@@ -98,11 +98,33 @@ function Get-SmartM365ProxyMailEvidence {
     }
 }
 
+function New-SmartM365ProxyMailTableHtml {
+    # Fixed-layout table that fits the 712px content area of the 760px mail frame (Outlook widens auto-layout tables).
+    param(
+        [Parameter(Mandatory)][object[]]$Columns,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows
+    )
+
+    $headCells = foreach ($column in $Columns) {
+        '<th align="{0}" width="{1}" style="width:{1}px;background:#f8fafc;border-bottom:1px solid #d9e2ec;padding:8px;font-size:11px;color:#475569;text-transform:uppercase;">{2}</th>' -f $column.Align, $column.Width, $column.Title
+    }
+    $bodyRows = foreach ($row in $Rows) {
+        $cells = for ($index = 0; $index -lt $Columns.Count; $index++) {
+            $column = $Columns[$index]
+            $wrap = if ($column.Address) { "font-family:Consolas,'Courier New',monospace;font-size:11px;word-break:break-all;overflow-wrap:anywhere;word-wrap:break-word;" } else { 'word-break:break-word;overflow-wrap:anywhere;word-wrap:break-word;' }
+            '<td align="{0}" valign="top" width="{1}" style="width:{1}px;border-bottom:1px solid #eef2f7;padding:8px;color:#334155;{2}">{3}</td>' -f $column.Align, $column.Width, $wrap, @($row)[$index]
+        }
+        '<tr>{0}</tr>' -f ($cells -join '')
+    }
+    return '<table role="presentation" width="712" cellpadding="0" cellspacing="0" style="width:712px;max-width:100%;table-layout:fixed;border-collapse:collapse;border:1px solid #d9e2ec;font-size:12px;"><tr>{0}</tr>{1}</table>' -f ($headCells -join ''), ($bodyRows -join "`n")
+}
+
 function New-SmartM365ProxyMailSections {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Evidence, [bool]$ShowMailLinks = $false)
 
     $encode = { param($value) [System.Net.WebUtility]::HtmlEncode([string]$value) }
+    $column = { param($title, $width, $align = 'left', [bool]$address = $false) [pscustomobject]@{ Title = $title; Width = $width; Align = $align; Address = $address } }
     if (-not $Evidence.Available) {
         $reason = & $encode $Evidence.Reason
         return @([pscustomobject]@{ Title = 'Check ProxyAddresses Report'; Html = "<p style='color:#92400e'>Today's ProxyAddresses audit is unavailable: $reason</p>" })
@@ -120,10 +142,10 @@ function New-SmartM365ProxyMailSections {
     $contextHtml += "<p style='color:#92400e'>$(& $encode $message)</p>"
     $sections = @([pscustomobject]@{ Title = 'Check ProxyAddresses Report'; Html = $contextHtml })
 
-    $metricRows = foreach ($row in $Evidence.Summary) {
-        '<tr><td style="border-bottom:1px solid #eef2f7;padding:7px">{0}</td><td style="border-bottom:1px solid #eef2f7;padding:7px;text-align:right">{1}</td></tr>' -f (& $encode $row.Summary), (& $encode $row.Count)
-    }
-    $sections += [pscustomobject]@{ Title = 'Proxy address summary'; Html = '<table style="width:100%;border-collapse:collapse">{0}</table>' -f ($metricRows -join "`n") }
+    # Column widths exclude the 16px horizontal padding; each table totals 712px.
+    $metricRows = @(foreach ($row in $Evidence.Summary) { , @((& $encode $row.Summary), (& $encode $row.Count)) })
+    $metricColumns = @((& $column 'Metric' 580), (& $column 'Count' 100 'right'))
+    $sections += [pscustomobject]@{ Title = 'Proxy address summary'; Html = New-SmartM365ProxyMailTableHtml -Columns $metricColumns -Rows $metricRows }
 
     $duplicateGroups = @($Evidence.Detail | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Alias) } |
         Group-Object Alias | Where-Object { $_.Count -gt 1 } | Sort-Object @{ Expression = 'Count'; Descending = $true }, Name)
@@ -131,35 +153,38 @@ function New-SmartM365ProxyMailSections {
         [pscustomobject]@{ Alias = $group.Name; Count = $group.Count; Record = $_ }
     } } | Select-Object -First 50)
     if ($duplicateRows.Count -gt 0) {
-        $rows = foreach ($item in $duplicateRows) {
-            '<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td><td>{6}</td></tr>' -f
-                (& $encode $item.Alias), (& $encode $item.Count), (& $encode $item.Record.DisplayName),
-                (& $encode $item.Record.PrimaryAddress), (& $encode $item.Record.ExpectedAddress),
-                (& $encode $item.Record.SuggestedUniqueAddress), (& $encode $item.Record.Status)
-        }
-        $sections += [pscustomobject]@{ Title = 'Top 50 duplicate aliases'; Html = '<table style="width:100%;border-collapse:collapse"><tr><th>Alias</th><th>Count</th><th>Display name</th><th>Primary SMTP</th><th>Expected proxy</th><th>Suggested proxy</th><th>Status</th></tr>{0}</table>' -f ($rows -join "`n") }
+        # Display name is left to the workbook so the address columns keep a readable width.
+        $rows = @(foreach ($item in $duplicateRows) {
+            , @((& $encode $item.Alias), (& $encode $item.Count), (& $encode $item.Record.PrimaryAddress),
+                (& $encode $item.Record.ExpectedAddress), (& $encode $item.Record.SuggestedUniqueAddress), (& $encode $item.Record.Status))
+        })
+        $duplicateColumns = @((& $column 'Alias' 80 'left' $true), (& $column 'Count' 40 'right'), (& $column 'Primary SMTP' 140 'left' $true),
+            (& $column 'Expected proxy' 130 'left' $true), (& $column 'Suggested proxy' 130 'left' $true), (& $column 'Status' 96 'left' $true))
+        $duplicateHtml = '<p style="margin:0 0 8px 0;font-size:12px;color:#64748b;">Display names and full details are in the ProxyAddresses workbook.</p>' + (New-SmartM365ProxyMailTableHtml -Columns $duplicateColumns -Rows $rows)
+        $sections += [pscustomobject]@{ Title = 'Top 50 duplicate aliases'; Html = $duplicateHtml }
     }
 
     $missingRows = @($Evidence.Detail | Where-Object { $_.Status -like 'Missing*' } | Sort-Object Status, DisplayName | Select-Object -First 50)
     if ($missingRows.Count -gt 0) {
-        $rows = foreach ($row in $missingRows) {
-            '<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td></tr>' -f
-                (& $encode $row.DisplayName), (& $encode $row.Alias), (& $encode $row.PrimaryAddress),
-                (& $encode $row.ExpectedAddress), (& $encode $row.Status)
-        }
-        $sections += [pscustomobject]@{ Title = 'Top 50 missing proxy addresses'; Html = '<table style="width:100%;border-collapse:collapse"><tr><th>Display name</th><th>Alias</th><th>Primary SMTP</th><th>Expected proxy</th><th>Status</th></tr>{0}</table>' -f ($rows -join "`n") }
+        $rows = @(foreach ($row in $missingRows) {
+            , @((& $encode $row.DisplayName), (& $encode $row.Alias), (& $encode $row.PrimaryAddress),
+                (& $encode $row.ExpectedAddress), (& $encode $row.Status))
+        })
+        $missingColumns = @((& $column 'Display name' 120), (& $column 'Alias' 80 'left' $true), (& $column 'Primary SMTP' 150 'left' $true),
+            (& $column 'Expected proxy' 150 'left' $true), (& $column 'Status' 132 'left' $true))
+        $sections += [pscustomobject]@{ Title = 'Top 50 missing proxy addresses'; Html = New-SmartM365ProxyMailTableHtml -Columns $missingColumns -Rows $rows }
     }
 
     $paths = @($Evidence.DetailPath, $Evidence.SummaryPath, $Evidence.WorkbookPath) | Where-Object { $_ }
-    $pathRows = foreach ($path in $paths) {
+    $pathRows = @(foreach ($path in $paths) {
         $fileName = Split-Path -Path $path -Leaf
         $link = @($Evidence.Links | Where-Object { [string]$_.FileName -eq $fileName -and [string]$_.WebUrl -match '^https://' } | Select-Object -First 1)
         if ($ShowMailLinks -and $link.Count -eq 1) {
-            '<tr><td style="word-break:break-all"><a href="{0}">{1}</a></td></tr>' -f (& $encode $link[0].WebUrl), (& $encode $path)
+            , @(('<a href="{0}">{1}</a>' -f (& $encode $link[0].WebUrl), (& $encode $path)))
         }
-        else { '<tr><td style="word-break:break-all">{0}</td></tr>' -f (& $encode $path) }
-    }
-    $sections += [pscustomobject]@{ Title = 'Proxy address files'; Html = '<table style="width:100%;border-collapse:collapse">{0}</table>' -f ($pathRows -join "`n") }
+        else { , @((& $encode $path)) }
+    })
+    $sections += [pscustomobject]@{ Title = 'Proxy address files'; Html = New-SmartM365ProxyMailTableHtml -Columns @((& $column 'Path / SharePoint link' 696 'left' $true)) -Rows $pathRows }
     return $sections
 }
 

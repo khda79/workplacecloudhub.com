@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$RecordBaseline, [string]$ExchangeSourcePath)
+param([switch]$RecordBaseline, [string]$ExchangeSourcePath, [string]$ProxyRenderPath)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -37,10 +37,63 @@ $rendered = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $rows -
 $bytes = [Text.Encoding]::UTF8.GetBytes($rendered)
 $hasher = [Security.Cryptography.SHA256]::Create()
 try { $hash = ([BitConverter]::ToString($hasher.ComputeHash($bytes))).Replace('-', '') } finally { $hasher.Dispose() }
-$baseline = '2A82EC5C7A72AABB3E7D345B98CDE3E4C04DA192E5984694114BA566C23E409B'
+$baseline = '45D1DD21E94DA7A30F3033DB49A30EF2BC34E6536CD4CFDDA8DFC56DF82CA06D'
 if ($RecordBaseline) { Write-Output "EXCHANGE_HTML_BASELINE=$hash"; return }
 if ($hash -ne $baseline) { throw "Exchange HTML changed: expected $baseline, got $hash" }
 Write-Output "PASS: Exchange HTML unchanged ($hash)."
+
+# ProxyAddresses sections: synthetic evidence with long unbreakable addresses and statuses must stay inside the 760px frame.
+Import-Module (Join-Path $folder 'SmartM365.ExchangeProxyMail.psm1') -Force
+$proxyChecks = 0
+function Assert-ProxyMail { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw "Proxy mail layout: $Message" }; $script:proxyChecks++ }
+$longSuffix = 'very-long-synthetic-subdomain-name-for-layout.example.invalid'
+$proxyDetail = @(
+    foreach ($index in 1..60) {
+        [pscustomobject]@{ Identity = "id$index"; Alias = ('sharedalias{0}' -f ($index % 3)); DisplayName = "Synthetic User $index"; PrimaryAddress = ('firstname.lastname.number{0}@{1}' -f $index, $longSuffix); ExpectedAddress = ('sharedalias{0}@{1}' -f ($index % 3), $longSuffix); SuggestedUniqueAddress = ('sharedalias{0}.{1}@{2}' -f ($index % 3), $index, $longSuffix); Status = 'Missing -> RemoteRoutingAddressUnavailable' }
+    }
+    foreach ($index in 61..70) {
+        [pscustomobject]@{ Identity = "id$index"; Alias = "unique$index"; DisplayName = "Synthetic User $index"; PrimaryAddress = "unique$index@$longSuffix"; ExpectedAddress = "unique$index@$longSuffix"; SuggestedUniqueAddress = ''; Status = 'OK' }
+    }
+)
+$proxyEvidence = [pscustomobject]@{
+    Available = $true; Reason = ''; CompletedAt = [datetimeoffset]'2026-10-09T00:00:00+02:00'; Version = 'synthetic'; Mode = 'Audit'; Scope = 'Synthetic scope'; ExpectedSuffix = $longSuffix
+    Summary = @([pscustomobject]@{ Summary = 'With expected address missing'; Count = 60 }, [pscustomobject]@{ Summary = 'Total recipients processed'; Count = 70 })
+    Detail = $proxyDetail
+    DetailPath = 'C:\Synthetic\DATA-LAST\Exchange_OnPrem_ProxyAddresses_Check.csv'; SummaryPath = 'C:\Synthetic\DATA-LAST\Exchange_OnPrem_ProxyAddresses_Summary.csv'; WorkbookPath = 'C:\Synthetic\DATA-LAST\Exchange_OnPrem_ProxyAddresses.xlsx'
+    Links = @([pscustomobject]@{ FileName = 'Exchange_OnPrem_ProxyAddresses.xlsx'; WebUrl = 'https://synthetic.invalid/sites/smartm365/Exchange_OnPrem_ProxyAddresses.xlsx' })
+}
+foreach ($showLinks in @($false, $true)) {
+    $proxySections = @(New-SmartM365ProxyMailSections -Evidence $proxyEvidence -ShowMailLinks:$showLinks)
+    Assert-ProxyMail ((@($proxySections | ForEach-Object Title) -join '|') -eq 'Check ProxyAddresses Report|Proxy address summary|Top 50 duplicate aliases|Top 50 missing proxy addresses|Proxy address files') 'unexpected section list.'
+    foreach ($section in $proxySections | Where-Object { $_.Html -match '<table' }) {
+        foreach ($table in [regex]::Matches($section.Html, '<table[^>]*>')) {
+            Assert-ProxyMail ($table.Value -match 'table-layout:fixed' -and $table.Value -match 'width:712px' -and $table.Value -match 'border:1px solid #d9e2ec') "$($section.Title) table is not a fixed 712px shared-style table."
+        }
+        $headerWidths = @([regex]::Matches($section.Html, '<th [^>]*width="(\d+)"') | ForEach-Object { [int]$_.Groups[1].Value })
+        Assert-ProxyMail ($headerWidths.Count -gt 0 -and ($headerWidths | Measure-Object -Sum).Sum + (16 * $headerWidths.Count) -eq 712) "$($section.Title) column widths do not total 712px."
+        Assert-ProxyMail (@([regex]::Matches($section.Html, '<th [^>]*background:#f8fafc[^>]*text-transform:uppercase')).Count -eq $headerWidths.Count) "$($section.Title) headers do not use the shared style."
+        foreach ($cell in [regex]::Matches($section.Html, '<td [^>]*>(?:(?!</td>).)*@(?:(?!</td>).)*</td>')) {
+            Assert-ProxyMail ($cell.Value -match 'word-break:break-all' -and $cell.Value -match 'overflow-wrap:anywhere') "$($section.Title) address cell cannot wrap."
+        }
+        foreach ($cell in [regex]::Matches($section.Html, '<td [^>]*>(?:(?!</td>).)*-&gt; (?:(?!</td>).)*</td>')) {
+            Assert-ProxyMail ($cell.Value -match 'word-break:break-all') "$($section.Title) status cell cannot wrap."
+        }
+    }
+    $duplicateHtml = @($proxySections | Where-Object Title -eq 'Top 50 duplicate aliases')[0].Html
+    Assert-ProxyMail (([regex]::Matches($duplicateHtml, '<tr>')).Count -eq 51) 'duplicate preview is not limited to 50 rows.'
+    Assert-ProxyMail ($duplicateHtml -notmatch '>Display name</th>' -and $duplicateHtml -notmatch 'Synthetic User') 'duplicate preview still shows display names.'
+    $missingHtml = @($proxySections | Where-Object Title -eq 'Top 50 missing proxy addresses')[0].Html
+    Assert-ProxyMail (([regex]::Matches($missingHtml, '<tr>')).Count -eq 51 -and $missingHtml -match '>Display name</th>') 'missing preview changed.'
+    $filesHtml = @($proxySections | Where-Object Title -eq 'Proxy address files')[0].Html
+    $expectedLinks = if ($showLinks) { 1 } else { 0 }
+    Assert-ProxyMail (([regex]::Matches($filesHtml, '<a href=')).Count -eq $expectedLinks -and ([regex]::Matches($filesHtml, '<tr>')).Count -eq 4) 'file links do not follow ShowMailLinks.'
+}
+$proxyRendered = New-SmartM365ExchangeLocalMailboxReportEmailBody -ReportRows $rows -DailyStatsCsv 'daily.csv' -SummaryCsv 'summary.csv' -Title 'Fixture' -ShowMailLinks:$false -ProxyEvidence $proxyEvidence
+$declaredWidths = @([regex]::Matches($proxyRendered, '(?:width="|width:)(\d+)(?:px)?') | ForEach-Object { [int]$_.Groups[1].Value })
+Assert-ProxyMail (@($declaredWidths | Where-Object { $_ -gt 760 }).Count -eq 0) 'an element is declared wider than 760px.'
+Assert-ProxyMail ($proxyRendered -match 'width:760px;max-width:760px') 'the 760px frame is missing.'
+if ($ProxyRenderPath) { [IO.File]::WriteAllText([IO.Path]::GetFullPath($ProxyRenderPath), $proxyRendered, (New-Object Text.UTF8Encoding($false))); Write-Output "Proxy mail render written to $ProxyRenderPath" }
+Write-Output "PASS: $proxyChecks ProxyAddresses mail layout checks (synthetic data)."
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
