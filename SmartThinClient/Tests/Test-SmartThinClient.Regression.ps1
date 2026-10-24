@@ -1,5 +1,5 @@
 ﻿param([string]$SourcePath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'SmartThinClient-Shell.ps1'))
-# Version: 1.1.1
+# Version: 1.1.2
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 $tokens = $null; $errors = $null
@@ -352,7 +352,7 @@ Check 'Fresh runtime inherits the Citrix and AVD demo defaults' {
             $urls = Get-WorkspaceWebUrls -Config $merged -EffectiveProfile $profileName
             Assert ($urls.Citrix -eq $runtime.CitrixWebUrl -and $urls.AVD -eq $runtime.AvdWebUrl) "Demo defaults lost in $profileName"
         }
-        Assert ([string]::IsNullOrEmpty($config.WebOnlyUrl)) 'Unrelated WebOnly default changed'
+        Assert ($config.WebOnlyUrl -eq 'https://workplacecloudhub.com/' -and $runtime.WebOnlyUrl -eq $config.WebOnlyUrl) 'WebOnly default missing'
     }
     finally { $script:ScriptRoot = $previousRoot }
 }
@@ -362,10 +362,12 @@ Check 'Built-in demo defaults match the template without JSON sources' {
     $ConfigPath = ''; $script:OutputRootOverride = ''
     $config = Resolve-Config
     Assert ($config.CitrixWebUrl -eq 'https://workplacecloudhub.com/demo/smartthinclient/citrix/' -and $config.AvdWebUrl -eq 'https://workplacecloudhub.com/demo/smartthinclient/avd/') 'Built-in defaults disagree with template'
+    Assert ($config.WebOnlyUrl -eq 'https://workplacecloudhub.com/') 'Built-in WebOnly default missing'
 }
 Check 'Existing custom runtime URLs survive template synchronization unchanged' {
     $runtimePath = Join-Path $testRoot 'custom-demo-config.json'
     $custom = Get-Content -Raw -LiteralPath (Join-Path $sourceRoot 'SmartThinClient-Shell.config.template.json') | ConvertFrom-Json
+    $custom.WebOnlyUrl = 'https://custom-web.example.invalid'
     $custom.CitrixWebUrl = 'https://custom-citrix.example.invalid'
     $custom.AvdWebUrl = 'https://custom-avd.example.invalid'
     $custom | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $runtimePath -Encoding UTF8
@@ -374,6 +376,7 @@ Check 'Existing custom runtime URLs survive template synchronization unchanged' 
     $ConfigPath = $runtimePath; $script:OutputRootOverride = ''
     $config = Resolve-Config
     Assert ($config.CitrixWebUrl -eq $custom.CitrixWebUrl -and $config.AvdWebUrl -eq $custom.AvdWebUrl) 'Custom runtime URL replaced'
+    Assert ($config.WebOnlyUrl -eq $custom.WebOnlyUrl) 'Custom WebOnly URL replaced'
     Assert ((Get-FileHash -LiteralPath $runtimePath).Hash -eq $before) 'Complete custom runtime was rewritten'
 }
 Check 'Custom provider profile URLs and legacy aliases beat demo defaults' {
@@ -406,20 +409,22 @@ Check 'Main legacy URL aliases beat demo defaults without replacing custom prima
 }
 Check 'Explicit blank URL values remain blank on existing runtime' {
     $ConfigPath = Join-Path $testRoot 'blank-demo-config.json'
-    '{"CitrixWebUrl":"","AvdWebUrl":""}' | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+    '{"CitrixWebUrl":"","AvdWebUrl":"","WebOnlyUrl":""}' | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
     $script:OutputRootOverride = ''
     $config = Resolve-Config
     $urls = Get-WorkspaceWebUrls -Config $config -EffectiveProfile Citrix
     Assert ([string]::IsNullOrEmpty($urls.Citrix) -and [string]::IsNullOrEmpty($urls.AVD)) 'Explicit blanks were silently replaced at startup'
+    Assert ([string]::IsNullOrEmpty($config.WebOnlyUrl)) 'Explicit WebOnly blank replaced'
 }
 Write-Host "RESULT passed=$script:passed failed=$script:failed"
 if ($script:failed) { exit 1 }
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDTxDqRkw46Ua4m
-# CE7+EBe3elh3fndXFIVlTAcFTmhKt6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDz7L6Bbi0eWPhX
+# BST0H85m+UAYMgl1eCYZ+TGyLXSTMqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -552,31 +557,31 @@ if ($script:failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMfRk6217qHwyfGWwzz8uLr6uZ3c/DcQ+UiGjQ875uLPMA0GCSqG
-# SIb3DQEBAQUABIIBgI6U0R5MjGAT3qGxy5FzBYEjO5t3uW57n3rjSsa+blAcL1UH
-# Jm7zvU7rPSfCNyeWOuqYU7NohB6VfK785mzNW9LbxoBm6NV4McU3jw9ip5KXgtu+
-# 8SvXzhAShZFRSmfzoGlRlZpzLONOYZPkgD98+yBgbhT+OrH23NxBkMwgXk1ADivW
-# tef227XJ49zKzmztyMQw1y12M1n9F3NdJuBAMpglLR8zbiXqLE1pIBU+kBxY942F
-# af1nVF+MKhlvD5FKfdx8YwmLnVfgcp0un74x74new2ge2/AWOnhMC2saD8FFVDYc
-# C+VvUhxF0evpFlWnyf5EEEhaRgiZPW3BuQeZFrX4DWuzLiQ6qtvYoiVpRSEay+Fc
-# DBzefWWggjQ89iTGVjY5GpervJ3RuhxspK8y2GfFy9XxeFZkEzdiaJkQA32FkZWU
-# XZee+kt0JvuvfrgsO03dG1Bc9rVeiSJ0nLD+YgV6xxBAVwQ7WUT308iQxZXDFMwc
-# 2jjAy4zG0/wVfRZd7KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKSB0L1ynZE/m1n2XjoG7Rt9QWvSO0++UuE8k/4skdr4MA0GCSqG
+# SIb3DQEBAQUABIIBgBIEVhiRxNM41LtbjhqRiSq20nyF7uHKGcFU9W80M2iwlcT0
+# rBq2nsQKDSwDvzDMFQnosuiP+2WUomIphKdQh1v15NFxU8fVcT4mPU2diqLt3eME
+# mSWjKairyzcMsdaqj+VBHuwJ5O65288JirqDEYUNJFAbR2jABpDuUlesA7GZeRj3
+# XHjiTbIMqeicF6Mr99mKKlEhwRUGZtN3+tf8c2Zj0ZOpKNADXb5P7U9GPCzHESsh
+# f+LLSLFDE5DM88jMSoYnpvjXctv0BgyxkQamD2AHj+AZ7+Dlix9DsnVO2Xp3Vu5b
+# 1f5TVHYFkVUEShrP5xDFhIo6XdtmGKz9wTWKHvnwROYEmPeEN1xEKMA5m00ChpLF
+# hSMP0Tdcr02Ptq1jcLicpHx5XVy1mhvzb03XC/jYxwsSrZw1F41oXBmZ/ZGIKp8v
+# 2g+Djv5K0V8tpdtFOJXL/0UxlsW0kJCUm4os9HVL4NRRYshz1/kKZjD4x0WwBLUb
+# S6DShfU2lFAoRkLqr6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNjA3
-# NTBaMC8GCSqGSIb3DQEJBDEiBCDoAQ3tv3wnxq0cjZQ5KI/jONHDVny33qLkL2ZP
-# bbqDIDANBgkqhkiG9w0BAQEFAASCAgCExTpGXpLEAXdeVRXCKLmICGn/cs9Uv/7d
-# Wt1XY7MfKI+iUdovfSbqUtJMSFQPUFFb6gbd0qjYkeUnclFqkOOjGNCWoqpARsgM
-# 81BoamNcytwFVJovRgwGIM9z5oUXftIFjmJ8i5roCWnk04micUNoWptgz4r5VV57
-# IMP5jg3f3JZIV79O7ro3pwe0ga4vmHSw7o6szPRCZs8RVus7kBiWprBOxR5JwZqB
-# RXNEXsfi5qJhf5Y73dFzWGxx3Q9oKRIE6JDkSmwZ4X3+0o1S+YkxUiocryr+Eo6G
-# t9b9ceZzlN8YgT6Soe8Fbj2pWxb1u/3g0zuIAYw8egnUc6gj+m5oCtiOi1MNKSmp
-# Kf43O6SfKyYYm0SpcIdX8mAbZhDfJF9eX2Hk0f+sLY+/bakjNdnapIeSZDI52U85
-# Z6MlSTrY3fd81fdFO9J1kWQlg4ZLVsggmacJCj7uvXzE1b6rWnBju5YhxUkO6TGD
-# 3Qj4aM3Ga6fxKhoht0vNOV139y0KGQteFKolAzOIxjVymSfTUFY0Ik/vzycuZ8Vm
-# Iye9cFmINDqepAJnxHvfDTFiQva4CFKjFQP4m+LMgaV5MXeHq40NvJr6FknA+HiU
-# v+MW54UhfBAv720HQkFZra4qdrgtrgPxYOS7JT5fZ1TZD+XXh7l5Mq0KBvFMlrRC
-# XgzMMwi6rg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNjI3
+# MDhaMC8GCSqGSIb3DQEJBDEiBCAcqzt6WAwyewKn1SQ5U9WWK3SRQwGzq8v3w515
+# RQl7eTANBgkqhkiG9w0BAQEFAASCAgBtKPO2/nILTM0mFMzRd0j/C+5S3DMKbKuX
+# y+HdRqg5V0V8kKjfC884TmgL9w9EUWFXdW41mTrwzMTXCUZTS97k7QiAhz94rZ65
+# z7KcFV/foYPVfJdRa5iwokgNUBFNUk+eY4NeZ7eQLz3S4eCK6xHVd7bH2VTmhKwL
+# IGZAKYb7ia9MhgIbx58G1wrxAjaFO1DapuHeYGGvJqpmB4uYbi+505HBsAXGkoqd
+# Fy2Ose2uolQRarxxR7wuwh5OwoUjmwSLgwXdlRFQBSHze5wGNKAgDhrt8gL5Qq1d
+# ReMZOodpfs31h/LPIjLD9lTxQMPbTf1N2JKag5Zg8okcj95wv41d0uWg05axldzy
+# 5dkwDgrffL5VC9mkycw0vDWXVehawArtwJ1jzk3HKmxnKzRFBJHrgph8VNLsGsKr
+# 6RuxfS0uXtlgDPo9KDney7GJgNpy7zzb1VQBsj3WKRqKOOURcR3UnQ2m2hK0N8/5
+# bPuNE2v2o/YhmNS5x1nLOmLVbGzV/JZLCACYdvu5lgts/hSz9sTb2KsW4g2I6Zj6
+# OU0DQQwzuffWA6htCBU6FgTBp0GW6qsIrc7V9szGsmGt/fW5Oc6mWXTPUdowRpMD
+# vkmmXZaXOI3B++wm/1oHVWPp45I9aLAGT8Uhi3w7NXVm9+DOygo1DM1M5mv0jlZO
+# 1HO6xxcgCw==
 # SIG # End signature block

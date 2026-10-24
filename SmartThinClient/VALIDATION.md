@@ -1,5 +1,9 @@
 # Smart ThinClient validation
 
+## WebOnly default - 2026-10-24
+
+Version 1.1.2 sets WebOnlyUrl to https://workplacecloudhub.com/ in the template and built-in defaults. Existing custom URLs and explicit blanks remain authoritative. Audit/Preview do not navigate to the URL. 49/49 offline regression scenarios pass under Windows PowerShell 5.1 and PowerShell 7. They verify fresh/runtime-free defaults, existing custom URLs and explicit blanks. No Apply/Restore or portal connection was performed.
+
 ## Demo URL defaults - 2026-10-24
 
 - Main template and built-in defaults now use the WorkplaceCloudHub Citrix and AVD demo destinations under `/demo/smartthinclient/citrix/` and `/demo/smartthinclient/avd/`. Script/test header version: 1.1.1. Provider profile templates retain blank URLs for inheritance; WebOnly is unchanged.

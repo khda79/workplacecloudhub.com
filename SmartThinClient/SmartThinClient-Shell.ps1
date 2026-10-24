@@ -8,7 +8,7 @@ web-only, or hybrid workspace access. Audit and Preview are read-only. Apply and
 Restore are guarded by administrator checks, configuration gates, confirmation
 phrases, rollback files, logs, and JSON/CSV evidence.
 .NOTES
-Version: 1.1.1
+Version: 1.1.2
 #>
 
 [CmdletBinding()]
@@ -292,7 +292,7 @@ function Resolve-Config {
         WebShellAllowPowerControls = $true
         WebShellAllowLimitedSettings = $true
         WebShellAllowedSettingsPages = @('ms-settings:network-status', 'ms-settings:display', 'ms-settings:sound', 'ms-settings:dateandtime')
-        WebOnlyUrl = ''
+        WebOnlyUrl = 'https://workplacecloudhub.com/'
         PreferredWorkspaceUrl = ''
         FallbackWebUrl = ''
         BrowserPath = ''
@@ -1916,11 +1916,12 @@ catch {
 }
 
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNH1VmiS3XMOaJ
-# ckliKIFgXLPfBigTpnNSc04Fq00Kc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3lVTC7YD0/GN/
+# q+xQjGEklUuAgrjye0JsXAyYOTpnWKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2053,31 +2054,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII8we0hJsWw7fYM0KPrg22XbQ/oMkDlfzW9IDXnOCoXaMA0GCSqG
-# SIb3DQEBAQUABIIBgHscMg52R6+K++kg99JsCIfah2krAjgNqDWeBKp1//eS+SJf
-# EQiLD+sdy9ZuKU6deyr3hc5pEBQnOyKHreePQR6P+nNd7fyA4A0kwAz2vPtY/OOt
-# EDNoiYnRYC220GFNDsGpRB88+YSlnx59ZOcv7hknG8HFs0OcQNUuFcHhXFvSmhs9
-# fMetOXzPu1uDyHxaKiCKMLZaiIeo0EPMb+TH/V0n6QACqvfbxrSfBRpiv5X6u7hO
-# f9bun3D5IiH1fR5BzSQE+UjeEs4RaCIQFjv/6kqAuOQmE5f4zVDQJg8E7m75btXY
-# 0I6B8gsCgIjP0o+TkX4kRU5YK2BbkGeonBesDbNG7C5DZwuLoSwADqbT6cxNtvUS
-# YKxljFPZ8gO5LyX+SG+ELb6RC9vU6Q8gpk5rkeld66kvJEA7iJonWNrnBwKEav4S
-# BbmDYg0YHAZJMaEqG6VbGWutmhIUObfdTJMdD0aRNA37kKHkHlmJSLkNEPCOsPUS
-# y7Sz1xo+x+VbrjXgDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA+iMEClPYiP1luMhCElGa5/zlE0Bl3MIWZjiSm0Xl8oMA0GCSqG
+# SIb3DQEBAQUABIIBgAEx/ih1dSKn9fNA+oP9z7edwekA4Xi+uXd/oomUIOsEcCPn
+# TxwKIZAJr+YbNgPnLkHVS62HaveLRBlTCcRbroXlEN4ClzjJrMzYYfsmbpeCujDG
+# ulyiwDAOzhSBXIGCnpVptRMfIW31v054A3TsbT907xrHkXA1NrmFGOP24oo2SX3M
+# B0Rxv/TU9qKMjJI1v6S6rMKoT1eTH9Sfvcn2DQLvAj4RKKXEVgQ3y6VblPk1+U+H
+# HZdF9542PYjaRedybmgrnMfHH7geKJhoXWMBe/1QiyBKfglpDA7JbMVQYyd0ew3D
+# 0GVPYeopuvEnWGpqIm5RFGw0eBpC4Qgz2sk6FzfEfo3YOtDDYyPGhqZeq+sHTNk5
+# Ve9BNu+hYyJD8ernAqmlzvY25rg66hnDUUfbZOQCf2ON11+gdksK7ag6geHZcun0
+# XZAU+YVDjIfjO16+HqbPCt7WEjQsWXdVQt/MeJvF41PJPxd0HnrMOlci727Btmo0
+# HwxeCa/Oi3F02CJd0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNjA3
-# NTBaMC8GCSqGSIb3DQEJBDEiBCAYKrFKIHinsQPRFzAlTKgZdbnvdjEvWY0d7EjY
-# Mg/arDANBgkqhkiG9w0BAQEFAASCAgCykVLbsBULTH2Ofa79BYfAZx5KJl0xymLM
-# dl9MRw0INOEAhk9+qjZQOaBRCiZPwHHqO4W/h8jwv+Nqy6s9kBUgEsWGFSTFiuur
-# jIsgP3a7QLf6pV0UtaDOfdUs9j2GFAUpUwT19uvfIgYl93BELZ2n75RcExSosZdk
-# mBcTjb9ruAcr8eWQ5T4m9A5mA8QDHkotsBCR6sMmcJOpCtC/Ai5W1/C6M82/AY+s
-# NKOaW8oKX7HoJLjue8gOODKzxLQ+9T0M1uoONg67CH3w5O3Zs2yn+a3PF/pyE8Br
-# SuJ/MbYOw60kLh2Bo2ZiqNYFI4pm59iMu3LEG+TujR0TbJ3tdRsVZPK5cVKwgwiT
-# 7cnZFdHQyluw31xweeqaZENNfCCrQggC9F4nmD12QARpDZj+qVVCNFL7x/L6s7pH
-# h2/mJl4XP58F9MJbk26btpoPU4+zR+kJfpagb+gbHjDWwtHbuZI3QgSCBx/XJHy7
-# I8osUFA4a62cv4KB7e4PqSm7jzpkO9xCfncuNGmAAQpFB+w0Ga+yBgTvgQ+mXo5o
-# 3ha+LmNQTpb1oiX24OASY9btGWxJwJdxA6Y1eHjWpPtQb+9+YBu+xHW/t0zeLdhQ
-# WbFvt5+LxXfoRtuzI7Im6Wl7dwqKecuiaF7/3LEhQwRMW7znGty8iP7U8Dn0GimS
-# 8NhdGKlaHA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNjI3
+# MDdaMC8GCSqGSIb3DQEJBDEiBCBvJTC0AsznVu7b0nCUhTFaGyucJ5MUP2NnX3kr
+# zyY5tjANBgkqhkiG9w0BAQEFAASCAgCzuibY30DBK47vOiEfne4sVPPVY6DCDxqO
+# I/FuV5JVum/25hLDfw8p4zfeowRIhv+Q/2q5x1NBk/YQaZBOh30sCf2HbZJb9/Bm
+# eFRJnYmbaVdhEIj+Ihz1J/+XEwK4gWswzfX2WBoZV9MY03b9GNXZoPb9VNgAyaUK
+# 8+f65dw4Z30UUGQA4p5paTFGPtUHu8q0q0+Ho5iGgdxB3mks5v7X6p5Kblbw9Dkn
+# +Pvin8OTQlY/i+p2jwELDGWr5tfWrojnOYKMGDigv5UD1vsPL1uvfEqoO2XapNYn
+# 26bMWWNqst88czzNVqmFeUAvewE05b5p0GUPuLCxYxYtv18/7bG71I6eEwPmi5X1
+# r1p2C3k4z+LOCgDA197TdEZsSJdtvTzsT8g52WRNdz1RnNXNin45ZRJvpXhYDgw6
+# OXWdqGkvtMQQExkDOxUUJf00Z2gegqbIyjK9fTfKA8Ag+M4/Rlm0MoOLSVlZOAWC
+# IoNJI/R68ijTVLkmlGfKdZuNoYxsAkdvguD6chU9VdQ8TF0RxA/aa98RBzuSn3k5
+# Wu5kJTz0FkyE001P+np3Usdh9Ww60ucu7DDq/EPxjYmduwOiE6AUScElKtIyF77/
+# 56Pv+jfMcK6KHrot8hxGbP7ocS26OwZntIXcIzLojkpXkJpM9VopjzYMuLB5GL2O
+# huC45/I08Q==
 # SIG # End signature block
