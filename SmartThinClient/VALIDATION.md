@@ -1,5 +1,12 @@
 # Smart ThinClient validation
 
+## Demo URL defaults - 2026-10-24
+
+- Main template and built-in defaults now use the WorkplaceCloudHub Citrix and AVD demo destinations under `/demo/smartthinclient/citrix/` and `/demo/smartthinclient/avd/`. Script/test header version: 1.1.1. Provider profile templates retain blank URLs for inheritance; WebOnly is unchanged.
+- Custom primary URLs are preserved. Custom legacy WorkspaceUrl/StoreUrl/FeedUrl values take precedence over a demo default, including Hybrid provider profiles. Startup continues to preserve existing runtime values, including explicit blanks. In this local working copy, only the two empty main runtime URL fields were filled; a private backup was kept and all other runtime values were verified unchanged.
+- 49/49 offline scenarios pass in Windows PowerShell 5.1 and PowerShell 7, including six new scenarios for fresh defaults, template-free defaults, custom runtime/profile values, legacy aliases and explicit blanks. These use temporary fixtures and intercepted system operations, not real Apply/Restore.
+- Demo-page availability, rendering, authentication and sessions were not tested. No browser, real Apply/Restore or VM operation was run. Git publication is limited to the main template, main script, regression harness, README and this validation record; the runtime configuration and local Windows 11 test sheet are excluded. The main script and regression harness receive renewed SHA-256 Authenticode signatures with timestamps, verified before commit and by committed-content read-back with Windows CRLF filters. The signed 2026-10-23 publication below remains the historical baseline.
+
 ## Local corrections - 2026-10-23
 
 The current source corrects target-user CMD policy scope, Hybrid provider profile URLs, modern default-provider precedence, external web readiness and the CSV evidence switch. Script/test header version: 1.1.0. Validation is offline only; no live Apply/Restore or registry/account/kiosk operation was performed. Git publication is limited to the main script, regression harness, README and this validation record.

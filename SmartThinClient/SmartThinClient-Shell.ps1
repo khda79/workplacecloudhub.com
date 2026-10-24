@@ -8,7 +8,7 @@ web-only, or hybrid workspace access. Audit and Preview are read-only. Apply and
 Restore are guarded by administrator checks, configuration gates, confirmation
 phrases, rollback files, logs, and JSON/CSV evidence.
 .NOTES
-Version: 1.1.0
+Version: 1.1.1
 #>
 
 [CmdletBinding()]
@@ -253,6 +253,15 @@ function Merge-ProfileConfig {
     return $merged
 }
 
+function Get-DemoWorkspaceUrl {
+    param([ValidateSet('Citrix','AVD','WebOnly')][string]$Provider)
+    switch ($Provider) {
+        Citrix { return 'https://workplacecloudhub.com/demo/smartthinclient/citrix/' }
+        AVD { return 'https://workplacecloudhub.com/demo/smartthinclient/avd/' }
+        default { return '' }
+    }
+}
+
 function Resolve-Config {
     $defaults = [ordered]@{
         DefaultProfile = 'Auto'
@@ -273,8 +282,8 @@ function Resolve-Config {
         WindowsAppLaunchUri = ''
         PreferredAccessMode = 'Web'
         UseWebShell = $true
-        CitrixWebUrl = ''
-        AvdWebUrl = ''
+        CitrixWebUrl = Get-DemoWorkspaceUrl -Provider Citrix
+        AvdWebUrl = Get-DemoWorkspaceUrl -Provider AVD
         WebShellPreferredProvider = 'Citrix'
         WebShellTitle = 'Smart ThinClient'
         WebShellHomeUrl = ''
@@ -621,10 +630,15 @@ function Get-WorkspaceWebUrls {
         $providerConfig = $Config
         if ($EffectiveProfile -eq 'Hybrid') { $providerConfig = Merge-ProfileConfig -Config $Config -EffectiveProfile $provider }
         $urls[$provider] = ''
+        $demoUrl = Get-DemoWorkspaceUrl -Provider $provider
+        $demoFallback = ''
         foreach ($key in $keys[$provider]) {
             $value = [string](Get-ConfigValue -Config $providerConfig -Name $key -Default '')
+            # Demo defaults must not mask an existing custom legacy URL alias.
+            if ($demoUrl -and $value -eq $demoUrl) { $demoFallback = $value; continue }
             if (-not [string]::IsNullOrWhiteSpace($value)) { $urls[$provider] = $value; break }
         }
+        if (-not $urls[$provider]) { $urls[$provider] = $demoFallback }
     }
     return $urls
 }
@@ -1905,8 +1919,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCpb62PYL8eyu3
-# Gpx3xApCGLBxEbW8S6Fsp9fNeVwGkaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNH1VmiS3XMOaJ
+# ckliKIFgXLPfBigTpnNSc04Fq00Kc6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2039,31 +2053,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJqZmawKiiOsM6fsBwhD01nXcl0L/9qEFBkb+Pl+TtN0MA0GCSqG
-# SIb3DQEBAQUABIIBgGwg1QQkQMrgn8PPbh5t0ckYsWH4FkTCWnP5fyuEUMOVjF18
-# ahj8TMgvm2Ou6tSm1TFAdkEjL6nF+Eb4LEYpbdnQcddbAHKOzomSNT80HdCB3u6r
-# O3eFtlPFZFMPo6IL0xFYapzkSJ5QRGlCkRhJ8Ll9nijgqWSJDPbFr+Mp0m5oDil+
-# +StTm3MY9jK3LNlnC/NsXxzjMCkVibIM8AYYr6Woxuvdh/HNd8LIsZ7laofH47xc
-# oHi2O715xKny+KgEH6gtl646PvBV+HG/VDrqHqbt02gZ+YNRgH2L0MalW6NuHOU2
-# 3rRLJS8TcoWVW4jWt2s2KnkV5B4V9TTqbyuK50MqV8XE6+mkn8FMBq5AHHzsgXMf
-# +Rz6yEBL+sgs0ppmAD4A/1iUQNNT5Y0jOkmi421VowiXxr1nO9jVY0HiX12X4riv
-# 6xhHaAtCxs6TPCGVcoF7GsPdXpv5WZhWlyCb75iWDcJOv+UqQ0cyLIt8PxOyWzqf
-# SKcm6OuR8uU1++Ae6qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII8we0hJsWw7fYM0KPrg22XbQ/oMkDlfzW9IDXnOCoXaMA0GCSqG
+# SIb3DQEBAQUABIIBgHscMg52R6+K++kg99JsCIfah2krAjgNqDWeBKp1//eS+SJf
+# EQiLD+sdy9ZuKU6deyr3hc5pEBQnOyKHreePQR6P+nNd7fyA4A0kwAz2vPtY/OOt
+# EDNoiYnRYC220GFNDsGpRB88+YSlnx59ZOcv7hknG8HFs0OcQNUuFcHhXFvSmhs9
+# fMetOXzPu1uDyHxaKiCKMLZaiIeo0EPMb+TH/V0n6QACqvfbxrSfBRpiv5X6u7hO
+# f9bun3D5IiH1fR5BzSQE+UjeEs4RaCIQFjv/6kqAuOQmE5f4zVDQJg8E7m75btXY
+# 0I6B8gsCgIjP0o+TkX4kRU5YK2BbkGeonBesDbNG7C5DZwuLoSwADqbT6cxNtvUS
+# YKxljFPZ8gO5LyX+SG+ELb6RC9vU6Q8gpk5rkeld66kvJEA7iJonWNrnBwKEav4S
+# BbmDYg0YHAZJMaEqG6VbGWutmhIUObfdTJMdD0aRNA37kKHkHlmJSLkNEPCOsPUS
+# y7Sz1xo+x+VbrjXgDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODE2
-# NTZaMC8GCSqGSIb3DQEJBDEiBCA43eruL/D8ol1Jat3uGlM22bWDsndDGj/IY7Hq
-# pzp8zzANBgkqhkiG9w0BAQEFAASCAgA8vPqpu1yCsEKB7CFvCLAd6flEMJJ5Qn1F
-# ArHeuhA7M4yWEYr3GHHDQSQ3uti7Kw2B+5FcmijH90q+pBrVtXoB/TIZqP/5dIEn
-# 6lHs3HUJ97LpuHlNo3Fcbo/5SSlc7A3ao8s4aE9EsJwZLzD1Lwa4k4+GXsWCGnHI
-# yYGEx58MtXIwxL8oKkreDAUEdSo6DaC3FxWDqOoTNwqYir/rpLYiKc5S+17pdAvD
-# BSQOoiD6cb2FUu/eXbtC3a9I6VTAOlTPDMhKKAwoLc3MQApxprBviqOUYFvhBJHN
-# HK3P53ns+V7lfOUpVDHR5CPYhhCKQIqNIsnCPo2fTYb3rwAeFmvx1aEJquaKmrZk
-# DQxXDgLMqo3P7tRNQGxTgPYa+Xtaq3JRxb8QXaBFpZioah8uWmlDi9kcinSWRYRJ
-# G+UctkwPhw3BZNa5sxSRzTAWzPbu+w4EIXInzO+VRfInsUOBBfFhWZc7iSvCxRF5
-# EhZA550iyKPeYAtnSms4N4cbZIpVH9JvqzEtK1i1FT7bb0zFKkHDmlAFUYipoewI
-# XJxLtRTg28PcqPI6v8hoRT9cMC9X9+YENwaDchzQgh/o5FkoHdUu2ESCM+Xwy6Gv
-# f8cwij1SiZEaSLjWZ8HT31FjeWCigBAqFoP9HEazfA1i1utAt2FYL8vu+qrOLTIJ
-# zl0dSQ9XYA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNjA3
+# NTBaMC8GCSqGSIb3DQEJBDEiBCAYKrFKIHinsQPRFzAlTKgZdbnvdjEvWY0d7EjY
+# Mg/arDANBgkqhkiG9w0BAQEFAASCAgCykVLbsBULTH2Ofa79BYfAZx5KJl0xymLM
+# dl9MRw0INOEAhk9+qjZQOaBRCiZPwHHqO4W/h8jwv+Nqy6s9kBUgEsWGFSTFiuur
+# jIsgP3a7QLf6pV0UtaDOfdUs9j2GFAUpUwT19uvfIgYl93BELZ2n75RcExSosZdk
+# mBcTjb9ruAcr8eWQ5T4m9A5mA8QDHkotsBCR6sMmcJOpCtC/Ai5W1/C6M82/AY+s
+# NKOaW8oKX7HoJLjue8gOODKzxLQ+9T0M1uoONg67CH3w5O3Zs2yn+a3PF/pyE8Br
+# SuJ/MbYOw60kLh2Bo2ZiqNYFI4pm59iMu3LEG+TujR0TbJ3tdRsVZPK5cVKwgwiT
+# 7cnZFdHQyluw31xweeqaZENNfCCrQggC9F4nmD12QARpDZj+qVVCNFL7x/L6s7pH
+# h2/mJl4XP58F9MJbk26btpoPU4+zR+kJfpagb+gbHjDWwtHbuZI3QgSCBx/XJHy7
+# I8osUFA4a62cv4KB7e4PqSm7jzpkO9xCfncuNGmAAQpFB+w0Ga+yBgTvgQ+mXo5o
+# 3ha+LmNQTpb1oiX24OASY9btGWxJwJdxA6Y1eHjWpPtQb+9+YBu+xHW/t0zeLdhQ
+# WbFvt5+LxXfoRtuzI7Im6Wl7dwqKecuiaF7/3LEhQwRMW7znGty8iP7U8Dn0GimS
+# 8NhdGKlaHA==
 # SIG # End signature block

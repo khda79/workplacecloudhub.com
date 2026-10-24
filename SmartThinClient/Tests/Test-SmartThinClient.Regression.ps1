@@ -1,5 +1,5 @@
 ﻿param([string]$SourcePath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'SmartThinClient-Shell.ps1'))
-# Version: 1.1.0
+# Version: 1.1.1
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 $tokens = $null; $errors = $null
@@ -336,14 +336,90 @@ Check 'Audit uses Hybrid profile URLs and honors CSV false through the export ca
     $result = Invoke-ThinClientAudit -Config ([ordered]@{WriteCsvEvidence=$false;UseWebShell=$false}) -RequestedProfile Hybrid -RequestedAction Preview
     Assert ($result.CitrixWebUrlConfigured -and (Test-Path -LiteralPath $script:EvidenceJsonPath) -and -not (Test-Path -LiteralPath $script:EvidenceCsvPath)) 'Audit/export ignored effective configuration'
 }
+Check 'Fresh runtime inherits the Citrix and AVD demo defaults' {
+    $previousRoot = $script:ScriptRoot
+    try {
+        $script:ScriptRoot = Join-Path $testRoot 'DemoFreshSource'
+        New-Item -ItemType Directory (Join-Path $script:ScriptRoot 'Profiles') -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $sourceRoot 'SmartThinClient-Shell.config.template.json') -Destination $script:ScriptRoot
+        Copy-Item -Path (Join-Path $sourceRoot 'Profiles\*.json.template') -Destination (Join-Path $script:ScriptRoot 'Profiles')
+        $ConfigPath = ''; $script:OutputRootOverride = ''
+        $config = Resolve-Config
+        $runtime = Read-JsonFile -Path (Join-Path $script:ScriptRoot 'SmartThinClient-Shell.config.json')
+        Assert ($runtime.CitrixWebUrl -eq 'https://workplacecloudhub.com/demo/smartthinclient/citrix/' -and $runtime.AvdWebUrl -eq 'https://workplacecloudhub.com/demo/smartthinclient/avd/') 'New runtime lacks demo defaults'
+        foreach ($profileName in @('Citrix','AVD','Hybrid')) {
+            $merged = Merge-ProfileConfig -Config $config -EffectiveProfile $profileName
+            $urls = Get-WorkspaceWebUrls -Config $merged -EffectiveProfile $profileName
+            Assert ($urls.Citrix -eq $runtime.CitrixWebUrl -and $urls.AVD -eq $runtime.AvdWebUrl) "Demo defaults lost in $profileName"
+        }
+        Assert ([string]::IsNullOrEmpty($config.WebOnlyUrl)) 'Unrelated WebOnly default changed'
+    }
+    finally { $script:ScriptRoot = $previousRoot }
+}
+Check 'Built-in demo defaults match the template without JSON sources' {
+    function Initialize-LocalJsonFiles { param($DefaultConfigPath) }
+    function Read-JsonFile { param($Path) return $null }
+    $ConfigPath = ''; $script:OutputRootOverride = ''
+    $config = Resolve-Config
+    Assert ($config.CitrixWebUrl -eq 'https://workplacecloudhub.com/demo/smartthinclient/citrix/' -and $config.AvdWebUrl -eq 'https://workplacecloudhub.com/demo/smartthinclient/avd/') 'Built-in defaults disagree with template'
+}
+Check 'Existing custom runtime URLs survive template synchronization unchanged' {
+    $runtimePath = Join-Path $testRoot 'custom-demo-config.json'
+    $custom = Get-Content -Raw -LiteralPath (Join-Path $sourceRoot 'SmartThinClient-Shell.config.template.json') | ConvertFrom-Json
+    $custom.CitrixWebUrl = 'https://custom-citrix.example.invalid'
+    $custom.AvdWebUrl = 'https://custom-avd.example.invalid'
+    $custom | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $runtimePath -Encoding UTF8
+    $before = (Get-FileHash -LiteralPath $runtimePath).Hash
+    Merge-MissingJsonTemplateKeys -TemplatePath (Join-Path $sourceRoot 'SmartThinClient-Shell.config.template.json') -RuntimePath $runtimePath
+    $ConfigPath = $runtimePath; $script:OutputRootOverride = ''
+    $config = Resolve-Config
+    Assert ($config.CitrixWebUrl -eq $custom.CitrixWebUrl -and $config.AvdWebUrl -eq $custom.AvdWebUrl) 'Custom runtime URL replaced'
+    Assert ((Get-FileHash -LiteralPath $runtimePath).Hash -eq $before) 'Complete custom runtime was rewritten'
+}
+Check 'Custom provider profile URLs and legacy aliases beat demo defaults' {
+    function Get-ProfileConfig {
+        param($ProfileName)
+        switch ($ProfileName) {
+            Citrix { [pscustomobject]@{CitrixWebUrl='https://profile-citrix.example.invalid'} }
+            AVD { [pscustomobject]@{FeedUrl='https://profile-avd.example.invalid'} }
+        }
+    }
+    $config = [ordered]@{CitrixWebUrl=(Get-DemoWorkspaceUrl Citrix);AvdWebUrl=(Get-DemoWorkspaceUrl AVD)}
+    foreach ($profileName in @('Citrix','AVD','Hybrid')) {
+        $merged = Merge-ProfileConfig -Config $config -EffectiveProfile $profileName
+        $urls = Get-WorkspaceWebUrls -Config $merged -EffectiveProfile $profileName
+        if ($profileName -in @('Citrix','Hybrid')) { Assert ($urls.Citrix -eq 'https://profile-citrix.example.invalid') 'Custom Citrix profile lost' }
+        if ($profileName -in @('AVD','Hybrid')) { Assert ($urls.AVD -eq 'https://profile-avd.example.invalid') 'Custom AVD alias masked by demo default' }
+    }
+}
+Check 'Main legacy URL aliases beat demo defaults without replacing custom primary URLs' {
+    foreach ($alias in @('WorkspaceUrl','StoreUrl')) {
+        $config = [ordered]@{CitrixWebUrl=(Get-DemoWorkspaceUrl Citrix);AvdWebUrl=(Get-DemoWorkspaceUrl AVD);FeedUrl='https://feed.example.invalid'}
+        $config[$alias] = 'https://legacy-citrix.example.invalid'
+        $urls = Get-WorkspaceWebUrls -Config $config -EffectiveProfile Citrix
+        Assert ($urls.Citrix -eq $config[$alias] -and $urls.AVD -eq $config.FeedUrl) 'Legacy URL masked by demo'
+        $config.CitrixWebUrl = 'https://primary-citrix.example.invalid'
+        $config.AvdWebUrl = 'https://primary-avd.example.invalid'
+        $urls = Get-WorkspaceWebUrls -Config $config -EffectiveProfile Citrix
+        Assert ($urls.Citrix -eq $config.CitrixWebUrl -and $urls.AVD -eq $config.AvdWebUrl) 'Custom primary URL lost precedence'
+    }
+}
+Check 'Explicit blank URL values remain blank on existing runtime' {
+    $ConfigPath = Join-Path $testRoot 'blank-demo-config.json'
+    '{"CitrixWebUrl":"","AvdWebUrl":""}' | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+    $script:OutputRootOverride = ''
+    $config = Resolve-Config
+    $urls = Get-WorkspaceWebUrls -Config $config -EffectiveProfile Citrix
+    Assert ([string]::IsNullOrEmpty($urls.Citrix) -and [string]::IsNullOrEmpty($urls.AVD)) 'Explicit blanks were silently replaced at startup'
+}
 Write-Host "RESULT passed=$script:passed failed=$script:failed"
 if ($script:failed) { exit 1 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHfK2BDwzwDPte
-# VjpyNPq4/ffEbxrA4dihWoakb4J6iqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDTxDqRkw46Ua4m
+# CE7+EBe3elh3fndXFIVlTAcFTmhKt6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -476,31 +552,31 @@ if ($script:failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOT+aZMlBsgRS5rb3XQOHh9GQ3ysdjJB2Cpr/vLb3p4mMA0GCSqG
-# SIb3DQEBAQUABIIBgK2BOU1gg3dMjq+V4Ns763tjIOFUAzrFfenjUFHxOh0J/Q2z
-# tcxDOjaiPf/KwH/70DHQnTFoBAnOgejDnhAdo5gbl8OaJM+3Ss+GM9RiuAejr0Ci
-# emIgxUIyaSk0qrEkInpswT0s6Ejddx4RYhrIWtT/BQFKgVj5IF/jR9kXg4zme65m
-# zKfrzFZqPUhrxszYnyF3kpJCGBQ6CgI5ERTRe+KPO3ghqi90/Zzhi9dVhFlV+V1I
-# 9xiOsdLIG9XPvN6fTJfJhcXfenflOwsefcFfxGy/oVI4JZafoqyPNkR/OPG/T0S6
-# G1VC92W0RrxSF60pzgRZKos8lOiG8/osgnXsiRVW4+Rt2tHxS95/7Qawn87S6Jpg
-# aH7NF0vTUfgxfBxm4QkTTcCeWX7KKzu/wRQiFs1RK5IXIulhWC7Z9zFOpl8kQwwY
-# z0Edu44TvfF4E1793GWP+DJJwSxNyqi/eIWrFKRkaMH1nqMeGonivydb3vGFmbBQ
-# 9lJUN4TZ7tMtTEpyfqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMfRk6217qHwyfGWwzz8uLr6uZ3c/DcQ+UiGjQ875uLPMA0GCSqG
+# SIb3DQEBAQUABIIBgI6U0R5MjGAT3qGxy5FzBYEjO5t3uW57n3rjSsa+blAcL1UH
+# Jm7zvU7rPSfCNyeWOuqYU7NohB6VfK785mzNW9LbxoBm6NV4McU3jw9ip5KXgtu+
+# 8SvXzhAShZFRSmfzoGlRlZpzLONOYZPkgD98+yBgbhT+OrH23NxBkMwgXk1ADivW
+# tef227XJ49zKzmztyMQw1y12M1n9F3NdJuBAMpglLR8zbiXqLE1pIBU+kBxY942F
+# af1nVF+MKhlvD5FKfdx8YwmLnVfgcp0un74x74new2ge2/AWOnhMC2saD8FFVDYc
+# C+VvUhxF0evpFlWnyf5EEEhaRgiZPW3BuQeZFrX4DWuzLiQ6qtvYoiVpRSEay+Fc
+# DBzefWWggjQ89iTGVjY5GpervJ3RuhxspK8y2GfFy9XxeFZkEzdiaJkQA32FkZWU
+# XZee+kt0JvuvfrgsO03dG1Bc9rVeiSJ0nLD+YgV6xxBAVwQ7WUT308iQxZXDFMwc
+# 2jjAy4zG0/wVfRZd7KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODE2
-# NTdaMC8GCSqGSIb3DQEJBDEiBCBCgYr+BSrRUNlTdktxBOm+w6iDpgHgw/nX6yye
-# G3fzgjANBgkqhkiG9w0BAQEFAASCAgAy+5Td1gOlK2sXQkA7Y89Jz2dMlcOzfKiO
-# qJQQn4IU2jzW/XQnNZM/wvYOOOd3c4IzAuajMwa2pzH3RvjIOEXN/zka0d3Y8aP1
-# HXZHhyB3anQcOGrvuf4bsg8Dv6KC8rJ3uuUajN4IGLpCzn0r1ADI+EPiQXFufVrC
-# HCTt6JSmL/UbpEQTAZeDo+b+WcgKxU+waDaT8ZpNmqAsl1RlV3gRlpVN5pMV6Sat
-# esKnRYldmVxrpNQegTHg/5jOXgDCvS/v5aPKlCNdolYvfFuME8rkR3z5MyKoUmaf
-# iys+9MXthG8VpJrQEzbIDtUELAhMmuZvlvLHsjS2rHqxAnoprf128oIozyIdis2Z
-# EY20+2MZ1me0OJ0xDKfLXXcEYr+I6ldt45xM/R6V6YKtAiqdO9X64ED+wgau/Ktr
-# 4yd8HsMJ6hXo6vRgnGgnb9Ow6BTpOF+32nTl73HiZUoxP96ThjXIh+KZiN/Yy+xA
-# S3L/vJka3eEDvFAtkgnyMWRQHt3uTEB6Ui1LJAPgsaEd82bm2apo471GrVVD6uBt
-# srq6rN09WQA5hg72UcFL+v8IhlBGfa8uoWBc2SAtMd6XJuXYS0YsiHQ1st6Kxqid
-# IniskJuqP/VXCx99yP12fSiMWCqjSu8LrasLWEGTcSPmhmXdV0vE7Zx97wcdLJm1
-# Zc2kKjbVCA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNjA3
+# NTBaMC8GCSqGSIb3DQEJBDEiBCDoAQ3tv3wnxq0cjZQ5KI/jONHDVny33qLkL2ZP
+# bbqDIDANBgkqhkiG9w0BAQEFAASCAgCExTpGXpLEAXdeVRXCKLmICGn/cs9Uv/7d
+# Wt1XY7MfKI+iUdovfSbqUtJMSFQPUFFb6gbd0qjYkeUnclFqkOOjGNCWoqpARsgM
+# 81BoamNcytwFVJovRgwGIM9z5oUXftIFjmJ8i5roCWnk04micUNoWptgz4r5VV57
+# IMP5jg3f3JZIV79O7ro3pwe0ga4vmHSw7o6szPRCZs8RVus7kBiWprBOxR5JwZqB
+# RXNEXsfi5qJhf5Y73dFzWGxx3Q9oKRIE6JDkSmwZ4X3+0o1S+YkxUiocryr+Eo6G
+# t9b9ceZzlN8YgT6Soe8Fbj2pWxb1u/3g0zuIAYw8egnUc6gj+m5oCtiOi1MNKSmp
+# Kf43O6SfKyYYm0SpcIdX8mAbZhDfJF9eX2Hk0f+sLY+/bakjNdnapIeSZDI52U85
+# Z6MlSTrY3fd81fdFO9J1kWQlg4ZLVsggmacJCj7uvXzE1b6rWnBju5YhxUkO6TGD
+# 3Qj4aM3Ga6fxKhoht0vNOV139y0KGQteFKolAzOIxjVymSfTUFY0Ik/vzycuZ8Vm
+# Iye9cFmINDqepAJnxHvfDTFiQva4CFKjFQP4m+LMgaV5MXeHq40NvJr6FknA+HiU
+# v+MW54UhfBAv720HQkFZra4qdrgtrgPxYOS7JT5fZ1TZD+XXh7l5Mq0KBvFMlrRC
+# XgzMMwi6rg==
 # SIG # End signature block
