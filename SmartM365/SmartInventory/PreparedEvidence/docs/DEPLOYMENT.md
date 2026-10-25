@@ -263,7 +263,7 @@ configuration and registry deployment are operator actions, separate from Git.
 | `PlanMaxAgeHours` | 24 by default; accepted range 1..168 hours. This expires plans, never protections. |
 | `Target` | Exact `TenantId`, `ClientId`, `SiteId`, `DriveId`, `RootId`, `BatchesId`, library-relative `RootPath` ending in `DATA-POWERBI`. No customer defaults. |
 | `Qualification` | Initially `Unqualified`. Requires the evidence below; a boolean alone cannot authorize retirement. |
-| `JournalRootPath` | Optional key, not templated. Required for Apply and Auto: an absolute shared folder outside `DATA` and its ancestors (for example a sibling of `DATA` on the server share). Plans and journals are written under `<JournalRootPath>/retention/<run-id>/`. Without it, Preview falls back to the local work root. May use effective global tokens, for example `{{WorkspaceRootPath}}\Tenants\<journal-folder>\{{TenantKey}}`; the resolved path must still be absolute and outside `DATA`, and an unknown or empty token blocks the run. |
+| `JournalRootPath` | Optional key, not templated. Required for Apply and Auto: an absolute shared folder outside `DATA` and its ancestors (for example a sibling of `DATA` on the server share). Plans and journals are written under `<JournalRootPath>/retention/<run-id>/`. Without it, Preview falls back to the local work root. May use effective global tokens, for example `{{WorkspaceRootPath}}\Tenants\<journal-folder>\{{ProfileKey}}`. Use `{{ProfileKey}}` (the tenant folder name, for example `prod`), not `{{TenantKey}}` (the organization-environment key): only the global path keys translate `{{TenantKey}}` to the folder name. The resolved path must still be absolute and outside `DATA`, and an unknown or empty token blocks the run. |
 | `SharePointKeepBatches` | Optional, code default 2 (current and previous validated batch), range 2..50. |
 | `ServerKeepBatches` | Optional, code default 0 = keep the full server history; otherwise 2..100000 and at least `SharePointKeepBatches`. |
 | `MaxSharePointRemovalsPerRun` | Optional, code default 1 (at most one SharePoint batch folder per publication), range 1..50. |
@@ -322,7 +322,7 @@ the operator and UTC review date, canonical `ServerOutputRoot`, `RegistrySHA256`
 `ModuleSHA256` of PreparedSharePointRetention.psm1, `AccessEvidenceSHA256`,
 `Coordination=SharedServerPublicationLock`, documented `WriterExclusionEvidence`,
 `ExclusiveCloudWritersConfirmed=true` and `RecoverabilityConfirmed=true`.
-`ServerOutputRoot` may be written as `{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\DATA-POWERBI`
+`ServerOutputRoot` may be written as `{{WorkspaceRootPath}}\Tenants\{{ProfileKey}}\DATA-POWERBI`
 so that it follows the global data root; it is resolved from the effective
 global configuration and then compared case-sensitively with the server
 `DATA-POWERBI` root, exactly like a literal path. A tokenized value no longer
