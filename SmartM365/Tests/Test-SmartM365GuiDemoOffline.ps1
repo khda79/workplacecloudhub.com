@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercises the two pilot demos with WPF events and forbidden operational commands.
 .VERSION
-1.0.1
+1.0.2
 .NOTES
 Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
 #>
@@ -132,7 +132,7 @@ try {
         Assert-Demo (@($s.Data.History|Where-Object {[datetime]$_.EventTime -gt $s.Data.Clock}).Count -eq 0) 'History contains future sample executions.'
         Assert-Demo (-not (Test-Path -LiteralPath $s.OutputRoot)) 'Demo wrote files during initialization.'
         Assert-Demo ($c.RequestJobsGrid.Items.Count -eq 3) 'Request detail selection failed.'
-        foreach($view in @('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity')){
+        foreach($view in @('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity','Events')){
             foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $view){$c.MainTabs.SelectedItem=$tab}}
             Assert-Demo ($c.MainTabs.SelectedItem.Header -eq $view) "Cannot navigate to $view"
             Export-DemoPreview $s.Window ('orchestrator-'+($view -replace ' ','-').ToLowerInvariant())
@@ -174,6 +174,16 @@ try {
         Assert-Demo (New-OrchestratorDemoData -Scenario Maintenance).Maintenance 'Maintenance scene missing.'
         $c.DemoScenarioCombo.SelectedItem='Issues'
         Assert-Demo ($c.OperationsIncidentsGrid.Items.Count -eq 1) 'Issues selector failed.'
+        Assert-Demo ($c.EventsGrid.Items.Count -eq 14) 'Issues events missing.'
+        $c.EventsLevelCombo.SelectedIndex=2
+        Assert-Demo (@($s.FilteredEvents | Where-Object Level -NE 'ERROR').Count -eq 0 -and $s.FilteredEvents.Count -eq 2) 'Events level filter failed.'
+        $c.EventsLevelCombo.SelectedIndex=0;$c.EventsServerCombo.SelectedItem='CTSO-INV-03';$c.EventsCategoryCombo.SelectedItem='StopRequest'
+        Assert-Demo ($c.EventsGrid.Items.Count -eq 1) 'Events server/category filter failed.'
+        $c.EventsCategoryCombo.SelectedIndex=0;$c.EventsServerCombo.SelectedIndex=0;$c.EventsTextBox.Text='heartbeat';$c.EventsPeriodCombo.SelectedIndex=0
+        Assert-Demo ($c.EventsGrid.Items.Count -eq 1) 'Events text/period filter failed.'
+        $c.EventsTextBox.Text='';$c.EventsPeriodCombo.SelectedIndex=2
+        $c.MainTabs.SelectedIndex=7
+        Export-DemoPreview $s.Window 'orchestrator-events-issues'
         $c.MainTabs.SelectedIndex=1
         Export-DemoPreview $s.Window 'orchestrator-issues'
         $c.DemoScenarioCombo.SelectedItem='Maintenance'

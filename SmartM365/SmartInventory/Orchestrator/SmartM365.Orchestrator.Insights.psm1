@@ -439,10 +439,153 @@ function New-SmartM365OrchestratorJobRunRequest {
     New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $SharedDataFolderPath -Tenant $Tenant -Pipeline Jobs -Selection $selection -ManifestHash $hash -RequestedBy ([Environment]::UserName) -RequestedFrom ([Environment]::MachineName)
 }
 
+# Resident log lines kept as events. ERROR/WARN lines are always kept; INFO lines only when
+# they match a rule. Messages are those written by SmartM365-Inventory-Orchestrator.ps1.
+$script:InsightsLogEventRules = @(
+    @{ Category = 'Lifecycle'; Pattern = '^\S+ v\S+ starting \(PID |^\S+ exiting normally|^Runtime update candidate detected|^Validated runtime update|^Heartbeat published as Recycling|^Maximum lifetime' }
+    @{ Category = 'StopRequest'; Pattern = '(?i)stop request' }
+    @{ Category = 'Heartbeat'; Pattern = '^Failed to write heartbeat' }
+    @{ Category = 'StatePersistence'; Pattern = '^State persistence ' }
+    @{ Category = 'ConfigReload'; Pattern = 'reload rejected' }
+    @{ Category = 'Maintenance'; Pattern = '^Maintenance control ' }
+)
+$script:InsightsLogEventNoise = '^(Email sent |Mail HTML copy |SharePoint |Acquiring )'
+$script:InsightsLogLinePattern = [regex]'^\[?(?<Time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]?\s?\[(?<Level>[A-Z]+)\]\s?(?<Message>.*)$'
+$script:InsightsLogMaxReadBytes = 33554432
+
+function Get-SmartM365OrchestratorLogEventCategory {
+    <# Category of a resident log line, or $null when the line is not an orchestrator event. #>
+    param([Parameter(Mandatory)][string]$Level, [AllowEmptyString()][string]$Message)
+    if ($Message -notmatch $script:InsightsLogEventNoise) {
+        foreach ($rule in $script:InsightsLogEventRules) { if ($Message -match $rule.Pattern) { return $rule.Category } }
+    }
+    if ($Level -eq 'ERROR') { return 'Error' }
+    if ($Level -eq 'WARN') { return 'Warning' }
+    return $null
+}
+
+function Read-InsightsLogTail {
+    # Shared read of complete lines appended after Offset; the resident keeps writing the file.
+    param([Parameter(Mandatory)][string]$Path, [long]$Offset = 0)
+    $stream = [IO.FileStream]::new($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try {
+        $length = $stream.Length; $reset = $false; $skipPartial = $false
+        if ($Offset -gt $length) { $Offset = 0; $reset = $true }
+        if (($length - $Offset) -gt $script:InsightsLogMaxReadBytes) { $Offset = $length - $script:InsightsLogMaxReadBytes; $skipPartial = $true }
+        $count = [int]($length - $Offset)
+        if ($count -le 0) { return [pscustomobject]@{ Lines = @(); Offset = $Offset; Reset = $reset } }
+        $buffer = [byte[]]::new($count); $stream.Position = $Offset; $read = 0
+        while ($read -lt $count) { $chunk = $stream.Read($buffer, $read, $count - $read); if ($chunk -le 0) { break }; $read += $chunk }
+        $last = [Array]::LastIndexOf($buffer, [byte]10, $read - 1)
+        if ($read -le 0 -or $last -lt 0) { return [pscustomobject]@{ Lines = @(); Offset = $Offset; Reset = $reset } }
+        $start = if ($Offset -eq 0 -and $read -ge 3 -and $buffer[0] -eq 0xEF -and $buffer[1] -eq 0xBB -and $buffer[2] -eq 0xBF) { 3 } else { 0 }
+        $lines = @([Text.Encoding]::UTF8.GetString($buffer, $start, $last + 1 - $start) -split '\r?\n')
+        if ($skipPartial -and $lines.Count) { $lines = @($lines | Select-Object -Skip 1) }
+        return [pscustomobject]@{ Lines = $lines; Offset = $Offset + $last + 1; Reset = $reset }
+    }
+    finally { $stream.Dispose() }
+}
+
+function Get-SmartM365OrchestratorLogEvents {
+    <# Read-only events from the resident daily logs of each server. Cache (path -> offset and
+       parsed events) lets periodic refreshes read only the lines appended since the last call. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$LogFolderPath, [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Server,
+        [ValidateRange(1, 744)][int]$Hours = 24, [datetime]$Now = (Get-Date), [hashtable]$Cache = $null
+    )
+    if ($null -eq $Cache) { $Cache = @{} }
+    $since = $Now.AddHours(-1 * $Hours)
+    $events = [Collections.Generic.List[object]]::new(); $sources = [Collections.Generic.List[object]]::new()
+    $usedKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($serverName in @($Server | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { [string]$_ } | Sort-Object -Unique)) {
+        $folder = Join-Path $LogFolderPath $serverName
+        $fileCount = 0; $failure = ''
+        if (Test-Path -LiteralPath $folder -PathType Container) {
+            for ($day = $since.Date; $day -le $Now.Date; $day = $day.AddDays(1)) {
+                $path = Join-Path $folder ('SmartM365-Inventory-Orchestrator_{0}_{1}.log' -f $serverName, $day.ToString('yyyyMMdd'))
+                if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+                [void]$usedKeys.Add($path)
+                $entry = $Cache[$path]
+                if ($null -eq $entry) { $entry = @{ Offset = [long]0; Events = [Collections.Generic.List[object]]::new() }; $Cache[$path] = $entry }
+                try {
+                    $tail = Read-InsightsLogTail -Path $path -Offset $entry.Offset
+                    if ($tail.Reset) { $entry.Events.Clear() }
+                    foreach ($line in $tail.Lines) {
+                        $match = $script:InsightsLogLinePattern.Match([string]$line)
+                        if (-not $match.Success) { continue }
+                        $level = switch ($match.Groups['Level'].Value) { 'ERROR' { 'ERROR' } { $_ -in @('WARN', 'WARNING') } { 'WARN' } default { 'INFO' } }
+                        $message = $match.Groups['Message'].Value.TrimEnd()
+                        $category = Get-SmartM365OrchestratorLogEventCategory -Level $level -Message $message
+                        if ($null -eq $category) { continue }
+                        $time = [datetime]::ParseExact($match.Groups['Time'].Value, 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
+                        $entry.Events.Add([pscustomobject]@{ Time = $time; Server = $serverName; Level = $level; Category = $category; Message = $message; Source = $path })
+                    }
+                    $entry.Offset = $tail.Offset
+                    $fileCount++
+                }
+                catch { $failure = $_.Exception.Message }
+                foreach ($logEvent in $entry.Events) { if ($logEvent.Time -ge $since -and $logEvent.Time -le $Now) { $events.Add($logEvent) } }
+            }
+        }
+        $status = if ($failure) { 'Read error: ' + $failure } elseif (-not (Test-Path -LiteralPath $folder -PathType Container)) { 'Log folder not found' } elseif ($fileCount) { 'OK' } else { 'No log in period' }
+        $sources.Add([pscustomobject]@{ Server = $serverName; Files = $fileCount; Status = $status })
+    }
+    foreach ($key in @($Cache.Keys)) { if (-not $usedKeys.Contains([string]$key)) { $Cache.Remove($key) } }
+    [pscustomobject]@{
+        Events = @($events | Sort-Object Time -Descending); Sources = @($sources); Since = $since; Hours = $Hours; ReadAt = $Now; Cache = $Cache
+    }
+}
+
+function Select-SmartM365OrchestratorLogEvents {
+    <# Filters events for display. GroupRepeats merges identical messages of one server. #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyCollection()][object[]]$Events = @(), [string]$Server = '',
+        [ValidateSet('All', 'ErrorsAndWarnings', 'ERROR', 'WARN', 'INFO')][string]$Level = 'All',
+        [string]$Category = '', [string]$Text = '', [datetime]$Since = [datetime]::MinValue,
+        [switch]$GroupRepeats, [ValidateRange(1, 100000)][int]$MaxRows = 5000
+    )
+    $matching = @(foreach ($logEvent in @($Events | Where-Object { $null -ne $_ })) {
+        if ($Server -and $logEvent.Server -ne $Server) { continue }
+        if ($Level -eq 'ErrorsAndWarnings' -and $logEvent.Level -notin @('ERROR', 'WARN')) { continue }
+        if ($Level -in @('ERROR', 'WARN', 'INFO') -and $logEvent.Level -ne $Level) { continue }
+        if ($Category -and $logEvent.Category -ne $Category) { continue }
+        if ($logEvent.Time -lt $Since) { continue }
+        if ($Text -and $logEvent.Message.IndexOf($Text, [StringComparison]::OrdinalIgnoreCase) -lt 0 -and $logEvent.Category.IndexOf($Text, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+        $logEvent
+    })
+    $rows = [Collections.Generic.List[object]]::new()
+    if ($GroupRepeats) {
+        $groups = [ordered]@{}
+        foreach ($logEvent in $matching) {
+            $key = '{0}|{1}|{2}|{3}' -f $logEvent.Server, $logEvent.Level, $logEvent.Category, $logEvent.Message
+            $group = $groups[$key]
+            if ($null -eq $group) { $groups[$key] = @{ Last = $logEvent; First = $logEvent.Time; Count = 1 }; continue }
+            $group.Count++
+            if ($logEvent.Time -gt $group.Last.Time) { $group.Last = $logEvent }
+            if ($logEvent.Time -lt $group.First) { $group.First = $logEvent.Time }
+        }
+        foreach ($group in $groups.Values) { $rows.Add([pscustomobject]@{ Event = $group.Last; First = $group.First; Count = $group.Count }) }
+    }
+    else { foreach ($logEvent in $matching) { $rows.Add([pscustomobject]@{ Event = $logEvent; First = $logEvent.Time; Count = 1 }) } }
+    $sorted = @($rows | Sort-Object { $_.Event.Time } -Descending)
+    [pscustomobject]@{
+        Total = $sorted.Count; Truncated = $sorted.Count -gt $MaxRows; Matching = $matching.Count
+        Rows = @($sorted | Select-Object -First $MaxRows | ForEach-Object {
+            [pscustomobject]@{
+                Time = $_.Event.Time.ToString('yyyy-MM-dd HH:mm:ss'); Server = $_.Event.Server; Level = $_.Event.Level; Category = $_.Event.Category
+                Count = $_.Count; First = $_.First.ToString('yyyy-MM-dd HH:mm:ss'); Message = $_.Event.Message; Source = $_.Event.Source
+            }
+        })
+    }
+}
+
 Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorScheduleOccurrences', 'Get-SmartM365OrchestratorExpectedMaxAgeHours', 'Get-SmartM365OrchestratorRecentRuns',
     'Get-SmartM365OrchestratorJobHealth', 'Get-SmartM365OrchestratorDependents', 'Get-SmartM365OrchestratorDependencyReadiness',
-    'Get-SmartM365OrchestratorOperations', 'Get-SmartM365OrchestratorRecentPipelineRuns', 'New-SmartM365OrchestratorJobRunRequest'
+    'Get-SmartM365OrchestratorOperations', 'Get-SmartM365OrchestratorRecentPipelineRuns', 'New-SmartM365OrchestratorJobRunRequest',
+    'Get-SmartM365OrchestratorLogEventCategory', 'Get-SmartM365OrchestratorLogEvents', 'Select-SmartM365OrchestratorLogEvents'
 )
 
 # SIG # Begin signature block

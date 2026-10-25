@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.15
+1.3.16
 #>
 [CmdletBinding()]
 param(
@@ -42,7 +42,7 @@ param(
     [switch]$Demo,
     [ValidateSet('Overview','Issues','Maintenance')]
     [string]$DemoScenario = 'Overview',
-    [ValidateSet('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity')]
+    [ValidateSet('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity','Events')]
     [string]$DemoView = 'Dashboard',
     [ValidateRange(1180,3840)][int]$DemoWindowWidth = 1500,
     [ValidateRange(720,2160)][int]$DemoWindowHeight = 900
@@ -64,7 +64,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.15'
+$script:AppVersion = '1.3.16'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -76,6 +76,9 @@ $script:RecentRuns = @()
 $script:HealthByName = @{}
 $script:RequestRows = @()
 $script:MailFolderPath = ''
+$script:LogEventsCache = @{}
+$script:LogEventsResult = $null
+$script:LogEventsLastError = ''
 $script:AutoRefreshTimer = $null
 $script:CancellationTimer = $null
 $script:CancellationBusy = $false
@@ -554,6 +557,45 @@ $xaml = @'
                     <TextBox x:Name="ActivityBox" FontFamily="Consolas" FontSize="12" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
                 </Grid>
             </TabItem>
+
+            <TabItem Header="Events">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="90"/></Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="180"/><ColumnDefinition Width="160"/><ColumnDefinition Width="160"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Margin="0,0,8,0"><TextBlock Text="Server"/><ComboBox x:Name="EventsServerCombo"/></StackPanel>
+                        <StackPanel Grid.Column="1" Margin="0,0,8,0"><TextBlock Text="Level"/><ComboBox x:Name="EventsLevelCombo"/></StackPanel>
+                        <StackPanel Grid.Column="2" Margin="0,0,8,0"><TextBlock Text="Category"/><ComboBox x:Name="EventsCategoryCombo"/></StackPanel>
+                        <StackPanel Grid.Column="3" Margin="0,0,8,0"><TextBlock Text="Period"/><ComboBox x:Name="EventsPeriodCombo"/></StackPanel>
+                        <StackPanel Grid.Column="4" Margin="0,0,8,0"><TextBlock Text="Text"/><TextBox x:Name="EventsTextBox" ToolTip="Case-insensitive search in the message and category."/></StackPanel>
+                        <CheckBox x:Name="EventsGroupCheck" Grid.Column="5" Content="Group repeats" IsChecked="True" VerticalAlignment="Bottom" Margin="4,0,8,14" ToolTip="Merge identical messages of one server; Count and First show the repetitions."/>
+                        <Button x:Name="EventsRefreshButton" Grid.Column="6" Content="Read logs" VerticalAlignment="Bottom" Margin="4,0,4,8"/>
+                    </Grid>
+                    <TextBlock x:Name="EventsSummaryText" Grid.Row="1" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="Resident orchestrator logs are read while this tab is open (read-only)."/>
+                    <DataGrid x:Name="EventsGrid" Grid.Row="2" SelectionMode="Single">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Level}" Value="ERROR"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                    <DataTrigger Binding="{Binding Level}" Value="WARN"><Setter Property="Background" Value="#FFF4CE"/></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.RowStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="145"/>
+                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="150"/>
+                            <DataGridTextColumn Header="Level" Binding="{Binding Level}" Width="60"/>
+                            <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="120"/>
+                            <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="55"/>
+                            <DataGridTextColumn Header="First" Binding="{Binding First}" Width="145"/>
+                            <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <TextBox x:Name="EventsDetailBox" Grid.Row="3" Margin="0,8,0,0" FontFamily="Consolas" FontSize="12" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                </Grid>
+            </TabItem>
         </TabControl>
 
         <Border Grid.Row="3" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="0,9,0,0" Padding="10,6">
@@ -616,7 +658,8 @@ if ($ValidateOnly) {
         'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
-        'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton')) {
+        'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
+        'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
     }
     $source = [IO.File]::ReadAllText($PSCommandPath)
@@ -1281,6 +1324,60 @@ function Show-FailuresLast24Hours {
     Start-GuiRefresh -Mode History -HistoryFrom $from -HistoryTo (Get-Date) -OnlyFailures
 }
 
+function Set-GuiEventsServers {
+    $selected = Get-ComboText -Combo $script:Controls.EventsServerCombo
+    $script:Controls.EventsServerCombo.ItemsSource = @('All') + @($script:DraftCluster.ExpectedOrchestratorServers | ForEach-Object { [string]$_ } | Sort-Object -Unique)
+    if ($selected -and $selected -in @($script:Controls.EventsServerCombo.ItemsSource)) { $script:Controls.EventsServerCombo.SelectedItem = $selected } else { $script:Controls.EventsServerCombo.SelectedIndex = 0 }
+}
+
+function Test-GuiEventsTabVisible {
+    return $null -ne $script:Controls.MainTabs.SelectedItem -and [string]$script:Controls.MainTabs.SelectedItem.Header -eq 'Events'
+}
+
+function Get-GuiEventsHours {
+    $item = $script:Controls.EventsPeriodCombo.SelectedItem
+    if ($null -eq $item) { return 24 }
+    return [int]$item.Hours
+}
+
+function Update-GuiEventsView {
+    # UI-thread filtering of the last read; no file access.
+    $result = $script:LogEventsResult
+    if ($null -eq $result) { $script:Controls.EventsGrid.ItemsSource = @(); return }
+    $server = Get-ComboText -Combo $script:Controls.EventsServerCombo
+    $category = Get-ComboText -Combo $script:Controls.EventsCategoryCombo
+    $levelItem = $script:Controls.EventsLevelCombo.SelectedItem
+    $selection = Select-SmartM365OrchestratorLogEvents -Events @($result.Events) -Server $(if ($server -eq 'All') { '' } else { $server }) `
+        -Level $(if ($null -ne $levelItem) { [string]$levelItem.Value } else { 'All' }) -Category $(if ($category -eq 'All') { '' } else { $category }) `
+        -Text $script:Controls.EventsTextBox.Text.Trim() -Since $result.Since -GroupRepeats:([bool]$script:Controls.EventsGroupCheck.IsChecked)
+    $script:Controls.EventsGrid.ItemsSource = @($selection.Rows)
+    $sources = @($result.Sources | ForEach-Object { '{0}: {1}' -f $_.Server, $_.Status }) -join '; '
+    $shown = if ($selection.Truncated) { '{0} of {1} rows shown (newest)' -f @($selection.Rows).Count, $selection.Total } else { '{0} row(s)' -f $selection.Total }
+    $script:Controls.EventsSummaryText.Text = '{0} for {1} event(s) since {2:yyyy-MM-dd HH:mm}, read {3:HH:mm:ss}. Logs: {4}' -f $shown, $selection.Matching, $result.Since, $result.ReadAt, $sources
+    $script:Controls.EventsDetailBox.Text = ''
+}
+
+function Set-GuiLogEvents {
+    param([AllowNull()]$Result, [string]$ErrorMessage = '')
+    if ($ErrorMessage) {
+        if ($ErrorMessage -ne $script:LogEventsLastError) { Write-GuiActivity -Message "Resident log events could not be read: $ErrorMessage" -Level WARN }
+        $script:LogEventsLastError = $ErrorMessage
+        $script:Controls.EventsSummaryText.Text = 'Resident logs unreadable (previous rows kept): ' + $ErrorMessage
+        return
+    }
+    $script:LogEventsLastError = ''
+    if ($null -eq $Result) { return }
+    $script:LogEventsResult = $Result
+    Update-GuiEventsView
+}
+
+function Show-SelectedGuiEvent {
+    $row = $script:Controls.EventsGrid.SelectedItem
+    if ($null -eq $row) { $script:Controls.EventsDetailBox.Text = ''; return }
+    $repeat = if ($row.Count -gt 1) { '; {0} occurrence(s) since {1}' -f $row.Count, $row.First } else { '' }
+    $script:Controls.EventsDetailBox.Text = '[{0}][{1}][{2}] {3}{4}{5}{6}{5}Log: {7}' -f $row.Time, $row.Server, $row.Level, $row.Category, $repeat, [Environment]::NewLine, $row.Message, $row.Source
+}
+
 function Get-GuiRefreshWork {
     return {
         param($Progress, $InputData)
@@ -1311,10 +1408,18 @@ function Get-GuiRefreshWork {
         $publishedCluster = Read-SmartM365OrchestratorJson -Path (Join-Path $root 'Config/Orchestrator-Cluster.json')
         $operations = Get-SmartM365OrchestratorOperations -SharedDataFolderPath $root -ClusterDocument $publishedCluster -MailFolderPath $InputData.MailFolderPath -MailHours 24
         $requests = @(Get-SmartM365OrchestratorRecentPipelineRuns -SharedDataFolderPath $root -Count 30)
+        $logEvents = $null; $logEventsError = ''
+        $eventsOption = $InputData.PSObject.Properties['LogEventsHours']
+        if ($null -ne $eventsOption -and [int]$eventsOption.Value -gt 0) {
+            # Read-only and isolated: an unreadable log never hides the live operations.
+            $Progress.Message = 'Reading resident orchestrator logs...'
+            try { $logEvents = Get-SmartM365OrchestratorLogEvents -LogFolderPath $InputData.MailFolderPath -Server @($publishedCluster.ExpectedOrchestratorServers) -Hours ([int]$eventsOption.Value) -Cache $InputData.LogEventsCache }
+            catch { $logEventsError = $_.Exception.Message }
+        }
         return [pscustomobject]@{
             Mode = $InputData.Mode; Snapshot = $snapshot; RecentRuns = $recentRuns; Servers = $servers
             Owners = $owners; History = $history; Versions = $versions; Operations = $operations
-            Requests = $requests; ReadAt = Get-Date
+            Requests = $requests; LogEvents = $logEvents; LogEventsError = $logEventsError; ReadAt = Get-Date
         }
     }
 }
@@ -1344,6 +1449,7 @@ function Start-GuiRefresh {
         ManagementModulePath = (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Management.psm1')
         InsightsModulePath = (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Insights.psm1')
         HistoryFrom = $from; HistoryTo = $to; HistoryServer = $server; HistoryJob = $job; HistoryStatus = $status; OnlyFailures = [bool]$OnlyFailures
+        LogEventsHours = $(if ($Mode -ne 'History' -and (Test-GuiEventsTabVisible)) { Get-GuiEventsHours } else { 0 }); LogEventsCache = $script:LogEventsCache
     }
     $script:RefreshContext.Input = $inputData
     $script:RefreshContext.Progress.Message = ''
@@ -1392,6 +1498,7 @@ function Receive-GuiRefresh {
             $script:Controls.HistoryServerCombo.SelectedIndex = 0
             $script:Controls.HistoryJobCombo.ItemsSource = @('All') + @($script:DraftJobs.Jobs.Name | Sort-Object)
             $script:Controls.HistoryJobCombo.SelectedIndex = 0
+            Set-GuiEventsServers
             $script:HistoryRows = @($result.History)
             $script:Controls.HistoryGrid.ItemsSource = $script:HistoryRows
             $script:InitialHistoryLoaded = $true
@@ -1411,6 +1518,7 @@ function Receive-GuiRefresh {
         else {
             Set-GuiOperations -Operations $result.Operations
             if (-not $script:CancellationBusy) { Set-GuiRequestRows -Rows @($result.Requests) }
+            if ([int]$script:RefreshContext.Input.LogEventsHours -gt 0) { Set-GuiLogEvents -Result $result.LogEvents -ErrorMessage ([string]$result.LogEventsError) }
         }
         if ($mode -eq 'History') {
             $script:Controls.StatusText.Text = "History refreshed: $(@($script:HistoryRows).Count) row(s)."
@@ -1720,7 +1828,8 @@ foreach ($name in @(
     'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
     'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
     'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
-    'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton'
+    'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
+    'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox'
 )) {
     $script:Controls[$name] = $window.FindName($name)
 }
@@ -1740,6 +1849,22 @@ $script:Controls.HistoryFromPicker.SelectedDate = (Get-Date).AddDays(-7).Date
 $script:Controls.HistoryToPicker.SelectedDate = (Get-Date).Date
 $script:Controls.HistoryStatusCombo.ItemsSource = @('All', 'Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'BlockedDependencyFailed', 'BlockedDependencyTimeout', 'BlockedPrerequisite', 'Skipped', 'Cancelled', 'Retried')
 $script:Controls.HistoryStatusCombo.SelectedIndex = 0
+$script:Controls.EventsLevelCombo.DisplayMemberPath = 'Label'
+$script:Controls.EventsLevelCombo.ItemsSource = @(
+    [pscustomobject]@{ Label = 'All'; Value = 'All' }, [pscustomobject]@{ Label = 'Errors and warnings'; Value = 'ErrorsAndWarnings' },
+    [pscustomobject]@{ Label = 'ERROR'; Value = 'ERROR' }, [pscustomobject]@{ Label = 'WARN'; Value = 'WARN' }, [pscustomobject]@{ Label = 'INFO'; Value = 'INFO' }
+)
+$script:Controls.EventsLevelCombo.SelectedIndex = 0
+$script:Controls.EventsCategoryCombo.ItemsSource = @('All', 'Lifecycle', 'StopRequest', 'Heartbeat', 'StatePersistence', 'ConfigReload', 'Maintenance', 'Error', 'Warning')
+$script:Controls.EventsCategoryCombo.SelectedIndex = 0
+$script:Controls.EventsPeriodCombo.DisplayMemberPath = 'Label'
+$script:Controls.EventsPeriodCombo.ItemsSource = @(
+    [pscustomobject]@{ Label = '1 h'; Hours = 1 }, [pscustomobject]@{ Label = '6 h'; Hours = 6 }, [pscustomobject]@{ Label = '24 h'; Hours = 24 },
+    [pscustomobject]@{ Label = '3 days'; Hours = 72 }, [pscustomobject]@{ Label = '7 days'; Hours = 168 }
+)
+$script:Controls.EventsPeriodCombo.SelectedIndex = 2
+$script:Controls.EventsServerCombo.ItemsSource = @('All')
+$script:Controls.EventsServerCombo.SelectedIndex = 0
 
 $script:Controls.ScheduleTypeCombo.Add_SelectionChanged({ Update-ScheduleDaysControlState })
 $script:Controls.AssignmentCombo.Add_SelectionChanged({ Update-PinnedServerControlState })
@@ -1797,7 +1922,16 @@ $script:Controls.MainTabs.Add_SelectionChanged({
         [string]$script:Controls.MainTabs.SelectedItem.Header -eq 'History') {
         try { Refresh-HistoryView } catch { Write-GuiException -Context 'History refresh failed' -ErrorRecord $_ }
     }
+    if (Test-GuiEventsTabVisible) { Start-GuiRefresh -Mode Live }
 })
+foreach ($eventsFilter in @('EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo')) {
+    $script:Controls[$eventsFilter].Add_SelectionChanged({ try { Update-GuiEventsView } catch { Write-GuiException -Context 'Event filter failed' -ErrorRecord $_ } })
+}
+$script:Controls.EventsTextBox.Add_TextChanged({ try { Update-GuiEventsView } catch { Write-GuiException -Context 'Event filter failed' -ErrorRecord $_ } })
+$script:Controls.EventsGroupCheck.Add_Click({ try { Update-GuiEventsView } catch { Write-GuiException -Context 'Event filter failed' -ErrorRecord $_ } })
+$script:Controls.EventsPeriodCombo.Add_SelectionChanged({ if ($script:InitialHistoryLoaded -and (Test-GuiEventsTabVisible)) { Start-GuiRefresh -Mode Live } })
+$script:Controls.EventsRefreshButton.Add_Click({ Start-GuiRefresh -Mode Live })
+$script:Controls.EventsGrid.Add_SelectionChanged({ Show-SelectedGuiEvent })
 $script:Controls.HistoryGrid.Add_MouseDoubleClick({
     $row = $script:Controls.HistoryGrid.SelectedItem
     if ($null -eq $row) { return }
@@ -2024,6 +2158,9 @@ if ($SmokeTest) {
     }
     else { Write-GuiActivity -Message 'SMOKE_TEST_RUN_REQUEST_SKIPPED No enabled runnable job without dependency in the published configuration.' -Level WARN }
     Write-GuiActivity -Message ("SMOKE_TEST_OPERATIONS_OK Servers={0}; HealthRows={1}" -f @($operations.Servers).Count, $script:HealthByName.Count) -Level SUCCESS
+    Set-GuiEventsServers
+    Set-GuiLogEvents -Result (Get-SmartM365OrchestratorLogEvents -LogFolderPath $script:MailFolderPath -Server @($script:DraftCluster.ExpectedOrchestratorServers) -Hours 24 -Cache $script:LogEventsCache)
+    Write-GuiActivity -Message ("SMOKE_TEST_EVENTS_OK Events={0}; Rows={1}; Logs={2}" -f @($script:LogEventsResult.Events).Count, @($script:Controls.EventsGrid.ItemsSource).Count, (@($script:LogEventsResult.Sources | ForEach-Object { '{0}={1}' -f $_.Server, $_.Status }) -join ',')) -Level SUCCESS
 
     $rebalanceRequest = Request-ElectionRebalance -SkipConfirmation
     $rebalanceRequestPath = Join-Path -Path $script:SharedDataFolderPath -ChildPath 'Election\Orchestrator-RebalanceRequest.json'

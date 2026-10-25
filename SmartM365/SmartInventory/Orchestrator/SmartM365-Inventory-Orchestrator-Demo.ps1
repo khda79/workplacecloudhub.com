@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.1.0
+1.1.1
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -96,6 +96,19 @@ function New-OrchestratorDemoData {
     $servers[0].Running=1; $servers[1].Running=1; $servers[2].Pending=1
     $pending = @([pscustomobject]@{Server=$spoJob.Server;ServerState='Running';Job=$spoJob.Name;Reason='Dependency';WaitingMinutes=4;Details='Waiting for the current Teams inventory (sample).'})
     $incidents = @()
+    $logEvents = [Collections.Generic.List[object]]::new()
+    foreach ($server in $servers) {
+        $logEvents.Add([pscustomobject]@{Time='2026-10-18 06:00:04';Server=$server.Server;Level='INFO';Category='Lifecycle';Count=1;First='2026-10-18 06:00:04';Message=('SmartM365-Inventory-Orchestrator v1.5.47 starting (PID {0}, tenant demo, sample).' -f $server.Pid);Source='Demo/Logs/Orchestrator.log'})
+        $logEvents.Add([pscustomobject]@{Time='2026-10-18 05:59:58';Server=$server.Server;Level='INFO';Category='Lifecycle';Count=1;First='2026-10-18 05:59:58';Message='SmartM365-Inventory-Orchestrator exiting normally (exit code 0).';Source='Demo/Logs/Orchestrator.log'})
+        $logEvents.Add([pscustomobject]@{Time='2026-10-18 07:15:00';Server=$server.Server;Level='INFO';Category='Maintenance';Count=1;First='2026-10-18 07:15:00';Message='Maintenance control applied: revision=3; enabled=False; catchUpAll=True; reason=Sample planning resumed.';Source='Demo/Logs/Orchestrator.log'})
+    }
+    $logEvents.Add([pscustomobject]@{Time='2026-10-18 08:41:12';Server='CTSO-INV-02';Level='WARN';Category='Warning';Count=2;First='2026-10-18 08:12:40';Message='Capability TeamsPowerShell unavailable on the sample server.';Source='Demo/Logs/Orchestrator.log'})
+    if ($Scenario -eq 'Issues') {
+        $logEvents.Add([pscustomobject]@{Time='2026-10-18 09:24:31';Server='CTSO-INV-03';Level='WARN';Category='Heartbeat';Count=14;First='2026-10-18 09:11:02';Message='Failed to write heartbeat: sample shared folder write timeout.';Source='Demo/Logs/Orchestrator.log'})
+        $logEvents.Add([pscustomobject]@{Time='2026-10-18 09:24:30';Server='CTSO-INV-03';Level='ERROR';Category='StatePersistence';Count=3;First='2026-10-18 09:12:30';Message='State persistence unavailable after 60 second(s) of UNC write retries; the scheduler remains alive but new job launches are paused (sample).';Source='Demo/Logs/Orchestrator.log'})
+        $logEvents.Add([pscustomobject]@{Time='2026-10-18 09:24:29';Server='CTSO-INV-03';Level='ERROR';Category='ConfigReload';Count=14;First='2026-10-18 09:11:01';Message='Central cluster configuration reload rejected; the last valid cluster settings stay in effect (sample).';Source='Demo/Logs/Orchestrator.log'})
+        $logEvents.Add([pscustomobject]@{Time='2026-10-18 09:27:45';Server='CTSO-INV-03';Level='WARN';Category='StopRequest';Count=1;First='2026-10-18 09:27:45';Message='Orphan stop request retired: target PID 4103 no longer runs (sample).';Source='Demo/Logs/Orchestrator.log'})
+    }
     if ($Scenario -eq 'Issues') {
         $complianceJob=@($jobs | Where-Object Name -EQ 'Intune-Devices-Compliance-Inventory')[0]
         $complianceJob.Health='Stale'; $complianceJob.LastStatus='Failed'; $complianceJob.SuccessAgeHours=27
@@ -113,7 +126,7 @@ function New-OrchestratorDemoData {
     })
     [pscustomobject]@{
         Clock=$clock; Scenario=$Scenario; Jobs=$jobs; Servers=$servers; History=$history
-        Running=$running; Pending=$pending; Incidents=$incidents; Requests=$requests
+        Running=$running; Pending=$pending; Incidents=$incidents; Requests=$requests; LogEvents=@($logEvents | Sort-Object Time -Descending)
         Maintenance=($Scenario -eq 'Maintenance'); Sequence=1
         Versions=@([pscustomobject]@{VersionId='DEMO-v003';Created='2026-10-18 08:45'},[pscustomobject]@{VersionId='DEMO-v002';Created='2026-10-17 16:20'})
     }
@@ -140,6 +153,23 @@ function Update-OrchestratorDemoHistory {
     } | Sort-Object EventTime -Descending)
     $s.FilteredHistory = $rows
     $c.HistoryGrid.ItemsSource = $rows
+}
+
+function Update-OrchestratorDemoEvents {
+    $s = $script:OrchestratorDemo
+    $c = $s.Controls
+    $since = $s.Data.Clock.AddHours(-1 * [int]$c.EventsPeriodCombo.SelectedItem.Hours).ToString('yyyy-MM-dd HH:mm:ss')
+    $level = [string]$c.EventsLevelCombo.SelectedItem.Value
+    $text = $c.EventsTextBox.Text.Trim()
+    $rows = @($s.Data.LogEvents | Where-Object {
+        ($c.EventsServerCombo.SelectedItem -eq 'All' -or $_.Server -eq $c.EventsServerCombo.SelectedItem) -and
+        ($level -eq 'All' -or $_.Level -eq $level -or ($level -eq 'ErrorsAndWarnings' -and $_.Level -in @('ERROR','WARN'))) -and
+        ($c.EventsCategoryCombo.SelectedItem -eq 'All' -or $_.Category -eq $c.EventsCategoryCombo.SelectedItem) -and
+        [string]::CompareOrdinal($_.Time, $since) -ge 0 -and (-not $text -or $_.Message -like "*$text*")
+    })
+    $s.FilteredEvents = $rows
+    $c.EventsGrid.ItemsSource = $rows
+    $c.EventsSummaryText.Text = 'DEMO - {0} sample event row(s). Resident logs are never read in demo mode.' -f $rows.Count
 }
 
 function Update-OrchestratorDemoViews {
@@ -178,6 +208,7 @@ function Update-OrchestratorDemoViews {
     if($d.Running.Count){$c.OperationsRunningGrid.SelectedIndex=0}
     if($d.Versions.Count){$c.VersionsGrid.SelectedIndex=0}
     Update-OrchestratorDemoHistory
+    Update-OrchestratorDemoEvents
 }
 
 function Export-OrchestratorDemoHistory {
@@ -309,7 +340,7 @@ function Invoke-OrchestratorDemo {
     }
     $script:OrchestratorDemo=[pscustomobject]@{
         Mode='Demo';Window=$window;Controls=$controls;Data=(New-OrchestratorDemoData -Scenario $Scenario)
-        FilteredHistory=@();OutputRoot=(Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-Demo/InventoryOrchestrator/'+[guid]::NewGuid().ToString('N')))
+        FilteredHistory=@();FilteredEvents=@();OutputRoot=(Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-Demo/InventoryOrchestrator/'+[guid]::NewGuid().ToString('N')))
     }
     $s=$script:OrchestratorDemo; $c=$s.Controls
     $body=$window.Content; $window.Content=$null
@@ -330,7 +361,7 @@ function Invoke-OrchestratorDemo {
     $c.SharedPathText.Text='Contoso | DEMO - Sample data | All actions are simulated'
     $c.ConnectionText.Text='Offline demo'; $c.LastRefreshText.Text='2026-10-18 09:30 (frozen)'
     $c.FooterText.Text='DEMO - Sample data. Exports use a separate temporary demo folder.'
-    $c.VersionText.Text='v1.3.14 | DEMO'
+    $c.VersionText.Text='v1.3.16 | DEMO'
     $c.AutoRefreshCheck.IsChecked=$false; $c.AutoRefreshCheck.IsEnabled=$false
     # Keep both running sample rows visible at the default capture size.
     $operationsLayout=$c.OperationsServersGrid.Parent
@@ -342,6 +373,12 @@ function Invoke-OrchestratorDemo {
     $c.HistoryJobCombo.ItemsSource=@('All')+@($s.Data.Jobs.Name);$c.HistoryJobCombo.SelectedIndex=0
     $c.HistoryStatusCombo.ItemsSource=@('All','Success','CompletedWithWarnings','Failed','Cancelled');$c.HistoryStatusCombo.SelectedIndex=0
     $c.PinnedServerCombo.ItemsSource=@($s.Data.Servers.Server)
+    $c.EventsServerCombo.ItemsSource=@('All')+@($s.Data.Servers.Server);$c.EventsServerCombo.SelectedIndex=0
+    $c.EventsLevelCombo.DisplayMemberPath='Label'
+    $c.EventsLevelCombo.ItemsSource=@(foreach($pair in @(@('All','All'),@('Errors and warnings','ErrorsAndWarnings'),@('ERROR','ERROR'),@('WARN','WARN'),@('INFO','INFO'))){[pscustomobject]@{Label=$pair[0];Value=$pair[1]}});$c.EventsLevelCombo.SelectedIndex=0
+    $c.EventsCategoryCombo.ItemsSource=@('All','Lifecycle','StopRequest','Heartbeat','StatePersistence','ConfigReload','Maintenance','Error','Warning');$c.EventsCategoryCombo.SelectedIndex=0
+    $c.EventsPeriodCombo.DisplayMemberPath='Label'
+    $c.EventsPeriodCombo.ItemsSource=@(foreach($pair in @(@('1 h',1),@('6 h',6),@('24 h',24),@('3 days',72),@('7 days',168))){[pscustomobject]@{Label=$pair[0];Hours=$pair[1]}});$c.EventsPeriodCombo.SelectedIndex=2
     $c.OperationsMailsGrid.ItemsSource=@([pscustomobject]@{Time='2026-10-18 08:20';Server='CTSO-INV-01';Subject='DEMO - Daily inventory completed (sample)'})
     foreach($name in @('MaintenanceReasonBox','JobStopReasonBox','CancellationReasonBox')){$c[$name].Text='Contoso demonstration'}
     $c.PlanningGrid.Add_SelectionChanged({
@@ -369,6 +406,10 @@ function Invoke-OrchestratorDemo {
     }
     $c.HistoryGrid.Add_MouseDoubleClick({$c=$script:OrchestratorDemo.Controls;if($c.HistoryGrid.SelectedItem){$c.MainTabs.SelectedIndex=6;Write-OrchestratorDemoActivity ('Sample log: '+$c.HistoryGrid.SelectedItem.LogPath)}})
     $c.OperationsMailsGrid.Add_MouseDoubleClick({Write-OrchestratorDemoActivity 'Sample mail: Contoso inventory completed successfully. No email was sent.'})
+    foreach($name in @('EventsServerCombo','EventsLevelCombo','EventsCategoryCombo','EventsPeriodCombo')){$c[$name].Add_SelectionChanged({Update-OrchestratorDemoEvents})}
+    $c.EventsTextBox.Add_TextChanged({Update-OrchestratorDemoEvents})
+    $c.EventsRefreshButton.Add_Click({Update-OrchestratorDemoEvents;Write-OrchestratorDemoActivity 'Sample events refreshed. No log file was read.'})
+    $c.EventsGrid.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$row=$c.EventsGrid.SelectedItem;$c.EventsDetailBox.Text=if($row){'[{0}][{1}][{2}] {3}{4}{5}' -f $row.Time,$row.Server,$row.Level,$row.Category,[Environment]::NewLine,$row.Message}else{''}})
     $logo=Join-Path $PSScriptRoot 'WorkplaceCloudHub-lockup-WPF.png'
     if(Test-Path -LiteralPath $logo){$c.HeaderLogo.Source=[System.Windows.Media.Imaging.BitmapFrame]::Create([uri]$logo)}
     $icon=Join-Path $PSScriptRoot 'WorkplaceCloudHub.ico'
