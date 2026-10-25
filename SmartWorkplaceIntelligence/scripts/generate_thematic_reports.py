@@ -1,4 +1,4 @@
-"""Generate report-only PBIR derivatives, v1.2.3; never edit or deploy the master.
+"""Generate report-only PBIR derivatives, v1.2.4; never edit or deploy the master.
 
 The default operation is a read-only plan. --write creates a NEW output folder.
 Stdout is a machine-readable JSON receipt. No network or Desktop calls occur.
@@ -17,8 +17,10 @@ import sys
 import uuid
 
 
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 DEFAULT_MANIFEST = Path(__file__).resolve().parents[1] / "config/thematic-reports.json.txt"
+PC_MOBILE_MANIFEST = DEFAULT_MANIFEST.with_name("thematic-reports-pc-mobile.json.txt")
+MOBILE_PAGES = frozenset({"6c639a162734adc6926b", "8e495ef8942de9cd3b1b"})
 PAGE_REFERENCES = {"navigationSection", "tooltipSection", "drillthroughSection", "pageName"}
 
 
@@ -98,6 +100,17 @@ def snapshot(root):
 
 def fingerprints(payload):
     return {key: digest(data) for key, data in sorted(payload.items())}
+
+
+def select_manifest(source, explicit=None):
+    """Keep the 30-page profile; select PC/Mobile only when both pages exist."""
+    if explicit is not None:
+        return Path(explicit)
+    pages = set(decode((source / "definition/pages/pages.json").read_bytes())["pageOrder"])
+    mobile = pages.intersection(MOBILE_PAGES)
+    require(not mobile or mobile == MOBILE_PAGES,
+            "Incomplete PC/Mobile source: both mobile pages are required; use a reviewed --manifest")
+    return PC_MOBILE_MANIFEST if mobile else DEFAULT_MANIFEST
 
 
 def literal(value):
@@ -228,9 +241,34 @@ def simplify_navigation(payload, selected, policy):
     removed = {page: set() for page in selected}
     changes = {'mode': 'tabs', 'removedNavigationVisuals': [], 'removedDrillthroughBindings': [],
                'addedExplorerSelectors': [], 'reflowedSlicers': [], 'prunedBookmarks': [],
-               'layoutAdjustments': []}
+               'layoutAdjustments': [], 'removedOrphanNavigators': []}
     bookmarks = {decode(data)['name']: decode(data) for path, data in payload.items()
                  if path.endswith('.bookmark.json')}
+    _, available_groups = metadata_members(decode(payload.get(
+        'definition/bookmarks/bookmarks.json', b'{"items":[]}')))
+    for adapter in policy.get('orphanNavigatorVisuals', []):
+        page, name = adapter['page'], adapter['visual']
+        if page not in selected:
+            continue
+        path = f'definition/pages/{page}/visuals/{name}/visual.json'
+        if path not in output:
+            continue  # The source may already have removed the obsolete control.
+        visual = decode(output[path])
+        require(visual.get('visual', {}).get('visualType') == 'bookmarkNavigator',
+                'Orphan navigator adapter must target a bookmark navigator')
+        properties = visual['visual']['objects']['bookmarks'][0]['properties']
+        require(literal(properties['bookmarkGroup']) == adapter['bookmarkGroup']
+                and literal(properties['selectedBookmark']) == adapter['selectedBookmark'],
+                'Orphan navigator bindings changed; review adapter')
+        group_exists = adapter['bookmarkGroup'] in available_groups
+        bookmark_exists = adapter['selectedBookmark'] in bookmarks
+        if group_exists and bookmark_exists:
+            continue  # Older sources can still have a working navigator.
+        require(not group_exists and not bookmark_exists,
+                'Partially resolved navigator requires review')
+        removed[page].add(name)
+        del output[path]
+        changes['removedOrphanNavigators'].append(dict(adapter))
     dead_filters = set()
     for page in sorted(selected):
         path = f'definition/pages/{page}/page.json'
@@ -565,6 +603,7 @@ def build(source, payload, manifest, theme, report_dir, semantic_model_id=None):
 
 def generate(source, manifest, theme, output_root, *, write=False, semantic_model_id=None):
     source = checked_path(source)
+    manifest = select_manifest(source, manifest)
     output_root = checked_path(output_root)
     require(not output_root.exists(), "Output already exists; choose a new version folder")
     require(not under(output_root, source.parent) and not under(source.parent, output_root),
@@ -635,7 +674,8 @@ def generate(source, manifest, theme, output_root, *, write=False, semantic_mode
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-report', required=True, type=Path)
-    parser.add_argument('--manifest', type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument('--manifest', type=Path,
+                        help='Explicit manifest; otherwise select the legacy or PC/Mobile profile from source pages')
     parser.add_argument('--theme', default='licensing', help='Theme key or all for a root-projects bundle')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--semantic-model-id', help='Explicit shared Service model ID; performs no network operation')

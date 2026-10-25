@@ -1,4 +1,4 @@
-"""Synthetic regression tests for master-to-thematic report generation, v1.2.3."""
+"""Synthetic regression tests for master-to-thematic report generation, v1.2.4."""
 
 import os
 from pathlib import Path
@@ -62,6 +62,38 @@ class ThematicReportsTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         self.assertFalse(result['written'])
         self.assertEqual(result['sourcePreservation'], 'verified-byte-identical')
+
+    def test_default_profile_selection_and_explicit_override(self):
+        self.assertEqual(gen.select_manifest(self.source), gen.DEFAULT_MANIFEST)
+        document = self.read('definition/pages/pages.json')
+        document['pageOrder'].extend(sorted(gen.MOBILE_PAGES))
+        self.put('definition/pages/pages.json', document)
+        self.assertEqual(gen.select_manifest(self.source), gen.PC_MOBILE_MANIFEST)
+        self.assertEqual(gen.select_manifest(self.source, self.manifest), self.manifest)
+        document['pageOrder'].pop()
+        self.put('definition/pages/pages.json', document)
+        with self.assertRaisesRegex(gen.GenerationError, 'both mobile pages'):
+            gen.select_manifest(self.source)
+        self.assertEqual(gen.select_manifest(self.source, self.manifest), self.manifest)
+
+    def test_profiles_cover_30_and_32_pages_without_changing_existing_theme_keys(self):
+        legacy = gen.decode(gen.DEFAULT_MANIFEST.read_bytes())
+        modern = gen.decode(gen.PC_MOBILE_MANIFEST.read_bytes())
+        old_pages = {p for t in legacy['reports'] for p in t['pages']}
+        new_pages = {p for t in modern['reports'] for p in t['pages']}
+        self.assertEqual((len(legacy['reports']), len(old_pages)), (11, 30))
+        self.assertEqual((len(modern['reports']), len(new_pages)), (12, 32))
+        self.assertEqual(new_pages - old_pages, gen.MOBILE_PAGES)
+        for theme in legacy['reports']:
+            replacement = next(t for t in modern['reports'] if t['key'] == theme['key'])
+            self.assertEqual(replacement['pages'], theme['pages'])
+        gen.read_manifest(gen.DEFAULT_MANIFEST, old_pages)
+        gen.read_manifest(gen.PC_MOBILE_MANIFEST, new_pages)
+        with self.assertRaisesRegex(gen.GenerationError, 'Unknown configured pages'):
+            gen.read_manifest(gen.PC_MOBILE_MANIFEST, old_pages)
+        self.assertEqual(modern['navigation']['layoutAdjustments'], [])
+        self.assertEqual(modern['navigation']['explorerSelectors'], [])
+        self.assertEqual(modern['navigation']['protectedButtonPages'], [])
 
     def test_root_projects_bundle_has_valid_paths_and_distinct_receipts(self):
         document = gen.decode(self.manifest.read_bytes())
@@ -461,6 +493,72 @@ class ThematicReportsTests(unittest.TestCase):
         self.tabs()
         self.fault('definition/bookmarks/capacity.bookmark.json', lambda d: d['options']['targetVisualNames'].append('unknown'))
         with self.assertRaisesRegex(gen.GenerationError, 'missing visuals'):
+            self.run_generation()
+
+    def orphan_navigator(self):
+        self.tabs(orphanNavigatorVisuals=[{'page': 'capacity', 'visual': 'obsolete',
+            'bookmarkGroup': 'retired-group', 'selectedBookmark': 'retired-bookmark'}])
+        properties = {key: {'expr': {'Literal': {'Value': "'" + value + "'"}}}
+                      for key, value in [('bookmarkGroup', 'retired-group'),
+                                         ('selectedBookmark', 'retired-bookmark')]}
+        self.put('definition/pages/capacity/visuals/obsolete/visual.json', {
+            'name': 'obsolete', 'visual': {'visualType': 'bookmarkNavigator', 'objects': {
+                'bookmarks': [{'properties': properties}]}}})
+
+    def test_reviewed_orphan_navigator_prunes_only_its_references_and_preserves_source(self):
+        self.orphan_navigator()
+        self.fault('definition/pages/capacity/page.json', lambda d: d.update({
+            'visualInteractions': [{'source': 'obsolete', 'target': 'chart'}]}))
+        self.fault('definition/bookmarks/capacity.bookmark.json', lambda d: (
+            d['options']['targetVisualNames'].append('obsolete'),
+            d['explorationState']['sections']['capacity']['visualContainers'].update(obsolete={})))
+        before = gen.fingerprints(gen.snapshot(self.source))
+        result = self.run_generation(write=True)
+        root = self.output / 'SWI-licensing.Report'
+        self.assertFalse((root / 'definition/pages/capacity/visuals/obsolete/visual.json').exists())
+        bookmark = gen.decode((root / 'definition/bookmarks/capacity.bookmark.json').read_bytes())
+        self.assertEqual(bookmark['options']['targetVisualNames'], ['chart'])
+        self.assertEqual(set(bookmark['explorationState']['sections']['capacity']['visualContainers']), {'chart'})
+        self.assertEqual(gen.decode((root / 'definition/pages/capacity/page.json').read_bytes())['visualInteractions'], [])
+        self.assertEqual(len(result['navigation']['removedOrphanNavigators']), 1)
+        self.assertEqual(before, gen.fingerprints(gen.snapshot(self.source)))
+
+    def test_orphan_adapter_preserves_a_working_navigator(self):
+        self.orphan_navigator()
+        self.put('definition/bookmarks/retired-bookmark.bookmark.json', {
+            'name': 'retired-bookmark', 'explorationState': {'activeSection': 'capacity',
+                'sections': {'capacity': {'visualContainers': {'chart': {}}}}}})
+        self.fault('definition/bookmarks/bookmarks.json', lambda d: d['items'].append({
+            'name': 'retired-group', 'children': ['retired-bookmark']}))
+        result = self.run_generation(write=True)
+        path = 'definition/pages/capacity/visuals/obsolete/visual.json'
+        self.assertEqual((self.output / 'SWI-licensing.Report' / path).read_bytes(), (self.source / path).read_bytes())
+        self.assertEqual(result['navigation']['removedOrphanNavigators'], [])
+
+    def test_orphan_adapter_rejects_partial_resolution_and_binding_drift(self):
+        self.orphan_navigator()
+        self.fault('definition/bookmarks/bookmarks.json', lambda d: d['items'].append({
+            'name': 'retired-group', 'children': []}))
+        with self.assertRaisesRegex(gen.GenerationError, 'Partially resolved'):
+            self.run_generation(write=True)
+        self.assertFalse(self.output.exists())
+        self.fault('definition/pages/capacity/visuals/obsolete/visual.json', lambda d:
+            d['visual']['objects']['bookmarks'][0]['properties'].update(
+                bookmarkGroup={'expr': {'Literal': {'Value': "'different-group'"}}}))
+        with self.assertRaisesRegex(gen.GenerationError, 'bindings changed'):
+            self.run_generation()
+
+    def test_orphan_adapter_cannot_remove_another_visual_type(self):
+        self.orphan_navigator()
+        self.fault('definition/pages/capacity/visuals/obsolete/visual.json', lambda d:
+            d['visual'].update(visualType='tableEx'))
+        with self.assertRaisesRegex(gen.GenerationError, 'must target a bookmark navigator'):
+            self.run_generation()
+
+    def test_unlisted_orphan_group_is_still_rejected(self):
+        self.orphan_navigator()
+        self.tabs()  # No reviewed removal policy.
+        with self.assertRaisesRegex(gen.GenerationError, 'Missing or external bookmark navigator group'):
             self.run_generation()
 
     def test_tabs_reject_hidden_support_pages(self):

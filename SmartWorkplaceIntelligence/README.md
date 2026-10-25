@@ -30,6 +30,69 @@ planning cards. It is disabled by default and does not rewrite historical trends
 The [Exchange migration licensing scenario](docs/EXCHANGE-LICENSING.md) documents
 identity reconciliation, retained SE exceptions and estimated E3/F3 purchases.
 
+## Thematic report generation
+
+`scripts/generate_thematic_reports.py` 1.2.4 creates report-only derivatives
+from a saved master. It never refreshes, publishes, edits the master or copies
+its semantic model, cache or local settings. Without `--write` it only prints
+a JSON plan; writing requires a new output folder. Keep private output outside
+the repository, with the current manual-publication bundle under
+`publication/thematic-reports`; do not recreate a second current `delivery` set.
+
+The default manifest is selected from the source's stable page IDs:
+
+- `config/thematic-reports.json.txt` retains the eleven-theme profile for the
+  existing 30-page source, including its reviewed legacy layout adjustments.
+- `config/thematic-reports-pc-mobile.json.txt` supports a 32-page source with
+  both Mobile pages. It inherits that source's layout without legacy positional
+  adapters. A partial Mobile pair is refused before writing. `--manifest` can
+  explicitly select a reviewed configuration; exact page coverage is mandatory.
+
+| Order | PC/Mobile profile | Pages |
+| --- | --- | --- |
+| 01 | Overview | 2 |
+| 02 | Daily Trends | 1 |
+| 03 | Licensing | 2 |
+| 04 | Workforce & Identity | 3 |
+| 05 | PC Devices & Compliance | 4 |
+| 06 | Mobile Devices & Compliance | 2 |
+| 07 | Applications | 2 |
+| 08 | Collaboration & SharePoint | 5 |
+| 09 | Messaging & Hybrid | 3 |
+| 10 | Security & Resilience | 3 |
+| 11 | Migrations | 3 |
+| 12 | Data Quality & Evidence | 2 |
+
+The eleven historical theme keys and logical report IDs stay stable; only the
+Mobile theme is new. The PC/Mobile profile removes inter-page controls while
+keeping in-page views and filters. Its reviewed obsolete SharePoint navigator
+can be removed only if both configured targets are absent; working controls
+are preserved, and partial resolution or binding drift fails for review.
+Every adaptation and source-preservation check is recorded in the receipt.
+
+```powershell
+python -B SmartWorkplaceIntelligence/scripts/generate_thematic_reports.py `
+  --source-report '<saved-project>/SmartWorkplaceIntelligence.Report' `
+  --theme licensing --output '<new-private-output>/licensing'
+```
+
+For one changed page, regenerate only its theme. Automatically validate all
+generated pages, connections, IDs, resources, bookmarks, interactions, filters
+and fidelity to the saved master. Visually check only new pages, generator
+adaptations or suspected rendering differences; do not replay every unchanged
+page of an already validated master. Document the actual test scope, use one
+Desktop test instance at a time and discard test selections when closing.
+
+Manual publication is separate. Preserve the exact existing Service connection;
+never guess a tenant URL or model ID. Reconcile existing Service names/IDs
+before replacing renamed reports: a local `logicalId` is not a Service report
+ID, and renumbering local filenames does not rename cloud items. Source
+credentials, model parameters and refresh schedules remain deployment settings.
+
+Run the offline regression suite with
+`python -B -m unittest discover -s SmartWorkplaceIntelligence/scripts -p test_thematic_reports.py`.
+Fixtures contain no tenant data and do not open Desktop or connect to Service.
+
 ## Qualified batch retention
 
 Publication alone no longer retires local batch payloads. After a successful
