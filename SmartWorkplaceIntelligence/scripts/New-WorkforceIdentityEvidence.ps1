@@ -1,4 +1,4 @@
-﻿# Version 1.4.0
+﻿# Version 1.4.1
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -74,17 +74,15 @@ if (-not $SiteClassificationPath) {
 }
 
 # Private tenant rules read by the shared SmartM365 reader (sibling SmartM365 deployment).
-Import-Module (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'SmartM365\SmartInventory\Common\SmartM365.AccountClassification.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
+Import-Module (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'SmartM365\SmartInventory\Common\SmartM365.AccountClassification.psd1') -MinimumVersion '1.2.0' -ErrorAction Stop
 $accountClassificationConfig = Read-SmartM365AccountClassification -Path $AccountClassificationConfigPath
 $accountPopulationRules = $accountClassificationConfig.Population
 $accountClassificationRuleVersion = [string]$accountClassificationConfig.RuleVersion
 
 function Get-ConfiguredAccountPopulation {
+    # The governed mapping is shared with the hybrid identity findings.
     param([AllowNull()][object]$AccountType)
-    $normalizedType = ([string]$AccountType).Trim()
-    if ($accountPopulationRules.Human -contains $normalizedType) { return 'Human' }
-    if ($accountPopulationRules.NonHuman -contains $normalizedType) { return 'Non-human' }
-    return 'Review required'
+    return Get-SmartM365AccountPopulation -PopulationRules $accountPopulationRules -AccountType $AccountType
 }
 
 function Get-RequiredCsv {

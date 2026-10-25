@@ -77,6 +77,21 @@ function Get-SmartM365IntegrationFallback {
     return $Default
 }
 
+function Get-SmartM365AccountPopulation {
+    # Maps an AD AccountType to its governed population through the Population section:
+    # Human, Non-human, or Review required for any type the rules do not list explicitly.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][AllowNull()]$PopulationRules,
+        [AllowNull()][object]$AccountType
+    )
+    $normalizedType = ([string]$AccountType).Trim()
+    if ($PopulationRules.Human -contains $normalizedType) { return 'Human' }
+    if ($PopulationRules.NonHuman -contains $normalizedType) { return 'Non-human' }
+    return 'Review required'
+}
+
 function Assert-SmartM365DirectoryRuleConfiguration {
     # The organization-specific directory rules are private configuration; a missing section stops the caller.
     [CmdletBinding()]
@@ -96,7 +111,7 @@ function Assert-SmartM365DirectoryRuleConfiguration {
     if ([string]::IsNullOrWhiteSpace([string]$rules['IntegrationFallback']['Default'])) { throw 'DirectoryRules.IntegrationFallback.Default is required.' }
 }
 
-Export-ModuleMember -Function Get-SmartM365AccountClassificationDefaultPath, Resolve-SmartM365AccountClassificationPath, Read-SmartM365AccountClassification, Get-SmartM365IntegrationFallback, Assert-SmartM365DirectoryRuleConfiguration
+Export-ModuleMember -Function Get-SmartM365AccountClassificationDefaultPath, Resolve-SmartM365AccountClassificationPath, Read-SmartM365AccountClassification, Get-SmartM365IntegrationFallback, Get-SmartM365AccountPopulation, Assert-SmartM365DirectoryRuleConfiguration
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
