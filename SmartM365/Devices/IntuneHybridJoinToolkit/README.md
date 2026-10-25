@@ -345,7 +345,7 @@ Keep the application folder, its original report/template sources, local brandin
 
 ## Local review correction (2026-10-18)
 
-Source version: GUI 1.20 / endpoint 2.10.40. GUI-generated CMD files preserve Unicode working directories, disable delayed expansion, use pushd/popd and preserve the worker exit code. Local GUI configuration is written as UTF-8 with BOM for Windows PowerShell compatibility. Endpoint enrollment cleanup verifies every required registry backup before any removal for that enrollment ID.
+Source version: GUI 1.21 / endpoint 2.10.40. A Single PC launch now passes the GUI options (dsregcmd /leave, cleanup and reboot authorizations, virtual machine skip, night pause, delays and timeouts) exactly like a LOT launch. GUI-generated CMD files preserve Unicode working directories, disable delayed expansion, use pushd/popd and preserve the worker exit code. Local GUI configuration is written as UTF-8 with BOM for Windows PowerShell compatibility. Endpoint enrollment cleanup verifies every required registry backup before any removal for that enrollment ID.
 
 Offline regression command from the repository root:
 

@@ -3,7 +3,7 @@
 Starts the Intune Hybrid Join repair LOT launcher GUI.
 
 .VERSION
-1.20
+1.21
 #>
 param(
     [switch]$ValidateOnly,
@@ -21,7 +21,7 @@ if ($Demo) {
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$GuiVersion = '1.20'
+$GuiVersion = '1.21'
 
 function Get-ToolkitRoot {
     $scriptPath = $PSCommandPath
@@ -701,6 +701,42 @@ function New-SingleComputerRunContext {
     }
 }
 
+function Get-SingleComputerOptionArguments {
+    # Same EHJIR_* to launcher parameter mapping and defaults as Run-IntuneHybridJoinRepairWithPsExec-Lot.cmd.
+    # The PsExec launcher does not read EHJIR_* itself, so a Single PC launch must pass them explicitly.
+    param([hashtable]$Environment)
+
+    function Get-OptionValue([string]$Name, [string]$Default) {
+        $value = [string]$Environment[$Name]
+        if ([string]::IsNullOrWhiteSpace($value)) { return $Default }
+        return $value.Trim()
+    }
+
+    $arguments = @()
+    if ((Get-OptionValue 'EHJIR_ALLOW_DSREG_LEAVE' '1') -eq '1') { $arguments += '-AllowDsregLeave' } else { $arguments += '-AllowDsregLeave:$false' }
+    if ((Get-OptionValue 'EHJIR_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT' '1') -eq '1') { $arguments += '-AllowRemoveStaleIntuneEnrollment' }
+    if ((Get-OptionValue 'EHJIR_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER' '1') -eq '1') { $arguments += '-AllowRebootWhenNoInteractiveUser' }
+    if ((Get-OptionValue 'EHJIR_ALLOW_REBOOT_AFTER_DSREG_LEAVE' '1') -eq '1') { $arguments += '-AllowRebootAfterDsregLeave' }
+    if ((Get-OptionValue 'EHJIR_SKIP_VIRTUAL_MACHINES' '1') -eq '1') { $arguments += '-SkipVirtualMachines' }
+    if ((Get-OptionValue 'EHJIR_DISABLE_NIGHT_PAUSE' '0') -eq '1') { $arguments += '-DisableNightPause' }
+    foreach ($pair in @(
+        @('-DelayBetweenCyclesMinutes','EHJIR_DELAY_BETWEEN_CYCLES_MINUTES','5'),
+        @('-NightPauseStartHour','EHJIR_NIGHT_PAUSE_START_HOUR','20'),
+        @('-NightPauseEndHour','EHJIR_NIGHT_PAUSE_END_HOUR','7'),
+        @('-IntuneRetrySleepMinutes','EHJIR_INTUNE_RETRY_SLEEP_MINUTES','5'),
+        @('-IntuneRetryMaxRetries','EHJIR_INTUNE_RETRY_MAX_RETRIES','5'),
+        @('-StaleCleanupDelaySeconds','EHJIR_STALE_CLEANUP_DELAY_SECONDS','60'),
+        @('-RebootDelaySeconds','EHJIR_REBOOT_DELAY_SECONDS','180'),
+        @('-PsExecTimeoutMinutes','EHJIR_PSEXEC_TIMEOUT_MINUTES','120')
+    )) {
+        $number = 0
+        $value = Get-OptionValue $pair[1] $pair[2]
+        if (-not [int]::TryParse($value, [ref]$number) -or $number -lt 0) { $value = $pair[2] }
+        $arguments += @($pair[0], $value)
+    }
+    return $arguments
+}
+
 function Start-ToolkitSingleComputer {
     param(
         [string]$ToolkitRoot,
@@ -748,6 +784,7 @@ function Start-ToolkitSingleComputer {
     $arguments += @('-TechnicianRunGuardHours',[string]$Environment.EHJIR_TECHNICIAN_RUN_GUARD_HOURS,'-CentralLogCollectionMode',[string]$Environment.EHJIR_CENTRAL_LOG_COLLECTION_MODE)
     if ([string]$Environment.EHJIR_USE_TECHNICIAN_RUN_GUARD_HISTORY -eq '1') { $arguments += '-UseTechnicianRunGuardHistory' }
     if ([string]$Environment.EHJIR_IGNORE_TECHNICIAN_RUN_GUARD_HISTORY -eq '1') { $arguments += '-IgnoreTechnicianRunGuardHistory' }
+    $arguments += @(Get-SingleComputerOptionArguments -Environment $Environment)
     if ($Mode -like 'Once*') {
         $arguments += '-RunOnce'
     }
