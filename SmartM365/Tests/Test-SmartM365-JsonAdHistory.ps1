@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline JSON transport tests for the Active Directory weekly history.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -49,6 +49,28 @@ try {
     [IO.File]::WriteAllText("$legacy.txt",'{')
     Reject { Save-WeeklyInventoryHistory -SourceFiles $source -RequiredSourceFiles $source -HistoryRootPath $history -RetentionWeeks 0 } 'Invalid AD preferred manifest was rebuilt.'
     Check ((Get-FileHash $legacy).Hash -eq $hash) 'Invalid AD preferred manifest destroyed valid legacy.'
+    # A relocated workspace keeps tenant-relative AD history; another tenant identity is still refused.
+    $global:EnableSharePointUpload=$false;$script:failUpload=$false
+    $OutputPath=Join-Path $root 'old-share\Tenants\fixture\DATA-ALL\ActiveDirectory\Inventory'
+    $null=New-Item -ItemType Directory $OutputPath -Force
+    $movedSource=Join-Path $OutputPath 'AD_Users_AllDomains.csv'
+    [IO.File]::WriteAllText($movedSource,"Id`r`n42`r`n")
+    Save-WeeklyInventoryHistory -SourceFiles $movedSource -RequiredSourceFiles $movedSource -HistoryRootPath (Join-Path $OutputPath 'WeeklyHistory') -RetentionWeeks 0
+    $newOutput=Join-Path $root 'new-share\Tenants\fixture\DATA-ALL\ActiveDirectory\Inventory'
+    $null=New-Item -ItemType Directory (Split-Path $newOutput -Parent) -Force
+    Copy-Item -LiteralPath $OutputPath -Destination $newOutput -Recurse
+    $OutputPath=$newOutput
+    $movedSource=Join-Path $OutputPath 'AD_Users_AllDomains.csv'
+    $movedManifest=(Get-ChildItem (Join-Path $OutputPath 'WeeklyHistory') -Recurse -Filter manifest.json.txt -File).FullName
+    $movedHash=(Get-FileHash $movedManifest).Hash
+    Save-WeeklyInventoryHistory -SourceFiles $movedSource -RequiredSourceFiles $movedSource -HistoryRootPath (Join-Path $OutputPath 'WeeklyHistory') -RetentionWeeks 0
+    Check ((Get-FileHash $movedManifest).Hash -eq $movedHash) 'Relocated AD history was rewritten.'
+    $foreignOutput=Join-Path $root 'other-share\Tenants\other\DATA-ALL\ActiveDirectory\Inventory'
+    $null=New-Item -ItemType Directory (Split-Path $foreignOutput -Parent) -Force
+    Copy-Item -LiteralPath $OutputPath -Destination $foreignOutput -Recurse
+    $OutputPath=$foreignOutput
+    $foreignSource=Join-Path $OutputPath 'AD_Users_AllDomains.csv'
+    Reject { Save-WeeklyInventoryHistory -SourceFiles $foreignSource -RequiredSourceFiles $foreignSource -HistoryRootPath (Join-Path $OutputPath 'WeeklyHistory') -RetentionWeeks 0 } 'Foreign tenant AD history was accepted.'
     [pscustomobject]@{Passed=$script:passed;FixtureRoot=$root;Evidence='Synthetic AD history functions; uploads mocked'}
 } finally { & $transport { param($original) Set-Item Function:script:Get-SmartM365JsonTransportPolicy -Value $original } $policy }
 

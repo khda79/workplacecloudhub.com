@@ -23,7 +23,7 @@
     Interactive delegated permission for Microsoft Graph PowerShell:
     - DeviceManagementScripts.Read.All
 .VERSION
-1.14
+1.15
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Version : 1.13
@@ -80,7 +80,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.14"
+$ScriptVersion = "1.15"
 
 $tenantContextPath = & {
     $d = $PSScriptRoot
@@ -584,7 +584,16 @@ function Convert-OwnedRemediationExportHistory {
         $runName = $run.Name
         $validateInfo = {
             param($document)
-            if ($document.Timestamp -ne $runName -or $document.TenantId -ne $ExpectedTenant -or [IO.Path]::GetFullPath([string]$document.ExportPath) -ne $runPath) { throw 'Remediation export owner/tenant/run mismatch.' }
+            if ($document.Timestamp -ne $runName -or $document.TenantId -ne $ExpectedTenant) { throw 'Remediation export owner/tenant/run mismatch.' }
+            $recordedRun = [IO.Path]::GetFullPath([string]$document.ExportPath)
+            if ($recordedRun -ne $runPath) {
+                # A relocated workspace keeps the tenant-relative run identity; the historical manifest is never rewritten.
+                $identityPattern = '(?i)[\\/]Tenants[\\/](?<identity>[^\\/]+[\\/].+)$'
+                $recordedIdentity = [regex]::Match($recordedRun.TrimEnd('\'), $identityPattern)
+                $currentIdentity = [regex]::Match($runPath.TrimEnd('\'), $identityPattern)
+                if (-not $recordedIdentity.Success -or -not $currentIdentity.Success -or
+                    $recordedIdentity.Groups['identity'].Value.Replace('/', '\') -ine $currentIdentity.Groups['identity'].Value.Replace('/', '\')) { throw 'Remediation export owner/tenant/run mismatch.' }
+            }
         }.GetNewClosure()
         $null = Read-SmartM365JsonDocument $infoPath -Validate $validateInfo
         $inventoryPath = Join-Path $run.FullName 'IntuneRemediations.json'
@@ -595,6 +604,16 @@ function Convert-OwnedRemediationExportHistory {
             if ($id -notmatch '^[0-9a-fA-F-]{36}$') { throw 'Unexpected remediation identifier; history preserved.' }
             $folder = [IO.Path]::GetFullPath([string]$item.Folder)
             $scripts = [IO.Path]::GetFullPath((Join-Path $run.FullName 'Scripts')).TrimEnd('\') + '\'
+            if (-not $folder.StartsWith($scripts,[StringComparison]::OrdinalIgnoreCase)) {
+                # A relocated workspace keeps the tenant-relative Scripts identity; the recorded folder is rebased, never rewritten.
+                $identityPattern = '(?i)[\\/]Tenants[\\/](?<identity>[^\\/]+[\\/].+)$'
+                $recordedIdentity = [regex]::Match([IO.Path]::GetDirectoryName($folder), $identityPattern)
+                $currentIdentity = [regex]::Match($scripts.TrimEnd('\'), $identityPattern)
+                if ($recordedIdentity.Success -and $currentIdentity.Success -and
+                    $recordedIdentity.Groups['identity'].Value.Replace('/', '\') -ieq $currentIdentity.Groups['identity'].Value.Replace('/', '\')) {
+                    $folder = $scripts + [IO.Path]::GetFileName($folder)
+                }
+            }
             if (-not $folder.StartsWith($scripts,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($folder) -notlike "*_$id") { throw 'Remediation export script folder ownership mismatch.' }
             foreach ($leaf in @('Metadata.json','Assignments.json')) {
                 $path = Join-Path $folder $leaf

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic daily capture, preservation and conditional SharePoint deletion tests.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored in finally.')]
@@ -166,6 +166,26 @@ try {
         $run=New-Run $f ([datetimeoffset]'2026-10-19T08:00:00Z') 'new'
         Reject {Finish $run} 'Retained capture is incomplete or changed'
         Check (Test-Path (Join-Path $f.All $old[0].Files[1].Relative)) 'changed retained evidence prevents every deletion'
+
+        # A relocated workspace keeps its tenant-relative records; another tenant identity is still refused.
+        $savedUploadState=$global:EnableSharePointUpload;$global:EnableSharePointUpload=$false
+        $f=New-Fixture 'relocated-old/Tenants/synthetic/DATA-ALL';$run=New-Run $f ([datetimeoffset]'2026-10-19T08:00:00Z') 'old-share';Finish $run
+        $movedBase=Join-Path $Temporary 'relocated-new/Tenants/synthetic/DATA-ALL'
+        New-Item -ItemType Directory -Path (Split-Path $movedBase -Parent) -Force | Out-Null
+        Copy-Item -LiteralPath $f.Base -Destination $movedBase -Recurse
+        $moved=@{All=(Join-Path $movedBase 'all');Last=(Join-Path $movedBase 'last');Base=$movedBase}
+        Check ((Records $moved)[0].OutputRoot -ceq [IO.Path]::GetFullPath($f.All)) 'relocated record keeps the former output root'
+        $run=New-Run $moved ([datetimeoffset]'2026-10-20T08:00:00Z') 'new-share';Finish $run
+        Check ((Records $moved).Count -eq 2 -and (Payloads $moved).Count -eq 4) 'relocated history remains eligible for retention'
+        $foreignBase=Join-Path $Temporary 'relocated-foreign/Tenants/other/DATA-ALL'
+        New-Item -ItemType Directory -Path (Split-Path $foreignBase -Parent) -Force | Out-Null
+        Copy-Item -LiteralPath $movedBase -Destination $foreignBase -Recurse
+        $foreign=@{All=(Join-Path $foreignBase 'all');Last=(Join-Path $foreignBase 'last');Base=$foreignBase}
+        $run=New-Run $foreign ([datetimeoffset]'2026-10-21T08:00:00Z') 'foreign'
+        Reject {Finish $run} 'Invalid capture metadata'
+        Check ((Payloads $foreign).Count -eq 4) 'foreign tenant records block retention before copying or deleting'
+        $script:SmartM365DailyCapture=$null;$script:SmartM365CmdbSourceContext=$null
+        $global:EnableSharePointUpload=$savedUploadState
 
         $f=New-Fixture 'metadata';$run=New-Run $f ([datetimeoffset]'2026-10-19T08:00:00Z') 'first';Finish $run
         $meta=Get-ChildItem -LiteralPath (Join-Path $f.All 'DailyCaptureRecords') -Recurse -File -Filter '*.json.txt' | Select-Object -First 1

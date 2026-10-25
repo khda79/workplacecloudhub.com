@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.67
+1.68
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -801,7 +801,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.67"
+$ScriptVersion = "1.68"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $script:ExitCode = 0
 $globalError = $null
@@ -1425,7 +1425,16 @@ try {
         $weekFolder = Join-Path -Path $HistoryRootPath -ChildPath $weekName
         $validateHistoryOwner = {
             param($document)
-            if ([IO.Path]::GetFullPath([string]$document.SourceOutputPath).TrimEnd('\') -ne [IO.Path]::GetFullPath($OutputPath).TrimEnd('\')) { throw 'AD weekly manifest source owner mismatch.' }
+            $recordedSource = [IO.Path]::GetFullPath([string]$document.SourceOutputPath).TrimEnd('\')
+            $currentSource = [IO.Path]::GetFullPath($OutputPath).TrimEnd('\')
+            if ($recordedSource -ne $currentSource) {
+                # A relocated workspace keeps the tenant-relative source identity; the historical manifest is never rewritten.
+                $identityPattern = '(?i)[\\/]Tenants[\\/](?<identity>[^\\/]+[\\/].+)$'
+                $recordedIdentity = [regex]::Match($recordedSource, $identityPattern)
+                $currentIdentity = [regex]::Match($currentSource, $identityPattern)
+                if (-not $recordedIdentity.Success -or -not $currentIdentity.Success -or
+                    $recordedIdentity.Groups['identity'].Value.Replace('/', '\') -ine $currentIdentity.Groups['identity'].Value.Replace('/', '\')) { throw 'AD weekly manifest source owner mismatch.' }
+            }
             if (-not $document.PSObject.Properties['Status'] -or -not $document.PSObject.Properties['RequiredFiles']) { throw 'AD weekly manifest schema is incomplete.' }
             foreach ($name in @($document.Files) + @($document.RequiredFiles)) {
                 if ($name -notmatch '^AD_[^\\/]+\.csv$') { throw 'AD weekly manifest contains a foreign file.' }

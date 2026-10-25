@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline JSON transport tests for remediation history files.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -51,6 +51,27 @@ try {
     [IO.File]::WriteAllText("$metadata.txt",'{')
     Reject {Convert-OwnedRemediationExportHistory $root fixture} 'Invalid preferred metadata fell back.'
     Check ((Get-FileHash $metadata).Hash -eq $hashes[$metadata]) 'Failed conversion destroyed valid legacy metadata.'
+    # A relocated workspace keeps tenant-relative remediation history; another tenant identity is still refused.
+    $oldExports=Join-Path $root 'old-share\Tenants\fixture\DATA-ALL\Intune\Remediations\Exports'
+    $newExports=Join-Path $root 'new-share\Tenants\fixture\DATA-ALL\Intune\Remediations\Exports'
+    $oldRun=Join-Path $oldExports '20260928-120000'
+    $oldFolder=Join-Path $oldRun "Scripts\Fixture_$id"
+    $movedRun=Join-Path $newExports '20260928-120000'
+    $movedFolder=Join-Path $movedRun "Scripts\Fixture_$id"
+    $null=New-Item -ItemType Directory $movedFolder -Force
+    $moved=@{}
+    $moved[(Join-Path $movedRun 'ExportInfo.json')]=(@{Timestamp='20260928-120000';TenantId='fixture';ExportPath=$oldRun}|ConvertTo-Json)
+    $moved[(Join-Path $movedRun 'IntuneRemediations.json')]=(ConvertTo-Json -InputObject @(@{Id=$id;Folder=$oldFolder;MetadataPath=(Join-Path $oldFolder 'Metadata.json')}) -Depth 5)
+    $moved[(Join-Path $movedFolder 'Metadata.json')]=(@{id=$id;version='1'}|ConvertTo-Json)
+    $moved[(Join-Path $movedFolder 'Assignments.json')]='[]'
+    $movedHashes=@{}
+    foreach($path in $moved.Keys){[IO.File]::WriteAllText($path,$moved[$path],[Text.UTF8Encoding]::new($true));$movedHashes[$path]=(Get-FileHash $path).Hash}
+    Convert-OwnedRemediationExportHistory $newExports fixture | Out-Null
+    foreach($path in $moved.Keys){Check ((Get-FileHash "$path.txt").Hash -eq $movedHashes[$path] -and !(Test-Path $path)) 'Relocated remediation history was refused or rewritten.'}
+    $foreignExports=Join-Path $root 'other-share\Tenants\other\DATA-ALL\Intune\Remediations\Exports'
+    $null=New-Item -ItemType Directory (Split-Path $foreignExports -Parent) -Force
+    Copy-Item -LiteralPath $newExports -Destination $foreignExports -Recurse
+    Reject {Convert-OwnedRemediationExportHistory $foreignExports fixture} 'Foreign tenant remediation history was accepted.'
     [pscustomobject]@{Passed=$script:passed;FixtureRoot=$root;Evidence='Synthetic remediation export functions; no Graph or collection'}
 } finally { & $transport {param($original) Set-Item Function:script:Get-SmartM365JsonTransportPolicy -Value $original} $policy }
 

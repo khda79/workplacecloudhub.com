@@ -2,7 +2,7 @@
 .SYNOPSIS
 Receipt-qualified daily capture retention. Internal, opt-in Core helper.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Reads the established Core publication/authentication context; does not introduce operational globals.')]
@@ -15,6 +15,17 @@ function Test-SmartM365DailyCapturePath {
     $full = [IO.Path]::GetFullPath($Path).TrimEnd([char[]]'\/')
     $root = $script:SmartM365DailyCapture.Root
     return $full -ieq $root -or $full.StartsWith($root + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-SmartM365DailyCaptureRecordedRoot {
+    param([string]$Recorded,[string]$Root)
+    if ($Recorded -ieq $Root) { return $true }
+    # A relocated workspace keeps the tenant-relative output identity; recorded metadata is never rewritten.
+    $pattern = '(?i)[\\/]Tenants[\\/](?<identity>[^\\/]+[\\/].+)$'
+    $recordedIdentity = [regex]::Match($Recorded.TrimEnd([char[]]'\/'),$pattern)
+    $currentIdentity = [regex]::Match($Root,$pattern)
+    return $recordedIdentity.Success -and $currentIdentity.Success -and
+        $recordedIdentity.Groups['identity'].Value.Replace('/','\') -ieq $currentIdentity.Groups['identity'].Value.Replace('/','\')
 }
 
 function Resolve-SmartM365DailyCapturePath {
@@ -145,7 +156,7 @@ function Invoke-SmartM365DailyCaptureRetention {
             if ($value.CompletedAtUtc -is [datetime] -or $value.CompletedAtUtc -is [datetimeoffset]) {
                 $value.CompletedAtUtc=([datetimeoffset]$value.CompletedAtUtc).ToUniversalTime().ToString('o',[Globalization.CultureInfo]::InvariantCulture)
             }
-            if ($value.Owner -cne 'SmartM365-DailyCapture' -or $value.Version -ne 1 -or $value.OutputRoot -ine $root -or $value.Status -ne 'Completed' -or $value.TimeZone -cne 'Europe/Paris' -or $value.RunId -notmatch '^[a-fA-F0-9]{32}$') { throw 'Invalid capture metadata; retention refused.' }
+            if ($value.Owner -cne 'SmartM365-DailyCapture' -or $value.Version -ne 1 -or -not (Test-SmartM365DailyCaptureRecordedRoot ([string]$value.OutputRoot) $root) -or $value.Status -ne 'Completed' -or $value.TimeZone -cne 'Europe/Paris' -or $value.RunId -notmatch '^[a-fA-F0-9]{32}$') { throw 'Invalid capture metadata; retention refused.' }
             if ($meta.Name -cne ($value.RunId+'.json.txt') -or @($records | Where-Object {$_.Value.RunId -eq $value.RunId}).Count) { throw 'Repeated capture run identity.' }
             foreach ($field in @('Producer','TenantKey','OrganizationKey','EnvironmentKey','TenantId')) {if ($value.$field -cne $Context[$field]) { throw 'Capture identity differs.' }}
             $date = [datetimeoffset]::Parse($value.CompletedAtUtc,[Globalization.CultureInfo]::InvariantCulture)
