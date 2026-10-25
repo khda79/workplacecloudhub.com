@@ -2,7 +2,7 @@
 .SYNOPSIS
     Synthetic retention regression tests. File-backed fake SharePoint; no tenant or network.
 .VERSION
-    1.4.0
+    1.4.1
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot,[switch]$AdapterOnly)
@@ -564,6 +564,26 @@ Check ($r.JournalPath.StartsWith($shared+'\',[StringComparison]::OrdinalIgnoreCa
 Check (@($r.Plan.Rows|Where-Object {$_.BatchId -ceq $f.Ids[1] -and $_.Reason -match 'Unresolved prior'}).Count -eq 2) 'Legacy work-root incident no longer blocks its batch'
 Check (-not (Test-Path (Join-Path $f.Work 'retention-scratch/*'))) 'Run read-back folder was left behind'
 Check ((Get-Content $r.JournalPath -Raw|ConvertFrom-Json).Machine -ceq [Environment]::MachineName) 'Shared journal lacks its writer machine'
+# Tokenized journal root and server authority resolve from the caller's effective configuration before every check.
+$f=Fixture;SetAuto $f;$a=$f.Args
+$c=Get-Content $f.Config -Raw | ConvertFrom-Json -Depth 70;$c.PreparedRetention.Qualification.ServerOutputRoot='{{SyntheticData}}\DATA-POWERBI';Json $f.Config $c
+SetPolicy $f @{JournalRootPath='{{SyntheticRoot}}\shared-journals\{{TenantKey}}'}
+$tokens=@{SyntheticRoot=$f.Root;SyntheticData=(Join-Path $f.Root 'DATA');TenantKey='synthetic'}
+$r=Invoke-PreparedBatchRetention @a -Mode Configured -ConfigurationTokens $tokens
+$tokenJournals=Join-Path $f.Root 'shared-journals\synthetic'
+Check ($r.Status -ceq 'Completed' -and $f.State.Recycles -gt 0 -and $r.JournalPath.StartsWith($tokenJournals+'\',[StringComparison]::OrdinalIgnoreCase)) 'Tokenized journal root or server authority was not resolved'
+foreach($case in 'NoTokens','UnknownToken','EmptyToken','ForeignServer'){
+    $f=Fixture;SetAuto $f;$a=$f.Args
+    $c=Get-Content $f.Config -Raw | ConvertFrom-Json -Depth 70
+    $c.PreparedRetention.Qualification.ServerOutputRoot=$(if($case -ceq 'UnknownToken'){'{{MissingRoot}}\DATA-POWERBI'}else{'{{SyntheticData}}\DATA-POWERBI'});Json $f.Config $c
+    $data=switch($case){EmptyToken {''};ForeignServer {Join-Path $f.Root 'OTHER'};default {Join-Path $f.Root 'DATA'}}
+    $extra=if($case -ceq 'NoTokens'){@{}}else{@{ConfigurationTokens=@{SyntheticData=$data}}}
+    $message='';$r=$null
+    try {$r=Invoke-PreparedBatchRetention @a @extra -Mode Configured} catch {$message=$_.Exception.Message}
+    $blocked=$message -match 'Unresolved retention configuration' -or ($case -ceq 'ForeignServer' -and ($message -match 'Server authority differs|blocked by qualification' -or ($null -ne $r -and $r.Status -ceq 'Blocked')))
+    Check $blocked "$case token was not blocked: '$message'"
+    Check ($f.State.Recycles -eq 0 -and $f.State.Archives -eq 0) "$case token reached removal"
+}
 # Regression for the 2026-10-22 incident: a pre-send Invalid URI failure leaves the folder intact and is NotRemoved, not Uncertain.
 $f=Fixture;SetAuto $f;$a=$f.Args
 $f.State.RecycleResult=@{Outcome='RequestFailed';HttpStatus=$null;MayHaveReachedService=$false;Error='Graph DELETE failed with System.UriFormatException: Invalid URI: The format of the URI could not be determined.'}

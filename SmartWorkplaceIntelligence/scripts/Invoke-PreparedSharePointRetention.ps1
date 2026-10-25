@@ -2,7 +2,7 @@
 .SYNOPSIS
     Inspect or apply qualified server/SharePoint retention without preparing evidence.
 .VERSION
-    1.1.1
+    1.2.0
 #>
 [CmdletBinding()]
 param([string]$Tenant='test',[ValidateSet('Configured','Preview','Apply')][string]$Mode='Preview',
@@ -61,7 +61,7 @@ $download={param($destination,$relative)
 }.GetNewClosure()
 try {
     $transport=New-PreparedRetentionGraphTransport -Connection $cloud -CloudRoot $cloudRoot -OutputRoot $output -WorkRoot $work -UploadFile $upload -DownloadFile $download
-    Invoke-PreparedBatchRetention -OutputRoot $output -TenantKey $effective.TenantKey -ConfigurationPath $ConfigurationPath -ConsumersPath $consumers -WorkRoot $work -Transport $transport -Mode $Mode -Verification $Verification -PlanPath $PlanPath -PlanSHA256 $PlanSHA256 -ExpectedPublishedBatchId $ExpectedPublishedBatchId -ExpectedPointerSHA256 $ExpectedPointerSHA256
+    Invoke-PreparedBatchRetention -OutputRoot $output -TenantKey $effective.TenantKey -ConfigurationPath $ConfigurationPath -ConsumersPath $consumers -WorkRoot $work -Transport $transport -Mode $Mode -Verification $Verification -PlanPath $PlanPath -PlanSHA256 $PlanSHA256 -ExpectedPublishedBatchId $ExpectedPublishedBatchId -ExpectedPointerSHA256 $ExpectedPointerSHA256 -ConfigurationTokens $effective
 } finally {
     $retentionSucceeded=$?
     if(-not $NoCompletionBanner){Write-SmartM365CompletionBanner -Status $(if($retentionSucceeded){'Success'}else{'Failed'})}

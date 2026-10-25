@@ -2,7 +2,7 @@
 .SYNOPSIS
     Qualified, coupled server/SharePoint batch retention. Preview is the default.
 .VERSION
-    1.4.0
+    1.5.0
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -23,6 +23,19 @@ function Get-RetentionValue($Value,[string]$Name,$Default=$null) {
     if ($Value -is [Collections.IDictionary]) { if($Value.Contains($Name)){return $Value[$Name]} }
     elseif ($null -ne $Value -and $Value.PSObject.Properties[$Name]) { return $Value.$Name }
     $Default
+}
+function Resolve-RetentionConfigurationValue([string]$Value,$Tokens,[string]$Label) {
+    # Path settings may reference effective global values such as {{WorkspaceRootPath}} or {{TenantKey}};
+    # every check then applies to the resolved path, and an unknown or empty token blocks the run.
+    for($i=0;$i -lt 10 -and $Value -match '\{\{';$i++){
+        foreach($match in [regex]::Matches($Value,'\{\{([A-Za-z0-9_.-]+)\}\}')){
+            $replacement=[string](Get-RetentionValue $Tokens $match.Groups[1].Value '')
+            if([string]::IsNullOrWhiteSpace($replacement)){throw "Unresolved retention configuration token in ${Label}: $($match.Value)"}
+            $Value=$Value.Replace($match.Value,$replacement)
+        }
+    }
+    if($Value -match '\{\{'){throw "Unresolved retention configuration in ${Label}."}
+    $Value
 }
 function Get-RetentionHttpStatus($ErrorRecord) {
     $exception=$ErrorRecord.Exception
@@ -563,7 +576,7 @@ function Invoke-PreparedBatchRetention {
         [Parameter(Mandatory)][string]$WorkRoot,[Parameter(Mandatory)]$Transport,
         [ValidateSet('Configured','Preview','Apply')][string]$Mode='Preview',
         [ValidateSet('Metadata','Full')][string]$Verification='Metadata',[string]$PlanPath,[string]$PlanSHA256,
-        [string]$ExpectedPublishedBatchId,[string]$ExpectedPointerSHA256)
+        [string]$ExpectedPublishedBatchId,[string]$ExpectedPointerSHA256,$ConfigurationTokens)
     $root=[IO.Path]::GetFullPath($OutputRoot).TrimEnd('\','/');Assert-RetentionPath $root
     if((Split-Path $root -Leaf) -cne 'DATA-POWERBI'){throw 'Retention requires the exact server DATA-POWERBI root.'}
     $work=[IO.Path]::GetFullPath($WorkRoot).TrimEnd('\','/');Assert-RetentionPath $work
@@ -577,6 +590,14 @@ function Invoke-PreparedBatchRetention {
         $config=Read-RetentionLockedDocument $ConfigurationPath
         $settings=$config.Value.PreparedRetention
         if($settings.Mode -cnotin @('Preview','Auto')){throw 'PreparedRetention.Mode must be Preview or Auto.'}
+        # Tokenized paths are resolved once, before the journal and server authority checks use them.
+        if($settings.PSObject.Properties['JournalRootPath'] -and $settings.JournalRootPath -is [string]){
+            $settings.JournalRootPath=Resolve-RetentionConfigurationValue $settings.JournalRootPath $ConfigurationTokens 'PreparedRetention.JournalRootPath'
+        }
+        $qualification=Get-RetentionValue $settings 'Qualification' $null
+        if($null -ne $qualification -and $qualification.PSObject.Properties['ServerOutputRoot'] -and $qualification.ServerOutputRoot -is [string]){
+            $qualification.ServerOutputRoot=Resolve-RetentionConfigurationValue $qualification.ServerOutputRoot $ConfigurationTokens 'PreparedRetention.Qualification.ServerOutputRoot'
+        }
         if($Mode -ceq 'Apply' -and (-not $PlanPath -or $PlanSHA256 -cnotmatch '^[A-Fa-f0-9]{64}$')){throw 'Manual Apply requires PlanPath and PlanSHA256.'}
         $apply=$Mode -ceq 'Apply' -or ($Mode -ceq 'Configured' -and $settings.Mode -ceq 'Auto')
         # A caller cannot weaken application checks with the Preview setting.
