@@ -30,7 +30,8 @@ try {
         $script:Candidates = @($script:Candidate)
         function script:Test-Path {param($LiteralPath) return $script:LockExists}
         function script:Get-Content {param($LiteralPath,[switch]$Raw,$ErrorAction) @{Pid=12345;StartTimeUtc=$script:When.ToString('o')} | ConvertTo-Json}
-        function script:Get-Process {param($Id,$ErrorAction) if($script:Alive){[pscustomobject]@{ProcessName='pwsh';StartTime=$script:When}}}
+        $script:DeadPids = @()
+        function script:Get-Process {param($Id,$ErrorAction) if($script:Alive -and $Id -notin $script:DeadPids){[pscustomobject]@{ProcessName='pwsh';StartTime=$script:When}}}
         function script:Get-CimInstance {param($ClassName,$Filter,$ErrorAction) $script:Candidates}
         function script:Write-OrchestratorLog {param($Message,$Level)}
         function script:Write-Host {param($Object,$ForegroundColor)}
@@ -61,6 +62,18 @@ try {
     try { & $module {Request-OrchestratorStop -TimeoutSeconds 1} } catch {$rejected=$true}
     Check $rejected 'Existing request for another process overwritten.'
     Check ((& $module {$script:Request.TargetPid}) -eq 99999) 'Foreign pending request modified.'
+    # A request whose target process exited, or whose PID now belongs to another start, is an orphan: retired, then the stop proceeds.
+    foreach ($orphan in 'Exited','ReusedPid') {
+        & $module {param($Case)
+            $script:Request=[pscustomobject]@{TargetPid=99999;TargetStartTimeUtc=$(if($Case -eq 'ReusedPid'){$script:When.AddHours(-2).ToString('o')}else{$script:When.ToString('o')});RequestedBy='OLD';RequestedAtLocal='2026-09-28T23:03:30'}
+            $script:DeadPids=$(if($Case -eq 'Exited'){@(99999)}else{@()});$script:Writes=2;$script:Consumed=0;$script:Alive=$true;$script:ExitDuringWait=$true
+        } $orphan
+        Check ((& $module {Request-OrchestratorStop -TimeoutSeconds 1}) -eq 0) "$orphan orphan request still blocked the stop."
+        Check ((& $module {$script:Consumed}) -eq 1 -and (& $module {$script:Writes}) -eq 3) "$orphan orphan request was not retired before the new request."
+        Check ((& $module {$script:Request.TargetPid}) -eq 12345) "$orphan new request does not target the running instance."
+    }
+    & $module {$script:DeadPids=@();$script:Writes=2;$script:Consumed=0;$script:Alive=$true;$script:ExitDuringWait=$false}
+    & $module {$script:Request=[pscustomobject]@{TargetPid=12345;TargetStartTimeUtc=$script:When.ToString('o')}}
     & $module {$script:Request.TargetPid=12345}
     & $module {$script:Candidates=@($script:Candidate,$script:Candidate)}
     Check ((& $module {Request-OrchestratorStop -TimeoutSeconds 1}) -eq 1) 'Ambiguous candidates accepted.'

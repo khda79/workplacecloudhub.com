@@ -101,7 +101,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.56
+1.5.57
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -114,7 +114,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.56
+    Version : 1.5.57
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -151,7 +151,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.56"
+$ScriptVersion = "1.5.57"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2402,13 +2402,29 @@ function Request-OrchestratorStop {
         Tenant = $Tenant
         Reason = 'ManualStopRequest'
     }
+    $existingRequest = $null
     if (Get-SmartM365JsonReadPath $script:Settings.StopRequestPath -Optional) {
-        $existingRequest = (Read-SmartM365JsonDocument $script:Settings.StopRequestPath).Document
+        $existingDocument = Read-SmartM365JsonDocument $script:Settings.StopRequestPath
+        $existingRequest = $existingDocument.Document
         if (-not $existingRequest.PSObject.Properties['TargetPid'] -or $existingRequest.TargetPid -ne $owner.Pid -or
             -not $existingRequest.PSObject.Properties['TargetStartTimeUtc'] -or
             -not (Test-OrchestratorProcessStartTime -Actual ([datetime]$owner.StartTimeUtc) -Expected ([datetime]$existingRequest.TargetStartTimeUtc))) {
-            throw 'Existing stop request targets another or unspecified process; preserved for review.'
+            # A request whose exact target process no longer runs on this server can never be consumed:
+            # it is retired with an audit line. A live or unspecified target is still preserved for review.
+            $targetAlive = $true
+            if ($existingRequest.PSObject.Properties['TargetPid'] -and $existingRequest.PSObject.Properties['TargetStartTimeUtc'] -and $existingRequest.TargetStartTimeUtc) {
+                $targetProcess = Get-Process -Id ([int]$existingRequest.TargetPid) -ErrorAction SilentlyContinue
+                $targetAlive = $null -ne $targetProcess -and (Test-OrchestratorProcessStartTime -Actual $targetProcess.StartTime -Expected ([datetime]$existingRequest.TargetStartTimeUtc))
+            }
+            if ($targetAlive) { throw 'Existing stop request targets another or unspecified process; preserved for review.' }
+            $orphanRequestedBy = if ($existingRequest.PSObject.Properties['RequestedBy']) { [string]$existingRequest.RequestedBy } else { 'unknown' }
+            $orphanRequestedAt = if ($existingRequest.PSObject.Properties['RequestedAtLocal']) { [string]$existingRequest.RequestedAtLocal } else { 'unknown' }
+            Write-OrchestratorLog -Message ("Orphan stop request retired: target PID {0} started {1} no longer runs. RequestedBy={2}; RequestedAt={3}." -f $existingRequest.TargetPid, $existingRequest.TargetStartTimeUtc, $orphanRequestedBy, $orphanRequestedAt) -Level WARN
+            Complete-SmartM365JsonConsumption -Path $script:Settings.StopRequestPath -Owner 'Orchestrator:StopRequestPath' -ExpectedSHA256 $existingDocument.SHA256
+            $existingRequest = $null
         }
+    }
+    if ($existingRequest) {
         if (([datetime]$existingRequest.TargetStartTimeUtc).ToUniversalTime() -ne ([datetime]$owner.StartTimeUtc).ToUniversalTime()) {
             $existingRequest.TargetStartTimeUtc = $owner.StartTimeUtc
             Write-FileAtomically -Path $script:Settings.StopRequestPath -Content ($existingRequest | ConvertTo-Json -Depth 5)
