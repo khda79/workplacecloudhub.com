@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.15'
+$script:DistributedModuleVersion = '1.1.16'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -493,6 +493,13 @@ function Get-CapabilityProbeResult {
     }
 }
 
+function Test-SmartM365OrchestratorCapabilityComponentMissing {
+    <# True when a capability is not ready only because its component is absent from this server
+       (snap-in not registered or module not installed), which is normal on servers that do not host it. #>
+    param([Parameter(Mandatory = $true)]$Result)
+    return (-not [bool]$Result.Ready) -and ([string]$Result.Detail -match '(?i)\bis not (registered|installed) on this server\.$')
+}
+
 function Get-SmartM365OrchestratorServerCapability {
     [CmdletBinding()]
     param(
@@ -547,11 +554,13 @@ function Get-SmartM365OrchestratorServerCapability {
         $adModule = Get-Module -ListAvailable -Name ActiveDirectory | Select-Object -First 1
         $results.Add((Get-CapabilityProbeResult -Name 'AD' -Ready ($null -ne $adModule) -Detail ("Static check: ActiveDirectory module {0}." -f $(if ($adModule) { 'available' } else { 'missing' }))))
         $exchangeSnapIn = & $windowsPowerShellPath -NoLogo -NoProfile -NonInteractive -Command "if (Get-PSSnapin -Registered -Name Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue) { 'yes' } else { 'no' }" 2>$null
-        $results.Add((Get-CapabilityProbeResult -Name 'ExchangeOnPrem' -Ready (($exchangeSnapIn | Select-Object -Last 1) -eq 'yes') -Detail 'Static check of the Exchange Management snap-in registration.'))
+        $exchangeRegistered = ($exchangeSnapIn | Select-Object -Last 1) -eq 'yes'
+        $results.Add((Get-CapabilityProbeResult -Name 'ExchangeOnPrem' -Ready $exchangeRegistered -Detail $(if ($exchangeRegistered) { 'Static check of the Exchange Management snap-in registration.' } else { 'Exchange Management Shell snap-in Microsoft.Exchange.Management.PowerShell.SnapIn is not registered on this server.' })))
         $sharePointSnapIn = & $windowsPowerShellPath -NoLogo -NoProfile -NonInteractive -Command "if (Get-PSSnapin -Registered -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue) { 'yes' } else { 'no' }" 2>$null
-        $results.Add((Get-CapabilityProbeResult -Name 'SharePointOnPrem' -Ready (($sharePointSnapIn | Select-Object -Last 1) -eq 'yes') -Detail 'Static check of the SharePoint Server PowerShell snap-in registration.'))
+        $sharePointRegistered = ($sharePointSnapIn | Select-Object -Last 1) -eq 'yes'
+        $results.Add((Get-CapabilityProbeResult -Name 'SharePointOnPrem' -Ready $sharePointRegistered -Detail $(if ($sharePointRegistered) { 'Static check of the SharePoint Server PowerShell snap-in registration.' } else { 'SharePoint Server PowerShell snap-in Microsoft.SharePoint.PowerShell is not registered on this server.' })))
         $teamsModule = Get-Module -ListAvailable -Name MicrosoftTeams | Sort-Object Version -Descending | Select-Object -First 1
-        $results.Add((Get-CapabilityProbeResult -Name 'TeamsPowerShell' -Ready ($cloudConfigurationReady -and $null -ne $teamsModule) -Detail ("Static check: module={0}; {1}" -f $(if ($teamsModule) { $teamsModule.Version } else { 'missing' }), $certificate.Detail)))
+        $results.Add((Get-CapabilityProbeResult -Name 'TeamsPowerShell' -Ready ($cloudConfigurationReady -and $null -ne $teamsModule) -Detail $(if ($null -eq $teamsModule) { 'MicrosoftTeams PowerShell module is not installed on this server.' } else { "Static check: module={0}; {1}" -f $teamsModule.Version, $certificate.Detail })))
     }
     else {
         $environment = @{
@@ -622,6 +631,7 @@ catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message 
         $exchangeScript = @'
 $ErrorActionPreference = 'Stop'
 try {
+    if (-not (Get-PSSnapin -Registered -Name Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue)) { throw 'Exchange Management Shell snap-in Microsoft.Exchange.Management.PowerShell.SnapIn is not registered on this server.' }
     Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction Stop
     $server = Get-ExchangeServer -ErrorAction Stop | Select-Object -First 1
     $result = @{ Ready = $true; Roles = @(); Detail = "Read-only Exchange on-premises probe succeeded against $($server.Name)." }
@@ -648,6 +658,7 @@ catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message 
         $teamsScript = @'
 $ErrorActionPreference = 'Stop'
 try {
+    if (-not (Get-Module -ListAvailable -Name MicrosoftTeams)) { throw 'MicrosoftTeams PowerShell module is not installed on this server.' }
     Import-Module MicrosoftTeams -MinimumVersion 4.7.1 -ErrorAction Stop
     Connect-MicrosoftTeams -TenantId $env:SMART_TENANT_ID -ApplicationId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT | Out-Null
     $null = Get-CsTenant -ErrorAction Stop
@@ -667,6 +678,7 @@ finally {
         $results.Add((Invoke-IsolatedCapabilityProbe -Name 'TeamsPowerShell' -EnginePath $pwshPath -ScriptText $teamsScript -Environment $environment -TimeoutSeconds $ProbeTimeoutSeconds))
     }
 
+    foreach ($result in $results) { $result | Add-Member -NotePropertyName ComponentMissing -NotePropertyValue (Test-SmartM365OrchestratorCapabilityComponentMissing -Result $result) -Force }
     $readyCapabilities = @($results | Where-Object Ready | ForEach-Object Name | Sort-Object -Unique)
     $graphResult = $results | Where-Object Name -eq 'Graph' | Select-Object -First 1
     return [pscustomobject]@{
@@ -1603,6 +1615,7 @@ function Get-SmartM365OrchestratorDependencyActivity {
 
 Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorServerCapability',
+    'Test-SmartM365OrchestratorCapabilityComponentMissing',
     'Test-SmartM365OrchestratorCapabilityMatch',
     'Test-SmartM365OrchestratorCanPreserveOwners',
     'Get-SmartM365OrchestratorElectionPlan',

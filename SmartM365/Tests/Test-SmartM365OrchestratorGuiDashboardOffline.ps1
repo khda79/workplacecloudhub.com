@@ -7,7 +7,7 @@ Uses synthetic operations, job runs, election plan, requests and log events only
 banner, tiles, items to review, server rows and 24-hour timeline, the background refresh contract,
 the delayed non-blocking loading overlay and the WPF rendering of tiles and timeline. Run with -STA.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -104,6 +104,12 @@ Assert-Dashboard (@(Get-Action 'Peer monitoring' 'SRV01').Count -eq 1) 'Peer inc
 Assert-Dashboard (@(Get-Action 'Pipeline request' 'OLD-BATCH').Count -eq 1 -and @(Get-Action 'Pipeline request' 'NEW-BATCH').Count -eq 0) 'Only requests older than 6 h are listed.'
 Assert-Dashboard ((Get-Action 'Log Heartbeat' 'SRV03')[0].Detail -like '2 line(s) in the last hour*' -and (Get-Action 'Log Heartbeat' 'SRV03')[0].Target -eq 'Events') 'Recent heartbeat log lines are grouped.'
 Assert-Dashboard (@($actions | Where-Object Area -eq 'Maintenance').Count -eq 0) 'No maintenance item while maintenance is off.'
+$restarted = [pscustomobject]@{ Events = @($logEvents.Events) + [pscustomobject]@{ Time = [datetime]'2026-10-25 11:52'; Server = 'SRV03'; Level = 'INFO'; Category = 'Lifecycle'; Message = 'SmartM365-Inventory-Orchestrator v9.9.9 starting (PID 42, tenant demo).' } }
+$afterRestart = Get-SmartM365OrchestratorDashboard -JobsDocument $jobsDocument -Operations $operations -Health $health -Runs $runs -Plan $plan -Requests $requests -LogEvents $restarted -Now $now
+Assert-Dashboard (@($afterRestart.Actions | Where-Object { $_.Area -like 'Log *' -and $_.Item -eq 'SRV03' }).Count -eq 0) 'Log items are dropped once the resident restarted after the last problem line.'
+$restartedBefore = [pscustomobject]@{ Events = @($logEvents.Events) + [pscustomobject]@{ Time = [datetime]'2026-10-25 11:45'; Server = 'SRV03'; Level = 'INFO'; Category = 'Lifecycle'; Message = 'SmartM365-Inventory-Orchestrator v9.9.9 starting (PID 41, tenant demo).' } }
+$beforeLast = Get-SmartM365OrchestratorDashboard -JobsDocument $jobsDocument -Operations $operations -Health $health -Runs $runs -Plan $plan -Requests $requests -LogEvents $restartedBefore -Now $now
+Assert-Dashboard (@($beforeLast.Actions | Where-Object { $_.Area -eq 'Log Heartbeat' -and $_.Item -eq 'SRV03' }).Count -eq 1) 'A restart before the last problem line keeps the item.'
 $ranks = @($actions | ForEach-Object { @{ Critical = 0; Warning = 1; Info = 2 }[$_.Severity] })
 Assert-Dashboard ((@($ranks) -join ',') -eq (@($ranks | Sort-Object) -join ',')) 'Items sorted by severity.'
 $servers = @{}; foreach ($row in @($dashboard.Servers)) { $servers[$row.Server] = $row }

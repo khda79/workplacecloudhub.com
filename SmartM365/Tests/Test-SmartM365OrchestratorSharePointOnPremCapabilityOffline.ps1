@@ -8,7 +8,7 @@ it from the snap-in registration, that the read-only probe uses the collector sn
 read-only farm call in Windows PowerShell, and that an OnlyJobsRequiring SharePointOnPrem
 policy keeps the other jobs away from that server in the election plan.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -114,6 +114,29 @@ foreach ($jobName in @('SharePointOnPrem-Infrastructure-Inventory', 'SharePointO
 }
 $script:ServerCapabilities = $null
 Assert-Capability (Test-JobAllowedOnServer -Job ([pscustomobject]@{ Name = 'ManualNoCapability'; AssignmentMode = 'Manual'; RequiredCapabilities = @() }) -AllowManual) 'A manual job without required capabilities keeps its previous behaviour.'
+
+# Absent components (snap-in not registered, module not installed) are logged as INFO, real failures as WARN.
+foreach ($detail in @('SharePoint Server PowerShell snap-in Microsoft.SharePoint.PowerShell is not registered on this server.', 'Exchange Management Shell snap-in Microsoft.Exchange.Management.PowerShell.SnapIn is not registered on this server.', 'MicrosoftTeams PowerShell module is not installed on this server.')) {
+    Assert-Capability (Test-SmartM365OrchestratorCapabilityComponentMissing -Result ([pscustomobject]@{ Ready = $false; Detail = $detail })) "Missing component: $detail"
+    Assert-Capability ($distributedText.Contains($detail.TrimEnd('.'))) "Probe emits: $detail"
+}
+foreach ($detail in @('Cannot connect to the configuration database.', 'Read-only probe timed out after 90 seconds.', 'The specified module MicrosoftTeams with version 4.7.1 was not loaded because no valid module file was found in any module directory.')) {
+    Assert-Capability (-not (Test-SmartM365OrchestratorCapabilityComponentMissing -Result ([pscustomobject]@{ Ready = $false; Detail = $detail }))) "Real failure stays a warning: $detail"
+}
+Assert-Capability (-not (Test-SmartM365OrchestratorCapabilityComponentMissing -Result ([pscustomobject]@{ Ready = $true; Detail = 'x is not installed on this server.' }))) 'A ready capability is never missing.'
+$root = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-SPCapability-' + [guid]::NewGuid().ToString('N'))
+try {
+    $null = New-Item -ItemType Directory -Path $root
+    $static = Get-SmartM365OrchestratorServerCapability -ServerName 'OFFLINE' -SharedDataFolderPath $root -ProbeMode Static
+    foreach ($result in @($static.Results)) {
+        Assert-Capability ($result.PSObject.Properties['ComponentMissing'] -and [bool]$result.ComponentMissing -eq (Test-SmartM365OrchestratorCapabilityComponentMissing -Result $result)) "ComponentMissing published for $($result.Name)."
+    }
+    $sharePointResult = @($static.Results | Where-Object Name -eq 'SharePointOnPrem')[0]
+    Assert-Capability ($sharePointResult.Ready -or $sharePointResult.ComponentMissing) 'An unregistered SharePoint snap-in is reported as a missing component.'
+}
+finally { if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force } }
+$capabilityRefresh = $orchestratorAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Update-OrchestratorServerCapabilities' }, $true).Extent.Text
+Assert-Capability ($capabilityRefresh.Contains('[bool]$probe.ComponentMissing) {') -and $capabilityRefresh.Contains('"Capability {0} not available on this server (component not installed): {1}" -f $probe.Name, $probe.Detail)') -and $capabilityRefresh.Contains('else { Write-OrchestratorLog -Message ("Capability {0} unavailable: {1}" -f $probe.Name, $probe.Detail) -Level WARN }')) 'Resident logs missing components as INFO and real failures as WARN.'
 
 "[{0}] PASS: SharePointOnPrem capability and policy, {1} offline checks." -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $script:Checks
 

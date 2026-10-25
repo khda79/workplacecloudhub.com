@@ -504,8 +504,14 @@ function Get-SmartM365OrchestratorDashboard {
     $recentEvents = @()
     if ($null -ne $LogEvents) {
         $recentEvents = @($LogEvents.Events | Where-Object { $_.Time -ge $Now.AddHours(-24) })
+        # A resident restarted after the last problem line no longer carries that state.
+        $lastStart = @{}
+        foreach ($start in @($LogEvents.Events | Where-Object { $_.Category -eq 'Lifecycle' -and $_.Message -match '^\S+ v\S+ starting \(PID ' })) {
+            if (-not $lastStart.ContainsKey($start.Server) -or $start.Time -gt $lastStart[$start.Server]) { $lastStart[$start.Server] = $start.Time }
+        }
         foreach ($group in @($LogEvents.Events | Where-Object { $_.Time -ge $Now.AddHours(-1) -and $_.Category -in @('Heartbeat', 'StatePersistence', 'ConfigReload') -and $_.Level -ne 'INFO' } | Group-Object Server, Category)) {
             $last = @($group.Group | Sort-Object Time -Descending)[0]
+            if ($lastStart.ContainsKey($last.Server) -and $lastStart[$last.Server] -gt $last.Time) { continue }
             Add-DashboardAction 'Warning' ('Log ' + $last.Category) $last.Server ('{0} line(s) in the last hour; latest {1:HH:mm}: {2}' -f $group.Count, $last.Time, $last.Message) 'Events'
         }
     }

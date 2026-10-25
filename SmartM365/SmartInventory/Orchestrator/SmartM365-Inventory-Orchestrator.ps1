@@ -101,7 +101,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.58
+1.5.59
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -114,7 +114,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.58
+    Version : 1.5.59
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -151,7 +151,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.58"
+$ScriptVersion = "1.5.59"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -4935,7 +4935,11 @@ function Update-OrchestratorServerCapabilities {
         $jobPolicyText = if ($null -ne $localJobPolicy) { 'only jobs requiring ' + (@($localJobPolicy.OnlyJobsRequiring) -join ', ') } else { 'none' }
         Write-OrchestratorLog -Message ("Automatic server capabilities refreshed: ready={0}; probeMode={1}; weight={2}; jobPolicy={3}; file={4}." -f $readyText, $capabilities.ProbeMode, $script:Settings.ElectionWeight, $jobPolicyText, $script:Settings.CapabilitiesPath)
         foreach ($probe in @($capabilities.Results | Where-Object { -not $_.Ready })) {
-            Write-OrchestratorLog -Message ("Capability {0} unavailable: {1}" -f $probe.Name, $probe.Detail) -Level WARN
+            # A component that is simply not installed here is expected on servers that do not host it.
+            if ($probe.PSObject.Properties['ComponentMissing'] -and [bool]$probe.ComponentMissing) {
+                Write-OrchestratorLog -Message ("Capability {0} not available on this server (component not installed): {1}" -f $probe.Name, $probe.Detail)
+            }
+            else { Write-OrchestratorLog -Message ("Capability {0} unavailable: {1}" -f $probe.Name, $probe.Detail) -Level WARN }
         }
         foreach ($block in @($script:ServerCapabilities.PrerequisiteBlocks)) {
             Write-OrchestratorLog -Message ("Launch prerequisite block kept until its re-check passes: {0}: {1}" -f $block.Name, $block.Detail) -Level WARN
