@@ -651,3 +651,7 @@ pwsh -NoProfile -STA -ExecutionPolicy Bypass -File SmartM365/Tests/Test-SmartM36
 ```
 
 These checks use temporary files, harmless child processes or mocked operational boundaries. They do not qualify a real tenant, endpoint repair, campaign delivery or deployment. Demo assets remain local in `DemoAssets/`, ignored by Git, and must be refreshed after GUI changes. Live deployment requires separate qualification.
+
+## Critical fix (2026-10-24): DirectSetup and reboots
+
+`Scripts\Run-Windows11UpgradeRepairWithPsExec-Lot.cmd` no longer forces `W11UT_ALLOW_REBOOT=1` and `W11UT_SETUP_REBOOT_WHEN_NO_USER=1` when `W11UT_DIRECT_SETUP_UPGRADE=1`. An explicit `0` (for example the GUI "Allow reboot" box unchecked) is now kept, so the endpoint does not receive `-AllowReboot` and the uptime-forced reboot cannot run. When the values are not set, the documented defaults still enable both. Regression test: `Tests\Test-SmartM365Windows11DirectSetupRebootCmd.ps1`. This change is not yet part of a published release.
