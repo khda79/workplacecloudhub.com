@@ -44,6 +44,25 @@ try {
         [IO.File]::WriteAllText($new,$invalid)
         Reject {Get-SmartM365JsonTransportPolicy} 'Invalid local qualification accepted.'
     }
+    # Tokenized roots follow the global WorkspaceRootPath and the SmartM365 folder; non-UNC results qualify nothing.
+    $global=Join-Path $configRoot 'SmartM365.global.local.json.txt'
+    [IO.File]::WriteAllText($new,'{"QualifiedUncRoots":["{{WorkspaceRootPath}}","\\\\synthetic\\share\\wch"]}')
+    Check (((Get-SmartM365JsonTransportPolicy).QualifiedUncRoots -join '|') -eq '\\synthetic\share\wch') 'Missing global file qualified a local workspace.'
+    [IO.File]::WriteAllText($global,'{"WorkspaceRootPath":"\\\\synthetic\\share\\data"}')
+    $globalHash=(Get-FileHash -LiteralPath $global).Hash
+    [IO.File]::WriteAllText($new,'{"QualifiedUncRoots":["{{WorkspaceRootPath}}","{{WorkspaceRootPath}}\\Tenants","{{SmartM365RootPath}}"]}')
+    Check (((Get-SmartM365JsonTransportPolicy).QualifiedUncRoots -join '|') -eq '\\synthetic\share\data|\\synthetic\share\data\Tenants') 'WorkspaceRootPath token not resolved from the global file.'
+    Check ((Get-FileHash -LiteralPath $global).Hash -eq $globalHash) 'Token resolution mutated the global file.'
+    foreach($workspace in '{{SmartM365RootPath}}\\Data','{{UnknownRoot}}',''){
+        [IO.File]::WriteAllText($global,('{"WorkspaceRootPath":"'+$workspace+'"}'))
+        Check ((Get-SmartM365JsonTransportPolicy).QualifiedUncRoots.Count -eq 0) "Non-UNC workspace '$workspace' was qualified."
+    }
+    [IO.File]::WriteAllText($global,'{"WorkspaceRootPath":"\\\\synthetic\\share\\..\\other"}')
+    Reject {Get-SmartM365JsonTransportPolicy} 'Traversal in the global workspace was qualified.'
+    foreach($invalid in '{"QualifiedUncRoots":["{{TenantKey}}"]}','{"QualifiedUncRoots":["{{WorkspaceRootPath}}*"]}','{"QualifiedUncRoots":["{{ }}"]}'){
+        [IO.File]::WriteAllText($new,$invalid)
+        Reject {Get-SmartM365JsonTransportPolicy} 'Unsupported qualified UNC token accepted.'
+    }
     [pscustomobject]@{Passed=$script:passed;FixtureRoot=$root;Evidence='Local synthetic fixtures only; no UNC or Graph access'}
 } finally {Remove-Module $module -Force}
 

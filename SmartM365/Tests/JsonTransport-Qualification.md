@@ -148,7 +148,7 @@ Après réussite, enregistrer les seuls chemins et drives effectivement qualifi�
 }
 ```
 
-Remplacer les tableaux vides par les destinations vérifiées sur le site concerné. Ce fichier reste hors Git, comme toutes les configurations `.local.json.txt`. La lecture n'effectue aucune écriture ni accès aux destinations déclarées. Contrôle en session neuve : importer `SmartM365.JsonTransport.psd1`, puis appeler `Get-SmartM365JsonTransportPolicy`.
+Remplacer les tableaux vides par les destinations vérifiées sur le site concerné. Depuis le module transport 1.0.9, une entrée de `QualifiedUncRoots` peut utiliser les jetons `{{WorkspaceRootPath}}` (lu dans `Config/SmartM365.global.local.json(.txt)` uniquement, jamais dans un profil tenant) et `{{SmartM365RootPath}}` (dossier SmartM365 qui contient le module), avec un suffixe éventuel, par exemple `["{{WorkspaceRootPath}}", "{{SmartM365RootPath}}"]`. La liste suit alors le global : un changement de `WorkspaceRootPath` qualifie automatiquement le nouveau partage, ce qui suppose que celui-ci a été qualifié avant la bascule. Une entrée dont le résultat n'est pas un chemin UNC (racine locale) ne qualifie rien ; tout autre jeton est refusé. Ce fichier reste hors Git, comme toutes les configurations `.local.json.txt`. La lecture n'effectue aucune écriture ni accès aux destinations déclarées. Contrôle en session neuve : importer `SmartM365.JsonTransport.psd1`, puis appeler `Get-SmartM365JsonTransportPolicy`.
 
 Conserver résultats CSV/logs, versions PowerShell et OS, empreintes du paquet signé, preuves des signatures, trois états de tâches et processus, rapports UNC/SharePoint, contrôles de propagation OneDrive et qualification Power Query. Ne pas transmettre de secrets de configuration.
 

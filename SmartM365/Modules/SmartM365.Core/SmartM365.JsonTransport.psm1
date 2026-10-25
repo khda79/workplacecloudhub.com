@@ -320,6 +320,36 @@ function Move-SmartM365OwnedJsonFile {
     } finally { $lock.Dispose() }
 }
 
+function Resolve-SmartM365JsonQualifiedUncToken {
+    param([Parameter(Mandatory)][string]$Value)
+    # Only the deployment roots can be referenced: the SmartM365 folder holding this module and the
+    # WorkspaceRootPath of the global file. Tenant overlays and script settings never qualify a share.
+    foreach ($match in [regex]::Matches($Value, '\{\{([^}]*)\}\}')) {
+        if ($match.Groups[1].Value -notin @('WorkspaceRootPath', 'SmartM365RootPath')) { throw "Unsupported qualified UNC token: $($match.Value)" }
+    }
+    $tokens = @{ SmartM365RootPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..')).TrimEnd('\') }
+    if ($Value -match '\{\{WorkspaceRootPath\}\}') {
+        $workspace = ''
+        # The global file is read directly: resolving a qualification must not depend on the policy being resolved.
+        $globalPath = Join-Path $PSScriptRoot '..\..\Config\SmartM365.global.local.json'
+        if (Get-SmartM365JsonReadPath -Path $globalPath -Optional) {
+            $globalConfig = (Read-SmartM365JsonDocument -Path $globalPath).Document
+            if ($globalConfig.PSObject.Properties['WorkspaceRootPath']) { $workspace = [string]$globalConfig.WorkspaceRootPath }
+        }
+        if ([string]::IsNullOrWhiteSpace($workspace)) { $workspace = '{{SmartM365RootPath}}' }
+        $tokens['WorkspaceRootPath'] = $workspace
+    }
+    $resolved = $Value
+    for ($i = 0; $i -lt 5 -and $resolved -match '\{\{'; $i++) {
+        foreach ($match in [regex]::Matches($resolved, '\{\{([A-Za-z0-9_.-]+)\}\}')) {
+            if (-not $tokens.ContainsKey($match.Groups[1].Value)) { return $null }
+            $resolved = $resolved.Replace($match.Value, [string]$tokens[$match.Groups[1].Value])
+        }
+    }
+    if ($resolved -match '\{\{') { return $null }
+    return $resolved
+}
+
 function Get-SmartM365JsonTransportPolicy {
     [CmdletBinding()]
     param()
@@ -337,11 +367,17 @@ function Get-SmartM365JsonTransportPolicy {
         }
         foreach ($name in @('QualifiedUncRoots','QualifiedSharePointDrives')) {
             if (-not $local.PSObject.Properties[$name]) { continue }
-            $values = @($local.$name)
-            foreach ($value in $values) {
+            $values = @()
+            foreach ($value in @($local.$name)) {
                 if ($value -isnot [string] -or [string]::IsNullOrWhiteSpace($value) -or $value -match '[*?]') { throw 'Invalid qualified destination.' }
+                if ($name -eq 'QualifiedUncRoots' -and $value -match '\{\{') {
+                    # A tokenized root follows the deployment; on a deployment where it is not a UNC path it qualifies nothing.
+                    $value = Resolve-SmartM365JsonQualifiedUncToken -Value $value
+                    if ([string]::IsNullOrWhiteSpace($value) -or -not $value.StartsWith('\\')) { continue }
+                }
                 if ($name -eq 'QualifiedUncRoots' -and $value -notmatch '^\\\\[^\\/]+\\[^\\/]+(?:\\[^\\/]+)*\\?$') { throw 'Qualified UNC destination must be an exact absolute UNC path.' }
                 if ($name -eq 'QualifiedUncRoots' -and @($value.Split('\') | Where-Object { $_ -in @('.','..') }).Count) { throw 'Qualified UNC destination cannot contain traversal segments.' }
+                $values += $value
             }
             $policy[$name] = @($values | Select-Object -Unique)
         }
