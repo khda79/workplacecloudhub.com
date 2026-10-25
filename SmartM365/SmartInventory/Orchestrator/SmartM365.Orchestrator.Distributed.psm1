@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.14'
+$script:DistributedModuleVersion = '1.1.15'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -548,6 +548,8 @@ function Get-SmartM365OrchestratorServerCapability {
         $results.Add((Get-CapabilityProbeResult -Name 'AD' -Ready ($null -ne $adModule) -Detail ("Static check: ActiveDirectory module {0}." -f $(if ($adModule) { 'available' } else { 'missing' }))))
         $exchangeSnapIn = & $windowsPowerShellPath -NoLogo -NoProfile -NonInteractive -Command "if (Get-PSSnapin -Registered -Name Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue) { 'yes' } else { 'no' }" 2>$null
         $results.Add((Get-CapabilityProbeResult -Name 'ExchangeOnPrem' -Ready (($exchangeSnapIn | Select-Object -Last 1) -eq 'yes') -Detail 'Static check of the Exchange Management snap-in registration.'))
+        $sharePointSnapIn = & $windowsPowerShellPath -NoLogo -NoProfile -NonInteractive -Command "if (Get-PSSnapin -Registered -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue) { 'yes' } else { 'no' }" 2>$null
+        $results.Add((Get-CapabilityProbeResult -Name 'SharePointOnPrem' -Ready (($sharePointSnapIn | Select-Object -Last 1) -eq 'yes') -Detail 'Static check of the SharePoint Server PowerShell snap-in registration.'))
         $teamsModule = Get-Module -ListAvailable -Name MicrosoftTeams | Sort-Object Version -Descending | Select-Object -First 1
         $results.Add((Get-CapabilityProbeResult -Name 'TeamsPowerShell' -Ready ($cloudConfigurationReady -and $null -ne $teamsModule) -Detail ("Static check: module={0}; {1}" -f $(if ($teamsModule) { $teamsModule.Version } else { 'missing' }), $certificate.Detail)))
     }
@@ -628,6 +630,20 @@ catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message 
 "SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
 '@
         $results.Add((Invoke-IsolatedCapabilityProbe -Name 'ExchangeOnPrem' -EnginePath $windowsPowerShellPath -ScriptText $exchangeScript -TimeoutSeconds $ProbeTimeoutSeconds))
+
+        # Same snap-in and read-only farm call as the SharePoint on-premises collectors.
+        $sharePointScript = @'
+$ErrorActionPreference = 'Stop'
+try {
+    if (-not (Get-PSSnapin -Registered -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue)) { throw 'SharePoint Server PowerShell snap-in Microsoft.SharePoint.PowerShell is not registered on this server.' }
+    Add-PSSnapin Microsoft.SharePoint.PowerShell -ErrorAction Stop
+    $farm = Get-SPFarm -ErrorAction Stop
+    $result = @{ Ready = $true; Roles = @(); Detail = "Read-only SharePoint Server probe succeeded against farm $($farm.Name) (build $($farm.BuildVersion))." }
+}
+catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message } }
+"SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
+'@
+        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'SharePointOnPrem' -EnginePath $windowsPowerShellPath -ScriptText $sharePointScript -TimeoutSeconds $ProbeTimeoutSeconds))
 
         $teamsScript = @'
 $ErrorActionPreference = 'Stop'

@@ -1,6 +1,6 @@
 # SmartM365 Inventory Orchestrator
 
-`SmartM365-Inventory-Orchestrator.ps1` (v1.5.57) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
+`SmartM365-Inventory-Orchestrator.ps1` (v1.5.58) is a PowerShell 7 resident scheduler that runs the SmartInventory scripts (ActiveDirectoryInventory, ExchangeInventory, M365Inventory, IntuneInventory, ...) unattended.
 
 ## Demo mode
 
@@ -452,10 +452,10 @@ For an explicit user-scoped install:
 
 - `Elected`: the normal multi-server mode. The server is selected automatically from live candidates that satisfy every `RequiredCapabilities` and `RequiredGraphAppRoles` value.
 - `Pinned`: legacy-style fixed ownership. Exactly one explicit `AllowedServers` value is required.
-- `Manual`: never launched by the schedule, catch-up or retry loop. An explicit `-Force <JobName>` may launch it manually and still honors local overlap/concurrency guards.
+- `Manual`: never launched by the schedule, catch-up or retry loop. An explicit `-Force <JobName>` may launch it manually and still honors local overlap/concurrency guards. Since 1.5.58 it is also refused (`-Force refused ... required capabilities not ready on this server`) unless this server's effective capabilities, after launch-prerequisite blocks, include every `RequiredCapabilities` value; unknown capabilities fail closed. Manual jobs without `RequiredCapabilities` are unchanged.
 - Missing `AssignmentMode`: compatibility mode for older manifests; the previous effective `AllowedServers` behavior is retained.
 
-Each resident server generates `Orchestrator-Capabilities.json` itself. The default `ReadOnly` probe mode uses isolated, time-bounded child PowerShell processes and read-only checks for `Graph`, `EXO`, `AD`, `ExchangeOnPrem`, and `TeamsPowerShell`; `SharedRuntime` verifies write access to the shared election folder. Graph readiness also records the application roles returned by the app-only connection. No module is installed and no token, certificate private key or secret is written to the capability document.
+Each resident server generates `Orchestrator-Capabilities.json` itself. The default `ReadOnly` probe mode uses isolated, time-bounded child PowerShell processes and read-only checks for `Graph`, `EXO`, `AD`, `ExchangeOnPrem`, `SharePointOnPrem` and `TeamsPowerShell`; `SharedRuntime` verifies write access to the shared election folder. `SharePointOnPrem` (v1.5.58, Distributed 1.1.15) is ready when the SharePoint Server snap-in `Microsoft.SharePoint.PowerShell`, used by the SharePoint on-premises collectors, is registered and `Get-SPFarm` answers in a child Windows PowerShell 5.1 process under the orchestrator account (the account therefore needs SharePoint Shell access to the farm); the `Static` probe mode checks only the snap-in registration. On a server without SharePoint Server the probe fails fast and logs `Capability SharePointOnPrem unavailable`, like `ExchangeOnPrem` on non-Exchange servers. Graph readiness also records the application roles returned by the app-only connection. No module is installed and no token, certificate private key or secret is written to the capability document.
 
 #### Launch prerequisites (v1.5.54)
 
@@ -480,6 +480,8 @@ The planner assigns each elected job on its own. `DependsOn` constrains executio
   }
 }
 ```
+
+A SharePoint Server farm member is reserved the same way with `"OnlyJobsRequiring": ["SharePointOnPrem"]` (GUI 1.3.17: `Servers and versions`, policy `SharePointOnPrem`). Its SharePoint on-premises jobs must then require `SharePointOnPrem` (normally with `SharedRuntime`). Update every resident to 1.5.58 before publishing a job or policy that uses `SharePointOnPrem`: an older resident rejects the reload as an unknown capability and keeps its previous configuration. Offline check: `pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorSharePointOnPremCapabilityOffline.ps1`.
 
 Before launching an elected occurrence, the owner must create its shared claim with `FileMode.CreateNew`. If shared storage or the plan is unavailable, the elected job stays queued (fail closed). A different server may take over only after `TimeoutMinutes + ElectionClaimGraceMinutes` has expired and the original owner's heartbeat is stale. Terminal claims are never taken over. When another owner already completed the occurrence, the current owner synchronizes that terminal claim into its local state instead of retrying every minute; peer monitoring also accepts terminal or still-safe active claims as proof that the occurrence is handled.
 
@@ -591,7 +593,7 @@ Offline regression suite: `Tests/Test-SmartM365OrchestratorDependencyActivityOff
 | `ConcurrencyKey` | Cluster-wide mutual-exclusion key. Defaults to the job name; jobs with the same explicit value are serialized across all servers. |
 | `AssignmentMode` | `Elected`, `Pinned` or `Manual`. Missing keeps the pre-1.4 legacy allowlist behavior. |
 | `AllowedServers` | Used by `Pinned` and legacy entries. `Pinned` requires exactly one server. Ignored for `Elected`. |
-| `RequiredCapabilities` | Election gates: `SharedRuntime`, `Graph`, `EXO`, `AD`, `ExchangeOnPrem`, `TeamsPowerShell`. There is intentionally no standalone Intune capability; Intune jobs use Graph. |
+| `RequiredCapabilities` | Election gates: `SharedRuntime`, `Graph`, `EXO`, `AD`, `ExchangeOnPrem`, `SharePointOnPrem`, `TeamsPowerShell`. There is intentionally no standalone Intune capability; Intune jobs use Graph. |
 | `RequiredGraphAppRoles` | Exact Microsoft Graph application roles required by the job. Valid only when `Graph` is required. |
 | `EstimatedDurationMinutes` | Positive fallback used by the planner when successful duration history is unavailable. Default 5. |
 | `RequiredPaths` | Optional extra folders or files checked before each launch on this server (v1.5.54). A string is a folder checked `ReadWrite`; an object is `{ "Path": "...", "Access": "Read" or "ReadWrite", "PathType": "Container" or "Leaf" }`. Tokens such as `{{LatestCsvFolderPath}}` and relative paths (from the SmartInventory folder) are resolved like job paths. |
@@ -609,7 +611,7 @@ Offline regression suite: `Tests/Test-SmartM365OrchestratorDependencyActivityOff
 
 The manifest is hot reloaded at every tick when its file changes; an invalid manifest is rejected with an error email and the last valid version stays in effect (no orchestrator restart needed to change the planning). At startup, jobs newly introduced by the committed template are appended to an existing runtime manifest by name. Existing job definitions are never overwritten, so local Enabled flags, schedules and other operational overrides remain authoritative.
 
-The committed template mirrors the validated operational Enabled flags and schedules. Scheduled jobs use `AssignmentMode = "Elected"`; Exchange on-premises jobs require `AD` plus `ExchangeOnPrem`, so they naturally elect only a server that passes both probes. `M365-PowerBIFabricActivity-Inventory` remains disabled with `AssignmentMode = "Manual"` as requested.
+The committed template mirrors the validated operational Enabled flags and schedules. Scheduled jobs use `AssignmentMode = "Elected"`; Exchange on-premises jobs require `AD` plus `ExchangeOnPrem`, so they naturally elect only a server that passes both probes. `M365-PowerBIFabricActivity-Inventory` remains disabled with `AssignmentMode = "Manual"` as requested. `SharePointOnPrem-Infrastructure-Inventory` and `SharePointOnPrem-Content-Inventory` (v1.5.58 template, SharePoint Server 2016/2019 collectors under `SharePointInventory\OnPremises`) are added as `AssignmentMode = "Manual"` for now, with no `DependsOn` and no `ConcurrencyKey`: Windows PowerShell, `RequiredCapabilities = SharePointOnPrem, SharedRuntime`, `MaxRetries = 0`, timeouts 120 and 780 minutes (Content keeps its own 720-minute `-GlobalTimeoutMinutes`). The first resident started on 1.5.58 appends them to the shared configuration (a resident still on 1.5.57 logs `Jobs manifest reload rejected` and keeps its previous manifest until its own automatic recycle); they are never scheduled or elected and run only through `-Force <JobName>`, which is refused on any server whose effective capabilities lack `SharePointOnPrem` (run Infrastructure before Content so the combined email includes both). Their placeholder daily times (06:00, 06:30) apply only if they are later switched to `Elected`.
 
 Template schedule (current committed template, see also `DAILY-SCHEDULE.md`):
 

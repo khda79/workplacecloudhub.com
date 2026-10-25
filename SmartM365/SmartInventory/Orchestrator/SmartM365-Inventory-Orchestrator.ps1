@@ -101,7 +101,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.57
+1.5.58
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -114,7 +114,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.57
+    Version : 1.5.58
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -151,7 +151,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.57"
+$ScriptVersion = "1.5.58"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1169,7 +1169,7 @@ function ConvertTo-NormalizedJob {
     if ($RawJob.PSObject.Properties['RequiredCapabilities'] -and $null -ne $RawJob.RequiredCapabilities) {
         $requiredCapabilities = @($RawJob.RequiredCapabilities | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
     }
-    $validCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'TeamsPowerShell')
+    $validCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell')
     foreach ($capability in $requiredCapabilities) {
         if ($capability -notin $validCapabilities) {
             $Errors.Add("Job '$name': unknown RequiredCapabilities value '$capability'.")
@@ -4856,6 +4856,14 @@ function Get-ElectedJobOwner {
     return [string]$assignment[0].OwnerServer
 }
 
+function Get-ManualJobMissingCapabilities {
+    # A forced Manual job runs only where this server's effective capabilities (after launch
+    # prerequisite blocks) cover its RequiredCapabilities; unknown capabilities fail closed.
+    param([Parameter(Mandatory = $true)]$Job)
+    $ready = if ($null -ne $script:ServerCapabilities) { @($script:ServerCapabilities.ReadyCapabilities) } else { @() }
+    return @(@($Job.RequiredCapabilities) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and [string]$_ -notin $ready } | ForEach-Object { [string]$_ })
+}
+
 function Test-JobAllowedOnServer {
     param(
         [Parameter(Mandatory = $true)]$Job,
@@ -4863,7 +4871,7 @@ function Test-JobAllowedOnServer {
     )
 
     switch ([string]$Job.AssignmentMode) {
-        'Manual' { return [bool]$AllowManual }
+        'Manual' { return ([bool]$AllowManual -and @(Get-ManualJobMissingCapabilities -Job $Job).Count -eq 0) }
         'Elected' {
             $owner = Get-ElectedJobOwner -JobName $Job.Name
             return (-not [string]::IsNullOrWhiteSpace($owner) -and $owner -eq $env:COMPUTERNAME)
@@ -5726,7 +5734,7 @@ function Invoke-LaunchPhase {
         $pipelineInfo = if ($isPipeline) { $script:PipelinePending[$name] } else { $null }
         if (-not (Test-JobAllowedOnServer -Job $job -AllowManual:$isForced)) {
             if ($isForced) {
-                $ownershipReason = if ($job.AssignmentMode -eq 'Elected') { "elected owner is '$(Get-ElectedJobOwner -JobName $name)'" } else { "effective allowlist is '$((Get-JobEffectiveAllowedServers -Job $job) -join ', ')'" }
+                $ownershipReason = if ($job.AssignmentMode -eq 'Elected') { "elected owner is '$(Get-ElectedJobOwner -JobName $name)'" } elseif ($job.AssignmentMode -eq 'Manual') { "required capabilities not ready on this server: $((Get-ManualJobMissingCapabilities -Job $job) -join ', ')" } else { "effective allowlist is '$((Get-JobEffectiveAllowedServers -Job $job) -join ', ')'" }
                 Write-OrchestratorLog -Message ("Job {0}: -Force refused on {1}; {2}." -f $name, $env:COMPUTERNAME, $ownershipReason) -Level WARN
                 $script:ForcedPending = @($script:ForcedPending | Where-Object { $_ -ne $name })
             }
@@ -6963,7 +6971,7 @@ try {
     $serverJobPolicies = @{}
     $serverJobPoliciesRaw = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'ServerJobPolicies' -DefaultValue $null
     if ($null -ne $serverJobPoliciesRaw) {
-        $validJobPolicyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'TeamsPowerShell')
+        $validJobPolicyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell')
         foreach ($serverPolicyProperty in @($serverJobPoliciesRaw.PSObject.Properties)) {
             $serverPolicyName = ([string]$serverPolicyProperty.Name).Trim().ToUpperInvariant()
             if ([string]::IsNullOrWhiteSpace($serverPolicyName)) { throw 'ServerJobPolicies contains an empty server name.' }

@@ -1736,6 +1736,44 @@
       "TimeoutMinutes": 120,
       "EstimatedDurationMinutes": 10,
       "Schedule": {"Type": "Daily", "Times": ["05:30"], "DaysOfWeek": [], "MissedRunPolicy": "RunOnce"}
+    },
+    {
+      "Name": "SharePointOnPrem-Infrastructure-Inventory",
+      "ScriptPath": "SharePointInventory\\OnPremises\\SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": true,
+      "Group": "SharePointOnPrem",
+      "DependsOn": [],
+      "AssignmentMode": "Manual",
+      "AllowedServers": [],
+      "PowerShellEdition": "WindowsPowerShell",
+      "RequiredCapabilities": ["SharePointOnPrem", "SharedRuntime"],
+      "RequiredGraphAppRoles": [],
+      "ContinueOnError": true,
+      "MaxRetries": 0,
+      "RetryDelaySeconds": 600,
+      "TimeoutMinutes": 120,
+      "EstimatedDurationMinutes": 15,
+      "Schedule": {"Type": "Daily", "Times": ["06:00"], "DaysOfWeek": [], "MissedRunPolicy": "RunOnce"}
+    },
+    {
+      "Name": "SharePointOnPrem-Content-Inventory",
+      "ScriptPath": "SharePointInventory\\OnPremises\\SmartM365-SharePoint-OnPrem-Content-Inventory.ps1",
+      "Arguments": "",
+      "Enabled": true,
+      "Group": "SharePointOnPrem",
+      "DependsOn": [],
+      "AssignmentMode": "Manual",
+      "AllowedServers": [],
+      "PowerShellEdition": "WindowsPowerShell",
+      "RequiredCapabilities": ["SharePointOnPrem", "SharedRuntime"],
+      "RequiredGraphAppRoles": [],
+      "ContinueOnError": true,
+      "MaxRetries": 0,
+      "RetryDelaySeconds": 600,
+      "TimeoutMinutes": 780,
+      "EstimatedDurationMinutes": 120,
+      "Schedule": {"Type": "Daily", "Times": ["06:30"], "DaysOfWeek": [], "MissedRunPolicy": "RunOnce"}
     }
   ]
 }

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.7
+1.2.8
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -118,7 +118,18 @@ foreach ($path in $paths) {
     $document = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
     $validation = Test-SmartM365OrchestratorJobsDocument -Document $document
     Assert-True $validation.Valid ('Invalid jobs manifest: ' + ($validation.Errors -join '; '))
-    if ($isTemplate) { Assert-True ($document.Jobs.Count -eq 55) 'Expected 55 template jobs.' }
+    if ($isTemplate) { Assert-True ($document.Jobs.Count -eq 57) 'Expected 57 template jobs.' }
+    if ($isTemplate) {
+        # SharePoint Server collectors are manual for now: -Force only, no dependency, no scheduled election.
+        foreach ($name in @('SharePointOnPrem-Infrastructure-Inventory', 'SharePointOnPrem-Content-Inventory')) {
+            $sharePointJob = @($document.Jobs | Where-Object Name -eq $name)
+            Assert-True ($sharePointJob.Count -eq 1 -and $sharePointJob[0].AssignmentMode -eq 'Manual' -and @($sharePointJob[0].DependsOn).Count -eq 0 -and
+                $sharePointJob[0].PowerShellEdition -eq 'WindowsPowerShell' -and (@($sharePointJob[0].RequiredCapabilities) -join ',') -ceq 'SharePointOnPrem,SharedRuntime' -and
+                -not $sharePointJob[0].PSObject.Properties['ConcurrencyKey']) "SharePoint on-premises job is not manual and independent: $name"
+            Assert-True (Test-Path -LiteralPath (Join-Path (Split-Path $orchestratorRoot -Parent) $sharePointJob[0].ScriptPath) -PathType Leaf) "SharePoint on-premises script not found: $name"
+            Assert-True (@($document.Jobs | Where-Object { @($_.DependsOn) -contains $name }).Count -eq 0) "A job depends on the manual SharePoint job: $name"
+        }
+    }
     Assert-True (@($document.Jobs | Where-Object Name -eq 'CmdbEvidence-Prepare').Count -eq 0) 'Retired CMDB preparation job is still present.'
     foreach ($name in @($daily.Keys | Where-Object { $isTemplate -or $_ -notin $newIntuneNames })) {
         $matches = @($document.Jobs | Where-Object Name -eq $name)

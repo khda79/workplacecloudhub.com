@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.16
+1.3.17
 #>
 [CmdletBinding()]
 param(
@@ -64,7 +64,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.16'
+$script:AppVersion = '1.3.17'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -527,6 +527,7 @@ $xaml = @'
                                     <ComboBox x:Name="ServerPolicyCombo" IsEditable="True">
                                         <ComboBoxItem Content=""/>
                                         <ComboBoxItem Content="ExchangeOnPrem"/>
+                                        <ComboBoxItem Content="SharePointOnPrem"/>
                                         <ComboBoxItem Content="AD"/>
                                         <ComboBoxItem Content="Graph"/>
                                         <ComboBoxItem Content="EXO"/>
