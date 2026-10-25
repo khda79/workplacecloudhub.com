@@ -1,4 +1,4 @@
-# Version 1.1.0
+# Version 1.2.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -12,6 +12,8 @@ param(
     [string]$DirectorySummaryOutputPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '_private\DeviceDirectorySummary.csv'),
 
     [string]$SystemEvidenceOutputPath,
+    # Optional raw readiness gap facts; the other outputs are unchanged whether or not it is set.
+    [string]$ReadinessGapOutputPath,
     [Nullable[double]]$DeviceSystemMaxObservationAgeHours,
     [string]$DeviceSystemOffsetlessGraphTimeZoneId,
     # Optional reference clock for reproducible offline preparation; defaults to the current time.
@@ -465,6 +467,19 @@ if ($SystemEvidenceOutputPath) {
     }
 }
 
+if ($ReadinessGapOutputPath) {
+    Import-Module (Join-Path $PSScriptRoot 'DeviceReadinessGapEvidence.psm1') -Force -ErrorAction Stop
+    $gapLocalSystemPath = Get-RequiredCsv 'DATA-LAST\Intune_Devices_LocalSystem.csv'
+    $gapReference = if ($null -ne $AsOfUtc) { $AsOfUtc.ToUniversalTime() } else { [datetimeoffset]::UtcNow }
+    $gapEvidence = @(New-DeviceReadinessGapEvidence -IntuneRows $intune -EntraRows $entra -AdRows $ad -LocalSystemRows @(Import-Csv -LiteralPath $gapLocalSystemPath) -Reference $gapReference)
+    New-Item -ItemType Directory -Path (Split-Path -Parent ([IO.Path]::GetFullPath($ReadinessGapOutputPath))) -Force | Out-Null
+    if ($gapEvidence.Count) {
+        $gapEvidence | Sort-Object 'Device Source ID', 'AD Object GUID', 'Device Name' | Export-Csv -LiteralPath $ReadinessGapOutputPath -NoTypeInformation -Encoding utf8NoBOM
+    } else {
+        [IO.File]::WriteAllText([IO.Path]::GetFullPath($ReadinessGapOutputPath), ((Get-DeviceReadinessGapColumns | ForEach-Object { '"' + $_ + '"' }) -join ',') + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    }
+}
+
 $enabledAdWindowsPcs = @($ad | Where-Object {
     (Get-NormalizedKey $_.Enabled) -eq 'true' -and
     ([string]$_.OperatingSystem -match '(?i)windows') -and
@@ -566,7 +581,7 @@ $summary = [ordered]@{
     AdWindows10AmbiguousIntuneMatches = $ambiguousWindows10Matches
     Windows10EligibilityUndeterminedAllSources = $intuneWindows10Undetermined + $adOnlyWindows10
     SecondWaveSignals = @($signalEvidence | ForEach-Object { [ordered]@{ Signal = $_.Signal; AffectedDevices = $_.'Affected Devices'; CoveredDevices = $_.'Covered Devices'; ManagedDevicesAffected = $_.'Managed Devices Affected'; ManagedDevicesCovered = $_.'Managed Devices Covered'; SourceFindings = $_.'Source Findings' } })
-    SourceFiles = @($intunePath, $usersPath, $entraPath, $adPath, $upgradeEligibilityPath, $windowsUpdatePath, $endpointPerformancePath, $endpointStartupPath, $hardwareConflictPath, $removalCandidatePath) + $(if ($SystemEvidenceOutputPath) {@($systemPath)} else {@()})
+    SourceFiles = @($intunePath, $usersPath, $entraPath, $adPath, $upgradeEligibilityPath, $windowsUpdatePath, $endpointPerformancePath, $endpointStartupPath, $hardwareConflictPath, $removalCandidatePath) + $(if ($SystemEvidenceOutputPath) {@($systemPath)} else {@()}) + $(if ($ReadinessGapOutputPath) {@($gapLocalSystemPath)} else {@()})
 }
 
 [pscustomobject]$summary | ConvertTo-Json -Depth 3

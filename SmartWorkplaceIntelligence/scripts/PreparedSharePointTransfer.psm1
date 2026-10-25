@@ -1,4 +1,4 @@
-# Version: 1.1.1
+# Version: 1.1.2
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'PreparedMetadata.psm1') -Force
@@ -71,6 +71,19 @@ function Resolve-PreparedTransferContract {
         throw 'Incomplete daily trends file set; transfer not started.'
     }elseif($dailySupplied.Count -ne 2){
         throw 'Incomplete supplied daily trends contract; transfer not started.'
+    }
+    # Batches prepared before the hybrid identity findings and device readiness gaps carry neither
+    # file and stay transferable; a batch with only one of them is incomplete.
+    $readinessFiles=@('HybridIdentityFindings.csv','DeviceReadinessGapEvidence.csv')
+    $readinessPresent=@($Manifest.Files | Where-Object File -in $readinessFiles)
+    if($readinessPresent.Count -eq 0){
+        if(@($contract.tables | Where-Object file -in $readinessFiles).Count){
+            $contract=$contract | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+            $contract.tables=@($contract.tables | Where-Object file -notin $readinessFiles)
+            $contractFiltered=$true
+        }
+    }elseif($readinessPresent.Count -ne 2 -or @($readinessPresent.File | Sort-Object -Unique).Count -ne 2){
+        throw 'Incomplete readiness findings file set; transfer not started.'
     }
     if($intunePresent.Count -eq 0){
         if($Manifest.PSObject.Properties['Provenance'] -and $Manifest.Provenance.PSObject.Properties['IntuneOperations']){throw 'Incomplete Intune operational file set; transfer not started.'}

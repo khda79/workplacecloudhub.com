@@ -28,7 +28,7 @@ function Reject([scriptblock]$Action,[string]$Pattern){
 $intuneSpec=(Read-SmartM365JsonDocument (Join-Path $PSScriptRoot '../config/intune-operational-contract.json.txt')).Document
 $baseCount=@($baseContract.tables).Count
 $extendedCount=@($extendedContract.tables).Count
-Check ($baseCount -eq 29+$intuneSpec.tables.Count) 'Expected legacy tables plus governed Intune and daily trend tables (SWI license evidence retired)'
+Check ($baseCount -eq 31+$intuneSpec.tables.Count) 'Expected legacy tables, hybrid identity findings and device readiness gaps plus governed Intune and daily trend tables (SWI license evidence retired)'
 Check (@($baseContract.tables | Where-Object table -in @('Daily Directory Trends','Daily Mailbox Trends')).Count -eq 2) 'Expected both governed daily trend tables'
 Check ($extendedCount -eq $baseCount+2) 'Expected endpoint protection extension'
 function New-Fixture([string]$Name,$Contract,[string]$ContractPath,[bool]$Endpoint){
@@ -163,7 +163,7 @@ $legacyBase=$baseContract | ConvertTo-Json -Depth 30 | ConvertFrom-Json
 $legacyLicense=Get-Content (Join-Path $PSScriptRoot '../config/legacy-license-evidence-tables.json.txt') -Raw | ConvertFrom-Json
 $legacyTables=[Collections.Generic.List[object]]::new();foreach($table in @($legacyBase.tables)){$legacyTables.Add($table)}
 foreach($entry in @($legacyLicense.Tables | Sort-Object {[int]$_.index})){$legacyTables.Insert([int]$entry.index,$entry.table)}
-$legacyBase.tables=@($legacyTables | Where-Object { $_.file -notin $intuneSpec.tables.file -and $_.table -notin @('Daily Directory Trends','Daily Mailbox Trends') })
+$legacyBase.tables=@($legacyTables | Where-Object { $_.file -notin $intuneSpec.tables.file -and $_.table -notin @('Daily Directory Trends','Daily Mailbox Trends','Hybrid Identity Findings','Device Readiness Gap Evidence') })
 $legacyPath=Join-Path $root 'legacy-contract.json.txt';Write-TestJson $legacyPath $legacyBase
 Import-Module (Join-Path $PSScriptRoot 'EndpointProtectionEvidence.psm1') -Global
 $legacyExtended=Merge-EndpointProtectionContract $legacyBase $extension
@@ -180,6 +180,11 @@ With-MutatedReceipt -Fixture $base -Change {param($m,$v)
     $m.Files=@($m.Files | Where-Object File -notin @('DailyDirectoryTrends.csv','DailyMailboxTrends.csv'))
     $v.Files=@($v.Files | Where-Object File -notin @('DailyDirectoryTrends.csv','DailyMailboxTrends.csv'))
 } -Action {Check-RejectedBeforeTransport $base 'Incomplete daily trends file set'}
+# A batch with only one of the two readiness files is incomplete, never a pre-feature batch.
+With-MutatedReceipt -Fixture $base -Change {param($m,$v)
+    $m.Files=@($m.Files | Where-Object File -ne 'DeviceReadinessGapEvidence.csv')
+    $v.Files=@($v.Files | Where-Object File -ne 'DeviceReadinessGapEvidence.csv')
+} -Action {Check-RejectedBeforeTransport $base 'Incomplete readiness findings file set'}
 With-MutatedReceipt $base {param($m,$v)$m.Provenance.PSObject.Properties.Remove('IntuneOperations')} {
     Check-RejectedBeforeTransport $base 'Intune operational batch lacks'
 }

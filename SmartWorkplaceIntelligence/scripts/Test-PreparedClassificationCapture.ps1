@@ -1,4 +1,4 @@
-# Version 1.0.1: fixture generators include SharePointMigration (always scheduled by the dispatcher).
+# Version 1.1.0: HybridIdentity reads the captured rules after Workforce; 1.0.1: SharePointMigration fixture generator.
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
 # Synthetic rules and simulated child generators only; no production preparation.
@@ -43,7 +43,7 @@ try {
         $message = ''
         try { Test-PreparedClassificationCapture -Path $invalid -Stage 'AfterCopy' | Out-Null } catch { $message = $_.Exception.Message }
         Check ($message -match 'JSON/rules are invalid or unreadable') 'Invalid rules accepted'
-        Check ($message -notmatch 'SYNTHETIC_DO_NOT_LOG|SchemaVersion|9.0') 'JSON/rule error leaked content'
+        Check ($message -notmatch 'SYNTHETIC_DO_NOT_LOG|SchemaVersion|9\.0') 'JSON/rule error leaked content'
     }
     # Mutate at the copy boundary, rather than relying on filesystem timing.
     foreach ($mode in @('MissingCopy','ChangedCopy','ChangedSource')) {
@@ -104,6 +104,10 @@ $control = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../control.json.tx
 if ($control.Mode -eq 'Delete') { [IO.File]::Delete($control.Path) }
 if ($control.Mode -eq 'Tamper') { [IO.File]::WriteAllText($control.Path,$control.Changed) }
 '@)
+[IO.File]::WriteAllText((Join-Path $scripts 'New-HybridIdentityEvidence.ps1'),@'
+param($DataRoot,$UserEvidencePath,$OutputPath,$AccountClassificationConfigPath)
+[IO.File]::WriteAllText((Join-Path (Split-Path $OutputPath -Parent) 'HybridIdentity.started'),[string]$AccountClassificationConfigPath)
+'@)
 [IO.File]::WriteAllText((Join-Path $scripts 'New-WorkforceIdentityEvidence.ps1'),@'
 param($DataRoot,$UserOutputPath,$HistoryOutputPath,$TrendOutputPath,$IdentityOutputPath,$SignalsOutputPath,$SystemEvidencePath,$AccountClassificationConfigPath)
 [IO.File]::WriteAllText((Join-Path (Split-Path $UserOutputPath -Parent) 'Workforce.started'),'synthetic')
@@ -128,10 +132,12 @@ foreach ($mode in @('Valid','MissingAtStart','TamperedAtStart','Delete','Tamper'
     if ($mode -eq 'Valid') {
         Check ($exitCode -eq 0) "Valid build dispatcher failed: $output"
         Check (Test-Path -LiteralPath (Join-Path $staging 'Workforce.started')) 'Valid capture never reached Workforce'
-        Check ($output -match 'stage=BuildStart;' -and $output -match 'stage=BeforeWorkforce;') 'Dispatcher checkpoints missing'
+        Check ($output -match 'stage=BuildStart;' -and $output -match 'stage=BeforeWorkforce;' -and $output -match 'stage=BeforeHybridIdentity;') 'Dispatcher checkpoints missing'
+        Check ((Get-Content -LiteralPath (Join-Path $staging 'HybridIdentity.started') -Raw) -eq $rules) 'HybridIdentity did not receive the captured rules'
     } else {
         Check ($exitCode -ne 0) "Invalid capture accepted: $mode"
         Check (-not (Test-Path -LiteralPath (Join-Path $staging 'Workforce.started'))) "Workforce started after capture loss: $mode"
+        Check (-not (Test-Path -LiteralPath (Join-Path $staging 'HybridIdentity.started'))) "HybridIdentity started after capture loss: $mode"
         if ($mode -in @('MissingAtStart','TamperedAtStart')) {
             Check ($output -match 'BuildStart') 'Initial failure stage missing'
             Check (-not (Test-Path -LiteralPath (Join-Path $staging 'Estate.started'))) 'Initial check ran after heavy work'

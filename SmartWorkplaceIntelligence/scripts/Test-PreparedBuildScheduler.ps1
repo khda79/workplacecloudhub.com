@@ -1,4 +1,4 @@
-# Version 1.2.0: a native-stage warning keeps its WARNING prefix in the parallel worker.
+# Version 1.3.0: HybridIdentity generator after Workforce with its own classification checkpoint; 1.2.0: native-stage warning prefix.
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
 # Runs the real build dispatcher with simulated generators only; no production preparation.
@@ -32,7 +32,7 @@ Write-Host "stub output $name"
 [IO.File]::WriteAllText((Join-Path $root "$name.end"), [string][datetime]::UtcNow.Ticks)
 if ($control.Fail -eq $name) { exit 3 }
 '@
-$generators = @('New-EnterpriseEstateEvidence','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
+$generators = @('New-EnterpriseEstateEvidence','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-HybridIdentityEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
 foreach ($name in $generators) { [IO.File]::WriteAllText((Join-Path $scripts ($name + '.ps1')), $stub) }
 [IO.File]::WriteAllText((Join-Path $scripts 'New-MailboxMigrationExceptions.ps1'), $stub)
 [IO.File]::WriteAllText((Join-Path $scripts 'NativeEvidence.psm1'),@'
@@ -53,12 +53,13 @@ Export-ModuleMember -Function Invoke-NativeEvidenceStage
 $valid = '{"SchemaVersion":"1.0","RuleVersion":"SYNTHETIC_DO_NOT_LOG","Population":{"Human":["human-a"],"NonHuman":[]}}'
 $changed = $valid.Replace('human-a','human-b')
 $shell = (Get-Process -Id $PID).Path
-$sequentialOrder = @('New-EnterpriseEstateEvidence','Native','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
+$sequentialOrder = @('New-EnterpriseEstateEvidence','Native','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-HybridIdentityEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
 $dependencies = @{
     'New-WorkforceIdentityEvidence'=@('New-DeviceInventoryEvidence')
     'New-EndpointProtectionEvidence'=@('New-DeviceInventoryEvidence')
     'New-WindowsMigrationEvidence'=@('New-DeviceInventoryEvidence')
     'New-MailboxEvidence'=@('New-WorkforceIdentityEvidence')
+    'New-HybridIdentityEvidence'=@('New-WorkforceIdentityEvidence')
     'New-SecurityEvidence'=@('New-WorkforceIdentityEvidence','New-DeviceInventoryEvidence')
     'New-DataTrustEvidence'=@('New-IntuneOperationalEvidence')
     'New-SharePointMigrationEvidence'=@('Native')
@@ -109,7 +110,9 @@ try {
     $order = @($sequential.Spans.GetEnumerator() | Sort-Object { $_.Value.Start } | ForEach-Object Key)
     Check (($order -join ',') -ceq ($sequentialOrder -join ',')) "Sequential order changed: $($order -join ',')"
     Check ((Get-MaxConcurrency $sequential.Spans) -eq 1) 'Sequential mode overlapped generators'
-    Check ($sequential.Output -match 'stage=BuildStart;' -and $sequential.Output -match 'stage=BeforeWorkforce;') 'Sequential classification checkpoints missing'
+    Check ($sequential.Output -match 'stage=BuildStart;' -and $sequential.Output -match 'stage=BeforeWorkforce;' -and $sequential.Output -match 'stage=BeforeHybridIdentity;') 'Sequential classification checkpoints missing'
+    Check ($sequential.Outputs['New-HybridIdentityEvidence'] -match [regex]::Escape('-UserEvidencePath|<case>') -and $sequential.Outputs['New-HybridIdentityEvidence'] -match 'HybridIdentityFindings\.csv' -and $sequential.Outputs['New-HybridIdentityEvidence'] -match '-AccountClassificationConfigPath') 'HybridIdentity arguments changed'
+    Check ($sequential.Outputs['New-DeviceInventoryEvidence'] -match 'DeviceReadinessGapEvidence\.csv') 'DeviceInventory gap output argument missing'
 
     # Parallel: same generators and outputs, dependencies respected, at most three at a time.
     $parallel = Invoke-Case 'parallel' 3 @{}
@@ -126,7 +129,7 @@ try {
         Check ($parallel.Outputs[$name] -ceq $sequential.Outputs[$name]) "Generator arguments differ between modes: $name"
         Check ($parallel.Output -match [regex]::Escape("stub output $name")) "Generator log not replayed: $name"
     }
-    Check ($parallel.Output -match 'stage=BeforeWorkforce;') 'Parallel classification checkpoint missing'
+    Check ($parallel.Output -match 'stage=BeforeWorkforce;' -and $parallel.Output -match 'stage=BeforeHybridIdentity;') 'Parallel classification checkpoint missing'
     Check (@([regex]::Matches($parallel.Output,'Completed ')).Count -eq ($sequentialOrder.Count - 1)) 'Completion lines missing'
 
     # A native-stage warning keeps its WARNING prefix when the parallel worker replays it.
@@ -144,13 +147,18 @@ try {
     foreach ($parallelism in 1,3) {
         $tampered = Invoke-Case "tampered-$parallelism" $parallelism @{Mutate='New-DeviceInventoryEvidence'}
         Check ($tampered.ExitCode -ne 0 -and $tampered.Output -match 'BeforeWorkforce') "Changed rules accepted with parallelism $parallelism"
-        Check (-not $tampered.Spans.ContainsKey('New-WorkforceIdentityEvidence')) "Workforce started after the rules changed (parallelism $parallelism)"
+        Check (-not $tampered.Spans.ContainsKey('New-WorkforceIdentityEvidence') -and -not $tampered.Spans.ContainsKey('New-HybridIdentityEvidence')) "Workforce or HybridIdentity started after the rules changed (parallelism $parallelism)"
         Check ($tampered.Output -notmatch 'SYNTHETIC_DO_NOT_LOG|human-a|human-b|Population') 'Dispatcher logs leaked private rules'
     }
 
     # -Only runs one domain; dependencies outside it are treated as already staged.
     $only = Invoke-Case 'only' 3 @{} @('-Only','Mailbox')
     Check ($only.ExitCode -eq 0 -and $only.Spans.Count -eq 1 -and $only.Spans.ContainsKey('New-MailboxEvidence')) 'Only mode ran other generators'
+    # Rules changed after Workforce: the hybrid findings never start on different rules.
+    $hybridTampered = Invoke-Case 'hybrid-tampered' 1 @{Mutate='New-MailboxEvidence'}
+    Check ($hybridTampered.ExitCode -ne 0 -and $hybridTampered.Output -match 'BeforeHybridIdentity' -and -not $hybridTampered.Spans.ContainsKey('New-HybridIdentityEvidence')) 'HybridIdentity started on changed rules'
+    $hybridOnly = Invoke-Case 'only-hybrid' 3 @{} @('-Only','HybridIdentity','-HybridAllowedTargetDomains','partner.example,other.example')
+    Check ($hybridOnly.ExitCode -eq 0 -and $hybridOnly.Spans.Count -eq 1 -and $hybridOnly.Output -match 'stage=BeforeHybridIdentity;' -and $hybridOnly.Outputs['New-HybridIdentityEvidence'] -match [regex]::Escape('-AllowedTargetDomains|partner.example,other.example')) 'HybridIdentity only mode or allowed domains changed'
     Write-Host "PASS: $script:checks build scheduler checks (sequential order, dependencies, concurrency, failures, classification checkpoint). Simulated generators only."
 } finally {
     Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue

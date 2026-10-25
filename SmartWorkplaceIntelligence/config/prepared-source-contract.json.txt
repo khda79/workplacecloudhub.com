@@ -32,7 +32,9 @@
     {"file":"AD_HealthCheck.csv", "maxAgeHours":48},
     {"file":"M365_Backup_ProtectedMailboxes.csv", "maxAgeHours":168},
     {"file":"M365_Backup_ProtectedSharePointSites.csv", "maxAgeHours":168},
-    {"file":"M365_Backup_ProtectedOneDriveAccounts.csv", "maxAgeHours":168}
+    {"file":"M365_Backup_ProtectedOneDriveAccounts.csv", "maxAgeHours":168},
+    {"file":"AD_Users_DuplicateSMTP.csv", "maxAgeHours":168},
+    {"file":"Exchange_EXO_AcceptedDomains.csv", "maxAgeHours":168}
   ],
   "mappingFiles": ["SmartWorkplaceIntelligence-PersonaClassification.xlsx", "SmartWorkplaceIntelligence-SiteClassification.xlsx"],
   "mailboxMigrationExceptionsFile": "SmartWorkplaceIntelligence-MailboxMigrationExceptions.xlsx",

@@ -1,5 +1,5 @@
 # Offline, single-tenant preparation and versioned local publication. No tenant APIs.
-# Version: 1.2.2
+# Version: 1.2.3
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -775,6 +775,7 @@ function Invoke-PreparedEvidencePipeline {
         [string]$SharePointMigrationReportingTimeZoneId='UTC',
         [Nullable[double]]$DeviceSystemMaxObservationAgeHours, [string]$DeviceSystemOffsetlessGraphTimeZoneId,
         [ValidateRange(1,8760)][int]$OfficeActivationWarningAgeHours=72,
+        [AllowNull()][string[]]$HybridAllowedTargetDomains=@(),
         [ValidateRange(1,8)][int]$MaxParallelGenerators=1)
     # Read only the two non-secret preparation settings from the effective tenant profile.
     if ($null -eq $DeviceSystemMaxObservationAgeHours -and $null -ne $AdCountryConfiguration) {
@@ -903,6 +904,9 @@ function Invoke-PreparedEvidencePipeline {
         if ($null -ne $DeviceSystemMaxObservationAgeHours) {$systemPolicyArgs+=@('-DeviceSystemMaxObservationAgeHours',$DeviceSystemMaxObservationAgeHours)}
         if ($DeviceSystemOffsetlessGraphTimeZoneId) {$systemPolicyArgs+=@('-DeviceSystemOffsetlessGraphTimeZoneId',$DeviceSystemOffsetlessGraphTimeZoneId)}
         $systemPolicyArgs+=@('-OfficeActivationWarningAgeHours',$OfficeActivationWarningAgeHours)
+        # Private TargetAddress domains cross into the child build as one comma-separated value.
+        $hybridDomains=@($HybridAllowedTargetDomains | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { ([string]$_).Trim() })
+        if ($hybridDomains.Count) { $systemPolicyArgs+=@('-HybridAllowedTargetDomains',($hybridDomains -join ',')) }
         $null = Test-PreparedClassificationCapture -Path $rules -Stage 'BeforeBuild' -ExpectedSHA256 $classificationCapture.Captured.SHA256 -ExpectedBytes $classificationCapture.Captured.Bytes
         $systemPolicyArgs+=@('-AccountClassificationExpectedSHA256',$classificationCapture.Captured.SHA256,'-AccountClassificationExpectedBytes',[string]$classificationCapture.Captured.Bytes)
         # Generators render warnings as plain text: relayed lines and the retained log never carry ANSI

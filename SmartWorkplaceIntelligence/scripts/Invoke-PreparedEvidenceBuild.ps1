@@ -1,9 +1,9 @@
-# Version 1.6.0: Office activation acquisition-age warning threshold passed to Workforce and Data Trust.
+# Version 1.7.0: hybrid identity findings and device readiness gap facts; earlier: Office activation warning threshold.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DataRoot,
     [Parameter(Mandatory)][string]$OutputRoot,
-    [ValidateSet('All','Estate','Workforce','Devices','Applications','IntuneOperations','Collaboration','Content','Mailbox','DailyTrends','Security','Backup','Trust','Executive','SharePointMigration')]
+    [ValidateSet('All','Estate','Workforce','Devices','Applications','IntuneOperations','Collaboration','Content','Mailbox','HybridIdentity','DailyTrends','Security','Backup','Trust','Executive','SharePointMigration')]
     [string]$Only = 'All',
     [switch]$SkipWorkforceHistory,
     [switch]$ReuseStagedWorkforce,
@@ -33,6 +33,8 @@ param(
     [int]$DailyTrendsPersistentAbsenceObservations = 7,
     # Hours after the last successful acquisition before the kept Office activation report is warned about.
     [ValidateRange(1,8760)][int]$OfficeActivationWarningAgeHours = 72,
+    # TargetAddress domains accepted in addition to the accepted remote routing domain (private setting).
+    [string[]]$HybridAllowedTargetDomains = @(),
     # Optional reference clock passed to every generator; omitted means each generator uses the current time.
     [Nullable[datetimeoffset]]$AsOfUtc,
     # 1 runs the generators one after another with live output; higher values run independent
@@ -73,7 +75,7 @@ $classificationStart = $null
 if (($AccountClassificationExpectedSHA256 -or $null -ne $AccountClassificationExpectedBytes) -and -not $AccountClassificationConfigPath) {
     throw 'An expected account classification capture requires its explicit file path.'
 }
-if ($Only -in @('All','Workforce') -and -not $ReuseStagedWorkforce -and $AccountClassificationConfigPath) {
+if ($Only -in @('All','Workforce','HybridIdentity') -and -not $ReuseStagedWorkforce -and $AccountClassificationConfigPath) {
     Import-Module (Join-Path $PSScriptRoot 'PreparedClassification.psm1')
     $classificationCheck = @{Path=$AccountClassificationConfigPath;Stage='BuildStart'}
     if ($AccountClassificationExpectedSHA256) { $classificationCheck.ExpectedSHA256=$AccountClassificationExpectedSHA256 }
@@ -85,7 +87,7 @@ if ($Only -eq 'All') {
     if (-not $NativeEvidenceAuditPath) { throw 'Unified preparation requires a receipt-qualified native capture audit.' }
     Add-Task 'Native' 'All' $null @{LastRoot=$last;TenantKey=$TenantKey;AuditPath=$NativeEvidenceAuditPath;OutputRoot=$OutputRoot;PythonCommand=$PythonCommand} -Native
 }
-$deviceArgs=@('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DeviceInventoryEvidence'),'-SignalsOutputPath',(OutPath 'DeviceRiskEvidenceSummary'),'-DirectorySummaryOutputPath',(OutPath 'DeviceDirectorySummary'),'-SystemEvidenceOutputPath',(OutPath 'DeviceSystemEvidence'))
+$deviceArgs=@('-DataRoot',$DataRoot,'-OutputPath',(OutPath 'DeviceInventoryEvidence'),'-SignalsOutputPath',(OutPath 'DeviceRiskEvidenceSummary'),'-DirectorySummaryOutputPath',(OutPath 'DeviceDirectorySummary'),'-SystemEvidenceOutputPath',(OutPath 'DeviceSystemEvidence'),'-ReadinessGapOutputPath',(OutPath 'DeviceReadinessGapEvidence'))
 if ($null -ne $DeviceSystemMaxObservationAgeHours) { $deviceArgs+=@('-DeviceSystemMaxObservationAgeHours',$DeviceSystemMaxObservationAgeHours) }
 if ($DeviceSystemOffsetlessGraphTimeZoneId) { $deviceArgs+=@('-DeviceSystemOffsetlessGraphTimeZoneId',$DeviceSystemOffsetlessGraphTimeZoneId) }
 $deviceArgs+=$clockArgs
@@ -117,6 +119,15 @@ Add-Task 'Applications' 'Applications' 'New-ApplicationInventoryEvidence.ps1' @(
 Add-Task 'Collaboration' 'Collaboration' 'New-CollaborationEvidence.ps1' (@('-DataRoot',$DataRoot,'-AdoptionOutputPath',(OutPath 'CollaborationAdoptionEvidence'),'-ObjectOutputPath',(OutPath 'CollaborationObjectEvidence'),'-TrendOutputPath',(OutPath 'CollaborationTrendEvidence'))+$clockArgs)
 Add-Task 'Content' 'Content' 'New-ContentStorageEvidence.ps1' (@('-DataRoot',$DataRoot,'-ObjectOutputPath',(OutPath 'ContentStorageEvidence'),'-TrendOutputPath',(OutPath 'ContentStorageTrendEvidence'))+$clockArgs)
 Add-Task 'Mailbox' 'Mailbox' 'New-MailboxEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-OutputPath',(OutPath 'MailboxEvidence')) -DependsOn 'Workforce'
+$hybridArgs=@('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-OutputPath',(OutPath 'HybridIdentityFindings'))
+if ($AccountClassificationConfigPath) { $hybridArgs+=@('-AccountClassificationConfigPath',$AccountClassificationConfigPath) }
+if (@($HybridAllowedTargetDomains).Count) { $hybridArgs+=@('-AllowedTargetDomains',(@($HybridAllowedTargetDomains) -join ',')) }
+$hybridArgs+=$clockArgs
+$beforeHybrid = $null
+if ($null -ne $classificationStart) {
+    $beforeHybrid = { $null = Test-PreparedClassificationCapture -Path $AccountClassificationConfigPath -Stage 'BeforeHybridIdentity' -ExpectedSHA256 $classificationStart.SHA256 -ExpectedBytes $classificationStart.Bytes }
+}
+Add-Task 'HybridIdentity' 'HybridIdentity' 'New-HybridIdentityEvidence.ps1' $hybridArgs -DependsOn 'Workforce' -BeforeStart $beforeHybrid
 if ($MailboxMigrationExceptionsEnabled) {
     $exceptionArgs=@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot,'-TenantKey',$TenantKey,'-NativeEvidenceAuditPath',$NativeEvidenceAuditPath,'-PythonCommand',$PythonCommand,'-Enabled')
     if ($MailboxMigrationBindingsPath) { $exceptionArgs+=@('-BindingsPath',$MailboxMigrationBindingsPath) }
@@ -175,7 +186,7 @@ if ($MaxParallelGenerators -le 1) {
 } else {
     # Parallel: ready tasks start in the order below (critical path and longest generators first);
     # each runs in its own child process and its log is printed in one block when it completes.
-    $priority = @('DeviceInventory','Workforce','Native','IntuneOperations','Applications','DeviceLifecycle','Estate','Trust','Mailbox','Security','WindowsMigration','EndpointProtection','Executive','Backup','Collaboration','Content','DailyTrends')
+    $priority = @('DeviceInventory','Workforce','Native','IntuneOperations','Applications','DeviceLifecycle','Estate','Trust','Mailbox','HybridIdentity','Security','WindowsMigration','EndpointProtection','Executive','Backup','Collaboration','Content','DailyTrends')
     $taskIds = @($script:tasks.Id)
     $pending = [Collections.Generic.List[object]]::new()
     foreach ($id in $priority) { foreach ($task in $script:tasks) { if ($task.Id -ceq $id) { $pending.Add($task) } } }

@@ -2357,6 +2357,178 @@
       ]
     },
     {
+      "table": "Hybrid Identity Findings",
+      "file": "HybridIdentityFindings.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [
+        "Finding Key"
+      ],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Finding Key",
+          "type": "string"
+        },
+        {
+          "name": "AD Object GUID",
+          "type": "string"
+        },
+        {
+          "name": "Entra Object ID",
+          "type": "string"
+        },
+        {
+          "name": "Exchange GUID",
+          "type": "string"
+        },
+        {
+          "name": "User Principal Name",
+          "type": "string"
+        },
+        {
+          "name": "Primary SMTP Address",
+          "type": "string"
+        },
+        {
+          "name": "Recipient Type",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Hosting",
+          "type": "string"
+        },
+        {
+          "name": "Rule ID",
+          "type": "string"
+        },
+        {
+          "name": "Legacy Issue Number",
+          "type": "int64"
+        },
+        {
+          "name": "Rule Family",
+          "type": "string"
+        },
+        {
+          "name": "Severity",
+          "type": "string"
+        },
+        {
+          "name": "Is Blocker",
+          "type": "boolean"
+        },
+        {
+          "name": "Observed Value",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Account Population",
+          "type": "string"
+        },
+        {
+          "name": "Account Population Source",
+          "type": "string"
+        },
+        {
+          "name": "Account Classification Rule Version",
+          "type": "string"
+        },
+        {
+          "name": "Rule Version",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
+      "table": "Device Readiness Gap Evidence",
+      "file": "DeviceReadinessGapEvidence.csv",
+      "stagingIncludesTenantKey": true,
+      "uniqueKey": [],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "TenantKey",
+          "type": "string"
+        },
+        {
+          "name": "Inventory Scope",
+          "type": "string"
+        },
+        {
+          "name": "Device Source ID",
+          "type": "string"
+        },
+        {
+          "name": "Device Name",
+          "type": "string"
+        },
+        {
+          "name": "Azure AD Device ID",
+          "type": "string"
+        },
+        {
+          "name": "AD Object GUID",
+          "type": "string"
+        },
+        {
+          "name": "Entra Registration Pending",
+          "type": "boolean"
+        },
+        {
+          "name": "Physical Memory (GB)",
+          "type": "double"
+        },
+        {
+          "name": "Firmware Type (source)",
+          "type": "string"
+        },
+        {
+          "name": "Secure Boot Status (source)",
+          "type": "string"
+        },
+        {
+          "name": "Last Reboot (source)",
+          "type": "string"
+        },
+        {
+          "name": "Last Reboot Source",
+          "type": "string"
+        },
+        {
+          "name": "Last Reboot Time Basis",
+          "type": "string"
+        },
+        {
+          "name": "Last Reboot UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Days Since Last Reboot",
+          "type": "int64"
+        },
+        {
+          "name": "Reboot Age Basis",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
       "table": "Mailbox Evidence",
       "file": "MailboxEvidence.csv",
       "uniqueKey": [],
