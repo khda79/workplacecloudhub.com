@@ -1,0 +1,263 @@
+{
+  "SourceCommit": "09d109efd639b8d5cdfb98c6844064db36a8c2b3",
+  "CopiedUtc": "2026-10-24T20:04:20.0227409Z",
+  "Files": [
+    {
+      "Source": "SmartM365/Devices/IntuneHybridJoinToolkit/Scripts/SmartM365-Invoke-IntuneHybridJoinRepair.ps1",
+      "SourceGitBlob": "4de8edf45514b0e800384310895e01d193cd1dd1",
+      "SourceSha256": "19E2C690CA4540706EF5A6A65B477E4E461C2BA8F32054897012A08D86D2579D",
+      "SourceVersion": "2.10.40",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/HybridJoin/Scripts/SmartM365-Invoke-EndpointMigration-HybridJoin.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM365-Invoke-Windows11UpgradeRepair.ps1",
+      "SourceGitBlob": "fc70d05b5266c604cc4667d8c71634089a9f7e98",
+      "SourceSha256": "53C8E49E3DC57E718AFAA2BF162DEF5DBC82D65C19D825180D04E35CB47962DA",
+      "SourceVersion": "0.1.59",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/Scripts/SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/Scripts/New-SmartM365SetupMediaManifest.ps1",
+      "SourceGitBlob": "ee12ee47e9831d78f873364969d9fa69fdfcea7d",
+      "SourceSha256": "5060F12D102DC165FB26DF9A0021C6730E10F34B6E5C27997D55679DA3CEBDE0",
+      "SourceVersion": "1.0.1",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/Scripts/SmartM365-EndpointMigration-New-SetupMediaManifest.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/IntuneHybridJoinToolkit/Scripts/SmartM365-IntuneHybridJoinRepair-New-AutomaticLot.ps1",
+      "SourceGitBlob": "8e4bfb0b9e9fdcbe662f81ee080b546ad814acaa",
+      "SourceSha256": "A43B0952084D4D7A092010D4609D0A31675BA21143A8A018B21E0A866259F00D",
+      "SourceVersion": "1.0.2",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/HybridJoin/Scripts/SmartM365-EndpointMigration-HybridJoin-New-AutomaticWave.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM365-Windows11Upgrade-New-AutomaticLot.ps1",
+      "SourceGitBlob": "088b49001db1ee5289883fb357cec755d876e302",
+      "SourceSha256": "CC23CB3CFB91B641D21141EBA2F8D66A274448F4C6FEF1FB67CB1B6F9BE83165",
+      "SourceVersion": "1.3.2",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/Scripts/SmartM365-EndpointMigration-Windows11Upgrade-New-AutomaticWave.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM365-Windows11Upgrade-Export-ADDevicesCsv.ps1",
+      "SourceGitBlob": "4df3d79492d993bd6a0ba6edeefb832b67f31b12",
+      "SourceSha256": "A057C2466062A98F2A3A6A0FAB9D53DB608C1500E1597CE1CEC3E257CEA9D083",
+      "SourceVersion": "1.0.0",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM365-Windows11Upgrade-Export-IntuneDevicesCsv.ps1",
+      "SourceGitBlob": "7df54f87e8c20fb21cb39961dc63aceb84b8ff89",
+      "SourceSha256": "55753B971A139BED1D77903B36C3D496E6D26AE3EC09F840D4B1FCC251E24374",
+      "SourceVersion": "1.2.0",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/IntuneHybridJoinToolkit/Scripts/SmartM365-IntuneHybridJoinRepair-Export-EntraDevicesCsv.ps1",
+      "SourceGitBlob": "7f3587ddea5a30f07a7acb7f46f8e7b2fb797ff4",
+      "SourceSha256": "41E1DB2443D16D447BD64B592909F0B4F3E345F1B3ADCC0F82DC112C92BE8485",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/SmartM365-EndpointMigration-Export-EntraDevicesCsv.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/IntuneHybridJoinToolkit/Scripts/SmartM365-IntuneHybridJoinRepair-Export-AutomaticGraphInventories.ps1",
+      "SourceGitBlob": "3660917e01500b6967b6d9350c14f27614775c36",
+      "SourceSha256": "670F2F2ED455BDC380E2A171A5BFCB43205C7570450985F9D82822A513178C54",
+      "SourceVersion": "1.0.0",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Build-AllSmartM365Windows11IntunePackages.ps1",
+      "SourceGitBlob": "df6a3e80ab7d700efd131732992e3b7e03a3c5ad",
+      "SourceSha256": "E16DEE5DB9144352BED3D8D35F6E91162AC061D706C135070DF27DFD89A39165",
+      "SourceVersion": "1.0.0",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/IntuneWin32/SmartM365-EndpointMigration-Build-AllWindows11IntunePackages.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Build-SmartM365Windows11IntunePackage.ps1",
+      "SourceGitBlob": "d8be484cbeb165d5eef941deea7e30249d73c594",
+      "SourceSha256": "3F3F8D57F11D14EB3B2944A0E74241011583A5327B3A23F9653ED846AEDE7AB4",
+      "SourceVersion": "1.0.2",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/IntuneWin32/SmartM365-EndpointMigration-Build-Windows11IntunePackage.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Publish-AllSmartM365Windows11IntuneApp.ps1",
+      "SourceGitBlob": "2f06493439fb9e60b973f6b287d03fb579623b6c",
+      "SourceSha256": "CE6497BE6B7D06137F778F2D78998F889AC232A55830898B283260710175459B",
+      "SourceVersion": "1.0.3",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/IntuneWin32/SmartM365-EndpointMigration-Publish-AllWindows11IntuneApps.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Publish-SmartM365Windows11IntuneApp.ps1",
+      "SourceGitBlob": "611b7254b9e6b5349b9145a7b9448c7b2474bc9d",
+      "SourceSha256": "68342D507AF3293520B9022778AFEC496B9A3AD1C4182734CB95BBBB90E70855",
+      "SourceVersion": "1.0.17",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/IntuneWin32/SmartM365-EndpointMigration-Publish-Windows11IntuneApp.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/README.md",
+      "SourceGitBlob": "26de8c00c5b6140c171dbce812a48da9e50559a5",
+      "SourceSha256": "049FAB56FA5AB1EE43C5C7B7AC2CFEFE679690D619A4B072DB2ECDA35604BE90",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/IntuneWin32/README.md",
+      "SignatureRemovedForModification": false
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Source/Detect-Template.ps1",
+      "SourceGitBlob": "282428d419c3551de382d21e67ef6201fa71f9b5",
+      "SourceSha256": "F4D5FBEBE5FBF421A58525D36EEA0EA86E0C8C84BAFA25ECCCC80DAB5C4D0EB6",
+      "SourceVersion": "1.0.2",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/IntuneWin32/Source/SmartM365-EndpointMigration-Detect-Template.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Source/Install.ps1",
+      "SourceGitBlob": "a42d7fc6b518da693600514ba2758d3f464dfa22",
+      "SourceSha256": "C77E3DA5769300AB8AD2EE717D5FD1AFCDB6B61654B10E06DCE409C8B012626F",
+      "SourceVersion": "1.0.9",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/IntuneWin32/Source/SmartM365-EndpointMigration-Install.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Source/Run-IntuneUpgrade.ps1",
+      "SourceGitBlob": "7140e37666a5bc02f1fbedf984c8aca0cabc63b8",
+      "SourceSha256": "B9E75CF115E22961F3C943B67DA528E235707D347C8BA87A10796D4E1B188D7C",
+      "SourceVersion": "1.0.11",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/IntuneWin32/Source/SmartM365-EndpointMigration-Run-IntuneUpgrade.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Source/SmartM365-SetupMediaIntegrity.ps1",
+      "SourceGitBlob": "f8df0ead26fe199b997ec91e80878d9e4cd605e2",
+      "SourceSha256": "78777D8E021D9B9F6189C72423C6556063D6BD4607309B351D71E65EF2BDF892",
+      "SourceVersion": "1.0.0",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/IntuneWin32/Source/SmartM365-EndpointMigration-SetupMediaIntegrity.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/SetupSource/.gitignore",
+      "SourceGitBlob": "7c9d611b59248fe868a3cf04d80ded04fee40d8e",
+      "SourceSha256": "AAE815B9313EF60FB99D51BEC324F3DE1CEA5256D6BBF58A660578B3E2D5815C",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/SetupSource/.gitignore",
+      "SignatureRemovedForModification": false
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/SetupSource/README.md",
+      "SourceGitBlob": "25280699661249c1349a7d3d45b0511ddc71d6a0",
+      "SourceSha256": "16224962035C191563F42D951C976678AA7FDDA2DE1C146ADE59DA686B779942",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/SetupSource/README.md",
+      "SignatureRemovedForModification": false
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/SetupSourceGates/.gitignore",
+      "SourceGitBlob": "7c9d611b59248fe868a3cf04d80ded04fee40d8e",
+      "SourceSha256": "385638635CC622D30DDEAEE23DB477E481354E4A96C60905D3B77BDB4F6A7A8D",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/SetupSourceGates/.gitignore",
+      "SignatureRemovedForModification": false
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/SetupSourceGates/README.md",
+      "SourceGitBlob": "fdea579224bfb51e744c6954099ce82a3cd9b433",
+      "SourceSha256": "692A79CB77E4B516352AA5B54CF7014A2D755165252510F0431483BB737BD3A0",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/SetupSourceGates/README.md",
+      "SignatureRemovedForModification": false
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/SetupSourceMap.csv.template",
+      "SourceGitBlob": "5116e98fbb490dc797e8f377bb04f2bdeb05ac13",
+      "SourceSha256": "E67DAFF6BC3F4D83AF3B3E99C2BE2E03926C62629B47B3C0887E03AE02D61406",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Campaigns/Windows11Upgrade/Templates/SetupSourceMap.csv.template",
+      "SignatureRemovedForModification": false
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/SmartM365.GuiSplash.ps1",
+      "SourceGitBlob": "577c2e8fded883efbca1a84e46ec1b6f75131d50",
+      "SourceSha256": "66C0D32A7360AC71A0ADA870D485EF1B0DE4D7CB84C433EEA993A085614D2561",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/SmartM365.GuiSplash.ps1",
+      "SignatureRemovedForModification": true,
+      "Modification": "Comment-based header (.SYNOPSIS, .VERSION 1.0.0) added for the repository script standards; code unchanged."
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/SmartM365.GuiUpdateCheck.ps1",
+      "SourceGitBlob": "e2301d27e08aa6e88f22ed01ace8199e577c5bd6",
+      "SourceSha256": "385316C86DE77F14256489AB1A25539B63C735F51E07C6C79F0D85EAD6AB3169",
+      "SourceVersion": "1.0.0",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/SmartM365.GuiUpdateCheck.ps1",
+      "SignatureRemovedForModification": false
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/SmartM365.GuiUpdateCheck.psd1",
+      "SourceGitBlob": "d7b9671141299acd9e0ebbe10e255d859ddcc593",
+      "SourceSha256": "169B653A01F302006B8ED3E18D9A709B74320A6EBB18551DFCE16FB57A793A34",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/SmartM365.GuiUpdateCheck.psd1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM365.GuiDemo.ps1",
+      "SourceGitBlob": "bd95fa58134f8226cc14a4382beb67526c617392",
+      "SourceSha256": "5D42237BC4D7C70CFB3BD59FD52A9D4F7800E51F3006C695357290032184DBCE",
+      "SourceVersion": "1.0.0",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/SmartM365.GuiDemo.ps1",
+      "SignatureRemovedForModification": false
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM365.GuiDemo.Reports.ps1",
+      "SourceGitBlob": "68c98379379810ff64d5aaccbe7ced3a2ac0dda7",
+      "SourceSha256": "B79913FF1C1FB61418B8A9CCB132F3E7D7E198B946A16FDEC8C46FBBBF26D655",
+      "SourceVersion": "1.0.0",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/SmartM365.GuiDemo.Reports.ps1",
+      "SignatureRemovedForModification": false
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM365-LotLauncher-Demo.ps1",
+      "SourceGitBlob": "37d2408645c50e6cd3ff27d519daf01a4a3c8060",
+      "SourceSha256": "CDF81BC1EAC6C0F1BBDEA51D3C38AE9648C3095618DB8BB34286559C15272037",
+      "SourceVersion": "1.0.0",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/SmartM365-EndpointMigration-Demo.ps1",
+      "SignatureRemovedForModification": true
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/WorkplaceCloudHub.ico",
+      "SourceGitBlob": "ac8879622592e0d55a908b0602269eadf87fc295",
+      "SourceSha256": "A1E829E9D291C97E7456010AB1622D4EF9FAB707BBC5DE258B0533C6B03B8AB8",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Assets/WorkplaceCloudHub.ico",
+      "SignatureRemovedForModification": false
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/WorkplaceCloudHub-lockup-WPF.png",
+      "SourceGitBlob": "750b95302b05d3f64eb69047a5797e871abc9d0b",
+      "SourceSha256": "E1F249F1E9FFDF01BB470D1887252D51CF4158CB93C1DF90A57D5E94FF857165",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Assets/WorkplaceCloudHub-lockup-WPF.png",
+      "SignatureRemovedForModification": false
+    },
+    {
+      "Source": "SmartM365/Devices/Windows11UpgradeToolkit/WorkplaceCloudHub.ico",
+      "SourceGitBlob": "ac8879622592e0d55a908b0602269eadf87fc295",
+      "SourceSha256": "A1E829E9D291C97E7456010AB1622D4EF9FAB707BBC5DE258B0533C6B03B8AB8",
+      "SourceVersion": "",
+      "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/WorkplaceCloudHub.ico",
+      "SignatureRemovedForModification": false
+    }
+  ]
+}

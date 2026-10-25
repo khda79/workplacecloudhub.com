@@ -1,0 +1,5 @@
+ScopeType,ScopeValue,SetupSourcePath,Priority
+Subnet,10.10.0.0/16,\\srv-paris\SEMT-SetupSource$\Windows11Upgrade\Windows11-24H2,10
+IPPrefix,10.20.,\\srv-lyon\SEMT-SetupSource$\Windows11Upgrade\Windows11-24H2,20
+ComputerPrefix,PC-MRS-,\\srv-marseille\SEMT-SetupSource$\Windows11Upgrade\Windows11-24H2,30
+Default,*,\\srv-central\SEMT-SetupSource$\Windows11Upgrade\Windows11-24H2,100

@@ -1,0 +1,6466 @@
+<#
+.SYNOPSIS
+    Diagnoses and optionally repairs Windows 10 devices that should move to Windows 11.
+
+.DESCRIPTION
+    Windows11Upgrade campaign endpoint of the Smart Endpoint Migration Toolkit. Autonomous
+    single-file script designed to run locally or as SYSTEM through PsExec Waves.
+    Provenance: copied from Windows11UpgradeToolkit SmartM365-Invoke-Windows11UpgradeRepair.ps1
+    0.1.59 (see Docs\PROVENANCE.json.txt).
+
+    Product additions:
+    - One Smart Endpoint Migration Toolkit operation at a time per computer (shared target guard).
+    - Previous toolkits are inspected read-only; a real active legacy operation stops the run.
+    - Windows 11 media left by the previous toolkit is reused before any large copy: idle,
+      unmanaged media is moved on the same volume (validated, rolled back on failure); media
+      still owned by a legacy Intune Win32 package is reused in place and never moved or cleaned.
+    - Each attempt writes State\Results\<CorrelationId>.json for the technician worker.
+
+    By default the script is diagnostic-only. Corrective actions require explicit switches.
+    Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
+
+.VERSION
+    1.0.0
+.NOTES
+    Author: https://github.com/khda79/workplacecloudhub.com
+#>
+
+#requires -Version 5.1
+
+[CmdletBinding()]
+param(
+    [switch]$IgnoreRunGuard,
+    [ValidateRange(0, 168)][int]$RunGuardHours = 3,
+
+    [switch]$AuditOnly,
+    [switch]$AllowPolicyRepair,
+    [switch]$AllowWUReset,
+    [switch]$AllowForceUpgrade,
+    [switch]$AllowSetupUpgrade,
+    [switch]$DirectSetupUpgrade,
+    [switch]$AllowReboot,
+    [switch]$AllowSetupCompletionRebootWhenNoUser,
+    [switch]$AllowSetupProfileRepair,
+    [switch]$ScheduleRetryAfterReboot,
+    [switch]$RetryAfterRebootTaskRun,
+    [ValidateRange(1, 30)][int]$RetryAfterRebootMaxAttempts = 3,
+    [ValidateRange(0, 3600)][int]$RetryAfterRebootDelaySeconds = 300,
+    [ValidateRange(0, 3650)][int]$ForceRequiredRebootWhenUptimeOverDays = 7,
+    [switch]$SkipVirtualMachines,
+    [switch]$AllowDiskCleanup,
+    [switch]$AllowAdvancedDiskCleanup,
+    [switch]$AllowDismComponentCleanup,
+
+    [string]$SetupSourcePath,
+    [string]$SetupSourceMapPath,
+    [ValidateSet('LocalCache','Share','Auto')]
+    [string]$SetupExecutionMode = 'LocalCache',
+    [string]$SetupMediaId = 'Win11',
+    [string]$SetupLanguage = 'MatchSystem',
+    [ValidateSet('Enable','Disable','NoDrivers','NoLCU','NoDriversNoLCU')]
+    [string]$SetupDynamicUpdate = 'Disable',
+    [switch]$SkipSetupMediaPreCopy,
+    [string]$SetupCacheRoot = 'C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade\SetupMedia',
+    [ValidateRange(0, 100)][int]$SetupSourceCandidateLimit = 5,
+    [ValidateRange(1, 10)][int]$SetupSourceValidationRetries = 3,
+    [ValidateRange(0, 300)][int]$SetupSourceValidationRetryDelaySeconds = 10,
+    [ValidateRange(0, 10000)][int]$SetupMediaCopyIpGapMilliseconds = 0,
+    [ValidateRange(0, 1440)][int]$SetupMediaCopyTimeoutMinutes = 180,
+    [ValidateRange(0, 86400)][int]$SetupMediaCopyJitterSeconds = 0,
+    [ValidateRange(0, 500)][int]$SetupSourceConcurrencyLimit = 0,
+    [ValidateRange(1, 1440)][int]$SetupSourceConcurrencyLeaseMinutes = 240,
+    [string]$SetupSourceConcurrencyGateRoot,
+    [ValidateRange(0, 500)][int]$SetupSubnetConcurrencyLimit = 0,
+    [string]$SetupSubnetPrefixLength = 'Auto',
+    [ValidateRange(1, 1440)][int]$SetupSubnetConcurrencyLeaseMinutes = 90,
+    [string]$SetupSubnetConcurrencyGateRoot,
+    [ValidateRange(10, 200)][int]$MinimumFreeDiskGB = 32,
+    [ValidateRange(0, 365)][int]$DiskCleanupTempFileMinAgeDays = 1,
+    [ValidateRange(0, 365)][int]$DiskCleanupLogRetentionDays = 14,
+    [ValidateRange(0, 365)][int]$DiskCleanupUpgradeFolderMinAgeDays = 14,
+    [ValidateRange(0, 365)][int]$DiskCleanupBrowserCacheMinAgeDays = 0,
+    [ValidateRange(0, 86400)][int]$RebootDelaySeconds = 180,
+    [ValidateRange(30, 3600)][int]$SetupProcessHeartbeatSeconds = 300,
+    [ValidateRange(0, 1440)][int]$SetupProcessTimeoutMinutes = 0,
+    [ValidateRange(1, 1000)][int]$LocalFileRetentionCount = 10,
+
+    [string]$DataRoot = 'C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade',
+    [string]$CorrelationId,
+    [ValidateSet('Block','Warn')][string]$LegacyActivityPolicy = 'Block',
+    [switch]$ReuseLegacySetupMedia,
+    [switch]$AllowSetupMediaDuplication,
+    [string]$SetupMediaPath
+)
+
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+
+# Endpoint scripts run in Windows PowerShell 5.1 (the worker and the Intune runner start them with
+# powershell.exe). Any other engine is refused here, before any state is written.
+if ([string]$PSVersionTable['PSEdition'] -eq 'Core' -or $PSVersionTable['PSVersion'] -lt [version]'5.1') {
+    Write-Output ('FINAL_STATUS=UNSUPPORTED_POWERSHELL_HOST; EXIT_CODE=3; NEXT_ACTION=RUN_WITH_WINDOWS_POWERSHELL_5_1; CORRELATION_ID={0}; DETAIL={1} {2} is not supported; run this script with powershell.exe (Windows PowerShell 5.1).' -f [string]$CorrelationId,[string]$PSVersionTable['PSEdition'],[string]$PSVersionTable['PSVersion'])
+    exit 3
+}
+$script:ScriptName = 'SEMT_Windows11Upgrade'
+$script:ScriptVersion = '1.0.0'
+$script:SemtCampaign = 'Windows11Upgrade'
+$script:RunId = Get-Date -Format 'yyyyMMdd-HHmmss'
+$script:ScriptStartUtc = (Get-Date).ToUniversalTime()
+$script:ComputerName = $env:COMPUTERNAME
+$script:EndpointScriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+$script:LogDir = Join-Path $DataRoot 'Logs'
+$script:OutputDir = Join-Path $DataRoot 'Output'
+$script:SetupLogDir = Join-Path $script:LogDir 'SetupUpgrade'
+$script:InputDir = Join-Path $DataRoot 'Input'
+$script:StateDir = Join-Path $DataRoot 'State'
+$script:LogPath = Join-Path $script:LogDir ("{0}_{1}_{2}.log" -f $script:ScriptName,$script:ComputerName,$script:RunId)
+$script:CsvPath = Join-Path $script:OutputDir ("SEMT_Windows11Upgrade_{0}_{1}.csv" -f $script:ComputerName,$script:RunId)
+$script:LastRunPath = Join-Path $DataRoot 'LastRun.json'
+$script:RetryAfterRebootTaskName = 'SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot'
+if ([string]::IsNullOrWhiteSpace($CorrelationId)) { $CorrelationId = [guid]::NewGuid().ToString('N') }
+elseif ($RetryAfterRebootTaskRun) { $CorrelationId = '{0}-R{1}' -f $CorrelationId,(Get-Date -Format 'yyyyMMddHHmmss') }
+$script:SemtTargetGuardStatus = ''
+$script:SemtLegacyActivityStatus = ''
+$script:SemtLegacyActivityDetail = ''
+$script:SemtLegacyMediaDecision = $null
+$script:SetupMediaReuseDecision = ''
+# The retry task runs as SYSTEM: its runner, its state (script path and arguments) and the endpoint
+# copy it starts live under Program Files, never under ProgramData.
+$script:RetryAfterRebootProgramDir = Join-Path $env:ProgramFiles 'WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade\RetryAfterReboot'
+$script:RetryAfterRebootStatePath = Join-Path $script:RetryAfterRebootProgramDir 'RetryAfterReboot.json'
+$script:RetryAfterRebootRunnerPath = Join-Path $script:RetryAfterRebootProgramDir 'RetryAfterRebootRunner.ps1'
+$script:RetryAfterRebootScriptPath = Join-Path $script:RetryAfterRebootProgramDir 'SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1'
+$script:SetupMediaManifestFileName = 'SmartM365-SetupMediaManifest.sha256.csv'
+
+function New-SmartDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        New-Item -ItemType Directory -Path $Path -Force -ErrorAction Stop | Out-Null
+    }
+}
+
+function Write-SmartLog {
+    param(
+        [Parameter(Mandatory = $true)][string]$Message,
+        [ValidateSet('INFO','WARN','ERROR')][string]$Level = 'INFO'
+    )
+
+    New-SmartDirectory -Path $script:LogDir
+    foreach ($line in ($Message -split "`r?`n")) {
+        $entry = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Level,$line
+        Add-Content -LiteralPath $script:LogPath -Value $entry -Encoding UTF8
+    }
+}
+
+#region SEMT trusted program folder v1
+# Scripts that run as SYSTEM (scheduled tasks, Intune runner, retry after reboot) are installed
+# under %ProgramFiles%, which only administrators can write. ProgramData keeps only data (logs,
+# state, results, setup media). The same region is copied unchanged into both endpoint scripts,
+# the Intune installer and the Intune runner (a test checks that all copies are identical).
+#
+# A folder is trusted when it and every item below it are owned by SYSTEM, Administrators or
+# TrustedInstaller and no other principal can write, append, delete, change permissions or take
+# ownership. Permissions that cannot be read are never trusted. An existing folder that is not
+# trusted is never repaired automatically: the operation stops (SEMT_PROGRAM_FOLDER_UNTRUSTED).
+
+$script:SemtProgramTrustedSids = @('S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+$script:SemtProgramFolderSddl = 'O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)'
+
+function Get-SemtProgramRoot {
+    param([Parameter(Mandatory = $true)][string]$Campaign, [string]$ProgramFilesPath = $env:ProgramFiles)
+    if ([string]::IsNullOrWhiteSpace($ProgramFilesPath)) { throw 'SEMT_PROGRAM_FOLDER_UNTRUSTED: the Program Files folder is unknown.' }
+    return (Join-Path $ProgramFilesPath ('WCH\SmartM365\SmartEndpointMigrationToolkit\{0}' -f $Campaign))
+}
+
+function Test-SemtTrustedProgramPath {
+    # Read-only. State: Trusted, Untrusted (proven) or Unreadable (not proven either way).
+    param([Parameter(Mandatory = $true)][string]$Path, [switch]$Recurse)
+    # Write data/append/extended attributes, delete child, delete, WRITE_DAC, WRITE_OWNER and the
+    # generic write/all bits that inherit-only entries may carry.
+    $writeMask = 0x00000002 -bor 0x00000004 -bor 0x00000010 -bor 0x00000040 -bor 0x00010000 -bor 0x00040000 -bor 0x00080000 -bor 0x40000000 -bor 0x10000000
+    try {
+        $items = @(Get-Item -LiteralPath $Path -Force -ErrorAction Stop)
+        if ($Recurse -and $items[0].PSIsContainer) { $items += @(Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction Stop) }
+    }
+    catch { return [pscustomobject]@{ Trusted = $false; State = 'Unreadable'; Detail = ('Program folder could not be read: {0}' -f $_.Exception.Message) } }
+    foreach ($item in $items) {
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return [pscustomobject]@{ Trusted = $false; State = 'Untrusted'; Detail = ('Reparse point in the program folder: {0}' -f $item.FullName) } }
+        try {
+            $acl = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
+            $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+            $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+        }
+        catch { return [pscustomobject]@{ Trusted = $false; State = 'Unreadable'; Detail = ('Permissions of {0} could not be read: {1}' -f $item.FullName,$_.Exception.Message) } }
+        if ($null -eq $owner) { return [pscustomobject]@{ Trusted = $false; State = 'Unreadable'; Detail = ('Owner of {0} could not be read.' -f $item.FullName) } }
+        if ($script:SemtProgramTrustedSids -notcontains $owner.Value) { return [pscustomobject]@{ Trusted = $false; State = 'Untrusted'; Detail = ('Owner {0} of {1} is not SYSTEM, Administrators or TrustedInstaller.' -f $owner.Value,$item.FullName) } }
+        foreach ($rule in $rules) {
+            if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+            if (([int64]$rule.FileSystemRights -band $writeMask) -eq 0) { continue }
+            $sid = $rule.IdentityReference.Value
+            if ($script:SemtProgramTrustedSids -contains $sid) { continue }
+            # CREATOR OWNER only applies to items created later, by principals that can already write.
+            if ($sid -eq 'S-1-3-0' -and ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
+            return [pscustomobject]@{ Trusted = $false; State = 'Untrusted'; Detail = ('{0} can modify {1}.' -f $sid,$item.FullName) }
+        }
+    }
+    return [pscustomobject]@{ Trusted = $true; State = 'Trusted'; Detail = '' }
+}
+
+function Set-SemtProgramFolderAcl {
+    # Owner Administrators; protected DACL: SYSTEM and Administrators full control, Users read and
+    # execute. Every other entry is removed. Requires an elevated or SYSTEM context.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $security = New-Object System.Security.AccessControl.DirectorySecurity
+    $security.SetSecurityDescriptorSddlForm($script:SemtProgramFolderSddl)
+    Set-Acl -LiteralPath $Path -AclObject $security -ErrorAction Stop
+}
+
+function Initialize-SemtTrustedProgramFolder {
+    # Creates the folder chain below Program Files with a protected ACL, or verifies an existing
+    # chain. Throws SEMT_PROGRAM_FOLDER_UNTRUSTED when any component is not trusted afterwards.
+    param([Parameter(Mandatory = $true)][string]$Path, [string]$BasePath = $env:ProgramFiles)
+    $base = [System.IO.Path]::GetFullPath($BasePath).TrimEnd('\')
+    $target = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+    if (-not $target.StartsWith($base + '\', [System.StringComparison]::OrdinalIgnoreCase)) { throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} is not below {1}.' -f $target,$base) }
+    $baseTrust = Test-SemtTrustedProgramPath -Path $base
+    if (-not $baseTrust.Trusted) { throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} ({1}) {2}' -f $base,$baseTrust.State,$baseTrust.Detail) }
+    $current = $base
+    foreach ($segment in @($target.Substring($base.Length + 1).Split('\'))) {
+        $current = Join-Path $current $segment
+        if (-not (Test-Path -LiteralPath $current)) {
+            New-Item -ItemType Directory -Path $current -ErrorAction Stop | Out-Null
+            try { Set-SemtProgramFolderAcl -Path $current }
+            catch {
+                # A folder created here that cannot be protected is removed again.
+                Remove-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+                throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: permissions of {0} could not be set: {1}' -f $current,$_.Exception.Message)
+            }
+        }
+        elseif (-not (Test-Path -LiteralPath $current -PathType Container)) { throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} exists and is not a folder.' -f $current) }
+        $trust = Test-SemtTrustedProgramPath -Path $current -Recurse:($current -eq $target)
+        if (-not $trust.Trusted) { throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} ({1}) {2}' -f $current,$trust.State,$trust.Detail) }
+    }
+    return $target
+}
+
+function Install-SemtTrustedProgramFile {
+    # Copies through a staging name inside the trusted folder, verifies the SHA256 against the
+    # source, renames, then verifies the hash and the permissions of the installed file.
+    param([Parameter(Mandatory = $true)][string]$Source, [Parameter(Mandatory = $true)][string]$Destination)
+    $expected = (Get-FileHash -LiteralPath $Source -Algorithm SHA256 -ErrorAction Stop).Hash
+    $folder = Split-Path -Path $Destination -Parent
+    $staging = Join-Path $folder ('.{0}.{1}.tmp' -f (Split-Path -Path $Destination -Leaf),([guid]::NewGuid().ToString('N')))
+    try {
+        Copy-Item -LiteralPath $Source -Destination $staging -ErrorAction Stop
+        if ((Get-FileHash -LiteralPath $staging -Algorithm SHA256).Hash -ne $expected) { throw ('SEMT_PROGRAM_FILE_HASH_MISMATCH: staged copy of {0} differs from the source.' -f $Source) }
+        Move-Item -LiteralPath $staging -Destination $Destination -Force -ErrorAction Stop
+    }
+    finally { if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Force -ErrorAction SilentlyContinue } }
+    $actual = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
+    if ($actual -ne $expected) { throw ('SEMT_PROGRAM_FILE_HASH_MISMATCH: {0} Expected={1}; Actual={2}' -f $Destination,$expected,$actual) }
+    $trust = Test-SemtTrustedProgramPath -Path $Destination
+    if (-not $trust.Trusted) { throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} ({1}) {2}' -f $Destination,$trust.State,$trust.Detail) }
+    return [pscustomobject]@{ Path = $Destination; Sha256 = $actual }
+}
+
+# ProgramData data folders (logs, state, results, setup media whose setup.exe runs as SYSTEM).
+# Scope: only the SEMT components (SmartEndpointMigrationToolkit and the folders below it) are
+# ever changed. The shared parents above it (WCH, WCH\SmartM365), used by other products and by
+# the legacy caches reused in place, are verified read-only and never changed; when they are not
+# protected, the operation stops. A read-only pass checks the whole scope before the first
+# change: shared parents, SEMT components, the provenance of existing content and, when a
+# permission replacement is planned, every reparse point and hard link below it.
+# A permission replacement never makes existing content trusted: an item that another principal
+# could modify, or any content of a SEMT component that was not protected, has no verified
+# provenance; it is refused and left unchanged (SEMT_DATA_FOLDER_UNTRUSTED), never adopted.
+$script:SemtDataProductFolderName = 'SmartEndpointMigrationToolkit'
+
+function Get-SemtHardLinkCount {
+    # Number of names of a file; -1 when it cannot be read.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $fsutil = Join-Path $env:SystemRoot 'System32\fsutil.exe'
+    $output = @(& $fsutil hardlink list $Path 2>$null)
+    if ($LASTEXITCODE -ne 0) { return -1 }
+    return @($output | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count
+}
+
+function Assert-SemtNoLinkedItem {
+    # Read-only. Before a DACL replacement propagates inheritance below Path: no reparse point
+    # (never followed) and only files with a single name.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $pending = New-Object System.Collections.Generic.Queue[string]
+    $pending.Enqueue([System.IO.Path]::GetFullPath($Path))
+    while ($pending.Count -gt 0) {
+        $folder = $pending.Dequeue()
+        try { $children = @(Get-ChildItem -LiteralPath $folder -Force -ErrorAction Stop) }
+        catch { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} could not be listed: {1}; nothing was changed.' -f $folder,$_.Exception.Message) }
+        foreach ($child in $children) {
+            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: reparse point {0}; nothing was changed.' -f $child.FullName) }
+            if ($child.PSIsContainer) { $pending.Enqueue($child.FullName); continue }
+            $links = Get-SemtHardLinkCount -Path $child.FullName
+            if ($links -ne 1) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} has {1} hard link name(s); nothing was changed.' -f $child.FullName,$links) }
+        }
+    }
+}
+
+function Test-SemtCanonicalFolderAcl {
+    # True when the folder already has exactly the protected ACL that this region sets.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    try {
+        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+        if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne 'S-1-5-32-544') { return $false }
+        if (-not $acl.AreAccessRulesProtected) { return $false }
+        $rules = @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { '{0}:{1}:{2}:{3}' -f $_.IdentityReference.Value,[int64]$_.FileSystemRights,[int]$_.InheritanceFlags,$_.AccessControlType })
+        $expected = @('S-1-5-18:2032127:3:Allow','S-1-5-32-544:2032127:3:Allow','S-1-5-32-545:1179817:3:Allow')
+        return (@($rules | Sort-Object) -join '|') -eq (@($expected | Sort-Object) -join '|')
+    }
+    catch { return $false }
+}
+
+function Test-SemtTrustedSharedParent {
+    # Read-only; a shared parent is never changed. Trusted when its owner is SYSTEM,
+    # Administrators or TrustedInstaller and no other principal can delete it, delete its
+    # children, change its permissions or take ownership. Creating new items (other products) is
+    # allowed: it cannot alter the existing SEMT folder below.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    # Delete child, delete, WRITE_DAC, WRITE_OWNER and generic all.
+    $mask = 0x00000040 -bor 0x00010000 -bor 0x00040000 -bor 0x00080000 -bor 0x10000000
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        $acl = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
+        $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+        $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+    }
+    catch { return [pscustomobject]@{ Trusted = $false; State = 'Unreadable'; Detail = ('Shared folder {0} could not be read: {1}' -f $Path,$_.Exception.Message) } }
+    if (-not $item.PSIsContainer) { return [pscustomobject]@{ Trusted = $false; State = 'Untrusted'; Detail = ('{0} is not a folder.' -f $item.FullName) } }
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return [pscustomobject]@{ Trusted = $false; State = 'Untrusted'; Detail = ('{0} is a reparse point.' -f $item.FullName) } }
+    if ($null -eq $owner) { return [pscustomobject]@{ Trusted = $false; State = 'Unreadable'; Detail = ('Owner of {0} could not be read.' -f $item.FullName) } }
+    if ($script:SemtProgramTrustedSids -notcontains $owner.Value) { return [pscustomobject]@{ Trusted = $false; State = 'Untrusted'; Detail = ('Owner {0} of {1} is not SYSTEM, Administrators or TrustedInstaller.' -f $owner.Value,$item.FullName) } }
+    foreach ($rule in $rules) {
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+        # Inherit-only entries apply to new children only, not to this folder.
+        if (($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
+        if (([int64]$rule.FileSystemRights -band $mask) -eq 0) { continue }
+        if ($script:SemtProgramTrustedSids -contains $rule.IdentityReference.Value) { continue }
+        return [pscustomobject]@{ Trusted = $false; State = 'Untrusted'; Detail = ('{0} can delete, rename or change the permissions of {1}.' -f $rule.IdentityReference.Value,$item.FullName) }
+    }
+    return [pscustomobject]@{ Trusted = $true; State = 'Trusted'; Detail = '' }
+}
+
+function Assert-SemtDataFolderAnchor {
+    # The data folder must be below the base inside a SmartEndpointMigrationToolkit folder, and
+    # the base and its parents must not be reparse points.
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$BasePath)
+    $base = [System.IO.Path]::GetFullPath($BasePath).TrimEnd('\')
+    $target = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+    if (-not $target.StartsWith($base + '\', [System.StringComparison]::OrdinalIgnoreCase)) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} is not below {1}.' -f $target,$base) }
+    $segments = @($target.Substring($base.Length + 1).Split('\'))
+    $productIndex = -1
+    for ($i = 0; $i -lt $segments.Count; $i++) { if ($segments[$i] -ieq $script:SemtDataProductFolderName) { $productIndex = $i; break } }
+    if ($productIndex -lt 0 -or $productIndex -ge ($segments.Count - 1)) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} is not a campaign folder below {1}.' -f $target,$script:SemtDataProductFolderName) }
+    $current = $base
+    while (-not [string]::IsNullOrWhiteSpace($current)) {
+        try { $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop }
+        catch { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} could not be read: {1}' -f $current,$_.Exception.Message) }
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} is a reparse point.' -f $current) }
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+        $current = $parent
+    }
+    return [pscustomobject]@{ Base = $base; Target = $target; Segments = $segments; ProductIndex = $productIndex }
+}
+
+function Get-SemtDataFolderPlan {
+    # Read-only pass over the whole scope. Returns one step per component (Keep, Create or
+    # Replace); throws SEMT_DATA_FOLDER_UNTRUSTED, with nothing changed, when the operation
+    # cannot be done within the SEMT scope or when existing content has no verified provenance.
+    param([Parameter(Mandatory = $true)]$Anchor)
+    $plan = New-Object System.Collections.Generic.List[object]
+    $current = $Anchor.Base
+    $missing = $false
+    for ($index = 0; $index -lt $Anchor.Segments.Count; $index++) {
+        $current = Join-Path $current $Anchor.Segments[$index]
+        $shared = $index -lt $Anchor.ProductIndex
+        if ($missing -or -not (Test-Path -LiteralPath $current)) {
+            $missing = $true
+            $plan.Add([pscustomobject]@{ Path = $current; Shared = $shared; Action = 'Create'; WasUntrusted = $false })
+            continue
+        }
+        try { $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop }
+        catch { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} could not be read: {1}; nothing was changed.' -f $current,$_.Exception.Message) }
+        if (-not $item.PSIsContainer) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} exists and is not a folder; nothing was changed.' -f $current) }
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} is a reparse point; nothing was changed.' -f $current) }
+        if ($shared) {
+            $trust = Test-SemtTrustedSharedParent -Path $current
+            if (-not $trust.Trusted) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: shared folder {0} ({1}) {2} It is used by other products and is never changed; nothing was changed.' -f $current,$trust.State,$trust.Detail) }
+            $plan.Add([pscustomobject]@{ Path = $current; Shared = $true; Action = 'Keep'; WasUntrusted = $false })
+            continue
+        }
+        $trust = Test-SemtTrustedProgramPath -Path $current
+        if ($trust.State -eq 'Unreadable') { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} (Unreadable) {1}; nothing was changed.' -f $current,$trust.Detail) }
+        if (-not $trust.Trusted) {
+            # Content of a SEMT folder that was not protected has no verified provenance.
+            try { $children = @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop) }
+            catch { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} could not be listed: {1}; nothing was changed.' -f $current,$_.Exception.Message) }
+            if ($children.Count -gt 0) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} was not protected ({1}) and is not empty; its content has no verified provenance and is not used; nothing was changed.' -f $current,$trust.Detail) }
+            $plan.Add([pscustomobject]@{ Path = $current; Shared = $false; Action = 'Replace'; WasUntrusted = $true })
+            continue
+        }
+        $action = if (Test-SemtCanonicalFolderAcl -Path $current) { 'Keep' } else { 'Replace' }
+        $plan.Add([pscustomobject]@{ Path = $current; Shared = $false; Action = $action; WasUntrusted = $false })
+    }
+    # Existing content must already be trusted, item by item: below the data root and, when a
+    # permission replacement is planned, everywhere it propagates to (other SEMT campaigns
+    # included), so that the replacement never makes untrusted content look trusted.
+    $firstReplace = @($plan | Where-Object { $_.Action -eq 'Replace' } | Select-Object -First 1)
+    $existing = @($plan | Where-Object { $_.Action -ne 'Create' -and -not $_.Shared })
+    $checkFrom = if ($firstReplace.Count -gt 0) { $firstReplace[0].Path } elseif (-not $missing) { $Anchor.Target } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($checkFrom)) {
+        $chain = @($existing | ForEach-Object { $_.Path })
+        $start = [array]::IndexOf([string[]]$chain, [string]$checkFrom)
+        for ($i = $start; $i -lt $chain.Count; $i++) {
+            try { $children = @(Get-ChildItem -LiteralPath $chain[$i] -Force -ErrorAction Stop) }
+            catch { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} could not be listed: {1}; nothing was changed.' -f $chain[$i],$_.Exception.Message) }
+            foreach ($child in $children) {
+                if ($i -lt ($chain.Count - 1) -and $child.FullName -ieq $chain[$i + 1]) { continue }
+                $trust = Test-SemtTrustedProgramPath -Path $child.FullName -Recurse
+                if (-not $trust.Trusted) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: existing content has no verified provenance and is not used ({0}) {1}; nothing was changed.' -f $trust.State,$trust.Detail) }
+            }
+        }
+    }
+    # A DACL replacement propagates inheritance below the folder: the whole subtree of the first
+    # replaced component is checked for reparse points and hard links before any change.
+    if ($firstReplace.Count -gt 0) { Assert-SemtNoLinkedItem -Path $firstReplace[0].Path }
+    return $plan
+}
+
+function Initialize-SemtTrustedDataFolder {
+    # Protects the SEMT data folder chain below ProgramData and verifies it. Throws
+    # SEMT_DATA_FOLDER_UNTRUSTED when it cannot be made trusted within the SEMT scope.
+    param([Parameter(Mandatory = $true)][string]$Path, [string]$BasePath = $env:ProgramData)
+    $anchor = Assert-SemtDataFolderAnchor -Path $Path -BasePath $BasePath
+    $plan = Get-SemtDataFolderPlan -Anchor $anchor
+    foreach ($step in $plan) {
+        if ($step.Action -eq 'Create') {
+            New-Item -ItemType Directory -Path $step.Path -ErrorAction Stop | Out-Null
+            if ($step.Shared) {
+                # Created with inherited permissions only: a shared folder is never changed.
+                $trust = Test-SemtTrustedSharedParent -Path $step.Path
+                if (-not $trust.Trusted) {
+                    Remove-Item -LiteralPath $step.Path -Force -ErrorAction SilentlyContinue
+                    throw ('SEMT_DATA_FOLDER_UNTRUSTED: shared folder {0} created here is not protected ({1}) {2}' -f $step.Path,$trust.State,$trust.Detail)
+                }
+                continue
+            }
+            try { Set-SemtProgramFolderAcl -Path $step.Path }
+            catch {
+                Remove-Item -LiteralPath $step.Path -Force -ErrorAction SilentlyContinue
+                throw ('SEMT_DATA_FOLDER_UNTRUSTED: permissions of {0} could not be set: {1}' -f $step.Path,$_.Exception.Message)
+            }
+        }
+        elseif ($step.Action -eq 'Replace') {
+            try { Set-SemtProgramFolderAcl -Path $step.Path }
+            catch { throw ('SEMT_DATA_FOLDER_UNTRUSTED: owner and permissions of {0} could not be replaced: {1}' -f $step.Path,$_.Exception.Message) }
+        }
+        else { continue }
+        # A folder created here, or one that was not protected (empty in the read-only pass), must
+        # still be empty once protected: nothing written meanwhile is adopted.
+        if ($step.Action -eq 'Create' -or $step.WasUntrusted) {
+            if (@(Get-ChildItem -LiteralPath $step.Path -Force -ErrorAction Stop).Count -gt 0) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: content appeared in {0} before it was protected; it is not used.' -f $step.Path) }
+        }
+        $trust = Test-SemtTrustedProgramPath -Path $step.Path
+        if (-not $trust.Trusted) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} ({1}) {2}' -f $step.Path,$trust.State,$trust.Detail) }
+    }
+    $final = Test-SemtTrustedDataFolder -Path $anchor.Target -BasePath $anchor.Base
+    if (-not $final.Trusted) { throw ('SEMT_DATA_FOLDER_UNTRUSTED: {0} ({1}) {2}' -f $anchor.Target,$final.State,$final.Detail) }
+    return $anchor.Target
+}
+
+function Test-SemtTrustedDataFolder {
+    # Read-only verification used before anything is run: shared parents protected, every SEMT
+    # component trusted, and the data root trusted with everything below it.
+    param([Parameter(Mandatory = $true)][string]$Path, [string]$BasePath = $env:ProgramData)
+    try { $anchor = Assert-SemtDataFolderAnchor -Path $Path -BasePath $BasePath }
+    catch { return [pscustomobject]@{ Trusted = $false; State = 'Untrusted'; Detail = $_.Exception.Message } }
+    $current = $anchor.Base
+    for ($index = 0; $index -lt $anchor.Segments.Count; $index++) {
+        $current = Join-Path $current $anchor.Segments[$index]
+        if ($index -lt $anchor.ProductIndex) { $trust = Test-SemtTrustedSharedParent -Path $current }
+        else { $trust = Test-SemtTrustedProgramPath -Path $current -Recurse:($current -eq $anchor.Target) }
+        if (-not $trust.Trusted) { return $trust }
+    }
+    return [pscustomobject]@{ Trusted = $true; State = 'Trusted'; Detail = '' }
+}
+#endregion SEMT trusted program folder v1
+
+#region SEMT shared target guards v1 (identical in every endpoint script; checked by Tests\Core)
+# Target-side protections shared by every campaign of the Smart Endpoint Migration Toolkit.
+# - One operation at a time on a target, whatever the campaign: named Global mutex held by the
+#   running endpoint plus a diagnostic lease file. The mutex is released by Windows if the
+#   process dies; the lease file only explains who holds it.
+# - A campaign can leave a pending-operation marker that outlives its process (for example a
+#   Windows Setup completion reboot). Other campaigns stop until the marker expires, the
+#   computer has restarted, or the owning campaign clears it.
+# - Previous toolkits (IntuneHybridJoinToolkit, Windows11UpgradeToolkit) are inspected
+#   READ-ONLY. Installed files or old history never block; a real active operation blocks;
+#   an unreadable state blocks with an explicit status.
+
+$script:SemtTargetMutexName = 'Global\SmartM365_SEMT_TargetOperation'
+$script:SemtTargetMutex = $null
+$script:SemtTargetMutexAcquired = $false
+$script:SemtLegacyHybridJoinRoot = 'C:\ProgramData\SmartM365\IntuneHybridJoinToolkit'
+$script:SemtLegacyWindows11Root = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit'
+
+function Get-SemtTargetProductRoot {
+    param([Parameter(Mandatory = $true)][string]$CampaignDataRoot)
+    return (Split-Path -Path $CampaignDataRoot -Parent)
+}
+
+function Get-SemtTargetLastBootUtc {
+    try { return ((Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime).ToUniversalTime() }
+    catch { return $null }
+}
+
+function Write-SemtTargetJson {
+    param([Parameter(Mandatory = $true)][string]$Path,[Parameter(Mandatory = $true)]$Data)
+    $parent = Split-Path -Path $Path -Parent
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    $temp = Join-Path -Path $parent -ChildPath ('.{0}.{1}.tmp' -f (Split-Path -Path $Path -Leaf),[guid]::NewGuid().ToString('N'))
+    try {
+        $Data | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $temp -Encoding UTF8 -Force -ErrorAction Stop
+        Move-Item -LiteralPath $temp -Destination $Path -Force -ErrorAction Stop
+    }
+    finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+}
+
+function ConvertTo-SemtTargetJsonDateText {
+    # Same dates on every engine: DateTime values created by PowerShell 7 JSON parsing become
+    # round-trip text again (UTC/offset as UTC 'o', no zone kept without zone).
+    param([AllowNull()]$Value)
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [datetime]) {
+        if ($Value.Kind -eq [System.DateTimeKind]::Unspecified) { return $Value.ToString('yyyy-MM-ddTHH:mm:ss.FFFFFFF', [Globalization.CultureInfo]::InvariantCulture) }
+        return $Value.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($Value -is [datetimeoffset]) { return $Value.UtcDateTime.ToString('o', [Globalization.CultureInfo]::InvariantCulture) }
+    if ($Value -is [string]) { return $Value }
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($property in @($Value.PSObject.Properties)) { $property.Value = ConvertTo-SemtTargetJsonDateText -Value $property.Value }
+        return $Value
+    }
+    if ($Value -is [System.Collections.IList]) {
+        for ($index = 0; $index -lt $Value.Count; $index++) { $Value[$index] = ConvertTo-SemtTargetJsonDateText -Value $Value[$index] }
+        return ,$Value
+    }
+    return $Value
+}
+function Read-SemtTargetJson {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+    # Keep ISO dates as text on PowerShell 7 too, so UTC round-trip comparisons stay exact.
+    if ((Get-Command -Name ConvertFrom-Json).Parameters.ContainsKey('DateKind')) { return ($raw | ConvertFrom-Json -DateKind String -ErrorAction Stop) }
+    return (ConvertTo-SemtTargetJsonDateText -Value ($raw | ConvertFrom-Json -ErrorAction Stop))
+}
+
+function Enter-SemtTargetOperationGuard {
+    param(
+        [Parameter(Mandatory = $true)][string]$Campaign,
+        [Parameter(Mandatory = $true)][string]$CampaignDataRoot,
+        [Parameter(Mandatory = $true)][string]$RunId,
+        [Parameter(Mandatory = $true)][string]$CorrelationId
+    )
+
+    $productRoot = Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot
+    $leasePath = Join-Path -Path $productRoot -ChildPath 'State\TargetOperation.json'
+    $pendingPath = Join-Path -Path $productRoot -ChildPath 'State\TargetPendingOperation.json'
+    try {
+        $script:SemtTargetMutex = New-Object System.Threading.Mutex($false, $script:SemtTargetMutexName)
+        try { $script:SemtTargetMutexAcquired = $script:SemtTargetMutex.WaitOne(0) }
+        catch [System.Threading.AbandonedMutexException] { $script:SemtTargetMutexAcquired = $true }
+    }
+    catch { $script:SemtTargetMutexAcquired = $false }
+    if (-not $script:SemtTargetMutexAcquired) {
+        $holder = ''
+        try {
+            $lease = Read-SemtTargetJson -Path $leasePath
+            if ($lease) { $holder = ('Campaign={0}; RunId={1}; ProcessId={2}; StartedUtc={3}' -f $lease.Campaign,$lease.RunId,$lease.ProcessId,$lease.StartedUtc) }
+        }
+        catch { $holder = 'Lease unreadable.' }
+        if ($script:SemtTargetMutex) { try { $script:SemtTargetMutex.Dispose() } catch { } ; $script:SemtTargetMutex = $null }
+        return [pscustomobject]@{ Acquired = $false; Status = 'TARGET_OPERATION_ACTIVE'; NextAction = 'WAIT_ACTIVE_TARGET_OPERATION'; Detail = ("Another Smart Endpoint Migration Toolkit operation is active on this computer. {0}" -f $holder) }
+    }
+
+    try {
+        $pending = Read-SemtTargetJson -Path $pendingPath
+        if ($pending -and [string]$pending.Campaign -ne $Campaign) {
+            $expires = [datetime]::MinValue
+            $expiresOk = [datetime]::TryParse([string]$pending.ExpiresUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$expires)
+            $bootAtWrite = [datetime]::MinValue
+            $bootOk = [datetime]::TryParse([string]$pending.LastBootUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$bootAtWrite)
+            $currentBoot = Get-SemtTargetLastBootUtc
+            $rebootedSince = ($bootOk -and $null -ne $currentBoot -and [math]::Abs(($currentBoot - $bootAtWrite.ToUniversalTime()).TotalMinutes) -gt 2 -and [bool]$pending.ClearedByReboot)
+            if ($expiresOk -and (Get-Date).ToUniversalTime() -lt $expires.ToUniversalTime() -and -not $rebootedSince) {
+                Exit-SemtTargetOperationGuard -CampaignDataRoot $CampaignDataRoot
+                return [pscustomobject]@{ Acquired = $false; Status = 'TARGET_PENDING_OPERATION'; NextAction = 'WAIT_OTHER_CAMPAIGN_PENDING_OPERATION'; Detail = ("Campaign {0} left a pending operation on this computer: {1}. Expires={2}." -f $pending.Campaign,$pending.Reason,$pending.ExpiresUtc) }
+            }
+        }
+    }
+    catch {
+        Exit-SemtTargetOperationGuard -CampaignDataRoot $CampaignDataRoot
+        return [pscustomobject]@{ Acquired = $false; Status = 'TARGET_STATE_UNREADABLE'; NextAction = 'VERIFY_TARGET_STATE_FILES'; Detail = ("Pending-operation marker could not be read: {0}" -f $_.Exception.Message) }
+    }
+
+    $processStart = ''
+    try { $processStart = (Get-Process -Id $PID -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o') } catch { $processStart = '' }
+    try {
+        Write-SemtTargetJson -Path $leasePath -Data ([pscustomobject]@{ SchemaVersion = 1; Campaign = $Campaign; RunId = $RunId; CorrelationId = $CorrelationId; ProcessId = $PID; ProcessStartUtc = $processStart; StartedUtc = (Get-Date).ToUniversalTime().ToString('o') })
+    }
+    catch { }
+    return [pscustomobject]@{ Acquired = $true; Status = 'TARGET_OPERATION_ACQUIRED'; NextAction = ''; Detail = 'Target operation guard acquired.' }
+}
+
+function Exit-SemtTargetOperationGuard {
+    param([Parameter(Mandatory = $true)][string]$CampaignDataRoot)
+
+    if ($script:SemtTargetMutexAcquired) {
+        $leasePath = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetOperation.json'
+        try {
+            $lease = Read-SemtTargetJson -Path $leasePath
+            if ($lease -and [int]$lease.ProcessId -eq $PID) { Remove-Item -LiteralPath $leasePath -Force -ErrorAction SilentlyContinue }
+        }
+        catch { }
+        if ($script:SemtTargetMutex) { try { $script:SemtTargetMutex.ReleaseMutex() } catch { } }
+    }
+    if ($script:SemtTargetMutex) { try { $script:SemtTargetMutex.Dispose() } catch { } }
+    $script:SemtTargetMutex = $null
+    $script:SemtTargetMutexAcquired = $false
+}
+
+function Set-SemtTargetPendingOperation {
+    param(
+        [Parameter(Mandatory = $true)][string]$Campaign,
+        [Parameter(Mandatory = $true)][string]$CampaignDataRoot,
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [ValidateRange(1, 168)][int]$Hours = 48,
+        [bool]$ClearedByReboot = $true
+    )
+
+    $path = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetPendingOperation.json'
+    $boot = Get-SemtTargetLastBootUtc
+    Write-SemtTargetJson -Path $path -Data ([pscustomobject]@{ SchemaVersion = 1; Campaign = $Campaign; Reason = $Reason; SinceUtc = (Get-Date).ToUniversalTime().ToString('o'); ExpiresUtc = (Get-Date).ToUniversalTime().AddHours($Hours).ToString('o'); LastBootUtc = $(if ($boot) { $boot.ToString('o') } else { '' }); ClearedByReboot = $ClearedByReboot })
+}
+
+function Clear-SemtTargetPendingOperation {
+    param(
+        [Parameter(Mandatory = $true)][string]$Campaign,
+        [Parameter(Mandatory = $true)][string]$CampaignDataRoot
+    )
+
+    $path = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetPendingOperation.json'
+    try {
+        $pending = Read-SemtTargetJson -Path $path
+        if ($pending -and [string]$pending.Campaign -eq $Campaign) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop; return $true }
+    }
+    catch { }
+    return $false
+}
+
+function Test-SemtWindowsSetupActive {
+    $signals = New-Object System.Collections.Generic.List[string]
+    try {
+        $setupKey = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\Setup' -ErrorAction Stop
+        foreach ($name in @('SystemSetupInProgress','UpgradeInProgress')) {
+            $property = $setupKey.PSObject.Properties[$name]
+            if ($property -and [string]$property.Value -ne '0') { $signals.Add(('{0}={1}' -f $name,$property.Value)) }
+        }
+    }
+    catch { }
+    foreach ($processName in @('SetupHost','SetupPrep','setup')) {
+        foreach ($process in @(Get-Process -Name $processName -ErrorAction SilentlyContinue)) {
+            $path = ''
+            try { $path = [string]$process.Path } catch { $path = '' }
+            if ($processName -ne 'setup' -or $path -match '(?i)\\(SetupMedia|\$WINDOWS\.~BT|sources)\\' -or [string]::IsNullOrWhiteSpace($path)) { $signals.Add(('{0}:{1}' -f $process.ProcessName,$process.Id)) }
+        }
+    }
+    return [pscustomobject]@{ Active = ($signals.Count -gt 0); Detail = ($signals -join '; ') }
+}
+
+function Get-SemtLegacyEndpointActivity {
+    <#
+    READ-ONLY inspection of the previous toolkits on this computer. It never writes, deletes,
+    takes a lock or waits on a legacy mutex.
+    Statuses: LEGACY_ABSENT, LEGACY_INSTALLED_IDLE and LEGACY_INTUNE_PACKAGE_ASSIGNED (not blocking;
+    media owned by a legacy Intune package is reused in place), LEGACY_ENDPOINT_RUNNING, LEGACY_SETUP_IN_PROGRESS,
+    LEGACY_COPY_IN_PROGRESS, LEGACY_RETRY_AFTER_REBOOT_PENDING (blocking),
+    LEGACY_STATE_UNREADABLE (blocking).
+    #>
+    param([Parameter(Mandatory = $true)][string]$Campaign)
+
+    $signals = New-Object System.Collections.Generic.List[string]
+    $active = New-Object System.Collections.Generic.List[string]
+    $installed = $false
+    try {
+        foreach ($root in @($script:SemtLegacyHybridJoinRoot,$script:SemtLegacyWindows11Root)) {
+            if (Test-Path -LiteralPath $root -PathType Container) { $installed = $true; $signals.Add(('Folder={0}' -f $root)) }
+        }
+
+        $legacyScripts = '(?i)(SmartM365-Invoke-Windows11UpgradeRepair\.ps1|SmartM365-Invoke-IntuneHybridJoinRepair\.ps1|Run-IntuneUpgrade\.ps1|\\(IntuneHybridJoinToolkit|Windows11UpgradeToolkit)\\State\\RetryAfterRebootRunner\.ps1)'
+        $legacyMedia = [regex]::Escape((Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'SetupMedia'))
+        foreach ($process in @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)) {
+            $name = [string]$process.Name
+            $commandLine = [string]$process.CommandLine
+            $executable = [string]$process.ExecutablePath
+            if ($name -match '(?i)^(powershell|pwsh)\.exe$' -and $commandLine -match $legacyScripts) { $active.Add(('LEGACY_ENDPOINT_RUNNING|Process {0}:{1}' -f $name,$process.ProcessId)) }
+            elseif ($name -match '(?i)^(setup|setuphost|setupprep)\.exe$' -and ($executable -match $legacyMedia -or $commandLine -match $legacyMedia)) { $active.Add(('LEGACY_SETUP_IN_PROGRESS|Process {0}:{1}' -f $name,$process.ProcessId)) }
+            elseif ($name -match '(?i)^robocopy\.exe$' -and $commandLine -match $legacyMedia) { $active.Add(('LEGACY_COPY_IN_PROGRESS|Process {0}:{1}' -f $name,$process.ProcessId)) }
+        }
+
+        $legacyMutex = $null
+        if ([System.Threading.Mutex]::TryOpenExisting('Global\SmartM365_IntuneHybridJoinToolkit_Endpoint', [ref]$legacyMutex)) {
+            $active.Add('LEGACY_ENDPOINT_RUNNING|Legacy Hybrid Join endpoint mutex is held')
+            try { $legacyMutex.Dispose() } catch { }
+        }
+
+        $taskNames = @(
+            @{ Path = '\'; Name = 'SmartM365-Windows11UpgradeToolkit-RetryAfterReboot'; State = (Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'State\RetryAfterReboot.json') },
+            @{ Path = '\'; Name = 'SmartM365-IntuneHybridJoinToolkit-RetryAfterReboot'; State = (Join-Path -Path $script:SemtLegacyHybridJoinRoot -ChildPath 'State\RetryAfterReboot.json') },
+            @{ Path = '\'; Name = 'SmartM365 Windows 11 Upgrade Toolkit - Intune'; State = '' }
+        )
+        foreach ($taskName in $taskNames) {
+            $task = Get-ScheduledTask -TaskPath $taskName.Path -TaskName $taskName.Name -ErrorAction SilentlyContinue
+            if (-not $task) { continue }
+            $installed = $true
+            $signals.Add(('Task={0}; State={1}' -f $taskName.Name,$task.State))
+            if ([string]$task.State -eq 'Running') { $active.Add(('LEGACY_ENDPOINT_RUNNING|Task {0} is running' -f $taskName.Name)) }
+            elseif (-not [string]::IsNullOrWhiteSpace($taskName.State) -and (Test-Path -LiteralPath $taskName.State -PathType Leaf)) { $active.Add(('LEGACY_RETRY_AFTER_REBOOT_PENDING|Task {0} will resume a legacy run at startup' -f $taskName.Name)) }
+        }
+        foreach ($task in @(Get-ScheduledTask -TaskPath '\SmartM365\IntuneHybridJoinToolkit\' -ErrorAction SilentlyContinue)) {
+            $installed = $true
+            if ([string]$task.State -eq 'Running') { $active.Add(('LEGACY_ENDPOINT_RUNNING|Task {0} is running' -f $task.TaskName)) }
+        }
+
+        $lockRoot = Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'Locks'
+        if (Test-Path -LiteralPath $lockRoot -PathType Container) {
+            foreach ($lockFile in @(Get-ChildItem -LiteralPath $lockRoot -Filter 'lock.json' -File -Recurse -ErrorAction Stop)) {
+                $lock = Read-SemtTargetJson -Path $lockFile.FullName
+                $lockPid = 0
+                if ($lock -and $lock.PSObject.Properties['PID']) { [void][int]::TryParse([string]$lock.PID, [ref]$lockPid) }
+                if ($lockPid -gt 0 -and (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) { $active.Add(('LEGACY_COPY_IN_PROGRESS|Legacy media lock {0} held by PID {1}' -f $lockFile.Directory.Name,$lockPid)) }
+            }
+        }
+
+        $packageRoot = 'SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages'
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+        try {
+            $packages = $baseKey.OpenSubKey($packageRoot, $false)
+            if ($packages) {
+                try {
+                    foreach ($packageName in @($packages.GetSubKeyNames())) {
+                        $package = $packages.OpenSubKey($packageName, $false)
+                        if (-not $package) { continue }
+                        try {
+                            $installed = $true
+                            $installState = [string]$package.GetValue('InstallState', '')
+                            $signals.Add(('IntunePackage={0}; InstallState={1}; Cache={2}' -f $packageName,$installState,[string]$package.GetValue('SetupCacheFolder', '')))
+                            if ($installState -in @('Installed','RepairRequired')) { $active.Add(('LEGACY_INTUNE_PACKAGE_ASSIGNED|Legacy Intune Win32 package {0} is {1}' -f $packageName,$installState)) }
+                        }
+                        finally { $package.Dispose() }
+                    }
+                }
+                finally { $packages.Dispose() }
+            }
+        }
+        finally { $baseKey.Dispose() }
+    }
+    catch {
+        return [pscustomobject]@{ Status = 'LEGACY_STATE_UNREADABLE'; Blocking = $true; NextAction = 'VERIFY_LEGACY_TOOLKIT_STATE'; Detail = ('Legacy toolkit state could not be read: {0}' -f $_.Exception.Message) }
+    }
+
+    $priority = @('LEGACY_SETUP_IN_PROGRESS','LEGACY_COPY_IN_PROGRESS','LEGACY_ENDPOINT_RUNNING','LEGACY_RETRY_AFTER_REBOOT_PENDING','LEGACY_INTUNE_PACKAGE_ASSIGNED')
+    foreach ($candidate in $priority) {
+        $found = @($active | Where-Object { $_.StartsWith($candidate + '|') })
+        if ($found.Count -eq 0) { continue }
+        $blocking = ($candidate -ne 'LEGACY_INTUNE_PACKAGE_ASSIGNED')
+        $nextAction = switch ($candidate) {
+            'LEGACY_SETUP_IN_PROGRESS' { 'WAIT_LEGACY_WINDOWS_SETUP' }
+            'LEGACY_COPY_IN_PROGRESS' { 'WAIT_LEGACY_MEDIA_COPY' }
+            'LEGACY_ENDPOINT_RUNNING' { 'WAIT_LEGACY_TOOLKIT_OPERATION' }
+            'LEGACY_RETRY_AFTER_REBOOT_PENDING' { 'WAIT_OR_REMOVE_LEGACY_RETRY_TASK' }
+            default { 'REVIEW_LEGACY_INTUNE_ASSIGNMENT' }
+        }
+        return [pscustomobject]@{ Status = $candidate; Blocking = $blocking; NextAction = $nextAction; Detail = (($found | ForEach-Object { $_.Substring($candidate.Length + 1) }) -join '; ') }
+    }
+    if ($installed) { return [pscustomobject]@{ Status = 'LEGACY_INSTALLED_IDLE'; Blocking = $false; NextAction = ''; Detail = ($signals -join '; ') } }
+    return [pscustomobject]@{ Status = 'LEGACY_ABSENT'; Blocking = $false; NextAction = ''; Detail = '' }
+}
+
+function Write-SemtAttemptResult {
+    <#
+    Writes <DataRoot>\State\Results\<CorrelationId>.json. The technician worker only trusts a
+    result whose CorrelationId matches its own attempt. Keeps the newest 50 result files.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$CampaignDataRoot,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Data
+    )
+
+    $resultsRoot = Join-Path -Path $CampaignDataRoot -ChildPath 'State\Results'
+    $path = Join-Path -Path $resultsRoot -ChildPath ('{0}.json' -f [string]$Data['CorrelationId'])
+    Write-SemtTargetJson -Path $path -Data ([pscustomobject]$Data)
+    try {
+        @(Get-ChildItem -LiteralPath $resultsRoot -Filter '*.json' -File -ErrorAction Stop | Sort-Object LastWriteTimeUtc -Descending | Select-Object -Skip 50) | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    }
+    catch { }
+    return $path
+}
+#endregion SEMT shared target guards v1
+
+function Invoke-LocalFileRetention {
+    param([ValidateRange(1, 1000)][int]$KeepLast = 10)
+
+    $sets = @(
+        [pscustomobject]@{ Name = 'EndpointLogs'; Path = $script:LogDir; Filter = 'SEMT_Windows11Upgrade_*.log'; ProtectedPaths = @($script:LogPath) },
+        [pscustomobject]@{ Name = 'SetupUpgradeLogs'; Path = $script:SetupLogDir; Filter = '*'; ProtectedPaths = @() },
+        [pscustomobject]@{ Name = 'OutputCsv'; Path = $script:OutputDir; Filter = 'SEMT_Windows11Upgrade_*.csv'; ProtectedPaths = @($script:CsvPath) }
+    )
+
+    foreach ($set in $sets) {
+        try {
+            if ([string]::IsNullOrWhiteSpace([string]$set.Path) -or -not (Test-Path -LiteralPath $set.Path -PathType Container)) { continue }
+
+            $protected = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($protectedPath in @($set.ProtectedPaths)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$protectedPath)) {
+                    try { [void]$protected.Add([System.IO.Path]::GetFullPath([string]$protectedPath)) } catch { }
+                }
+            }
+
+            $files = @(Get-ChildItem -LiteralPath $set.Path -Filter $set.Filter -File -ErrorAction SilentlyContinue)
+            if ($files.Count -le $KeepLast) { continue }
+
+            $protectedCount = 0
+            foreach ($file in $files) {
+                try {
+                    if ($protected.Contains([System.IO.Path]::GetFullPath($file.FullName))) { $protectedCount++ }
+                }
+                catch { }
+            }
+
+            $keepUnprotected = [Math]::Max(0, $KeepLast - $protectedCount)
+            $removeFiles = @(
+                $files |
+                    Where-Object {
+                        try { -not $protected.Contains([System.IO.Path]::GetFullPath($_.FullName)) }
+                        catch { $true }
+                    } |
+                    Sort-Object LastWriteTimeUtc, Name -Descending |
+                    Select-Object -Skip $keepUnprotected
+            )
+
+            $removed = 0
+            foreach ($file in $removeFiles) {
+                try {
+                    Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                    $removed++
+                }
+                catch {
+                    Write-SmartLog ("Local file retention could not remove {0}: {1}" -f $file.FullName,$_.Exception.Message) 'WARN'
+                }
+            }
+
+            if ($removed -gt 0) {
+                Write-SmartLog ("Local file retention {0}: RemovedFiles={1}; KeepLast={2}; Path={3}; Filter={4}" -f $set.Name,$removed,$KeepLast,$set.Path,$set.Filter)
+            }
+        }
+        catch {
+            Write-SmartLog ("Local file retention failed for {0}: {1}" -f $set.Name,$_.Exception.Message) 'WARN'
+        }
+    }
+}
+
+function Protect-Windows11ToolkitPathAcl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$Directory,
+        [switch]$RequireSuccess
+    )
+
+    try {
+        if (-not (Test-Path -LiteralPath $Path)) {
+            $message = "ACL hardening target does not exist. Path={0}" -f $Path
+            if ($RequireSuccess) { throw $message }
+            Write-SmartLog $message 'WARN'
+            return
+        }
+
+        $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+        if (-not (Test-Path -LiteralPath $icacls -PathType Leaf)) {
+            $message = "ACL hardening skipped because icacls.exe was not found. Path={0}" -f $Path
+            if ($RequireSuccess) { throw $message }
+            Write-SmartLog $message 'WARN'
+            return
+        }
+
+        $grants = if ($Directory) {
+            @('*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F','*S-1-5-32-545:(OI)(CI)RX')
+        }
+        else {
+            @('*S-1-5-18:F','*S-1-5-32-544:F','*S-1-5-32-545:RX')
+        }
+
+        $output = & $icacls $Path '/inheritance:r' '/grant:r' $grants 2>&1
+        $exitCode = [int]$LASTEXITCODE
+        if ($exitCode -ne 0) {
+            $message = "ACL hardening failed. Path={0}; ExitCode={1}; Output={2}" -f $Path,$exitCode,(($output | Out-String).Trim())
+            if ($RequireSuccess) { throw $message }
+            Write-SmartLog $message 'WARN'
+            return
+        }
+
+        Write-SmartLog ("ACL hardening applied. Path={0}; Directory={1}" -f $Path,[bool]$Directory)
+    }
+    catch {
+        if ($RequireSuccess) { throw }
+        Write-SmartLog ("ACL hardening threw an exception. Path={0}; Error={1}" -f $Path,$_.Exception.Message) 'WARN'
+    }
+}
+
+function ConvertTo-LongLiteralPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if ($fullPath.StartsWith('\\?\')) { return $fullPath }
+    if ($fullPath.StartsWith('\\')) { return '\\?\UNC\' + $fullPath.Substring(2) }
+    return '\\?\' + $fullPath
+}
+
+function Get-SmartFileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::OpenRead((ConvertTo-LongLiteralPath -Path $Path))
+        $hashBytes = $sha.ComputeHash($stream)
+        return (($hashBytes | ForEach-Object { $_.ToString('X2') }) -join '')
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        if ($null -ne $sha) { $sha.Dispose() }
+    }
+}
+function Convert-SignedExitCodeToHex {
+    param([Parameter(Mandatory = $true)][int]$ExitCode)
+
+    $bytes = [BitConverter]::GetBytes($ExitCode)
+    $unsigned = [BitConverter]::ToUInt32($bytes, 0)
+    return ('0x{0:X8}' -f $unsigned)
+}
+
+function Get-SetupExitCodeInfo {
+    param([Parameter(Mandatory = $true)][int]$ExitCode)
+
+    $hex = Convert-SignedExitCodeToHex -ExitCode $ExitCode
+    $knownMeanings = @{
+        '0x00000000' = 'Success.'
+        '0x00000BC2' = 'Success; reboot required.'
+        '0x8007000B' = 'Bad image format. Windows Setup could not read a required image; validate or recopy setup media.'
+        '0x8007001F' = 'Windows Setup failed during downlevel gather/migration. Common cause: duplicate or invalid user profile registry entries; check setupact.log/setuperr.log for Duplicate profile detected and inspect HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList.'
+        '0x8007007F' = 'Windows Setup migration plugin failure. Check Panther logs for MIG plugin LoadDllServer/LoadLibraryExW failures such as CscMig.dll, WSManMigrationPlugin.dll, or RasMigPlugin.dll.'
+        '0x80070420' = 'A required Windows Setup service was not running. Check setupact.log/setuperr.log and the Windows Update, BITS, Cryptographic Services, and Windows Installer service state before retrying.'
+        '0x80070490' = 'Windows Setup could not find a required element. Check setup logs and component-store health before retrying.'
+        '0x000000B7' = 'Windows Setup reported that an item already exists. Check for an existing setup process, stale setup state, or conflicting migration artifact before retrying.'
+        '0xC1900101' = 'Windows Setup rollback, often driver or firmware related. Confirm with setup logs or SetupDiag.'
+        '0xC1900107' = 'A cleanup from a previous installation attempt is pending. Restart the device, verify previous setup state, and retry only after cleanup completes.'
+        '0xC190010E' = 'Windows Setup requires EULA acceptance. Use /EULA accept for quiet or non-interactive Windows 11 Setup.'
+        '0xC1900200' = 'Compatibility failure: device does not meet Windows Setup minimum requirements.'
+        '0xC1900202' = 'Compatibility failure: device does not meet Windows Setup minimum requirements for this upgrade.'
+        '0xC1900204' = 'Migration choice not available or invalid.'
+        '0xC1900208' = 'Compatibility blocker, usually an incompatible app or driver.'
+        '0xC190020E' = 'Insufficient free disk space for Windows Setup.'
+    }
+
+    if ($knownMeanings.ContainsKey($hex)) {
+        $meaning = $knownMeanings[$hex]
+    }
+    elseif ($hex -like '0xC190010*') {
+        $meaning = 'Windows Setup C190010x failure. Exact cause must be confirmed from setupact.log, setuperr.log, or SetupDiag.'
+    }
+    elseif ($hex -like '0xC19002*') {
+        $meaning = 'Windows Setup compatibility or prerequisite failure. Exact cause must be confirmed from setup logs or SetupDiag.'
+    }
+    else {
+        $meaning = 'Windows Setup returned an unmapped exit code. Check setup logs or SetupDiag.'
+    }
+
+    [pscustomobject]@{
+        Decimal = $ExitCode
+        Hex = $hex
+        Meaning = $meaning
+        CopyLogsPath = $script:SetupLogDir
+        PantherLog = 'C:\$WINDOWS.~BT\Sources\Panther\setupact.log'
+        PantherErrorLog = 'C:\$WINDOWS.~BT\Sources\Panther\setuperr.log'
+        RollbackLogFolder = 'C:\$WINDOWS.~BT\Sources\Rollback'
+    }
+}
+
+function Format-SetupExitCodeInfo {
+    param([Parameter(Mandatory = $true)]$Info)
+
+    return ("ExitCode={0}; Hex={1}; Meaning={2}; CopyLogs={3}; Panther={4}; PantherErrors={5}; RollbackLogs={6}" -f $Info.Decimal,$Info.Hex,$Info.Meaning,$Info.CopyLogsPath,$Info.PantherLog,$Info.PantherErrorLog,$Info.RollbackLogFolder)
+}
+
+function Get-SetupFailureNextAction {
+    param([Parameter(Mandatory = $true)]$Info)
+
+    switch ([string]$Info.Hex) {
+        '0x80070420' { return 'CHECK_SETUP_SERVICES_AND_SETUP_LOGS' }
+        '0x80070490' { return 'CHECK_COMPONENT_STORE_AND_SETUP_LOGS' }
+        '0x000000B7' { return 'CHECK_EXISTING_SETUP_STATE_AND_SETUP_LOGS' }
+        '0xC1900107' { return 'REBOOT_AND_CLEAN_PREVIOUS_SETUP_THEN_RETRY' }
+        default { return 'CHECK_SETUP_LOGS' }
+    }
+}
+
+function Get-RegistryValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    try {
+        $item = Get-ItemProperty -LiteralPath $Path -Name $Name -ErrorAction Stop
+        return $item.$Name
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-OsSummary {
+    $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+    $build = [int]$os.BuildNumber
+    $major = if ($build -ge 22000) { 'Windows11' } elseif ($build -ge 10240) { 'Windows10' } else { 'Other' }
+    [pscustomobject]@{
+        Caption = [string]$os.Caption
+        Version = [string]$os.Version
+        BuildNumber = $build
+        Architecture = [string]$os.OSArchitecture
+        MajorFamily = $major
+        LastBootUpTime = $os.LastBootUpTime
+    }
+}
+
+function Get-DeviceUptimeSummary {
+    param($LastBootUpTime)
+
+    $lastBoot = $null
+    if ($LastBootUpTime -is [datetime]) {
+        $lastBoot = [datetime]$LastBootUpTime
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace([string]$LastBootUpTime)) {
+        try { $lastBoot = [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$LastBootUpTime) } catch { $lastBoot = $null }
+    }
+
+    if (-not $lastBoot) {
+        return [pscustomobject]@{
+            DetectionSucceeded = $false
+            LastBootUpTime = ''
+            UptimeDays = ''
+            UptimeHours = ''
+            ThresholdDays = $ForceRequiredRebootWhenUptimeOverDays
+            ThresholdExceeded = $false
+            Detail = 'LastBootUpTime could not be determined.'
+        }
+    }
+
+    $uptime = (Get-Date) - $lastBoot
+    $uptimeDays = [math]::Round([double]$uptime.TotalDays, 2)
+    $uptimeHours = [math]::Round([double]$uptime.TotalHours, 1)
+    $thresholdExceeded = ($ForceRequiredRebootWhenUptimeOverDays -gt 0 -and $uptime.TotalDays -ge $ForceRequiredRebootWhenUptimeOverDays)
+
+    return [pscustomobject]@{
+        DetectionSucceeded = $true
+        LastBootUpTime = $lastBoot.ToString('yyyy-MM-dd HH:mm:ss')
+        UptimeDays = $uptimeDays
+        UptimeHours = $uptimeHours
+        ThresholdDays = $ForceRequiredRebootWhenUptimeOverDays
+        ThresholdExceeded = $thresholdExceeded
+        Detail = ("LastBootUpTime={0}; UptimeDays={1}; UptimeHours={2}; ForceRequiredRebootWhenUptimeOverDays={3}; ThresholdExceeded={4}" -f $lastBoot.ToString('yyyy-MM-dd HH:mm:ss'),$uptimeDays,$uptimeHours,$ForceRequiredRebootWhenUptimeOverDays,$thresholdExceeded)
+    }
+}
+
+function Test-RequiredRebootForceByUptime {
+    if ($ForceRequiredRebootWhenUptimeOverDays -le 0) { return $false }
+    if (-not $AllowReboot -or $AuditOnly) { return $false }
+    if ($null -eq $script:DeviceUptimeSummary) { return $false }
+    if (-not $script:DeviceUptimeSummary.DetectionSucceeded) { return $false }
+    return [bool]$script:DeviceUptimeSummary.ThresholdExceeded
+}
+
+function Invoke-RequiredRebootForcedByUptime {
+    param(
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [Parameter(Mandatory = $true)][ValidateSet('PendingReboot','SetupCompletion')][string]$Context
+    )
+
+    if (-not (Test-RequiredRebootForceByUptime)) { return 'NotApplicable' }
+
+    try {
+        shutdown.exe /r /t $RebootDelaySeconds /c $Reason | Out-Null
+        $shutdownExitCode = $LASTEXITCODE
+        if ($shutdownExitCode -ne 0) { throw ("shutdown.exe failed. ExitCode={0}" -f $shutdownExitCode) }
+        $script:RequiredRebootByUptimeAction = ("{0}Forced" -f $Context)
+        $script:RequiredRebootByUptimeDetail = ("Required reboot forced because uptime is {0} day(s), threshold is {1} day(s). Reboot scheduled in {2} second(s). Reason={3}" -f $script:DeviceUptimeSummary.UptimeDays,$ForceRequiredRebootWhenUptimeOverDays,$RebootDelaySeconds,$Reason)
+        Write-SmartLog $script:RequiredRebootByUptimeDetail 'WARN'
+        return 'ForcedByUptime'
+    }
+    catch {
+        $script:RequiredRebootByUptimeAction = ("{0}ForceFailed" -f $Context)
+        $script:RequiredRebootByUptimeDetail = ("Required reboot force failed: {0}" -f $_.Exception.Message)
+        Write-SmartLog $script:RequiredRebootByUptimeDetail 'ERROR'
+        return 'ScheduleFailed'
+    }
+}
+function Get-ComputerSystemSummary {
+    $system = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+    $manufacturer = [string]$system.Manufacturer
+    $model = [string]$system.Model
+    $hypervisorPresent = $false
+    try { $hypervisorPresent = [bool]$system.HypervisorPresent } catch { $hypervisorPresent = $false }
+
+    $signature = ("{0} {1}" -f $manufacturer,$model)
+    $virtualPatterns = @(
+        'Virtual Machine',
+        'VMware',
+        'VirtualBox',
+        'KVM',
+        'QEMU',
+        'Xen',
+        'HVM domU',
+        'Parallels',
+        'BHYVE',
+        'OpenStack',
+        'Google Compute Engine',
+        'Amazon EC2'
+    )
+
+    $matchedPattern = ''
+    foreach ($pattern in $virtualPatterns) {
+        if ($signature -match [regex]::Escape($pattern)) {
+            $matchedPattern = $pattern
+            break
+        }
+    }
+
+    $isVirtual = -not [string]::IsNullOrWhiteSpace($matchedPattern)
+    $evidence = if ($matchedPattern) {
+        "Manufacturer=$manufacturer; Model=$model; Pattern=$matchedPattern"
+    }
+    else {
+        "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=$hypervisorPresent"
+    }
+
+    [pscustomobject]@{
+        Manufacturer = $manufacturer
+        Model = $model
+        HypervisorPresent = $hypervisorPresent
+        IsVirtualMachine = $isVirtual
+        Evidence = $evidence
+    }
+}
+
+function Get-SystemDriveFreeGb {
+    $driveLetter = ([System.IO.Path]::GetPathRoot($env:SystemRoot)).TrimEnd('\')
+    $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter ("DeviceID='{0}'" -f $driveLetter) -ErrorAction Stop
+    if ($null -eq $disk.FreeSpace) { return 0 }
+    return [math]::Round(([double]$disk.FreeSpace / 1GB), 2)
+}
+
+function Test-PendingReboot {
+    $sources = New-Object System.Collections.ArrayList
+
+    if (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') {
+        [void]$sources.Add('CBS:Component Based Servicing\RebootPending')
+    }
+    if (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') {
+        [void]$sources.Add('WindowsUpdate:Auto Update\RebootRequired')
+    }
+    $pendingFileRename = Get-RegistryValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name 'PendingFileRenameOperations'
+    if ($null -ne $pendingFileRename) {
+        [void]$sources.Add('SessionManager:PendingFileRenameOperations')
+    }
+
+    [pscustomobject]@{
+        IsPending = ($sources.Count -gt 0)
+        Source = (@($sources.ToArray()) -join '; ')
+    }
+}
+
+function Get-IntuneEnrollmentSummary {
+    $enrollmentRoot = 'HKLM:\SOFTWARE\Microsoft\Enrollments'
+    $strong = New-Object System.Collections.ArrayList
+    $weak = New-Object System.Collections.ArrayList
+
+    if (Test-Path -LiteralPath $enrollmentRoot) {
+        foreach ($key in @(Get-ChildItem -LiteralPath $enrollmentRoot -ErrorAction SilentlyContinue)) {
+            $provider = Get-RegistryValue -Path $key.PSPath -Name 'ProviderID'
+            $discovery = Get-RegistryValue -Path $key.PSPath -Name 'DiscoveryServiceFullURL'
+            if ([string]$provider -eq 'MS DM Server') {
+                [void]$strong.Add(("ProviderID=MS DM Server ({0})" -f $key.PSChildName))
+            }
+            elseif ($discovery -match 'manage\.microsoft\.com|enrollment\.manage\.microsoft\.com') {
+                [void]$strong.Add(("DiscoveryUrl={0}" -f $discovery))
+            }
+        }
+    }
+
+    if (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Provisioning\OMADM\Accounts') {
+        [void]$weak.Add('OMADM account path exists')
+    }
+    if (Get-Service -Name 'IntuneManagementExtension' -ErrorAction SilentlyContinue) {
+        [void]$weak.Add('Intune Management Extension service exists')
+    }
+
+    [pscustomobject]@{
+        IsIntuneEnrolled = ($strong.Count -gt 0)
+        StrongEvidence = (@($strong.ToArray()) -join '; ')
+        WeakEvidence = (@($weak.ToArray()) -join '; ')
+    }
+}
+
+function Get-WindowsUpdatePolicySummary {
+    $wuPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+    $auPath = Join-Path $wuPath 'AU'
+    $mdmUpdatePath = 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Update'
+    $policyStatePath = 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UpdatePolicy\PolicyState'
+
+    $issues = New-Object System.Collections.ArrayList
+    $wus = Get-RegistryValue -Path $wuPath -Name 'WUServer'
+    $wuStatus = Get-RegistryValue -Path $wuPath -Name 'WUStatusServer'
+    $useWUServer = Get-RegistryValue -Path $auPath -Name 'UseWUServer'
+    $noAutoUpdate = Get-RegistryValue -Path $auPath -Name 'NoAutoUpdate'
+    $doNotConnect = Get-RegistryValue -Path $wuPath -Name 'DoNotConnectToWindowsUpdateInternetLocations'
+    $targetRelease = Get-RegistryValue -Path $wuPath -Name 'TargetReleaseVersion'
+    $targetReleaseInfo = Get-RegistryValue -Path $wuPath -Name 'TargetReleaseVersionInfo'
+    $productVersion = Get-RegistryValue -Path $wuPath -Name 'ProductVersion'
+    $disableDualScan = Get-RegistryValue -Path $wuPath -Name 'DisableDualScan'
+    $isWufbConfigured = Get-RegistryValue -Path $policyStatePath -Name 'IsWUfBConfigured'
+
+    if ($wus) { [void]$issues.Add('WUServer policy present') }
+    if ($wuStatus) { [void]$issues.Add('WUStatusServer policy present') }
+    if ($useWUServer -eq 1) { [void]$issues.Add('UseWUServer=1') }
+    if ($noAutoUpdate -eq 1) { [void]$issues.Add('NoAutoUpdate=1') }
+    if ($doNotConnect -eq 1) { [void]$issues.Add('DoNotConnectToWindowsUpdateInternetLocations=1') }
+    if ($disableDualScan -eq 1) { [void]$issues.Add('DisableDualScan=1') }
+    if ($targetRelease -eq 1 -and $targetReleaseInfo -and $productVersion -notmatch 'Windows 11') {
+        [void]$issues.Add(("TargetReleaseVersion holds {0} {1}" -f $productVersion,$targetReleaseInfo).Trim())
+    }
+
+    [pscustomobject]@{
+        HasLegacyBlocker = ($issues.Count -gt 0)
+        Issues = (@($issues.ToArray()) -join '; ')
+        MdmWUfBPolicyPresent = (Test-Path -LiteralPath $mdmUpdatePath)
+        IsWUfBConfigured = if ($null -eq $isWufbConfigured) { 'Unknown' } else { [string]$isWufbConfigured }
+        TargetReleaseVersion = if ($null -eq $targetRelease) { '' } else { [string]$targetRelease }
+        TargetReleaseVersionInfo = [string]$targetReleaseInfo
+        ProductVersion = [string]$productVersion
+    }
+}
+
+function ConvertTo-Windows11IndicatorSignal {
+    param([object]$Value)
+
+    if ($null -eq $Value) { return '' }
+
+    $values = if ($Value -is [System.Array]) { @($Value) } else { @($Value) }
+    $signals = @(
+        $values |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '(?i)^(none|n/a|na|null)$' }
+    )
+
+    if ($signals.Count -eq 0) { return '' }
+    return (@($signals) -join '; ')
+}
+
+function Get-SmartM365Windows11HardwareReadinessTag {
+    param([ValidateRange(-2, 1)][int]$ReturnCode)
+
+    switch ($ReturnCode) {
+        0 { return 'WINDOWS11_HARDWARE_CAPABLE' }
+        1 { return 'WINDOWS11_HARDWARE_NOT_CAPABLE' }
+        default { return 'WINDOWS11_HARDWARE_READINESS_UNDETERMINED' }
+    }
+}
+
+# Adapted from Microsoft's HardwareReadiness.ps1 (Copyright (C) 2021 Microsoft Corporation).
+# Source: https://aka.ms/HWReadinessScript
+# Verified upstream source SHA256: 3F21C32818BFC3A20293317FF91A62ADB349B5A0D468A6DDDEA752F68365C24A
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+# and associated documentation files (the "Software"), to deal in the Software without restriction,
+# including without limitation the rights to use, copy, modify, merge, publish, distribute,
+# sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in all copies or
+# substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+# BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+function Get-SmartM365Windows11HardwareReadiness {
+    $minimumOsDiskSizeGb = 64
+    $minimumMemoryGb = 4
+    $minimumClockSpeedMhz = 1000
+    $minimumLogicalCores = 2
+    $requiredAddressWidth = 64
+    $outcome = [ordered]@{ ReturnCode = -2; Result = 'FAILED TO RUN'; Reason = ''; Logging = '' }
+
+    $updateReturnCode = {
+        param([ValidateRange(-2, 1)][int]$ReturnCode)
+        switch ($ReturnCode) {
+            0 { if ($outcome.ReturnCode -eq -2) { $outcome.ReturnCode = 0 } }
+            1 { $outcome.ReturnCode = 1 }
+            -1 { if ($outcome.ReturnCode -ne 1) { $outcome.ReturnCode = -1 } }
+        }
+    }
+    $appendReason = {
+        param([string]$Name)
+        if (-not [string]::IsNullOrWhiteSpace($Name)) { $outcome.Reason += ("{0}, " -f $Name) }
+    }
+    $appendLog = {
+        param([string]$Text)
+        if (-not [string]::IsNullOrWhiteSpace($Text)) { $outcome.Logging += $Text }
+    }
+
+    $cpuFamilySource = @'
+using Microsoft.Win32;
+using System;
+using System.Runtime.InteropServices;
+
+public class SmartM365HardwareReadinessCpuFamilyResult
+{
+    public bool IsValid { get; set; }
+    public string Message { get; set; }
+}
+
+public class SmartM365HardwareReadinessCpuFamily
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SYSTEM_INFO
+    {
+        public ushort ProcessorArchitecture;
+        ushort Reserved;
+        public uint PageSize;
+        public IntPtr MinimumApplicationAddress;
+        public IntPtr MaximumApplicationAddress;
+        public IntPtr ActiveProcessorMask;
+        public uint NumberOfProcessors;
+        public uint ProcessorType;
+        public uint AllocationGranularity;
+        public ushort ProcessorLevel;
+        public ushort ProcessorRevision;
+    }
+
+    [DllImport("kernel32.dll")]
+    internal static extern void GetNativeSystemInfo(ref SYSTEM_INFO lpSystemInfo);
+
+    public enum ProcessorFeature : uint { ARM_SUPPORTED_INSTRUCTIONS = 34 }
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool IsProcessorFeaturePresent(ProcessorFeature processorFeature);
+
+    private const ushort PROCESSOR_ARCHITECTURE_X86 = 0;
+    private const ushort PROCESSOR_ARCHITECTURE_ARM64 = 12;
+    private const ushort PROCESSOR_ARCHITECTURE_X64 = 9;
+    private const string INTEL_MANUFACTURER = "GenuineIntel";
+    private const string AMD_MANUFACTURER = "AuthenticAMD";
+    private const string QUALCOMM_MANUFACTURER = "Qualcomm Technologies Inc";
+
+    public static SmartM365HardwareReadinessCpuFamilyResult Validate(string manufacturer, ushort processorArchitecture)
+    {
+        SmartM365HardwareReadinessCpuFamilyResult result = new SmartM365HardwareReadinessCpuFamilyResult();
+        if (string.IsNullOrWhiteSpace(manufacturer))
+        {
+            result.IsValid = false;
+            result.Message = "Manufacturer is null or empty";
+            return result;
+        }
+
+        string registryPath = "HKEY_LOCAL_MACHINE\\Hardware\\Description\\System\\CentralProcessor\\0";
+        SYSTEM_INFO sysInfo = new SYSTEM_INFO();
+        GetNativeSystemInfo(ref sysInfo);
+
+        switch (processorArchitecture)
+        {
+            case PROCESSOR_ARCHITECTURE_ARM64:
+                if (manufacturer.Equals(QUALCOMM_MANUFACTURER, StringComparison.OrdinalIgnoreCase))
+                {
+                    bool isArmv81Supported = IsProcessorFeaturePresent(ProcessorFeature.ARM_SUPPORTED_INSTRUCTIONS);
+                    if (!isArmv81Supported)
+                    {
+                        long registryValue = (long)Registry.GetValue(registryPath, "CP 4030", -1);
+                        long atomicResult = (registryValue >> 20) & 0xF;
+                        if (atomicResult >= 2) { isArmv81Supported = true; }
+                    }
+                    result.IsValid = isArmv81Supported;
+                    result.Message = isArmv81Supported ? "" : "Processor does not implement ARM v8.1 atomic instruction";
+                }
+                else
+                {
+                    result.IsValid = false;
+                    result.Message = "The processor isn't currently supported for Windows 11";
+                }
+                break;
+
+            case PROCESSOR_ARCHITECTURE_X64:
+            case PROCESSOR_ARCHITECTURE_X86:
+                int cpuFamily = sysInfo.ProcessorLevel;
+                int cpuModel = (sysInfo.ProcessorRevision >> 8) & 0xFF;
+                int cpuStepping = sysInfo.ProcessorRevision & 0xFF;
+                if (manufacturer.Equals(INTEL_MANUFACTURER, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        result.IsValid = true;
+                        result.Message = "";
+                        if (cpuFamily >= 6 && cpuModel <= 95 && !(cpuFamily == 6 && cpuModel == 85))
+                        {
+                            result.IsValid = false;
+                        }
+                        else if (cpuFamily == 6 && (cpuModel == 142 || cpuModel == 158) && cpuStepping == 9)
+                        {
+                            int registryValue = (int)Registry.GetValue(registryPath, "Platform Specific Field 1", -1);
+                            if ((cpuModel == 142 && registryValue != 16) || (cpuModel == 158 && registryValue != 8))
+                            {
+                                result.IsValid = false;
+                            }
+                            result.Message = "PlatformId " + registryValue;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        result.IsValid = false;
+                        result.Message = "Exception:" + ex.GetType().Name;
+                    }
+                }
+                else if (manufacturer.Equals(AMD_MANUFACTURER, StringComparison.OrdinalIgnoreCase))
+                {
+                    result.IsValid = true;
+                    result.Message = "";
+                    if (cpuFamily < 23 || (cpuFamily == 23 && (cpuModel == 1 || cpuModel == 17)))
+                    {
+                        result.IsValid = false;
+                    }
+                }
+                else
+                {
+                    result.IsValid = false;
+                    result.Message = "Unsupported Manufacturer: " + manufacturer + ", Architecture: " + processorArchitecture + ", CPUFamily: " + sysInfo.ProcessorLevel + ", ProcessorRevision: " + sysInfo.ProcessorRevision;
+                }
+                break;
+
+            default:
+                result.IsValid = false;
+                result.Message = "Unsupported CPU category. Manufacturer: " + manufacturer + ", Architecture: " + processorArchitecture + ", CPUFamily: " + sysInfo.ProcessorLevel + ", ProcessorRevision: " + sysInfo.ProcessorRevision;
+                break;
+        }
+        return result;
+    }
+}
+'@
+
+    try {
+        $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop | Select-Object -First 1
+        $systemDrive = if ($operatingSystem) { [string]$operatingSystem.SystemDrive } else { '' }
+        $logicalDisk = if ($systemDrive) { Get-CimInstance -ClassName Win32_LogicalDisk -Filter ("DeviceID='{0}'" -f $systemDrive) -ErrorAction Stop | Select-Object -First 1 } else { $null }
+        if ($null -eq $logicalDisk -or $null -eq $logicalDisk.Size) {
+            & $updateReturnCode 1
+            & $appendReason 'Storage'
+            & $appendLog 'Storage: Storage is null. FAIL; '
+        }
+        else {
+            $osDiskSizeGb = [int]([double]$logicalDisk.Size / 1GB)
+            if ($osDiskSizeGb -lt $minimumOsDiskSizeGb) {
+                & $updateReturnCode 1
+                & $appendReason 'Storage'
+                & $appendLog ("Storage: OSDiskSize={0}GB. FAIL; " -f $osDiskSizeGb)
+            }
+            else {
+                & $updateReturnCode 0
+                & $appendLog ("Storage: OSDiskSize={0}GB. PASS; " -f $osDiskSizeGb)
+            }
+        }
+    }
+    catch {
+        & $updateReturnCode -1
+        & $appendLog ("Storage: OSDiskSize=Undetermined. UNDETERMINED; {0} {1}; " -f $_.Exception.GetType().Name,$_.Exception.Message)
+    }
+
+    try {
+        $memoryMeasure = @(Get-CimInstance -ClassName Win32_PhysicalMemory -ErrorAction Stop) | Measure-Object -Property Capacity -Sum
+        if ($null -eq $memoryMeasure -or $null -eq $memoryMeasure.Sum) {
+            & $updateReturnCode 1
+            & $appendReason 'Memory'
+            & $appendLog 'Memory: Memory is null. FAIL; '
+        }
+        else {
+            $memoryGb = [int]([double]$memoryMeasure.Sum / 1GB)
+            if ($memoryGb -lt $minimumMemoryGb) {
+                & $updateReturnCode 1
+                & $appendReason 'Memory'
+                & $appendLog ("Memory: System_Memory={0}GB. FAIL; " -f $memoryGb)
+            }
+            else {
+                & $updateReturnCode 0
+                & $appendLog ("Memory: System_Memory={0}GB. PASS; " -f $memoryGb)
+            }
+        }
+    }
+    catch {
+        & $updateReturnCode -1
+        & $appendLog ("Memory: System_Memory=Undetermined. UNDETERMINED; {0} {1}; " -f $_.Exception.GetType().Name,$_.Exception.Message)
+    }
+
+    try {
+        $tpm = Get-Tpm -ErrorAction Stop
+        if ($null -eq $tpm) {
+            & $updateReturnCode 1
+            & $appendReason 'TPM'
+            & $appendLog 'TPM: TPM is null. FAIL; '
+        }
+        elseif ($tpm -is [string]) {
+            & $updateReturnCode -1
+            & $appendLog ("TPM: TPMVersion=Undetermined. UNDETERMINED; {0}; " -f $tpm)
+        }
+        elseif ($tpm.TpmPresent) {
+            $tpmVersion = Get-CimInstance -ClassName Win32_Tpm -Namespace 'root/CIMV2/Security/MicrosoftTpm' -ErrorAction Stop | Select-Object -First 1 -ExpandProperty SpecVersion
+            if ([string]::IsNullOrWhiteSpace([string]$tpmVersion)) {
+                & $updateReturnCode 1
+                & $appendReason 'TPM'
+                & $appendLog 'TPM: TPMVersion=null. FAIL; '
+            }
+            else {
+                $majorVersion = ([string]$tpmVersion).Split(',')[0] -as [int]
+                if ($null -eq $majorVersion -or $majorVersion -lt 2) {
+                    & $updateReturnCode 1
+                    & $appendReason 'TPM'
+                    & $appendLog ("TPM: TPMVersion={0}. FAIL; " -f $tpmVersion)
+                }
+                else {
+                    & $updateReturnCode 0
+                    & $appendLog ("TPM: TPMVersion={0}. PASS; " -f $tpmVersion)
+                }
+            }
+        }
+        else {
+            & $updateReturnCode 1
+            & $appendReason 'TPM'
+            & $appendLog ("TPM: TPMVersion={0}. FAIL; " -f $tpm.TpmPresent)
+        }
+    }
+    catch {
+        & $updateReturnCode -1
+        & $appendLog ("TPM: TPMVersion=Undetermined. UNDETERMINED; {0} {1}; " -f $_.Exception.GetType().Name,$_.Exception.Message)
+    }
+
+    try {
+        $cpuDetails = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop)[0]
+        if ($null -eq $cpuDetails) {
+            & $updateReturnCode 1
+            & $appendReason 'Processor'
+            & $appendLog 'Processor: CpuDetails is null. FAIL; '
+        }
+        else {
+            if ($null -eq ('SmartM365HardwareReadinessCpuFamily' -as [type])) { Add-Type -TypeDefinition $cpuFamilySource -ErrorAction Stop }
+            $cpuFamilyResult = [SmartM365HardwareReadinessCpuFamily]::Validate([string]$cpuDetails.Manufacturer, [uint16]$cpuDetails.Architecture)
+            $cpuFamilyException = $false
+            if (-not $cpuFamilyResult.IsValid -and [string]$cpuDetails.Name -match '(?i)i7-7820hq cpu @ 2\.90ghz') {
+                $hardwareSystem = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop | Select-Object -First 1
+                $model = if ($hardwareSystem) { ([string]$hardwareSystem.Model).Trim() } else { '' }
+                if ($model -in @('Surface Studio 2','Precision 5520')) {
+                    $cpuFamilyException = $true
+                    $cpuFamilyResult.IsValid = $true
+                    $cpuFamilyResult.Message = ("Microsoft supported-device exception: {0}" -f $model)
+                }
+            }
+
+            $processorCheckFailed = (
+                $null -eq $cpuDetails.AddressWidth -or [int]$cpuDetails.AddressWidth -ne $requiredAddressWidth -or
+                $null -eq $cpuDetails.MaxClockSpeed -or [int]$cpuDetails.MaxClockSpeed -le $minimumClockSpeedMhz -or
+                $null -eq $cpuDetails.NumberOfLogicalProcessors -or [int]$cpuDetails.NumberOfLogicalProcessors -lt $minimumLogicalCores -or
+                -not $cpuFamilyResult.IsValid
+            )
+            $cpuLog = "{AddressWidth=$($cpuDetails.AddressWidth); MaxClockSpeed=$($cpuDetails.MaxClockSpeed); NumberOfLogicalCores=$($cpuDetails.NumberOfLogicalProcessors); Manufacturer=$($cpuDetails.Manufacturer); Caption=$($cpuDetails.Caption); Name=$($cpuDetails.Name); FamilyException=$cpuFamilyException; $($cpuFamilyResult.Message)}"
+            if ($processorCheckFailed) {
+                & $updateReturnCode 1
+                & $appendReason 'Processor'
+                & $appendLog ("Processor: {0}. FAIL; " -f $cpuLog)
+            }
+            else {
+                & $updateReturnCode 0
+                & $appendLog ("Processor: {0}. PASS; " -f $cpuLog)
+            }
+        }
+    }
+    catch {
+        & $updateReturnCode -1
+        & $appendLog ("Processor: Processor=Undetermined. UNDETERMINED; {0} {1}; " -f $_.Exception.GetType().Name,$_.Exception.Message)
+    }
+
+    try {
+        [void](Confirm-SecureBootUEFI -ErrorAction Stop)
+        & $updateReturnCode 0
+        & $appendLog 'SecureBoot: Capable. PASS; '
+    }
+    catch [System.PlatformNotSupportedException] {
+        & $updateReturnCode 1
+        & $appendReason 'SecureBoot'
+        & $appendLog 'SecureBoot: Not capable. FAIL; '
+    }
+    catch {
+        & $updateReturnCode -1
+        & $appendLog ("SecureBoot: Undetermined. UNDETERMINED; {0} {1}; " -f $_.Exception.GetType().Name,$_.Exception.Message)
+    }
+
+    $outcome.Result = switch ([int]$outcome.ReturnCode) {
+        0 { 'CAPABLE' }
+        1 { 'NOT CAPABLE' }
+        -1 { 'UNDETERMINED' }
+        default { 'FAILED TO RUN' }
+    }
+    $outcome.Reason = ([string]$outcome.Reason).TrimEnd(' ', ',')
+    return [pscustomobject]@{
+        ReturnCode = [int]$outcome.ReturnCode
+        Result = [string]$outcome.Result
+        Reason = [string]$outcome.Reason
+        Logging = [string]$outcome.Logging
+        Tag = Get-SmartM365Windows11HardwareReadinessTag -ReturnCode ([int]$outcome.ReturnCode)
+        Source = 'Microsoft HardwareReadiness.ps1 adapted; https://aka.ms/HWReadinessScript; SHA256=3F21C32818BFC3A20293317FF91A62ADB349B5A0D468A6DDDEA752F68365C24A'
+    }
+}
+
+function Get-Windows11IndicatorSummary {
+    $path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\TargetVersionUpgradeExperienceIndicators'
+    $ignoredHardware = @('Cpu','CpuFms','CpuVendor','CpuFamily','CpuModel','CpuSpeed','CpuCores','Tpm','TpmVersion','SecureBoot','UefiSecureBoot','Uefi','Ram','Memory','Storage','Disk','SystemDriveSize')
+    $blocking = New-Object System.Collections.ArrayList
+    $hardwareOnly = New-Object System.Collections.ArrayList
+
+    if (-not (Test-Path -LiteralPath $path)) {
+        return [pscustomobject]@{
+            IndicatorPathPresent = $false
+            BlockingCount = 0
+            HardwareOnlyCount = 0
+            ActionableBlocking = $false
+            BlockingReasons = ''
+        }
+    }
+
+    foreach ($key in @(Get-ChildItem -LiteralPath $path -ErrorAction SilentlyContinue)) {
+        $target = $key.PSChildName
+        if ($target -match '^(1507|1511|1607|1703|1709|1803|1809|1903|1909|19H1|19H2|2004|20H1|20H2|21H1|TH|RS)') {
+            continue
+        }
+
+        $props = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue
+        $upEx = if ($props.PSObject.Properties['UpEx']) { ConvertTo-Windows11IndicatorSignal -Value $props.UpEx } else { '' }
+        $gated = if ($props.PSObject.Properties['GatedBlockId']) { ConvertTo-Windows11IndicatorSignal -Value $props.GatedBlockId } else { '' }
+        $red = if ($props.PSObject.Properties['RedReason']) { ConvertTo-Windows11IndicatorSignal -Value $props.RedReason } else { '' }
+        $sysReq = if ($props.PSObject.Properties['SysReqIssue']) { ConvertTo-Windows11IndicatorSignal -Value $props.SysReqIssue } else { '' }
+        $hasBlock = ($upEx -match '(Red|Blocked|Hold)' -or -not [string]::IsNullOrWhiteSpace($gated) -or -not [string]::IsNullOrWhiteSpace($red) -or -not [string]::IsNullOrWhiteSpace($sysReq))
+        if (-not $hasBlock) { continue }
+
+        $reason = ("Target={0}; UpEx={1}; GatedBlockId={2}; RedReason={3}; SysReqIssue={4}" -f $target,$upEx,$gated,$red,$sysReq)
+        $tokens = @(@($red,$sysReq -split '[,; ]+') | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+        $actionable = $false
+        if ($gated) { $actionable = $true }
+        elseif ($tokens.Count -eq 0 -and $upEx -match '(Red|Blocked|Hold)') { $actionable = $true }
+        else {
+            foreach ($token in $tokens) {
+                if ($token -notin $ignoredHardware) {
+                    $actionable = $true
+                    break
+                }
+            }
+        }
+
+        if ($actionable) { [void]$blocking.Add($reason) } else { [void]$hardwareOnly.Add($reason) }
+    }
+
+    [pscustomobject]@{
+        IndicatorPathPresent = $true
+        BlockingCount = $blocking.Count
+        HardwareOnlyCount = $hardwareOnly.Count
+        ActionableBlocking = ($blocking.Count -gt 0)
+        BlockingReasons = (@($blocking.ToArray()) -join ' | ')
+    }
+}
+
+function Repair-WindowsUpdatePolicyBlockers {
+    Write-SmartLog 'Repairing legacy Windows Update policy blockers.'
+    $wuPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+    $auPath = Join-Path $wuPath 'AU'
+    $names = @(
+        @{ Path = $wuPath; Name = 'WUServer' },
+        @{ Path = $wuPath; Name = 'WUStatusServer' },
+        @{ Path = $wuPath; Name = 'DoNotConnectToWindowsUpdateInternetLocations' },
+        @{ Path = $wuPath; Name = 'DisableDualScan' },
+        @{ Path = $wuPath; Name = 'TargetReleaseVersion' },
+        @{ Path = $wuPath; Name = 'TargetReleaseVersionInfo' },
+        @{ Path = $wuPath; Name = 'ProductVersion' },
+        @{ Path = $auPath; Name = 'UseWUServer' },
+        @{ Path = $auPath; Name = 'NoAutoUpdate' }
+    )
+
+    foreach ($entry in $names) {
+        if (Test-Path -LiteralPath $entry.Path) {
+            Remove-ItemProperty -LiteralPath $entry.Path -Name $entry.Name -ErrorAction SilentlyContinue
+        }
+    }
+
+    gpupdate.exe /target:computer /force | Out-Null
+}
+
+function Reset-WindowsUpdateComponents {
+    Write-SmartLog 'Resetting Windows Update components.'
+    $services = 'bits','wuauserv','cryptsvc','dosvc'
+    foreach ($service in $services) {
+        try { Stop-Service -Name $service -Force -ErrorAction SilentlyContinue } catch { }
+    }
+
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    foreach ($folder in @('SoftwareDistribution','System32\catroot2')) {
+        $path = Join-Path $env:WINDIR $folder
+        if (Test-Path -LiteralPath $path) {
+            Rename-Item -LiteralPath $path -NewName ("{0}.SmartM365Backup.{1}" -f (Split-Path -Leaf $path),$stamp) -ErrorAction SilentlyContinue
+        }
+    }
+
+    foreach ($service in $services) {
+        try { Start-Service -Name $service -ErrorAction SilentlyContinue } catch { }
+    }
+}
+
+function Invoke-AssignedUpdateInstall {
+    Write-SmartLog 'Starting assigned Windows Update scan/download/install.'
+    $resultText = 'NoUpdates'
+    try {
+        $session = New-Object -ComObject 'Microsoft.Update.Session'
+        $searcher = $session.CreateUpdateSearcher()
+        $result = $searcher.Search('IsInstalled=0 and IsHidden=0 and IsAssigned=1')
+        if ($result.Updates.Count -gt 0) {
+            $updates = New-Object -ComObject 'Microsoft.Update.UpdateColl'
+            foreach ($update in $result.Updates) { [void]$updates.Add($update) }
+            $downloader = $session.CreateUpdateDownloader()
+            $downloader.Updates = $updates
+            [void]$downloader.Download()
+            $installer = $session.CreateUpdateInstaller()
+            $installer.Updates = $updates
+            $installResult = $installer.Install()
+            $resultText = if ($installResult.RebootRequired) { 'InstalledRebootRequired' } else { 'Installed' }
+        }
+    }
+    catch {
+        Write-SmartLog ("COM Windows Update install failed: {0}" -f $_.Exception.Message) 'WARN'
+    }
+
+    $uso = Join-Path $env:SystemRoot 'System32\UsoClient.exe'
+    if (Test-Path -LiteralPath $uso -PathType Leaf) {
+        foreach ($arg in @('StartScan','StartDownload','StartInstall')) {
+            Start-Process -FilePath $uso -ArgumentList $arg -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
+        }
+        if ($resultText -eq 'NoUpdates') { $resultText = 'UsoClientTriggered' }
+    }
+
+    return $resultText
+}
+
+function Get-SystemInstallLanguageTag {
+    $installLanguageCode = ''
+    $installCultureName = ''
+    try {
+        $languageKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language'
+        $installLanguageCode = [string](Get-RegistryValue -Path $languageKey -Name 'InstallLanguage')
+        if (-not [string]::IsNullOrWhiteSpace($installLanguageCode)) {
+            $lcid = [Convert]::ToInt32($installLanguageCode, 16)
+            $installCultureName = ([System.Globalization.CultureInfo]::GetCultureInfo($lcid)).Name
+        }
+    }
+    catch { }
+
+    $installedUiCultureName = ''
+    try {
+        $installedUiCultureName = [string][System.Globalization.CultureInfo]::InstalledUICulture.Name
+    }
+    catch { }
+
+    $systemLocaleName = ''
+    try {
+        $systemLocale = Get-WinSystemLocale -ErrorAction Stop
+        if ($systemLocale -and -not [string]::IsNullOrWhiteSpace($systemLocale.Name)) {
+            $systemLocaleName = [string]$systemLocale.Name
+        }
+    }
+    catch { }
+
+    Write-SmartLog ("Windows setup language detection: InstallLanguage={0}; InstallCulture={1}; InstalledUICulture={2}; SystemLocale={3}." -f $installLanguageCode,$installCultureName,$installedUiCultureName,$systemLocaleName)
+
+    if (-not [string]::IsNullOrWhiteSpace($installCultureName)) {
+        return $installCultureName
+    }
+    if (-not [string]::IsNullOrWhiteSpace($installedUiCultureName)) {
+        return $installedUiCultureName
+    }
+    return ''
+}
+
+function Resolve-SetupLanguageRequirement {
+    param([string]$RequestedLanguage)
+
+    if ([string]::IsNullOrWhiteSpace($RequestedLanguage)) { return '' }
+    $normalized = $RequestedLanguage.Trim()
+    if ($normalized -in @('Any','None','Disabled')) { return '' }
+    if ($normalized -in @('Auto','MatchSystem','System')) {
+        $installLanguage = Get-SystemInstallLanguageTag
+        if ([string]::IsNullOrWhiteSpace($installLanguage)) {
+            throw 'Unable to detect the installed Windows UI language required for setup media validation.'
+        }
+        Write-SmartLog ("Setup language requirement resolved from installed Windows language: {0}" -f $installLanguage)
+        return $installLanguage
+    }
+
+    try {
+        return ([System.Globalization.CultureInfo]::GetCultureInfo($normalized)).Name
+    }
+    catch {
+        throw "Invalid SetupLanguage value '$RequestedLanguage'. Use MatchSystem, Any, or a culture tag such as fr-FR or en-US."
+    }
+}
+
+function Get-SetupMediaLanguages {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    $langIni = Join-Path $MediaRoot 'sources\lang.ini'
+    if (-not (Test-Path -LiteralPath $langIni -PathType Leaf)) { return @() }
+
+    $languages = New-Object System.Collections.ArrayList
+    $inAvailableSection = $false
+    foreach ($rawLine in @(Get-Content -LiteralPath $langIni -ErrorAction Stop)) {
+        $line = ([string]$rawLine).Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith(';')) { continue }
+
+        if ($line -match '^\[(.+)\]$') {
+            $inAvailableSection = ($Matches[1] -ieq 'Available UI Languages')
+            continue
+        }
+
+        if ($inAvailableSection -and $line -match '^([^=]+)=') {
+            $language = $Matches[1].Trim()
+            if (-not [string]::IsNullOrWhiteSpace($language) -and -not $languages.Contains($language)) {
+                [void]$languages.Add($language)
+            }
+        }
+    }
+
+    return @($languages.ToArray())
+}
+
+function Resolve-SetupSourceMediaPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [string]$ExpectedLanguage
+    )
+
+    if (Test-Path -LiteralPath (Join-Path $SourcePath 'setup.exe') -PathType Leaf) {
+        return $SourcePath
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ExpectedLanguage)) {
+        throw "SetupSourcePath does not contain setup.exe and language matching is disabled, so no language subfolder can be selected: $SourcePath"
+    }
+
+    foreach ($child in @(Get-ChildItem -LiteralPath $SourcePath -Directory -ErrorAction SilentlyContinue)) {
+        $languages = @(Get-SetupMediaLanguages -MediaRoot $child.FullName)
+        if (@($languages | Where-Object { $_ -ieq $ExpectedLanguage } | Select-Object -First 1).Count -gt 0) {
+            Write-SmartLog ("Selected setup source subfolder '{0}' for language {1}." -f $child.FullName,$ExpectedLanguage)
+            return $child.FullName
+        }
+    }
+
+    throw ("No setup source subfolder under '{0}' contains language {1} in sources\lang.ini." -f $SourcePath,$ExpectedLanguage)
+}
+
+function Split-SetupSourcePathList {
+    param([AllowNull()][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return @() }
+
+    $result = New-Object System.Collections.ArrayList
+    foreach ($item in @($Value -split ';')) {
+        $path = ([string]$item).Trim().Trim([char]34)
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        [void]$result.Add($path)
+    }
+
+    return @($result.ToArray())
+}
+
+function Convert-IPv4ToUInt32 {
+    param([Parameter(Mandatory = $true)][string]$Address)
+
+    $parsed = [System.Net.IPAddress]::Parse($Address)
+    if ($parsed.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "Not an IPv4 address: $Address"
+    }
+
+    $bytes = $parsed.GetAddressBytes()
+    return (
+        ([uint32]$bytes[0] -shl 24) -bor
+        ([uint32]$bytes[1] -shl 16) -bor
+        ([uint32]$bytes[2] -shl 8) -bor
+        [uint32]$bytes[3]
+    )
+}
+
+function Test-IPv4InCidr {
+    param(
+        [Parameter(Mandatory = $true)][string]$Address,
+        [Parameter(Mandatory = $true)][string]$Cidr
+    )
+
+    $parts = $Cidr.Trim() -split '/', 2
+    if ($parts.Count -ne 2) { return $false }
+
+    $prefixLength = 0
+    if (-not [int]::TryParse($parts[1], [ref]$prefixLength)) { return $false }
+    if ($prefixLength -lt 0 -or $prefixLength -gt 32) { return $false }
+
+    $addressInt = Convert-IPv4ToUInt32 -Address $Address
+    $networkInt = Convert-IPv4ToUInt32 -Address $parts[0]
+    $mask = if ($prefixLength -eq 0) { [uint32]0 } else { [uint32]([uint32]::MaxValue -shl (32 - $prefixLength)) }
+    return (($addressInt -band $mask) -eq ($networkInt -band $mask))
+}
+
+function Get-LocalIPv4Addresses {
+    $addresses = New-Object System.Collections.ArrayList
+
+    try {
+        foreach ($adapter in @(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction Stop)) {
+            foreach ($ip in @($adapter.IPAddress)) {
+                $parsed = $null
+                if ([System.Net.IPAddress]::TryParse([string]$ip, [ref]$parsed) -and $parsed.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and -not [System.Net.IPAddress]::IsLoopback($parsed)) {
+                    [void]$addresses.Add($parsed.ToString())
+                }
+            }
+        }
+    }
+    catch {
+        foreach ($ip in @([System.Net.Dns]::GetHostAddresses($env:COMPUTERNAME))) {
+            if ($ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and -not [System.Net.IPAddress]::IsLoopback($ip)) {
+                [void]$addresses.Add($ip.ToString())
+            }
+        }
+    }
+
+    return @($addresses.ToArray() | Select-Object -Unique)
+}
+
+function Test-SetupSourceMapRowMatch {
+    param(
+        [Parameter(Mandatory = $true)]$Row,
+        [string[]]$LocalIPv4Addresses = @()
+    )
+
+    $scopeType = ''
+    if ($Row.PSObject.Properties['ScopeType']) {
+        $scopeType = ([string]$Row.ScopeType).Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($scopeType) -and $Row.PSObject.Properties['Type']) {
+        $scopeType = ([string]$Row.Type).Trim()
+    }
+
+    $scopeValue = ''
+    if ($Row.PSObject.Properties['ScopeValue']) {
+        $scopeValue = ([string]$Row.ScopeValue).Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($scopeValue) -and $Row.PSObject.Properties['Value']) {
+        $scopeValue = ([string]$Row.Value).Trim()
+    }
+
+    switch -Regex ($scopeType) {
+        '^(?i:Default|Fallback)$' { return $true }
+        '^(?i:Subnet|CIDR)$' {
+            foreach ($ip in @($LocalIPv4Addresses)) {
+                try {
+                    if (Test-IPv4InCidr -Address $ip -Cidr $scopeValue) { return $true }
+                }
+                catch { }
+            }
+            return $false
+        }
+        '^(?i:IPPrefix|Prefix)$' {
+            foreach ($ip in @($LocalIPv4Addresses)) {
+                if ($ip.StartsWith($scopeValue, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+            }
+            return $false
+        }
+        '^(?i:ComputerName|Hostname)$' { return ($env:COMPUTERNAME -ieq $scopeValue) }
+        '^(?i:ComputerPrefix|HostnamePrefix)$' { return ($env:COMPUTERNAME.StartsWith($scopeValue, [System.StringComparison]::OrdinalIgnoreCase)) }
+        default { return $false }
+    }
+}
+
+function Get-SetupSourceCandidatesFromMap {
+    param([AllowNull()][string]$MapPath)
+
+    if ([string]::IsNullOrWhiteSpace($MapPath)) { return @() }
+
+    $expandedMapPath = [Environment]::ExpandEnvironmentVariables($MapPath.Trim('"'))
+    if (-not (Test-Path -LiteralPath $expandedMapPath -PathType Leaf)) {
+        throw "Setup source map not found from target context: $expandedMapPath"
+    }
+
+    $mapPathToRead = $expandedMapPath
+    try {
+        New-SmartDirectory -Path $script:InputDir
+        $cachedMapPath = Join-Path $script:InputDir 'SetupSourceMap.csv'
+        Copy-Item -LiteralPath $expandedMapPath -Destination $cachedMapPath -Force -ErrorAction Stop
+        $mapPathToRead = $cachedMapPath
+        Write-SmartLog ("Setup source map cached locally: {0}" -f $cachedMapPath)
+    }
+    catch {
+        Write-SmartLog ("Could not cache setup source map locally; reading original path. Detail={0}" -f $_.Exception.Message) 'WARN'
+    }
+
+    $rows = @(Import-Csv -LiteralPath $mapPathToRead -ErrorAction Stop)
+    $localIps = @(Get-LocalIPv4Addresses)
+    Write-SmartLog ("Setup source map loaded: Path={0}; Rows={1}; LocalIPv4={2}" -f $mapPathToRead,$rows.Count,($localIps -join ','))
+
+    $matches = New-Object System.Collections.ArrayList
+    foreach ($row in $rows) {
+        $sourcePath = ''
+        if ($row.PSObject.Properties['SetupSourcePath']) {
+            $sourcePath = ([string]$row.SetupSourcePath).Trim()
+        }
+        if ([string]::IsNullOrWhiteSpace($sourcePath) -and $row.PSObject.Properties['SourcePath']) {
+            $sourcePath = ([string]$row.SourcePath).Trim()
+        }
+        if ([string]::IsNullOrWhiteSpace($sourcePath)) { continue }
+
+        if (Test-SetupSourceMapRowMatch -Row $row -LocalIPv4Addresses $localIps) {
+            $priority = 100
+            if ($row.PSObject.Properties['Priority']) {
+                [void][int]::TryParse([string]$row.Priority, [ref]$priority)
+            }
+            [void]$matches.Add([pscustomobject]@{ Priority = $priority; SourcePath = $sourcePath })
+        }
+    }
+
+    $matchedSources = @($matches.ToArray() | Sort-Object Priority, SourcePath | ForEach-Object { $_.SourcePath } | Select-Object -Unique)
+    if ($SetupSourceCandidateLimit -gt 0 -and $matchedSources.Count -gt $SetupSourceCandidateLimit) {
+        Write-SmartLog ("Setup source map matched {0} source(s); limiting benchmark shortlist to {1} by priority." -f $matchedSources.Count,$SetupSourceCandidateLimit)
+        $matchedSources = @($matchedSources | Select-Object -First $SetupSourceCandidateLimit)
+    }
+    return $matchedSources
+}
+
+function Get-EffectiveSetupSourceCandidates {
+    $candidates = New-Object System.Collections.ArrayList
+    try {
+        foreach ($source in @(Get-SetupSourceCandidatesFromMap -MapPath $SetupSourceMapPath)) {
+            [void]$candidates.Add($source)
+        }
+    }
+    catch {
+        Write-SmartLog ("Setup source map could not be used: {0}" -f $_.Exception.Message) 'WARN'
+    }
+    foreach ($source in @(Split-SetupSourcePathList -Value $SetupSourcePath)) {
+        [void]$candidates.Add($source)
+    }
+
+    return @($candidates.ToArray() | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+}
+
+function Get-UncServerName {
+    param([AllowNull()][string]$Path)
+
+    $match = [regex]::Match([string]$Path, '^\\\\(?<server>[^\\]+)\\')
+    if ($match.Success) { return $match.Groups['server'].Value }
+    return ''
+}
+
+function Measure-TcpConnectionMilliseconds {
+    param(
+        [Parameter(Mandatory = $true)][string]$ServerName,
+        [int]$Port = 445,
+        [int]$TimeoutMilliseconds = 1200
+    )
+
+    $client = New-Object System.Net.Sockets.TcpClient
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $async = $client.BeginConnect($ServerName, $Port, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne($TimeoutMilliseconds, $false)) {
+            throw "TCP $ServerName`:$Port timed out after $TimeoutMilliseconds ms"
+        }
+
+        $client.EndConnect($async)
+        return [int][math]::Max(1, $watch.ElapsedMilliseconds)
+    }
+    finally {
+        $watch.Stop()
+        try { $client.Close() } catch { }
+    }
+}
+
+function Measure-FileReadSampleMilliseconds {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int64]$MaxBytes = 8388608,
+        [int]$BufferBytes = 1048576
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "File not found for read sample: $Path"
+    }
+
+    $buffer = New-Object byte[] $BufferBytes
+    $bytesRead = 0L
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        while ($bytesRead -lt $MaxBytes) {
+            $remaining = [int][math]::Min($buffer.Length, ($MaxBytes - $bytesRead))
+            if ($remaining -le 0) { break }
+            $read = $stream.Read($buffer, 0, $remaining)
+            if ($read -le 0) { break }
+            $bytesRead += [int64]$read
+        }
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        $watch.Stop()
+    }
+
+    return [pscustomobject]@{
+        Path = $Path
+        BytesRead = $bytesRead
+        Milliseconds = [int][math]::Max(1, $watch.ElapsedMilliseconds)
+    }
+}
+
+function Measure-SetupSourceReadSample {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    $samples = New-Object System.Collections.ArrayList
+    $langIni = Join-Path $MediaRoot 'sources\lang.ini'
+    if (Test-Path -LiteralPath $langIni -PathType Leaf) {
+        [void]$samples.Add((Measure-FileReadSampleMilliseconds -Path $langIni -MaxBytes 262144 -BufferBytes 65536))
+    }
+
+    $setupExe = Join-Path $MediaRoot 'setup.exe'
+    [void]$samples.Add((Measure-FileReadSampleMilliseconds -Path $setupExe -MaxBytes 8388608 -BufferBytes 1048576))
+
+    $totalBytes = 0L
+    $totalMs = 0
+    foreach ($sample in @($samples.ToArray())) {
+        $totalBytes += [int64]$sample.BytesRead
+        $totalMs += [int]$sample.Milliseconds
+    }
+
+    return [pscustomobject]@{
+        BytesRead = $totalBytes
+        Milliseconds = [int][math]::Max(1, $totalMs)
+    }
+}
+
+function Resolve-ValidatedSetupSourceMediaPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [string]$ExpectedLanguage,
+        [string]$DisplayPath = $SourcePath
+    )
+
+    $attempts = [math]::Max(1, [int]$SetupSourceValidationRetries)
+    $delaySeconds = [math]::Max(0, [int]$SetupSourceValidationRetryDelaySeconds)
+    $lastError = $null
+
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            if (-not (Test-Path -LiteralPath $SourcePath -PathType Container -ErrorAction Stop)) {
+                throw "Path is not reachable as a container from target context: $SourcePath"
+            }
+
+            $resolved = Resolve-SetupSourceMediaPath -SourcePath $SourcePath -ExpectedLanguage $ExpectedLanguage
+            $null = Test-SetupMedia -MediaPath $resolved -ExpectedLanguage $ExpectedLanguage
+            if ($attempt -gt 1) {
+                Write-SmartLog ("Setup source candidate validation succeeded after retry: Path={0}; Resolved={1}; Attempt={2}/{3}" -f $DisplayPath,$resolved,$attempt,$attempts)
+            }
+            return $resolved
+        }
+        catch {
+            $lastError = $_
+            if ($attempt -ge $attempts) { break }
+            Write-SmartLog ("Setup source candidate validation attempt {0}/{1} failed: Path={2}; Error={3}; Retrying in {4} second(s)." -f $attempt,$attempts,$DisplayPath,$_.Exception.Message,$delaySeconds) 'WARN'
+            if ($delaySeconds -gt 0) { Start-Sleep -Seconds $delaySeconds }
+        }
+    }
+
+    throw $lastError
+}
+function Resolve-PreferredSetupSourcePath {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$SourcePaths,
+        [string]$ExpectedLanguage
+    )
+
+    $candidates = @(
+        @(
+            foreach ($sourcePath in @($SourcePaths)) {
+                Split-SetupSourcePathList -Value $sourcePath
+            }
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+    )
+    if ($candidates.Count -eq 0) {
+        throw 'SetupSourcePath is empty.'
+    }
+
+    if ($candidates.Count -eq 1) {
+        $singleSource = [Environment]::ExpandEnvironmentVariables($candidates[0])
+        try {
+            $singleSource = Resolve-ValidatedSetupSourceMediaPath -SourcePath $singleSource -ExpectedLanguage $ExpectedLanguage -DisplayPath $candidates[0]
+            Write-SmartLog ("Setup source candidate OK: Path={0}; Resolved={1}; Selection=SingleSource" -f $candidates[0],$singleSource)
+        }
+        catch {
+            $accessHint = "Setup source is validated from the target SYSTEM context. For UNC sources, grant Share and NTFS Read to the target computer account '$script:ComputerName`$' or to a group such as Domain Computers."
+            throw ("Setup source is not reachable or valid from this target. Path={0}; Error={1}; {2}" -f $singleSource,$_.Exception.Message,$accessHint)
+        }
+        $script:SelectedSetupSourcePath = [string]$singleSource
+        $script:SetupSourceSelectionDetail = 'SingleSource'
+        return $singleSource
+    }
+
+    Write-SmartLog ("Selecting nearest setup source from {0} candidate(s): {1}" -f $candidates.Count,($candidates -join ' | '))
+
+    $validSources = New-Object System.Collections.ArrayList
+    $errors = New-Object System.Collections.ArrayList
+    foreach ($candidate in $candidates) {
+        $expanded = [Environment]::ExpandEnvironmentVariables($candidate)
+        $server = Get-UncServerName -Path $expanded
+        $tcpMs = 0
+        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($server)) {
+                $tcpMs = Measure-TcpConnectionMilliseconds -ServerName $server
+            }
+
+            $resolved = Resolve-ValidatedSetupSourceMediaPath -SourcePath $expanded -ExpectedLanguage $ExpectedLanguage -DisplayPath $candidate
+            $readSample = Measure-SetupSourceReadSample -MediaRoot $resolved
+            $watch.Stop()
+            $scoreMs = [int][math]::Max(1, ([int]$readSample.Milliseconds + [int]$tcpMs))
+            [void]$validSources.Add([pscustomobject]@{
+                Candidate = $candidate
+                ResolvedPath = $resolved
+                Server = $server
+                TcpMilliseconds = $tcpMs
+                ReadMilliseconds = [int]$readSample.Milliseconds
+                ReadBytes = [int64]$readSample.BytesRead
+                ScoreMilliseconds = $scoreMs
+            })
+            Write-SmartLog ("Setup source candidate OK: Path={0}; Resolved={1}; TcpMs={2}; ReadMs={3}; ReadBytes={4}; ScoreMs={5}" -f $candidate,$resolved,$tcpMs,$readSample.Milliseconds,$readSample.BytesRead,$scoreMs)
+        }
+        catch {
+            $watch.Stop()
+            $message = "Path=$candidate; Error=$($_.Exception.Message)"
+            [void]$errors.Add($message)
+            Write-SmartLog ("Setup source candidate skipped: {0}" -f $message) 'WARN'
+        }
+    }
+
+    if ($validSources.Count -eq 0) {
+        throw ("No setup source candidate is reachable and valid from this target. Errors: {0}" -f (@($errors.ToArray()) -join ' | '))
+    }
+
+    $selected = @($validSources.ToArray() | Sort-Object ScoreMilliseconds, ReadMilliseconds, TcpMilliseconds, ResolvedPath | Select-Object -First 1)[0]
+    $null = Test-SetupMedia -MediaPath $selected.ResolvedPath -ExpectedLanguage $ExpectedLanguage
+    Write-SmartLog ("Selected nearest setup source: {0}; TcpMs={1}; ReadMs={2}; ReadBytes={3}; ScoreMs={4}" -f $selected.ResolvedPath,$selected.TcpMilliseconds,$selected.ReadMilliseconds,$selected.ReadBytes,$selected.ScoreMilliseconds)
+    $script:SelectedSetupSourcePath = [string]$selected.ResolvedPath
+    $script:SetupSourceSelectionDetail = ("Candidates={0}; Selected={1}; TcpMs={2}; ReadMs={3}; ReadBytes={4}; ScoreMs={5}" -f $candidates.Count,$selected.ResolvedPath,$selected.TcpMilliseconds,$selected.ReadMilliseconds,$selected.ReadBytes,$selected.ScoreMilliseconds)
+    return [string]$selected.ResolvedPath
+}
+
+function Test-SetupExecutableSignature {
+    param([Parameter(Mandatory = $true)][string]$SetupExe)
+
+    try {
+        $signature = Get-AuthenticodeSignature -LiteralPath $SetupExe -ErrorAction Stop
+    }
+    catch {
+        throw ("setup.exe Authenticode signature could not be checked. Path={0}; Error={1}" -f $SetupExe,$_.Exception.Message)
+    }
+
+    $status = [string]$signature.Status
+    $statusMessage = [string]$signature.StatusMessage
+    if ($status -ne 'Valid') {
+        throw ("setup.exe Authenticode signature is not valid. Path={0}; Status={1}; StatusMessage={2}" -f $SetupExe,$status,$statusMessage)
+    }
+
+    if ($null -eq $signature.SignerCertificate) {
+        throw ("setup.exe Authenticode signature is valid but signer certificate is missing. Path={0}" -f $SetupExe)
+    }
+
+    $signerSubject = [string]$signature.SignerCertificate.Subject
+    if ($signerSubject -notmatch '(?i)(CN|O)=Microsoft Corporation') {
+        throw ("setup.exe Authenticode signer is not Microsoft Corporation. Path={0}; Signer={1}" -f $SetupExe,$signerSubject)
+    }
+
+    Write-SmartLog ("Authenticode validated setup executable: Path={0}; Signer={1}; Thumbprint={2}" -f $SetupExe,$signerSubject,$signature.SignerCertificate.Thumbprint)
+}
+
+function Get-SetupMediaIntegrityManifestPath {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    return Join-Path $MediaRoot $script:SetupMediaManifestFileName
+}
+
+function Get-SetupMediaIntegrityManifestHash {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    $manifestPath = Get-SetupMediaIntegrityManifestPath -MediaRoot $MediaRoot
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return '' }
+    return (Get-SmartFileSha256 -Path $manifestPath)
+}
+
+function Test-SetupMediaIntegrityManifest {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    $manifestPath = Get-SetupMediaIntegrityManifestPath -MediaRoot $MediaRoot
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $false }
+
+    try {
+        $rootFull = [System.IO.Path]::GetFullPath($MediaRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    }
+    catch {
+        throw ("Setup media integrity manifest media root cannot be resolved. MediaRoot={0}; Error={1}" -f $MediaRoot,$_.Exception.Message)
+    }
+
+    try {
+        $rows = @(Import-Csv -LiteralPath $manifestPath -ErrorAction Stop)
+    }
+    catch {
+        throw ("Setup media integrity manifest cannot be read. Manifest={0}; Error={1}" -f $manifestPath,$_.Exception.Message)
+    }
+
+    if ($rows.Count -eq 0) {
+        throw "Setup media integrity manifest is empty: $manifestPath"
+    }
+
+    foreach ($column in @('RelativePath','Length','SHA256')) {
+        if (-not $rows[0].PSObject.Properties[$column]) {
+            throw "Setup media integrity manifest is missing required column '$column': $manifestPath"
+        }
+    }
+
+    $checkedFiles = 0
+    $checkedBytes = 0L
+    $rowNumber = 1
+    foreach ($row in $rows) {
+        $rowNumber++
+        $rawRelativePath = [string]$row.RelativePath
+        $relativePath = $rawRelativePath.Trim().TrimStart('\', '/')
+        if ([string]::IsNullOrWhiteSpace($relativePath)) {
+            throw ("Setup media integrity manifest contains an empty RelativePath. Manifest={0}; Row={1}" -f $manifestPath,$rowNumber)
+        }
+        if ([System.IO.Path]::IsPathRooted($relativePath) -or $relativePath -match '(^|[\\/])\.\.([\\/]|$)') {
+            throw ("Setup media integrity manifest contains an unsafe RelativePath. Manifest={0}; Row={1}; RelativePath={2}" -f $manifestPath,$rowNumber,$relativePath)
+        }
+        if ($relativePath -match '[<>:"|?*\x00-\x1F]') {
+            throw ("Setup media integrity manifest contains an invalid RelativePath character. Manifest={0}; Row={1}; RelativePath={2}" -f $manifestPath,$rowNumber,$relativePath)
+        }
+
+        try {
+            $filePath = Join-Path $MediaRoot $relativePath
+            $fileFull = [System.IO.Path]::GetFullPath($filePath)
+        }
+        catch {
+            throw ("Setup media integrity manifest path cannot be resolved. Manifest={0}; Row={1}; RelativePath={2}; Error={3}" -f $manifestPath,$rowNumber,$relativePath,$_.Exception.Message)
+        }
+
+        if (-not $fileFull.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw ("Setup media integrity manifest path escapes media root. Manifest={0}; Row={1}; RelativePath={2}; File={3}" -f $manifestPath,$rowNumber,$relativePath,$fileFull)
+        }
+        if (-not (Test-Path -LiteralPath $fileFull -PathType Leaf)) {
+            throw ("Setup media integrity check failed. File missing. Manifest={0}; Row={1}; RelativePath={2}; File={3}" -f $manifestPath,$rowNumber,$relativePath,$fileFull)
+        }
+
+        $expectedLength = 0L
+        if (-not [int64]::TryParse([string]$row.Length, [ref]$expectedLength)) {
+            throw ("Setup media integrity manifest contains an invalid Length. Manifest={0}; Row={1}; RelativePath={2}; Length={3}" -f $manifestPath,$rowNumber,$relativePath,$row.Length)
+        }
+
+        $item = Get-Item -LiteralPath $fileFull -ErrorAction Stop
+        if ([int64]$item.Length -ne $expectedLength) {
+            throw ("Setup media integrity check failed. Length mismatch. Manifest={0}; Row={1}; RelativePath={2}; File={3}; ExpectedLength={4}; ActualLength={5}" -f $manifestPath,$rowNumber,$relativePath,$fileFull,$expectedLength,$item.Length)
+        }
+
+        $expectedHash = ([string]$row.SHA256).Trim().ToUpperInvariant()
+        if ($expectedHash -notmatch '^[A-F0-9]{64}$') {
+            throw ("Setup media integrity manifest contains an invalid SHA256. Manifest={0}; Row={1}; RelativePath={2}; SHA256={3}" -f $manifestPath,$rowNumber,$relativePath,$row.SHA256)
+        }
+
+        try {
+            $actualHash = (Get-SmartFileSha256 -Path $fileFull).ToUpperInvariant()
+        }
+        catch {
+            throw ("Setup media integrity check failed. Cannot hash file. Manifest={0}; Row={1}; RelativePath={2}; File={3}; Error={4}" -f $manifestPath,$rowNumber,$relativePath,$fileFull,$_.Exception.Message)
+        }
+
+        if ($actualHash -ne $expectedHash) {
+            throw ("Setup media integrity check failed. SHA256 mismatch. Manifest={0}; Row={1}; RelativePath={2}; File={3}; ExpectedSHA256={4}; ActualSHA256={5}" -f $manifestPath,$rowNumber,$relativePath,$fileFull,$expectedHash,$actualHash)
+        }
+
+        $checkedFiles++
+        $checkedBytes += [int64]$item.Length
+    }
+
+    Write-SmartLog ("Setup media integrity manifest validated: Manifest={0}; Files={1}; Bytes={2}" -f $manifestPath,$checkedFiles,$checkedBytes)
+    return $true
+}
+function Test-SetupMedia {
+    param(
+        [Parameter(Mandatory = $true)][string]$MediaPath,
+        [string]$ExpectedLanguage,
+        [switch]$ValidateManifest
+    )
+
+    $setupExe = if ([System.IO.Path]::GetFileName($MediaPath) -ieq 'setup.exe') {
+        $MediaPath
+    }
+    else {
+        Join-Path $MediaPath 'setup.exe'
+    }
+
+    if (-not (Test-Path -LiteralPath $setupExe -PathType Leaf)) {
+        throw "setup.exe not found at: $setupExe"
+    }
+
+    $setupItem = Get-Item -LiteralPath $setupExe -ErrorAction Stop
+    if ($setupItem.Length -lt 64KB) {
+        throw "setup.exe exists but size is unexpectedly small: $setupExe"
+    }
+
+    Test-SetupExecutableSignature -SetupExe $setupItem.FullName
+
+    $mediaRoot = Split-Path -Parent $setupExe
+    $null = Test-SetupInstallImageReadable -MediaRoot $mediaRoot
+    if ($ValidateManifest) {
+        try {
+            # The result is checked: a missing manifest returns $false and the media is refused.
+            $manifestValid = Test-SetupMediaIntegrityManifest -MediaRoot $mediaRoot
+            if ($manifestValid -ne $true) { throw ("Setup media integrity manifest not found: {0}" -f (Get-SetupMediaIntegrityManifestPath -MediaRoot $mediaRoot)) }
+        }
+        catch {
+            $manifestPath = Get-SetupMediaIntegrityManifestPath -MediaRoot $mediaRoot
+            throw ("Setup media integrity manifest validation failed. MediaRoot={0}; Manifest={1}; Error={2}" -f $mediaRoot,$manifestPath,$_.Exception.Message)
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedLanguage)) {
+        $mediaLanguages = @(Get-SetupMediaLanguages -MediaRoot $mediaRoot)
+        if ($mediaLanguages.Count -eq 0) {
+            throw "Setup media language could not be detected from sources\lang.ini. Expected=$ExpectedLanguage; MediaRoot=$mediaRoot"
+        }
+
+        $match = @($mediaLanguages | Where-Object { $_ -ieq $ExpectedLanguage } | Select-Object -First 1)
+        if ($match.Count -eq 0) {
+            throw "Setup media language mismatch. Expected=$ExpectedLanguage; Found=$($mediaLanguages -join ','); MediaRoot=$mediaRoot"
+        }
+        $script:ResolvedSetupMediaLanguages = ($mediaLanguages -join ',')
+    }
+
+    return $setupItem.FullName
+}
+function Convert-ToSafePathSegment {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    $safe = ($Value.Trim() -replace '[^A-Za-z0-9_.-]', '_')
+    if ([string]::IsNullOrWhiteSpace($safe)) { return 'Default' }
+    return $safe
+}
+
+function Resolve-SetupCachePath {
+    param([string]$ExpectedLanguage)
+
+    $mediaSegment = Convert-ToSafePathSegment -Value $SetupMediaId
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedLanguage)) {
+        $mediaSegment = "{0}-{1}" -f $mediaSegment,(Convert-ToSafePathSegment -Value $ExpectedLanguage)
+    }
+    return Join-Path $SetupCacheRoot $mediaSegment
+}
+
+#region SEMT setup media resolution v1
+# Shared, read-only resolution of the Windows setup media used by the Windows 11 Campaign.
+# The same region is copied unchanged into the endpoint script and into the Intune package
+# helper (a test checks that both copies are identical). It never moves, deletes, writes or
+# changes ACLs: it only decides which media folder may be used and why.
+#
+# Decisions:
+#   NewCacheValid       valid media in the cache of this product
+#   LegacyIntuneOwned   valid media of the previous Windows 11 toolkit still owned by its Intune
+#                       package: used in place, read-only, external to this product
+#   LegacyAdoptable     valid, idle, unmanaged legacy media that can be moved to the new cache
+#   InUse               the selected media is used by a running process or a live lock
+#   Indeterminate       the state could not be read (registry, processes, locks, permissions,
+#                       folder tree): nothing is done, the caller stops
+#   Untrusted           legacy media is present but a non-administrator owns or can modify it, or
+#                       it contains a reparse point: never used (setup.exe runs as SYSTEM), its
+#                       permissions are never changed, and a second copy needs authorization
+#   Incompatible        media present but not the requested media (language, version)
+#   Corrupt             media present but invalid
+#   Absent              no media of this product and no legacy media found
+# LegacyValidRemains is true when valid legacy media exists but is not used. DuplicationRequired
+# is true when legacy media is present and not used (valid or untrusted): a second copy then
+# requires an explicit duplication authorization.
+
+$script:SemtLegacySetupMediaRegistryKey = 'SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages'
+
+function Test-SemtPathHasReparsePoint {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $current = [System.IO.Path]::GetFullPath($Path)
+    while (-not [string]::IsNullOrWhiteSpace($current)) {
+        if (Test-Path -LiteralPath $current) {
+            try {
+                $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+                if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+            }
+            catch { return $true }
+        }
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+        $current = $parent
+    }
+    return $false
+}
+
+function Test-SemtTreeHasReparsePoint {
+    # Stops at the first reparse point and never descends into one (no junction is followed).
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (Test-SemtPathHasReparsePoint -Path $Path) { return $true }
+    $pending = New-Object System.Collections.Generic.Queue[string]
+    $pending.Enqueue([System.IO.Path]::GetFullPath($Path))
+    try {
+        while ($pending.Count -gt 0) {
+            $folder = $pending.Dequeue()
+            foreach ($item in @(Get-ChildItem -LiteralPath $folder -Force -ErrorAction Stop)) {
+                if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+                if ($item.PSIsContainer) { $pending.Enqueue($item.FullName) }
+            }
+        }
+    }
+    catch { return $true }
+    return $false
+}
+
+function Get-SemtTreeReparseState {
+    # Found: a reparse point exists on the path or in the tree. Unreadable: the tree could not be
+    # enumerated, so the absence of a reparse point is not proven. Never descends into one.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (Test-SemtPathHasReparsePoint -Path $Path) { return [pscustomobject]@{ State = 'Found'; Detail = ('Reparse point on the path of {0}.' -f $Path) } }
+    $pending = New-Object System.Collections.Generic.Queue[string]
+    $pending.Enqueue([System.IO.Path]::GetFullPath($Path))
+    try {
+        while ($pending.Count -gt 0) {
+            $folder = $pending.Dequeue()
+            foreach ($item in @(Get-ChildItem -LiteralPath $folder -Force -ErrorAction Stop)) {
+                if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return [pscustomobject]@{ State = 'Found'; Detail = ('Reparse point: {0}' -f $item.FullName) } }
+                if ($item.PSIsContainer) { $pending.Enqueue($item.FullName) }
+            }
+        }
+    }
+    catch { return [pscustomobject]@{ State = 'Unreadable'; Detail = ('Media folder tree could not be read: {0}' -f $_.Exception.Message) } }
+    return [pscustomobject]@{ State = 'None'; Detail = '' }
+}
+
+function Get-SemtLegacySetupMediaOwners {
+    # Intune packages of the previous toolkit whose SetupCacheFolder is this media folder.
+    param(
+        [Parameter(Mandatory = $true)][string]$Leaf,
+        [string]$RegistryKeyPath = $script:SemtLegacySetupMediaRegistryKey
+    )
+    $owners = New-Object System.Collections.Generic.List[string]
+    try {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+        try {
+            $packages = $baseKey.OpenSubKey($RegistryKeyPath, $false)
+            if ($packages) {
+                try {
+                    foreach ($name in @($packages.GetSubKeyNames())) {
+                        $package = $packages.OpenSubKey($name, $false)
+                        if (-not $package) { continue }
+                        try {
+                            $cacheFolder = [string]$package.GetValue('SetupCacheFolder', '')
+                            $installState = [string]$package.GetValue('InstallState', '')
+                            if ($cacheFolder -ieq $Leaf -and $installState -notin @('','Uninstalled','Removed')) { $owners.Add(('{0}:{1}' -f $name,$installState)) }
+                        }
+                        finally { $package.Dispose() }
+                    }
+                }
+                finally { $packages.Dispose() }
+            }
+        }
+        finally { $baseKey.Dispose() }
+    }
+    catch {
+        return [pscustomobject]@{ State = 'Unreadable'; Owners = @(); Detail = ('Legacy Intune package registry could not be read: {0}' -f $_.Exception.Message) }
+    }
+    return [pscustomobject]@{ State = 'Read'; Owners = @($owners.ToArray()); Detail = '' }
+}
+
+function Get-SemtSetupMediaUsage {
+    # A media folder is in use when a live process runs from it or copies into it, or when a
+    # media lock of its folder is held by a live process. Unreadable state is Indeterminate.
+    param(
+        [Parameter(Mandatory = $true)][string]$MediaPath,
+        [string[]]$LockRoots = @()
+    )
+    $full = [System.IO.Path]::GetFullPath($MediaPath).TrimEnd('\')
+    $leaf = Split-Path -Path $full -Leaf
+    $signals = New-Object System.Collections.Generic.List[string]
+    foreach ($lockRoot in @($LockRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        if (-not (Test-Path -LiteralPath $lockRoot -PathType Container)) { continue }
+        foreach ($lockDir in @(Get-ChildItem -LiteralPath $lockRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like ('*{0}*' -f $leaf) })) {
+            $payloadPath = Join-Path $lockDir.FullName 'lock.json'
+            if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) {
+                if ($lockDir.LastWriteTimeUtc -gt (Get-Date).ToUniversalTime().AddMinutes(-5)) { $signals.Add(('Recent lock without payload: {0}' -f $lockDir.FullName)) }
+                continue
+            }
+            $payload = $null
+            try { $payload = Get-Content -LiteralPath $payloadPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+            catch { return [pscustomobject]@{ State = 'Indeterminate'; Detail = ('Media lock is unreadable: {0}' -f $payloadPath) } }
+            $lockPid = 0
+            if ($payload -and $payload.PSObject.Properties['PID']) { [void][int]::TryParse([string]$payload.PID, [ref]$lockPid) }
+            if ($lockPid -gt 0 -and (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) { $signals.Add(('Lock {0} held by PID {1}' -f $lockDir.Name,$lockPid)) }
+        }
+    }
+    try {
+        $escaped = [regex]::Escape($full)
+        foreach ($process in @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)) {
+            $text = '{0} {1}' -f [string]$process.ExecutablePath,[string]$process.CommandLine
+            if ($text -match ('(?i){0}(\\|"|\s|$)' -f $escaped)) { $signals.Add(('Process {0}:{1}' -f $process.Name,$process.ProcessId)) }
+        }
+    }
+    catch { return [pscustomobject]@{ State = 'Indeterminate'; Detail = ('Running processes could not be listed: {0}' -f $_.Exception.Message) } }
+    if ($signals.Count -gt 0) { return [pscustomobject]@{ State = 'InUse'; Detail = ($signals -join '; ') } }
+    return [pscustomobject]@{ State = 'Free'; Detail = '' }
+}
+
+function Test-SemtMediaWriteRestricted {
+    # Legacy media is run as SYSTEM, so it is trusted only when no principal other than SYSTEM,
+    # Administrators, TrustedInstaller or CREATOR OWNER owns or can modify any of its items.
+    # State: Trusted, Untrusted (insufficient protection, proven), or Unreadable (the permissions
+    # or the folder tree could not be read: the protection is not proven either way).
+    # Read-only: the permissions are never changed.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $trustedSids = @('S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464','S-1-3-0')
+    $writeRights = [System.Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteExtendedAttributes, DeleteSubdirectoriesAndFiles, Delete, ChangePermissions, TakeOwnership'
+    try { $items = @(Get-Item -LiteralPath $Path -Force -ErrorAction Stop) + @(Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction Stop) }
+    catch { return [pscustomobject]@{ Trusted = $false; State = 'Unreadable'; Detail = ('Media folder tree could not be read: {0}' -f $_.Exception.Message) } }
+    foreach ($item in $items) {
+        try {
+            $acl = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
+            $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+            $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+        }
+        catch { return [pscustomobject]@{ Trusted = $false; State = 'Unreadable'; Detail = ('Permissions of {0} could not be read: {1}' -f $item.FullName,$_.Exception.Message) } }
+        if ($null -eq $owner) { return [pscustomobject]@{ Trusted = $false; State = 'Unreadable'; Detail = ('Owner of {0} could not be read.' -f $item.FullName) } }
+        if ($trustedSids -notcontains $owner.Value) { return [pscustomobject]@{ Trusted = $false; State = 'Untrusted'; Detail = ('Owner {0} of {1} is not SYSTEM or Administrators.' -f $owner.Value,$item.FullName) } }
+        foreach ($rule in $rules) {
+            if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+            if (($rule.FileSystemRights -band $writeRights) -eq 0) { continue }
+            if ($trustedSids -notcontains $rule.IdentityReference.Value) { return [pscustomobject]@{ Trusted = $false; State = 'Untrusted'; Detail = ('{0} can modify {1}.' -f $rule.IdentityReference.Value,$item.FullName) } }
+        }
+    }
+    return [pscustomobject]@{ Trusted = $true; State = 'Trusted'; Detail = '' }
+}
+
+function Get-SemtMediaTrustState {
+    # Normalizes a trust provider result. A missing or unknown result is Unreadable, never Untrusted
+    # or Trusted, so an unverifiable state always stops the caller.
+    param([AllowNull()]$Trust)
+    if ($null -eq $Trust) { return 'Unreadable' }
+    if ($Trust.PSObject.Properties['State']) {
+        $state = [string]$Trust.State
+        if ($state -in @('Trusted','Untrusted','Unreadable')) { return $state }
+        return 'Unreadable'
+    }
+    if ($Trust.PSObject.Properties['Trusted']) { if ([bool]$Trust.Trusted) { return 'Trusted' } else { return 'Untrusted' } }
+    return 'Unreadable'
+}
+
+function Invoke-SemtSetupMediaValidator {
+    param([Parameter(Mandatory = $true)][scriptblock]$ValidateMedia, [Parameter(Mandatory = $true)][string]$Path)
+    try {
+        $result = & $ValidateMedia $Path
+        if ($null -eq $result) { return [pscustomobject]@{ Valid = $false; Category = 'Corrupt'; Detail = 'Validator returned nothing.' } }
+        return $result
+    }
+    catch { return [pscustomobject]@{ Valid = $false; Category = 'Corrupt'; Detail = $_.Exception.Message } }
+}
+
+function Resolve-SemtSetupMedia {
+    param(
+        [Parameter(Mandatory = $true)][string]$NewCachePath,
+        [string[]]$LegacyCandidates = @(),
+        [Parameter(Mandatory = $true)][scriptblock]$ValidateMedia,
+        [scriptblock]$OwnerProvider = { param($Path) Get-SemtLegacySetupMediaOwners -Leaf (Split-Path -Path $Path -Leaf) },
+        [scriptblock]$UsageProvider = { param($Path) Get-SemtSetupMediaUsage -MediaPath $Path },
+        [scriptblock]$TrustProvider = { param($Path) Test-SemtMediaWriteRestricted -Path $Path },
+        [switch]$AllowAdoption
+    )
+
+    $newFull = [System.IO.Path]::GetFullPath($NewCachePath).TrimEnd('\')
+    $result = [ordered]@{
+        Decision = 'Absent'; Path = ''; Source = 'None'; External = $false; Owner = ''
+        NewCachePath = $newFull; NewCacheState = 'Absent'; NewCacheDetail = ''
+        LegacyPath = ''; LegacyState = 'Absent'; LegacyDetail = ''; LegacyValidRemains = $false
+        UntrustedPath = ''; UntrustedDetail = ''; DuplicationRequired = $false
+        Detail = ''
+    }
+
+    if (Test-Path -LiteralPath (Join-Path $newFull 'setup.exe') -PathType Leaf) {
+        $check = Invoke-SemtSetupMediaValidator -ValidateMedia $ValidateMedia -Path $newFull
+        if ($check.Valid) {
+            $result.NewCacheState = 'Valid'
+            $result.Decision = 'NewCacheValid'; $result.Path = $newFull; $result.Source = 'NewCache'
+            $result.Detail = 'Valid media in the cache of this product.'
+            return [pscustomobject]$result
+        }
+        $result.NewCacheState = [string]$check.Category; $result.NewCacheDetail = [string]$check.Detail
+    }
+    elseif (Test-Path -LiteralPath $newFull) { $result.NewCacheState = 'Corrupt'; $result.NewCacheDetail = 'Cache folder exists without setup.exe.' }
+
+    foreach ($candidate in @($LegacyCandidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { [System.IO.Path]::GetFullPath($_).TrimEnd('\') } | Select-Object -Unique)) {
+        if ($candidate -ieq $newFull) { continue }
+        if (-not (Test-Path -LiteralPath (Join-Path $candidate 'setup.exe') -PathType Leaf)) { continue }
+        $result.LegacyPath = $candidate
+        $owners = & $OwnerProvider $candidate
+        if ($null -eq $owners -or [string]$owners.State -ne 'Read') {
+            $result.LegacyState = 'Indeterminate'; $result.LegacyDetail = if ($owners) { [string]$owners.Detail } else { 'Owner provider returned nothing.' }
+            break
+        }
+        $usage = & $UsageProvider $candidate
+        if ($null -eq $usage -or [string]$usage.State -eq 'Indeterminate') {
+            $result.LegacyState = 'Indeterminate'; $result.LegacyDetail = if ($usage) { [string]$usage.Detail } else { 'Usage provider returned nothing.' }
+            break
+        }
+        if ([string]$usage.State -eq 'InUse') { $result.LegacyState = 'InUse'; $result.LegacyDetail = [string]$usage.Detail; break }
+        # Present legacy media is never reported as Absent: an unreadable tree or unreadable
+        # permissions stop the caller (Indeterminate); proven insufficient protection is Untrusted.
+        $reparse = Get-SemtTreeReparseState -Path $candidate
+        if ([string]$reparse.State -eq 'Unreadable') { $result.LegacyState = 'Indeterminate'; $result.LegacyDetail = [string]$reparse.Detail; break }
+        if ([string]$reparse.State -eq 'Found') {
+            $result.LegacyState = 'Untrusted'; $result.LegacyDetail = ('Legacy media contains a reparse point; it is not used. {0}' -f $reparse.Detail)
+            if ([string]::IsNullOrWhiteSpace($result.UntrustedPath)) { $result.UntrustedPath = $candidate; $result.UntrustedDetail = $result.LegacyDetail }
+            continue
+        }
+        $trust = $null
+        try { $trust = & $TrustProvider $candidate } catch { $trust = [pscustomobject]@{ Trusted = $false; State = 'Unreadable'; Detail = $_.Exception.Message } }
+        $trustState = Get-SemtMediaTrustState -Trust $trust
+        $trustDetail = if ($trust -and $trust.PSObject.Properties['Detail']) { [string]$trust.Detail } else { 'no result' }
+        if ($trustState -eq 'Unreadable') { $result.LegacyState = 'Indeterminate'; $result.LegacyDetail = ('Legacy media permissions could not be verified: {0}' -f $trustDetail); break }
+        if ($trustState -eq 'Untrusted') {
+            $result.LegacyState = 'Untrusted'; $result.LegacyDetail = ('Legacy media is not write-restricted; it is not used and its permissions are not changed: {0}' -f $trustDetail)
+            if ([string]::IsNullOrWhiteSpace($result.UntrustedPath)) { $result.UntrustedPath = $candidate; $result.UntrustedDetail = $result.LegacyDetail }
+            continue
+        }
+        $check = Invoke-SemtSetupMediaValidator -ValidateMedia $ValidateMedia -Path $candidate
+        if (-not $check.Valid) { $result.LegacyState = [string]$check.Category; $result.LegacyDetail = [string]$check.Detail; continue }
+        if (@($owners.Owners).Count -gt 0) {
+            $result.LegacyState = 'IntuneOwned'; $result.Owner = (@($owners.Owners) -join ', ')
+            $result.LegacyDetail = ('Owned by the legacy Intune package {0}.' -f $result.Owner)
+            break
+        }
+        $reasons = New-Object System.Collections.Generic.List[string]
+        if (-not $AllowAdoption) { $reasons.Add('adoption disabled') }
+        if (Test-Path -LiteralPath $newFull) { $reasons.Add('the new cache folder already exists') }
+        if ([System.IO.Path]::GetPathRoot($candidate) -ine [System.IO.Path]::GetPathRoot($newFull)) { $reasons.Add('other volume') }
+        if ((Test-SemtTreeHasReparsePoint -Path $candidate) -or (Test-SemtPathHasReparsePoint -Path (Split-Path -Path $newFull -Parent))) { $reasons.Add('reparse point') }
+        if ($reasons.Count -eq 0) { $result.LegacyState = 'Adoptable'; $result.LegacyDetail = 'Idle, unmanaged and valid.' }
+        else { $result.LegacyState = 'NotAdoptable'; $result.LegacyDetail = ('Valid but not adoptable: {0}.' -f ($reasons -join ', ')) }
+        break
+    }
+
+    switch ($result.LegacyState) {
+        'IntuneOwned' { $result.Decision = 'LegacyIntuneOwned'; $result.Path = $result.LegacyPath; $result.Source = 'LegacyExternal'; $result.External = $true }
+        'Adoptable' { $result.Decision = 'LegacyAdoptable'; $result.Path = $result.LegacyPath; $result.Source = 'LegacyAdoptable' }
+        'InUse' { $result.Decision = 'InUse'; $result.Path = $result.LegacyPath }
+        'Indeterminate' { $result.Decision = 'Indeterminate'; $result.Path = $result.LegacyPath }
+        default {
+            if ($result.LegacyState -eq 'NotAdoptable') { $result.LegacyValidRemains = $true }
+            if (-not [string]::IsNullOrWhiteSpace($result.UntrustedPath) -and -not $result.LegacyValidRemains) {
+                # Untrusted legacy media is reported as such, even when another candidate was
+                # incompatible or corrupt afterwards.
+                $result.Decision = 'Untrusted'
+                $result.LegacyState = 'Untrusted'; $result.LegacyPath = $result.UntrustedPath; $result.LegacyDetail = $result.UntrustedDetail
+            }
+            elseif ($result.NewCacheState -in @('Incompatible','Corrupt')) { $result.Decision = $result.NewCacheState }
+            elseif ($result.LegacyState -in @('Incompatible','Corrupt')) { $result.Decision = $result.LegacyState }
+            else { $result.Decision = 'Absent' }
+            if ($result.LegacyValidRemains -or -not [string]::IsNullOrWhiteSpace($result.UntrustedPath)) { $result.DuplicationRequired = $true }
+        }
+    }
+    $result.Detail = ('NewCache={0}; Legacy={1} {2}' -f $result.NewCacheState,$result.LegacyState,$result.LegacyDetail).Trim()
+    return [pscustomobject]$result
+}
+#endregion SEMT setup media resolution v1
+
+#region SEMT legacy setup media reuse
+# Endpoint use of the shared media resolution:
+# - LegacyIntuneOwned: used in place, read-only (never moved, cleaned, re-permissioned or marked).
+# - LegacyAdoptable: moved on the same volume to the new cache. Every step is checked; on failure
+#   the media goes back to its legacy location and its saved permissions are restored and
+#   verified. The outcome (Moved, NotMoved, RolledBack, RollbackPartial, RollbackFailed) and the
+#   evidence are kept under <DataRoot>\State\MediaAdoption.
+# - A second copy next to valid legacy media requires -AllowSetupMediaDuplication.
+
+$script:SemtMediaValidationLanguage = ''
+
+function Get-SemtLegacySetupMediaCandidates {
+    param([Parameter(Mandatory = $true)][string]$Leaf)
+    $candidates = New-Object System.Collections.Generic.List[string]
+    $legacyCacheRoot = Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'SetupMedia'
+    $candidates.Add((Join-Path -Path $legacyCacheRoot -ChildPath $Leaf))
+    try {
+        $legacyLastRun = Read-SemtTargetJson -Path (Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'LastRun.json')
+        if ($legacyLastRun -and $legacyLastRun.PSObject.Properties['SetupCachePath']) {
+            $recorded = [string]$legacyLastRun.SetupCachePath
+            # Normalized first, then anchored to <legacy root>\SetupMedia\ (no '..' or sibling-prefix escape).
+            if (-not [string]::IsNullOrWhiteSpace($recorded)) {
+                $recordedFull = [System.IO.Path]::GetFullPath($recorded).TrimEnd('\')
+                $legacyMediaRoot = [System.IO.Path]::GetFullPath($legacyCacheRoot).TrimEnd('\') + '\'
+                if ($recordedFull.StartsWith($legacyMediaRoot, [System.StringComparison]::OrdinalIgnoreCase) -and (Split-Path -Path $recordedFull -Leaf) -ieq $Leaf) { $candidates.Add($recordedFull) }
+            }
+        }
+    }
+    catch { Write-SmartLog ("Legacy LastRun.json could not be read for media discovery (read-only): {0}" -f $_.Exception.Message) 'WARN' }
+    return @($candidates | ForEach-Object { [System.IO.Path]::GetFullPath($_) } | Select-Object -Unique)
+}
+
+function Test-SemtEndpointSetupMediaCandidate {
+    # Read-only validation used for resolution and before/after adoption.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    try {
+        $setupExe = Test-SetupMedia -MediaPath $Path -ExpectedLanguage $script:SemtMediaValidationLanguage -ValidateManifest
+        return [pscustomobject]@{ Valid = $true; Category = 'Valid'; Detail = ''; SetupExe = $setupExe }
+    }
+    catch {
+        $message = $_.Exception.Message
+        $category = if ($message -like 'Setup media language*') { 'Incompatible' } else { 'Corrupt' }
+        return [pscustomobject]@{ Valid = $false; Category = $category; Detail = $message; SetupExe = '' }
+    }
+}
+
+function Get-SemtEndpointMediaLockRoots {
+    return @((Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'Locks'), (Join-Path -Path $DataRoot -ChildPath 'Locks'))
+}
+
+function Resolve-SemtEndpointSetupMedia {
+    param([Parameter(Mandatory = $true)][string]$CachePath, [string]$ExpectedLanguage)
+    $script:SemtMediaValidationLanguage = $ExpectedLanguage
+    $candidates = @()
+    if ($ReuseLegacySetupMedia) { $candidates = @(Get-SemtLegacySetupMediaCandidates -Leaf (Split-Path -Path $CachePath -Leaf)) }
+    return Resolve-SemtSetupMedia -NewCachePath $CachePath -LegacyCandidates $candidates -ValidateMedia { param($Path) Test-SemtEndpointSetupMediaCandidate -Path $Path } -UsageProvider { param($Path) Get-SemtSetupMediaUsage -MediaPath $Path -LockRoots (Get-SemtEndpointMediaLockRoots) } -AllowAdoption:([bool]$ReuseLegacySetupMedia)
+}
+
+function Get-SemtMediaTreeSnapshot {
+    # Relative path, size and DACL (SDDL) of every item, used to prove a complete restore.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $root = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $rows = New-Object System.Collections.Generic.List[object]
+    $items = @(Get-Item -LiteralPath $root -Force -ErrorAction Stop) + @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction Stop)
+    foreach ($item in $items) {
+        $full = $item.FullName.TrimEnd('\')
+        $relative = if ($full -ieq $root) { '.' } else { $full.Substring($root.Length + 1) }
+        $length = if ($item.PSIsContainer) { [int64]-1 } else { [int64]$item.Length }
+        $sddl = (Get-Acl -LiteralPath $item.FullName -ErrorAction Stop).GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access)
+        $rows.Add([pscustomobject]@{ Path = $relative; Length = $length; Sddl = $sddl })
+    }
+    return @($rows.ToArray() | Sort-Object Path)
+}
+
+function ConvertTo-SemtCanonicalDacl {
+    # Same permissions whatever the order Windows gives to re-derived inherited entries: protection
+    # flags, then explicit and inherited entries as sorted sets (deny entries before allow entries).
+    param([AllowNull()][string]$Sddl)
+    $text = [string]$Sddl
+    $flags = ([regex]::Match($text, '^D:([A-Z]*)')).Groups[1].Value
+    $aces = @([regex]::Matches($text, '\(([^)]*)\)') | ForEach-Object { $_.Groups[1].Value })
+    $key = { param($Ace) $type = ($Ace -split ';')[0]; $rank = if ($type -like 'D*' -or $type -eq 'XD') { 0 } elseif ($type -like 'A*' -or $type -eq 'XA') { 1 } else { 2 }; '{0}|{1}' -f $rank,$Ace }
+    $explicit = @($aces | Where-Object { (($_ -split ';')[1]) -notmatch 'ID' } | Sort-Object { & $key $_ })
+    $inherited = @($aces | Where-Object { (($_ -split ';')[1]) -match 'ID' } | Sort-Object { & $key $_ })
+    return ('D:{0}|E:{1}|I:{2}' -f $flags,($explicit -join ','),($inherited -join ','))
+}
+function Compare-SemtMediaTreeSnapshot {
+    param([AllowEmptyCollection()][object[]]$Expected, [AllowEmptyCollection()][object[]]$Actual)
+    $actualByPath = @{}
+    foreach ($row in @($Actual)) { $actualByPath[([string]$row.Path).ToUpperInvariant()] = $row }
+    $differences = New-Object System.Collections.Generic.List[string]
+    foreach ($row in @($Expected)) {
+        $key = ([string]$row.Path).ToUpperInvariant()
+        if (-not $actualByPath.ContainsKey($key)) { $differences.Add(('Missing: {0}' -f $row.Path)); continue }
+        $other = $actualByPath[$key]
+        if ([int64]$other.Length -ne [int64]$row.Length) { $differences.Add(('Size: {0}' -f $row.Path)) }
+        if ((ConvertTo-SemtCanonicalDacl -Sddl ([string]$other.Sddl)) -cne (ConvertTo-SemtCanonicalDacl -Sddl ([string]$row.Sddl))) { $differences.Add(('Permissions: {0}' -f $row.Path)) }
+        $actualByPath.Remove($key)
+    }
+    foreach ($key in @($actualByPath.Keys)) { $differences.Add(('Unexpected: {0}' -f $actualByPath[$key].Path)) }
+    return [pscustomobject]@{ Same = ($differences.Count -eq 0); Differences = @($differences.ToArray()) }
+}
+
+function Get-SemtIcaclsPath {
+    $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+    if (-not (Test-Path -LiteralPath $icacls -PathType Leaf)) { throw "icacls.exe not found: $icacls" }
+    return $icacls
+}
+
+function Save-SemtMediaAcl {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$AclFile)
+    $output = & (Get-SemtIcaclsPath) $Path '/save' $AclFile '/t' '/c' '/q' 2>&1
+    $exitCode = [int]$LASTEXITCODE
+    $saved = (Test-Path -LiteralPath $AclFile -PathType Leaf) -and ((Get-Item -LiteralPath $AclFile).Length -gt 0)
+    return [pscustomobject]@{ Success = ($exitCode -eq 0 -and $saved); ExitCode = $exitCode; Detail = (($output | Out-String).Trim()) }
+}
+
+function Reset-SemtMediaAcl {
+    # Replaces explicit permissions with the ones inherited from the new cache. Success is checked
+    # on the files themselves (no explicit or protected DACL left), not only from the exit code.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $output = & (Get-SemtIcaclsPath) $Path '/reset' '/t' '/c' '/q' 2>&1
+    $exitCode = [int]$LASTEXITCODE
+    $left = New-Object System.Collections.Generic.List[string]
+    try {
+        foreach ($item in @(Get-Item -LiteralPath $Path -Force) + @(Get-ChildItem -LiteralPath $Path -Recurse -Force)) {
+            $acl = Get-Acl -LiteralPath $item.FullName
+            if ($acl.AreAccessRulesProtected -or @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])).Count -gt 0) { $left.Add($item.FullName) }
+        }
+    }
+    catch { $left.Add(('verification failed: {0}' -f $_.Exception.Message)) }
+    $detail = (($output | Out-String).Trim())
+    if ($left.Count -gt 0) { $detail = ('{0} Items not reset: {1}' -f $detail,(@($left | Select-Object -First 5) -join '; ')).Trim() }
+    return [pscustomobject]@{ Success = ($exitCode -eq 0 -and $left.Count -eq 0); ExitCode = $exitCode; Detail = $detail }
+}
+
+function Set-SemtItemDacl {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Sddl)
+    $isDirectory = Test-Path -LiteralPath $Path -PathType Container
+    $security = if ($isDirectory) { New-Object System.Security.AccessControl.DirectorySecurity } else { New-Object System.Security.AccessControl.FileSecurity }
+    $security.SetSecurityDescriptorSddlForm($Sddl, [System.Security.AccessControl.AccessControlSections]::Access)
+    if ('System.IO.FileSystemAclExtensions' -as [type]) {
+        if ($isDirectory) { [System.IO.FileSystemAclExtensions]::SetAccessControl((New-Object System.IO.DirectoryInfo $Path), $security) }
+        else { [System.IO.FileSystemAclExtensions]::SetAccessControl((New-Object System.IO.FileInfo $Path), $security) }
+    }
+    elseif ($isDirectory) { [System.IO.Directory]::SetAccessControl($Path, $security) }
+    else { [System.IO.File]::SetAccessControl($Path, $security) }
+}
+
+function Restore-SemtMediaAcl {
+    # Re-applies the DACL recorded in the snapshot to every item, the root first. Only WRITE_DAC is
+    # needed (icacls /restore would need SeRestorePrivilege); the icacls file saved before the move
+    # stays in the evidence for a manual restore.
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][object[]]$Snapshot)
+    $root = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $failed = New-Object System.Collections.Generic.List[string]
+    $ordered = @($Snapshot | Sort-Object @{ Expression = { if ([string]$_.Path -eq '.') { 0 } else { @(([string]$_.Path) -split '\\').Count } } }, @{ Expression = { [string]$_.Path } })
+    foreach ($row in $ordered) {
+        $full = if ([string]$row.Path -eq '.') { $root } else { Join-Path $root ([string]$row.Path) }
+        try { Set-SemtItemDacl -Path $full -Sddl ([string]$row.Sddl) }
+        catch { $failed.Add(('{0}: {1}' -f $row.Path,$_.Exception.Message)) }
+    }
+    return [pscustomobject]@{ Success = ($failed.Count -eq 0); ExitCode = $(if ($failed.Count -eq 0) { 0 } else { 1 }); Detail = ((@($failed) | Select-Object -First 5) -join '; ') }
+}
+
+function Move-SemtMediaDirectory {
+    param([Parameter(Mandatory = $true)][string]$Source, [Parameter(Mandatory = $true)][string]$Destination)
+    [System.IO.Directory]::Move($Source, $Destination)
+}
+
+function Invoke-SemtSetupMediaAdoption {
+    param(
+        [Parameter(Mandatory = $true)][string]$LegacyPath,
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)][scriptblock]$ValidateMedia,
+        [Parameter(Mandatory = $true)][string]$EvidenceRoot,
+        [scriptblock]$OwnerProvider = { param($Path) Get-SemtLegacySetupMediaOwners -Leaf (Split-Path -Path $Path -Leaf) },
+        [scriptblock]$UsageProvider = { param($Path) Get-SemtSetupMediaUsage -MediaPath $Path }
+    )
+
+    $source = [System.IO.Path]::GetFullPath($LegacyPath).TrimEnd('\')
+    $target = [System.IO.Path]::GetFullPath($CachePath).TrimEnd('\')
+    $evidence = Join-Path $EvidenceRoot ('{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'),[guid]::NewGuid().ToString('N').Substring(0, 6))
+    New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+    $aclFile = Join-Path $evidence 'acl-before.icacls'
+    $steps = New-Object System.Collections.Generic.List[object]
+    $state = [ordered]@{ Outcome = 'NotMoved'; LegacyPath = $source; CachePath = $target; Path = $source; Detail = ''; EvidencePath = $evidence; AclRestored = $false; Steps = $null }
+
+    function Add-AdoptionStep([string]$Name, [string]$Status, [string]$Detail) {
+        $steps.Add([pscustomobject]@{ Utc = (Get-Date).ToUniversalTime().ToString('o'); Step = $Name; Status = $Status; Detail = $Detail })
+        $level = if ($Status -eq 'OK') { 'INFO' } else { 'WARN' }
+        Write-SmartLog ("Media adoption step {0}: {1}. {2}" -f $Name,$Status,$Detail) $level
+    }
+    function Complete-Adoption([string]$Outcome, [string]$Path, [string]$Detail) {
+        $state.Outcome = $Outcome; $state.Path = $Path; $state.Detail = $Detail; $state.Steps = @($steps.ToArray())
+        try { ([pscustomobject]$state) | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidence 'adoption.json') -Encoding UTF8 } catch { }
+        $level = if ($Outcome -in @('Moved','NotMoved','RolledBack')) { 'INFO' } else { 'ERROR' }
+        Write-SmartLog ("Media adoption outcome {0}: {1} Evidence={2}" -f $Outcome,$Detail,$evidence) $level
+        return [pscustomobject]$state
+    }
+
+    # 1. Checks before any change.
+    $problems = New-Object System.Collections.Generic.List[string]
+    if (-not (Test-Path -LiteralPath (Join-Path $source 'setup.exe') -PathType Leaf)) { $problems.Add('legacy media not found') }
+    if (Test-Path -LiteralPath $target) { $problems.Add('the new cache folder already exists') }
+    if ([System.IO.Path]::GetPathRoot($source) -ine [System.IO.Path]::GetPathRoot($target)) { $problems.Add('other volume') }
+    if ($problems.Count -eq 0 -and ((Test-SemtTreeHasReparsePoint -Path $source) -or (Test-SemtPathHasReparsePoint -Path (Split-Path -Path $target -Parent)))) { $problems.Add('reparse point') }
+    if ($problems.Count -eq 0) {
+        $owners = & $OwnerProvider $source
+        if ($null -eq $owners -or [string]$owners.State -ne 'Read') { $problems.Add('legacy ownership indeterminate') }
+        elseif (@($owners.Owners).Count -gt 0) { $problems.Add(('owned by {0}' -f (@($owners.Owners) -join ', '))) }
+    }
+    if ($problems.Count -eq 0) {
+        $usage = & $UsageProvider $source
+        if ($null -eq $usage -or [string]$usage.State -ne 'Free') { $problems.Add(('media not free: {0}' -f $(if ($usage) { '{0} {1}' -f $usage.State,$usage.Detail } else { 'unknown' }))) }
+    }
+    if ($problems.Count -eq 0) {
+        $check = & $ValidateMedia $source
+        if (-not $check.Valid) { $problems.Add(('pre-move validation failed: {0}' -f $check.Detail)) }
+    }
+    if ($problems.Count -gt 0) { Add-AdoptionStep 'PreChecks' 'Failed' ($problems -join '; '); return (Complete-Adoption 'NotMoved' $source ('Not moved: {0}.' -f ($problems -join '; '))) }
+    Add-AdoptionStep 'PreChecks' 'OK' ('{0} -> {1}' -f $source,$target)
+
+    # 2. Restore information.
+    try {
+        $before = @(Get-SemtMediaTreeSnapshot -Path $source)
+        $before | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'snapshot-before.json') -Encoding UTF8
+    }
+    catch { Add-AdoptionStep 'Snapshot' 'Failed' $_.Exception.Message; return (Complete-Adoption 'NotMoved' $source ('Not moved: snapshot failed: {0}' -f $_.Exception.Message)) }
+    $saved = $null
+    try { $saved = Save-SemtMediaAcl -Path $source -AclFile $aclFile } catch { $saved = [pscustomobject]@{ Success = $false; ExitCode = -1; Detail = $_.Exception.Message } }
+    if (-not $saved.Success) { Add-AdoptionStep 'SaveAcl' 'Failed' ('ExitCode={0}; {1}' -f $saved.ExitCode,$saved.Detail); return (Complete-Adoption 'NotMoved' $source 'Not moved: permissions could not be saved.') }
+    Add-AdoptionStep 'SaveAcl' 'OK' ('{0} item(s); {1}' -f $before.Count,$aclFile)
+
+    # 3. Move on the same volume.
+    $failure = ''
+    try {
+        $parent = Split-Path -Path $target -Parent
+        if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+        Move-SemtMediaDirectory -Source $source -Destination $target
+        Add-AdoptionStep 'Move' 'OK' ''
+    }
+    catch {
+        $moveError = $_.Exception.Message
+        $sourceThere = Test-Path -LiteralPath $source; $targetThere = Test-Path -LiteralPath $target
+        if ($sourceThere -and -not $targetThere) { Add-AdoptionStep 'Move' 'Failed' ('Nothing moved: {0}' -f $moveError); return (Complete-Adoption 'NotMoved' $source ('Not moved: {0}' -f $moveError)) }
+        if (-not ($targetThere -and -not $sourceThere)) { Add-AdoptionStep 'Move' 'Failed' ('Inconsistent state after move error: Source={0}; Target={1}; {2}' -f $sourceThere,$targetThere,$moveError); return (Complete-Adoption 'RollbackFailed' $(if ($targetThere) { $target } else { $source }) ('Move failed with an inconsistent state; no folder was overwritten. SourceExists={0}; TargetExists={1}. {2}' -f $sourceThere,$targetThere,$moveError)) }
+        Add-AdoptionStep 'Move' 'Failed' ('Moved, then failed: {0}' -f $moveError)
+        $failure = ('move reported an error after moving: {0}' -f $moveError)
+    }
+
+    # 4. Permissions of the new cache, then 5. validation in place.
+    if (-not $failure) {
+        $reset = $null
+        try { $reset = Reset-SemtMediaAcl -Path $target } catch { $reset = [pscustomobject]@{ Success = $false; ExitCode = -1; Detail = $_.Exception.Message } }
+        if ($reset.Success) { Add-AdoptionStep 'ResetAcl' 'OK' '' } else { Add-AdoptionStep 'ResetAcl' 'Failed' ('ExitCode={0}; {1}' -f $reset.ExitCode,$reset.Detail); $failure = ('permission reset failed (ExitCode={0})' -f $reset.ExitCode) }
+    }
+    if (-not $failure) {
+        $after = $null
+        try { $after = & $ValidateMedia $target } catch { $after = [pscustomobject]@{ Valid = $false; Detail = $_.Exception.Message } }
+        if ($after.Valid) { Add-AdoptionStep 'Validate' 'OK' ''; return (Complete-Adoption 'Moved' $target ('Moved from {0} and validated in the new cache.' -f $source)) }
+        Add-AdoptionStep 'Validate' 'Failed' ([string]$after.Detail)
+        $failure = ('validation after move failed: {0}' -f $after.Detail)
+    }
+
+    # 6. Rollback: location first, then saved permissions, then proof.
+    if (Test-Path -LiteralPath $source) {
+        Add-AdoptionStep 'RollbackMove' 'Failed' 'The legacy location was recreated meanwhile; it is not overwritten.'
+        try { $restoreHere = Restore-SemtMediaAcl -Path $target -Snapshot $before; Add-AdoptionStep 'RestoreAclInPlace' $(if ($restoreHere.Success) { 'OK' } else { 'Failed' }) ('ExitCode={0}' -f $restoreHere.ExitCode) } catch { Add-AdoptionStep 'RestoreAclInPlace' 'Failed' $_.Exception.Message }
+        return (Complete-Adoption 'RollbackFailed' $target ('Rollback not done: {0}. The legacy location was recreated meanwhile, so the media stays at {1} (not deleted). Verify both folders.' -f $failure,$target))
+    }
+    try { Move-SemtMediaDirectory -Source $target -Destination $source; Add-AdoptionStep 'RollbackMove' 'OK' '' }
+    catch {
+        Add-AdoptionStep 'RollbackMove' 'Failed' $_.Exception.Message
+        $where = if (Test-Path -LiteralPath $target) { $target } elseif (Test-Path -LiteralPath $source) { $source } else { '<unknown>' }
+        return (Complete-Adoption 'RollbackFailed' $where ('Rollback failed: {0}; move back error: {1}. Media location: {2}.' -f $failure,$_.Exception.Message,$where))
+    }
+    $restore = $null
+    try { $restore = Restore-SemtMediaAcl -Path $source -Snapshot $before } catch { $restore = [pscustomobject]@{ Success = $false; ExitCode = -1; Detail = $_.Exception.Message } }
+    Add-AdoptionStep 'RestoreAcl' $(if ($restore.Success) { 'OK' } else { 'Failed' }) ('ExitCode={0}; {1}' -f $restore.ExitCode,$restore.Detail)
+    $comparison = $null
+    try {
+        $afterRollback = @(Get-SemtMediaTreeSnapshot -Path $source)
+        $afterRollback | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'snapshot-after-rollback.json') -Encoding UTF8
+        $comparison = Compare-SemtMediaTreeSnapshot -Expected $before -Actual $afterRollback
+    }
+    catch { $comparison = [pscustomobject]@{ Same = $false; Differences = @(('verification failed: {0}' -f $_.Exception.Message)) } }
+    if ($restore.Success -and $comparison.Same) {
+        $state.AclRestored = $true
+        Add-AdoptionStep 'VerifyRollback' 'OK' 'Location, content sizes and permissions match the state before the move.'
+        return (Complete-Adoption 'RolledBack' $source ('Rolled back after {0}; location and permissions verified.' -f $failure))
+    }
+    Add-AdoptionStep 'VerifyRollback' 'Failed' ((@($comparison.Differences) | Select-Object -First 10) -join '; ')
+    return (Complete-Adoption 'RollbackPartial' $source ('Media moved back to {0} after {1}, but the restore is not complete: {2} difference(s). Verify the permissions.' -f $source,$failure,@($comparison.Differences).Count))
+}
+
+function Assert-SemtSetupMediaCopyAllowed {
+    # Any second copy next to legacy media that is present and not used (valid but not reusable,
+    # or untrusted) needs -AllowSetupMediaDuplication. Untrusted media keeps its own status, and
+    # its permissions are never changed here.
+    param([AllowNull()]$Resolution)
+    if ($null -eq $Resolution) { return }
+    $untrusted = ([string]$Resolution.Decision -eq 'Untrusted')
+    $required = [bool]$Resolution.LegacyValidRemains -or $untrusted
+    if ($Resolution.PSObject.Properties['DuplicationRequired'] -and [bool]$Resolution.DuplicationRequired) { $required = $true }
+    if (-not $required) { return }
+    if ($AllowSetupMediaDuplication) {
+        Write-SmartLog ("Second setup media copy allowed by option although legacy media remains at {0} (Decision={1}). Reason={2}" -f $Resolution.LegacyPath,$Resolution.Decision,$Resolution.LegacyDetail) 'WARN'
+        $script:SetupMediaReuseDecision = ('DuplicationAllowed; Decision={0}; Legacy={1}; {2}' -f $Resolution.Decision,$Resolution.LegacyPath,$Resolution.LegacyDetail)
+        return
+    }
+    if ($untrusted) {
+        throw ("Setup media legacy untrusted. Legacy media at {0} is present but not protected against modification by non-administrators; it is not used and its permissions were not changed: {1} Secure or remove the legacy media, or allow duplication explicitly." -f $Resolution.LegacyPath,$Resolution.LegacyDetail)
+    }
+    throw ("Setup media duplication blocked. Legacy media remains at {0} and was not reused: {1} Unassign the legacy Intune app, free the legacy media, or allow duplication explicitly." -f $Resolution.LegacyPath,$Resolution.LegacyDetail)
+}
+#endregion SEMT legacy setup media reuse
+
+function Get-SetupInstallImageItem {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    foreach ($name in @('sources\install.wim','sources\install.esd')) {
+        $path = Join-Path $MediaRoot $name
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            return Get-Item -LiteralPath $path -ErrorAction Stop
+        }
+    }
+    return $null
+}
+
+function Test-SetupInstallImageReadable {
+    param([Parameter(Mandatory = $true)][string]$MediaRoot)
+
+    $installItem = Get-SetupInstallImageItem -MediaRoot $MediaRoot
+    if ($null -eq $installItem) {
+        throw "Windows setup media is incomplete. Missing sources\install.wim or sources\install.esd under: $MediaRoot"
+    }
+
+    if ($installItem.Length -lt 512MB) {
+        throw ("Windows setup media install image is unexpectedly small. Path={0}; SizeBytes={1}" -f $installItem.FullName,$installItem.Length)
+    }
+
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open($installItem.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        $header = New-Object byte[] 8
+        $read = $stream.Read($header, 0, $header.Length)
+        if ($read -lt 8) {
+            throw ("Windows setup media install image header is truncated. Path={0}; BytesRead={1}" -f $installItem.FullName,$read)
+        }
+
+        $signature = [System.Text.Encoding]::ASCII.GetString($header, 0, 5)
+        if ($signature -ne 'MSWIM') {
+            $hex = (($header | ForEach-Object { $_.ToString('X2') }) -join ' ')
+            throw ("Windows setup media install image header is invalid. Expected MSWIM signature. Path={0}; Header={1}" -f $installItem.FullName,$hex)
+        }
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+
+    Test-SetupInstallImageDismReadable -ImagePath $installItem.FullName
+    return $installItem
+}
+
+function Test-SetupInstallImageDismReadable {
+    param([Parameter(Mandatory = $true)][string]$ImagePath)
+
+    $dismPath = Join-Path $env:SystemRoot 'System32\dism.exe'
+    if (-not (Test-Path -LiteralPath $dismPath -PathType Leaf)) {
+        $dismCommand = Get-Command -Name 'dism.exe' -CommandType Application -ErrorAction SilentlyContinue
+        if ($dismCommand) { $dismPath = $dismCommand.Source }
+    }
+
+    if (-not (Test-Path -LiteralPath $dismPath -PathType Leaf)) {
+        throw 'dism.exe not found; cannot validate Windows setup install image readability.'
+    }
+
+    $dismOutput = @(& $dismPath /English /Get-WimInfo ("/WimFile:{0}" -f $ImagePath) 2>&1)
+    $dismExitCode = [int]$LASTEXITCODE
+    if ($dismExitCode -ne 0) {
+        $detail = (($dismOutput | ForEach-Object { [string]$_ }) -join ' | ')
+        if ($detail.Length -gt 1200) { $detail = $detail.Substring(0, 1200) + '...' }
+        throw ("DISM cannot read Windows setup install image. ExitCode={0}; Path={1}; Detail={2}" -f $dismExitCode,$ImagePath,$detail)
+    }
+
+    Write-SmartLog ("DISM validated setup install image readability: {0}" -f $ImagePath)
+}
+
+function Get-SetupMediaFingerprint {
+    param(
+        [Parameter(Mandatory = $true)][string]$MediaRoot,
+        [string]$ExpectedLanguage
+    )
+
+    $setupExe = Join-Path $MediaRoot 'setup.exe'
+    $setupItem = Get-Item -LiteralPath $setupExe -ErrorAction Stop
+    $installItem = Get-SetupInstallImageItem -MediaRoot $MediaRoot
+    if ($null -eq $installItem) {
+        throw "Windows setup media is incomplete. Missing sources\install.wim or sources\install.esd under: $MediaRoot"
+    }
+
+    $langIni = Join-Path $MediaRoot 'sources\lang.ini'
+    $langHash = ''
+    if (Test-Path -LiteralPath $langIni -PathType Leaf) {
+        $langHash = Get-SmartFileSha256 -Path $langIni
+    }
+
+    [pscustomobject]@{
+        MediaId = $SetupMediaId
+        ExpectedLanguage = [string]$ExpectedLanguage
+        MediaLanguages = (@(Get-SetupMediaLanguages -MediaRoot $MediaRoot) -join ',')
+        SetupExeLength = [int64]$setupItem.Length
+        SetupExeHash = Get-SmartFileSha256 -Path $setupItem.FullName
+        InstallImageName = $installItem.Name
+        InstallImageLength = [int64]$installItem.Length
+        InstallImageLastWriteUtc = $installItem.LastWriteTimeUtc.ToString('o')
+        LangIniHash = $langHash
+        IntegrityManifestHash = Get-SetupMediaIntegrityManifestHash -MediaRoot $MediaRoot
+    }
+}
+
+function Test-SetupCacheManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)]$Fingerprint
+    )
+
+    $manifestPath = Join-Path $CachePath 'SmartM365-SetupMedia.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $false }
+
+    try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        foreach ($property in @('MediaId','ExpectedLanguage','SetupExeLength','SetupExeHash','InstallImageName','InstallImageLength','LangIniHash','IntegrityManifestHash')) {
+            if ([string]$manifest.$property -ne [string]$Fingerprint.$property) { return $false }
+        }
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-SetupFingerprintMatch {
+    param(
+        [Parameter(Mandatory = $true)]$Left,
+        [Parameter(Mandatory = $true)]$Right
+    )
+
+    foreach ($property in @('MediaId','ExpectedLanguage','SetupExeLength','SetupExeHash','InstallImageName','InstallImageLength','LangIniHash','IntegrityManifestHash')) {
+        if ([string]$Left.$property -ne [string]$Right.$property) { return $false }
+    }
+    return $true
+}
+
+function Save-SetupCacheManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)]$Fingerprint,
+        [string]$SourcePath
+    )
+
+    $manifestPath = Join-Path $CachePath 'SmartM365-SetupMedia.json'
+    $Fingerprint | Add-Member -NotePropertyName SourcePath -NotePropertyValue ([string]$SourcePath) -Force
+    $Fingerprint | Add-Member -NotePropertyName WrittenUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o')) -Force
+    $Fingerprint | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8 -Force
+}
+
+function Get-SetupSourceGateKey {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($SourcePath.ToUpperInvariant())
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0, 32)
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
+function Remove-StaleSetupSourceCopyLeases {
+    param([Parameter(Mandatory = $true)][string]$GatePath)
+
+    $nowUtc = (Get-Date).ToUniversalTime()
+    foreach ($lease in @(Get-ChildItem -LiteralPath $GatePath -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+        $remove = $false
+        try {
+            $data = Get-Content -LiteralPath $lease.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $createdUtc = [datetime]::Parse([string]$data.CreatedUtc, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            if (($nowUtc - $createdUtc).TotalMinutes -gt $SetupSourceConcurrencyLeaseMinutes) {
+                $remove = $true
+            }
+        }
+        catch {
+            $remove = $true
+        }
+
+        if ($remove) {
+            Remove-Item -LiteralPath $lease.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Acquire-SetupSourceCopyLease {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $gateRoot = [Environment]::ExpandEnvironmentVariables($SetupSourceConcurrencyGateRoot.Trim('"'))
+    $sourceKey = Get-SetupSourceGateKey -SourcePath $SourcePath
+    $gatePath = Join-Path $gateRoot $sourceKey
+    New-SmartDirectory -Path $gatePath
+
+    $leaseId = [guid]::NewGuid().ToString('N')
+    $leasePath = Join-Path $gatePath ("{0}_{1}.json" -f $env:COMPUTERNAME,$leaseId)
+    $waitSeconds = [math]::Max(60, $SetupSourceConcurrencyLeaseMinutes * 60)
+    $started = Get-Date
+    do {
+        Remove-StaleSetupSourceCopyLeases -GatePath $gatePath
+        $activeCount = @(Get-ChildItem -LiteralPath $gatePath -Filter '*.json' -File -ErrorAction SilentlyContinue).Count
+        if ($activeCount -lt $SetupSourceConcurrencyLimit) {
+            [pscustomobject]@{
+                ComputerName = $env:COMPUTERNAME
+                ProcessId = $PID
+                SourcePath = $SourcePath
+                CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $leasePath -Encoding UTF8 -Force
+            Write-SmartLog ("Acquired setup source copy lease: Source={0}; ActiveBefore={1}; Limit={2}; Lease={3}" -f $SourcePath,$activeCount,$SetupSourceConcurrencyLimit,$leasePath)
+            return $leasePath
+        }
+
+        Write-SmartLog ("Waiting for setup source copy lease: Source={0}; Active={1}; Limit={2}" -f $SourcePath,$activeCount,$SetupSourceConcurrencyLimit)
+        Start-Sleep -Seconds (Get-Random -Minimum 10 -Maximum 31)
+    }
+    while (((Get-Date) - $started).TotalSeconds -lt $waitSeconds)
+
+    throw ("Timed out waiting for setup source copy lease. Source={0}; Gate={1}; Limit={2}" -f $SourcePath,$gatePath,$SetupSourceConcurrencyLimit)
+}
+
+function Release-SetupSourceCopyLease {
+    param([AllowNull()][string]$LeasePath)
+
+    if (-not [string]::IsNullOrWhiteSpace($LeasePath)) {
+        Remove-Item -LiteralPath $LeasePath -Force -ErrorAction SilentlyContinue
+        Write-SmartLog ("Released setup source copy lease: {0}" -f $LeasePath)
+    }
+}
+
+function Get-SetupUncHostName {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $trimmed = [Environment]::ExpandEnvironmentVariables($SourcePath.Trim('"'))
+    if ($trimmed -notmatch '^\\\\([^\\]+)\\') { return '' }
+    return $matches[1]
+}
+
+function ConvertTo-IPv4Number {
+    param([Parameter(Mandatory = $true)][string]$Address)
+
+    $parts = @($Address.Split('.') | ForEach-Object { [uint32]$_ })
+    if ($parts.Count -ne 4) { throw "Invalid IPv4 address: $Address" }
+    return [uint32]((($parts[0] -shl 24) -bor ($parts[1] -shl 16) -bor ($parts[2] -shl 8) -bor $parts[3]) -band [uint32]::MaxValue)
+}
+
+function ConvertFrom-IPv4Number {
+    param([Parameter(Mandatory = $true)][uint32]$Value)
+
+    return ('{0}.{1}.{2}.{3}' -f (($Value -shr 24) -band 255), (($Value -shr 16) -band 255), (($Value -shr 8) -band 255), ($Value -band 255))
+}
+
+function Get-IPv4NetworkAddress {
+    param(
+        [Parameter(Mandatory = $true)][string]$Address,
+        [ValidateRange(1, 32)][int]$PrefixLength = 24
+    )
+
+    $ipNumber = ConvertTo-IPv4Number -Address $Address
+    $mask = if ($PrefixLength -eq 32) { [uint32]::MaxValue } else { [uint32](([uint64]::MaxValue -shl (32 - $PrefixLength)) -band [uint32]::MaxValue) }
+    return ConvertFrom-IPv4Number -Value ([uint32]($ipNumber -band $mask))
+}
+
+function Get-LocalIPv4ForSetupSource {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $hostName = Get-SetupUncHostName -SourcePath $SourcePath
+    if ([string]::IsNullOrWhiteSpace($hostName)) { return $null }
+
+    $selectedAddress = ''
+    try {
+        $remoteAddresses = @([System.Net.Dns]::GetHostAddresses($hostName) | Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork })
+        foreach ($remoteAddress in $remoteAddresses) {
+            $socket = New-Object System.Net.Sockets.Socket([System.Net.Sockets.AddressFamily]::InterNetwork, [System.Net.Sockets.SocketType]::Dgram, [System.Net.Sockets.ProtocolType]::Udp)
+            try {
+                $socket.Connect($remoteAddress, 445)
+                if ($socket.LocalEndPoint -and $socket.LocalEndPoint.Address) {
+                    $candidateAddress = [string]$socket.LocalEndPoint.Address
+                    if ($candidateAddress -and $candidateAddress -ne '0.0.0.0' -and -not $candidateAddress.StartsWith('169.254.')) {
+                        $selectedAddress = $candidateAddress
+                        break
+                    }
+                }
+            }
+            catch { }
+            finally { $socket.Dispose() }
+        }
+    }
+    catch { }
+
+    try {
+        $ipConfig = @(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction Stop)
+        foreach ($adapter in $ipConfig) {
+            $addresses = @($adapter.IPAddress)
+            $masks = @($adapter.IPSubnet)
+            for ($index = 0; $index -lt $addresses.Count; $index++) {
+                $address = [string]$addresses[$index]
+                if ($address -notmatch '^\d+\.\d+\.\d+\.\d+$' -or $address.StartsWith('169.254.')) { continue }
+
+                if ([string]::IsNullOrWhiteSpace($selectedAddress)) { $selectedAddress = $address }
+                if ($address -eq $selectedAddress) {
+                    $prefix = $null
+                    if ($index -lt $masks.Count -and [string]$masks[$index] -match '^\d+\.\d+\.\d+\.\d+$') {
+                        $prefix = Get-IPv4PrefixLengthFromMask -Mask ([string]$masks[$index])
+                    }
+
+                    return [pscustomobject]@{
+                        Address = $selectedAddress
+                        PrefixLength = $prefix
+                    }
+                }
+            }
+        }
+    }
+    catch { }
+
+    if ([string]::IsNullOrWhiteSpace($selectedAddress)) { return $null }
+    return [pscustomobject]@{
+        Address = $selectedAddress
+        PrefixLength = $null
+    }
+}
+
+function Get-IPv4PrefixLengthFromMask {
+    param([Parameter(Mandatory = $true)][string]$Mask)
+
+    $maskNumber = ConvertTo-IPv4Number -Address $Mask
+    $prefix = 0
+    for ($bit = 31; $bit -ge 0; $bit--) {
+        $bitValue = [uint32]([uint64]1 -shl $bit)
+        if (($maskNumber -band $bitValue) -ne 0) { $prefix++ } else { break }
+    }
+
+    return $prefix
+}
+
+function Resolve-SetupSubnetPrefixLength {
+    param([AllowNull()]$LocalAddressInfo)
+
+    $value = ([string]$SetupSubnetPrefixLength).Trim()
+    if ([string]::IsNullOrWhiteSpace($value) -or $value -ieq 'Auto') {
+        if ($LocalAddressInfo -and $LocalAddressInfo.PSObject.Properties['PrefixLength'] -and $LocalAddressInfo.PrefixLength -ge 1 -and $LocalAddressInfo.PrefixLength -le 32) {
+            return [int]$LocalAddressInfo.PrefixLength
+        }
+
+        Write-SmartLog 'Unable to detect local subnet prefix length for setup subnet copy gate; falling back to /24. Set -SetupSubnetPrefixLength to force another value.' 'WARN'
+        return 24
+    }
+
+    $prefixLength = 0
+    if (-not [int]::TryParse($value, [ref]$prefixLength) -or $prefixLength -lt 1 -or $prefixLength -gt 32) {
+        throw "SetupSubnetPrefixLength must be Auto or an integer from 1 to 32. Value=$value"
+    }
+
+    return $prefixLength
+}
+
+function Get-SetupSubnetCopyGateInfo {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $localAddressInfo = Get-LocalIPv4ForSetupSource -SourcePath $SourcePath
+    $sourceHost = Get-SetupUncHostName -SourcePath $SourcePath
+    if (-not $localAddressInfo -or [string]::IsNullOrWhiteSpace([string]$localAddressInfo.Address)) {
+        Write-SmartLog ("Unable to resolve local IPv4 for setup subnet copy gate. Source={0}; using UNKNOWN subnet gate." -f $SourcePath) 'WARN'
+        $prefixLength = Resolve-SetupSubnetPrefixLength -LocalAddressInfo $null
+        $subnet = 'UNKNOWN'
+        $key = 'UNKNOWN_SUBNET'
+        $localIPv4 = ''
+    }
+    else {
+        $localIPv4 = [string]$localAddressInfo.Address
+        $prefixLength = Resolve-SetupSubnetPrefixLength -LocalAddressInfo $localAddressInfo
+        $subnet = Get-IPv4NetworkAddress -Address $localIPv4 -PrefixLength $prefixLength
+        $key = ("{0}_{1}" -f $subnet,$prefixLength).Replace('.', '-')
+    }
+
+    [pscustomobject]@{
+        SourceHost = $sourceHost
+        LocalIPv4 = $localIPv4
+        Subnet = $subnet
+        PrefixLength = $prefixLength
+        Key = $key
+        Display = if ($subnet -eq 'UNKNOWN') { 'UNKNOWN' } else { "{0}/{1}" -f $subnet,$prefixLength }
+    }
+}
+
+function Remove-StaleSetupSubnetCopyLeases {
+    param([Parameter(Mandatory = $true)][string]$GatePath)
+
+    $nowUtc = (Get-Date).ToUniversalTime()
+    foreach ($slot in @(Get-ChildItem -LiteralPath $GatePath -Directory -Filter 'slot-*' -ErrorAction SilentlyContinue)) {
+        $remove = $false
+        $leaseFile = Join-Path $slot.FullName 'lease.json'
+        try {
+            $data = Get-Content -LiteralPath $leaseFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $seenText = if ($data.PSObject.Properties['LastSeenUtc']) { [string]$data.LastSeenUtc } else { [string]$data.CreatedUtc }
+            $lastSeenUtc = [datetime]::Parse($seenText, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            if (($nowUtc - $lastSeenUtc).TotalMinutes -gt $SetupSubnetConcurrencyLeaseMinutes) { $remove = $true }
+        }
+        catch { $remove = $true }
+
+        if ($remove) { Remove-Item -LiteralPath $slot.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Write-SetupSubnetCopyLease {
+    param(
+        [Parameter(Mandatory = $true)][string]$LeaseFilePath,
+        [Parameter(Mandatory = $true)]$GateInfo,
+        [Parameter(Mandatory = $true)][string]$SourcePath
+    )
+
+    $nowUtc = (Get-Date).ToUniversalTime().ToString('o')
+    [pscustomobject]@{
+        ComputerName = $env:COMPUTERNAME
+        ProcessId = $PID
+        RunId = $script:RunId
+        SourcePath = $SourcePath
+        SourceHost = [string]$GateInfo.SourceHost
+        LocalIPv4 = [string]$GateInfo.LocalIPv4
+        Subnet = [string]$GateInfo.Display
+        CreatedUtc = $nowUtc
+        LastSeenUtc = $nowUtc
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $LeaseFilePath -Encoding UTF8 -Force
+}
+
+function Update-SetupSubnetCopyLeaseHeartbeat {
+    param([Parameter(Mandatory = $true)][string]$LeaseFilePath)
+
+    try {
+        $data = Get-Content -LiteralPath $LeaseFilePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $data | Add-Member -NotePropertyName LastSeenUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o')) -Force
+        $data | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $LeaseFilePath -Encoding UTF8 -Force
+    }
+    catch { }
+}
+
+function Start-SetupSubnetCopyLeaseHeartbeat {
+    param([Parameter(Mandatory = $true)][string]$LeaseFilePath)
+
+    return Start-Job -ArgumentList $LeaseFilePath -ScriptBlock {
+        param([string]$Path)
+        while ($true) {
+            try {
+                $data = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                $data | Add-Member -NotePropertyName LastSeenUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o')) -Force
+                $data | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $Path -Encoding UTF8 -Force
+            }
+            catch { }
+            Start-Sleep -Seconds 60
+        }
+    }
+}
+
+function Stop-SetupSubnetCopyLeaseHeartbeat {
+    param([AllowNull()]$Job)
+
+    if ($null -ne $Job) {
+        try {
+            Stop-Job -Job $Job -ErrorAction SilentlyContinue
+            Wait-Job -Job $Job -Timeout 5 -ErrorAction SilentlyContinue | Out-Null
+        }
+        catch { }
+
+        try {
+            Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            Remove-Job -Job $Job -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Acquire-SetupSubnetCopyLease {
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
+
+    $gateRoot = [Environment]::ExpandEnvironmentVariables($SetupSubnetConcurrencyGateRoot.Trim('"'))
+    $gateInfo = Get-SetupSubnetCopyGateInfo -SourcePath $SourcePath
+    $gatePath = Join-Path (Join-Path $gateRoot 'SetupSubnetCopy') $gateInfo.Key
+    New-SmartDirectory -Path $gatePath
+
+    $waitSeconds = [math]::Max(60, $SetupSubnetConcurrencyLeaseMinutes * 60)
+    $started = Get-Date
+    do {
+        Remove-StaleSetupSubnetCopyLeases -GatePath $gatePath
+        for ($slot = 1; $slot -le $SetupSubnetConcurrencyLimit; $slot++) {
+            $slotPath = Join-Path $gatePath ("slot-{0:000}" -f $slot)
+            try {
+                New-Item -ItemType Directory -Path $slotPath -ErrorAction Stop | Out-Null
+                $leaseFilePath = Join-Path $slotPath 'lease.json'
+                Write-SetupSubnetCopyLease -LeaseFilePath $leaseFilePath -GateInfo $gateInfo -SourcePath $SourcePath
+                Write-SmartLog ("Acquired setup subnet copy lease: Subnet={0}; LocalIPv4={1}; Source={2}; Limit={3}; Lease={4}" -f $gateInfo.Display,$gateInfo.LocalIPv4,$SourcePath,$SetupSubnetConcurrencyLimit,$slotPath)
+                return [pscustomobject]@{ LeasePath = $slotPath; LeaseFilePath = $leaseFilePath; GateInfo = $gateInfo }
+            }
+            catch {
+                if (-not (Test-Path -LiteralPath $slotPath -PathType Container)) { throw }
+            }
+        }
+
+        $activeCount = @(Get-ChildItem -LiteralPath $gatePath -Directory -Filter 'slot-*' -ErrorAction SilentlyContinue).Count
+        Write-SmartLog ("Waiting for setup subnet copy lease: Subnet={0}; Active={1}; Limit={2}; Gate={3}" -f $gateInfo.Display,$activeCount,$SetupSubnetConcurrencyLimit,$gatePath)
+        Start-Sleep -Seconds (Get-Random -Minimum 10 -Maximum 31)
+    }
+    while (((Get-Date) - $started).TotalSeconds -lt $waitSeconds)
+
+    throw ("Timed out waiting for setup subnet copy lease. Subnet={0}; Gate={1}; Limit={2}; LeaseMinutes={3}" -f $gateInfo.Display,$gatePath,$SetupSubnetConcurrencyLimit,$SetupSubnetConcurrencyLeaseMinutes)
+}
+
+function Release-SetupSubnetCopyLease {
+    param([AllowNull()]$Lease)
+
+    if ($null -ne $Lease -and -not [string]::IsNullOrWhiteSpace([string]$Lease.LeasePath)) {
+        Remove-Item -LiteralPath ([string]$Lease.LeasePath) -Recurse -Force -ErrorAction SilentlyContinue
+        Write-SmartLog ("Released setup subnet copy lease: Subnet={0}; Lease={1}" -f $Lease.GateInfo.Display,$Lease.LeasePath)
+    }
+}
+function Test-SetupCacheReady {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [string]$ExpectedLanguage
+    )
+
+    $setupExe = Test-SetupMedia -MediaPath $CachePath -ExpectedLanguage $ExpectedLanguage -ValidateManifest
+    $fingerprint = Get-SetupMediaFingerprint -MediaRoot (Split-Path -Parent $setupExe) -ExpectedLanguage $ExpectedLanguage
+    if (-not (Test-SetupCacheManifest -CachePath $CachePath -Fingerprint $fingerprint)) {
+        Save-SetupCacheManifest -CachePath $CachePath -Fingerprint $fingerprint -SourcePath 'ExistingCache'
+        Write-SmartLog ("Setup cache was valid but manifest was missing or stale. Manifest refreshed: {0}" -f $CachePath)
+    }
+    return $setupExe
+}
+
+function Get-SetupCacheLockName {
+    param([Parameter(Mandatory = $true)][string]$CachePath)
+
+    $leaf = Split-Path -Path $CachePath -Leaf
+    if ([string]::IsNullOrWhiteSpace($leaf)) { $leaf = 'Default' }
+    $safe = $leaf -replace '[^A-Za-z0-9._-]', '_'
+    return "SetupCache-$safe.lock"
+}
+
+function Get-SetupCacheLockLeaseMinutes {
+    if ($SetupMediaCopyTimeoutMinutes -gt 0) { return [math]::Max(30, ($SetupMediaCopyTimeoutMinutes + 30)) }
+    return 240
+}
+
+function Test-SetupCacheLockProcessAlive {
+    param([AllowNull()][object]$ProcessId)
+
+    $pidValue = 0
+    if ($null -eq $ProcessId -or -not [int]::TryParse([string]$ProcessId, [ref]$pidValue) -or $pidValue -le 0) { return $false }
+    try { [void](Get-Process -Id $pidValue -ErrorAction Stop); return $true } catch { return $false }
+}
+
+function New-SetupCacheLockPayload {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)][string]$LockPath,
+        [Parameter(Mandatory = $true)][string]$OwnerToken,
+        [Parameter(Mandatory = $true)][string]$Purpose,
+        [Parameter(Mandatory = $true)][int]$LeaseMinutes
+    )
+
+    $nowUtc = (Get-Date).ToUniversalTime()
+    $processName = ''
+    try { $processName = (Get-Process -Id $PID -ErrorAction Stop).ProcessName } catch { }
+    return [pscustomobject]@{
+        OwnerToken = $OwnerToken
+        Owner = 'SEMT_Windows11Upgrade'
+        ComputerName = $env:COMPUTERNAME
+        PID = $PID
+        ProcessName = $processName
+        RunId = $script:RunId
+        Purpose = $Purpose
+        CachePath = $CachePath
+        LockPath = $LockPath
+        StartedUtc = $nowUtc.ToString('o')
+        LastSeenUtc = $nowUtc.ToString('o')
+        ExpiresUtc = $nowUtc.AddMinutes($LeaseMinutes).ToString('o')
+    }
+}
+
+function Read-SetupCacheLockPayload {
+    param([Parameter(Mandatory = $true)][string]$LockPath)
+
+    $payloadPath = Join-Path $LockPath 'lock.json'
+    if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) { return $null }
+    try { return (Get-Content -LiteralPath $payloadPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop) } catch { return $null }
+}
+
+function Save-SetupCacheLockPayload {
+    param(
+        [Parameter(Mandatory = $true)][string]$LockPath,
+        [Parameter(Mandatory = $true)][object]$Payload
+    )
+
+    $payloadPath = Join-Path $LockPath 'lock.json'
+    $Payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $payloadPath -Encoding UTF8
+}
+
+function Format-SetupCacheLockPayload {
+    param([AllowNull()][object]$Payload)
+
+    if ($null -eq $Payload) { return 'LockPayload=<missing>' }
+    return ("Owner={0}; PID={1}; Process={2}; Purpose={3}; StartedUtc={4}; LastSeenUtc={5}; ExpiresUtc={6}" -f $Payload.Owner,$Payload.PID,$Payload.ProcessName,$Payload.Purpose,$Payload.StartedUtc,$Payload.LastSeenUtc,$Payload.ExpiresUtc)
+}
+
+function Acquire-SetupCacheLock {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)][string]$Purpose,
+        [int]$LeaseMinutes = (Get-SetupCacheLockLeaseMinutes),
+        [int]$WaitSeconds = 300
+    )
+
+    $lockRoot = Join-Path $DataRoot 'Locks'
+    New-SmartDirectory -Path $lockRoot
+    $lockPath = Join-Path $lockRoot (Get-SetupCacheLockName -CachePath $CachePath)
+    $ownerToken = [guid]::NewGuid().ToString('N')
+    $deadline = (Get-Date).AddSeconds([math]::Max(0, $WaitSeconds))
+    $lastWaitLog = [datetime]::MinValue
+
+    while ($true) {
+        try {
+            New-Item -ItemType Directory -Path $lockPath -ErrorAction Stop | Out-Null
+            $payload = New-SetupCacheLockPayload -CachePath $CachePath -LockPath $lockPath -OwnerToken $ownerToken -Purpose $Purpose -LeaseMinutes $LeaseMinutes
+            Save-SetupCacheLockPayload -LockPath $lockPath -Payload $payload
+            Write-SmartLog ("Acquired setup cache lock: CachePath={0}; LeaseMinutes={1}; Lock={2}; {3}" -f $CachePath,$LeaseMinutes,$lockPath,(Format-SetupCacheLockPayload -Payload $payload))
+            return [pscustomobject]@{ LockPath = $lockPath; OwnerToken = $ownerToken; CachePath = $CachePath; LeaseMinutes = $LeaseMinutes; Purpose = $Purpose }
+        }
+        catch {
+            $payload = Read-SetupCacheLockPayload -LockPath $lockPath
+            $nowUtc = (Get-Date).ToUniversalTime()
+            if ($null -eq $payload) {
+                $lockItem = $null
+                try { $lockItem = Get-Item -LiteralPath $lockPath -ErrorAction Stop } catch { }
+                if ($null -ne $lockItem -and $lockItem.LastWriteTimeUtc -lt $nowUtc.AddMinutes(-5)) {
+                    Write-SmartLog ("Reclaiming empty stale setup cache lock: CachePath={0}; Lock={1}; LastWriteTimeUtc={2}" -f $CachePath,$lockPath,$lockItem.LastWriteTimeUtc.ToString('o')) 'WARN'
+                    Remove-Item -LiteralPath $lockPath -Recurse -Force -ErrorAction SilentlyContinue
+                    continue
+                }
+
+                if ($WaitSeconds -le 0 -or (Get-Date) -ge $deadline) {
+                    throw ("Setup cache is locked by another SmartM365 process. CachePath={0}; Lock={1}; {2}" -f $CachePath,$lockPath,(Format-SetupCacheLockPayload -Payload $payload))
+                }
+
+                if (((Get-Date) - $lastWaitLog).TotalSeconds -ge 60) {
+                    Write-SmartLog ("Waiting for setup cache lock payload: CachePath={0}; Lock={1}" -f $CachePath,$lockPath) 'WARN'
+                    $lastWaitLog = Get-Date
+                }
+                Start-Sleep -Seconds 10
+                continue
+            }
+            $expiresUtc = [datetime]::MinValue
+            $expired = $true
+            if ($null -ne $payload -and [datetime]::TryParse([string]$payload.ExpiresUtc, [ref]$expiresUtc)) { $expired = ($expiresUtc.ToUniversalTime() -lt $nowUtc) }
+            $processAlive = if ($null -ne $payload) { Test-SetupCacheLockProcessAlive -ProcessId $payload.PID } else { $false }
+
+            if ($expired -and -not $processAlive) {
+                Write-SmartLog ("Reclaiming stale setup cache lock: CachePath={0}; Lock={1}; {2}" -f $CachePath,$lockPath,(Format-SetupCacheLockPayload -Payload $payload)) 'WARN'
+                Remove-Item -LiteralPath $lockPath -Recurse -Force -ErrorAction SilentlyContinue
+                continue
+            }
+
+            if ($WaitSeconds -le 0 -or (Get-Date) -ge $deadline) {
+                throw ("Setup cache is locked by another SmartM365 process. CachePath={0}; Lock={1}; {2}" -f $CachePath,$lockPath,(Format-SetupCacheLockPayload -Payload $payload))
+            }
+
+            if (((Get-Date) - $lastWaitLog).TotalSeconds -ge 60) {
+                Write-SmartLog ("Waiting for setup cache lock: CachePath={0}; Lock={1}; {2}" -f $CachePath,$lockPath,(Format-SetupCacheLockPayload -Payload $payload)) 'WARN'
+                $lastWaitLog = Get-Date
+            }
+            Start-Sleep -Seconds 10
+        }
+    }
+}
+
+function Update-SetupCacheLock {
+    param([AllowNull()][object]$Lock)
+
+    if ($null -eq $Lock) { return }
+    $payload = Read-SetupCacheLockPayload -LockPath $Lock.LockPath
+    if ($null -eq $payload -or [string]$payload.OwnerToken -ne [string]$Lock.OwnerToken) { return }
+    $nowUtc = (Get-Date).ToUniversalTime()
+    $payload.LastSeenUtc = $nowUtc.ToString('o')
+    $payload.ExpiresUtc = $nowUtc.AddMinutes([int]$Lock.LeaseMinutes).ToString('o')
+    Save-SetupCacheLockPayload -LockPath $Lock.LockPath -Payload $payload
+}
+
+function Release-SetupCacheLock {
+    param([AllowNull()][object]$Lock)
+
+    if ($null -eq $Lock) { return }
+    $payload = Read-SetupCacheLockPayload -LockPath $Lock.LockPath
+    if ($null -ne $payload -and [string]$payload.OwnerToken -ne [string]$Lock.OwnerToken) {
+        Write-SmartLog ("Skipping setup cache lock release because owner changed. Lock={0}; {1}" -f $Lock.LockPath,(Format-SetupCacheLockPayload -Payload $payload)) 'WARN'
+        return
+    }
+    Remove-Item -LiteralPath $Lock.LockPath -Recurse -Force -ErrorAction SilentlyContinue
+    Write-SmartLog ("Released setup cache lock: CachePath={0}; Lock={1}" -f $Lock.CachePath,$Lock.LockPath)
+}
+
+function Clear-SetupCachePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [switch]$LockAlreadyHeld
+    )
+
+    if (-not (Test-Path -LiteralPath $CachePath)) { return }
+
+    $cacheLock = $null
+    try {
+        if (-not $LockAlreadyHeld) { $cacheLock = Acquire-SetupCacheLock -CachePath $CachePath -Purpose 'ClearInvalidCache' -WaitSeconds 300 }
+        Write-SmartLog ("Clearing invalid local setup cache before recopy. CachePath={0}; Reason={1}" -f $CachePath,$Reason) 'WARN'
+        Remove-Item -LiteralPath $CachePath -Recurse -Force -ErrorAction Stop
+    }
+    finally {
+        if (-not $LockAlreadyHeld) { Release-SetupCacheLock -Lock $cacheLock }
+    }
+}
+function Get-RobocopyExitCodeMeaning {
+    param([Parameter(Mandatory = $true)][int]$ExitCode)
+
+    $flags = New-Object System.Collections.ArrayList
+    if (($ExitCode -band 1) -ne 0) { [void]$flags.Add('Copied') }
+    if (($ExitCode -band 2) -ne 0) { [void]$flags.Add('Extra') }
+    if (($ExitCode -band 4) -ne 0) { [void]$flags.Add('Mismatch') }
+    if (($ExitCode -band 8) -ne 0) { [void]$flags.Add('Failure') }
+    if (($ExitCode -band 16) -ne 0) { [void]$flags.Add('Fatal') }
+    if ($flags.Count -eq 0) { [void]$flags.Add('NoChange') }
+
+    return (@($flags.ToArray()) -join '+')
+}
+
+function Get-RobocopyLogErrorSummary {
+    param([Parameter(Mandatory = $true)][string]$LogPath)
+
+    if ([string]::IsNullOrWhiteSpace($LogPath) -or -not (Test-Path -LiteralPath $LogPath -PathType Leaf)) { return '' }
+
+    try {
+        $lines = @(Get-Content -LiteralPath $LogPath -Tail 250 -ErrorAction Stop)
+        $errorLines = @($lines | Where-Object { [string]$_ -match '(?i)(ERREUR|ERROR)\s+\d+' })
+        if ($errorLines.Count -eq 0) { return '' }
+
+        $codes = New-Object System.Collections.ArrayList
+        foreach ($line in $errorLines) {
+            $text = [string]$line
+            if ($text -match '(?i)(?:ERREUR|ERROR)\s+(\d+)') {
+                if (-not @($codes.ToArray()).Contains($matches[1])) { [void]$codes.Add($matches[1]) }
+            }
+        }
+
+        $lastError = ([string]$errorLines[-1]) -replace '[\r\n]+', ' '
+        $lastError = $lastError.Trim()
+        if ($lastError.Length -gt 260) { $lastError = $lastError.Substring(0, 260) + '...' }
+
+        $codeText = (@($codes.ToArray()) -join ',')
+        if ([string]::IsNullOrWhiteSpace($codeText)) { $codeText = 'Unknown' }
+        return ("RobocopyErrors={0}; ErrorCodes={1}; LastRobocopyError={2}" -f $errorLines.Count,$codeText,$lastError)
+    }
+    catch {
+        return ("RobocopyErrorSummaryUnavailable={0}" -f $_.Exception.Message)
+    }
+}
+
+function Format-SmartProcessArgument {
+    param([AllowNull()][string]$Argument)
+
+    $value = [string]$Argument
+    if ($value -notmatch '[\s"]') { return $value }
+    return '"' + ($value -replace '"', '\"') + '"'
+}
+
+function Invoke-RobocopySetupMediaCopy {
+    param(
+        [Parameter(Mandatory = $true)][string]$RobocopyPath,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [AllowNull()][object]$CacheLock
+    )
+
+    $argumentText = (@($Arguments) | ForEach-Object { Format-SmartProcessArgument -Argument $_ }) -join ' '
+    $process = Start-Process -FilePath $RobocopyPath -ArgumentList $Arguments -PassThru -NoNewWindow -ErrorAction Stop
+    $startedAt = Get-Date
+    $lastHeartbeatAt = $startedAt
+    $heartbeatSeconds = 300
+    $timeoutAt = if ($SetupMediaCopyTimeoutMinutes -gt 0) { $startedAt.AddMinutes($SetupMediaCopyTimeoutMinutes) } else { $null }
+
+    Write-SmartLog ("Robocopy setup media copy started. PID={0}; TimeoutMinutes={1}; Log={2}; Command={3} {4}" -f $process.Id,$SetupMediaCopyTimeoutMinutes,$LogPath,$RobocopyPath,$argumentText)
+
+    while ($true) {
+        try { $process.Refresh() } catch { }
+        if ($process.HasExited) { break }
+
+        $now = Get-Date
+        if ($timeoutAt -and $now -ge $timeoutAt) {
+            $robocopyErrorSummary = Get-RobocopyLogErrorSummary -LogPath $LogPath
+            $timeoutDetail = ("Robocopy setup media copy timed out after {0} minute(s). Log={1}" -f $SetupMediaCopyTimeoutMinutes,$LogPath)
+            if (-not [string]::IsNullOrWhiteSpace($robocopyErrorSummary)) { $timeoutDetail = ("{0}; {1}" -f $timeoutDetail,$robocopyErrorSummary) }
+            Write-SmartLog ("Robocopy setup media copy timeout reached after {0} minute(s). PID={1}; ElapsedMinutes={2}; Log={3}; {4}" -f $SetupMediaCopyTimeoutMinutes,$process.Id,([math]::Round(($now - $startedAt).TotalMinutes, 1)),$LogPath,$robocopyErrorSummary) 'ERROR'
+            try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch { Write-SmartLog ("Failed to stop timed-out robocopy PID={0}: {1}" -f $process.Id,$_.Exception.Message) 'WARN' }
+            throw $timeoutDetail
+        }
+
+        if (($now - $lastHeartbeatAt).TotalSeconds -ge $heartbeatSeconds) {
+            Write-SmartLog ("Robocopy setup media copy still running. PID={0}; ElapsedMinutes={1}; TimeoutMinutes={2}; Log={3}" -f $process.Id,([math]::Round(($now - $startedAt).TotalMinutes, 1)),$SetupMediaCopyTimeoutMinutes,$LogPath)
+            Update-SetupCacheLock -Lock $CacheLock
+            $lastHeartbeatAt = $now
+        }
+
+        Start-Sleep -Seconds 5
+    }
+
+    Update-SetupCacheLock -Lock $CacheLock
+    Write-SmartLog ("Robocopy setup media copy process exited. PID={0}; ElapsedMinutes={1}; ExitCode={2}; Log={3}" -f $process.Id,([math]::Round(((Get-Date) - $startedAt).TotalMinutes, 1)),$process.ExitCode,$LogPath)
+    return [int]$process.ExitCode
+}
+
+function Copy-SetupMediaToLocalCache {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [string]$ExpectedLanguage
+    )
+
+    New-SmartDirectory -Path $CachePath
+    $robocopyLog = Join-Path $script:SetupLogDir ("Robocopy_SetupMedia_{0}.log" -f $script:RunId)
+    New-SmartDirectory -Path $script:SetupLogDir
+    Test-SetupMediaCopyDiskSpace -SourcePath $SourcePath -CachePath $CachePath
+
+    if ($SetupMediaCopyJitterSeconds -gt 0) {
+        $jitter = Get-Random -Minimum 0 -Maximum ($SetupMediaCopyJitterSeconds + 1)
+        if ($jitter -gt 0) {
+            Write-SmartLog ("Waiting {0} second(s) before setup media copy jitter." -f $jitter)
+            Start-Sleep -Seconds $jitter
+        }
+    }
+
+    $sourceLeasePath = ''
+    $cacheLock = $null
+    if ($SetupSourceConcurrencyLimit -gt 0 -and -not [string]::IsNullOrWhiteSpace($SetupSourceConcurrencyGateRoot)) {
+        $sourceLeasePath = Acquire-SetupSourceCopyLease -SourcePath $SourcePath
+    }
+
+    try {
+        $cacheLock = Acquire-SetupCacheLock -CachePath $CachePath -Purpose ("SetupMediaCopy:{0}" -f $script:RunId) -WaitSeconds 300
+        Write-SmartLog ("Copying setup media on target from '{0}' to local cache '{1}'." -f $SourcePath,$CachePath)
+        $robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
+        if (Test-Path -LiteralPath $robocopy -PathType Leaf) {
+            $robocopyArgs = @($SourcePath, $CachePath, '/MIR', '/Z', '/R:2', '/W:5', '/NP', '/NFL', '/NDL', "/LOG+:$robocopyLog")
+            if ($SetupMediaCopyIpGapMilliseconds -gt 0) {
+                $robocopyHelp = ''
+                try { $robocopyHelp = (& $robocopy /? 2>$null | Out-String) } catch { }
+                if ($robocopyHelp -match '(?i)/IPG') {
+                    $robocopyArgs += ("/IPG:{0}" -f $SetupMediaCopyIpGapMilliseconds)
+                }
+                else {
+                    Write-SmartLog ("Robocopy does not advertise /IPG support. Continuing without per-PC copy bandwidth delay. Robocopy={0}" -f $robocopy) 'WARN'
+                }
+            }
+            $subnetLease = $null
+            $subnetHeartbeatJob = $null
+            if ($SetupSubnetConcurrencyLimit -gt 0 -and -not [string]::IsNullOrWhiteSpace($SetupSubnetConcurrencyGateRoot)) {
+                $subnetLease = Acquire-SetupSubnetCopyLease -SourcePath $SourcePath
+                $subnetHeartbeatJob = Start-SetupSubnetCopyLeaseHeartbeat -LeaseFilePath $subnetLease.LeaseFilePath
+            }
+
+            try {
+                $copyExit = Invoke-RobocopySetupMediaCopy -RobocopyPath $robocopy -Arguments $robocopyArgs -LogPath $robocopyLog -CacheLock $cacheLock
+            }
+            catch {
+                $failureDetail = $_.Exception.Message
+                try {
+                    $script:SetupCacheAction = 'CopyFailedCacheCleared'
+                    Clear-SetupCachePath -CachePath $CachePath -Reason $failureDetail -LockAlreadyHeld
+                }
+                catch {
+                    $script:SetupCacheAction = 'CopyFailedCacheClearFailed'
+                    Write-SmartLog ("Failed to clear local setup cache after Robocopy exception. CachePath={0}; Error={1}" -f $CachePath,$_.Exception.Message) 'WARN'
+                }
+                throw $failureDetail
+            }
+            finally {
+                Stop-SetupSubnetCopyLeaseHeartbeat -Job $subnetHeartbeatJob
+                if ($null -ne $subnetLease) {
+                    Update-SetupSubnetCopyLeaseHeartbeat -LeaseFilePath $subnetLease.LeaseFilePath
+                    Release-SetupSubnetCopyLease -Lease $subnetLease
+                }
+            }
+
+            if ($copyExit -gt 7) {
+                $robocopyMeaning = Get-RobocopyExitCodeMeaning -ExitCode $copyExit
+                $robocopyErrorSummary = Get-RobocopyLogErrorSummary -LogPath $robocopyLog
+                $failureDetail = "Robocopy setup media copy failed with exit code $copyExit ($robocopyMeaning). Log=$robocopyLog"
+                if (-not [string]::IsNullOrWhiteSpace($robocopyErrorSummary)) { $failureDetail = ("{0}; {1}" -f $failureDetail,$robocopyErrorSummary) }
+                try {
+                    $script:SetupCacheAction = 'CopyFailedCacheCleared'
+                    Clear-SetupCachePath -CachePath $CachePath -Reason $failureDetail -LockAlreadyHeld
+                }
+                catch {
+                    $script:SetupCacheAction = 'CopyFailedCacheClearFailed'
+                    Write-SmartLog ("Failed to clear local setup cache after Robocopy failure. CachePath={0}; Error={1}" -f $CachePath,$_.Exception.Message) 'WARN'
+                }
+                throw $failureDetail
+            }
+            Write-SmartLog ("Robocopy setup media copy completed with exit code {0}. IPG={1}ms; Log={2}" -f $copyExit,$SetupMediaCopyIpGapMilliseconds,$robocopyLog)
+        }
+        else {
+            Copy-Item -Path (Join-Path $SourcePath '*') -Destination $CachePath -Recurse -Force -ErrorAction Stop
+            Write-SmartLog 'Setup media copied with Copy-Item because robocopy.exe was not found. Bandwidth limiting is unavailable with this fallback.'
+        }
+    }
+    finally {
+        Release-SetupCacheLock -Lock $cacheLock
+        if (-not [string]::IsNullOrWhiteSpace($sourceLeasePath)) {
+            Release-SetupSourceCopyLease -LeasePath $sourceLeasePath
+        }
+    }
+
+    $setupExe = Test-SetupMedia -MediaPath $CachePath -ExpectedLanguage $ExpectedLanguage -ValidateManifest
+    $fingerprint = Get-SetupMediaFingerprint -MediaRoot (Split-Path -Parent $setupExe) -ExpectedLanguage $ExpectedLanguage
+    Save-SetupCacheManifest -CachePath $CachePath -Fingerprint $fingerprint -SourcePath $SourcePath
+    $script:SetupCacheAction = 'CopiedByTarget'
+    return $setupExe
+}
+
+function Get-PathDriveAvailableBytes {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetPathRoot($fullPath)
+    if ([string]::IsNullOrWhiteSpace($root)) {
+        throw "Unable to resolve drive root for path: $Path"
+    }
+
+    $drive = New-Object System.IO.DriveInfo($root)
+    return [int64]$drive.AvailableFreeSpace
+}
+
+function Test-SetupMediaCopyDiskSpace {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$CachePath
+    )
+
+    $sourceBytes = Get-PathSizeBytes -Path $SourcePath
+    $cacheBytes = Get-PathSizeBytes -Path $CachePath
+    $cacheDriveFreeBytes = Get-PathDriveAvailableBytes -Path $CachePath
+    $minimumSystemFreeBytes = [int64]$MinimumFreeDiskGB * 1GB
+    $additionalCopyBytes = [int64]([math]::Max([double]0, ([double]$sourceBytes - [double]$cacheBytes)))
+    $systemDriveRoot = [System.IO.Path]::GetPathRoot((Join-Path $env:SystemDrive '\'))
+    $cacheDriveRoot = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($CachePath))
+    $systemFreeBytes = [int64]((Get-SystemDriveFreeGb) * 1GB)
+
+    if ($cacheDriveRoot -ieq $systemDriveRoot) {
+        $requiredCacheDriveFreeBytes = $additionalCopyBytes + $minimumSystemFreeBytes
+    }
+    else {
+        $requiredCacheDriveFreeBytes = $additionalCopyBytes
+        if ($systemFreeBytes -lt $minimumSystemFreeBytes) {
+            $script:SetupCacheAction = 'CopyBlockedInsufficientDisk'
+            throw ("Insufficient system disk space before setup media copy. SystemFreeGB={0}; RequiredSystemFreeGB={1}; CachePath={2}; SourcePath={3}" -f (Convert-BytesToGbText -Bytes $systemFreeBytes),$MinimumFreeDiskGB,$CachePath,$SourcePath)
+        }
+    }
+
+    Write-SmartLog ("Setup media copy disk preflight: SourceGB={0}; ExistingCacheGB={1}; CacheDriveFreeGB={2}; RequiredCacheDriveFreeGB={3}; SystemFreeGB={4}; RequiredSystemFreeGB={5}; CachePath={6}" -f (Convert-BytesToGbText -Bytes $sourceBytes),(Convert-BytesToGbText -Bytes $cacheBytes),(Convert-BytesToGbText -Bytes $cacheDriveFreeBytes),(Convert-BytesToGbText -Bytes $requiredCacheDriveFreeBytes),(Convert-BytesToGbText -Bytes $systemFreeBytes),$MinimumFreeDiskGB,$CachePath)
+
+    if ($cacheDriveFreeBytes -lt $requiredCacheDriveFreeBytes) {
+        $script:SetupCacheAction = 'CopyBlockedInsufficientDisk'
+        throw ("Insufficient disk space before setup media copy. CacheDriveFreeGB={0}; RequiredCacheDriveFreeGB={1}; SourceGB={2}; ExistingCacheGB={3}; RequiredSystemFreeGB={4}; CachePath={5}; SourcePath={6}" -f (Convert-BytesToGbText -Bytes $cacheDriveFreeBytes),(Convert-BytesToGbText -Bytes $requiredCacheDriveFreeBytes),(Convert-BytesToGbText -Bytes $sourceBytes),(Convert-BytesToGbText -Bytes $cacheBytes),$MinimumFreeDiskGB,$CachePath,$SourcePath)
+    }
+}
+
+function Get-PathSizeBytes {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return 0L }
+    $total = 0L
+    try {
+        foreach ($file in @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+            try { $total += [int64]$file.Length } catch { }
+        }
+    }
+    catch { }
+    return $total
+}
+
+function Convert-BytesToGbText {
+    param([int64]$Bytes)
+    return ([math]::Round(([double]$Bytes / 1GB), 2)).ToString('0.##')
+}
+
+function ConvertTo-CleanupFullPathKey {
+    param([AllowNull()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    try { return [System.IO.Path]::GetFullPath($Path).TrimEnd('\').ToUpperInvariant() } catch { return '' }
+}
+
+function Test-CleanupPathExcluded {
+    param(
+        [Parameter(Mandatory = $true)][string]$PathKey,
+        [Parameter(Mandatory = $true)][string[]]$ExcludePathKeys
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathKey)) { return $false }
+    foreach ($excludeKey in @($ExcludePathKeys)) {
+        if ([string]::IsNullOrWhiteSpace($excludeKey)) { continue }
+        if ($PathKey -eq $excludeKey -or $PathKey.StartsWith($excludeKey + '\')) { return $true }
+    }
+    return $false
+}
+
+function Remove-PathChildrenForCleanup {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [datetime]$OlderThan,
+        [string[]]$ExcludeLiteralPaths = @()
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return 0 }
+
+    $excludePathKeys = @(
+        foreach ($item in @($ExcludeLiteralPaths)) {
+            $key = ConvertTo-CleanupFullPathKey -Path $item
+            if (-not [string]::IsNullOrWhiteSpace($key)) { $key }
+        }
+    )
+
+    $removed = 0
+    $hasAgeFilter = $PSBoundParameters.ContainsKey('OlderThan')
+
+    foreach ($file in @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+        $fileKey = ConvertTo-CleanupFullPathKey -Path $file.FullName
+        if (Test-CleanupPathExcluded -PathKey $fileKey -ExcludePathKeys $excludePathKeys) { continue }
+        if ($hasAgeFilter -and $file.LastWriteTime -gt $OlderThan) { continue }
+        try {
+            Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+            $removed++
+        }
+        catch {
+            Write-SmartLog ("Cleanup skipped locked file '{0}': {1}" -f $file.FullName,$_.Exception.Message) 'WARN'
+        }
+    }
+
+    foreach ($directory in @(Get-ChildItem -LiteralPath $Path -Recurse -Directory -Force -ErrorAction SilentlyContinue | Sort-Object FullName -Descending)) {
+        $directoryKey = ConvertTo-CleanupFullPathKey -Path $directory.FullName
+        if (Test-CleanupPathExcluded -PathKey $directoryKey -ExcludePathKeys $excludePathKeys) { continue }
+        if ($hasAgeFilter -and $directory.LastWriteTime -gt $OlderThan) { continue }
+        try {
+            $hasChildren = @(Get-ChildItem -LiteralPath $directory.FullName -Force -ErrorAction SilentlyContinue).Count -gt 0
+            if (-not $hasChildren) {
+                Remove-Item -LiteralPath $directory.FullName -Force -ErrorAction Stop
+                $removed++
+            }
+        }
+        catch {
+            Write-SmartLog ("Cleanup skipped locked directory '{0}': {1}" -f $directory.FullName,$_.Exception.Message) 'WARN'
+        }
+    }
+
+    return $removed
+}
+
+function Invoke-CleanupArea {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [datetime]$OlderThan,
+        [string[]]$ExcludeLiteralPaths = @()
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        Write-SmartLog ("Disk cleanup area skipped, path missing: {0} ({1})" -f $Name,$Path)
+        return [pscustomobject]@{ Name = $Name; Path = $Path; BeforeBytes = 0L; AfterBytes = 0L; RemovedBytes = 0L; RemovedItems = 0 }
+    }
+
+    $before = Get-PathSizeBytes -Path $Path
+    $cleanupParams = @{
+        Path = $Path
+        ExcludeLiteralPaths = $ExcludeLiteralPaths
+    }
+    if ($PSBoundParameters.ContainsKey('OlderThan')) {
+        $cleanupParams['OlderThan'] = $OlderThan
+    }
+    $removedItems = Remove-PathChildrenForCleanup @cleanupParams
+    $after = Get-PathSizeBytes -Path $Path
+    $removedBytes = [math]::Max(0L, $before - $after)
+    Write-SmartLog ("Disk cleanup area {0}: RemovedItems={1}; FreedGB={2}; Path={3}" -f $Name,$removedItems,(Convert-BytesToGbText -Bytes $removedBytes),$Path)
+    return [pscustomobject]@{ Name = $Name; Path = $Path; BeforeBytes = $before; AfterBytes = $after; RemovedBytes = $removedBytes; RemovedItems = $removedItems }
+}
+
+function Get-CurrentSetupCachePathForCleanup {
+    try {
+        $expectedLanguage = Resolve-SetupLanguageRequirement -RequestedLanguage $SetupLanguage
+        return Resolve-SetupCachePath -ExpectedLanguage $expectedLanguage
+    }
+    catch {
+        Write-SmartLog ("Could not resolve current setup cache path for cleanup exclusion: {0}" -f $_.Exception.Message) 'WARN'
+        return ''
+    }
+}
+
+function Test-WindowsUpdateBusy {
+    $busyProcesses = @('setup','setuphost','setupprep','TiWorker','TrustedInstaller','MoUsoCoreWorker','UsoClient')
+    foreach ($name in $busyProcesses) {
+        if (Get-Process -Name $name -ErrorAction SilentlyContinue) { return $true }
+    }
+    return $false
+}
+
+function Test-WindowsSetupOrUpgradeBusy {
+    if (Test-WindowsUpdateBusy) { return $true }
+
+    try {
+        $setup = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\Setup' -ErrorAction Stop
+        foreach ($name in @('SystemSetupInProgress','UpgradeInProgress','OOBEInProgress')) {
+            if ($setup.PSObject.Properties[$name] -and [int]$setup.$name -ne 0) { return $true }
+        }
+    }
+    catch { }
+
+    return $false
+}
+
+function Stop-WindowsUpdateServicesForCleanup {
+    $stoppedServices = New-Object System.Collections.Generic.List[string]
+    foreach ($serviceName in @('wuauserv','bits','dosvc')) {
+        try {
+            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if ($null -ne $service -and $service.Status -eq 'Running') {
+                Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+                [void]$stoppedServices.Add($serviceName)
+                Write-SmartLog ("Disk cleanup requested service stop: {0}" -f $serviceName)
+            }
+        }
+        catch {
+            Write-SmartLog ("Disk cleanup could not stop service {0}: {1}" -f $serviceName,$_.Exception.Message) 'WARN'
+        }
+    }
+
+    if ($stoppedServices.Count -gt 0) { Start-Sleep -Seconds 2 }
+    return @($stoppedServices.ToArray())
+}
+
+function Start-WindowsUpdateServicesAfterCleanup {
+    param([string[]]$ServiceNames = @())
+
+    foreach ($serviceName in @($ServiceNames | Select-Object -Unique)) {
+        try {
+            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if ($null -ne $service -and $service.Status -ne 'Running') {
+                Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+                Write-SmartLog ("Disk cleanup requested service restart: {0}" -f $serviceName)
+            }
+        }
+        catch {
+            Write-SmartLog ("Disk cleanup could not restart service {0}: {1}" -f $serviceName,$_.Exception.Message) 'WARN'
+        }
+    }
+
+    if (@($ServiceNames).Count -gt 0) { Start-Sleep -Seconds 2 }
+}
+
+function Get-UserProfileFoldersForCleanup {
+    $systemDrive = ([System.IO.Path]::GetPathRoot($env:SystemRoot)).TrimEnd('\')
+    $usersRoot = Join-Path $systemDrive 'Users'
+    if (-not (Test-Path -LiteralPath $usersRoot -PathType Container)) {
+        Write-SmartLog ("Disk cleanup skipped user profile cleanup because Users root was not found: {0}" -f $usersRoot) 'WARN'
+        return @()
+    }
+
+    return @(Get-ChildItem -LiteralPath $usersRoot -Force -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('Default','Default User','Public','All Users') })
+}
+
+function Invoke-UserTempCleanup {
+    $before = Get-SystemDriveFreeGb
+    $profiles = @(Get-UserProfileFoldersForCleanup)
+    $profileCount = 0
+    foreach ($profile in $profiles) {
+        $userTemp = Join-Path $profile.FullName 'AppData\Local\Temp'
+        if (Test-Path -LiteralPath $userTemp -PathType Container) {
+            $profileCount++
+            [void](Invoke-CleanupArea -Name 'UserTemp' -Path $userTemp)
+        }
+    }
+
+    $after = Get-SystemDriveFreeGb
+    $freed = [math]::Max(0, [math]::Round(($after - $before), 2))
+    Write-SmartLog ("Disk cleanup user temp completed. ProfileTempFolders={0}; FreedGB={1}." -f $profileCount,$freed)
+}
+
+function Get-BrowserCacheDefinition {
+    param([Parameter(Mandatory = $true)][string]$Browser)
+
+    switch ($Browser) {
+        'Edge' {
+            return [pscustomobject]@{
+                ProfileRootRelativePath = 'AppData\Local\Microsoft\Edge\User Data'
+                CacheRelativePaths = @('Cache','Code Cache','GPUCache','Service Worker\CacheStorage','DawnCache','ShaderCache','GrShaderCache','Media Cache')
+            }
+        }
+        'Chrome' {
+            return [pscustomobject]@{
+                ProfileRootRelativePath = 'AppData\Local\Google\Chrome\User Data'
+                CacheRelativePaths = @('Cache','Code Cache','GPUCache','Service Worker\CacheStorage','DawnCache','ShaderCache','GrShaderCache','Media Cache')
+            }
+        }
+        'Firefox' {
+            return [pscustomobject]@{
+                ProfileRootRelativePath = 'AppData\Local\Mozilla\Firefox\Profiles'
+                CacheRelativePaths = @('cache2','startupCache','shader-cache')
+            }
+        }
+        default { return $null }
+    }
+}
+
+function Invoke-BrowserUserCacheCleanup {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string]$Browser,
+        [Parameter(Mandatory = $true)][string]$ProcessName,
+        [Parameter(Mandatory = $true)][datetime]$OlderThan
+    )
+
+    $definition = Get-BrowserCacheDefinition -Browser $Browser
+    if ($null -eq $definition) {
+        Write-SmartLog ("Disk cleanup skipped browser cache. Label={0}; Reason=UnsupportedBrowser; Browser={1}" -f $Label,$Browser) 'WARN'
+        return
+    }
+
+    if (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue) {
+        Write-SmartLog ("Disk cleanup skipped browser cache. Label={0}; Reason=ProcessActive; ProcessName={1}" -f $Label,$ProcessName) 'WARN'
+        return
+    }
+
+    $before = Get-SystemDriveFreeGb
+    $profileCount = 0
+    $browserProfileCount = 0
+    $cacheFolderCount = 0
+    foreach ($profile in @(Get-UserProfileFoldersForCleanup)) {
+        $profileCount++
+        $browserProfileRoot = Join-Path $profile.FullName $definition.ProfileRootRelativePath
+        if (-not (Test-Path -LiteralPath $browserProfileRoot -PathType Container)) { continue }
+
+        foreach ($browserProfile in @(Get-ChildItem -LiteralPath $browserProfileRoot -Force -Directory -ErrorAction SilentlyContinue)) {
+            $browserProfileHasCache = $false
+            foreach ($relativePath in @($definition.CacheRelativePaths)) {
+                $cachePath = Join-Path $browserProfile.FullName $relativePath
+                if (-not (Test-Path -LiteralPath $cachePath -PathType Container)) { continue }
+                $cacheFolderCount++
+                $browserProfileHasCache = $true
+                [void](Invoke-CleanupArea -Name $Label -Path $cachePath -OlderThan $OlderThan)
+            }
+            if ($browserProfileHasCache) { $browserProfileCount++ }
+        }
+    }
+
+    $after = Get-SystemDriveFreeGb
+    $freed = [math]::Max(0, [math]::Round(($after - $before), 2))
+    Write-SmartLog ("Disk cleanup browser cache completed. Label={0}; Browser={1}; UserProfilesScanned={2}; BrowserProfilesWithCache={3}; CacheFolders={4}; FreedGB={5}." -f $Label,$Browser,$profileCount,$browserProfileCount,$cacheFolderCount,$freed)
+}
+
+function Invoke-RecycleBinCleanup {
+    $before = Get-SystemDriveFreeGb
+    try {
+        Clear-RecycleBin -Force -ErrorAction SilentlyContinue | Out-Null
+        $after = Get-SystemDriveFreeGb
+        $freed = [math]::Max(0, [math]::Round(($after - $before), 2))
+        Write-SmartLog ("Disk cleanup recycle bin completed. FreedGB={0}." -f $freed)
+    }
+    catch {
+        Write-SmartLog ("Disk cleanup skipped recycle bin: {0}" -f $_.Exception.Message) 'WARN'
+    }
+}
+
+function Invoke-SmartM365RuntimeCleanup {
+    param([Parameter(Mandatory = $true)][datetime]$OlderThan)
+
+    $runtimeRoot = Join-Path $env:ProgramData 'SmartM365\IntuneRemediation'
+    foreach ($target in @(
+        [pscustomobject]@{ Name = 'SmartM365RuntimeLogs'; Path = (Join-Path $runtimeRoot 'Logs') },
+        [pscustomobject]@{ Name = 'SmartM365RuntimeTemp'; Path = (Join-Path $runtimeRoot 'Temp') },
+        [pscustomobject]@{ Name = 'SmartM365RuntimeCache'; Path = (Join-Path $runtimeRoot 'Cache') }
+    )) {
+        [void](Invoke-CleanupArea -Name $target.Name -Path $target.Path -OlderThan $OlderThan)
+    }
+}
+
+function Get-ModerateCustomCleanupDirectoryList {
+    return @(
+        [pscustomobject]@{ Label = 'BMCClientPatchDownload'; Path = 'C:\Program Files\BMC Software\Client Management\Client\data\FileStore\downstream\PatchDownload'; MinimumAgeDays = 0; DeleteRoot = $false }
+    )
+}
+
+function Invoke-ModerateCustomCleanupDirectoryList {
+    foreach ($target in @(Get-ModerateCustomCleanupDirectoryList)) {
+        if ($null -eq $target -or [string]::IsNullOrWhiteSpace([string]$target.Path)) { continue }
+        $label = if ([string]::IsNullOrWhiteSpace([string]$target.Label)) { 'CustomDirectory' } else { [string]$target.Label }
+        $minimumAgeDays = 0
+        if ($target.PSObject.Properties['MinimumAgeDays']) { $minimumAgeDays = [int]$target.MinimumAgeDays }
+        $cutoff = (Get-Date).AddDays(-1 * [math]::Abs($minimumAgeDays))
+
+        if ($target.PSObject.Properties['DeleteRoot'] -and [bool]$target.DeleteRoot) {
+            try {
+                if (-not (Test-Path -LiteralPath ([string]$target.Path) -PathType Container)) {
+                    Write-SmartLog ("Disk cleanup custom directory skipped, path missing: {0} ({1})" -f $label,$target.Path)
+                    continue
+                }
+                $item = Get-Item -LiteralPath ([string]$target.Path) -Force -ErrorAction Stop
+                if ($item.LastWriteTime -gt $cutoff) {
+                    Write-SmartLog ("Disk cleanup custom directory skipped, root too recent: {0}; LastWrite={1}; MinimumAgeDays={2}" -f $target.Path,$item.LastWriteTime,$minimumAgeDays) 'WARN'
+                    continue
+                }
+                $beforeBytes = Get-PathSizeBytes -Path ([string]$target.Path)
+                Remove-Item -LiteralPath ([string]$target.Path) -Recurse -Force -ErrorAction Stop
+                Write-SmartLog ("Disk cleanup custom directory root removed. Label={0}; Path={1}; FreedGBApprox={2}" -f $label,$target.Path,(Convert-BytesToGbText -Bytes $beforeBytes))
+            }
+            catch {
+                Write-SmartLog ("Disk cleanup custom directory root removal failed. Label={0}; Path={1}; Error={2}" -f $label,$target.Path,$_.Exception.Message) 'WARN'
+            }
+        }
+        else {
+            [void](Invoke-CleanupArea -Name $label -Path ([string]$target.Path) -OlderThan $cutoff)
+        }
+    }
+}
+
+function Invoke-ModerateDiskCleanupStep {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][scriptblock]$Action
+    )
+
+    try {
+        if ((Get-SystemDriveFreeGb) -ge $MinimumFreeDiskGB) {
+            Write-SmartLog ("Disk cleanup step skipped because target free space is already reached. Step={0}; FreeDiskGB={1}; RequiredGB={2}." -f $Name,(Get-SystemDriveFreeGb),$MinimumFreeDiskGB)
+            return
+        }
+        Write-SmartLog ("Disk cleanup step started. Step={0}." -f $Name)
+        & $Action
+        Write-SmartLog ("Disk cleanup step finished. Step={0}; FreeDiskGB={1}." -f $Name,(Get-SystemDriveFreeGb))
+    }
+    catch {
+        Write-SmartLog ("Disk cleanup step failed. Step={0}; Error={1}" -f $Name,$_.Exception.Message) 'WARN'
+    }
+}
+
+function Invoke-SafeDiskCleanup {
+    $beforeFree = Get-SystemDriveFreeGb
+    Write-SmartLog ("Starting moderate disk cleanup. FreeDiskGB before={0}; RequiredGB={1}." -f $beforeFree,$MinimumFreeDiskGB)
+
+    $tempCutoff = (Get-Date).AddDays(-1 * $DiskCleanupTempFileMinAgeDays)
+    $logCutoff = (Get-Date).AddDays(-1 * $DiskCleanupLogRetentionDays)
+    $browserCutoff = (Get-Date).AddDays(-1 * $DiskCleanupBrowserCacheMinAgeDays)
+
+    Invoke-ModerateDiskCleanupStep -Name 'WindowsTemp' -Action {
+        $tempPaths = New-Object System.Collections.ArrayList
+        foreach ($path in @($env:TEMP,$env:TMP,(Join-Path $env:SystemRoot 'Temp'))) {
+            if (-not [string]::IsNullOrWhiteSpace($path) -and -not @($tempPaths.ToArray()).Contains($path)) {
+                [void]$tempPaths.Add($path)
+            }
+        }
+        foreach ($path in @($tempPaths.ToArray())) {
+            [void](Invoke-CleanupArea -Name 'Temp' -Path $path -OlderThan $tempCutoff)
+        }
+    }
+
+    Invoke-ModerateDiskCleanupStep -Name 'WindowsUpdateAndDeliveryOptimizationCaches' -Action {
+        $deliveryOptimizationCache = Join-Path $env:SystemRoot 'ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache'
+        $wuDownload = Join-Path $env:SystemRoot 'SoftwareDistribution\Download'
+        if (Test-WindowsUpdateBusy) {
+            Write-SmartLog ("Disk cleanup skipped Windows Update and Delivery Optimization caches because update/setup activity appears active: WU={0}; DO={1}" -f $wuDownload,$deliveryOptimizationCache) 'WARN'
+        }
+        else {
+            $stoppedServices = @(Stop-WindowsUpdateServicesForCleanup)
+            try {
+                [void](Invoke-CleanupArea -Name 'DeliveryOptimizationCache' -Path $deliveryOptimizationCache -OlderThan $tempCutoff)
+                [void](Invoke-CleanupArea -Name 'WindowsUpdateDownloadCache' -Path $wuDownload -OlderThan $tempCutoff)
+            }
+            finally {
+                Start-WindowsUpdateServicesAfterCleanup -ServiceNames $stoppedServices
+            }
+        }
+    }
+
+    Invoke-ModerateDiskCleanupStep -Name 'UserTemp' -Action { Invoke-UserTempCleanup }
+    Invoke-ModerateDiskCleanupStep -Name 'EdgeUserCache' -Action { Invoke-BrowserUserCacheCleanup -Label 'EdgeUserCache' -Browser 'Edge' -ProcessName 'msedge' -OlderThan $browserCutoff }
+    Invoke-ModerateDiskCleanupStep -Name 'ChromeUserCache' -Action { Invoke-BrowserUserCacheCleanup -Label 'ChromeUserCache' -Browser 'Chrome' -ProcessName 'chrome' -OlderThan $browserCutoff }
+    Invoke-ModerateDiskCleanupStep -Name 'FirefoxUserCache' -Action { Invoke-BrowserUserCacheCleanup -Label 'FirefoxUserCache' -Browser 'Firefox' -ProcessName 'firefox' -OlderThan $browserCutoff }
+    Invoke-ModerateDiskCleanupStep -Name 'RecycleBin' -Action { Invoke-RecycleBinCleanup }
+
+    Invoke-ModerateDiskCleanupStep -Name 'OldWindowsUpgradeFolders' -Action { [void](Invoke-OldUpgradeFolderCleanup) }
+
+    Invoke-ModerateDiskCleanupStep -Name 'SmartM365RuntimeOldContent' -Action { Invoke-SmartM365RuntimeCleanup -OlderThan $logCutoff }
+    Invoke-ModerateDiskCleanupStep -Name 'CustomCleanupDirectories' -Action { Invoke-ModerateCustomCleanupDirectoryList }
+
+    Invoke-ModerateDiskCleanupStep -Name 'SmartEndpointMigrationOldContent' -Action {
+        $currentCache = Get-CurrentSetupCachePathForCleanup
+        [void](Invoke-CleanupArea -Name 'OldSmartM365SetupMedia' -Path $SetupCacheRoot -ExcludeLiteralPaths @($currentCache))
+        [void](Invoke-CleanupArea -Name 'OldSmartM365Logs' -Path $script:LogDir -OlderThan $logCutoff -ExcludeLiteralPaths @($script:LogPath))
+        [void](Invoke-CleanupArea -Name 'OldSmartM365Output' -Path $script:OutputDir -OlderThan $logCutoff -ExcludeLiteralPaths @($script:CsvPath))
+    }
+
+    Invoke-ModerateDiskCleanupStep -Name 'DismComponentCleanup' -Action { [void](Invoke-DismComponentCleanup) }
+
+    $afterFree = Get-SystemDriveFreeGb
+    $freed = [math]::Max(0, [math]::Round(($afterFree - $beforeFree), 2))
+    $script:DiskCleanupAction = ("ModerateCleanup; BeforeGB={0}; AfterGB={1}; FreedGB={2}; BrowserCacheMinAgeDays={3}" -f $beforeFree,$afterFree,$freed,$DiskCleanupBrowserCacheMinAgeDays)
+    $script:DiskCleanupFreedGB = $freed
+    Write-SmartLog ("Moderate disk cleanup completed. FreeDiskGB after={0}; FreedGB={1}." -f $afterFree,$freed)
+    return $afterFree
+}
+
+function Invoke-OldUpgradeFolderCleanup {
+    $beforeFree = Get-SystemDriveFreeGb
+    if (Test-WindowsSetupOrUpgradeBusy) {
+        $script:AdvancedDiskCleanupAction = 'OldUpgradeFoldersSkipped; Reason=SetupOrUpdateBusy'
+        Write-SmartLog 'Advanced cleanup skipped old Windows upgrade folders because setup/update activity appears active.' 'WARN'
+        return $beforeFree
+    }
+
+    $systemDrive = ([System.IO.Path]::GetPathRoot($env:SystemRoot)).TrimEnd('\')
+    $cutoff = (Get-Date).AddDays(-1 * $DiskCleanupUpgradeFolderMinAgeDays)
+    $targets = @(
+        (Join-Path $systemDrive '$WINDOWS.~BT'),
+        (Join-Path $systemDrive '$WINDOWS.~WS'),
+        (Join-Path $systemDrive 'Windows.old')
+    )
+
+    $removed = New-Object System.Collections.ArrayList
+    foreach ($target in $targets) {
+        if (-not (Test-Path -LiteralPath $target -PathType Container)) { continue }
+        $item = Get-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item) { continue }
+        if ($item.LastWriteTime -gt $cutoff) {
+            Write-SmartLog ("Advanced cleanup skipped recent upgrade folder: {0}; LastWrite={1}" -f $target,$item.LastWriteTime) 'WARN'
+            continue
+        }
+
+        $beforeBytes = Get-PathSizeBytes -Path $target
+        try {
+            Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+            [void]$removed.Add(("{0}:{1}GB" -f $target,(Convert-BytesToGbText -Bytes $beforeBytes)))
+            Write-SmartLog ("Advanced cleanup removed old upgrade folder: {0}; FreedGBApprox={1}" -f $target,(Convert-BytesToGbText -Bytes $beforeBytes))
+        }
+        catch {
+            Write-SmartLog ("Advanced cleanup could not remove old upgrade folder '{0}': {1}" -f $target,$_.Exception.Message) 'WARN'
+        }
+    }
+
+    $afterFree = Get-SystemDriveFreeGb
+    $freed = [math]::Max(0, [math]::Round(($afterFree - $beforeFree), 2))
+    $details = if ($removed.Count -gt 0) { (@($removed.ToArray()) -join '; ') } else { 'NoOldUpgradeFoldersRemoved' }
+    $script:AdvancedDiskCleanupAction = ("OldUpgradeFolders; BeforeGB={0}; AfterGB={1}; FreedGB={2}; Detail={3}" -f $beforeFree,$afterFree,$freed,$details)
+    $script:AdvancedDiskCleanupFreedGB = $freed
+    Write-SmartLog ("Advanced old upgrade folder cleanup completed. FreeDiskGB after={0}; FreedGB={1}." -f $afterFree,$freed)
+    return $afterFree
+}
+
+function Invoke-DismComponentCleanup {
+    $beforeFree = Get-SystemDriveFreeGb
+    New-SmartDirectory -Path $script:SetupLogDir
+    $stdout = Join-Path $script:SetupLogDir ("DISM_StartComponentCleanup_{0}.stdout.txt" -f $script:RunId)
+    $stderr = Join-Path $script:SetupLogDir ("DISM_StartComponentCleanup_{0}.stderr.txt" -f $script:RunId)
+    $dism = Join-Path $env:SystemRoot 'System32\dism.exe'
+    if (-not (Test-Path -LiteralPath $dism -PathType Leaf)) {
+        throw "dism.exe not found: $dism"
+    }
+
+    Write-SmartLog 'Starting DISM StartComponentCleanup.'
+    $process = Start-Process -FilePath $dism -ArgumentList @('/Online','/Cleanup-Image','/StartComponentCleanup') -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr -ErrorAction Stop
+    $afterFree = Get-SystemDriveFreeGb
+    $freed = [math]::Max(0, [math]::Round(($afterFree - $beforeFree), 2))
+    $script:DismCleanupAction = ("StartComponentCleanup; ExitCode={0}; BeforeGB={1}; AfterGB={2}; FreedGB={3}; Stdout={4}; Stderr={5}" -f $process.ExitCode,$beforeFree,$afterFree,$freed,$stdout,$stderr)
+    $script:DismCleanupFreedGB = $freed
+    Write-SmartLog ("DISM StartComponentCleanup completed. ExitCode={0}; FreeDiskGB after={1}; FreedGB={2}." -f $process.ExitCode,$afterFree,$freed)
+    if ($process.ExitCode -ne 0) {
+        throw "DISM StartComponentCleanup failed with exit code $($process.ExitCode). Stdout=$stdout; Stderr=$stderr"
+    }
+    return $afterFree
+}
+
+function Resolve-SetupUpgradeExecutable {
+    if (-not ($AllowSetupUpgrade -or $DirectSetupUpgrade)) { return '' }
+
+    $expectedLanguage = Resolve-SetupLanguageRequirement -RequestedLanguage $SetupLanguage
+    $script:ResolvedSetupLanguage = $expectedLanguage
+
+    $cachePath = Resolve-SetupCachePath -ExpectedLanguage $expectedLanguage
+    $script:ResolvedSetupCachePath = $cachePath
+    if ($SetupExecutionMode -in @('LocalCache','Auto')) {
+        # One resolution decides which media folder may be used before any copy (shared with the
+        # Intune package). The Intune runner passes the folder it selected in -SetupMediaPath.
+        $resolution = Resolve-SemtEndpointSetupMedia -CachePath $cachePath -ExpectedLanguage $expectedLanguage
+        $script:SemtLegacyMediaDecision = $resolution
+        $script:SetupMediaReuseDecision = ('{0}; {1}' -f $resolution.Decision,$resolution.Detail)
+        Write-SmartLog ("Setup media resolution: Decision={0}; Path={1}; External={2}; {3}" -f $resolution.Decision,$resolution.Path,$resolution.External,$resolution.Detail)
+        if (-not [string]::IsNullOrWhiteSpace($SetupMediaPath)) {
+            $requestedMedia = [System.IO.Path]::GetFullPath($SetupMediaPath).TrimEnd('\')
+            $knownMedia = @([System.IO.Path]::GetFullPath($cachePath).TrimEnd('\')) + @(Get-SemtLegacySetupMediaCandidates -Leaf (Split-Path -Path $cachePath -Leaf) | ForEach-Object { $_.TrimEnd('\') })
+            if (@($knownMedia | Where-Object { $_ -ieq $requestedMedia }).Count -eq 0) {
+                throw ("Setup media path not recognized. Requested={0}; Expected one of: {1}" -f $requestedMedia,($knownMedia -join ', '))
+            }
+            if (-not [string]::IsNullOrWhiteSpace($resolution.Path) -and $resolution.Path -ine $requestedMedia) {
+                Write-SmartLog ("Requested setup media path differs from the current resolution; the current resolution is used. Requested={0}; Resolved={1}" -f $requestedMedia,$resolution.Path) 'WARN'
+            }
+        }
+        switch ($resolution.Decision) {
+            'InUse' { throw ("Setup media is in use. Path={0}; {1}" -f $resolution.Path,$resolution.LegacyDetail) }
+            'Indeterminate' { throw ("Setup media state is indeterminate. Path={0}; {1}" -f $resolution.Path,$resolution.LegacyDetail) }
+            'LegacyIntuneOwned' {
+                $sourceDiffers = $false
+                if (-not $SkipSetupMediaPreCopy) {
+                    try {
+                        $legacySourceCandidates = @(Get-EffectiveSetupSourceCandidates)
+                        if ($legacySourceCandidates.Count -gt 0) {
+                            $legacyCandidateSource = Resolve-PreferredSetupSourcePath -SourcePaths $legacySourceCandidates -ExpectedLanguage $expectedLanguage
+                            $legacySourceFingerprint = Get-SetupMediaFingerprint -MediaRoot $legacyCandidateSource -ExpectedLanguage $expectedLanguage
+                            $legacyMediaFingerprint = Get-SetupMediaFingerprint -MediaRoot $resolution.Path -ExpectedLanguage $expectedLanguage
+                            $sourceDiffers = -not (Test-SetupFingerprintMatch -Left $legacySourceFingerprint -Right $legacyMediaFingerprint)
+                        }
+                    }
+                    catch { Write-SmartLog ("Could not compare the setup source with legacy media; legacy media is used as validated. Detail={0}" -f $_.Exception.Message) 'WARN' }
+                }
+                if (-not $sourceDiffers) {
+                    $script:SetupCacheAction = 'LegacyReusedInPlace'
+                    $script:ResolvedSetupCachePath = $resolution.Path
+                    $script:SetupMediaReuseDecision = ('LegacyIntuneOwned; reused in place read-only (external to this product); Owner={0}; Path={1}' -f $resolution.Owner,$resolution.Path)
+                    Write-SmartLog $script:SetupMediaReuseDecision 'WARN'
+                    return (Test-SemtEndpointSetupMediaCandidate -Path $resolution.Path).SetupExe
+                }
+                $resolution.LegacyValidRemains = $true
+                $resolution.LegacyDetail = ('Legacy Intune-owned media differs from the selected setup source and cannot be updated in place. {0}' -f $resolution.LegacyDetail)
+                $script:SetupMediaReuseDecision = ('LegacyIntuneOwnedSourceDiffers; {0}' -f $resolution.LegacyDetail)
+            }
+            'LegacyAdoptable' {
+                $adoption = Invoke-SemtSetupMediaAdoption -LegacyPath $resolution.Path -CachePath $cachePath -ValidateMedia { param($Path) Test-SemtEndpointSetupMediaCandidate -Path $Path } -EvidenceRoot (Join-Path $script:StateDir 'MediaAdoption') -UsageProvider { param($Path) Get-SemtSetupMediaUsage -MediaPath $Path -LockRoots (Get-SemtEndpointMediaLockRoots) }
+                $script:SetupMediaReuseDecision = ('Adoption{0}; {1}; Evidence={2}' -f $adoption.Outcome,$adoption.Detail,$adoption.EvidencePath)
+                switch ($adoption.Outcome) {
+                    'Moved' { $script:SetupCacheAction = 'LegacyMovedAndValidated' }
+                    { $_ -in @('NotMoved','RolledBack') } { $resolution.LegacyValidRemains = $true; $resolution.LegacyDetail = $adoption.Detail }
+                    default { throw ("Legacy setup media adoption rollback failed. Outcome={0}; {1} Evidence={2}" -f $adoption.Outcome,$adoption.Detail,$adoption.EvidencePath) }
+                }
+            }
+        }
+        try {
+            if ($script:SetupCacheAction -ne 'LegacyMovedAndValidated') { $script:SetupCacheAction = 'AlreadyCached' }
+            $cachedSetupExe = Test-SetupCacheReady -CachePath $cachePath -ExpectedLanguage $expectedLanguage
+            if (-not $SkipSetupMediaPreCopy) {
+                try {
+                    $setupSourceCandidates = @(Get-EffectiveSetupSourceCandidates)
+                    if ($setupSourceCandidates.Count -gt 0) {
+                        $candidateSource = Resolve-PreferredSetupSourcePath -SourcePaths $setupSourceCandidates -ExpectedLanguage $expectedLanguage
+                        $sourceFingerprint = Get-SetupMediaFingerprint -MediaRoot $candidateSource -ExpectedLanguage $expectedLanguage
+                        $cacheFingerprint = Get-SetupMediaFingerprint -MediaRoot (Split-Path -Parent $cachedSetupExe) -ExpectedLanguage $expectedLanguage
+                        if (-not (Test-SetupFingerprintMatch -Left $sourceFingerprint -Right $cacheFingerprint)) {
+                            Write-SmartLog ("Setup source differs from local cache. Updating cache from '{0}'." -f $candidateSource) 'WARN'
+                            return Copy-SetupMediaToLocalCache -SourcePath $candidateSource -CachePath $cachePath -ExpectedLanguage $expectedLanguage
+                        }
+                    }
+                }
+                catch {
+                    Write-SmartLog ("Could not compare setup source with local cache. Using valid local cache. Detail={0}" -f $_.Exception.Message) 'WARN'
+                }
+            }
+            return $cachedSetupExe
+        }
+        catch {
+            $script:SetupCacheAction = 'CacheInvalid'
+            # Untrusted legacy media keeps its explicit status, also in existing-media-only mode.
+            if ($resolution.Decision -eq 'Untrusted') { Assert-SemtSetupMediaCopyAllowed -Resolution $resolution }
+            if ($SkipSetupMediaPreCopy) {
+                throw ("Local setup cache is not ready and existing-media-only mode is enabled. CachePath={0}; Error={1}" -f $cachePath,$_.Exception.Message)
+            }
+            $cacheError = $_.Exception.Message
+            Write-SmartLog ("Local setup cache not ready: {0}" -f $cacheError) 'WARN'
+            $setupSourceCandidates = @(Get-EffectiveSetupSourceCandidates)
+            if ($setupSourceCandidates.Count -eq 0) {
+                throw ("Local setup cache is not ready and no SetupSourcePath was provided. CachePath={0}; Error={1}. The invalid cache was preserved for diagnostics." -f $cachePath,$cacheError)
+            }
+            Assert-SemtSetupMediaCopyAllowed -Resolution $resolution
+            Clear-SetupCachePath -CachePath $cachePath -Reason $cacheError
+        }
+    }
+
+    $setupSourceCandidates = @(Get-EffectiveSetupSourceCandidates)
+    if ($setupSourceCandidates.Count -eq 0) {
+        throw 'SetupSourcePath is required when -AllowSetupUpgrade is used and no valid local cache exists.'
+    }
+
+    $expandedSource = Resolve-PreferredSetupSourcePath -SourcePaths $setupSourceCandidates -ExpectedLanguage $expectedLanguage
+    if ($SetupExecutionMode -in @('Share','Auto')) {
+        try {
+            return Test-SetupMedia -MediaPath $expandedSource -ExpectedLanguage $expectedLanguage -ValidateManifest
+        }
+        catch {
+            if ($SetupExecutionMode -eq 'Share') { throw }
+            Write-SmartLog ("Setup share source not directly usable from target context: {0}" -f $_.Exception.Message) 'WARN'
+        }
+    }
+
+    if ($SetupExecutionMode -in @('LocalCache','Auto')) {
+        return Copy-SetupMediaToLocalCache -SourcePath $expandedSource -CachePath $cachePath -ExpectedLanguage $expectedLanguage
+    }
+
+    throw 'Unable to resolve a valid setup.exe path.'
+}
+
+function Format-SetupProcessSnapshot {
+    param([AllowNull()]$Process)
+
+    if ($null -eq $Process) { return 'PID=<unknown>' }
+
+    try { $Process.Refresh() } catch { }
+
+    $startTime = ''
+    try { $startTime = $Process.StartTime.ToString('yyyy-MM-dd HH:mm:ss') } catch { $startTime = '<unavailable>' }
+
+    $cpuSeconds = ''
+    try { $cpuSeconds = [math]::Round([double]$Process.TotalProcessorTime.TotalSeconds, 1).ToString([System.Globalization.CultureInfo]::InvariantCulture) } catch { $cpuSeconds = '<unavailable>' }
+
+    $workingSetMb = ''
+    try { $workingSetMb = [math]::Round(($Process.WorkingSet64 / 1MB), 1).ToString([System.Globalization.CultureInfo]::InvariantCulture) } catch { $workingSetMb = '<unavailable>' }
+
+    $hasExited = ''
+    try { $hasExited = [string]$Process.HasExited } catch { $hasExited = '<unavailable>' }
+
+    return ("PID={0}; HasExited={1}; StartTime={2}; CPUSeconds={3}; WorkingSetMB={4}" -f $Process.Id,$hasExited,$startTime,$cpuSeconds,$workingSetMb)
+}
+
+function Invoke-SetupUpgrade {
+    param([Parameter(Mandatory = $true)][string]$SetupExePath)
+
+    New-SmartDirectory -Path $script:SetupLogDir
+    $args = @(
+        '/auto','upgrade',
+        '/quiet',
+        '/eula','accept',
+        '/dynamicupdate',$SetupDynamicUpdate.ToLowerInvariant(),
+        '/copylogs',"`"$script:SetupLogDir`""
+    )
+
+    $argumentText = $args -join ' '
+    $workingDirectory = Split-Path -Parent $SetupExePath
+
+    Write-SmartLog ("Starting setup upgrade: {0} {1}" -f $SetupExePath,$argumentText)
+    Write-SmartLog ("Creating setup process with ProcessStartInfo: FileName={0}; WorkingDirectory={1}; UseShellExecute=False; CreateNoWindow=True; Arguments={2}" -f $SetupExePath,$workingDirectory,$argumentText)
+
+    $processStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $processStartInfo.FileName = $SetupExePath
+    $processStartInfo.Arguments = $argumentText
+    $processStartInfo.WorkingDirectory = $workingDirectory
+    $processStartInfo.UseShellExecute = $false
+    $processStartInfo.CreateNoWindow = $true
+
+    Write-SmartLog 'Calling Process.Start for setup.exe.'
+    $process = [System.Diagnostics.Process]::Start($processStartInfo)
+    if ($null -eq $process) { throw 'Process.Start returned null for setup.exe.' }
+    $startedAt = Get-Date
+    $lastHeartbeatAt = $startedAt
+    $heartbeatSeconds = [math]::Max(30, [int]$SetupProcessHeartbeatSeconds)
+    $timeoutAt = if ($SetupProcessTimeoutMinutes -gt 0) { $startedAt.AddMinutes($SetupProcessTimeoutMinutes) } else { $null }
+
+    $script:SetupProcessStarted = $true
+    $script:SetupProcessExited = $false
+    $script:SetupProcessPid = [string]$process.Id
+    $script:SetupProcessStartTime = try { $process.StartTime.ToString('yyyy-MM-dd HH:mm:ss') } catch { '' }
+    $script:SetupProcessLastSnapshot = Format-SetupProcessSnapshot -Process $process
+    $script:SetupProcessLastHeartbeatUtc = (Get-Date).ToUniversalTime().ToString('o')
+    Write-SmartLog ("setup.exe started. {0}; HeartbeatSeconds={1}; TimeoutMinutes={2}" -f $script:SetupProcessLastSnapshot,$heartbeatSeconds,$SetupProcessTimeoutMinutes)
+
+    while ($true) {
+        try { $process.Refresh() } catch { }
+
+        if ($process.HasExited) { break }
+
+        $now = Get-Date
+        if ($timeoutAt -and $now -ge $timeoutAt) {
+            Write-SmartLog ("setup.exe timeout reached after {0} minute(s). {1}" -f $SetupProcessTimeoutMinutes,(Format-SetupProcessSnapshot -Process $process)) 'ERROR'
+            try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch { Write-SmartLog ("Failed to stop timed-out setup.exe PID={0}: {1}" -f $process.Id,$_.Exception.Message) 'WARN' }
+            throw ("setup.exe timed out after {0} minute(s)." -f $SetupProcessTimeoutMinutes)
+        }
+
+        if (($now - $lastHeartbeatAt).TotalSeconds -ge $heartbeatSeconds) {
+            $script:SetupProcessLastSnapshot = Format-SetupProcessSnapshot -Process $process
+            $script:SetupProcessLastHeartbeatUtc = $now.ToUniversalTime().ToString('o')
+            Write-SmartLog ("setup.exe still running. ElapsedMinutes={0}; {1}" -f ([math]::Round(($now - $startedAt).TotalMinutes, 1)),$script:SetupProcessLastSnapshot)
+            $lastHeartbeatAt = $now
+        }
+
+        Start-Sleep -Seconds 5
+    }
+
+    $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $process.ExitCode
+    $script:SetupProcessExited = $true
+    $script:SetupProcessExitCode = [string]$process.ExitCode
+    $script:SetupProcessLastSnapshot = Format-SetupProcessSnapshot -Process $process
+    $script:SetupProcessLastHeartbeatUtc = (Get-Date).ToUniversalTime().ToString('o')
+    Write-SmartLog ("setup.exe exited. ElapsedMinutes={0}; {1}; {2}" -f ([math]::Round(((Get-Date) - $startedAt).TotalMinutes, 1)),$script:SetupProcessLastSnapshot,(Format-SetupExitCodeInfo -Info $setupExitInfo))
+    return $process.ExitCode
+}
+
+function Get-InteractiveUserSessionSummary {
+    $excludedDomains = @('NT AUTHORITY','WINDOW MANAGER','FONT DRIVER HOST')
+    $excludedNames = @('SYSTEM','LOCAL SERVICE','NETWORK SERVICE')
+
+    try {
+        $sessions = @(Get-CimInstance -ClassName Win32_LogonSession -Filter 'LogonType = 2 OR LogonType = 10 OR LogonType = 11' -ErrorAction Stop)
+        $users = New-Object System.Collections.ArrayList
+
+        foreach ($session in $sessions) {
+            $accounts = @(Get-CimAssociatedInstance -InputObject $session -Association Win32_LoggedOnUser -ErrorAction Stop)
+            if ($accounts.Count -eq 0) {
+                throw 'An interactive logon session could not be resolved to an account.'
+            }
+            foreach ($account in $accounts) {
+                $domain = ([string]$account.Domain).Trim()
+                $name = ([string]$account.Name).Trim()
+                if ([string]::IsNullOrWhiteSpace($name)) { continue }
+                if ($excludedDomains -contains $domain.ToUpperInvariant()) { continue }
+                if ($excludedNames -contains $name.ToUpperInvariant()) { continue }
+                if ($name -match '^(DWM|UMFD)-\d+$') { continue }
+                if ($name.EndsWith('$')) { continue }
+
+                $display = if ([string]::IsNullOrWhiteSpace($domain)) { $name } else { "{0}\{1}" -f $domain,$name }
+                if (-not $users.Contains($display)) { [void]$users.Add($display) }
+            }
+        }
+
+        $userList = (@($users.ToArray()) -join '; ')
+        return [pscustomobject]@{
+            DetectionSucceeded = $true
+            InteractiveUserCount = $users.Count
+            InteractiveUsers = $userList
+            Detail = ("InteractiveUserCount={0}; InteractiveUsers={1}" -f $users.Count,$userList)
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            DetectionSucceeded = $false
+            InteractiveUserCount = ''
+            InteractiveUsers = ''
+            Detail = ("Interactive user detection failed: {0}" -f $_.Exception.Message)
+        }
+    }
+}
+
+function ConvertFrom-SmartUnicodeEscape {
+    param([AllowNull()][string]$Text)
+    if ($null -eq $Text) { return '' }
+    return [regex]::Replace($Text, '\\u([0-9A-Fa-f]{4})', {
+        param($match)
+        [string][char]([Convert]::ToInt32($match.Groups[1].Value, 16))
+    })
+}
+
+function Send-UserRebootNotification {
+    param([ValidateSet('UpgradeReady', 'PendingReboot')][string]$Context = 'UpgradeReady')
+    $lang = try { ((Get-WinUserLanguageList)[0].LanguageTag -split '-')[0].ToLower() } catch { (Get-UICulture).TwoLetterISOLanguageName.ToLower() }
+    $messagesByContext = @{
+        'PendingReboot' = @{
+            'fr' = 'Un red\u00E9marrage est requis avant de poursuivre la mise \u00E0 niveau Windows 11. Veuillez enregistrer votre travail et red\u00E9marrer d\u00E8s que possible.'
+            'es' = 'Se requiere un reinicio antes de continuar con la actualizaci\u00F3n de Windows 11. Guarde su trabajo y reinicie cuanto antes.'
+            'de' = 'Ein Neustart ist erforderlich, bevor das Windows 11-Upgrade fortgesetzt werden kann. Bitte speichern Sie Ihre Arbeit und starten Sie den Computer neu.'
+            'it' = '\u00C8 necessario riavviare prima di continuare con l''aggiornamento a Windows 11. Salvare il lavoro e riavviare il computer.'
+            'nl' = 'Er is een herstart vereist voordat het Windows 11-upgrade kan worden voortgezet. Sla uw werk op en start opnieuw op.'
+            'pt' = '\u00C9 necess\u00E1rio reiniciar antes de continuar com a atualiza\u00E7\u00E3o para o Windows 11. Guarde o seu trabalho e reinicie o computador.'
+            'pl' = 'Wymagane jest ponowne uruchomienie przed kontynuowaniem aktualizacji systemu Windows 11. Zapisz prac\u0119 i uruchom ponownie komputer.'
+        }
+        'UpgradeReady' = @{
+            'fr' = 'La mise \u00E0 niveau Windows 11 est pr\u00EAte. Veuillez enregistrer votre travail et red\u00E9marrer d\u00E8s que possible.'
+            'es' = 'La actualizaci\u00F3n a Windows 11 est\u00E1 lista. Guarde su trabajo y reinicie cuanto antes.'
+            'de' = 'Das Windows 11-Upgrade ist bereit. Bitte speichern Sie Ihre Arbeit und starten Sie den Computer neu.'
+            'it' = 'L''aggiornamento a Windows 11 \u00E8 pronto. Salvare il lavoro e riavviare il computer.'
+            'nl' = 'De Windows 11-upgrade is gereed. Sla uw werk op en start opnieuw op.'
+            'pt' = 'A atualiza\u00E7\u00E3o para o Windows 11 est\u00E1 pronta. Guarde o seu trabalho e reinicie o computador.'
+            'pl' = 'Aktualizacja Windows 11 jest gotowa. Zapisz prac\u0119 i uruchom ponownie komputer.'
+        }
+    }
+    $defaultMessages = @{
+        'PendingReboot' = "A restart is required before the Windows 11 upgrade can continue. Please save your work and restart as soon as possible."
+        'UpgradeReady'  = "Windows 11 upgrade is ready. Please save your work and restart as soon as possible."
+    }
+    $messages = $messagesByContext[$Context]
+    $messageTemplate = if ($messages.ContainsKey($lang)) { $messages[$lang] } else { $defaultMessages[$Context] }
+    $message = ConvertFrom-SmartUnicodeEscape -Text $messageTemplate
+    try {
+        & "$env:SystemRoot\System32\msg.exe" * /time:300 $message 2>$null | Out-Null
+        $script:UserRebootNotificationSent = 'True'
+        $script:UserRebootNotificationLang = $lang
+        $script:UserRebootNotificationMessage = $message
+        Write-SmartLog ("User reboot notification sent via msg.exe (lang={0}; context={1}): {2}" -f $lang,$Context,$message)
+    }
+    catch {
+        Write-SmartLog ("Failed to send user reboot notification: {0}" -f $_.Exception.Message) 'WARN'
+    }
+}
+
+function Invoke-ControlledRebootWhenNoUser {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    $forcedRebootResult = Invoke-RequiredRebootForcedByUptime -Reason $Reason -Context PendingReboot
+    if ($forcedRebootResult -ne 'NotApplicable') {
+        $script:ControlledRebootAction = if ($forcedRebootResult -eq 'ForcedByUptime') { 'ForcedByUptime' } else { 'ScheduleFailed' }
+        $script:ControlledRebootDetail = $script:RequiredRebootByUptimeDetail
+        return $forcedRebootResult
+    }
+
+    $summary = Get-InteractiveUserSessionSummary
+    $script:ControlledRebootUserCount = [string]$summary.InteractiveUserCount
+    $script:ControlledRebootUsers = [string]$summary.InteractiveUsers
+    $script:ControlledRebootDetail = [string]$summary.Detail
+
+    if (-not $summary.DetectionSucceeded) {
+        $script:ControlledRebootAction = 'SkippedUserDetectionFailed'
+        Write-SmartLog ("Controlled reboot skipped because user detection failed: {0}" -f $summary.Detail) 'WARN'
+        return 'UserDetectionFailed'
+    }
+
+    if ([int]$summary.InteractiveUserCount -gt 0) {
+        $script:ControlledRebootAction = 'SkippedUserConnected'
+        Write-SmartLog ("Controlled reboot skipped because interactive user(s) are connected: {0}. A pending reboot must be cleared before the Windows 11 upgrade can continue; it will retry on a later cycle once no user is connected." -f $summary.InteractiveUsers) 'WARN'
+        Send-UserRebootNotification -Context PendingReboot
+        return 'UserConnected'
+    }
+
+    try {
+        shutdown.exe /r /t $RebootDelaySeconds /c $Reason | Out-Null
+        $shutdownExitCode = $LASTEXITCODE
+        if ($shutdownExitCode -ne 0) { throw ("shutdown.exe failed. ExitCode={0}" -f $shutdownExitCode) }
+        $script:ControlledRebootAction = 'ScheduledNoUser'
+        $script:ControlledRebootDetail = ("No interactive user connected. Reboot scheduled in {0} second(s). Reason={1}" -f $RebootDelaySeconds,$Reason)
+        Write-SmartLog $script:ControlledRebootDetail
+        return 'ScheduledNoUser'
+    }
+    catch {
+        $script:ControlledRebootAction = 'ScheduleFailed'
+        $script:ControlledRebootDetail = ("No interactive user connected, but reboot scheduling failed: {0}" -f $_.Exception.Message)
+        Write-SmartLog $script:ControlledRebootDetail 'ERROR'
+        return 'ScheduleFailed'
+    }
+}
+function Invoke-SetupCompletionRebootWhenNoUser {
+    if (-not $AllowSetupCompletionRebootWhenNoUser) { return 'NotRequested' }
+    if (-not $AllowReboot) { return 'NotAllowed' }
+
+    $forcedRebootResult = Invoke-RequiredRebootForcedByUptime -Reason 'SmartM365 Windows 11 setup completion reboot - uptime threshold exceeded' -Context SetupCompletion
+    if ($forcedRebootResult -ne 'NotApplicable') {
+        $script:SetupCompletionRebootAction = if ($forcedRebootResult -eq 'ForcedByUptime') { 'ForcedByUptime' } else { 'ScheduleFailed' }
+        $script:SetupCompletionRebootDetail = $script:RequiredRebootByUptimeDetail
+        return $forcedRebootResult
+    }
+
+    $summary = Get-InteractiveUserSessionSummary
+    $script:SetupCompletionRebootUserCount = [string]$summary.InteractiveUserCount
+    $script:SetupCompletionRebootUsers = [string]$summary.InteractiveUsers
+    $script:SetupCompletionRebootDetail = [string]$summary.Detail
+
+    if (-not $summary.DetectionSucceeded) {
+        $script:SetupCompletionRebootAction = 'SkippedUserDetectionFailed'
+        Write-SmartLog ("Setup completion reboot skipped because user detection failed: {0}" -f $summary.Detail) 'WARN'
+        return 'UserDetectionFailed'
+    }
+
+    if ([int]$summary.InteractiveUserCount -gt 0) {
+        $script:SetupCompletionRebootAction = 'SkippedUserConnected'
+        Write-SmartLog ("Setup completion reboot skipped because interactive user(s) are connected: {0}" -f $summary.InteractiveUsers) 'WARN'
+        Send-UserRebootNotification
+        return 'UserConnected'
+    }
+
+    try {
+        shutdown.exe /r /t $RebootDelaySeconds /c 'SmartM365 Windows 11 setup completion reboot - no interactive user connected' | Out-Null
+        $shutdownExitCode = $LASTEXITCODE
+        if ($shutdownExitCode -ne 0) { throw ("shutdown.exe failed. ExitCode={0}" -f $shutdownExitCode) }
+        $script:SetupCompletionRebootAction = 'ScheduledNoUser'
+        $script:SetupCompletionRebootDetail = ("No interactive user connected. Reboot scheduled in {0} second(s)." -f $RebootDelaySeconds)
+        Write-SmartLog $script:SetupCompletionRebootDetail
+        return 'ScheduledNoUser'
+    }
+    catch {
+        $script:SetupCompletionRebootAction = 'ScheduleFailed'
+        $script:SetupCompletionRebootDetail = ("No interactive user connected, but reboot scheduling failed: {0}" -f $_.Exception.Message)
+        Write-SmartLog $script:SetupCompletionRebootDetail 'ERROR'
+        return 'ScheduleFailed'
+    }
+}
+
+function Resolve-SetupUpgradeSuccessOutcome {
+    param(
+        [Parameter(Mandatory = $true)][string]$Prefix,
+        [Parameter(Mandatory = $true)][int]$SetupExitCode
+    )
+
+    $baseStatus = if ($SetupExitCode -eq 3010) { "${Prefix}_REBOOT_REQUIRED" } else { "${Prefix}_STARTED" }
+    $baseNextAction = if ($SetupExitCode -eq 3010) { 'REBOOT_DEVICE' } else { 'MONITOR_SETUP_AND_REBOOT' }
+    $suffix = ''
+
+    if (-not $AllowSetupCompletionRebootWhenNoUser) {
+        return [pscustomobject]@{ Status = $baseStatus; NextAction = $baseNextAction; ExitCode = 0; ActionResultSuffix = $suffix }
+    }
+
+    $rebootResult = Invoke-SetupCompletionRebootWhenNoUser
+    switch ($rebootResult) {
+        'ScheduledNoUser' {
+            return [pscustomobject]@{ Status = "${Prefix}_REBOOT_SCHEDULED_NO_USER"; NextAction = 'REBOOT_SCHEDULED'; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootScheduledNoUser' }
+        }
+        'ForcedByUptime' {
+            return [pscustomobject]@{ Status = "${Prefix}_SUCCESS_FORCE_REBOOT_UPTIME_EXCEEDED"; NextAction = 'REBOOT_TRIGGERED_WAIT_NEXT_CYCLE'; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootForcedByUptime' }
+        }
+        'UserConnected' {
+            return [pscustomobject]@{ Status = "${Prefix}_REBOOT_SKIPPED_USER_CONNECTED"; NextAction = 'WAIT_USER_LOGOFF_OR_REBOOT_DEVICE'; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootSkippedUserConnected' }
+        }
+        'UserDetectionFailed' {
+            return [pscustomobject]@{ Status = "${Prefix}_REBOOT_SKIPPED_USER_DETECTION_FAILED"; NextAction = 'CHECK_USER_SESSIONS_BEFORE_REBOOT'; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootSkippedUserDetectionFailed' }
+        }
+        'ScheduleFailed' {
+            return [pscustomobject]@{ Status = "${Prefix}_REBOOT_SCHEDULE_FAILED"; NextAction = 'CHECK_REBOOT_SCHEDULE'; ExitCode = 1; ActionResultSuffix = 'SetupCompletionRebootScheduleFailed' }
+        }
+        'NotAllowed' {
+            return [pscustomobject]@{ Status = $baseStatus; NextAction = $baseNextAction; ExitCode = 0; ActionResultSuffix = 'SetupCompletionRebootNotAllowed' }
+        }
+        default {
+            return [pscustomobject]@{ Status = $baseStatus; NextAction = $baseNextAction; ExitCode = 0; ActionResultSuffix = $suffix }
+        }
+    }
+}
+
+function Resolve-PendingRebootOutcome {
+    param(
+        [Parameter(Mandatory = $true)]$PendingRebootInfo,
+        [Parameter(Mandatory = $true)][string]$RebootReason
+    )
+
+    $outcome = [ordered]@{
+        Status = 'PENDING_REBOOT'
+        NextAction = if ($AllowReboot) { 'REBOOT_SCHEDULED' } else { 'REBOOT_DEVICE' }
+        Detail = ("A reboot is pending and must be cleared before the Windows 11 upgrade can continue. Source(s)={0}" -f $PendingRebootInfo.Source)
+        ExitCode = 3
+        ActionResult = ''
+    }
+
+    if ($AllowReboot -and -not $AuditOnly) {
+        $rebootResult = Invoke-ControlledRebootWhenNoUser -Reason $RebootReason
+        switch ($rebootResult) {
+            'ScheduledNoUser' {
+                $outcome.ActionResult = 'RebootScheduledNoUser'
+                $outcome.ExitCode = 0
+            }
+            'UserConnected' {
+                $outcome.Status = 'PENDING_REBOOT_USER_CONNECTED'
+                $outcome.NextAction = 'WAIT_USER_LOGOFF_OR_REBOOT_DEVICE'
+                $outcome.ActionResult = 'RebootSkippedUserConnected'
+                $outcome.ExitCode = 0
+            }
+            'ForcedByUptime' {
+                $outcome.Status = 'PENDING_REBOOT_FORCE_REBOOT_UPTIME_EXCEEDED'
+                $outcome.NextAction = 'REBOOT_TRIGGERED_WAIT_NEXT_CYCLE'
+                $outcome.ActionResult = 'RebootForcedByUptime'
+                $outcome.ExitCode = 0
+                $outcome.Detail = ("{0}; {1}" -f $outcome.Detail,$script:RequiredRebootByUptimeDetail)
+            }
+            'UserDetectionFailed' {
+                $outcome.Status = 'PENDING_REBOOT_USER_DETECTION_FAILED'
+                $outcome.NextAction = 'CHECK_USER_SESSIONS_BEFORE_REBOOT'
+                $outcome.ActionResult = 'RebootSkippedUserDetectionFailed'
+                $outcome.ExitCode = 3
+            }
+            'ScheduleFailed' {
+                $outcome.Status = 'PENDING_REBOOT_SCHEDULE_FAILED'
+                $outcome.NextAction = 'CHECK_REBOOT_SCHEDULE'
+                $outcome.ActionResult = 'RebootScheduleFailed'
+                $outcome.ExitCode = 1
+            }
+        }
+    }
+
+    if ($ScheduleRetryAfterReboot -and -not $AuditOnly -and $outcome.Status -like 'PENDING_REBOOT*') {
+        try {
+            Register-RetryAfterRebootTask -Reason $outcome.Status
+            $outcome.NextAction = 'REBOOT_DEVICE_THEN_RETRY_AT_STARTUP'
+            $outcome.Detail = ("{0}; RetryAfterReboot=Scheduled; TaskName={1}; DelaySeconds={2}; MaxAttempts={3}" -f $outcome.Detail,$script:RetryAfterRebootTaskName,$RetryAfterRebootDelaySeconds,$RetryAfterRebootMaxAttempts)
+            if ([string]::IsNullOrWhiteSpace([string]$outcome.ActionResult)) {
+                $outcome.ActionResult = 'RetryAfterRebootScheduled'
+            }
+            else {
+                $outcome.ActionResult = "{0};RetryAfterRebootScheduled" -f $outcome.ActionResult
+            }
+        }
+        catch {
+            $script:RetryAfterRebootAction = 'ScheduleFailed'
+            $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+            $script:RetryAfterRebootDetail = $_.Exception.Message
+            $outcome.NextAction = 'CHECK_RETRY_AFTER_REBOOT_TASK_OR_REBOOT_DEVICE'
+            $outcome.Detail = ("{0}; RetryAfterReboot=ScheduleFailed; Error={1}" -f $outcome.Detail,$_.Exception.Message)
+            if ([string]::IsNullOrWhiteSpace([string]$outcome.ActionResult)) {
+                $outcome.ActionResult = 'RetryAfterRebootScheduleFailed'
+            }
+            else {
+                $outcome.ActionResult = "{0};RetryAfterRebootScheduleFailed" -f $outcome.ActionResult
+            }
+            Write-SmartLog ("Retry-after-reboot task scheduling failed: {0}" -f $_.Exception.Message) 'WARN'
+        }
+    }
+
+    return [pscustomobject]$outcome
+}
+function Set-RetryAfterRebootStateProperty {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $Value
+    )
+
+    if ($State.PSObject.Properties[$Name]) {
+        $State.$Name = $Value
+    }
+    else {
+        Add-Member -InputObject $State -NotePropertyName $Name -NotePropertyValue $Value -Force
+    }
+}
+
+function Read-RetryAfterRebootState {
+    if (-not (Test-Path -LiteralPath $script:RetryAfterRebootStatePath -PathType Leaf)) { return $null }
+    return Get-Content -LiteralPath $script:RetryAfterRebootStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+}
+
+function Write-RetryAfterRebootState {
+    param([Parameter(Mandatory = $true)]$State)
+
+    if (-not (Test-Path -LiteralPath $script:RetryAfterRebootProgramDir -PathType Container)) { throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: retry-after-reboot folder missing: {0}' -f $script:RetryAfterRebootProgramDir) }
+    $State | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $script:RetryAfterRebootStatePath -Encoding UTF8
+}
+
+function New-RetryAfterRebootArgumentList {
+    $arguments = New-Object System.Collections.Generic.List[string]
+
+    foreach ($switchName in @(
+        'IgnoreRunGuard',
+        'AuditOnly',
+        'AllowPolicyRepair',
+        'AllowWUReset',
+        'AllowForceUpgrade',
+        'AllowSetupUpgrade',
+        'DirectSetupUpgrade',
+        'AllowReboot',
+        'AllowSetupCompletionRebootWhenNoUser',
+        'AllowSetupProfileRepair',
+        'ScheduleRetryAfterReboot',
+        'SkipVirtualMachines',
+        'AllowDiskCleanup',
+        'AllowAdvancedDiskCleanup',
+        'AllowDismComponentCleanup',
+        'SkipSetupMediaPreCopy',
+        'ReuseLegacySetupMedia',
+        'AllowSetupMediaDuplication'
+    )) {
+        $value = Get-Variable -Name $switchName -ValueOnly -ErrorAction SilentlyContinue
+        if ($value) { [void]$arguments.Add("-$switchName") }
+    }
+
+    if (-not $arguments.Contains('-IgnoreRunGuard')) { [void]$arguments.Add('-IgnoreRunGuard') }
+    if (-not $arguments.Contains('-ScheduleRetryAfterReboot')) { [void]$arguments.Add('-ScheduleRetryAfterReboot') }
+
+    $valueParameters = [ordered]@{
+        RunGuardHours = $RunGuardHours
+        RetryAfterRebootMaxAttempts = $RetryAfterRebootMaxAttempts
+        RetryAfterRebootDelaySeconds = $RetryAfterRebootDelaySeconds
+        ForceRequiredRebootWhenUptimeOverDays = $ForceRequiredRebootWhenUptimeOverDays
+        SetupSourcePath = $SetupSourcePath
+        SetupSourceMapPath = $SetupSourceMapPath
+        SetupExecutionMode = $SetupExecutionMode
+        SetupMediaId = $SetupMediaId
+        SetupLanguage = $SetupLanguage
+        SetupDynamicUpdate = $SetupDynamicUpdate
+        SetupCacheRoot = $SetupCacheRoot
+        SetupSourceCandidateLimit = $SetupSourceCandidateLimit
+        SetupSourceValidationRetries = $SetupSourceValidationRetries
+        SetupSourceValidationRetryDelaySeconds = $SetupSourceValidationRetryDelaySeconds
+        SetupMediaCopyIpGapMilliseconds = $SetupMediaCopyIpGapMilliseconds
+        SetupMediaCopyTimeoutMinutes = $SetupMediaCopyTimeoutMinutes
+        SetupMediaCopyJitterSeconds = $SetupMediaCopyJitterSeconds
+        SetupSourceConcurrencyLimit = $SetupSourceConcurrencyLimit
+        SetupSourceConcurrencyLeaseMinutes = $SetupSourceConcurrencyLeaseMinutes
+        SetupSourceConcurrencyGateRoot = $SetupSourceConcurrencyGateRoot
+        SetupSubnetConcurrencyLimit = $SetupSubnetConcurrencyLimit
+        SetupSubnetPrefixLength = $SetupSubnetPrefixLength
+        SetupSubnetConcurrencyLeaseMinutes = $SetupSubnetConcurrencyLeaseMinutes
+        SetupSubnetConcurrencyGateRoot = $SetupSubnetConcurrencyGateRoot
+        MinimumFreeDiskGB = $MinimumFreeDiskGB
+        DiskCleanupTempFileMinAgeDays = $DiskCleanupTempFileMinAgeDays
+        DiskCleanupLogRetentionDays = $DiskCleanupLogRetentionDays
+        DiskCleanupUpgradeFolderMinAgeDays = $DiskCleanupUpgradeFolderMinAgeDays
+        DiskCleanupBrowserCacheMinAgeDays = $DiskCleanupBrowserCacheMinAgeDays
+        RebootDelaySeconds = $RebootDelaySeconds
+        SetupProcessHeartbeatSeconds = $SetupProcessHeartbeatSeconds
+        SetupProcessTimeoutMinutes = $SetupProcessTimeoutMinutes
+        LocalFileRetentionCount = $LocalFileRetentionCount
+        DataRoot = $DataRoot
+        CorrelationId = ($CorrelationId -replace '-R\d{14}$','')
+        LegacyActivityPolicy = $LegacyActivityPolicy
+    }
+
+    foreach ($entry in $valueParameters.GetEnumerator()) {
+        if ($null -eq $entry.Value) { continue }
+        $text = [string]$entry.Value
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        [void]$arguments.Add("-$($entry.Key)")
+        [void]$arguments.Add($text)
+    }
+
+    return @($arguments)
+}
+
+function Write-RetryAfterRebootRunner {
+    $escapedStatePath = $script:RetryAfterRebootStatePath.Replace("'", "''")
+    $runnerContent = @"
+`$ErrorActionPreference = 'Stop'
+`$statePath = '$escapedStatePath'
+`$state = Get-Content -LiteralPath `$statePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+`$delaySeconds = 0
+if (`$state.PSObject.Properties['DelaySeconds']) { `$delaySeconds = [int]`$state.DelaySeconds }
+if (`$delaySeconds -gt 0) { Start-Sleep -Seconds `$delaySeconds }
+`$arguments = @()
+if (`$state.PSObject.Properties['Arguments']) { `$arguments = @(`$state.Arguments | ForEach-Object { [string]`$_ }) }
+`$arguments += '-RetryAfterRebootTaskRun'
+& ([string]`$state.ScriptPath) @arguments
+`$exitCode = if (`$global:LASTEXITCODE -is [int]) { [int]`$global:LASTEXITCODE } else { 0 }
+exit `$exitCode
+"@
+    $runnerContent | Set-Content -LiteralPath $script:RetryAfterRebootRunnerPath -Encoding UTF8
+}
+
+function Register-RetryAfterRebootTask {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    $script:RetryAfterRebootAction = 'ScheduleRequested'
+    New-SmartDirectory -Path $script:StateDir
+    Protect-Windows11ToolkitPathAcl -Path $DataRoot -Directory -RequireSuccess
+    Protect-Windows11ToolkitPathAcl -Path $script:StateDir -Directory -RequireSuccess
+    # Trusted Program Files folder (created with a protected ACL or verified), then a verified copy
+    # of this endpoint script: the task never starts a script stored under ProgramData.
+    [void](Initialize-SemtTrustedProgramFolder -Path $script:RetryAfterRebootProgramDir)
+    if ([System.IO.Path]::GetFullPath($script:EndpointScriptPath) -ine [System.IO.Path]::GetFullPath($script:RetryAfterRebootScriptPath)) {
+        [void](Install-SemtTrustedProgramFile -Source $script:EndpointScriptPath -Destination $script:RetryAfterRebootScriptPath)
+    }
+
+    $previousAttempts = 0
+    try {
+        $existingState = Read-RetryAfterRebootState
+        if ($existingState -and $existingState.PSObject.Properties['Attempts']) { $previousAttempts = [int]$existingState.Attempts }
+    }
+    catch {
+        Write-SmartLog ("Existing retry-after-reboot state could not be read and will be replaced: {0}" -f $_.Exception.Message) 'WARN'
+    }
+
+    $state = [pscustomobject]@{
+        TaskName = $script:RetryAfterRebootTaskName
+        ScriptPath = $script:RetryAfterRebootScriptPath
+        Arguments = @(New-RetryAfterRebootArgumentList)
+        Attempts = $previousAttempts
+        MaxAttempts = $RetryAfterRebootMaxAttempts
+        DelaySeconds = $RetryAfterRebootDelaySeconds
+        Reason = $Reason
+        ComputerName = $script:ComputerName
+        CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        LastScheduledUtc = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    Write-RetryAfterRebootState -State $state
+    Write-RetryAfterRebootRunner
+    $programTrust = Test-SemtTrustedProgramPath -Path $script:RetryAfterRebootProgramDir -Recurse
+    if (-not $programTrust.Trusted) { throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} ({1}) {2}' -f $script:RetryAfterRebootProgramDir,$programTrust.State,$programTrust.Detail) }
+
+    $taskCommand = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $script:RetryAfterRebootRunnerPath
+    $createArgs = @('/Create','/TN',$script:RetryAfterRebootTaskName,'/SC','ONSTART','/RU','SYSTEM','/RL','HIGHEST','/TR',$taskCommand,'/F')
+    $output = & schtasks.exe @createArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw ("schtasks.exe failed with exit code {0}: {1}" -f $LASTEXITCODE,(@($output) -join ' '))
+    }
+
+    $script:RetryAfterRebootAction = 'Scheduled'
+    $script:RetryAfterRebootAttempt = [string]$previousAttempts
+    $script:RetryAfterRebootMaxAttemptsResult = [string]$RetryAfterRebootMaxAttempts
+    $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+    $script:RetryAfterRebootDetail = ("Task={0}; DelaySeconds={1}; MaxAttempts={2}; Reason={3}" -f $script:RetryAfterRebootTaskName,$RetryAfterRebootDelaySeconds,$RetryAfterRebootMaxAttempts,$Reason)
+    Write-SmartLog ("Retry-after-reboot task scheduled. {0}" -f $script:RetryAfterRebootDetail)
+}
+
+function Start-RetryAfterRebootTaskRun {
+    $script:RetryAfterRebootAction = 'TaskRun'
+    $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+    $programTrust = Test-SemtTrustedProgramPath -Path $script:RetryAfterRebootProgramDir -Recurse
+    if (-not $programTrust.Trusted) { throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} ({1}) {2}' -f $script:RetryAfterRebootProgramDir,$programTrust.State,$programTrust.Detail) }
+
+    $state = Read-RetryAfterRebootState
+    if (-not $state) {
+        $script:RetryAfterRebootDetail = 'Retry-after-reboot task run started but state file is missing.'
+        return [pscustomobject]@{ Exhausted = $false }
+    }
+
+    $attempts = 0
+    if ($state.PSObject.Properties['Attempts']) { $attempts = [int]$state.Attempts }
+    $attempts++
+    $maxAttempts = $RetryAfterRebootMaxAttempts
+    if ($state.PSObject.Properties['MaxAttempts']) { $maxAttempts = [int]$state.MaxAttempts }
+
+    Set-RetryAfterRebootStateProperty -State $state -Name 'Attempts' -Value $attempts
+    Set-RetryAfterRebootStateProperty -State $state -Name 'LastAttemptUtc' -Value ((Get-Date).ToUniversalTime().ToString('o'))
+    Write-RetryAfterRebootState -State $state
+
+    $script:RetryAfterRebootAttempt = [string]$attempts
+    $script:RetryAfterRebootMaxAttemptsResult = [string]$maxAttempts
+    $script:RetryAfterRebootDetail = ("Task={0}; Attempt={1}; MaxAttempts={2}" -f $script:RetryAfterRebootTaskName,$attempts,$maxAttempts)
+    Write-SmartLog ("Retry-after-reboot task run started. {0}" -f $script:RetryAfterRebootDetail)
+
+    return [pscustomobject]@{ Exhausted = ($attempts -gt $maxAttempts); Attempts = $attempts; MaxAttempts = $maxAttempts }
+}
+
+function Unregister-RetryAfterRebootTask {
+    param([string]$Reason = '')
+
+    $messages = New-Object System.Collections.Generic.List[string]
+    $deleteOutput = & schtasks.exe /Delete /TN $script:RetryAfterRebootTaskName /F 2>&1
+    if ($LASTEXITCODE -ne 0 -and (@($deleteOutput) -join ' ') -notmatch 'cannot find|The system cannot find') {
+        [void]$messages.Add(("Task delete failed: {0}" -f (@($deleteOutput) -join ' ')))
+    }
+
+    $paths = @($script:RetryAfterRebootRunnerPath,$script:RetryAfterRebootStatePath)
+    # The endpoint copy is removed only when another script runs: a task run keeps its own file.
+    if ([System.IO.Path]::GetFullPath($script:EndpointScriptPath) -ine [System.IO.Path]::GetFullPath($script:RetryAfterRebootScriptPath)) { $paths += $script:RetryAfterRebootScriptPath }
+    foreach ($path in $paths) {
+        try {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+        }
+        catch {
+            [void]$messages.Add(("Remove failed for {0}: {1}" -f $path,$_.Exception.Message))
+        }
+    }
+
+    if ($messages.Count -gt 0) {
+        Write-SmartLog ("Retry-after-reboot cleanup completed with warning(s). Reason={0}; {1}" -f $Reason,($messages -join '; ')) 'WARN'
+    }
+    else {
+        Write-SmartLog ("Retry-after-reboot task/state cleaned up. Reason={0}" -f $Reason)
+    }
+}
+
+function Get-SetupDuplicateProfileFailure {
+    $pantherPaths = @(
+        'C:\$WINDOWS.~BT\Sources\Panther\setupact.log',
+        'C:\$WINDOWS.~BT\Sources\Panther\setuperr.log'
+    )
+
+    $duplicateRecords = New-Object System.Collections.Generic.List[object]
+    $abandonSids = New-Object System.Collections.Generic.List[string]
+
+    foreach ($path in $pantherPaths) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try {
+            $matches = @(Select-String -LiteralPath $path -Pattern 'Duplicate profile detected' -ErrorAction Stop)
+            foreach ($match in $matches) {
+                $line = [string]$match.Line
+                $pairMatch = [regex]::Match($line, 'Duplicate profile detected for(?: user)?\s+(?<BlockingSid>S-\d(?:-\d+)+)\((?<BlockingPath>[^\)]+)\)\s+vs\.\s+(?<OtherSid>S-\d(?:-\d+)+)\((?<OtherPath>[^\)]+)\)')
+                if ($pairMatch.Success) {
+                    [void]$duplicateRecords.Add([pscustomobject]@{
+                        BlockingSid = $pairMatch.Groups['BlockingSid'].Value
+                        BlockingProfilePath = $pairMatch.Groups['BlockingPath'].Value
+                        OtherSid = $pairMatch.Groups['OtherSid'].Value
+                        OtherProfilePath = $pairMatch.Groups['OtherPath'].Value
+                        SourcePath = $path
+                        LineNumber = $match.LineNumber
+                        Evidence = $line
+                    })
+                }
+
+                $abandonMatch = [regex]::Match($line, 'Duplicate profile detected for\s+(?<Sid>S-\d(?:-\d+)+)\.\s+Abandoning')
+                if ($abandonMatch.Success) {
+                    [void]$abandonSids.Add($abandonMatch.Groups['Sid'].Value)
+                }
+            }
+        }
+        catch {
+            Write-SmartLog ("Failed to inspect Panther profile migration evidence: Path={0}; Error={1}" -f $path,$_.Exception.Message) 'WARN'
+        }
+    }
+
+    if ($duplicateRecords.Count -eq 0 -and $abandonSids.Count -eq 0) {
+        return [pscustomobject]@{ Found = $false }
+    }
+
+    $blockingSid = if ($abandonSids.Count -gt 0) { [string]$abandonSids[$abandonSids.Count - 1] } else { [string]$duplicateRecords[$duplicateRecords.Count - 1].BlockingSid }
+    $record = @($duplicateRecords | Where-Object { $_.BlockingSid -eq $blockingSid } | Select-Object -Last 1)
+    if (-not $record) { $record = @($duplicateRecords | Select-Object -Last 1) }
+    $record = $record | Select-Object -First 1
+
+    $profileListRoot = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+    $profileKeyPath = Join-Path $profileListRoot $blockingSid
+    $profile = $null
+    try { $profile = Get-ItemProperty -LiteralPath $profileKeyPath -ErrorAction Stop } catch { }
+
+    $profileImagePath = ''
+    if ($profile -and $profile.PSObject.Properties['ProfileImagePath']) { $profileImagePath = [string]$profile.ProfileImagePath }
+    if ([string]::IsNullOrWhiteSpace($profileImagePath) -and $record) { $profileImagePath = [string]$record.BlockingProfilePath }
+
+    $duplicateSids = @()
+    if (-not [string]::IsNullOrWhiteSpace($profileImagePath)) {
+        try {
+            $duplicateSids = @(Get-ChildItem -LiteralPath $profileListRoot -ErrorAction Stop | ForEach-Object {
+                $p = Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue
+                if ($p -and [string]$p.ProfileImagePath -eq $profileImagePath) { [string]$_.PSChildName }
+            })
+        }
+        catch { }
+    }
+
+    $userAccount = $null
+    try {
+        $escapedSid = $blockingSid.Replace("'", "''")
+        $userAccount = Get-CimInstance -ClassName Win32_UserAccount -Filter "SID='$escapedSid'" -ErrorAction Stop | Select-Object -First 1
+    }
+    catch { }
+
+    $profileLeaf = ''
+    if (-not [string]::IsNullOrWhiteSpace($profileImagePath)) {
+        try { $profileLeaf = Split-Path -Leaf $profileImagePath } catch { $profileLeaf = '' }
+    }
+
+    return [pscustomobject]@{
+        Found = $true
+        BlockingSid = $blockingSid
+        ProfileKeyPath = $profileKeyPath
+        ProfileImagePath = $profileImagePath
+        ProfileLeaf = $profileLeaf
+        OtherSid = if ($record) { [string]$record.OtherSid } else { '' }
+        OtherProfilePath = if ($record) { [string]$record.OtherProfilePath } else { '' }
+        DuplicateSids = ($duplicateSids -join ',')
+        DuplicateSidCount = @($duplicateSids).Count
+        IsLocalAccount = if ($userAccount) { [bool]$userAccount.LocalAccount } else { $false }
+        AccountName = if ($userAccount) { [string]$userAccount.Name } else { '' }
+        AccountDomain = if ($userAccount) { [string]$userAccount.Domain } else { '' }
+        Evidence = if ($record) { [string]$record.Evidence } else { "Duplicate profile detected for $blockingSid" }
+    }
+}
+
+function Invoke-SetupProfileRepairRebootWhenNoUser {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    $summary = Get-InteractiveUserSessionSummary
+    $script:ControlledRebootUserCount = [string]$summary.InteractiveUserCount
+    $script:ControlledRebootUsers = [string]$summary.InteractiveUsers
+    $script:ControlledRebootDetail = [string]$summary.Detail
+
+    if (-not $summary.DetectionSucceeded) {
+        $script:ControlledRebootAction = 'SetupProfileRepairSkippedUserDetectionFailed'
+        Write-SmartLog ("Setup profile repair reboot skipped because user detection failed: {0}" -f $summary.Detail) 'WARN'
+        return 'UserDetectionFailed'
+    }
+
+    if ([int]$summary.InteractiveUserCount -gt 0) {
+        $script:ControlledRebootAction = 'SetupProfileRepairSkippedUserConnected'
+        Write-SmartLog ("Setup profile repair reboot skipped because interactive user(s) are connected: {0}. Reboot is required before retrying Windows Setup." -f $summary.InteractiveUsers) 'WARN'
+        Send-UserRebootNotification -Context UpgradeReady
+        return 'UserConnected'
+    }
+
+    try {
+        shutdown.exe /r /t $RebootDelaySeconds /c $Reason | Out-Null
+        $shutdownExitCode = $LASTEXITCODE
+        if ($shutdownExitCode -ne 0) { throw ("shutdown.exe failed. ExitCode={0}" -f $shutdownExitCode) }
+        $script:ControlledRebootAction = 'SetupProfileRepairScheduledNoUser'
+        $script:ControlledRebootDetail = ("No interactive user connected. Reboot scheduled in {0} second(s). Reason={1}" -f $RebootDelaySeconds,$Reason)
+        Write-SmartLog $script:ControlledRebootDetail
+        return 'ScheduledNoUser'
+    }
+    catch {
+        $script:ControlledRebootAction = 'SetupProfileRepairScheduleFailed'
+        $script:ControlledRebootDetail = ("No interactive user connected, but setup profile repair reboot scheduling failed: {0}" -f $_.Exception.Message)
+        Write-SmartLog $script:ControlledRebootDetail 'ERROR'
+        return 'ScheduleFailed'
+    }
+}
+
+function Invoke-SetupDuplicateProfileRepair {
+    param([Parameter(Mandatory = $true)]$SetupExitInfo)
+
+    $empty = [pscustomobject]@{ Handled = $false; Status = ''; NextAction = ''; Detail = ''; ExitCode = 1; ActionResult = '' }
+    if ([string]$SetupExitInfo.Hex -ne '0x8007001F') { return $empty }
+
+    $failure = Get-SetupDuplicateProfileFailure
+    if (-not $failure.Found) { return $empty }
+
+    $script:SetupProfileRepairAction = 'Detected'
+    $script:SetupProfileRepairBlockingSid = [string]$failure.BlockingSid
+    $script:SetupProfileRepairKeptSid = [string]$failure.OtherSid
+    $script:SetupProfileRepairProfilePath = [string]$failure.ProfileImagePath
+    $script:SetupProfileRepairDetail = [string]$failure.Evidence
+
+    $detailPrefix = ("Duplicate setup migration profile detected. BlockingSid={0}; KeptSid={1}; ProfilePath={2}; Evidence={3}" -f $failure.BlockingSid,$failure.OtherSid,$failure.ProfileImagePath,$failure.Evidence)
+
+    if (-not $AllowSetupProfileRepair) {
+        $script:SetupProfileRepairAction = 'DetectedRepairDisabled'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'ENABLE_SETUP_PROFILE_REPAIR_OR_REPAIR_PROFILELIST'; Detail = ("{0}; Repair=Disabled" -f $detailPrefix); ExitCode = 3; ActionResult = 'SetupProfileDuplicateDetectedRepairDisabled' }
+    }
+
+    if ($failure.BlockingSid -in @('S-1-5-18','S-1-5-19','S-1-5-20')) {
+        $script:SetupProfileRepairAction = 'SkippedSystemSid'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'REPAIR_DUPLICATE_PROFILE_MANUALLY'; Detail = ("{0}; Repair=SkippedSystemSid" -f $detailPrefix); ExitCode = 3; ActionResult = 'SetupProfileDuplicateSkippedSystemSid' }
+    }
+
+    if (-not $failure.IsLocalAccount) {
+        $script:SetupProfileRepairAction = 'SkippedNotLocalAccount'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'REPAIR_DUPLICATE_PROFILE_MANUALLY'; Detail = ("{0}; Repair=SkippedNotLocalAccount; Account={1}\{2}" -f $detailPrefix,$failure.AccountDomain,$failure.AccountName); ExitCode = 3; ActionResult = 'SetupProfileDuplicateSkippedNotLocalAccount' }
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$failure.ProfileImagePath) -or [string]$failure.ProfileImagePath -notlike 'C:\Users\*') {
+        $script:SetupProfileRepairAction = 'SkippedUnsafeProfilePath'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'REPAIR_DUPLICATE_PROFILE_MANUALLY'; Detail = ("{0}; Repair=SkippedUnsafeProfilePath" -f $detailPrefix); ExitCode = 3; ActionResult = 'SetupProfileDuplicateSkippedUnsafeProfilePath' }
+    }
+
+    if ([int]$failure.DuplicateSidCount -lt 2) {
+        $script:SetupProfileRepairAction = 'SkippedDuplicateNotConfirmed'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'REPAIR_DUPLICATE_PROFILE_MANUALLY'; Detail = ("{0}; Repair=SkippedDuplicateNotConfirmed; DuplicateSids={1}" -f $detailPrefix,$failure.DuplicateSids); ExitCode = 3; ActionResult = 'SetupProfileDuplicateSkippedDuplicateNotConfirmed' }
+    }
+
+    $sessionSummary = Get-InteractiveUserSessionSummary
+    if ($sessionSummary.DetectionSucceeded -and -not [string]::IsNullOrWhiteSpace([string]$failure.ProfileLeaf)) {
+        $activeUsers = [string]$sessionSummary.InteractiveUsers
+        if ($activeUsers -match ('(?i)(^|[\\,;\s])' + [regex]::Escape([string]$failure.ProfileLeaf) + '($|[,;\s])')) {
+            $script:SetupProfileRepairAction = 'SkippedProfileUserConnected'
+            return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_FAILURE'; NextAction = 'WAIT_USER_LOGOFF_THEN_REPAIR_PROFILE'; Detail = ("{0}; Repair=SkippedProfileUserConnected; InteractiveUsers={1}" -f $detailPrefix,$activeUsers); ExitCode = 3; ActionResult = 'SetupProfileDuplicateSkippedProfileUserConnected' }
+        }
+    }
+
+    $backupRoot = Join-Path $DataRoot 'Backups\ProfileList'
+    New-SmartDirectory -Path $backupRoot
+    $backupPath = Join-Path $backupRoot ("{0}_{1}.reg" -f ($failure.BlockingSid -replace '[^A-Za-z0-9_.-]', '_'),(Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $nativeRegPath = "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($failure.BlockingSid)"
+
+    try {
+        & reg.exe export $nativeRegPath $backupPath /y | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $backupPath -PathType Leaf)) { throw "reg.exe export failed with exit code $LASTEXITCODE" }
+        & reg.exe delete $nativeRegPath /f | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "reg.exe delete failed with exit code $LASTEXITCODE" }
+    }
+    catch {
+        $script:SetupProfileRepairAction = 'RepairFailed'
+        $script:SetupProfileRepairBackupPath = $backupPath
+        $script:SetupProfileRepairDetail = ("{0}; RepairFailed={1}; Backup={2}" -f $detailPrefix,$_.Exception.Message,$backupPath)
+        Write-SmartLog $script:SetupProfileRepairDetail 'ERROR'
+        return [pscustomobject]@{ Handled = $true; Status = 'SETUP_MIGRATION_PROFILE_REPAIR_FAILED'; NextAction = 'CHECK_PROFILE_REPAIR_BACKUP_AND_LOG'; Detail = $script:SetupProfileRepairDetail; ExitCode = 1; ActionResult = 'SetupProfileDuplicateRepairFailed' }
+    }
+
+    $script:SetupProfileRepairAction = 'RepairedLocalAccount'
+    $script:SetupProfileRepairBackupPath = $backupPath
+    $script:SetupProfileRepairDetail = ("{0}; Repair=RepairedLocalAccount; Backup={1}; DeletedSid={2}" -f $detailPrefix,$backupPath,$failure.BlockingSid)
+    Write-SmartLog $script:SetupProfileRepairDetail
+
+    if ($AllowReboot -and -not $AuditOnly) {
+        $rebootResult = Invoke-SetupProfileRepairRebootWhenNoUser -Reason 'SmartM365 Windows 11 setup profile repair reboot - retry setup after restart'
+        $script:SetupProfileRepairDetail = ("{0}; RebootResult={1}" -f $script:SetupProfileRepairDetail,$rebootResult)
+    }
+
+    return [pscustomobject]@{ Handled = $true; Status = 'SETUP_PROFILE_DUPLICATE_REPAIRED_REBOOT_REQUIRED'; NextAction = 'REBOOT_AND_RETRY_SETUP'; Detail = $script:SetupProfileRepairDetail; ExitCode = 0; ActionResult = 'SetupProfileDuplicateRepairedLocalAccount' }
+}
+
+function Get-SetupMigrationPluginFailure {
+    param([Parameter(Mandatory = $true)]$SetupExitInfo)
+
+    $pantherPaths = @(
+        'C:\$WINDOWS.~BT\Sources\Panther\setupact.log',
+        'C:\$WINDOWS.~BT\Sources\Panther\setuperr.log'
+    )
+    $patterns = @(
+        '0x8007007F',
+        'hr=\[0x8007007f\]',
+        'hr=0x8007007f',
+        'gle=0x7f',
+        'LoadDllServer',
+        'LoadLibraryExW',
+        'Failure while calling I(?:Discovery|PreApply|PostApply|PostApplySuccess|ApplySuccess)->',
+        'CscMig\.dll',
+        'WSManMigrationPlugin\.dll',
+        'RasMigPlugin\.dll'
+    )
+
+    $records = New-Object System.Collections.Generic.List[object]
+    foreach ($path in $pantherPaths) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try {
+            $matches = @(Select-String -LiteralPath $path -Pattern $patterns -ErrorAction Stop)
+            foreach ($match in $matches) {
+                $line = [string]$match.Line
+                $plugin = ''
+                $pluginMatch = [regex]::Match($line, '(?<Plugin>[A-Za-z0-9_.-]+\.dll)')
+                if ($pluginMatch.Success) { $plugin = $pluginMatch.Groups['Plugin'].Value }
+                [void]$records.Add([pscustomobject]@{
+                    SourcePath = $path
+                    LineNumber = $match.LineNumber
+                    Plugin = $plugin
+                    Evidence = $line.Trim()
+                })
+            }
+        }
+        catch {
+            Write-SmartLog ("Failed to inspect Panther migration plugin evidence: Path={0}; Error={1}" -f $path,$_.Exception.Message) 'WARN'
+        }
+    }
+
+    if ($records.Count -eq 0) {
+        return [pscustomobject]@{ Found = $false }
+    }
+
+    $preferred = @($records | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Plugin) } | Select-Object -Last 1)
+    if (-not $preferred) { $preferred = @($records | Select-Object -Last 1) }
+    $record = $preferred | Select-Object -First 1
+
+    return [pscustomobject]@{
+        Found = $true
+        ErrorCode = [string]$SetupExitInfo.Hex
+        Plugin = [string]$record.Plugin
+        SourcePath = [string]$record.SourcePath
+        LineNumber = [int]$record.LineNumber
+        Evidence = [string]$record.Evidence
+    }
+}
+
+function Resolve-SetupMigrationPluginFailure {
+    param([Parameter(Mandatory = $true)]$SetupExitInfo)
+
+    $empty = [pscustomobject]@{ Handled = $false; Status = ''; NextAction = ''; Detail = ''; ExitCode = 1; ActionResult = '' }
+    $failure = Get-SetupMigrationPluginFailure -SetupExitInfo $SetupExitInfo
+    if (-not $failure.Found -and [string]$SetupExitInfo.Hex -ne '0x8007007F') { return $empty }
+
+    $detail = if ($failure.Found) {
+        ("Setup migration plugin failure detected. ErrorCode={0}; Plugin={1}; Source={2}; Line={3}; Evidence={4}" -f $failure.ErrorCode,$failure.Plugin,$failure.SourcePath,$failure.LineNumber,$failure.Evidence)
+    }
+    else {
+        ("Setup migration plugin failure detected from setup exit code. ErrorCode={0}; Panther={1}; PantherErrors={2}" -f $SetupExitInfo.Hex,$SetupExitInfo.PantherLog,$SetupExitInfo.PantherErrorLog)
+    }
+
+    return [pscustomobject]@{
+        Handled = $true
+        Status = 'SETUP_MIGRATION_PLUGIN_FAILURE'
+        NextAction = 'CHECK_SETUP_LOGS_OR_SETUPDIAG'
+        Detail = $detail
+        ExitCode = 1
+        ActionResult = 'SetupMigrationPluginFailure'
+    }
+}
+function Resolve-SetupFailureOutcome {
+    param([Parameter(Mandatory = $true)]$SetupExitInfo)
+
+    $profileOutcome = Invoke-SetupDuplicateProfileRepair -SetupExitInfo $SetupExitInfo
+    if ($profileOutcome.Handled) { return $profileOutcome }
+
+    $pluginOutcome = Resolve-SetupMigrationPluginFailure -SetupExitInfo $SetupExitInfo
+    if ($pluginOutcome.Handled) { return $pluginOutcome }
+
+    return [pscustomobject]@{ Handled = $false; Status = ''; NextAction = ''; Detail = ''; ExitCode = 1; ActionResult = '' }
+}
+function Save-RunResult {
+    param([Parameter(Mandatory = $true)]$Result)
+
+    New-SmartDirectory -Path $script:OutputDir
+    $Result | Export-Csv -LiteralPath $script:CsvPath -NoTypeInformation -Encoding UTF8
+    $Result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $script:LastRunPath -Encoding UTF8
+}
+
+function Save-SetupReturnCheckpoint {
+    param(
+        [Parameter(Mandatory = $true)][string]$Status,
+        [Parameter(Mandatory = $true)][string]$NextAction,
+        [string]$Detail = '',
+        [string]$ActionResult = '',
+        [Parameter(Mandatory = $true)][int]$ExitCode,
+        [string]$SetupExePath = ''
+    )
+
+    try {
+        $checkpoint = [pscustomobject]@{
+            RunId = $script:RunId
+            ComputerName = $script:ComputerName
+            StartTimeUtc = $script:ScriptStartUtc.ToString('o')
+            EndTimeUtc = (Get-Date).ToUniversalTime().ToString('o')
+            ScriptVersion = $script:ScriptVersion
+            Status = $Status
+            NextAction = $NextAction
+            Detail = $Detail
+            ActionResult = $ActionResult
+            ExitCode = $ExitCode
+            HardwareReadinessTag = $script:HardwareReadiness.Tag
+            HardwareReadinessCode = $script:HardwareReadiness.ReturnCode
+            HardwareReadinessResult = $script:HardwareReadiness.Result
+            HardwareReadinessReason = $script:HardwareReadiness.Reason
+            HardwareReadinessLog = $script:HardwareReadiness.Logging
+            HardwareReadinessSource = $script:HardwareReadiness.Source
+            SetupExecutionMode = $SetupExecutionMode
+            SetupMediaId = $SetupMediaId
+            SetupLanguage = $SetupLanguage
+            SetupDynamicUpdate = $SetupDynamicUpdate
+            ResolvedSetupLanguage = $script:ResolvedSetupLanguage
+            SetupMediaLanguages = $script:ResolvedSetupMediaLanguages
+            SetupCachePath = $script:ResolvedSetupCachePath
+            SelectedSetupSourcePath = $script:SelectedSetupSourcePath
+            SetupSourceSelectionDetail = $script:SetupSourceSelectionDetail
+            SetupCacheAction = $script:SetupCacheAction
+            SetupProcessStarted = $script:SetupProcessStarted
+            SetupProcessExited = $script:SetupProcessExited
+            SetupProcessPid = $script:SetupProcessPid
+            SetupProcessStartTime = $script:SetupProcessStartTime
+            SetupProcessExitCode = $script:SetupProcessExitCode
+            SetupProcessLastSnapshot = $script:SetupProcessLastSnapshot
+            SetupProcessLastHeartbeatUtc = $script:SetupProcessLastHeartbeatUtc
+            SetupExePath = $SetupExePath
+            LogPath = $script:LogPath
+            CsvPath = $script:CsvPath
+            Checkpoint = 'SetupReturn'
+        }
+        Save-RunResult -Result $checkpoint
+        Write-SmartLog ("Setup return checkpoint saved before finalization. Status={0}; NextAction={1}; ExitCode={2}" -f $Status,$NextAction,$ExitCode)
+    }
+    catch {
+        Write-SmartLog ("Failed to save setup return checkpoint: {0}" -f $_.Exception.Message) 'WARN'
+    }
+}
+
+# SEMT data folder boundary: before anything is written there (setup media included), the SEMT
+# components of the data folder chain get owner Administrators and a protected DACL after a
+# read-only check of the whole scope; shared parents are verified, never changed; existing content
+# without verified provenance is refused. Failure stops the endpoint without writing under the
+# data root.
+try { [void](Initialize-SemtTrustedDataFolder -Path $DataRoot) }
+catch {
+    Write-Output ('FINAL_STATUS=DATA_FOLDER_UNTRUSTED; EXIT_CODE=1; NEXT_ACTION=VERIFY_DATA_FOLDER_PERMISSIONS; CORRELATION_ID={0}; DETAIL={1}' -f [string]$CorrelationId,($_.Exception.Message -replace '[\r\n]+',' '))
+    exit 1
+}
+
+# The subfolders inherit the protected DACL of the data root.
+New-SmartDirectory -Path $script:LogDir
+New-SmartDirectory -Path $script:OutputDir
+New-SmartDirectory -Path $script:StateDir
+$script:LocalIPv4Addresses = ''
+try { $script:LocalIPv4Addresses = (@(Get-LocalIPv4Addresses) -join ',') } catch { $script:LocalIPv4Addresses = '' }
+Write-SmartLog ("===== {0} v{1} started. ComputerName={2}; LocalIPv4={3}; RunId={4}; CorrelationId={5}; DataRoot={6}; LegacyActivityPolicy={7}; ReuseLegacySetupMedia={8}; AllowSetupMediaDuplication={9} =====" -f $script:ScriptName,$script:ScriptVersion,$script:ComputerName,$script:LocalIPv4Addresses,$script:RunId,$CorrelationId,$DataRoot,$LegacyActivityPolicy,[bool]$ReuseLegacySetupMedia,[bool]$AllowSetupMediaDuplication)
+
+$exitCode = 3
+$status = 'UNKNOWN'
+$nextAction = 'CHECK_LOGS'
+$detail = ''
+$actionResult = ''
+$setupExe = ''
+
+function Write-SemtWindows11AttemptResult {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('Running','Completed')][string]$State,
+        [AllowNull()]$Result
+    )
+
+    $data = [ordered]@{
+        SchemaVersion = 2
+        Product = 'SmartEndpointMigrationToolkit'
+        Campaign = $script:SemtCampaign
+        ScriptVersion = $script:ScriptVersion
+        RunId = $script:RunId
+        CorrelationId = $CorrelationId
+        ComputerName = $script:ComputerName
+        State = $State
+        StartTimeUtc = $script:ScriptStartUtc.ToString('o')
+        EndTimeUtc = ''
+        Status = 'RUNNING'
+        ExitCode = ''
+        NextAction = ''
+        Detail = ''
+        LogPath = $script:LogPath
+        CsvPath = $script:CsvPath
+        TargetGuardStatus = $script:SemtTargetGuardStatus
+        LegacyActivityStatus = $script:SemtLegacyActivityStatus
+        LegacyActivityDetail = $script:SemtLegacyActivityDetail
+        SetupMediaReuseDecision = $script:SetupMediaReuseDecision
+    }
+    if ($Result) {
+        foreach ($property in $Result.PSObject.Properties) { if (-not $data.Contains($property.Name) -or $property.Name -in @('EndTimeUtc','Status','ExitCode','NextAction','Detail')) { $data[$property.Name] = $property.Value } }
+        $data['ExitCode'] = [string]$Result.ExitCode
+    }
+    return (Write-SemtAttemptResult -CampaignDataRoot $DataRoot -Data $data)
+}
+
+try { $null = Write-SemtWindows11AttemptResult -State Running -Result $null } catch { Write-SmartLog ("Attempt start marker write failed: {0}" -f $_.Exception.Message) 'WARN' }
+$semtGuard = Enter-SemtTargetOperationGuard -Campaign $script:SemtCampaign -CampaignDataRoot $DataRoot -RunId $script:RunId -CorrelationId $CorrelationId
+$script:SemtTargetGuardStatus = $semtGuard.Status
+if (-not $semtGuard.Acquired) {
+    Write-SmartLog $semtGuard.Detail 'WARN'
+    $earlyResult = [pscustomobject]@{ EndTimeUtc = (Get-Date).ToUniversalTime().ToString('o'); Status = $semtGuard.Status; ExitCode = 3; NextAction = $semtGuard.NextAction; Detail = $semtGuard.Detail }
+    try { $null = Write-SemtWindows11AttemptResult -State Completed -Result $earlyResult } catch { }
+    Write-Host ("FINAL_STATUS={0}; EXIT_CODE={1}; NEXT_ACTION={2}; CORRELATION_ID={3}; DETAIL={4}" -f $semtGuard.Status,3,$semtGuard.NextAction,$CorrelationId,$semtGuard.Detail)
+    exit 3
+}
+$script:ResolvedSetupLanguage = ''
+$script:ResolvedSetupMediaLanguages = ''
+$script:ResolvedSetupCachePath = ''
+$script:SelectedSetupSourcePath = ''
+$script:SetupSourceSelectionDetail = ''
+$script:SetupCacheAction = ''
+$script:DiskCleanupAction = ''
+$script:DiskCleanupFreedGB = ''
+$script:AdvancedDiskCleanupAction = ''
+$script:AdvancedDiskCleanupFreedGB = ''
+$script:DismCleanupAction = ''
+$script:DismCleanupFreedGB = ''
+$script:SetupCompletionRebootAction = ''
+$script:SetupCompletionRebootDetail = ''
+$script:SetupCompletionRebootUserCount = ''
+$script:SetupCompletionRebootUsers = ''
+$script:ControlledRebootAction = ''
+$script:ControlledRebootDetail = ''
+$script:ControlledRebootUserCount = ''
+$script:ControlledRebootUsers = ''
+$script:RetryAfterRebootAction = ''
+$script:RetryAfterRebootDetail = ''
+$script:RetryAfterRebootAttempt = ''
+$script:RetryAfterRebootMaxAttemptsResult = ''
+$script:RetryAfterRebootTaskNameResult = ''
+$script:RequiredRebootByUptimeAction = ''
+$script:RequiredRebootByUptimeDetail = ''
+$script:UserRebootNotificationSent = ''
+$script:UserRebootNotificationLang = ''
+$script:UserRebootNotificationMessage = ''
+$script:SetupProfileRepairAction = ''
+$script:SetupProfileRepairDetail = ''
+$script:SetupProfileRepairBlockingSid = ''
+$script:SetupProfileRepairKeptSid = ''
+$script:SetupProfileRepairProfilePath = ''
+$script:SetupProfileRepairBackupPath = ''
+$script:RunGuardReferenceEndTimeUtc = ''
+$script:RunGuardReferenceStatus = ''
+$script:SetupProcessStarted = $false
+$script:SetupProcessExited = $false
+$script:SetupProcessPid = ''
+$script:SetupProcessStartTime = ''
+$script:SetupProcessLastSnapshot = ''
+$script:SetupProcessLastHeartbeatUtc = ''
+$script:SetupProcessExitCode = ''
+$script:DeviceUptimeSummary = $null
+$script:HardwareReadiness = [pscustomobject]@{ ReturnCode = ''; Result = 'NOT CHECKED'; Reason = ''; Logging = ''; Tag = ''; Source = '' }
+$computerSystem = $null
+
+try {
+    if ($RetryAfterRebootTaskRun) {
+        $retryTaskRun = Start-RetryAfterRebootTaskRun
+        if ($retryTaskRun.Exhausted) {
+            $status = 'RETRY_AFTER_REBOOT_EXHAUSTED'
+            $nextAction = 'CHECK_PENDING_REBOOT_OR_RELAUNCH_WAVE'
+            $detail = ("Retry-after-reboot task exceeded max attempts. Attempt={0}; MaxAttempts={1}; TaskName={2}." -f $retryTaskRun.Attempts,$retryTaskRun.MaxAttempts,$script:RetryAfterRebootTaskName)
+            $exitCode = 3
+            Unregister-RetryAfterRebootTask -Reason $status
+            throw [System.OperationCanceledException]::new($detail)
+        }
+    }
+
+    if (-not $IgnoreRunGuard -and $RunGuardHours -gt 0 -and (Test-Path -LiteralPath $script:LastRunPath -PathType Leaf)) {
+        $last = Get-Content -LiteralPath $script:LastRunPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $lastStatus = ''
+        if ($last.PSObject.Properties['Status']) { $lastStatus = [string]$last.Status }
+        $guardReferenceEndUtcText = ''
+        $guardReferenceStatus = $lastStatus
+        if ($lastStatus -eq 'RUN_GUARD_ACTIVE') {
+            if ($last.PSObject.Properties['RunGuardReferenceEndTimeUtc'] -and -not [string]::IsNullOrWhiteSpace([string]$last.RunGuardReferenceEndTimeUtc)) {
+                $guardReferenceEndUtcText = [string]$last.RunGuardReferenceEndTimeUtc
+                if ($last.PSObject.Properties['RunGuardReferenceStatus'] -and -not [string]::IsNullOrWhiteSpace([string]$last.RunGuardReferenceStatus)) {
+                    $guardReferenceStatus = [string]$last.RunGuardReferenceStatus
+                }
+            }
+            else {
+                Write-SmartLog 'Previous LastRun status is RUN_GUARD_ACTIVE but has no preserved run guard reference; treating run guard as expired to avoid a retry self-lock.' 'WARN'
+            }
+        }
+        elseif ($last.PSObject.Properties['EndTimeUtc'] -and -not [string]::IsNullOrWhiteSpace([string]$last.EndTimeUtc)) {
+            $guardReferenceEndUtcText = [string]$last.EndTimeUtc
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($guardReferenceEndUtcText)) {
+            $lastEndUtc = [datetime]::Parse($guardReferenceEndUtcText, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            $age = (Get-Date).ToUniversalTime() - $lastEndUtc
+            $guardSeconds = [double]($RunGuardHours * 3600)
+            if ($age.TotalSeconds -lt $guardSeconds) {
+                $status = 'RUN_GUARD_ACTIVE'
+                $nextAction = 'WAIT_OR_USE_IGNORE_RUN_GUARD'
+                $script:RunGuardReferenceEndTimeUtc = $lastEndUtc.ToUniversalTime().ToString('o')
+                $script:RunGuardReferenceStatus = $guardReferenceStatus
+                $remainingSeconds = [math]::Max(0, ($guardSeconds - $age.TotalSeconds))
+                $detail = ("Last run age {0:N2} hour(s) ({1:N1} minute(s)); guard {2} hour(s); remaining {3:N0} second(s); referenceStatus={4}; referenceEndUtc={5}." -f $age.TotalHours,$age.TotalMinutes,$RunGuardHours,$remainingSeconds,$guardReferenceStatus,$script:RunGuardReferenceEndTimeUtc)
+                $exitCode = 3
+                throw [System.OperationCanceledException]::new($detail)
+            }
+        }
+    }
+
+    $computerSystem = Get-ComputerSystemSummary
+    if ($SkipVirtualMachines -and $computerSystem.IsVirtualMachine) {
+        $status = 'SKIPPED_VIRTUAL_MACHINE'
+        $nextAction = 'NO_ACTION_VIRTUAL_MACHINE'
+        $detail = $computerSystem.Evidence
+        $exitCode = 0
+        throw [System.OperationCanceledException]::new($detail)
+    }
+
+    $os = Get-OsSummary
+    if ($os.MajorFamily -eq 'Windows10') {
+        $semtLegacy = Get-SemtLegacyEndpointActivity -Campaign $script:SemtCampaign
+        $script:SemtLegacyActivityStatus = $semtLegacy.Status
+        $script:SemtLegacyActivityDetail = $semtLegacy.Detail
+        if ($semtLegacy.Blocking -and $LegacyActivityPolicy -eq 'Block') {
+            $status = $semtLegacy.Status
+            $nextAction = $semtLegacy.NextAction
+            $detail = ("Previous toolkit activity detected (read-only check): {0}" -f $semtLegacy.Detail)
+            $exitCode = 3
+            throw [System.OperationCanceledException]::new($detail)
+        }
+        elseif ($semtLegacy.Status -ne 'LEGACY_ABSENT') {
+            Write-SmartLog ("Previous toolkit inspection: Status={0}; Blocking={1}; Policy={2}; Detail={3}" -f $semtLegacy.Status,$semtLegacy.Blocking,$LegacyActivityPolicy,$semtLegacy.Detail) 'WARN'
+        }
+    }
+    Write-SmartLog ("Startup OS before upgrade: ComputerName={0}; LocalIPv4={1}; Caption={2}; Version={3}; Build={4}; Architecture={5}; Family={6}" -f $script:ComputerName,$script:LocalIPv4Addresses,$os.Caption,$os.Version,$os.BuildNumber,$os.Architecture,$os.MajorFamily)
+    $script:DeviceUptimeSummary = Get-DeviceUptimeSummary -LastBootUpTime $os.LastBootUpTime
+    Write-SmartLog ("Startup uptime before upgrade: {0}" -f $script:DeviceUptimeSummary.Detail)
+    if ($os.MajorFamily -eq 'Windows10') {
+        try {
+            $script:HardwareReadiness = Get-SmartM365Windows11HardwareReadiness
+        }
+        catch {
+            $script:HardwareReadiness = [pscustomobject]@{
+                ReturnCode = -2
+                Result = 'FAILED TO RUN'
+                Reason = ''
+                Logging = ("Hardware readiness execution failed: {0} {1}" -f $_.Exception.GetType().Name,$_.Exception.Message)
+                Tag = 'WINDOWS11_HARDWARE_READINESS_UNDETERMINED'
+                Source = 'Microsoft HardwareReadiness.ps1 adapted; https://aka.ms/HWReadinessScript'
+            }
+        }
+        $hardwareLogLevel = if ([int]$script:HardwareReadiness.ReturnCode -eq 0) { 'INFO' } else { 'WARN' }
+        Write-SmartLog ("Hardware readiness: Tag={0}; ReturnCode={1}; Result={2}; Reason={3}; Detail={4}" -f $script:HardwareReadiness.Tag,$script:HardwareReadiness.ReturnCode,$script:HardwareReadiness.Result,$script:HardwareReadiness.Reason,$script:HardwareReadiness.Logging) $hardwareLogLevel
+    }
+    $hardwareReadinessBlocksUpgrade = ($os.MajorFamily -eq 'Windows10' -and [int]$script:HardwareReadiness.ReturnCode -eq 1)
+    $hardwareReadinessUndetermined = ($os.MajorFamily -eq 'Windows10' -and [int]$script:HardwareReadiness.ReturnCode -in @(-2,-1))
+    if ($hardwareReadinessUndetermined) {
+        Write-SmartLog 'Hardware readiness is undetermined. Tagging the result and continuing the existing upgrade flow as explicitly configured.' 'WARN'
+    }
+    $freeGb = Get-SystemDriveFreeGb
+    $pendingRebootInfo = Test-PendingReboot
+    $pendingReboot = $pendingRebootInfo.IsPending
+    Write-SmartLog ("Startup reboot requirement before upgrade: PendingReboot={0}; Source(s)={1}; ForceRequiredRebootWhenUptimeOverDays={2}; UptimeThresholdExceeded={3}" -f $pendingReboot,$pendingRebootInfo.Source,$ForceRequiredRebootWhenUptimeOverDays,$script:DeviceUptimeSummary.ThresholdExceeded)
+    if ($pendingReboot) {
+        Write-SmartLog ("Pending reboot detected before upgrade. Source(s)={0}" -f $pendingRebootInfo.Source) 'WARN'
+    }
+    $intune = Get-IntuneEnrollmentSummary
+    $policy = Get-WindowsUpdatePolicySummary
+    $indicators = Get-Windows11IndicatorSummary
+
+    $diskCleanupEligible = ($os.MajorFamily -eq 'Windows10' -and -not $hardwareReadinessBlocksUpgrade -and -not $DirectSetupUpgrade -and $intune.IsIntuneEnrolled -and -not $indicators.ActionableBlocking)
+    if ($diskCleanupEligible -and $freeGb -lt $MinimumFreeDiskGB -and $AllowDiskCleanup -and -not $AuditOnly) {
+        try {
+            $freeGb = Invoke-SafeDiskCleanup
+        }
+        catch {
+            $script:DiskCleanupAction = ("SafeCleanupFailed; Error={0}" -f $_.Exception.Message)
+            Write-SmartLog ("Safe disk cleanup failed: {0}" -f $_.Exception.Message) 'WARN'
+            $freeGb = Get-SystemDriveFreeGb
+        }
+
+        if ($freeGb -lt $MinimumFreeDiskGB -and ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) -and [string]::IsNullOrWhiteSpace($script:AdvancedDiskCleanupAction)) {
+            try {
+                $freeGb = Invoke-OldUpgradeFolderCleanup
+            }
+            catch {
+                $script:AdvancedDiskCleanupAction = ("OldUpgradeFoldersFailed; Error={0}" -f $_.Exception.Message)
+                Write-SmartLog ("Advanced old upgrade folder cleanup failed: {0}" -f $_.Exception.Message) 'WARN'
+                $freeGb = Get-SystemDriveFreeGb
+            }
+        }
+
+        if ($freeGb -lt $MinimumFreeDiskGB -and ($AllowAdvancedDiskCleanup -or $AllowDismComponentCleanup) -and [string]::IsNullOrWhiteSpace($script:DismCleanupAction)) {
+            try {
+                $freeGb = Invoke-DismComponentCleanup
+            }
+            catch {
+                $script:DismCleanupAction = ("StartComponentCleanupFailed; Error={0}" -f $_.Exception.Message)
+                Write-SmartLog ("DISM component cleanup failed: {0}" -f $_.Exception.Message) 'WARN'
+                $freeGb = Get-SystemDriveFreeGb
+            }
+        }
+    }
+
+    if ($os.MajorFamily -eq 'Windows11') {
+        $status = 'ALREADY_WINDOWS11'
+        $nextAction = 'NO_ACTION_ALREADY_WINDOWS11'
+        $exitCode = 0
+    }
+    elseif ($os.MajorFamily -ne 'Windows10') {
+        $status = 'UNSUPPORTED_OS'
+        $nextAction = 'CHECK_DEVICE_SCOPE'
+        $detail = "OS family is $($os.MajorFamily)."
+        $exitCode = 3
+    }
+    elseif ($hardwareReadinessBlocksUpgrade) {
+        $status = 'WINDOWS11_HARDWARE_NOT_CAPABLE'
+        $nextAction = 'REVIEW_HARDWARE_READINESS'
+        $detail = ("HardwareReadinessResult={0}; Reason={1}; Detail={2}" -f $script:HardwareReadiness.Result,$script:HardwareReadiness.Reason,$script:HardwareReadiness.Logging)
+        $exitCode = 3
+    }
+    elseif ($DirectSetupUpgrade) {
+        Write-SmartLog 'Direct setup upgrade requested. Confirmed hardware NOT CAPABLE remains blocking; hardware UNDETERMINED is tagged but non-blocking. Intune enrollment, compatibility-indicator, and policy-blocker gates are skipped; pending reboot can still trigger a controlled reboot when allowed and no interactive user is connected; Windows Setup will perform final validation.' 'WARN'
+        if ($pendingReboot -and ($AllowReboot -or $ScheduleRetryAfterReboot) -and -not $AuditOnly) {
+            $pendingOutcome = Resolve-PendingRebootOutcome -PendingRebootInfo $pendingRebootInfo -RebootReason 'SmartM365 Windows 11 direct setup readiness reboot - no interactive user connected'
+            $status = $pendingOutcome.Status
+            $nextAction = $pendingOutcome.NextAction
+            $detail = $pendingOutcome.Detail
+            $exitCode = $pendingOutcome.ExitCode
+            $actionResult = $pendingOutcome.ActionResult
+        }
+        elseif ($freeGb -lt $MinimumFreeDiskGB) {
+            $status = 'INSUFFICIENT_DISK'
+            $nextAction = 'FREE_DISK_SPACE'
+            $detail = ("FreeDiskGB={0}; RequiredGB={1}; DirectSetup=True; Setup media copy was not attempted." -f $freeGb,$MinimumFreeDiskGB)
+            $exitCode = 3
+        }
+        else {
+            $setupExe = Resolve-SetupUpgradeExecutable
+            if ($AuditOnly) {
+                $status = 'DIRECT_SETUP_UPGRADE_READY'
+                $nextAction = 'RUN_WITHOUT_AUDIT_ONLY'
+                $actionResult = 'DirectSetupValidatedAuditOnly'
+                $exitCode = 0
+            }
+            else {
+                $setupExitCode = Invoke-SetupUpgrade -SetupExePath $setupExe
+                $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $setupExitCode
+                $setupExitDetail = Format-SetupExitCodeInfo -Info $setupExitInfo
+                $actionResult = "DirectSetup$setupExitDetail"
+                if ($setupExitCode -eq 0 -or $setupExitCode -eq 3010) {
+                    $outcome = Resolve-SetupUpgradeSuccessOutcome -Prefix 'DIRECT_SETUP_UPGRADE' -SetupExitCode $setupExitCode
+                    $status = $outcome.Status
+                    $nextAction = $outcome.NextAction
+                    $exitCode = $outcome.ExitCode
+                    if (-not [string]::IsNullOrWhiteSpace([string]$outcome.ActionResultSuffix)) { $actionResult = "$actionResult;$($outcome.ActionResultSuffix)" }
+                    Save-SetupReturnCheckpoint -Status $status -NextAction $nextAction -Detail $detail -ActionResult $actionResult -ExitCode $exitCode -SetupExePath $setupExe
+                }
+                else {
+                    $failureOutcome = Resolve-SetupFailureOutcome -SetupExitInfo $setupExitInfo
+                    if ($failureOutcome.Handled) {
+                        $status = $failureOutcome.Status
+                        $nextAction = $failureOutcome.NextAction
+                        $detail = $failureOutcome.Detail
+                        $exitCode = $failureOutcome.ExitCode
+                        $actionResult = "$actionResult;$($failureOutcome.ActionResult)"
+                    }
+                    else {
+                        $status = 'DIRECT_SETUP_UPGRADE_FAILED'
+                        $nextAction = Get-SetupFailureNextAction -Info $setupExitInfo
+                        $detail = $setupExitDetail
+                        $exitCode = 1
+                    }
+                }
+            }
+        }
+    }
+    elseif (-not $intune.IsIntuneEnrolled) {
+        $status = 'NOT_INTUNE_ENROLLED'
+        $nextAction = 'FIX_INTUNE_ENROLLMENT_FIRST'
+        $detail = $intune.WeakEvidence
+        $exitCode = 3
+    }
+    elseif ($indicators.ActionableBlocking) {
+        $status = 'WINDOWS11_COMPAT_BLOCKER'
+        $nextAction = 'REVIEW_COMPATIBILITY_OR_SETUPDIAG'
+        $detail = $indicators.BlockingReasons
+        $exitCode = 3
+    }
+    elseif ($freeGb -lt $MinimumFreeDiskGB) {
+        $status = if ($script:DiskCleanupAction -or $script:AdvancedDiskCleanupAction -or $script:DismCleanupAction) { 'INSUFFICIENT_DISK_AFTER_CLEANUP' } else { 'INSUFFICIENT_DISK' }
+        $nextAction = 'FREE_DISK_SPACE'
+        $detail = ("FreeDiskGB={0}; RequiredGB={1}; DiskCleanup={2}; AdvancedCleanup={3}; DismCleanup={4}" -f $freeGb,$MinimumFreeDiskGB,$script:DiskCleanupAction,$script:AdvancedDiskCleanupAction,$script:DismCleanupAction)
+        $exitCode = 3
+    }
+    elseif ($pendingReboot) {
+        $pendingOutcome = Resolve-PendingRebootOutcome -PendingRebootInfo $pendingRebootInfo -RebootReason 'SmartM365 Windows 11 upgrade readiness reboot - no interactive user connected'
+        $status = $pendingOutcome.Status
+        $nextAction = $pendingOutcome.NextAction
+        $detail = $pendingOutcome.Detail
+        $exitCode = $pendingOutcome.ExitCode
+        $actionResult = $pendingOutcome.ActionResult
+    }
+    elseif ($policy.HasLegacyBlocker) {
+        $status = 'WU_POLICY_BLOCKER'
+        $nextAction = if ($AllowPolicyRepair) { 'POLICY_REPAIR_ATTEMPTED' } else { 'ALLOW_POLICY_REPAIR' }
+        $detail = $policy.Issues
+        if ($AllowPolicyRepair -and -not $AuditOnly) {
+            Repair-WindowsUpdatePolicyBlockers
+            $actionResult = 'PolicyRepairCompleted'
+            $exitCode = 0
+        }
+        else {
+            $exitCode = 3
+        }
+    }
+    elseif ($AllowSetupUpgrade) {
+        $setupExe = Resolve-SetupUpgradeExecutable
+        if ($AuditOnly) {
+            $status = 'SETUP_UPGRADE_READY'
+            $nextAction = 'RUN_WITHOUT_AUDIT_ONLY'
+            $actionResult = 'SetupValidatedAuditOnly'
+            $exitCode = 0
+        }
+        else {
+            $setupExitCode = Invoke-SetupUpgrade -SetupExePath $setupExe
+            $setupExitInfo = Get-SetupExitCodeInfo -ExitCode $setupExitCode
+            $setupExitDetail = Format-SetupExitCodeInfo -Info $setupExitInfo
+            $actionResult = "Setup$setupExitDetail"
+            if ($setupExitCode -eq 0 -or $setupExitCode -eq 3010) {
+                $outcome = Resolve-SetupUpgradeSuccessOutcome -Prefix 'SETUP_UPGRADE' -SetupExitCode $setupExitCode
+                $status = $outcome.Status
+                $nextAction = $outcome.NextAction
+                $exitCode = $outcome.ExitCode
+                if (-not [string]::IsNullOrWhiteSpace([string]$outcome.ActionResultSuffix)) { $actionResult = "$actionResult;$($outcome.ActionResultSuffix)" }
+                Save-SetupReturnCheckpoint -Status $status -NextAction $nextAction -Detail $detail -ActionResult $actionResult -ExitCode $exitCode -SetupExePath $setupExe
+            }
+            else {
+                $failureOutcome = Resolve-SetupFailureOutcome -SetupExitInfo $setupExitInfo
+                if ($failureOutcome.Handled) {
+                    $status = $failureOutcome.Status
+                    $nextAction = $failureOutcome.NextAction
+                    $detail = $failureOutcome.Detail
+                    $exitCode = $failureOutcome.ExitCode
+                    $actionResult = "$actionResult;$($failureOutcome.ActionResult)"
+                }
+                else {
+                    $status = 'SETUP_UPGRADE_FAILED'
+                    $nextAction = Get-SetupFailureNextAction -Info $setupExitInfo
+                    $detail = $setupExitDetail
+                    $exitCode = 1
+                }
+            }
+        }
+    }
+    elseif ($AllowWUReset -and -not $AuditOnly) {
+        Reset-WindowsUpdateComponents
+        $status = 'WU_RESET_COMPLETED'
+        $nextAction = 'RETRY_WINDOWS_UPDATE'
+        $actionResult = 'WUResetCompleted'
+        $exitCode = 0
+    }
+    elseif ($AllowForceUpgrade -and -not $AuditOnly) {
+        $actionResult = Invoke-AssignedUpdateInstall
+        $status = 'WINDOWS_UPDATE_FORCE_TRIGGERED'
+        $nextAction = 'MONITOR_INTUNE_WINDOWS_UPDATE_STATUS'
+        $exitCode = 0
+    }
+    else {
+        $status = 'READY_TO_FORCE_UPGRADE'
+        $nextAction = 'USE_ALLOW_FORCEUPGRADE_OR_ALLOWSETUPUPGRADE'
+        $exitCode = 3
+    }
+}
+catch [System.OperationCanceledException] {
+    $operationDetail = [string]$_.Exception.Message
+    Write-SmartLog $operationDetail 'WARN'
+    if ($status -eq 'UNKNOWN' -and $script:SetupProcessStarted) {
+        $status = 'SETUP_PROCESS_MONITOR_INTERRUPTED'
+        $nextAction = 'CHECK_SETUP_PROCESS_OR_OS_STATUS'
+        $exitCode = 3
+        $runningText = 'Unknown'
+        if (-not [string]::IsNullOrWhiteSpace($script:SetupProcessPid)) {
+            try {
+                $runningProcess = Get-Process -Id ([int]$script:SetupProcessPid) -ErrorAction Stop
+                $runningText = if ($runningProcess.HasExited) { 'False' } else { 'True' }
+            }
+            catch { $runningText = 'False' }
+        }
+        $detail = ("Setup monitoring was interrupted before setup.exe exit was observed. PID={0}; StillRunning={1}; Started={2}; LastHeartbeatUtc={3}; LastSnapshot={4}; Interruption={5}" -f $script:SetupProcessPid,$runningText,$script:SetupProcessStartTime,$script:SetupProcessLastHeartbeatUtc,$script:SetupProcessLastSnapshot,$operationDetail)
+        $actionResult = 'SetupProcessMonitorInterrupted'
+        Write-SmartLog $detail 'WARN'
+    }
+}
+catch {
+    $detail = $_.Exception.Message
+    if ($detail -like 'Insufficient disk space before setup media copy.*') {
+        $status = 'INSUFFICIENT_DISK'
+        $nextAction = 'FREE_DISK_SPACE'
+        $actionResult = 'SetupMediaCopyInsufficientDisk'
+        $exitCode = 3
+    }
+    elseif ($detail -like '*No setup source subfolder under*contains language*in sources\lang.ini*') {
+        $status = 'SETUP_SOURCE_LANGUAGE_UNAVAILABLE'
+        $nextAction = 'ADD_SETUP_SOURCE_LANGUAGE_OR_CHANGE_SETUP_LANGUAGE'
+        $actionResult = 'SetupSourceLanguageUnavailable'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'setup.exe timed out after *') {
+        $status = 'SETUP_PROCESS_TIMEOUT'
+        $nextAction = 'CHECK_SETUP_LOGS'
+        $actionResult = 'SetupProcessTimeout'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'Robocopy setup media copy timed out after *') {
+        $status = 'SETUP_MEDIA_COPY_TIMEOUT'
+        $nextAction = 'CHECK_SETUP_SOURCE_NETWORK_OR_ROBOCOPY_LOG'
+        $actionResult = 'SetupMediaCopyTimeout'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'Robocopy setup media copy failed with exit code *') {
+        $status = 'SETUP_MEDIA_COPY_FAILED'
+        $nextAction = 'CHECK_ROBOCOPY_LOG_AND_SETUP_SOURCE_NETWORK'
+        $actionResult = 'SetupMediaCopyFailed'
+        $exitCode = 1
+    }
+    elseif ($detail -like 'Setup media integrity manifest validation failed.*') {
+        $status = 'SETUP_MEDIA_MANIFEST_VALIDATION_FAILED'
+        $nextAction = 'REGENERATE_SETUP_MEDIA_MANIFEST_OR_RECOPY_MEDIA'
+        $actionResult = 'SetupMediaManifestValidationFailed'
+        $exitCode = 1
+    }
+        elseif ($detail -like 'Setup cache is locked by another SmartM365 process.*') {
+        $status = 'SETUP_CACHE_LOCKED'
+        $nextAction = 'WAIT_CACHE_UNLOCK_OR_RETRY'
+        $actionResult = 'SetupCacheLocked'
+        $exitCode = 3
+    }
+elseif ($detail -like 'Timed out waiting for setup subnet copy lease.*') {
+        $status = 'SETUP_SUBNET_COPY_LEASE_TIMEOUT'
+        $nextAction = 'CHECK_SETUP_SUBNET_COPY_LEASE'
+        $actionResult = 'SetupSubnetCopyLeaseTimeout'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'Setup media duplication blocked.*') {
+        $status = 'SETUP_MEDIA_DUPLICATION_BLOCKED'
+        $nextAction = 'UNASSIGN_LEGACY_INTUNE_APP_OR_ALLOW_DUPLICATION'
+        $actionResult = 'SetupMediaDuplicationBlocked'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'Setup media legacy untrusted.*') {
+        $status = 'SETUP_MEDIA_LEGACY_UNTRUSTED'
+        $nextAction = 'SECURE_OR_REMOVE_LEGACY_MEDIA_OR_ALLOW_DUPLICATION'
+        $actionResult = 'SetupMediaLegacyUntrusted'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'Setup media is in use.*') {
+        $status = 'SETUP_MEDIA_IN_USE'
+        $nextAction = 'WAIT_SETUP_MEDIA_RELEASE'
+        $actionResult = 'SetupMediaInUse'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'Setup media state is indeterminate.*') {
+        $status = 'SETUP_MEDIA_STATE_INDETERMINATE'
+        $nextAction = 'VERIFY_SETUP_MEDIA_STATE'
+        $actionResult = 'SetupMediaStateIndeterminate'
+        $exitCode = 3
+    }
+    elseif ($detail -like 'Setup media path not recognized.*') {
+        $status = 'SETUP_MEDIA_PATH_REJECTED'
+        $nextAction = 'VERIFY_INTUNE_PACKAGE_MEDIA_STATE'
+        $actionResult = 'SetupMediaPathRejected'
+        $exitCode = 1
+    }
+    elseif ($detail -like 'Legacy setup media adoption rollback failed.*') {
+        $status = 'SETUP_MEDIA_LEGACY_ADOPTION_FAILED'
+        $nextAction = 'VERIFY_LEGACY_MEDIA_LOCATION'
+        $actionResult = 'SetupMediaLegacyAdoptionFailed'
+        $exitCode = 1
+    }
+    elseif ($detail -like 'Timed out waiting for setup source copy lease.*') {
+        $status = 'SETUP_SOURCE_COPY_LEASE_TIMEOUT'
+        $nextAction = 'CHECK_SETUP_SOURCE_COPY_LEASE'
+        $actionResult = 'SetupSourceCopyLeaseTimeout'
+        $exitCode = 3
+    }
+    else {
+        if ($status -eq 'UNKNOWN') { $status = 'ERROR' }
+        if ($nextAction -eq 'CHECK_LOGS') { $nextAction = 'CHECK_SCRIPT_LOG' }
+        $exitCode = if ($status -eq 'RUN_GUARD_ACTIVE') { 3 } else { 1 }
+    }
+    Write-SmartLog $detail 'ERROR'
+}
+finally {
+    $osFinal = $null
+    try { $osFinal = Get-OsSummary } catch { }
+    $finalFreeDisk = ''
+    $finalPendingReboot = ''
+    $finalPendingRebootSource = ''
+    $finalIntuneEnrolled = ''
+    $finalWuBlockers = ''
+    $finalW11BlockingReasons = ''
+    try { $finalFreeDisk = Get-SystemDriveFreeGb } catch { }
+    try {
+        $finalPendingRebootInfo = Test-PendingReboot
+        $finalPendingReboot = $finalPendingRebootInfo.IsPending
+        $finalPendingRebootSource = $finalPendingRebootInfo.Source
+    }
+    catch { }
+    try { $finalIntuneEnrolled = (Get-IntuneEnrollmentSummary).IsIntuneEnrolled } catch { }
+    try { $finalWuBlockers = (Get-WindowsUpdatePolicySummary).Issues } catch { }
+    try { $finalW11BlockingReasons = (Get-Windows11IndicatorSummary).BlockingReasons } catch { }
+    if ($null -eq $computerSystem) {
+        try { $computerSystem = Get-ComputerSystemSummary } catch { }
+    }
+
+    $result = [pscustomobject]@{
+        RunId = $script:RunId
+        ComputerName = $script:ComputerName
+        StartTimeUtc = $script:ScriptStartUtc.ToString('o')
+        EndTimeUtc = (Get-Date).ToUniversalTime().ToString('o')
+        ScriptVersion = $script:ScriptVersion
+        Status = $status
+        NextAction = $nextAction
+        Detail = $detail
+        ActionResult = $actionResult
+        ExitCode = $exitCode
+        OSFamily = if ($osFinal) { $osFinal.MajorFamily } else { '' }
+        OSCaption = if ($osFinal) { $osFinal.Caption } else { '' }
+        OSVersion = if ($osFinal) { $osFinal.Version } else { '' }
+        OSBuild = if ($osFinal) { $osFinal.BuildNumber } else { '' }
+        FreeDiskGB = $finalFreeDisk
+        PendingReboot = $finalPendingReboot
+        PendingRebootSource = $finalPendingRebootSource
+        IsVirtualMachine = if ($computerSystem) { $computerSystem.IsVirtualMachine } else { '' }
+        VirtualMachineEvidence = if ($computerSystem) { $computerSystem.Evidence } else { '' }
+        IntuneEnrolled = $finalIntuneEnrolled
+        WUBlockers = $finalWuBlockers
+        W11BlockingReasons = $finalW11BlockingReasons
+        HardwareReadinessTag = $script:HardwareReadiness.Tag
+        HardwareReadinessCode = $script:HardwareReadiness.ReturnCode
+        HardwareReadinessResult = $script:HardwareReadiness.Result
+        HardwareReadinessReason = $script:HardwareReadiness.Reason
+        HardwareReadinessLog = $script:HardwareReadiness.Logging
+        HardwareReadinessSource = $script:HardwareReadiness.Source
+        SetupExecutionMode = $SetupExecutionMode
+        SetupMediaId = $SetupMediaId
+        SetupLanguage = $SetupLanguage
+        SetupDynamicUpdate = $SetupDynamicUpdate
+        ResolvedSetupLanguage = $script:ResolvedSetupLanguage
+        SetupMediaLanguages = $script:ResolvedSetupMediaLanguages
+        SetupCachePath = $script:ResolvedSetupCachePath
+        SelectedSetupSourcePath = $script:SelectedSetupSourcePath
+        SetupSourceSelectionDetail = $script:SetupSourceSelectionDetail
+        SetupCacheAction = $script:SetupCacheAction
+        DiskCleanupAction = $script:DiskCleanupAction
+        DiskCleanupFreedGB = $script:DiskCleanupFreedGB
+        AdvancedDiskCleanupAction = $script:AdvancedDiskCleanupAction
+        AdvancedDiskCleanupFreedGB = $script:AdvancedDiskCleanupFreedGB
+        DismCleanupAction = $script:DismCleanupAction
+        DismCleanupFreedGB = $script:DismCleanupFreedGB
+        SetupCompletionRebootAction = $script:SetupCompletionRebootAction
+        SetupCompletionRebootDetail = $script:SetupCompletionRebootDetail
+        SetupCompletionRebootUserCount = $script:SetupCompletionRebootUserCount
+        SetupCompletionRebootUsers = $script:SetupCompletionRebootUsers
+        RequiredRebootByUptimeAction = $script:RequiredRebootByUptimeAction
+        RequiredRebootByUptimeDetail = $script:RequiredRebootByUptimeDetail
+        LastBootUpTime = if ($script:DeviceUptimeSummary) { $script:DeviceUptimeSummary.LastBootUpTime } else { '' }
+        UptimeDays = if ($script:DeviceUptimeSummary) { $script:DeviceUptimeSummary.UptimeDays } else { '' }
+        ForceRequiredRebootWhenUptimeOverDays = $ForceRequiredRebootWhenUptimeOverDays
+        ControlledRebootAction = $script:ControlledRebootAction
+        ControlledRebootDetail = $script:ControlledRebootDetail
+        ControlledRebootUserCount = $script:ControlledRebootUserCount
+        ControlledRebootUsers = $script:ControlledRebootUsers
+        RetryAfterRebootAction = $script:RetryAfterRebootAction
+        RetryAfterRebootDetail = $script:RetryAfterRebootDetail
+        RetryAfterRebootAttempt = $script:RetryAfterRebootAttempt
+        RetryAfterRebootMaxAttempts = $script:RetryAfterRebootMaxAttemptsResult
+        RetryAfterRebootTaskName = $script:RetryAfterRebootTaskNameResult
+        UserRebootNotificationSent = $script:UserRebootNotificationSent
+        UserRebootNotificationLang = $script:UserRebootNotificationLang
+        UserRebootNotificationMessage = $script:UserRebootNotificationMessage
+        SetupProfileRepairAction = $script:SetupProfileRepairAction
+        SetupProfileRepairDetail = $script:SetupProfileRepairDetail
+        SetupProfileRepairBlockingSid = $script:SetupProfileRepairBlockingSid
+        SetupProfileRepairKeptSid = $script:SetupProfileRepairKeptSid
+        SetupProfileRepairProfilePath = $script:SetupProfileRepairProfilePath
+        SetupProfileRepairBackupPath = $script:SetupProfileRepairBackupPath
+        RunGuardReferenceEndTimeUtc = $script:RunGuardReferenceEndTimeUtc
+        RunGuardReferenceStatus = $script:RunGuardReferenceStatus
+        SetupExePath = $setupExe
+        LogPath = $script:LogPath
+        CsvPath = $script:CsvPath
+        Product = 'SmartEndpointMigrationToolkit'
+        Campaign = $script:SemtCampaign
+        CorrelationId = $CorrelationId
+        TargetGuardStatus = $script:SemtTargetGuardStatus
+        LegacyActivityStatus = $script:SemtLegacyActivityStatus
+        LegacyActivityDetail = $script:SemtLegacyActivityDetail
+        SetupMediaReuseDecision = $script:SetupMediaReuseDecision
+    }
+
+    Save-RunResult -Result $result
+    try {
+        if ($status -match '^(DIRECT_)?SETUP_UPGRADE_(STARTED|REBOOT_.+)$') {
+            Set-SemtTargetPendingOperation -Campaign $script:SemtCampaign -CampaignDataRoot $DataRoot -Reason ("Windows Setup completion pending: {0}" -f $status) -Hours 168 -ClearedByReboot $true
+        }
+        elseif ($status -in @('ALREADY_WINDOWS11','UNSUPPORTED_OS','WINDOWS11_HARDWARE_NOT_CAPABLE') -or $status -like '*SETUP_UPGRADE_FAILED') {
+            $null = Clear-SemtTargetPendingOperation -Campaign $script:SemtCampaign -CampaignDataRoot $DataRoot
+        }
+    }
+    catch { Write-SmartLog ("Pending-operation marker update failed: {0}" -f $_.Exception.Message) 'WARN' }
+    try { $null = Write-SemtWindows11AttemptResult -State Completed -Result $result } catch { Write-SmartLog ("Attempt result write failed: {0}" -f $_.Exception.Message) 'WARN' }
+    Exit-SemtTargetOperationGuard -CampaignDataRoot $DataRoot
+    if (($RetryAfterRebootTaskRun -or (Test-Path -LiteralPath $script:RetryAfterRebootStatePath -PathType Leaf)) -and $status -notlike 'PENDING_REBOOT*') {
+        Unregister-RetryAfterRebootTask -Reason $status
+    }
+    Write-SmartLog ("Final Status={0}; ComputerName={1}; LocalIPv4={2}; NextAction={3}; ExitCode={4}; OSCaption={5}; OSVersion={6}; OSBuild={7}" -f $status,$script:ComputerName,$script:LocalIPv4Addresses,$nextAction,$exitCode,$result.OSCaption,$result.OSVersion,$result.OSBuild)
+    if ($status -like 'PENDING_REBOOT*') {
+        $rebootExplanation = switch ($status) {
+            'PENDING_REBOOT_USER_CONNECTED' { 'Upgrade paused: a reboot is pending but was skipped because an interactive user is connected. The device will continue on a later cycle once it has rebooted or the user has logged off.' }
+            'PENDING_REBOOT_USER_DETECTION_FAILED' { 'Upgrade paused: a reboot is pending but interactive user detection failed, so the reboot was skipped. Verify user sessions before rebooting.' }
+            'PENDING_REBOOT_SCHEDULE_FAILED' { 'Upgrade paused: a reboot is pending and no user is connected, but scheduling the reboot failed. Check the reboot schedule.' }
+            default { 'Upgrade paused: a reboot is pending and must be cleared before the Windows 11 upgrade can continue.' }
+        }
+        Write-SmartLog ("Pending reboot summary: {0} Source(s)={1}" -f $rebootExplanation,$finalPendingRebootSource)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($detail)) {
+        Write-SmartLog ("Final Detail={0}" -f $detail)
+    }
+    if ($status -eq 'WINDOWS11_COMPAT_BLOCKER' -and -not [string]::IsNullOrWhiteSpace($finalW11BlockingReasons) -and $finalW11BlockingReasons -ne $detail) {
+        Write-SmartLog ("Final Windows11CompatibilityReasons={0}" -f $finalW11BlockingReasons)
+    }
+    Invoke-LocalFileRetention -KeepLast $LocalFileRetentionCount
+    Write-Output ("Status={0}; NextAction={1}; ExitCode={2}; Log={3}" -f $status,$nextAction,$exitCode,$script:LogPath)
+    Write-Host ("FINAL_STATUS={0}; EXIT_CODE={1}; NEXT_ACTION={2}; CORRELATION_ID={3}; DETAIL={4}" -f $status,$exitCode,$nextAction,$CorrelationId,(([string]$detail) -replace '[\r\n]+',' '))
+}
+
+exit $exitCode

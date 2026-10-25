@@ -1,0 +1,177 @@
+<#
+.SYNOPSIS
+    Publishes multiple Smart Endpoint Migration Toolkit Windows 11 Upgrade Intune Win32 packages.
+
+.DESCRIPTION
+    Discovers generated .intunewin packages under the IntuneWin32 Output folder and calls
+    SmartM365-EndpointMigration-Publish-Windows11IntuneApp.ps1 once per package. By default, only full media
+    packages are selected so existing WithCacheOnly packages are not republished accidentally.
+    Only packages whose PackageId starts with SmartM365-SEMT-Windows11Upgrade- are published. No assignment is created.
+    Provenance: copied from SmartM365/Devices/Windows11UpgradeToolkit/IntuneWin32/Publish-AllSmartM365Windows11IntuneApp.ps1 1.0.3 (see Docs\PROVENANCE.json.txt).
+
+.VERSION
+    1.0.0
+.NOTES
+    Author: https://github.com/khda79/workplacecloudhub.com
+#>
+[CmdletBinding(SupportsShouldProcess = $true)]
+param(
+    [string]$OutputRoot,
+    [string]$PublisherScriptPath,
+    [ValidateSet('WithMedia','WithCacheOnly','All')][string]$PackageMode = 'WithMedia',
+    [ValidatePattern('^[a-z]{2}-[A-Z]{2}$')][string[]]$IncludeLanguage,
+    [ValidatePattern('^[a-z]{2}-[A-Z]{2}$')][string[]]$ExcludeLanguage,
+    [string[]]$IncludePackageId,
+    [string[]]$ExcludePackageId,
+    [string]$PackageVersion,
+    [switch]$ForceCreateNew,
+    [switch]$UpdateMetadataOnly,
+    [switch]$UpdateDetectionRules,
+    [switch]$DisableLanguageRequirementRule,
+    [ValidateRange(-1, 2147483647)][int]$MinimumFreeDiskSpaceInMB = -1,
+    [int]$UploadBlockSizeMB = 16,
+    [int]$AzureUploadMaxRetries = 5,
+    [int]$PollSeconds = 10,
+    [int]$PollTimeoutMinutes = 45,
+    [string]$GraphBaseUri = 'https://graph.microsoft.com/beta',
+    [switch]$NoConnect
+)
+
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+
+$scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Join-Path $scriptDir 'Output' }
+if ([string]::IsNullOrWhiteSpace($PublisherScriptPath)) { $PublisherScriptPath = Join-Path $scriptDir 'SmartM365-EndpointMigration-Publish-Windows11IntuneApp.ps1' }
+
+$OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
+$PublisherScriptPath = [System.IO.Path]::GetFullPath($PublisherScriptPath)
+
+if (-not (Test-Path -LiteralPath $OutputRoot -PathType Container)) { throw "OutputRoot not found: $OutputRoot" }
+if (-not (Test-Path -LiteralPath $PublisherScriptPath -PathType Leaf)) { throw "Publisher script not found: $PublisherScriptPath" }
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message)
+}
+
+function ConvertTo-Set {
+    param([AllowNull()][string[]]$Values)
+
+    $set = @{}
+    foreach ($value in @($Values)) {
+        if (-not [string]::IsNullOrWhiteSpace($value)) { $set[$value.ToLowerInvariant()] = $true }
+    }
+    return $set
+}
+
+function Read-PackageManifest {
+    param([Parameter(Mandatory = $true)][string]$IntuneWinPath)
+
+    $packageDir = Split-Path -Parent $IntuneWinPath
+    foreach ($candidate in @((Join-Path $packageDir 'PackageManifest.json'), (Join-Path (Split-Path -Parent $packageDir) 'Source\PackageManifest.json'))) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            try { return (Get-Content -LiteralPath $candidate -Raw | ConvertFrom-Json) }
+            catch { throw "Unable to read package manifest: $candidate. $($_.Exception.Message)" }
+        }
+    }
+
+    return $null
+}
+
+function Get-PackageLanguageFromName {
+    param([string]$Name)
+
+    $match = [regex]::Match($Name, 'Win11-(?<Language>[a-z]{2}-[A-Z]{2})(?:-WithCacheOnly)?\.intunewin$', 'IgnoreCase')
+    if ($match.Success) { return $match.Groups['Language'].Value }
+    return ''
+}
+
+function Get-PackageIdFromName {
+    param([string]$Name)
+
+    if ($Name.EndsWith('.intunewin', [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $Name.Substring(0, $Name.Length - '.intunewin'.Length)
+    }
+    return $Name
+}
+
+$includeLanguageSet = ConvertTo-Set -Values $IncludeLanguage
+$excludeLanguageSet = ConvertTo-Set -Values $ExcludeLanguage
+$includePackageSet = ConvertTo-Set -Values $IncludePackageId
+$excludePackageSet = ConvertTo-Set -Values $ExcludePackageId
+
+$packages = @(
+    Get-ChildItem -LiteralPath $OutputRoot -Filter '*.intunewin' -Recurse -File -ErrorAction Stop |
+        Sort-Object FullName |
+        ForEach-Object {
+            $manifest = Read-PackageManifest -IntuneWinPath $_.FullName
+            $packageId = if ($manifest -and $manifest.PackageId) { [string]$manifest.PackageId } else { Get-PackageIdFromName -Name $_.Name }
+            $language = if ($manifest -and $manifest.Language) { [string]$manifest.Language } else { Get-PackageLanguageFromName -Name $_.Name }
+            $mode = if ($manifest -and $manifest.PackageMode) { [string]$manifest.PackageMode } elseif ($packageId -match '-WithCacheOnly$') { 'WithCacheOnly' } else { 'WithMedia' }
+            $version = if ($manifest -and $manifest.PackageVersion) { [string]$manifest.PackageVersion } else { '' }
+            $displayName = if ($manifest -and $manifest.DisplayName) { [string]$manifest.DisplayName } else { '' }
+
+            [pscustomobject]@{
+                IntuneWinPath = $_.FullName
+                PackageId = $packageId
+                PackageVersion = $version
+                Language = $language
+                PackageMode = $mode
+                DisplayName = $displayName
+            }
+        }
+)
+
+$packageIdPrefix = 'SmartM365-SEMT-Windows11Upgrade-'
+foreach ($foreignPackage in @($packages | Where-Object { -not ([string]$_.PackageId).StartsWith($packageIdPrefix, [System.StringComparison]::OrdinalIgnoreCase) })) {
+    Write-Step ("Skipping package without the {0} prefix: {1}" -f $packageIdPrefix,$foreignPackage.IntuneWinPath)
+}
+$packages = @($packages | Where-Object { ([string]$_.PackageId).StartsWith($packageIdPrefix, [System.StringComparison]::OrdinalIgnoreCase) })
+
+$selected = @(
+    $packages | Where-Object {
+        $languageKey = ([string]$_.Language).ToLowerInvariant()
+        $packageKey = ([string]$_.PackageId).ToLowerInvariant()
+        (($PackageMode -eq 'All') -or ([string]$_.PackageMode -eq $PackageMode)) -and
+        (($includeLanguageSet.Count -eq 0) -or $includeLanguageSet.ContainsKey($languageKey)) -and
+        (-not $excludeLanguageSet.ContainsKey($languageKey)) -and
+        (($includePackageSet.Count -eq 0) -or $includePackageSet.ContainsKey($packageKey)) -and
+        (-not $excludePackageSet.ContainsKey($packageKey))
+    }
+)
+
+if ($selected.Count -eq 0) {
+    throw "No .intunewin package matched the requested filters. OutputRoot=$OutputRoot; PackageMode=$PackageMode"
+}
+
+Write-Step ("Publishing/updating {0} package(s). OutputRoot={1}; PackageMode={2}; UpdateMetadataOnly={3}" -f $selected.Count,$OutputRoot,$PackageMode,[bool]$UpdateMetadataOnly)
+foreach ($package in $selected) {
+    Write-Step ("Package: {0}; Language={1}; Mode={2}; Version={3}" -f $package.PackageId,$package.Language,$package.PackageMode,$package.PackageVersion)
+
+    $publishParams = @{
+        IntuneWinPath = $package.IntuneWinPath
+        UploadBlockSizeMB = $UploadBlockSizeMB
+        AzureUploadMaxRetries = $AzureUploadMaxRetries
+        PollSeconds = $PollSeconds
+        PollTimeoutMinutes = $PollTimeoutMinutes
+        MinimumFreeDiskSpaceInMB = $MinimumFreeDiskSpaceInMB
+        GraphBaseUri = $GraphBaseUri
+    }
+    if ($ForceCreateNew) { $publishParams['ForceCreateNew'] = $true }
+    if ($UpdateMetadataOnly) { $publishParams['UpdateMetadataOnly'] = $true }
+    if ($UpdateDetectionRules) { $publishParams['UpdateDetectionRules'] = $true }
+    if (-not [string]::IsNullOrWhiteSpace($PackageVersion)) { $publishParams['PackageVersion'] = $PackageVersion }
+    if ($DisableLanguageRequirementRule) { $publishParams['DisableLanguageRequirementRule'] = $true }
+    if ($NoConnect) { $publishParams['NoConnect'] = $true }
+
+    if ($WhatIfPreference) {
+        & $PublisherScriptPath @publishParams -WhatIf
+        continue
+    }
+
+    $actionText = if ($UpdateMetadataOnly) { 'Update Smart Endpoint Migration Toolkit Windows 11 Upgrade Intune app metadata' } else { 'Publish Smart Endpoint Migration Toolkit Windows 11 Upgrade Intune app' }
+    if ($PSCmdlet.ShouldProcess($package.PackageId, $actionText)) {
+        & $PublisherScriptPath @publishParams
+    }
+}

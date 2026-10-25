@@ -1,0 +1,50 @@
+# Smart Endpoint Migration Toolkit
+# The repository root ignores SmartM365/** by default and re-includes scripts,
+# modules, CMD wrappers, Markdown and *.json.template files. This file only
+# re-includes the versioned assets of this product and keeps runtime data out.
+
+# Versioned assets and data contracts
+!.gitignore
+!*.png
+!*.ico
+!*.json.txt
+!*.csv.template
+!.gitkeep
+
+# Private configuration and local notes (always last for these patterns)
+*.local.json
+*.local.json.txt
+*.local.json.*
+# Safe templates of the private configuration stay versioned.
+!*.local.json.template
+LOCAL_MEMORY.md
+IMPLEMENTATION-NOTES.md
+
+# Operational Waves, Runs and inventory caches
+/Waves/*/*/
+/Runs/*
+!/Runs/.gitkeep
+/Inventory/
+DevicesAD.csv
+DevicesIntune.csv
+DevicesEntra.csv
+*.tmp.*.csv
+
+# Local fictional demo captures
+/DemoAssets/
+
+# Release outputs
+/Release/Output/
+/Release/Work/
+
+# Windows 11 media, gates and Intune Win32 outputs
+/Campaigns/Windows11Upgrade/SetupSource/*
+!/Campaigns/Windows11Upgrade/SetupSource/.gitignore
+!/Campaigns/Windows11Upgrade/SetupSource/README.md
+/Campaigns/Windows11Upgrade/SetupSourceGates/*
+!/Campaigns/Windows11Upgrade/SetupSourceGates/.gitignore
+!/Campaigns/Windows11Upgrade/SetupSourceGates/README.md
+/Campaigns/Windows11Upgrade/IntuneWin32/Build/
+/Campaigns/Windows11Upgrade/IntuneWin32/Output/
+/Campaigns/Windows11Upgrade/IntuneWin32/Source/SetupMedia/
+*.intunewin

@@ -1,0 +1,18 @@
+{
+  "SchemaVersion": 1,
+  "Product": "SmartEndpointMigrationToolkit",
+  "ProductName": "Smart Endpoint Migration Toolkit",
+  "PackageVersion": "1.0.0",
+  "ReleaseTag": "endpoint-migration-toolkit-v1.0.0",
+  "ReleaseDate": "2026-10-24",
+  "WorkerContractVersion": 1,
+  "Campaigns": [ "HybridJoin", "Windows11Upgrade" ],
+  "Components": {
+    "Engine": "1.0.0",
+    "Worker": "1.0.0",
+    "CoreModule": "1.0.0",
+    "GUI": "1.0.0",
+    "HybridJoinEndpoint": "1.0.0",
+    "Windows11UpgradeEndpoint": "1.0.0"
+  }
+}

@@ -1,0 +1,1228 @@
+<#
+.SYNOPSIS
+    Smart Endpoint Migration Toolkit GUI (WPF).
+
+.DESCRIPTION
+    Hybrid Join, Intune Enrollment and Windows 11 Upgrade campaigns from one launcher:
+    Campaign selector, Waves, New Wave, Automatic Wave (Preview distinct from Create),
+    Single PC, Launch Wave, Launch All Waves (selected Campaign only, staggered), Runs and
+    reports, controlled stop. Options are generated from the option catalog; the choices
+    of the operator are captured for each Run and isolated per Campaign.
+    Requires Windows PowerShell 5.1 started with -STA.
+
+.VERSION
+    1.0.0
+
+.NOTES
+    Author: https://github.com/khda79/workplacecloudhub.com
+#>
+
+param(
+    [switch]$ValidateOnly,
+    [switch]$Demo,
+    [ValidateSet('Overview','Issues','Completed')][string]$DemoScenario = 'Overview',
+    [string]$DemoView = '',
+    [ValidateRange(1000,3840)][int]$DemoWindowWidth = 1500,
+    [ValidateRange(650,2160)][int]$DemoWindowHeight = 950
+)
+
+if ($Demo) {
+    . (Join-Path $PSScriptRoot 'SmartM365.GuiDemo.ps1')
+    Start-SmartM365GuiDemo -GuiScriptPath $PSCommandPath -ProfilePath (Join-Path $PSScriptRoot 'SmartM365-EndpointMigration-Demo.ps1') -Scenario $DemoScenario -View $DemoView -Width $DemoWindowWidth -Height $DemoWindowHeight -ValidateOnly:$ValidateOnly
+    return
+}
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+if ([string]$PSVersionTable['PSEdition'] -eq 'Core' -or [Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentState]::STA) {
+    throw ('SEMT_UNSUPPORTED_GUI_HOST: the GUI runs in Windows PowerShell 5.1 started with -STA (current: {0} {1}, {2}). Use Start-SmartEndpointMigrationToolkit-GUI.cmd.' -f [string]$PSVersionTable['PSEdition'],[string]$PSVersionTable['PSVersion'],[Threading.Thread]::CurrentThread.ApartmentState)
+}
+$script:GuiVersion = '1.0.0'
+$script:PackageRoot = Split-Path -Path $PSScriptRoot -Parent
+Import-Module (Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
+$script:CampaignTitles = [ordered]@{ HybridJoin = 'Hybrid Join and Intune enrollment'; Windows11Upgrade = 'Windows 11 upgrade' }
+$script:CategoryOrder = @('Mode','Actions','Setup','Safety','Schedule','Parallelism','Network','Inventory','Evidence')
+$script:RunModes = [ordered]@{ 'Loop' = @('Loop',$false); 'Once' = @('Once',$false); 'Loop - ignore run guard (first cycle)' = @('Loop',$true); 'Once - ignore run guard' = @('Once',$true) }
+
+#region Testable helpers (no UI)
+
+function Assert-CmdLiteralValue {
+    param([AllowNull()][string]$Value,[string]$Context = 'CMD value')
+    if ($null -eq $Value) { return }
+    if ($Value.IndexOf([char]0) -ge 0 -or $Value -match '[\r\n"%!]') {
+        throw ("{0} contains a character that cannot be represented safely in a generated CMD launcher. Remove quotes, percent signs, exclamation marks or line breaks." -f $Context)
+    }
+}
+
+function ConvertTo-CmdArgument {
+    param([AllowNull()][string]$Value)
+    if ($null -eq $Value) { return '""' }
+    Assert-CmdLiteralValue -Value $Value -Context 'CMD argument'
+    if ($Value -match '^[A-Za-z0-9_:\\./=-]+$') { return $Value }
+    return ('"{0}"' -f $Value)
+}
+
+function ConvertTo-CmdWindowTitle {
+    param([AllowNull()][string]$Value)
+    $title = ([string]$Value -replace '[\r\n\t]+', ' ').Trim()
+    $title = $title -replace '[&|<>^%!"]', '-'
+    if ($title.Length -gt 240) { $title = $title.Substring(0, 240) }
+    return $title
+}
+
+function New-GuiLaunchCommandFile {
+    <#
+    Writes a temporary CMD launcher: UTF-8 code page, delayed expansion disabled, literal paths
+    quoted, pushd/popd, exit code preserved; an optional copy is kept as Run evidence.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][string[]]$Commands,
+        [string]$NamePrefix = 'SEMT-GUI',
+        [string]$WindowTitle,
+        [string]$EvidenceDirectory,
+        [switch]$PauseWhenDone
+    )
+
+    $launcherRoot = Join-Path $env:TEMP 'SmartEndpointMigrationToolkit\GuiLaunchers'
+    New-Item -ItemType Directory -Path $launcherRoot -Force | Out-Null
+    $safePrefix = [regex]::Replace($NamePrefix, '[^A-Za-z0-9._-]+', '-').Trim('-._')
+    if ([string]::IsNullOrWhiteSpace($safePrefix)) { $safePrefix = 'SEMT-GUI' }
+    $launchPath = Join-Path $launcherRoot ('{0}_{1}.cmd' -f $safePrefix,(Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('@echo off')
+    $lines.Add('chcp 65001 >nul')
+    $lines.Add('setlocal DisableDelayedExpansion')
+    $lines.Add('echo GUI launcher : %~f0')
+    if (-not [string]::IsNullOrWhiteSpace($WindowTitle)) { $lines.Add(('title {0}' -f (ConvertTo-CmdWindowTitle -Value $WindowTitle))) }
+    $lines.Add(('pushd {0} || exit /b 1' -f (ConvertTo-CmdArgument -Value $WorkingDirectory)))
+    foreach ($command in @($Commands)) { if (-not [string]::IsNullOrWhiteSpace($command)) { $lines.Add($command) } }
+    $lines.Add('set "EXITCODE=%ERRORLEVEL%"')
+    $lines.Add('popd')
+    if ($PauseWhenDone) { $lines.Add('echo.'); $lines.Add('echo Finished with exit code %EXITCODE%.'); $lines.Add('pause') }
+    $lines.Add('exit /b %EXITCODE%')
+    [IO.File]::WriteAllLines($launchPath, $lines.ToArray(), [Text.UTF8Encoding]::new($false))
+    if (-not [string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
+        New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
+        Copy-Item -LiteralPath $launchPath -Destination (Join-Path $EvidenceDirectory (Split-Path $launchPath -Leaf)) -Force
+    }
+    return $launchPath
+}
+
+function Start-GuiLaunchCommandFile {
+    param([Parameter(Mandatory = $true)][string]$LaunchCommandPath,[Parameter(Mandatory = $true)][string]$WorkingDirectory)
+    Assert-CmdLiteralValue -Value $LaunchCommandPath -Context 'GUI launcher path'
+    Start-Process -FilePath 'cmd.exe' -ArgumentList ('/d /s /c ""{0}""' -f $LaunchCommandPath) -WorkingDirectory $WorkingDirectory -Verb RunAs | Out-Null
+}
+
+function Get-GuiStatePath {
+    param([Parameter(Mandatory = $true)][string]$Campaign)
+    return (Join-Path $script:PackageRoot ("Config\GuiState.{0}.local.json" -f $Campaign))
+}
+
+function Get-GuiInitialOptionValues {
+    <#
+    Values shown when a Campaign is opened: campaign defaults, global configuration and SEMT_*
+    environment, then the last GUI choices saved for this Campaign (invalid values are ignored).
+    #>
+    param([Parameter(Mandatory = $true)]$Catalog,[Parameter(Mandatory = $true)][string]$Campaign,[switch]$IgnoreSavedState)
+
+    $global = Read-SemtGlobalConfig -PackageRoot $script:PackageRoot
+    $resolved = Resolve-SemtEffectiveOptions -Catalog $Catalog -Campaign $Campaign -GlobalLayer $global.Data -EnvironmentLayer (Get-SemtEnvironmentOptionLayer -Catalog $Catalog -Campaign $Campaign)
+    $values = @{}
+    foreach ($entry in $resolved.GetEnumerator()) { $values[$entry.Key] = $entry.Value.Value }
+    if (-not $IgnoreSavedState) {
+        $state = $null
+        try { $state = Read-SemtJsonFile -Path (Get-GuiStatePath -Campaign $Campaign) } catch { $state = $null }
+        if ($state -and [string](Get-SemtPropertyValue -InputObject $state -Name 'Campaign' -Default '') -eq $Campaign) {
+            $saved = ConvertTo-SemtOptionLayer -Layer $state
+            foreach ($key in @($saved.Keys)) {
+                if (-not $values.ContainsKey($key) -or -not $Catalog.ByName.ContainsKey($key)) { continue }
+                try { $values[$key] = ConvertTo-SemtOptionValue -Definition $Catalog.ByName[$key] -Value $saved[$key] -Source 'GuiState' } catch { }
+            }
+        }
+    }
+    return $values
+}
+
+function Save-GuiState {
+    param([Parameter(Mandatory = $true)][string]$Campaign,[Parameter(Mandatory = $true)][hashtable]$Values)
+    Write-SemtJsonFileAtomic -Path (Get-GuiStatePath -Campaign $Campaign) -InputObject ([pscustomobject]@{ SchemaVersion = 1; Campaign = $Campaign; UpdatedUtc = (Get-SemtUtcNowText); Options = $Values })
+}
+
+function New-GuiSelectionFile {
+    <#
+    Captures the GUI choices for one Run. Empty text and path fields are not captured, so the
+    Wave or global configuration still applies to them.
+    #>
+    param([Parameter(Mandatory = $true)]$Catalog,[Parameter(Mandatory = $true)][string]$Campaign,[Parameter(Mandatory = $true)][hashtable]$Values)
+
+    $captured = [ordered]@{}
+    foreach ($definition in @(Get-SemtCampaignOptionDefinitions -Catalog $Catalog -Campaign $Campaign | Where-Object { $_.GuiVisible })) {
+        $name = [string]$definition.Name
+        if (-not $Values.ContainsKey($name)) { continue }
+        $value = $Values[$name]
+        if ($definition.Type -in @('String','Path') -and [string]::IsNullOrWhiteSpace([string]$value)) { continue }
+        $captured[$name] = ConvertTo-SemtOptionValue -Definition $definition -Value $value -Source 'Gui'
+    }
+    $root = Join-Path $script:PackageRoot ("Runs\{0}\_GuiSelections" -f $Campaign)
+    $path = Join-Path $root ('{0}-{1}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'),([guid]::NewGuid().ToString('N').Substring(0, 6)))
+    Write-SemtJsonFileAtomic -Path $path -InputObject ([pscustomobject]@{ SchemaVersion = 1; Product = 'SmartEndpointMigrationToolkit'; Campaign = $Campaign; CapturedUtc = (Get-SemtUtcNowText); CapturedBy = [Environment]::UserName; Options = $captured })
+    return $path
+}
+
+function Test-UnlimitedCycleConfirmationRequired {
+    param([string]$RunMode,[int]$MaxCycles)
+    return ($RunMode -eq 'Loop' -and $MaxCycles -le 0)
+}
+
+function Get-GuiLaunchSummary {
+    param(
+        [Parameter(Mandatory = $true)]$Catalog,
+        [Parameter(Mandatory = $true)][string]$Campaign,
+        [Parameter(Mandatory = $true)][hashtable]$Values,
+        [Parameter(Mandatory = $true)][string]$Target,
+        [Parameter(Mandatory = $true)][string]$RunMode,
+        [bool]$IgnoreRunGuard
+    )
+
+    $execution = if ($Values['DryRun']) { 'DRY RUN - DNS, ping, SMB 445 and administrative shares only; nothing is copied or executed' } elseif ($Values['AuditOnly']) { 'REMOTE AUDIT - the endpoint script runs diagnostics only' } else { 'REPAIR - the endpoint applies the enabled actions below' }
+    $actions = @(Get-SemtCampaignOptionDefinitions -Catalog $Catalog -Campaign $Campaign | Where-Object { $_.Type -eq 'Boolean' -and $_.Category -in @('Actions','Setup') -and $Values.ContainsKey($_.Name) -and [bool]$Values[$_.Name] } | ForEach-Object { '  - {0}' -f $_.Label })
+    $cycles = if ($RunMode -eq 'Once') { '1' } elseif ([int]$Values['MaxCycles'] -gt 0) { [string]$Values['MaxCycles'] } else { 'unlimited until complete or stopped' }
+    $lines = @(
+        ('Campaign: {0}' -f $script:CampaignTitles[$Campaign]),
+        ('Target: {0}' -f $Target),
+        ('Run mode: {0} (cycles: {1})' -f $RunMode,$cycles),
+        ('Execution: {0}' -f $execution),
+        ('Run guard: {0}' -f $(if ($IgnoreRunGuard) { 'IGNORED for the first cycle (endpoint and technician history)' } else { 'applied' })),
+        ('Workers per Wave: {0}; shared cap on this technician computer: {1}' -f $Values['ThrottleLimit'],$Values['GlobalWorkerLimit']),
+        'Enabled actions:'
+    )
+    if ($actions.Count -eq 0) { $lines += '  (none)' } else { $lines += $actions }
+    return ($lines -join [Environment]::NewLine)
+}
+
+function Get-GuiRunCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$Campaign,
+        [string]$WavePath,
+        [string]$ComputerName,
+        [Parameter(Mandatory = $true)][string]$RunMode,
+        [bool]$IgnoreRunGuard,
+        [Parameter(Mandatory = $true)][string]$SelectionPath
+    )
+
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $engine = Join-Path $script:PackageRoot 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'
+    $parts = @((ConvertTo-CmdArgument -Value $powershell),'-NoProfile','-ExecutionPolicy','Bypass','-File',(ConvertTo-CmdArgument -Value $engine),'-Campaign',$Campaign)
+    if (-not [string]::IsNullOrWhiteSpace($WavePath)) { $parts += @('-WavePath',(ConvertTo-CmdArgument -Value $WavePath)) }
+    else { $parts += @('-ComputerName',(ConvertTo-CmdArgument -Value $ComputerName)) }
+    $parts += @('-RunMode',$RunMode,'-GuiSelectionPath',(ConvertTo-CmdArgument -Value $SelectionPath))
+    if ($IgnoreRunGuard) { $parts += '-IgnoreRunGuard' }
+    return ($parts -join ' ')
+}
+
+function ConvertTo-PowerShellLiteral {
+    param([AllowNull()][string]$Value)
+    return ("'{0}'" -f ([string]$Value).Replace("'", "''"))
+}
+
+function Get-AutomaticWaveCommandText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Campaign,
+        [Parameter(Mandatory = $true)][hashtable]$Filters,
+        [Parameter(Mandatory = $true)][string]$EvidenceRoot,
+        [switch]$Create
+    )
+
+    $script = Join-Path $script:PackageRoot ("Campaigns\{0}\Scripts\SmartM365-EndpointMigration-{0}-New-AutomaticWave.ps1" -f $Campaign)
+    $parts = @('&',(ConvertTo-PowerShellLiteral $script),'-PackageRoot',(ConvertTo-PowerShellLiteral $script:PackageRoot),'-WaveName',(ConvertTo-PowerShellLiteral $Filters.WaveName),'-EvidenceRoot',(ConvertTo-PowerShellLiteral $EvidenceRoot))
+    foreach ($pair in @(@('ComputerNamePrefix','Prefixes'),@('ComputerNameContains','Contains'))) {
+        $items = @($Filters[$pair[1]] | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($items.Count -gt 0) { $parts += @(('-{0}' -f $pair[0]),('@({0})' -f (($items | ForEach-Object { ConvertTo-PowerShellLiteral $_ }) -join ','))) }
+    }
+    if ($Filters.ExcludeStaleAd) { $parts += @('-ExcludeStaleAd','-AdLastLogonMaxAgeDays',[string][int]$Filters.LastLogonDays) }
+    if ($Campaign -eq 'Windows11Upgrade') {
+        $parts += @('-Source',$Filters.Source)
+        if ($Filters.ExcludeIntunePresent) { $parts += '-ExcludeIntunePresent' }
+    }
+    if ($Create) { $parts += '-Create' }
+    return ($parts -join ' ')
+}
+
+function Get-AutomaticFilterSignature {
+    param([Parameter(Mandatory = $true)][string]$Campaign,[Parameter(Mandatory = $true)][hashtable]$Filters)
+    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}' -f $Campaign,$Filters.WaveName,(@($Filters.Prefixes) -join ';'),(@($Filters.Contains) -join ';'),$Filters.ExcludeStaleAd,$Filters.LastLogonDays,$Filters.Source,$Filters.ExcludeIntunePresent)
+}
+
+function Split-GuiList {
+    param([AllowNull()][string]$Text)
+    return @(([string]$Text -split '[;,\r\n]+') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
+#endregion
+
+if (-not $ValidateOnly) {
+    $splashScript = Join-Path $PSScriptRoot 'SmartM365.GuiSplash.ps1'
+    if (Test-Path -LiteralPath $splashScript -PathType Leaf) { . $splashScript }
+}
+$updateCheckScript = Join-Path $PSScriptRoot 'SmartM365.GuiUpdateCheck.ps1'
+if (Test-Path -LiteralPath $updateCheckScript -PathType Leaf) { . $updateCheckScript }
+
+Add-Type -AssemblyName PresentationCore
+Add-Type -AssemblyName PresentationFramework
+Add-Type -AssemblyName WindowsBase
+
+$splash = $null
+if (-not $ValidateOnly -and (Get-Command -Name Start-SmartM365GuiSplash -ErrorAction SilentlyContinue)) {
+    try { $splash = Start-SmartM365GuiSplash -Framework Wpf -ProductName 'Smart Endpoint Migration Toolkit' -LogoPath (Join-Path $script:PackageRoot 'Assets\WorkplaceCloudHub-lockup-WPF.png') -WindowIconPath (Join-Path $script:PackageRoot 'Assets\WorkplaceCloudHub.ico') } catch { $splash = $null }
+}
+
+$xaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Smart Endpoint Migration Toolkit v1.0.0"
+        Width="1240" Height="860" MinWidth="1080" MinHeight="740"
+        WindowStartupLocation="CenterScreen"
+        Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <Window.Resources>
+        <SolidColorBrush x:Key="TextBrush" Color="#1F2937"/>
+        <SolidColorBrush x:Key="MutedBrush" Color="#475569"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#D8E4F0"/>
+        <Style TargetType="Button">
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="Padding" Value="14,6"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="BorderBrush" Value="#CBDDEC"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="Padding" Value="14,6"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="Background" Value="#0078D4"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#0078D4"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Margin" Value="0,4,0,10"/>
+            <Setter Property="BorderBrush" Value="#CBDDEC"/>
+            <Setter Property="Padding" Value="8,5"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Margin" Value="0,4,0,10"/>
+            <Setter Property="BorderBrush" Value="#CBDDEC"/>
+        </Style>
+        <Style x:Key="NumericTextBoxStyle" TargetType="TextBox">
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="BorderBrush" Value="#CBDDEC"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="TextAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="StepperButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="MinWidth" Value="32"/>
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="BorderBrush" Value="#CBDDEC"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Margin" Value="0,4,18,4"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="#475569"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#D8E4F0"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#F8FBFE"/>
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="#B9DDF7"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Foreground" Value="#005A9E"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                <Setter TargetName="TabBorder" Property="Background" Value="#E6F4FF"/>
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="#B9DDF7"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="20" Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="190"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <Border Background="#E7F3FF" BorderBrush="#B5DCFF" BorderThickness="1" CornerRadius="8" Padding="10,3" HorizontalAlignment="Left" Margin="0,0,0,12">
+                        <TextBlock Text="SMARTM365 DEVICES" Foreground="#005A9E" FontWeight="SemiBold"/>
+                    </Border>
+                    <TextBlock x:Name="ProductVersionText" Text="v1.0.0" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="Smart Endpoint Migration Toolkit" Foreground="{StaticResource TextBrush}" FontSize="28" FontWeight="SemiBold"/>
+                    <TextBlock Text="Hybrid Join, Intune Enrollment &amp; Windows 11 Upgrade" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
+                </StackPanel>
+                <Border x:Name="HeaderLogoLink" Grid.Column="1" BorderBrush="#D8E4F0" BorderThickness="1" CornerRadius="8" Background="#F8FBFF" Padding="12" Cursor="Hand" ToolTip="Open WorkplaceCloudHub.com">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <Image x:Name="HeaderLogoImage" Width="128" Height="72" Stretch="Uniform" SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality"/>
+                        <TextBlock Text="workplacecloudhub.com" Foreground="#475569" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="14" Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="300"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                    <TextBlock Text="Campaign" FontWeight="SemiBold"/>
+                    <ComboBox x:Name="CampaignCombo" Margin="0,4,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Width="10" Height="10" Fill="#0078D4" Margin="2,0,12,0"/>
+                    <StackPanel>
+                        <TextBlock x:Name="StatusTitle" Text="Ready" FontWeight="SemiBold" Foreground="#0078D4"/>
+                        <TextBlock x:Name="StatusText" Text="Select a Campaign and a Wave." Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="RefreshButton" Content="Refresh"/>
+                    <Button x:Name="StopAllButton" Content="Stop running Waves" Background="#FFF4E5" Foreground="#9A3412" BorderBrush="#FDBA74" MinWidth="150"/>
+                    <Button x:Name="LaunchAllButton" Content="Launch All Waves" Style="{StaticResource PrimaryButtonStyle}" MinWidth="150"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TabControl Grid.Row="2" x:Name="MainTabs" Background="Transparent" BorderThickness="0" Padding="0">
+            <TabItem x:Name="WavesTab" Header="Waves">
+                <Grid Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.05*"/>
+                        <ColumnDefinition Width="0.95*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="0,0,8,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Wave" Foreground="{StaticResource TextBrush}" FontSize="18" FontWeight="SemiBold"/>
+                            <Grid Grid.Row="1" Margin="0,14,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="160"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Existing Waves of the selected Campaign"/>
+                                    <ComboBox x:Name="WaveCombo"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" x:Name="LaunchWaveButton" Content="Launch Wave" Style="{StaticResource PrimaryButtonStyle}" Margin="12,22,0,10"/>
+                            </Grid>
+                            <UniformGrid Grid.Row="2" Columns="4" Margin="0,4,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="Computers" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="WaveDeviceCountText" Text="-" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="Source" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="WaveSourceText" Text="-" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="Launchers" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="WaveWrappersText" Text="-" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="Last Run" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="WaveLastRunText" Text="-" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </UniformGrid>
+                            <StackPanel Grid.Row="3">
+                                <TextBlock Text="Run mode"/>
+                                <ComboBox x:Name="WaveModeCombo"/>
+                            </StackPanel>
+                            <WrapPanel Grid.Row="4" VerticalAlignment="Bottom">
+                                <Button x:Name="OpenWaveFolderButton" Content="Folder"/>
+                                <Button x:Name="OpenWaveComputersButton" Content="Computers.txt"/>
+                                <Button x:Name="OpenWaveConfigButton" Content="Wave options"/>
+                                <Button x:Name="RefreshWrappersButton" Content="Refresh launchers"/>
+                            </WrapPanel>
+                        </Grid>
+                    </Border>
+                    <Border Grid.Column="1" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="8,0,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Activity" Foreground="{StaticResource TextBrush}" FontSize="18" FontWeight="SemiBold"/>
+                            <TextBox Grid.Row="1" x:Name="ActivityText" Margin="0,14,0,0" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem x:Name="SinglePcTab" Header="Single PC">
+                <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="0,12,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Margin="0,0,14,0">
+                            <TextBlock Text="Single PC" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
+                            <TextBlock Text="Computer name (short name or FQDN)"/>
+                            <TextBox x:Name="SingleComputerText"/>
+                            <TextBlock Text="Run mode"/>
+                            <ComboBox x:Name="SingleModeCombo"/>
+                            <TextBlock Text="A Single PC Run uses a one-computer Wave created inside its Run folder and the same engine, options and protections as a Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <Button x:Name="LaunchSingleButton" Content="Launch Single PC" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" MinWidth="170"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="14,0,0,0">
+                            <TextBlock Text="Single PC Runs" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
+                            <TextBox x:Name="SingleRunFolderText" IsReadOnly="True"/>
+                            <Button x:Name="OpenSingleRunFolderButton" Content="Open folder" HorizontalAlignment="Left"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </TabItem>
+
+            <TabItem x:Name="NewWaveTab" Header="New Wave">
+                <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="0,12,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Margin="0,0,14,0">
+                            <TextBlock Text="New Wave" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
+                            <TextBlock Text="Wave name (letters, digits, dot, dash, underscore)"/>
+                            <TextBox x:Name="NewWaveNameText"/>
+                            <TextBlock Text="Computers (one per line, optional)"/>
+                            <TextBox x:Name="NewWaveComputersText" AcceptsReturn="True" Height="220" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+                            <TextBlock Text="Create only prepares the Wave folder, Computers.txt, Wave.local.json and the Loop/Once launchers. It never launches the Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <Button x:Name="CreateWaveButton" Content="Create Wave" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" MinWidth="140"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="14,0,0,0">
+                            <TextBlock Text="Created Wave" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
+                            <TextBox x:Name="NewWavePathText" IsReadOnly="True"/>
+                            <Button x:Name="OpenNewWaveComputersButton" Content="Open Computers.txt" HorizontalAlignment="Left"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </TabItem>
+
+            <TabItem x:Name="AutomaticWaveTab" Header="Automatic Wave">
+                <Grid Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="0.95*"/>
+                        <ColumnDefinition Width="1.05*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="16" Margin="0,0,8,0">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <TextBlock Text="Selection" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,10"/>
+                                <TextBlock x:Name="AutomaticInventoryStatusText" Text="-" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                <Button x:Name="AutomaticRefreshInventoryButton" Content="Refresh shared inventories" HorizontalAlignment="Left"/>
+                                <TextBlock Text="Wave name" Margin="0,8,0,0"/>
+                                <TextBox x:Name="AutomaticWaveNameText"/>
+                                <TextBlock Text="Computer name prefixes (separated by ;)"/>
+                                <TextBox x:Name="AutomaticNamePrefixText"/>
+                                <TextBlock Text="Computer name contains (separated by ;)"/>
+                                <TextBox x:Name="AutomaticNameContainsText"/>
+                                <StackPanel x:Name="AutomaticSourcePanel">
+                                    <TextBlock Text="Inventory source"/>
+                                    <ComboBox x:Name="AutomaticSourceCombo"/>
+                                    <CheckBox x:Name="AutomaticExcludeIntuneCheck" Content="Exclude devices present in Intune"/>
+                                </StackPanel>
+                                <CheckBox x:Name="AutomaticExcludeStaleAdCheck" Content="Exclude computers without a recent AD logon"/>
+                                <TextBlock Text="Maximum AD logon age (days)" Margin="0,6,0,0"/>
+                                <Grid Margin="0,4,0,10" Width="160" HorizontalAlignment="Left">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="32"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="32"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="AutomaticLastLogonDaysDownButton" Grid.Column="0" Content="-" Style="{StaticResource StepperButtonStyle}"/>
+                                    <TextBox x:Name="AutomaticLastLogonDaysText" Grid.Column="1" Text="45" Style="{StaticResource NumericTextBoxStyle}"/>
+                                    <Button x:Name="AutomaticLastLogonDaysUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
+                                </Grid>
+                                <WrapPanel>
+                                    <Button x:Name="AutomaticPreviewButton" Content="Preview" MinWidth="110"/>
+                                    <Button x:Name="AutomaticCreateButton" Content="Create Wave" Style="{StaticResource PrimaryButtonStyle}" MinWidth="130"/>
+                                </WrapPanel>
+                                <TextBlock Text="Preview never creates anything. Create is available only for the previewed filters and never launches the Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+                    <Border Grid.Column="1" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="16" Margin="8,0,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Preview" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                            <TextBox Grid.Row="1" x:Name="AutomaticSummaryText" Margin="0,12,0,0" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="AutomaticEvidencePathText" IsReadOnly="True" Margin="0,8,8,0"/>
+                                <Button Grid.Column="1" x:Name="AutomaticOpenEvidenceButton" Content="Evidence"/>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem x:Name="RunsTab" Header="Runs">
+                <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="16" Margin="0,12,0,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Runs and reports" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                            <TextBlock x:Name="ActiveRunsText" Text="-" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,8" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <DataGrid Grid.Row="1" x:Name="RunsGrid" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" HeadersVisibility="Column" GridLinesVisibility="Horizontal" BorderBrush="#D8E4F0">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Wave" Binding="{Binding WaveName}" Width="160"/>
+                                <DataGridTextColumn Header="Run" Binding="{Binding RunId}" Width="170"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="130"/>
+                                <DataGridTextColumn Header="Cycles" Binding="{Binding Cycles}" Width="60"/>
+                                <DataGridTextColumn Header="Started (UTC)" Binding="{Binding StartedUtc}" Width="170"/>
+                                <DataGridTextColumn Header="Updated (UTC)" Binding="{Binding UpdatedUtc}" Width="170"/>
+                                <DataGridTextColumn Header="Technician" Binding="{Binding Technician}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <WrapPanel Grid.Row="2" Margin="0,8,0,0">
+                            <Button x:Name="RefreshRunsButton" Content="Refresh"/>
+                            <Button x:Name="OpenRunReportButton" Content="Open report"/>
+                            <Button x:Name="OpenRunFolderButton" Content="Open Run folder"/>
+                            <Button x:Name="StopSelectedRunButton" Content="Controlled stop" Background="#FFF4E5" Foreground="#9A3412" BorderBrush="#FDBA74"/>
+                            <Button x:Name="ForceStopSelectedRunButton" Content="Force local stop" Background="#FDECEC" Foreground="#991B1B" BorderBrush="#FCA5A5"/>
+                        </WrapPanel>
+                    </Grid>
+                </Border>
+            </TabItem>
+
+            <TabItem x:Name="OptionsTab" Header="Options">
+                <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="16" Margin="0,12,0,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel>
+                            <TextBlock x:Name="OptionsCampaignText" Text="Options" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                            <TextBlock Text="These choices are captured for each Run of this Campaign and win over the Wave and global configuration. Empty text fields keep the Wave or global value. Hover an option for its unit, default and environment variable." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,8"/>
+                        </StackPanel>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="OptionsHost"/>
+                        </ScrollViewer>
+                        <WrapPanel Grid.Row="2" Margin="0,8,0,0">
+                            <Button x:Name="SaveOptionsButton" Content="Save choices"/>
+                            <Button x:Name="ResetOptionsButton" Content="Reset to defaults"/>
+                        </WrapPanel>
+                    </Grid>
+                </Border>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</Window>
+'@
+
+$reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]::new($xaml))
+$window = [Windows.Markup.XamlReader]::Load($reader)
+$controls = @{}
+foreach ($match in [regex]::Matches($xaml, 'x:Name="(?<Name>[A-Za-z][A-Za-z0-9_]*)"')) {
+    $name = $match.Groups['Name'].Value
+    $control = $window.FindName($name)
+    if ($control) { $controls[$name] = $control }
+}
+$controls.ProductVersionText.Text = 'v{0}' -f $script:GuiVersion
+
+$iconPath = Join-Path $script:PackageRoot 'Assets\WorkplaceCloudHub.ico'
+if (Test-Path -LiteralPath $iconPath -PathType Leaf) { try { $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]$iconPath) } catch { } }
+$logoPath = Join-Path $script:PackageRoot 'Assets\WorkplaceCloudHub-lockup-WPF.png'
+if (Test-Path -LiteralPath $logoPath -PathType Leaf) {
+    try {
+        $bitmap = [System.Windows.Media.Imaging.BitmapImage]::new()
+        $bitmap.BeginInit(); $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad; $bitmap.UriSource = [Uri]$logoPath; $bitmap.EndInit(); $bitmap.Freeze()
+        $controls.HeaderLogoImage.Source = $bitmap
+    }
+    catch { }
+}
+
+#region UI helpers
+
+function Add-Status {
+    param([string]$Message,[string]$Title = 'Ready')
+    $controls.StatusTitle.Text = $Title
+    $controls.StatusText.Text = $Message
+    $controls.ActivityText.AppendText(('{0:yyyy-MM-dd HH:mm:ss}  {1}' -f (Get-Date),$Message) + [Environment]::NewLine)
+    $controls.ActivityText.ScrollToEnd()
+}
+
+function Show-GuiError {
+    param([string]$Message)
+    [System.Windows.MessageBox]::Show($window, $Message, 'Smart Endpoint Migration Toolkit', 'OK', 'Error') | Out-Null
+}
+
+function Show-GuiQuestion {
+    param([string]$Message,[string]$Title = 'Confirm')
+    return ([System.Windows.MessageBox]::Show($window, $Message, $Title, 'YesNo', 'Question') -eq [System.Windows.MessageBoxResult]::Yes)
+}
+
+function Open-ShellPath {
+    param([AllowNull()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { Show-GuiError ("Path not found: {0}" -f $Path); return }
+    Start-Process -FilePath $Path | Out-Null
+}
+
+function Open-TextFile {
+    param([AllowNull()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { Show-GuiError ("File not found: {0}" -f $Path); return }
+    Start-Process -FilePath 'notepad.exe' -ArgumentList @(('"{0}"' -f $Path)) | Out-Null
+}
+
+function Get-SelectedCampaign {
+    $item = $controls.CampaignCombo.SelectedItem
+    if ($null -eq $item) { return 'HybridJoin' }
+    return [string]$item.Tag
+}
+
+function Register-NumericStepper {
+    param($TextBox,$DownButton,$UpButton,[int]$Minimum,[int]$Maximum,[int]$Step = 1)
+    $state = [pscustomobject]@{ TextBox = $TextBox; Minimum = $Minimum; Maximum = $Maximum; Step = $Step }
+    $handler = {
+        param($eventSource,$routedEventArgs)
+        $target = $eventSource.Tag
+        $value = 0
+        if (-not [int]::TryParse([string]$target.TextBox.Text, [ref]$value)) { $value = $target.Minimum }
+        if ([string]$eventSource.Content -eq '+') { $value += $target.Step } else { $value -= $target.Step }
+        if ($value -lt $target.Minimum) { $value = $target.Minimum }
+        if ($value -gt $target.Maximum) { $value = $target.Maximum }
+        $target.TextBox.Text = [string]$value
+    }
+    $DownButton.Tag = $state; $UpButton.Tag = $state
+    $DownButton.Add_Click($handler); $UpButton.Add_Click($handler)
+}
+
+function Add-SemtGuiOptionControls {
+    <#
+    Builds one editor per GUI-visible option of the Campaign, grouped by category: check box
+    for booleans, numeric stepper for integers, combo box for choices, text box for strings and
+    paths. The demo profile reuses this function so demonstrations show the real options.
+    #>
+    param([Parameter(Mandatory = $true)]$OptionsHost,[Parameter(Mandatory = $true)]$Catalog,[Parameter(Mandatory = $true)][string]$Campaign,[hashtable]$Values = @{})
+
+    $OptionsHost.Children.Clear()
+    $editors = @{}
+    $definitions = @(Get-SemtCampaignOptionDefinitions -Catalog $Catalog -Campaign $Campaign | Where-Object { $_.GuiVisible })
+    $categories = @($script:CategoryOrder) + @($definitions | ForEach-Object { [string]$_.Category } | Where-Object { $script:CategoryOrder -notcontains $_ } | Select-Object -Unique)
+    foreach ($category in $categories) {
+        $items = @($definitions | Where-Object { [string]$_.Category -eq $category })
+        if ($items.Count -eq 0) { continue }
+        $group = New-Object System.Windows.Controls.GroupBox
+        $group.Header = $category
+        $group.Margin = [System.Windows.Thickness]::new(0,0,0,10)
+        $group.Padding = [System.Windows.Thickness]::new(8)
+        $panel = New-Object System.Windows.Controls.WrapPanel
+        foreach ($definition in $items) {
+            $name = [string]$definition.Name
+            $default = Get-SemtOptionDefault -Definition $definition -Campaign $Campaign
+            $value = if ($Values.ContainsKey($name)) { $Values[$name] } else { $default }
+            $tip = '{0}{1}Default: {2}{3}{1}Option: {4}; environment: {5}' -f $definition.Description,[Environment]::NewLine,$default,$(if ($definition.Unit) { ' ' + $definition.Unit } else { '' }),$name,$definition.EnvVar
+            $cell = New-Object System.Windows.Controls.StackPanel
+            $cell.Width = 340
+            $cell.Margin = [System.Windows.Thickness]::new(0,0,14,6)
+            $cell.ToolTip = $tip
+            $control = $null
+            switch ([string]$definition.Type) {
+                'Boolean' {
+                    $control = New-Object System.Windows.Controls.CheckBox
+                    $control.Content = [string]$definition.Label
+                    $control.IsChecked = [bool]$value
+                    $control.ToolTip = $tip
+                    [void]$cell.Children.Add($control)
+                }
+                'Integer' {
+                    $label = New-Object System.Windows.Controls.TextBlock
+                    $label.Text = if ($definition.Unit) { '{0} ({1})' -f $definition.Label,$definition.Unit } else { [string]$definition.Label }
+                    $label.TextWrapping = 'Wrap'
+                    [void]$cell.Children.Add($label)
+                    $grid = New-Object System.Windows.Controls.Grid
+                    $grid.Width = 170; $grid.HorizontalAlignment = 'Left'; $grid.Margin = [System.Windows.Thickness]::new(0,4,0,4)
+                    foreach ($width in @(32,0,32)) { $column = New-Object System.Windows.Controls.ColumnDefinition; $column.Width = if ($width -gt 0) { [System.Windows.GridLength]::new($width) } else { [System.Windows.GridLength]::new(1,'Star') }; [void]$grid.ColumnDefinitions.Add($column) }
+                    $down = New-Object System.Windows.Controls.Button; $down.Content = '-'; $down.Style = $window.Resources['StepperButtonStyle']
+                    $text = New-Object System.Windows.Controls.TextBox; $text.Text = [string]$value; $text.Style = $window.Resources['NumericTextBoxStyle']; [System.Windows.Controls.Grid]::SetColumn($text, 1)
+                    $up = New-Object System.Windows.Controls.Button; $up.Content = '+'; $up.Style = $window.Resources['StepperButtonStyle']; [System.Windows.Controls.Grid]::SetColumn($up, 2)
+                    [void]$grid.Children.Add($down); [void]$grid.Children.Add($text); [void]$grid.Children.Add($up)
+                    $minimum = [int](Get-SemtPropertyValue -InputObject $definition -Name 'Minimum' -Default 0)
+                    $maximum = [int](Get-SemtPropertyValue -InputObject $definition -Name 'Maximum' -Default 100000)
+                    $range = $maximum - $minimum
+                    $step = if ($range -ge 2000) { 10 } else { 1 }
+                    Register-NumericStepper -TextBox $text -DownButton $down -UpButton $up -Minimum $minimum -Maximum $maximum -Step $step
+                    [void]$cell.Children.Add($grid)
+                    $control = $text
+                }
+                'Choice' {
+                    $label = New-Object System.Windows.Controls.TextBlock; $label.Text = [string]$definition.Label; [void]$cell.Children.Add($label)
+                    $control = New-Object System.Windows.Controls.ComboBox
+                    foreach ($choice in @($definition.Choices)) { [void]$control.Items.Add([string]$choice) }
+                    $control.SelectedItem = [string]$value
+                    [void]$cell.Children.Add($control)
+                }
+                default {
+                    $label = New-Object System.Windows.Controls.TextBlock; $label.Text = [string]$definition.Label; $label.TextWrapping = 'Wrap'; [void]$cell.Children.Add($label)
+                    $control = New-Object System.Windows.Controls.TextBox
+                    $control.Text = [string]$value
+                    [void]$cell.Children.Add($control)
+                }
+            }
+            $editors[$name] = [pscustomobject]@{ Definition = $definition; Control = $control }
+            [void]$panel.Children.Add($cell)
+        }
+        $group.Content = $panel
+        [void]$OptionsHost.Children.Add($group)
+    }
+    return $editors
+}
+
+function Get-SemtGuiOptionValues {
+    param([Parameter(Mandatory = $true)][hashtable]$Editors)
+    $values = @{}
+    foreach ($entry in $Editors.GetEnumerator()) {
+        $definition = $entry.Value.Definition
+        $control = $entry.Value.Control
+        $raw = switch ([string]$definition.Type) {
+            'Boolean' { [bool]$control.IsChecked }
+            'Choice' { [string]$control.SelectedItem }
+            default { [string]$control.Text }
+        }
+        $values[$entry.Key] = ConvertTo-SemtOptionValue -Definition $definition -Value $raw -Source ('GUI field "{0}"' -f $definition.Label)
+    }
+    return $values
+}
+
+#endregion
+
+$script:Catalog = Import-SemtOptionCatalog -PackageRoot $script:PackageRoot
+$script:Editors = @{}
+$script:CurrentCampaign = ''
+$script:Waves = @()
+$script:SelectedWave = $null
+$script:LaunchQueue = New-Object System.Collections.Queue
+$script:LaunchTimer = $null
+$script:AutomaticPreviewSignature = ''
+$script:AutomaticProcess = $null
+$script:AutomaticTimer = $null
+
+foreach ($campaign in $script:CampaignTitles.Keys) {
+    $item = New-Object System.Windows.Controls.ComboBoxItem
+    $item.Content = $script:CampaignTitles[$campaign]
+    $item.Tag = $campaign
+    [void]$controls.CampaignCombo.Items.Add($item)
+}
+foreach ($combo in @($controls.WaveModeCombo,$controls.SingleModeCombo)) { foreach ($mode in $script:RunModes.Keys) { [void]$combo.Items.Add($mode) } }
+$controls.WaveModeCombo.SelectedIndex = 0
+$controls.SingleModeCombo.SelectedIndex = 1
+foreach ($source in @('Both','AD','Intune')) { [void]$controls.AutomaticSourceCombo.Items.Add($source) }
+$controls.AutomaticSourceCombo.SelectedIndex = 0
+Register-NumericStepper -TextBox $controls.AutomaticLastLogonDaysText -DownButton $controls.AutomaticLastLogonDaysDownButton -UpButton $controls.AutomaticLastLogonDaysUpButton -Minimum 1 -Maximum 3650
+
+function Save-CurrentCampaignState {
+    param([switch]$Quiet)
+    if ($ValidateOnly -or [string]::IsNullOrWhiteSpace($script:CurrentCampaign) -or $script:Editors.Count -eq 0) { return $true }
+    try {
+        $values = Get-SemtGuiOptionValues -Editors $script:Editors
+        Save-GuiState -Campaign $script:CurrentCampaign -Values $values
+        return $true
+    }
+    catch {
+        if (-not $Quiet) { Show-GuiError $_.Exception.Message }
+        return $false
+    }
+}
+
+function Update-WaveView {
+    $wave = $script:SelectedWave
+    if ($null -eq $wave) {
+        foreach ($name in @('WaveDeviceCountText','WaveSourceText','WaveWrappersText','WaveLastRunText')) { $controls[$name].Text = '-' }
+        $controls.LaunchWaveButton.IsEnabled = $false
+        return
+    }
+    $controls.WaveDeviceCountText.Text = [string]$wave.ComputerCount
+    $source = 'Manual'
+    try {
+        $config = Read-SemtJsonFile -Path (Join-Path $wave.Path 'Wave.local.json')
+        if ($config) { $source = ('{0} {1}' -f (Get-SemtPropertyValue -InputObject $config -Name 'Source' -Default 'Manual'),(Get-SemtPropertyValue -InputObject $config -Name 'Description' -Default '')).Trim() }
+    }
+    catch { $source = 'Wave.local.json unreadable' }
+    $controls.WaveSourceText.Text = $source
+    $controls.WaveWrappersText.Text = if ($wave.WrappersReady) { 'Ready' } else { 'Missing: ' + $wave.MissingWrappers }
+    $last = @(Get-SemtRuns -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Last 200 | Where-Object { $_.WaveName -eq $wave.Name } | Select-Object -First 1)
+    $controls.WaveLastRunText.Text = if ($last.Count -gt 0) { '{0} ({1})' -f $last[0].Status,$last[0].UpdatedUtc } else { 'Never' }
+    $controls.LaunchWaveButton.IsEnabled = [bool]$wave.Launchable
+}
+
+function Update-WaveList {
+    param([string]$SelectName)
+    $script:Waves = @(Get-SemtWaves -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign)
+    $controls.WaveCombo.Items.Clear()
+    foreach ($wave in $script:Waves) { [void]$controls.WaveCombo.Items.Add(('{0}  ({1} computer(s))' -f $wave.Name,$wave.ComputerCount)) }
+    $index = 0
+    if (-not [string]::IsNullOrWhiteSpace($SelectName)) { for ($i = 0; $i -lt $script:Waves.Count; $i++) { if ($script:Waves[$i].Name -eq $SelectName) { $index = $i } } }
+    if ($script:Waves.Count -gt 0) { $controls.WaveCombo.SelectedIndex = $index } else { $script:SelectedWave = $null; Update-WaveView }
+    $hasLaunchable = (@($script:Waves | Where-Object { $_.Launchable }).Count -gt 0)
+    $controls.LaunchAllButton.IsEnabled = $hasLaunchable
+    $controls.WaveCombo.IsEnabled = ($script:Waves.Count -gt 0)
+}
+
+function Update-RunsView {
+    $runs = @(Get-SemtRuns -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Last 100)
+    $controls.RunsGrid.ItemsSource = $runs
+    $active = @(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') -Campaign $script:CurrentCampaign | Where-Object { $_.Alive })
+    $controls.ActiveRunsText.Text = if ($active.Count -eq 0) { 'No Run of this Campaign is active on this technician computer.' } else { '{0} active Run(s): {1}' -f $active.Count,((@($active) | ForEach-Object { '{0} [{1}]' -f $_.WaveName,$_.Status }) -join ', ') }
+    $singleRoot = Join-Path $script:PackageRoot ("Runs\{0}\_SinglePC" -f $script:CurrentCampaign)
+    $controls.SingleRunFolderText.Text = $singleRoot
+}
+
+function Update-AutomaticView {
+    $isWindows11 = ($script:CurrentCampaign -eq 'Windows11Upgrade')
+    $controls.AutomaticSourcePanel.Visibility = if ($isWindows11) { 'Visible' } else { 'Collapsed' }
+    $kinds = if ($isWindows11) { @('AD','Intune') } else { @('AD','Intune','Entra') }
+    $parts = foreach ($kind in $kinds) {
+        $maxAge = if ($kind -eq 'AD') { 12 } else { 2 }
+        $check = Test-SemtSharedInventoryUsable -Path (Get-SemtSharedInventoryPath -PackageRoot $script:PackageRoot -Kind $kind) -Kind $kind -MaxAgeHours $maxAge
+        '{0}: {1}' -f $kind,$(if ($null -ne $check.AgeHours) { '{0} ({1} h)' -f $check.Reason,$check.AgeHours } else { $check.Reason })
+    }
+    $controls.AutomaticInventoryStatusText.Text = 'Shared inventories - ' + ($parts -join '; ')
+    if ([string]::IsNullOrWhiteSpace($controls.AutomaticWaveNameText.Text) -or $controls.AutomaticWaveNameText.Text -like 'WAVE-AUTO-*') {
+        $prefix = if ($isWindows11) { 'W10' } else { 'HJ' }
+        $controls.AutomaticWaveNameText.Text = 'WAVE-AUTO-{0}-{1}' -f $prefix,(Get-Date -Format 'yyyyMMdd-HHmmss')
+    }
+    $script:AutomaticPreviewSignature = ''
+    $controls.AutomaticCreateButton.IsEnabled = $false
+}
+
+function Switch-Campaign {
+    $new = Get-SelectedCampaign
+    if ($new -eq $script:CurrentCampaign) { return }
+    if (-not [string]::IsNullOrWhiteSpace($script:CurrentCampaign)) { [void](Save-CurrentCampaignState -Quiet) }
+    $script:CurrentCampaign = $new
+    $values = Get-GuiInitialOptionValues -Catalog $script:Catalog -Campaign $new
+    $script:Editors = Add-SemtGuiOptionControls -OptionsHost $controls.OptionsHost -Catalog $script:Catalog -Campaign $new -Values $values
+    $controls.OptionsCampaignText.Text = 'Options - {0}' -f $script:CampaignTitles[$new]
+    Update-WaveList
+    Update-RunsView
+    Update-AutomaticView
+    Add-Status -Message ('Campaign selected: {0}. Options and selections are kept separately for each Campaign.' -f $script:CampaignTitles[$new])
+}
+
+function Start-GuiRun {
+    param([string]$WavePath,[string]$ComputerName,[Parameter(Mandatory = $true)][string]$ModeKey,[Parameter(Mandatory = $true)][string]$TargetText,[switch]$SkipConfirmation)
+
+    $campaign = $script:CurrentCampaign
+    $values = Get-SemtGuiOptionValues -Editors $script:Editors
+    $mode = $script:RunModes[$ModeKey]
+    $runMode = [string]$mode[0]
+    $ignoreGuard = [bool]$mode[1]
+    if (-not $SkipConfirmation) {
+        $summary = Get-GuiLaunchSummary -Catalog $script:Catalog -Campaign $campaign -Values $values -Target $TargetText -RunMode $runMode -IgnoreRunGuard $ignoreGuard
+        if (-not (Show-GuiQuestion -Message ($summary + [Environment]::NewLine + [Environment]::NewLine + 'Launch now in an elevated console?') -Title 'Confirm launch')) { return $false }
+        if ((Test-UnlimitedCycleConfirmationRequired -RunMode $runMode -MaxCycles ([int]$values['MaxCycles'])) -and -not (Show-GuiQuestion -Message 'Loop mode with no cycle limit repeats until every computer is complete or the Run is stopped. Continue?' -Title 'Unlimited cycles')) { return $false }
+    }
+    Save-GuiState -Campaign $campaign -Values $values
+    $selection = New-GuiSelectionFile -Catalog $script:Catalog -Campaign $campaign -Values $values
+    $command = Get-GuiRunCommand -Campaign $campaign -WavePath $WavePath -ComputerName $ComputerName -RunMode $runMode -IgnoreRunGuard $ignoreGuard -SelectionPath $selection
+    $title = 'SEMT {0} - {1} - {2}' -f $campaign,$TargetText,$runMode
+    $launcher = New-GuiLaunchCommandFile -WorkingDirectory (Join-Path $script:PackageRoot 'Scripts') -Commands @($command) -NamePrefix ('SEMT-{0}' -f $campaign) -WindowTitle $title -EvidenceDirectory (Split-Path $selection -Parent) -PauseWhenDone
+    Start-GuiLaunchCommandFile -LaunchCommandPath $launcher -WorkingDirectory (Join-Path $script:PackageRoot 'Scripts')
+    Add-Status -Title 'Launched' -Message ('{0}: elevated console started. Choices captured in {1}' -f $TargetText,$selection)
+    return $true
+}
+
+function Invoke-LaunchQueueTick {
+    if ($script:LaunchQueue.Count -eq 0) {
+        if ($script:LaunchTimer) { $script:LaunchTimer.Stop() }
+        Add-Status -Message 'Launch All Waves: every queued Wave was started.'
+        return
+    }
+    $wave = $script:LaunchQueue.Dequeue()
+    try { [void](Start-GuiRun -WavePath $wave.Path -ModeKey ([string]$controls.WaveModeCombo.SelectedItem) -TargetText ("Wave '{0}'" -f $wave.Name) -SkipConfirmation) }
+    catch { Add-Status -Title 'Launch failed' -Message ('{0}: {1}' -f $wave.Name,$_.Exception.Message) }
+}
+
+function Invoke-AutomaticWave {
+    param([switch]$Create)
+
+    $campaign = $script:CurrentCampaign
+    $filters = @{
+        WaveName = $controls.AutomaticWaveNameText.Text.Trim()
+        Prefixes = @(Split-GuiList $controls.AutomaticNamePrefixText.Text)
+        Contains = @(Split-GuiList $controls.AutomaticNameContainsText.Text)
+        ExcludeStaleAd = [bool]$controls.AutomaticExcludeStaleAdCheck.IsChecked
+        LastLogonDays = [int]$controls.AutomaticLastLogonDaysText.Text
+        Source = [string]$controls.AutomaticSourceCombo.SelectedItem
+        ExcludeIntunePresent = [bool]$controls.AutomaticExcludeIntuneCheck.IsChecked
+    }
+    if (-not (Test-SemtWaveName -Name $filters.WaveName)) { throw ("'{0}' is not a valid Wave name." -f $filters.WaveName) }
+    $signature = Get-AutomaticFilterSignature -Campaign $campaign -Filters $filters
+    if ($Create -and $signature -ne $script:AutomaticPreviewSignature) { throw 'The filters changed since the last preview. Run Preview again before Create.' }
+    if ($Create -and -not (Show-GuiQuestion -Message ("Create Wave '{0}' from the previewed selection?{1}{1}The Wave is created but NOT launched." -f $filters.WaveName,[Environment]::NewLine) -Title 'Create Wave')) { return }
+    $evidence = Join-Path $script:PackageRoot ("Runs\{0}\_AutomaticWave\{1}" -f $campaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
+    New-SemtDirectory -Path $evidence
+    $commandText = Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot $evidence -Create:$Create
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(("`$ErrorActionPreference='Stop'; {0} *> '{1}'" -f $commandText,(Join-Path $evidence 'GuiAutomaticWave.log').Replace("'","''"))))
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $script:AutomaticProcess = Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru
+    $controls.AutomaticPreviewButton.IsEnabled = $false
+    $controls.AutomaticCreateButton.IsEnabled = $false
+    $controls.AutomaticEvidencePathText.Text = $evidence
+    $controls.AutomaticSummaryText.Text = if ($Create) { 'Creating the Wave...' } else { 'Previewing the selection...' }
+    Add-Status -Title 'Automatic Wave' -Message $controls.AutomaticSummaryText.Text
+    $state = [pscustomobject]@{ Create = [bool]$Create; Evidence = $evidence; Signature = $signature; WaveName = $filters.WaveName }
+    $script:AutomaticTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:AutomaticTimer.Interval = [TimeSpan]::FromSeconds(1)
+    $script:AutomaticTimer.Tag = $state
+    $script:AutomaticTimer.Add_Tick({
+        param($eventSource,$routedEventArgs)
+        if (-not $script:AutomaticProcess.HasExited) { return }
+        $eventSource.Stop()
+        $info = $eventSource.Tag
+        $controls.AutomaticPreviewButton.IsEnabled = $true
+        $summaryFile = Get-ChildItem -LiteralPath $info.Evidence -Filter 'AutomaticWaveSummary.json' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        $logFile = Join-Path $info.Evidence 'GuiAutomaticWave.log'
+        $logText = if (Test-Path -LiteralPath $logFile) { (Get-Content -LiteralPath $logFile -Raw -ErrorAction SilentlyContinue) } else { '' }
+        if ($script:AutomaticProcess.ExitCode -ne 0 -or -not $summaryFile) {
+            $controls.AutomaticSummaryText.Text = ('Automatic Wave failed (exit code {0}).{1}{2}' -f $script:AutomaticProcess.ExitCode,[Environment]::NewLine,$logText)
+            Add-Status -Title 'Automatic Wave failed' -Message ('See {0}' -f $logFile)
+            return
+        }
+        $summary = Get-Content -LiteralPath $summaryFile.FullName -Raw | ConvertFrom-Json
+        $controls.AutomaticSummaryText.Text = ($summary | ConvertTo-Json -Depth 6)
+        if ($info.Create) {
+            Add-Status -Title 'Wave created' -Message ("Wave '{0}' created from the automatic selection. It was not launched." -f $info.WaveName)
+            Update-WaveList -SelectName $info.WaveName
+            Update-AutomaticView
+        }
+        else {
+            $script:AutomaticPreviewSignature = $info.Signature
+            $controls.AutomaticCreateButton.IsEnabled = $true
+            Add-Status -Title 'Preview ready' -Message 'Review the selection, then Create the Wave or change the filters.'
+        }
+    })
+    $script:AutomaticTimer.Start()
+}
+
+#region Events
+
+$controls.HeaderLogoLink.Add_MouseLeftButtonUp({ try { Start-Process 'https://workplacecloudhub.com' | Out-Null } catch { } })
+$controls.CampaignCombo.Add_SelectionChanged({ try { Switch-Campaign } catch { Show-GuiError $_.Exception.Message } })
+$controls.WaveCombo.Add_SelectionChanged({
+    $index = $controls.WaveCombo.SelectedIndex
+    $script:SelectedWave = if ($index -ge 0 -and $index -lt $script:Waves.Count) { $script:Waves[$index] } else { $null }
+    try { Update-WaveView } catch { Show-GuiError $_.Exception.Message }
+})
+$controls.RefreshButton.Add_Click({ try { $name = if ($script:SelectedWave) { $script:SelectedWave.Name } else { '' }; Update-WaveList -SelectName $name; Update-RunsView; Update-AutomaticView; Add-Status -Message 'Refreshed.' } catch { Show-GuiError $_.Exception.Message } })
+$controls.LaunchWaveButton.Add_Click({
+    try {
+        $wave = $script:SelectedWave
+        if ($null -eq $wave) { return }
+        if (@(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') -Campaign $script:CurrentCampaign | Where-Object { $_.Alive -and $_.WaveName -eq $wave.Name }).Count -gt 0) { Show-GuiError ("Wave '{0}' is already running." -f $wave.Name); return }
+        [void](Start-GuiRun -WavePath $wave.Path -ModeKey ([string]$controls.WaveModeCombo.SelectedItem) -TargetText ("Wave '{0}' ({1} computer(s))" -f $wave.Name,$wave.ComputerCount))
+    }
+    catch { Show-GuiError $_.Exception.Message }
+})
+$controls.LaunchAllButton.Add_Click({
+    try {
+        $active = @(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') -Campaign $script:CurrentCampaign | Where-Object { $_.Alive } | ForEach-Object { $_.WaveName })
+        $ready = @($script:Waves | Where-Object { $_.Launchable -and $active -notcontains $_.Name })
+        if ($ready.Count -eq 0) { Show-GuiError 'No launchable Wave of this Campaign is waiting.'; return }
+        $values = Get-SemtGuiOptionValues -Editors $script:Editors
+        $mode = $script:RunModes[[string]$controls.WaveModeCombo.SelectedItem]
+        $summary = Get-GuiLaunchSummary -Catalog $script:Catalog -Campaign $script:CurrentCampaign -Values $values -Target ('{0} Wave(s): {1}' -f $ready.Count,((@($ready) | ForEach-Object { $_.Name }) -join ', ')) -RunMode ([string]$mode[0]) -IgnoreRunGuard ([bool]$mode[1])
+        if (-not (Show-GuiQuestion -Message ($summary + [Environment]::NewLine + [Environment]::NewLine + 'Launch All Waves of this Campaign only, one every 5 seconds?') -Title 'Launch All Waves')) { return }
+        if ((Test-UnlimitedCycleConfirmationRequired -RunMode ([string]$mode[0]) -MaxCycles ([int]$values['MaxCycles'])) -and -not (Show-GuiQuestion -Message 'Loop mode with no cycle limit repeats until every computer is complete or the Run is stopped. Continue?' -Title 'Unlimited cycles')) { return }
+        $script:LaunchQueue.Clear()
+        foreach ($wave in $ready) { $script:LaunchQueue.Enqueue($wave) }
+        Invoke-LaunchQueueTick
+        $script:LaunchTimer = New-Object System.Windows.Threading.DispatcherTimer
+        $script:LaunchTimer.Interval = [TimeSpan]::FromSeconds(5)
+        $script:LaunchTimer.Add_Tick({ Invoke-LaunchQueueTick })
+        $script:LaunchTimer.Start()
+    }
+    catch { Show-GuiError $_.Exception.Message }
+})
+$controls.StopAllButton.Add_Click({
+    try {
+        $active = @(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') -Campaign $script:CurrentCampaign | Where-Object { $_.Alive })
+        if ($active.Count -eq 0) { Add-Status -Message 'No active Run of this Campaign.'; return }
+        $force = (@($active | Where-Object { Test-Path -LiteralPath $_.SignalPath -PathType Leaf }).Count -gt 0)
+        $question = if ($force) { 'A controlled stop was already requested. Force the local stop of running workers? Remote endpoints may continue and must be verified before relaunch.' } else { 'Request a controlled stop of {0} active Run(s) of this Campaign? No new computer starts; running workers finish.' -f $active.Count }
+        if (-not (Show-GuiQuestion -Message $question -Title 'Stop running Waves')) { return }
+        foreach ($run in $active) { [void](Request-SemtRunStop -ActiveRun $run -Force:$force) }
+        Add-Status -Title 'Stop requested' -Message ('{0} Run(s): {1}' -f $active.Count,$(if ($force) { 'forced local stop' } else { 'controlled stop' }))
+        Update-RunsView
+    }
+    catch { Show-GuiError $_.Exception.Message }
+})
+$controls.OpenWaveFolderButton.Add_Click({ if ($script:SelectedWave) { Open-ShellPath $script:SelectedWave.Path } })
+$controls.OpenWaveComputersButton.Add_Click({ if ($script:SelectedWave) { Open-TextFile $script:SelectedWave.ComputersPath } })
+$controls.OpenWaveConfigButton.Add_Click({ if ($script:SelectedWave) { Open-TextFile (Join-Path $script:SelectedWave.Path 'Wave.local.json') } })
+$controls.RefreshWrappersButton.Add_Click({
+    try {
+        if ($null -eq $script:SelectedWave) { return }
+        [void](Write-SemtWaveWrappers -WavePath $script:SelectedWave.Path)
+        Update-WaveList -SelectName $script:SelectedWave.Name
+        Add-Status -Message ("Launchers refreshed for Wave '{0}'." -f $script:SelectedWave.Name)
+    }
+    catch { Show-GuiError $_.Exception.Message }
+})
+$controls.LaunchSingleButton.Add_Click({
+    try {
+        $name = ConvertTo-SemtComputerName -Line $controls.SingleComputerText.Text
+        if ([string]::IsNullOrWhiteSpace($name)) { Show-GuiError 'Enter a computer name.'; return }
+        [void](Start-GuiRun -ComputerName $name -ModeKey ([string]$controls.SingleModeCombo.SelectedItem) -TargetText ("Single PC '{0}'" -f $name))
+    }
+    catch { Show-GuiError $_.Exception.Message }
+})
+$controls.OpenSingleRunFolderButton.Add_Click({ $path = $controls.SingleRunFolderText.Text; if (Test-Path -LiteralPath $path) { Open-ShellPath $path } else { Show-GuiError 'No Single PC Run yet for this Campaign.' } })
+$controls.CreateWaveButton.Add_Click({
+    try {
+        $name = $controls.NewWaveNameText.Text.Trim()
+        $computers = @(Split-GuiList $controls.NewWaveComputersText.Text)
+        if (-not (Show-GuiQuestion -Message ("Create Wave '{0}' for {1} with {2} computer(s)?{3}{3}The Wave is created but NOT launched." -f $name,$script:CampaignTitles[$script:CurrentCampaign],$computers.Count,[Environment]::NewLine) -Title 'Create Wave')) { return }
+        $wave = New-SemtWave -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Name $name -Computers $computers -Source Manual
+        $controls.NewWavePathText.Text = $wave.ComputersPath
+        Update-WaveList -SelectName $wave.Name
+        Add-Status -Title 'Wave created' -Message ("Wave '{0}' created ({1} computer(s)). It was not launched." -f $wave.Name,$wave.ComputerCount)
+    }
+    catch { Show-GuiError $_.Exception.Message }
+})
+$controls.OpenNewWaveComputersButton.Add_Click({ Open-TextFile $controls.NewWavePathText.Text })
+foreach ($name in @('AutomaticWaveNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticLastLogonDaysText')) { $controls[$name].Add_TextChanged({ if ($script:AutomaticPreviewSignature) { $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false } }) }
+foreach ($name in @('AutomaticExcludeStaleAdCheck','AutomaticExcludeIntuneCheck')) { $controls[$name].Add_Click({ $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false }) }
+$controls.AutomaticSourceCombo.Add_SelectionChanged({ $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false })
+$controls.AutomaticPreviewButton.Add_Click({ try { Invoke-AutomaticWave } catch { Show-GuiError $_.Exception.Message; $controls.AutomaticPreviewButton.IsEnabled = $true } })
+$controls.AutomaticCreateButton.Add_Click({ try { Invoke-AutomaticWave -Create } catch { Show-GuiError $_.Exception.Message; $controls.AutomaticPreviewButton.IsEnabled = $true } })
+$controls.AutomaticOpenEvidenceButton.Add_Click({ Open-ShellPath $controls.AutomaticEvidencePathText.Text })
+$controls.AutomaticRefreshInventoryButton.Add_Click({
+    try {
+        $kinds = if ($script:CurrentCampaign -eq 'Windows11Upgrade') { @('AD','Intune') } else { @('AD','Intune','Entra') }
+        if (-not (Show-GuiQuestion -Message ('Refresh the shared {0} inventories in a new console? AD needs the ActiveDirectory module; Intune and Entra open an interactive Microsoft Graph sign-in.' -f ($kinds -join ', ')) -Title 'Refresh shared inventories')) { return }
+        $lines = @('$ErrorActionPreference = ''Continue''')
+        foreach ($kind in $kinds) { $lines += ("& {0} -ForceRefresh" -f (ConvertTo-PowerShellLiteral (Join-Path $script:PackageRoot ("Scripts\SmartM365-EndpointMigration-Export-{0}DevicesCsv.ps1" -f $kind)))) }
+        $lines += 'Write-Host ''Done. Close this window and click Refresh in the GUI.'''
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(($lines -join '; ')))
+        Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-EncodedCommand',$encoded) | Out-Null
+        Add-Status -Message 'Inventory refresh started in a new console.'
+    }
+    catch { Show-GuiError $_.Exception.Message }
+})
+$controls.RefreshRunsButton.Add_Click({ try { Update-RunsView } catch { Show-GuiError $_.Exception.Message } })
+$controls.OpenRunReportButton.Add_Click({ $run = $controls.RunsGrid.SelectedItem; if ($run) { $report = [string](Get-SemtPropertyValue -InputObject $run -Name 'ReportPath' -Default ''); if ([string]::IsNullOrWhiteSpace($report)) { $report = @(Get-ChildItem -LiteralPath (Join-Path $run.RunRoot 'Reports') -Filter '*.html' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { $_.FullName }) -join '' }; Open-ShellPath $report } })
+$controls.OpenRunFolderButton.Add_Click({ $run = $controls.RunsGrid.SelectedItem; if ($run) { Open-ShellPath ([string]$run.RunRoot) } })
+foreach ($pair in @(@('StopSelectedRunButton',$false),@('ForceStopSelectedRunButton',$true))) {
+    $button = $controls[$pair[0]]
+    $button.Tag = [bool]$pair[1]
+    $button.Add_Click({
+        param($eventSource,$routedEventArgs)
+        try {
+            $run = $controls.RunsGrid.SelectedItem
+            if ($null -eq $run) { return }
+            $active = @(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') -Campaign $script:CurrentCampaign | Where-Object { $_.Alive -and $_.RunId -eq [string]$run.RunId })
+            if ($active.Count -eq 0) { Add-Status -Message ('Run {0} is not active.' -f $run.RunId); return }
+            $force = [bool]$eventSource.Tag
+            $question = if ($force) { 'Force the local stop of running workers? Remote endpoints may continue and must be verified before relaunch.' } else { 'Request a controlled stop? No new computer starts; running workers finish.' }
+            if (-not (Show-GuiQuestion -Message $question -Title 'Stop Run')) { return }
+            Add-Status -Title 'Stop requested' -Message ('Run {0}: {1}' -f $run.RunId,(Request-SemtRunStop -ActiveRun $active[0] -Force:$force))
+            Update-RunsView
+        }
+        catch { Show-GuiError $_.Exception.Message }
+    })
+}
+$controls.SaveOptionsButton.Add_Click({ if (Save-CurrentCampaignState) { Add-Status -Message ('Choices saved for {0}.' -f $script:CampaignTitles[$script:CurrentCampaign]) } })
+$controls.ResetOptionsButton.Add_Click({
+    try {
+        if (-not (Show-GuiQuestion -Message 'Reset the options of this Campaign to the global configuration and campaign defaults?' -Title 'Reset options')) { return }
+        $values = Get-GuiInitialOptionValues -Catalog $script:Catalog -Campaign $script:CurrentCampaign -IgnoreSavedState
+        $script:Editors = Add-SemtGuiOptionControls -OptionsHost $controls.OptionsHost -Catalog $script:Catalog -Campaign $script:CurrentCampaign -Values $values
+        Save-GuiState -Campaign $script:CurrentCampaign -Values $values
+        Add-Status -Message 'Options reset to defaults.'
+    }
+    catch { Show-GuiError $_.Exception.Message }
+})
+$window.Add_Closing({
+    param($eventSource,$routedEventArgs)
+    [void](Save-CurrentCampaignState -Quiet)
+    $active = @(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') | Where-Object { $_.Alive })
+    if ($active.Count -eq 0) { return }
+    $choice = [System.Windows.MessageBox]::Show($window, ("{0} Run(s) are still active.`n`nYes: request a controlled stop, then close.`nNo: close and leave them running.`nCancel: keep the GUI open." -f $active.Count), 'Active Runs', 'YesNoCancel', 'Warning')
+    if ($choice -eq [System.Windows.MessageBoxResult]::Cancel) { $routedEventArgs.Cancel = $true; return }
+    if ($choice -eq [System.Windows.MessageBoxResult]::Yes) { foreach ($run in $active) { try { [void](Request-SemtRunStop -ActiveRun $run) } catch { } } }
+})
+
+#endregion
+
+$controls.CampaignCombo.SelectedIndex = 0
+if ($ValidateOnly) {
+    for ($index = 0; $index -lt $controls.CampaignCombo.Items.Count; $index++) {
+        $controls.CampaignCombo.SelectedIndex = $index
+        if ($script:Editors.Count -eq 0) { throw ('Options were not generated for {0}.' -f $script:CurrentCampaign) }
+        [void](Get-SemtGuiOptionValues -Editors $script:Editors)
+        Write-Output ('ValidateOnly: GUI {0} loaded; campaign={1}; options={2}; waves={3}.' -f $script:GuiVersion,$script:CurrentCampaign,$script:Editors.Count,$script:Waves.Count)
+    }
+    return
+}
+
+$window.Add_ContentRendered({
+    if ($splash -and (Get-Command -Name Close-SmartM365GuiSplash -ErrorAction SilentlyContinue)) { Close-SmartM365GuiSplash -Splash $splash }
+    if (Get-Command -Name Start-SmartM365GuiUpdateCheck -ErrorAction SilentlyContinue) {
+        try { $script:UpdateCheckTimer = Start-SmartM365GuiUpdateCheck -Owner $window -ManifestPath (Join-Path $PSScriptRoot 'SmartM365.GuiUpdateCheck.psd1') -AppRoot $script:PackageRoot -OnStatus { param([string]$Message,[string]$Title) Add-Status -Title $Title -Message $Message } } catch { }
+    }
+})
+if (Get-Command -Name Set-SmartM365WpfWindowVisible -ErrorAction SilentlyContinue) { $window.Add_SourceInitialized({ Set-SmartM365WpfWindowVisible -Window $window }) }
+[void]$window.ShowDialog()
