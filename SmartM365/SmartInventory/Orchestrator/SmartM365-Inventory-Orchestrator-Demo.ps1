@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.1.2
+1.2.0
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -172,6 +172,60 @@ function Update-OrchestratorDemoEvents {
     $c.EventsSummaryText.Text = 'DEMO - {0} sample event row(s). Resident logs are never read in demo mode.' -f $rows.Count
 }
 
+function New-OrchestratorDemoDashboard {
+    # Same shape as Get-SmartM365OrchestratorDashboard, built from the fictional model only.
+    param([Parameter(Mandatory)]$Data)
+    $clock = $Data.Clock
+    $actions = [Collections.Generic.List[object]]::new()
+    $failed = @($Data.History | Where-Object { $_.Status -eq 'Failed' -and [datetime]$_.EventTime -ge $clock.AddHours(-24) })
+    foreach ($row in $failed | Select-Object -First 3) { $actions.Add([pscustomobject]@{ Severity = 'Critical'; Area = 'Job Failing'; Item = $row.JobName; Detail = 'Sample failure at {0}.' -f $row.EventTime; Target = 'Planning' }) }
+    foreach ($job in @($Data.Jobs | Where-Object Health -eq 'Stale')) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Job Stale'; Item = $job.Name; Detail = ('Last sample success {0} ({1} h).' -f $job.LastSuccess, $job.SuccessAgeHours); Target = 'Planning' }) }
+    foreach ($incident in @($Data.Incidents)) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Peer monitoring'; Item = $incident.ObservedBy; Detail = $incident.Issue; Target = 'Operations' }) }
+    if ($Data.Maintenance) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Maintenance'; Item = 'Scheduling'; Detail = 'Sample maintenance is ON: scheduled launches are suspended.'; Target = 'Operations' }) }
+    foreach ($logEvent in @($Data.LogEvents | Where-Object { $_.Level -eq 'ERROR' })) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Log ' + $logEvent.Category; Item = $logEvent.Server; Detail = $logEvent.Message; Target = 'Events' }) }
+    $sorted = @($actions | Sort-Object @{ Expression = { @{ Critical = 0; Warning = 1; Info = 2 }[$_.Severity] } }, Area)
+    $enabled = @($Data.Jobs | Where-Object Enabled)
+    $unhealthy = @($Data.Jobs | Where-Object { $_.Health -in @('Stale', 'Failing') })
+    $errors = @($Data.LogEvents | Where-Object Level -eq 'ERROR').Count
+    $tiles = @(
+        [pscustomobject]@{ Label = 'Jobs'; Value = [string]$Data.Jobs.Count; Detail = '{0} disabled (sample)' -f ($Data.Jobs.Count - $enabled.Count); Level = 'Normal'; Target = 'Planning' }
+        [pscustomobject]@{ Label = 'Enabled'; Value = [string]$enabled.Count; Detail = 'scheduled or manual'; Level = 'Normal'; Target = 'Planning' }
+        [pscustomobject]@{ Label = 'Servers online'; Value = '{0}/{0}' -f $Data.Servers.Count; Detail = 'all sample heartbeats fresh'; Level = 'Normal'; Target = 'Operations' }
+        [pscustomobject]@{ Label = 'Running'; Value = [string]$Data.Running.Count; Detail = 'jobs in progress'; Level = 'Normal'; Target = 'Operations' }
+        [pscustomobject]@{ Label = 'Pending'; Value = [string]$Data.Pending.Count; Detail = $(if ($Data.Pending.Count) { 'mostly Dependency' } else { 'nothing waiting' }); Level = $(if ($Data.Pending.Count) { 'Info' } else { 'Normal' }); Target = 'Operations' }
+        [pscustomobject]@{ Label = 'Job health'; Value = [string]$unhealthy.Count; Detail = '{0} stale or failing' -f $unhealthy.Count; Level = $(if ($unhealthy.Count) { 'Warning' } else { 'Normal' }); Target = 'Planning' }
+        [pscustomobject]@{ Label = 'Failures 24 h'; Value = [string]$failed.Count; Detail = $(if ($failed.Count) { (@($failed.JobName | Sort-Object -Unique) | Select-Object -First 2) -join ', ' } else { 'no failed run' }); Level = $(if ($failed.Count) { 'Critical' } else { 'Normal' }); Target = 'Failures24h' }
+        [pscustomobject]@{ Label = 'Log errors 24 h'; Value = [string]$errors; Detail = '{0} warning(s)' -f @($Data.LogEvents | Where-Object Level -eq 'WARN').Count; Level = $(if ($errors) { 'Warning' } else { 'Normal' }); Target = 'Events' }
+        [pscustomobject]@{ Label = 'Certificate'; Value = '212 d'; Detail = 'days before expiry (sample)'; Level = 'Normal'; Target = 'Operations' }
+    )
+    $servers = @(foreach ($server in $Data.Servers) {
+        [pscustomobject]@{ Server = $server.Server; State = 'Online'; Version = $server.Version; Running = $server.Running; Pending = $server.Pending; RecycleIn = '14h30'
+            Owned = $server.AssignedJobs; Certificate = '212 d'; StatePersistence = 'OK'; Capabilities = $server.Capabilities }
+    })
+    $items = [Collections.Generic.List[object]]::new()
+    foreach ($job in @($Data.Jobs | Where-Object { $_.Enabled -and $_.Assignment -ne 'Manual' })) {
+        foreach ($day in @($clock.Date, $clock.Date.AddDays(1))) {
+            if ($job.Frequency -eq 'Weekly' -and [string]$day.DayOfWeek -notin @($job.ScheduleDays)) { continue }
+            foreach ($text in @([string]$job.Times -split ',\s*' | Where-Object { $_ })) {
+                $time = [timespan]::Zero
+                if (-not [timespan]::TryParseExact($text, 'hh\:mm', [cultureinfo]::InvariantCulture, [ref]$time)) { continue }
+                $start = $day.Add($time)
+                if ($start -lt $clock -or $start -gt $clock.AddHours(24)) { continue }
+                $items.Add([pscustomobject]@{ Lane = $job.Server; Job = $job.Name; Start = $start; End = $start.AddMinutes([math]::Max(5, [double]$job.AverageDurationMinutes)); Kind = $(if ($Data.Maintenance) { 'Suspended' } else { 'Planned' }) })
+            }
+        }
+    }
+    foreach ($running in @($Data.Running)) { $start = [datetime]$running.Started; $items.Add([pscustomobject]@{ Lane = $running.Server; Job = $running.Job; Start = $start; End = $clock.AddMinutes(25); Kind = 'Running' }) }
+    $critical = @($sorted | Where-Object Severity -eq 'Critical').Count; $warning = @($sorted | Where-Object Severity -eq 'Warning').Count
+    $summary = 'DEMO - {0}/{0} sample server(s) online | {1} running | {2} pending | {3} failure(s) in 24 h' -f $Data.Servers.Count, $Data.Running.Count, $Data.Pending.Count, $failed.Count
+    [pscustomobject]@{
+        Banner = $(if ($critical) { [pscustomobject]@{ Level = 'Critical'; Text = '{0} critical and {1} warning item(s) to review. {2}' -f $critical, $warning, $summary } } elseif ($warning) { [pscustomobject]@{ Level = 'Warning'; Text = '{0} warning item(s) to review. {1}' -f $warning, $summary } } else { [pscustomobject]@{ Level = 'Normal'; Text = 'Everything looks healthy. ' + $summary } })
+        Tiles = $tiles; Actions = $sorted; Servers = $servers
+        Timeline = [pscustomobject]@{ From = $clock; To = $clock.AddHours(24); Lanes = @($Data.Servers.Server); Items = @($items | Sort-Object Start) }
+        GeneratedAt = $clock
+    }
+}
+
 function Update-OrchestratorDemoViews {
     $s=$script:OrchestratorDemo; $d=$s.Data; $c=$s.Controls
     foreach($server in $d.Servers){
@@ -181,7 +235,6 @@ function Update-OrchestratorDemoViews {
         $server.Maintenance=if($d.Maintenance){'Paused'}else{'Active'}
         $server.MaintenanceAcknowledgement=if($d.Maintenance){'Applied (sample)'}else{'Ready'}
     }
-    $c.DashboardGrid.ItemsSource=@($d.Servers)
     $c.ServersGrid.ItemsSource=@($d.Servers)
     $c.OperationsServersGrid.ItemsSource=@($d.Servers)
     $c.PlanningGrid.ItemsSource=@($d.Jobs)
@@ -190,11 +243,8 @@ function Update-OrchestratorDemoViews {
     $c.OperationsIncidentsGrid.ItemsSource=@($d.Incidents)
     $c.RequestsGrid.ItemsSource=@($d.Requests)
     $c.VersionsGrid.ItemsSource=@($d.Versions)
-    $c.JobsCountText.Text=[string]$d.Jobs.Count
-    $c.EnabledCountText.Text=[string]@($d.Jobs | Where-Object Enabled).Count
-    $c.OnlineServersText.Text=[string]@($d.Servers | Where-Object Online).Count
-    $c.SuccessCountText.Text=[string]@($d.History | Where-Object Status -EQ 'Success').Count
-    $c.FailureCountText.Text=[string]@($d.History | Where-Object Status -EQ 'Failed').Count
+    $s.Dashboard=New-OrchestratorDemoDashboard -Data $d
+    Set-OrchestratorDashboardView -Controls $c -Dashboard $s.Dashboard
     $c.MaintenanceBannerText.Text=if($d.Maintenance){'DEMO - Scheduling maintenance enabled'}else{'DEMO - Scheduling active'}
     $c.MaintenanceDetailText.Text=if($d.Maintenance){'Contoso demo maintenance window. Running sample jobs remain visible.'}else{'All three sample residents are ready. Actions affect this demonstration only.'}
     $c.EnableMaintenanceButton.IsEnabled=-not $d.Maintenance
@@ -326,6 +376,15 @@ function Invoke-OrchestratorDemoAction {
     Write-OrchestratorDemoActivity "$Action simulated in memory. No operational request or configuration was written."
 }
 
+function Select-OrchestratorDemoTarget {
+    param([string]$Target)
+    $c=$script:OrchestratorDemo.Controls
+    $header=switch($Target){'Failures24h'{'History'}default{$Target}}
+    if($Target -eq 'Failures24h'){$c.HistoryStatusCombo.SelectedItem='Failed';Update-OrchestratorDemoHistory}
+    if($Target -eq 'Events'){$c.EventsLevelCombo.SelectedIndex=1}
+    foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $header){$c.MainTabs.SelectedItem=$tab;break}}
+}
+
 function Invoke-OrchestratorDemo {
     param([string]$Xaml,[string]$Scenario,[string]$View,[int]$Width,[int]$Height,[switch]$ValidateOnly)
     if([Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentState]::STA){throw 'The demo requires STA. Use the Demo CMD launcher.'}
@@ -340,7 +399,7 @@ function Invoke-OrchestratorDemo {
     }
     $script:OrchestratorDemo=[pscustomobject]@{
         Mode='Demo';Window=$window;Controls=$controls;Data=(New-OrchestratorDemoData -Scenario $Scenario)
-        FilteredHistory=@();FilteredEvents=@();OutputRoot=(Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-Demo/InventoryOrchestrator/'+[guid]::NewGuid().ToString('N')))
+        FilteredHistory=@();FilteredEvents=@();Dashboard=$null;OutputRoot=(Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-Demo/InventoryOrchestrator/'+[guid]::NewGuid().ToString('N')))
     }
     $s=$script:OrchestratorDemo; $c=$s.Controls
     $body=$window.Content; $window.Content=$null
@@ -361,7 +420,7 @@ function Invoke-OrchestratorDemo {
     $c.SharedPathText.Text='Contoso | DEMO - Sample data | All actions are simulated'
     $c.ConnectionText.Text='Offline demo'; $c.LastRefreshText.Text='2026-10-18 09:30 (frozen)'
     $c.FooterText.Text='DEMO - Sample data. Exports use a separate temporary demo folder.'
-    $c.VersionText.Text='v1.3.17 | DEMO'
+    $c.VersionText.Text='v1.4.0 | DEMO'
     $c.AutoRefreshCheck.IsChecked=$false; $c.AutoRefreshCheck.IsEnabled=$false
     # Keep both running sample rows visible at the default capture size.
     $operationsLayout=$c.OperationsServersGrid.Parent
@@ -408,6 +467,9 @@ function Invoke-OrchestratorDemo {
     $c.OperationsMailsGrid.Add_MouseDoubleClick({Write-OrchestratorDemoActivity 'Sample mail: Contoso inventory completed successfully. No email was sent.'})
     foreach($name in @('EventsServerCombo','EventsLevelCombo','EventsCategoryCombo','EventsPeriodCombo')){$c[$name].Add_SelectionChanged({Update-OrchestratorDemoEvents})}
     $c.EventsTextBox.Add_TextChanged({Update-OrchestratorDemoEvents})
+    $c.DashboardTimelineCanvas.Add_SizeChanged({param($sender) Update-OrchestratorDashboardTimeline -Canvas $sender})
+    $c.DashboardTilesList.AddHandler([System.Windows.UIElement]::MouseLeftButtonUpEvent,[System.Windows.Input.MouseButtonEventHandler]{param($sender,$eventArgs)$tile=$eventArgs.OriginalSource.DataContext;if($tile -and $tile.PSObject.Properties['Target']){Select-OrchestratorDemoTarget ([string]$tile.Target)}})
+    $c.DashboardActionsGrid.Add_MouseDoubleClick({$row=$script:OrchestratorDemo.Controls.DashboardActionsGrid.SelectedItem;if($row){Select-OrchestratorDemoTarget ([string]$row.Target)}})
     $c.EventsRefreshButton.Add_Click({Update-OrchestratorDemoEvents;Write-OrchestratorDemoActivity 'Sample events refreshed. No log file was read.'})
     $c.EventsGrid.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$row=$c.EventsGrid.SelectedItem;$c.EventsDetailBox.Text=if($row){'[{0}][{1}][{2}] {3}{4}{5}' -f $row.Time,$row.Server,$row.Level,$row.Category,[Environment]::NewLine,$row.Message}else{''}})
     $logo=Join-Path $PSScriptRoot 'WorkplaceCloudHub-lockup-WPF.png'

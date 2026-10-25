@@ -30,7 +30,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.3.17
+1.4.0
 #>
 [CmdletBinding()]
 param(
@@ -64,7 +64,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.3.17'
+$script:AppVersion = '1.4.0'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -79,6 +79,9 @@ $script:MailFolderPath = ''
 $script:LogEventsCache = @{}
 $script:LogEventsResult = $null
 $script:LogEventsLastError = ''
+$script:DashboardData = $null
+$script:DashboardLastError = ''
+$script:DashboardLoading = [pscustomobject]@{ Pending = $false; Clock = [Diagnostics.Stopwatch]::new() }
 $script:AutoRefreshTimer = $null
 $script:CancellationTimer = $null
 $script:CancellationBusy = $false
@@ -194,28 +197,84 @@ $xaml = @'
         <TabControl x:Name="MainTabs" Grid.Row="2">
             <TabItem Header="Dashboard">
                 <Grid Margin="12">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="92"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <UniformGrid Columns="5" Margin="0,0,0,12">
-                        <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="4" Padding="12"><StackPanel><TextBlock Text="Jobs" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="JobsCountText" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
-                        <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="4" Padding="12"><StackPanel><TextBlock Text="Enabled" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="EnabledCountText" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
-                        <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="4" Padding="12"><StackPanel><TextBlock Text="Servers online" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="OnlineServersText" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
-                        <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="4" Padding="12"><StackPanel><TextBlock Text="Success (7 days)" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="SuccessCountText" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
-                        <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="4" Padding="12"><StackPanel><TextBlock Text="Failures (7 days)" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="FailureCountText" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
-                    </UniformGrid>
-                    <DataGrid x:Name="DashboardGrid" Grid.Row="1">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="170"/>
-                            <DataGridCheckBoxColumn Header="Online" Binding="{Binding Online}" Width="70"/>
-                            <DataGridTextColumn Header="Heartbeat age (min)" Binding="{Binding HeartbeatAgeMinutes}" Width="140"/>
-                            <DataGridTextColumn Header="Weight" Binding="{Binding Weight}" Width="70"/>
-                            <DataGridTextColumn Header="Policy" Binding="{Binding Policy}" Width="220"/>
-                            <DataGridTextColumn Header="Capabilities" Binding="{Binding Capabilities}" Width="*"/>
-                            <DataGridTextColumn Header="Assigned jobs" Binding="{Binding AssignedJobs}" Width="100"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="98"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Border x:Name="DashboardBannerBorder" Background="#F3F6FA" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Padding="12,8" Margin="4,0,4,8">
+                        <TextBlock x:Name="DashboardBannerText" FontWeight="SemiBold" TextWrapping="Wrap" Text="Loading dashboard..."/>
+                    </Border>
+                    <ItemsControl x:Name="DashboardTilesList" Grid.Row="1" Margin="0,0,0,8" ToolTip="Click a tile to open the related view.">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{Binding Background}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="4" Padding="10,6" Cursor="Hand" ToolTip="{Binding Detail}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Label}" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding Value}" FontSize="24" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding Detail}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="3*"/></Grid.ColumnDefinitions>
+                        <GroupBox x:Name="DashboardActionsGroup" Header="To review" Margin="4,0,0,8">
+                            <DataGrid x:Name="DashboardActionsGrid" SelectionMode="Single" ToolTip="Double-click a row to open the related view.">
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="DataGridRow">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Severity}" Value="Critical"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                            <DataTrigger Binding="{Binding Severity}" Value="Warning"><Setter Property="Background" Value="#FFF4CE"/></DataTrigger>
+                                            <DataTrigger Binding="{Binding Severity}" Value="Info"><Setter Property="Background" Value="#E5F1FB"/></DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGrid.RowStyle>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="70"/>
+                                    <DataGridTextColumn Header="Area" Binding="{Binding Area}" Width="135"/>
+                                    <DataGridTextColumn Header="Item" Binding="{Binding Item}" Width="190"/>
+                                    <DataGridTextColumn Header="Detail" Binding="{Binding Detail}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                        <GroupBox Grid.Column="2" Header="Servers" Margin="0,0,4,8">
+                            <DataGrid x:Name="DashboardGrid">
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="DataGridRow">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding State}" Value="Stale"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                            <DataTrigger Binding="{Binding State}" Value="No heartbeat"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                            <DataTrigger Binding="{Binding State}" Value="Recycling"><Setter Property="Background" Value="#E5F1FB"/></DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGrid.RowStyle>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="125"/>
+                                    <DataGridTextColumn Header="State" Binding="{Binding State}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Running" Binding="{Binding Running}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Recycle in" Binding="{Binding RecycleIn}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Elected jobs" Binding="{Binding Owned}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Certificate" Binding="{Binding Certificate}" Width="Auto"/>
+                                    <DataGridTextColumn Header="State persistence" Binding="{Binding StatePersistence}" Width="Auto" MaxWidth="160"/>
+                                    <DataGridTextColumn Header="Ready capabilities" Binding="{Binding Capabilities}" Width="*" MinWidth="160"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                    </Grid>
+                    <GroupBox Grid.Row="3" Header="Next 24 hours by server (elected owner, average duration; dark blue = running, orange = no owner, grey = suspended by maintenance)" Margin="4,0,4,0">
+                        <Canvas x:Name="DashboardTimelineCanvas" Height="110" ClipToBounds="True" Background="White"/>
+                    </GroupBox>
+                    <Border x:Name="DashboardLoadingOverlay" Grid.RowSpan="4" Background="#B3F3F6FA" Visibility="Collapsed">
+                        <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="10" Padding="28,20" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.25"/></Border.Effect>
+                            <StackPanel Width="320">
+                                <TextBlock Text="Loading dashboard..." FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                <ProgressBar IsIndeterminate="True" Height="6" Margin="0,12,0,8"/>
+                                <TextBlock x:Name="DashboardLoadingText" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Text="Reading shared orchestrator data in the background. The window stays usable."/>
+                            </StackPanel>
+                        </Border>
+                    </Border>
                 </Grid>
             </TabItem>
 
@@ -623,6 +682,87 @@ function Get-OrchestratorGuiPropertyValue {
     }
     return $Object.$Name
 }
+$script:DashboardLevelColors = @{ Normal = '#FFFFFF'; Info = '#E5F1FB'; Warning = '#FFF4CE'; Critical = '#FDE7E9' }
+$script:DashboardBannerColors = @{ Normal = '#DFF6DD'; Info = '#E5F1FB'; Warning = '#FFF4CE'; Critical = '#FDE7E9' }
+$script:DashboardTimelineColors = @{ Running = '#005A9E'; Planned = '#8DB6E0'; Suspended = '#B8B8B8'; Unassigned = '#F7B955' }
+
+function ConvertTo-OrchestratorBrush {
+    param([Parameter(Mandatory = $true)][string]$Color)
+    return [System.Windows.Media.BrushConverter]::new().ConvertFromString($Color)
+}
+
+function Set-OrchestratorDashboardView {
+    # Renders a dashboard object (Get-SmartM365OrchestratorDashboard shape) into the Dashboard tab.
+    param([Parameter(Mandatory = $true)]$Controls, [AllowNull()]$Dashboard)
+    if ($null -eq $Dashboard) { return }
+    $level = [string]$Dashboard.Banner.Level
+    $Controls.DashboardBannerBorder.Background = ConvertTo-OrchestratorBrush $(if ($script:DashboardBannerColors.ContainsKey($level)) { $script:DashboardBannerColors[$level] } else { '#F3F6FA' })
+    $Controls.DashboardBannerText.Text = [string]$Dashboard.Banner.Text
+    $Controls.DashboardTilesList.ItemsSource = @($Dashboard.Tiles | ForEach-Object {
+        $tileLevel = [string]$_.Level
+        $_ | Select-Object *, @{ Name = 'Background'; Expression = { if ($script:DashboardLevelColors.ContainsKey($tileLevel)) { $script:DashboardLevelColors[$tileLevel] } else { '#FFFFFF' } } }
+    })
+    $actions = @($Dashboard.Actions)
+    $Controls.DashboardActionsGrid.ItemsSource = $actions
+    $Controls.DashboardActionsGroup.Header = if ($actions.Count) { 'To review ({0})' -f $actions.Count } else { 'To review (nothing to review)' }
+    $Controls.DashboardGrid.ItemsSource = @($Dashboard.Servers)
+    $Controls.DashboardTimelineCanvas.Tag = $Dashboard.Timeline
+    Update-OrchestratorDashboardTimeline -Canvas $Controls.DashboardTimelineCanvas
+}
+
+function Update-OrchestratorDashboardTimeline {
+    # Draws one lane per server for the timeline stored in Canvas.Tag; redrawn on resize.
+    param([Parameter(Mandatory = $true)]$Canvas)
+    $Canvas.Children.Clear()
+    $timeline = $Canvas.Tag
+    if ($null -eq $timeline) { return }
+    $lanes = @($timeline.Lanes)
+    $labelWidth = 150.0; $laneHeight = 24.0; $top = 22.0
+    $Canvas.Height = $top + [math]::Max(1, $lanes.Count) * $laneHeight + 4
+    $width = [double]$Canvas.ActualWidth
+    if ($width -lt ($labelWidth + 120)) { return }
+    $plotWidth = $width - $labelWidth - 10
+    $from = [datetime]$timeline.From; $to = [datetime]$timeline.To
+    $totalMinutes = [math]::Max(1.0, ($to - $from).TotalMinutes)
+    $gridBrush = ConvertTo-OrchestratorBrush '#E3E9F0'; $mutedBrush = ConvertTo-OrchestratorBrush '#5D6B78'
+    for ($index = 0; $index -lt $lanes.Count; $index++) {
+        if ($index % 2 -eq 1) {
+            $band = [System.Windows.Shapes.Rectangle]::new(); $band.Width = $width; $band.Height = $laneHeight; $band.Fill = ConvertTo-OrchestratorBrush '#F7FAFD'
+            [System.Windows.Controls.Canvas]::SetLeft($band, 0); [System.Windows.Controls.Canvas]::SetTop($band, $top + $index * $laneHeight); [void]$Canvas.Children.Add($band)
+        }
+        $label = [System.Windows.Controls.TextBlock]::new(); $label.Text = [string]$lanes[$index]; $label.Width = $labelWidth - 8; $label.TextTrimming = 'CharacterEllipsis'
+        if ([string]$lanes[$index] -eq 'Unassigned') { $label.Foreground = ConvertTo-OrchestratorBrush '#B45309' }
+        [System.Windows.Controls.Canvas]::SetLeft($label, 4); [System.Windows.Controls.Canvas]::SetTop($label, $top + $index * $laneHeight + 4); [void]$Canvas.Children.Add($label)
+    }
+    $tick = $from.Date.AddHours($from.Hour + 1)
+    if ($tick.Hour % 2 -eq 1) { $tick = $tick.AddHours(1) }
+    while ($tick -lt $to) {
+        $x = $labelWidth + ($tick - $from).TotalMinutes / $totalMinutes * $plotWidth
+        $line = [System.Windows.Shapes.Line]::new(); $line.X1 = $x; $line.X2 = $x; $line.Y1 = $top - 4; $line.Y2 = $Canvas.Height; $line.Stroke = $gridBrush
+        [void]$Canvas.Children.Add($line)
+        $hour = [System.Windows.Controls.TextBlock]::new(); $hour.Text = $tick.ToString('HH:mm'); $hour.FontSize = 11; $hour.Foreground = $mutedBrush
+        [System.Windows.Controls.Canvas]::SetLeft($hour, $x - 15); [System.Windows.Controls.Canvas]::SetTop($hour, 2); [void]$Canvas.Children.Add($hour)
+        $tick = $tick.AddHours(2)
+    }
+    $nowLine = [System.Windows.Shapes.Line]::new(); $nowLine.X1 = $labelWidth; $nowLine.X2 = $labelWidth; $nowLine.Y1 = $top - 4; $nowLine.Y2 = $Canvas.Height
+    $nowLine.Stroke = ConvertTo-OrchestratorBrush '#C42B1C'; $nowLine.StrokeThickness = 2; [void]$Canvas.Children.Add($nowLine)
+    foreach ($item in @($timeline.Items)) {
+        $laneIndex = [array]::IndexOf([object[]]$lanes, [string]$item.Lane)
+        if ($laneIndex -lt 0) { continue }
+        $start = if ([datetime]$item.Start -lt $from) { $from } else { [datetime]$item.Start }
+        $end = if ([datetime]$item.End -gt $to) { $to } else { [datetime]$item.End }
+        if ($end -le $from -or $start -ge $to) { continue }
+        $x1 = $labelWidth + ($start - $from).TotalMinutes / $totalMinutes * $plotWidth
+        $x2 = $labelWidth + ($end - $from).TotalMinutes / $totalMinutes * $plotWidth
+        $kind = [string]$item.Kind
+        $bar = [System.Windows.Shapes.Rectangle]::new(); $bar.Width = [math]::Max(4.0, $x2 - $x1); $bar.Height = $laneHeight - 8; $bar.RadiusX = 2; $bar.RadiusY = 2; $bar.Opacity = 0.9
+        $bar.Fill = ConvertTo-OrchestratorBrush $(if ($script:DashboardTimelineColors.ContainsKey($kind)) { $script:DashboardTimelineColors[$kind] } else { '#8DB6E0' })
+        $bar.Stroke = [System.Windows.Media.Brushes]::White; $bar.StrokeThickness = 0.5
+        $bar.ToolTip = '{0}{1}{2:yyyy-MM-dd HH:mm} - {3:HH:mm} | {4} | {5}' -f $item.Job, [Environment]::NewLine, [datetime]$item.Start, [datetime]$item.End, $kind, $item.Lane
+        [System.Windows.Controls.Canvas]::SetLeft($bar, $x1); [System.Windows.Controls.Canvas]::SetTop($bar, $top + $laneIndex * $laneHeight + 4); [void]$Canvas.Children.Add($bar)
+    }
+}
+
 if ($Demo) {
     . (Join-Path $PSScriptRoot 'SmartM365-Inventory-Orchestrator-Demo.ps1')
     Invoke-OrchestratorDemo -Xaml $xaml -Scenario $DemoScenario -View $DemoView -Width $DemoWindowWidth -Height $DemoWindowHeight -ValidateOnly:$ValidateOnly
@@ -660,7 +800,8 @@ if ($ValidateOnly) {
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
         'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
-        'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox')) {
+        'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
+        'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
     }
     $source = [IO.File]::ReadAllText($PSCommandPath)
@@ -958,10 +1099,8 @@ function Refresh-ServersView {
     param([AllowNull()]$Servers = $null)
     if ($null -eq $Servers) { $Servers = @(Get-SmartM365OrchestratorServerStatus -SharedDataFolderPath $script:SharedDataFolderPath -ClusterDocument $script:DraftCluster) }
     $servers = @($Servers)
-    $script:Controls.DashboardGrid.ItemsSource = $servers
     $script:Controls.ServersGrid.ItemsSource = $servers
     $script:Controls.PinnedServerCombo.ItemsSource = @($script:DraftCluster.ExpectedOrchestratorServers)
-    $script:Controls.OnlineServersText.Text = '{0}/{1}' -f @($servers | Where-Object Online).Count, @($servers).Count
     return $servers
 }
 
@@ -1331,6 +1470,64 @@ function Set-GuiEventsServers {
     if ($selected -and $selected -in @($script:Controls.EventsServerCombo.ItemsSource)) { $script:Controls.EventsServerCombo.SelectedItem = $selected } else { $script:Controls.EventsServerCombo.SelectedIndex = 0 }
 }
 
+function Test-GuiDashboardTabVisible {
+    return $null -ne $script:Controls.MainTabs.SelectedItem -and [string]$script:Controls.MainTabs.SelectedItem.Header -eq 'Dashboard'
+}
+
+function Set-GuiDashboard {
+    param([AllowNull()]$Dashboard, [string]$ErrorMessage = '')
+    if ($ErrorMessage) {
+        if ($ErrorMessage -ne $script:DashboardLastError) { Write-GuiActivity -Message "Dashboard could not be built: $ErrorMessage" -Level WARN }
+        $script:DashboardLastError = $ErrorMessage
+        $script:Controls.DashboardBannerBorder.Background = ConvertTo-OrchestratorBrush $script:DashboardBannerColors['Critical']
+        $script:Controls.DashboardBannerText.Text = 'Dashboard unavailable (previous values kept): ' + $ErrorMessage
+        return
+    }
+    $script:DashboardLastError = ''
+    if ($null -eq $Dashboard) { return }
+    $script:DashboardData = $Dashboard
+    Set-OrchestratorDashboardView -Controls $script:Controls -Dashboard $Dashboard
+}
+
+function Update-GuiDashboardLoading {
+    # The overlay appears only when a requested dashboard read lasts more than 350 ms.
+    $show = $script:DashboardLoading.Pending -and $script:DashboardLoading.Clock.ElapsedMilliseconds -ge 350 -and (Test-GuiDashboardTabVisible)
+    $script:Controls.DashboardLoadingOverlay.Visibility = if ($show) { 'Visible' } else { 'Collapsed' }
+    if ($show) {
+        $message = [string]$script:RefreshContext.Progress.Message
+        $script:Controls.DashboardLoadingText.Text = '{0}{1}{2:0} s elapsed. The window stays usable.' -f $(if ($message) { $message } else { 'Reading shared orchestrator data in the background.' }), [Environment]::NewLine, $script:DashboardLoading.Clock.Elapsed.TotalSeconds
+    }
+}
+
+function Stop-GuiDashboardLoading {
+    if ($null -ne $script:PendingRefreshRequest -and $script:PendingRefreshRequest.Mode -ne 'History' -and ([bool]$script:PendingRefreshRequest.ShowLoading -or $script:PendingRefreshRequest.Mode -eq 'Full')) { return }
+    $script:DashboardLoading.Pending = $false
+    $script:DashboardLoading.Clock.Reset()
+    $script:Controls.DashboardLoadingOverlay.Visibility = 'Collapsed'
+}
+
+function Invoke-GuiDashboardTarget {
+    param([string]$Target)
+    if ([string]::IsNullOrWhiteSpace($Target)) { return }
+    switch ($Target) {
+        'Failures24h' {
+            Select-GuiTab -Header 'History'
+            Show-FailuresLast24Hours
+        }
+        'Events' {
+            $script:Controls.EventsLevelCombo.SelectedIndex = 1
+            $script:Controls.EventsPeriodCombo.SelectedIndex = 2
+            Select-GuiTab -Header 'Events'
+        }
+        default { Select-GuiTab -Header $Target }
+    }
+}
+
+function Select-GuiTab {
+    param([Parameter(Mandatory = $true)][string]$Header)
+    foreach ($tab in $script:Controls.MainTabs.Items) { if ([string]$tab.Header -eq $Header) { $script:Controls.MainTabs.SelectedItem = $tab; return } }
+}
+
 function Test-GuiEventsTabVisible {
     return $null -ne $script:Controls.MainTabs.SelectedItem -and [string]$script:Controls.MainTabs.SelectedItem.Header -eq 'Events'
 }
@@ -1417,19 +1614,41 @@ function Get-GuiRefreshWork {
             try { $logEvents = Get-SmartM365OrchestratorLogEvents -LogFolderPath $InputData.MailFolderPath -Server @($publishedCluster.ExpectedOrchestratorServers) -Hours ([int]$eventsOption.Value) -Cache $InputData.LogEventsCache }
             catch { $logEventsError = $_.Exception.Message }
         }
+        $dashboard = $null; $dashboardError = ''
+        $dashboardOption = $InputData.PSObject.Properties['IncludeDashboard']
+        if ($null -ne $dashboardOption -and [bool]$dashboardOption.Value) {
+            # Isolated like the log events: a dashboard failure never hides the live operations.
+            $Progress.Message = 'Building dashboard: job health, election plan and resident logs...'
+            try {
+                $jobsDocument = if ($null -ne $snapshot) { $snapshot.Jobs } else { Read-SmartM365OrchestratorJson -Path (Join-Path $root 'Config/Orchestrator-Jobs.json') }
+                $dashboardEvents = $logEvents
+                if ($null -eq $dashboardEvents -and -not [string]::IsNullOrWhiteSpace([string]$InputData.MailFolderPath)) {
+                    try { $dashboardEvents = Get-SmartM365OrchestratorLogEvents -LogFolderPath $InputData.MailFolderPath -Server @($publishedCluster.ExpectedOrchestratorServers) -Hours 24 -Cache $InputData.LogEventsCache } catch { $dashboardEvents = $null }
+                }
+                $dashboardRuns = if ($InputData.Mode -eq 'Full') { @($recentRuns) } else { $null }
+                $dashboard = Get-SmartM365OrchestratorDashboardData -SharedDataFolderPath $root -JobsDocument $jobsDocument -Operations $operations -Runs $dashboardRuns -Requests $requests -LogEvents $dashboardEvents
+            }
+            catch { $dashboardError = $_.Exception.Message }
+        }
         return [pscustomobject]@{
             Mode = $InputData.Mode; Snapshot = $snapshot; RecentRuns = $recentRuns; Servers = $servers
             Owners = $owners; History = $history; Versions = $versions; Operations = $operations
-            Requests = $requests; LogEvents = $logEvents; LogEventsError = $logEventsError; ReadAt = Get-Date
+            Requests = $requests; LogEvents = $logEvents; LogEventsError = $logEventsError
+            Dashboard = $dashboard; DashboardError = $dashboardError; ReadAt = Get-Date
         }
     }
 }
 
 function Start-GuiRefresh {
-    param([ValidateSet('Full', 'Live', 'History')][string]$Mode = 'Live', [datetime]$HistoryFrom = [datetime]::MinValue, [datetime]$HistoryTo = [datetime]::MinValue, [switch]$OnlyFailures)
+    param([ValidateSet('Full', 'Live', 'History')][string]$Mode = 'Live', [datetime]$HistoryFrom = [datetime]::MinValue, [datetime]$HistoryTo = [datetime]::MinValue, [switch]$OnlyFailures, [switch]$ShowLoading)
+    $includeDashboard = $Mode -eq 'Full' -or ($Mode -eq 'Live' -and (Test-GuiDashboardTabVisible))
+    if ($includeDashboard -and ($Mode -eq 'Full' -or $ShowLoading -or $null -eq $script:DashboardData)) {
+        $script:DashboardLoading.Pending = $true
+        if (-not $script:DashboardLoading.Clock.IsRunning) { $script:DashboardLoading.Clock.Restart() }
+    }
     if ($null -ne $script:RefreshContext.Worker) {
         if ($Mode -eq 'Full' -or $null -eq $script:PendingRefreshRequest -or $script:PendingRefreshRequest.Mode -ne 'Full') {
-            $script:PendingRefreshRequest = @{ Mode = $Mode; HistoryFrom = $HistoryFrom; HistoryTo = $HistoryTo; OnlyFailures = [bool]$OnlyFailures }
+            $script:PendingRefreshRequest = @{ Mode = $Mode; HistoryFrom = $HistoryFrom; HistoryTo = $HistoryTo; OnlyFailures = [bool]$OnlyFailures; ShowLoading = [bool]$ShowLoading }
         }
         return
     }
@@ -1451,6 +1670,7 @@ function Start-GuiRefresh {
         InsightsModulePath = (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Insights.psm1')
         HistoryFrom = $from; HistoryTo = $to; HistoryServer = $server; HistoryJob = $job; HistoryStatus = $status; OnlyFailures = [bool]$OnlyFailures
         LogEventsHours = $(if ($Mode -ne 'History' -and (Test-GuiEventsTabVisible)) { Get-GuiEventsHours } else { 0 }); LogEventsCache = $script:LogEventsCache
+        IncludeDashboard = $includeDashboard
     }
     $script:RefreshContext.Input = $inputData
     $script:RefreshContext.Progress.Message = ''
@@ -1503,10 +1723,6 @@ function Receive-GuiRefresh {
             $script:HistoryRows = @($result.History)
             $script:Controls.HistoryGrid.ItemsSource = $script:HistoryRows
             $script:InitialHistoryLoaded = $true
-            $script:Controls.JobsCountText.Text = [string]@($script:DraftJobs.Jobs).Count
-            $script:Controls.EnabledCountText.Text = [string]@($script:DraftJobs.Jobs | Where-Object Enabled).Count
-            $script:Controls.SuccessCountText.Text = [string]@($result.History | Where-Object Status -eq 'Success').Count
-            $script:Controls.FailureCountText.Text = [string]@($result.History | Where-Object { $_.Status -in $script:HistoryFailureStatuses }).Count
             $script:Controls.VersionsGrid.ItemsSource = @($result.Versions)
             $script:Controls.ConnectionText.Text = "Tenant: $Tenant"
             $script:Controls.StatusText.Text = 'Shared configuration loaded'
@@ -1520,6 +1736,7 @@ function Receive-GuiRefresh {
             Set-GuiOperations -Operations $result.Operations
             if (-not $script:CancellationBusy) { Set-GuiRequestRows -Rows @($result.Requests) }
             if ([int]$script:RefreshContext.Input.LogEventsHours -gt 0) { Set-GuiLogEvents -Result $result.LogEvents -ErrorMessage ([string]$result.LogEventsError) }
+            if ([bool]$script:RefreshContext.Input.IncludeDashboard) { Set-GuiDashboard -Dashboard $result.Dashboard -ErrorMessage ([string]$result.DashboardError) }
         }
         if ($mode -eq 'History') {
             $script:Controls.StatusText.Text = "History refreshed: $(@($script:HistoryRows).Count) row(s)."
@@ -1541,6 +1758,7 @@ function Receive-GuiRefresh {
         Write-GuiException -Context 'Background refresh failed' -ErrorRecord $_
     }
     finally {
+        if ([bool]$script:RefreshContext.Input.IncludeDashboard) { Stop-GuiDashboardLoading }
         if ($mode -eq 'Full') {
             $script:Controls.MainTabs.IsEnabled = $null -ne $script:Snapshot
             $script:Controls.PublishButton.IsEnabled = $null -ne $script:Snapshot
@@ -1575,12 +1793,11 @@ function Refresh-AllViewsSync {
         }
         elseif ($null -ne $script:Controls.MainTabs.SelectedItem -and
             [string]$script:Controls.MainTabs.SelectedItem.Header -eq 'History') { Refresh-HistoryView }
-        $script:Controls.JobsCountText.Text = [string]@($script:DraftJobs.Jobs).Count
-        $script:Controls.EnabledCountText.Text = [string]@($script:DraftJobs.Jobs | Where-Object Enabled).Count
-        $script:Controls.SuccessCountText.Text = [string]@($history7 | Where-Object { $_.StartTime -ge $historyFrom -and $_.StartTime -le $historyNow -and $_.Status -eq 'Success' }).Count
-        $script:Controls.FailureCountText.Text = [string]@($history7 | Where-Object { $_.EventTime -ge $historyFrom -and $_.EventTime -le $historyNow -and $_.Status -in $script:HistoryFailureStatuses }).Count
-        [void](Refresh-OperationsView)
+        $operations = Refresh-OperationsView
         Refresh-RequestsView
+        if ($null -ne $operations) {
+            Set-GuiDashboard -Dashboard (Get-SmartM365OrchestratorDashboardData -SharedDataFolderPath $script:SharedDataFolderPath -JobsDocument $script:DraftJobs -Operations $operations -Runs $script:RecentRuns -Requests $script:RequestRows)
+        }
         $script:Controls.VersionsGrid.ItemsSource = @(Get-SmartM365OrchestratorConfigurationVersions -SharedDataFolderPath $script:SharedDataFolderPath)
         $script:Controls.ConnectionText.Text = "Tenant: $Tenant"
         $script:Controls.LastRefreshText.Text = 'Refreshed: ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -1818,7 +2035,7 @@ $window = ConvertFrom-OrchestratorGuiXaml -Text $xaml
 $script:Controls = @{}
 foreach ($name in @(
     'MainTabs', 'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'ValidateButton', 'RebalanceButton', 'PublishButton',
-    'JobsCountText', 'EnabledCountText', 'OnlineServersText', 'SuccessCountText', 'FailureCountText', 'DashboardGrid',
+    'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
     'PlanningGrid', 'SelectedJobText', 'JobArgumentsBox', 'JobEnabledCheck', 'ScheduleTypeCombo', 'TimesBox', 'DaysPanel',
     'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck', 'MissedPolicyCombo',
     'AssignmentCombo', 'PinnedServerCombo', 'TimeoutBox', 'RetriesBox', 'RetryDelayBox', 'DurationBox', 'ApplyJobButton',
@@ -1924,6 +2141,20 @@ $script:Controls.MainTabs.Add_SelectionChanged({
         try { Refresh-HistoryView } catch { Write-GuiException -Context 'History refresh failed' -ErrorRecord $_ }
     }
     if (Test-GuiEventsTabVisible) { Start-GuiRefresh -Mode Live }
+    if (Test-GuiDashboardTabVisible) { Start-GuiRefresh -Mode Live -ShowLoading }
+})
+$script:Controls.DashboardTimelineCanvas.Add_SizeChanged({ param($sender) Update-OrchestratorDashboardTimeline -Canvas $sender })
+$script:Controls.DashboardTilesList.AddHandler([System.Windows.UIElement]::MouseLeftButtonUpEvent, [System.Windows.Input.MouseButtonEventHandler]{
+    param($sender, $eventArgs)
+    try {
+        $tile = $eventArgs.OriginalSource.DataContext
+        if ($null -ne $tile -and $tile.PSObject.Properties['Target']) { Invoke-GuiDashboardTarget -Target ([string]$tile.Target) }
+    }
+    catch { Write-GuiException -Context 'Dashboard navigation failed' -ErrorRecord $_ }
+})
+$script:Controls.DashboardActionsGrid.Add_MouseDoubleClick({
+    try { $row = $script:Controls.DashboardActionsGrid.SelectedItem; if ($null -ne $row) { Invoke-GuiDashboardTarget -Target ([string]$row.Target) } }
+    catch { Write-GuiException -Context 'Dashboard navigation failed' -ErrorRecord $_ }
 })
 foreach ($eventsFilter in @('EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo')) {
     $script:Controls[$eventsFilter].Add_SelectionChanged({ try { Update-GuiEventsView } catch { Write-GuiException -Context 'Event filter failed' -ErrorRecord $_ } })
@@ -2161,6 +2392,8 @@ if ($SmokeTest) {
     Write-GuiActivity -Message ("SMOKE_TEST_OPERATIONS_OK Servers={0}; HealthRows={1}" -f @($operations.Servers).Count, $script:HealthByName.Count) -Level SUCCESS
     Set-GuiEventsServers
     Set-GuiLogEvents -Result (Get-SmartM365OrchestratorLogEvents -LogFolderPath $script:MailFolderPath -Server @($script:DraftCluster.ExpectedOrchestratorServers) -Hours 24 -Cache $script:LogEventsCache)
+    if ($null -eq $script:DashboardData -or @($script:Controls.DashboardTilesList.ItemsSource).Count -ne 9 -or @($script:Controls.DashboardGrid.ItemsSource).Count -ne @($script:DraftCluster.ExpectedOrchestratorServers).Count) { throw 'Dashboard was not built from the shared data.' }
+    Write-GuiActivity -Message ("SMOKE_TEST_DASHBOARD_OK Banner={0}; Tiles={1}; Actions={2}; TimelineItems={3}" -f $script:DashboardData.Banner.Level, @($script:DashboardData.Tiles).Count, @($script:DashboardData.Actions).Count, @($script:DashboardData.Timeline.Items).Count) -Level SUCCESS
     Write-GuiActivity -Message ("SMOKE_TEST_EVENTS_OK Events={0}; Rows={1}; Logs={2}" -f @($script:LogEventsResult.Events).Count, @($script:Controls.EventsGrid.ItemsSource).Count, (@($script:LogEventsResult.Sources | ForEach-Object { '{0}={1}' -f $_.Server, $_.Status }) -join ',')) -Level SUCCESS
 
     $rebalanceRequest = Request-ElectionRebalance -SkipConfirmation
@@ -2182,7 +2415,7 @@ $script:CancellationTimer.Add_Tick({ Receive-GuiPipelineCancellation })
 $script:CancellationTimer.Start()
 $script:RefreshTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:RefreshTimer.Interval = [TimeSpan]::FromMilliseconds(150)
-$script:RefreshTimer.Add_Tick({ Receive-GuiRefresh })
+$script:RefreshTimer.Add_Tick({ Receive-GuiRefresh; Update-GuiDashboardLoading })
 $script:RefreshTimer.Start()
 $script:AutoRefreshTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:AutoRefreshTimer.Interval = [TimeSpan]::FromSeconds(60)

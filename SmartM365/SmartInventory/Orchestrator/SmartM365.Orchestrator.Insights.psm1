@@ -335,6 +335,9 @@ function Get-SmartM365OrchestratorOperations {
             Maintenance = if ($maintenanceError) { 'Unknown' } elseif ($maintenance.Enabled) { 'ON' } else { 'OFF' }
             MaintenanceAcknowledgement = if ($maintenanceError) { 'Control unavailable' } else { [string](@($maintenanceServers | Where-Object Server -eq $serverName)[0].Status) }
             StatePersistence = if ([bool](Get-InsightsProperty $heartbeat 'StatePersistenceHealthy' $true)) { 'OK' } else { 'Launches paused: ' + [string](Get-InsightsProperty $heartbeat 'StatePersistenceLastError' '') }
+            ReadyCapabilities = (@(Get-InsightsProperty $heartbeat 'ReadyCapabilities' @() | ForEach-Object { [string]$_ } | Sort-Object -Unique) -join ', ')
+            CertificateDaysRemaining = Get-InsightsProperty $heartbeat 'CertificateDaysRemaining' $null
+            PrerequisiteBlocks = (@(Get-InsightsProperty $heartbeat 'PrerequisiteBlocks' @() | ForEach-Object { if ($_ -is [string]) { $_ } else { '{0}: {1}' -f (Get-InsightsProperty $_ 'Name' ''), (Get-InsightsProperty $_ 'Detail' '') } }) -join '; ')
         })
         foreach ($job in $jobsRunning) {
             $rawStart = Get-InsightsProperty $job 'StartTime' $null
@@ -437,6 +440,164 @@ function New-SmartM365OrchestratorJobRunRequest {
     if ($missing.Count) { throw "No elected owner in the current shared plan for: $($missing -join ', ')." }
     $hash = (Get-FileHash -LiteralPath $JobsPath -Algorithm SHA256).Hash
     New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $SharedDataFolderPath -Tenant $Tenant -Pipeline Jobs -Selection $selection -ManifestHash $hash -RequestedBy ([Environment]::UserName) -RequestedFrom ([Environment]::MachineName)
+}
+
+function Get-SmartM365OrchestratorDashboard {
+    <# Pure dashboard aggregation (banner, tiles, items to review, servers, next 24 h timeline). #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$JobsDocument, [Parameter(Mandatory)]$Operations,
+        [AllowEmptyCollection()][object[]]$Health = @(), [AllowEmptyCollection()][object[]]$Runs = @(),
+        [AllowNull()]$Plan = $null, [AllowEmptyCollection()][object[]]$Requests = @(), [AllowNull()]$LogEvents = $null,
+        [datetime]$Now = (Get-Date), [int]$CertificateWarningDays = 30, [int]$RequestStaleHours = 6, [int]$TimelineHours = 24
+    )
+    $actions = [Collections.Generic.List[object]]::new()
+    function Add-DashboardAction([string]$Severity, [string]$Area, [string]$Item, [string]$Detail, [string]$Target) {
+        $actions.Add([pscustomobject]@{ Severity = $Severity; Area = $Area; Item = $Item; Detail = $Detail; Target = $Target })
+    }
+    $servers = @($Operations.Servers)
+    $jobs = @($JobsDocument.Jobs)
+    $enabledJobs = @($jobs | Where-Object { [bool](Get-InsightsProperty $_ 'Enabled' $false) })
+    $owners = @{}; $ownedCount = @{}
+    foreach ($assignment in @(Get-InsightsProperty $Plan 'Assignments' @())) {
+        $owner = [string](Get-InsightsProperty $assignment 'OwnerServer' '')
+        $owners[[string](Get-InsightsProperty $assignment 'JobName' '')] = $owner
+        if ($owner) { $ownedCount[$owner] = 1 + [int]$(if ($ownedCount.ContainsKey($owner)) { $ownedCount[$owner] } else { 0 }) }
+    }
+
+    # Items to review, most severe first.
+    foreach ($server in $servers) {
+        switch ([string]$server.State) {
+            'Online' { }
+            { $_ -in @('Recycling', 'Starting') } { Add-DashboardAction 'Info' 'Server' $server.Server ('{0} (heartbeat {1} min).' -f $server.State, $server.HeartbeatAgeMinutes) 'Operations' }
+            default { Add-DashboardAction 'Critical' 'Server' $server.Server ('{0}; heartbeat age {1} min.' -f $server.State, $(if ($null -ne $server.HeartbeatAgeMinutes) { $server.HeartbeatAgeMinutes } else { 'unknown' })) 'Operations' }
+        }
+        if ([string]$server.StatePersistence -ne 'OK') { Add-DashboardAction 'Critical' 'State persistence' $server.Server ([string]$server.StatePersistence) 'Events' }
+        if ([string](Get-InsightsProperty $server 'PrerequisiteBlocks' '')) { Add-DashboardAction 'Critical' 'Launch prerequisite' $server.Server ([string]$server.PrerequisiteBlocks) 'Operations' }
+        $days = Get-InsightsProperty $server 'CertificateDaysRemaining' $null
+        if ($null -ne $days -and [double]$days -lt $CertificateWarningDays) {
+            Add-DashboardAction $(if ([double]$days -lt 7) { 'Critical' } else { 'Warning' }) 'Certificate' $server.Server ('Application certificate expires in {0} day(s).' -f [math]::Floor([double]$days)) 'Operations'
+        }
+    }
+    if ([string](Get-InsightsProperty $Operations 'MaintenanceError' '')) { Add-DashboardAction 'Critical' 'Maintenance' 'Shared control' ('Maintenance control unavailable: ' + $Operations.MaintenanceError) 'Operations' }
+    elseif ($null -ne $Operations.Maintenance -and [bool](Get-InsightsProperty $Operations.Maintenance 'Enabled' $false)) { Add-DashboardAction 'Warning' 'Maintenance' 'Scheduling' ('Maintenance is ON: scheduled launches are suspended. Reason: ' + [string](Get-InsightsProperty $Operations.Maintenance 'Reason' '')) 'Operations' }
+    foreach ($row in @($Health | Where-Object { $_.Health -in @('Failing', 'Stale', 'NoRecentSuccess') })) {
+        $detail = switch ($row.Health) {
+            'Failing' { 'Last run {0} at {1}; last success {2}.' -f $row.LastStatus, $row.LastRun, $(if ($row.LastSuccess) { $row.LastSuccess } else { 'none in 21 days' }) }
+            'Stale' { 'Last success {0} ({1} h, expected at most {2} h).' -f $row.LastSuccess, $row.SuccessAgeHours, $row.ExpectedMaxAgeHours }
+            default { 'No successful run in the last 21 days.' }
+        }
+        Add-DashboardAction $(if ($row.Health -eq 'Failing') { 'Critical' } else { 'Warning' }) ('Job ' + $row.Health) $row.Name $detail 'Planning'
+    }
+    foreach ($group in @(Get-InsightsProperty $Plan 'UnassignedGroups' @())) {
+        $groupName = [string](Get-InsightsProperty $group 'GroupKey' (Get-InsightsProperty $group 'Group' $group))
+        $reason = [string](Get-InsightsProperty $group 'Reason' 'No live server satisfies the job requirements.')
+        Add-DashboardAction 'Warning' 'Election' $groupName ('Unassigned: ' + $reason) 'Servers and versions'
+    }
+    foreach ($incident in @($Operations.Incidents)) { Add-DashboardAction 'Warning' 'Peer monitoring' ([string]$incident.ObservedBy) ([string]$incident.Issue) 'Operations' }
+    foreach ($request in @($Requests | Where-Object { $_.Status -in @('Running', 'Cancelling') })) {
+        $created = [datetime]::MinValue
+        if ([datetime]::TryParseExact([string]$request.Created, 'yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$created) -and ($Now - $created).TotalHours -gt $RequestStaleHours) {
+            Add-DashboardAction 'Warning' 'Pipeline request' ([string]$request.BatchId) ('{0} for {1:0} h; {2} job(s) not finished.' -f $request.Status, ($Now - $created).TotalHours, $request.Pending) 'Requests'
+        }
+    }
+    $recentEvents = @()
+    if ($null -ne $LogEvents) {
+        $recentEvents = @($LogEvents.Events | Where-Object { $_.Time -ge $Now.AddHours(-24) })
+        foreach ($group in @($LogEvents.Events | Where-Object { $_.Time -ge $Now.AddHours(-1) -and $_.Category -in @('Heartbeat', 'StatePersistence', 'ConfigReload') -and $_.Level -ne 'INFO' } | Group-Object Server, Category)) {
+            $last = @($group.Group | Sort-Object Time -Descending)[0]
+            Add-DashboardAction 'Warning' ('Log ' + $last.Category) $last.Server ('{0} line(s) in the last hour; latest {1:HH:mm}: {2}' -f $group.Count, $last.Time, $last.Message) 'Events'
+        }
+    }
+    $rank = @{ Critical = 0; Warning = 1; Info = 2 }
+    $sortedActions = @($actions | Sort-Object @{ Expression = { $rank[$_.Severity] } }, Area, Item)
+
+    # Tiles.
+    $online = @($servers | Where-Object State -eq 'Online').Count
+    $unhealthy = @($Health | Where-Object { $_.Health -in @('Failing', 'Stale', 'NoRecentSuccess') })
+    $failingCount = @($unhealthy | Where-Object Health -eq 'Failing').Count
+    $failures = @($Runs | Where-Object { $_.Status -in $script:InsightsTerminalFailure -and $(if ($null -ne $_.EndTime) { [datetime]$_.EndTime } else { [datetime]$_.StartTime }) -ge $Now.AddHours(-24) })
+    $pendingRows = @($Operations.Pending)
+    $topReason = @($pendingRows | Group-Object Reason | Sort-Object Count -Descending | Select-Object -First 1)
+    $certificateDays = @($servers | ForEach-Object { Get-InsightsProperty $_ 'CertificateDaysRemaining' $null } | Where-Object { $null -ne $_ } | ForEach-Object { [double]$_ } | Sort-Object)
+    $errorEvents = @($recentEvents | Where-Object Level -eq 'ERROR').Count
+    $warnEvents = @($recentEvents | Where-Object Level -eq 'WARN').Count
+    $tiles = @(
+        [pscustomobject]@{ Key = 'Jobs'; Label = 'Jobs'; Value = [string]$jobs.Count; Detail = '{0} manual, {1} disabled' -f @($jobs | Where-Object { [string](Get-InsightsProperty $_ 'AssignmentMode' '') -eq 'Manual' }).Count, ($jobs.Count - $enabledJobs.Count); Level = 'Normal'; Target = 'Planning' }
+        [pscustomobject]@{ Key = 'Enabled'; Label = 'Enabled'; Value = [string]$enabledJobs.Count; Detail = 'scheduled or manual'; Level = 'Normal'; Target = 'Planning' }
+        [pscustomobject]@{ Key = 'Servers'; Label = 'Servers online'; Value = '{0}/{1}' -f $online, $servers.Count; Detail = $(if ($online -eq $servers.Count) { 'all heartbeats fresh' } else { (@($servers | Where-Object State -ne 'Online' | ForEach-Object { '{0} {1}' -f $_.Server, $_.State }) -join ', ') }); Level = $(if ($servers.Count -and $online -eq $servers.Count) { 'Normal' } elseif (@($servers | Where-Object { $_.State -notin @('Online', 'Recycling', 'Starting') }).Count) { 'Critical' } else { 'Warning' }); Target = 'Operations' }
+        [pscustomobject]@{ Key = 'Running'; Label = 'Running'; Value = [string]@($Operations.Running).Count; Detail = 'jobs in progress'; Level = 'Normal'; Target = 'Operations' }
+        [pscustomobject]@{ Key = 'Pending'; Label = 'Pending'; Value = [string]$pendingRows.Count; Detail = $(if ($topReason.Count) { 'mostly ' + $(if ($topReason[0].Name) { $topReason[0].Name } else { 'waiting' }) } else { 'nothing waiting' }); Level = $(if ($pendingRows.Count) { 'Info' } else { 'Normal' }); Target = 'Operations' }
+        [pscustomobject]@{ Key = 'Health'; Label = 'Job health'; Value = [string]$unhealthy.Count; Detail = '{0} failing, {1} stale, {2} no success' -f $failingCount, @($unhealthy | Where-Object Health -eq 'Stale').Count, @($unhealthy | Where-Object Health -eq 'NoRecentSuccess').Count; Level = $(if ($failingCount) { 'Critical' } elseif ($unhealthy.Count) { 'Warning' } else { 'Normal' }); Target = 'Planning' }
+        [pscustomobject]@{ Key = 'Failures'; Label = 'Failures 24 h'; Value = [string]$failures.Count; Detail = $(if ($failures.Count) { (@($failures | ForEach-Object JobName | Sort-Object -Unique) | Select-Object -First 3) -join ', ' } else { 'no failed run' }); Level = $(if ($failures.Count) { 'Critical' } else { 'Normal' }); Target = 'Failures24h' }
+        [pscustomobject]@{ Key = 'Events'; Label = 'Log errors 24 h'; Value = $(if ($null -eq $LogEvents) { '-' } else { [string]$errorEvents }); Detail = $(if ($null -eq $LogEvents) { 'resident logs not read' } else { '{0} warning(s)' -f $warnEvents }); Level = $(if ($errorEvents) { 'Warning' } else { 'Normal' }); Target = 'Events' }
+        [pscustomobject]@{ Key = 'Certificate'; Label = 'Certificate'; Value = $(if ($certificateDays.Count) { '{0} d' -f [math]::Floor($certificateDays[0]) } else { '-' }); Detail = $(if ($certificateDays.Count) { 'days before expiry (lowest server)' } else { 'not reported by heartbeats' }); Level = $(if (-not $certificateDays.Count) { 'Normal' } elseif ($certificateDays[0] -lt 7) { 'Critical' } elseif ($certificateDays[0] -lt $CertificateWarningDays) { 'Warning' } else { 'Normal' }); Target = 'Operations' }
+    )
+
+    # Servers.
+    $serverRows = @(foreach ($server in $servers) {
+        [pscustomobject]@{
+            Server = $server.Server; State = $server.State; Version = $server.Version; StatePersistence = $server.StatePersistence
+            Running = $server.Running; Pending = $server.Pending; RecycleIn = $server.RecycleIn
+            Owned = $(if ($ownedCount.ContainsKey([string]$server.Server)) { $ownedCount[[string]$server.Server] } else { 0 })
+            Certificate = $(if ($null -ne (Get-InsightsProperty $server 'CertificateDaysRemaining' $null)) { '{0} d' -f [math]::Floor([double]$server.CertificateDaysRemaining) } else { '' })
+            Capabilities = [string](Get-InsightsProperty $server 'ReadyCapabilities' '')
+            HeartbeatAgeMinutes = $server.HeartbeatAgeMinutes
+        }
+    })
+
+    # Next hours: scheduled occurrences on their owner lane, plus running jobs.
+    $healthByName = @{}; foreach ($row in @($Health)) { $healthByName[[string]$row.Name] = $row }
+    $maintenanceOn = $null -ne $Operations.Maintenance -and [bool](Get-InsightsProperty $Operations.Maintenance 'Enabled' $false)
+    $to = $Now.AddHours($TimelineHours)
+    $items = [Collections.Generic.List[object]]::new()
+    foreach ($job in @($enabledJobs | Where-Object { [string](Get-InsightsProperty $_ 'AssignmentMode' '') -ne 'Manual' })) {
+        $name = [string]$job.Name
+        $mode = [string](Get-InsightsProperty $job 'AssignmentMode' 'Legacy')
+        $allowed = @(Get-InsightsProperty $job 'AllowedServers' @() | ForEach-Object { [string]$_ } | Where-Object { $_ })
+        $lane = if ($mode -eq 'Elected') { if ($owners.ContainsKey($name) -and $owners[$name]) { $owners[$name] } else { 'Unassigned' } } elseif ($allowed.Count -eq 1) { $allowed[0] } else { 'Any server' }
+        $minutes = [double](Get-InsightsProperty $healthByName[$name] 'AverageDurationMinutes' 0)
+        if ($minutes -le 0) { $minutes = [double](Get-InsightsProperty $job 'EstimatedDurationMinutes' 5) }
+        if ($minutes -le 0) { $minutes = 5 }
+        foreach ($occurrence in @(Get-SmartM365OrchestratorScheduleOccurrences -Schedule $job.Schedule -From $Now -To $to)) {
+            $kind = if ($lane -eq 'Unassigned') { 'Unassigned' } elseif ($maintenanceOn) { 'Suspended' } else { 'Planned' }
+            $items.Add([pscustomobject]@{ Lane = $lane; Job = $name; Start = $occurrence; End = $occurrence.AddMinutes($minutes); Kind = $kind })
+        }
+    }
+    foreach ($running in @($Operations.Running)) {
+        $start = $null; $parsed = [datetime]::MinValue
+        if ([datetime]::TryParseExact([string]$running.Started, 'yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$parsed)) { $start = $parsed } else { $start = $Now }
+        $minutes = [double](Get-InsightsProperty $healthByName[[string]$running.Job] 'AverageDurationMinutes' 0)
+        $end = if ($minutes -gt 0) { $start.AddMinutes($minutes) } else { $Now.AddMinutes(15) }
+        if ($end -lt $Now.AddMinutes(5)) { $end = $Now.AddMinutes(5) }
+        $items.Add([pscustomobject]@{ Lane = [string]$running.Server; Job = [string]$running.Job; Start = $start; End = $end; Kind = 'Running' })
+    }
+    $lanes = @(@($servers | ForEach-Object { [string]$_.Server }) + @($items | ForEach-Object Lane | Where-Object { $_ -notin @($servers | ForEach-Object { [string]$_.Server }) } | Sort-Object -Unique))
+
+    $critical = @($sortedActions | Where-Object Severity -eq 'Critical').Count
+    $warning = @($sortedActions | Where-Object Severity -eq 'Warning').Count
+    $summary = '{0}/{1} server(s) online | {2} running | {3} pending | {4} failure(s) in 24 h | maintenance {5}' -f $online, $servers.Count, @($Operations.Running).Count, $pendingRows.Count, $failures.Count, $(if ($maintenanceOn) { 'ON' } else { 'off' })
+    $banner = if ($critical) { [pscustomobject]@{ Level = 'Critical'; Text = '{0} critical and {1} warning item(s) to review. {2}' -f $critical, $warning, $summary } }
+    elseif ($warning) { [pscustomobject]@{ Level = 'Warning'; Text = '{0} warning item(s) to review. {1}' -f $warning, $summary } }
+    else { [pscustomobject]@{ Level = 'Normal'; Text = 'Everything looks healthy. ' + $summary } }
+    [pscustomobject]@{
+        Banner = $banner; Tiles = $tiles; Actions = $sortedActions; Servers = $serverRows
+        Timeline = [pscustomobject]@{ From = $Now; To = $to; Lanes = $lanes; Items = @($items | Sort-Object Start) }
+        GeneratedAt = $Now
+    }
+}
+
+function Get-SmartM365OrchestratorDashboardData {
+    <# Reads the remaining read-only sources (runs, election plan) and builds the dashboard. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SharedDataFolderPath, [Parameter(Mandatory)]$JobsDocument, [Parameter(Mandatory)]$Operations,
+        [AllowNull()][object[]]$Runs = $null, [AllowEmptyCollection()][object[]]$Requests = @(), [AllowNull()]$LogEvents = $null, [datetime]$Now = (Get-Date)
+    )
+    if ($null -eq $Runs) { $Runs = @(Get-SmartM365OrchestratorRecentRuns -SharedDataFolderPath $SharedDataFolderPath -Days 21 -Now $Now) }
+    $health = @(Get-SmartM365OrchestratorJobHealth -JobsDocument $JobsDocument -Runs $Runs -Now $Now)
+    $plan = Read-InsightsJson -Path (Join-Path $SharedDataFolderPath 'Election\Orchestrator-ElectionPlan.json')
+    Get-SmartM365OrchestratorDashboard -JobsDocument $JobsDocument -Operations $Operations -Health $health -Runs $Runs -Plan $plan -Requests $Requests -LogEvents $LogEvents -Now $Now
 }
 
 # Resident log lines kept as events. ERROR/WARN lines are always kept; INFO lines only when
@@ -585,7 +746,8 @@ Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorScheduleOccurrences', 'Get-SmartM365OrchestratorExpectedMaxAgeHours', 'Get-SmartM365OrchestratorRecentRuns',
     'Get-SmartM365OrchestratorJobHealth', 'Get-SmartM365OrchestratorDependents', 'Get-SmartM365OrchestratorDependencyReadiness',
     'Get-SmartM365OrchestratorOperations', 'Get-SmartM365OrchestratorRecentPipelineRuns', 'New-SmartM365OrchestratorJobRunRequest',
-    'Get-SmartM365OrchestratorLogEventCategory', 'Get-SmartM365OrchestratorLogEvents', 'Select-SmartM365OrchestratorLogEvents'
+    'Get-SmartM365OrchestratorLogEventCategory', 'Get-SmartM365OrchestratorLogEvents', 'Select-SmartM365OrchestratorLogEvents',
+    'Get-SmartM365OrchestratorDashboard', 'Get-SmartM365OrchestratorDashboardData'
 )
 
 # SIG # Begin signature block

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercises the two pilot demos with WPF events and forbidden operational commands.
 .VERSION
-1.0.2
+1.0.3
 .NOTES
 Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
 #>
@@ -137,6 +137,11 @@ try {
             Assert-Demo ($c.MainTabs.SelectedItem.Header -eq $view) "Cannot navigate to $view"
             Export-DemoPreview $s.Window ('orchestrator-'+($view -replace ' ','-').ToLowerInvariant())
         }
+        Assert-Demo (@($c.DashboardTilesList.ItemsSource).Count -eq 9 -and @($c.DashboardGrid.ItemsSource).Count -eq 3 -and @($c.DashboardTimelineCanvas.Tag.Items).Count -gt 0) 'Dashboard tiles, servers or timeline missing.'
+        Assert-Demo ($c.DashboardBannerText.Text -like '*DEMO*' -and @($c.DashboardActionsGrid.ItemsSource).Count -eq @($s.Dashboard.Actions).Count) 'Dashboard banner or items to review missing.'
+        Select-OrchestratorDemoTarget 'Failures24h'
+        Assert-Demo ($c.MainTabs.SelectedItem.Header -eq 'History' -and @($s.FilteredHistory | Where-Object Status -NE 'Failed').Count -eq 0) 'Dashboard failure tile navigation failed.'
+        $c.HistoryStatusCombo.SelectedItem='All';Update-OrchestratorDemoHistory
         $c.HistoryServerCombo.SelectedItem='CTSO-INV-01'
         Invoke-DemoClick $c.HistoryRefreshButton
         Assert-Demo ($s.FilteredHistory.Count -eq (@($s.Data.Jobs|Where-Object Server -EQ 'CTSO-INV-01').Count*7)) 'History server filter failed.'
