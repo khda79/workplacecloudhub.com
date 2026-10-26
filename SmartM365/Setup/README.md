@@ -5,6 +5,7 @@ This folder contains interactive setup and bootstrap scripts for SmartM365.
 - `SmartM365-Create-AppRegistration.ps1`: creates or updates the SmartM365 Entra app registration, permissions, certificate metadata, Teams workspace, SharePoint target, and mail sender setup.
 - `SmartM365-AppRegistration-Permissions.md`: documents the permission-by-permission rationale and the scripts that use each permission.
 - `SmartM365-Set-TeamsWebhook.ps1`: stores and tests Teams Workflows / Power Automate webhook URLs in the selected local tenant profile.
+- `Test-SmartM365-SendMail.ps1`: sends one test mail through `Send-SmartM365Mail` with the selected tenant profile; `-From`/`-To`/`-Cc` override the profile, `-AsScript <name>` applies that script's mail profile entry, `-WhatIf` only shows the effective values.
 - `Install-SmartM365-SmartInventoryPrerequisites.ps1`: installs PowerShell module prerequisites for all SmartM365 SmartInventory scripts and reports the RSAT Active Directory prerequisite when missing.
 
 Run these scripts from the SmartM365 root with `.\Setup\<script-name>.ps1` so relative examples and local configuration paths remain easy to read.
