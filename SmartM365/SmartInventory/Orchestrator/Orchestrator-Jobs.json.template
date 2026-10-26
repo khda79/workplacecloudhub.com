@@ -1969,6 +1969,7 @@
     {
       "Name": "AD-DuplicateIdentity-Mail",
       "Manual": true,
+      "Group": "AD",
       "Description": "Duplicate identity analysis of the AD inventory and its notification mail.",
       "ScriptPath": "ActiveDirectoryInventory\\SmartM365-ActiveDirectory-Inventory.ps1",
       "Arguments": "-DuplicateAnalysisOnly -ForceSendDuplicateNotification",
@@ -1979,6 +1980,7 @@
     {
       "Name": "Exchange2016-Local-Mailboxes-Inventory-MailboxesOnly",
       "Manual": true,
+      "Group": "Exchange2016",
       "Description": "Exchange 2016 local mailboxes inventory without AD permissions.",
       "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
       "Arguments": "",
@@ -1996,6 +1998,7 @@
     {
       "Name": "Exchange2016-Local-Mailboxes-OnlyADPermissions",
       "Manual": true,
+      "Group": "Exchange2016",
       "Description": "Exchange 2016 local mailboxes: AD permissions only.",
       "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
       "Arguments": "-OnlyADPermission",
@@ -2013,6 +2016,7 @@
     {
       "Name": "Exchange2016-ProxyAddresses-Write",
       "Manual": true,
+      "Group": "Exchange2016",
       "Description": "Adds the missing proxy addresses in Exchange on-premises (write mode).",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ProxyAddresses\\SmartM365-Check-ProxyAddresses-Exchange.ps1",
       "Arguments": "-AllOrganizationalUnit -AddMissingAddress",
@@ -2030,6 +2034,7 @@
     {
       "Name": "Exchange2016-Infrastructure-Inventory-Basic",
       "Manual": true,
+      "Group": "Exchange2016",
       "Description": "Exchange 2016 servers and storage inventory without the optional health sections.",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1",
       "Arguments": "",
@@ -2045,6 +2050,8 @@
     {
       "Name": "Exchange-HealthChecker-ScheduledTask-Installer",
       "Manual": true,
+      "Group": "Exchange2016",
+      "Advanced": true,
       "HideInGui": true,
       "Description": "Installs the HealthChecker scheduled task on the Exchange servers (Windows PowerShell 5.1 for the CIM sessions).",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1",
@@ -2058,6 +2065,8 @@
     {
       "Name": "Intune-DeviceSystemRemediation-Create",
       "Manual": true,
+      "Group": "Intune",
+      "Advanced": true,
       "Description": "Creates the Intune device system remediation package.",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Create-DeviceSystemRemediation.ps1",
       "Arguments": "",
@@ -2068,6 +2077,7 @@
     {
       "Name": "Intune-EndpointAnalytics-Inventory-NoStartupProcesses",
       "Manual": true,
+      "Group": "Intune",
       "Description": "Endpoint Analytics reports without startup processes.",
       "ScriptPath": "M365Inventory\\IntuneInventory\\EndpointAnalytics\\SmartM365-EndpointAnalytics-Inventory.ps1",
       "Arguments": "-Reports All -Connect",
@@ -2078,6 +2088,7 @@
     {
       "Name": "M365-LicensePricing-Inventory-PublicPrices",
       "Manual": true,
+      "Group": "M365",
       "Description": "License pricing from the public price list shipped with the script.",
       "ScriptPath": "M365Inventory\\Licensing\\SmartM365-LicensePricing-Inventory.ps1",
       "Arguments": "-PricingSourceCsvPath {{PricingSourceCsvPath}} -EnableConfiguredExternalActions",
@@ -2094,6 +2105,7 @@
     {
       "Name": "M365-BackupProtectedMailboxes-Interactive",
       "Manual": true,
+      "Group": "ExchangeOnline",
       "Description": "Microsoft 365 Backup protected mailboxes with interactive sign-in.",
       "ScriptPath": "ExchangeInventory\\BackupProtection\\SmartM365-M365-BackupProtectedMailboxes-Inventory.ps1",
       "Arguments": "-InteractiveAuth",
@@ -2105,6 +2117,7 @@
     {
       "Name": "M365-BackupProtectedSitesAndDrives-Interactive",
       "Manual": true,
+      "Group": "ExchangeOnline",
       "Description": "Microsoft 365 Backup protected sites and drives with interactive sign-in.",
       "ScriptPath": "ExchangeInventory\\BackupProtection\\SmartM365-M365-BackupProtectedSitesAndDrives-Inventory.ps1",
       "Arguments": "-InteractiveAuth -EnableConfiguredExternalActions",
@@ -2116,6 +2129,7 @@
     {
       "Name": "M365-Usage-Inventory-D180",
       "Manual": true,
+      "Group": "M365",
       "Description": "Microsoft 365 usage reports (all) over 180 days.",
       "ScriptPath": "M365Inventory\\Usage\\SmartM365-M365UserActivity-Inventory.ps1",
       "Arguments": "-Period D180 -Reports All -Connect",
@@ -2126,6 +2140,7 @@
     {
       "Name": "M365-UserActivity-Inventory-D180",
       "Manual": true,
+      "Group": "M365",
       "Description": "Microsoft 365 user activity (default reports) over 180 days.",
       "ScriptPath": "M365Inventory\\Usage\\SmartM365-M365UserActivity-Inventory.ps1",
       "Arguments": "-Period D180 -Connect",
@@ -2136,6 +2151,7 @@
     {
       "Name": "M365-TeamsPhonePstnUsage-Inventory-NoPhoneAssignments",
       "Manual": true,
+      "Group": "M365",
       "Description": "Teams Phone PSTN usage over 90 days without phone assignments.",
       "ScriptPath": "M365Inventory\\Teams\\SmartM365-TeamsPhonePstnUsage-Inventory.ps1",
       "Arguments": "-LookbackDays 90",
@@ -2146,6 +2162,8 @@
     {
       "Name": "WorkplaceEvidence-Prepare-Offline",
       "Manual": true,
+      "Group": "PreparedEvidence",
+      "Advanced": true,
       "Description": "Workplace evidence preparation from local data only.",
       "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
       "Arguments": "-Offline",
@@ -2157,6 +2175,8 @@
     {
       "Name": "WorkplaceEvidence-Transfer",
       "Manual": true,
+      "Group": "PreparedEvidence",
+      "Advanced": true,
       "Description": "Workplace evidence transfer only.",
       "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
       "Arguments": "-TransferOnly",
@@ -2168,6 +2188,8 @@
     {
       "Name": "WorkplaceEvidence-Validate",
       "Manual": true,
+      "Group": "PreparedEvidence",
+      "Advanced": true,
       "Description": "Workplace evidence preparation, validation only.",
       "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
       "Arguments": "-ValidateOnly",
@@ -2179,6 +2201,8 @@
     {
       "Name": "WorkplaceEvidence-WorkforceDiagnostic",
       "Manual": true,
+      "Group": "PreparedEvidence",
+      "Advanced": true,
       "Description": "Workplace evidence workforce memory diagnostic.",
       "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
       "Arguments": "-WorkforceDiagnostic",
@@ -2190,6 +2214,8 @@
     {
       "Name": "WorkplaceEvidence-ConvertMetadata",
       "Manual": true,
+      "Group": "PreparedEvidence",
+      "Advanced": true,
       "Description": "Workplace evidence metadata conversion.",
       "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
       "Arguments": "-ConvertMetadata",
@@ -2201,6 +2227,8 @@
     {
       "Name": "WorkplaceEvidence-RepairTenantKeys",
       "Manual": true,
+      "Group": "PreparedEvidence",
+      "Advanced": true,
       "Description": "Workplace evidence legacy history TenantKey repair.",
       "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
       "Arguments": "-RepairLegacyHistory",
@@ -2212,6 +2240,7 @@
     {
       "Name": "Orchestrator-GUI",
       "Manual": true,
+      "Group": "Orchestrator",
       "HideInGui": true,
       "Description": "Orchestrator management console (WPF).",
       "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator-GUI.ps1",
@@ -2224,6 +2253,7 @@
     {
       "Name": "Orchestrator-Start",
       "Manual": true,
+      "Group": "Orchestrator",
       "HideInGui": true,
       "Description": "Starts a resident orchestrator in this console.",
       "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator.ps1",
@@ -2235,6 +2265,7 @@
     {
       "Name": "Orchestrator-Stop",
       "Manual": true,
+      "Group": "Orchestrator",
       "HideInGui": true,
       "Description": "Asks the resident orchestrator of this computer to stop cleanly.",
       "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator.ps1",
@@ -2246,6 +2277,7 @@
     {
       "Name": "Orchestrator-Restart",
       "Manual": true,
+      "Group": "Orchestrator",
       "HideInGui": true,
       "Description": "Stops the orchestrator cleanly, then starts its scheduled task.",
       "ScriptPath": "Orchestrator\\Restart-SmartM365-Inventory-Orchestrator.ps1",
@@ -2257,6 +2289,7 @@
     {
       "Name": "Orchestrator-FullCollect",
       "Manual": true,
+      "Group": "Orchestrator",
       "HideInGui": true,
       "Description": "Requests the full pipeline from the resident orchestrators and waits for it.",
       "ScriptPath": "Orchestrator\\SmartM365-Inventory-Pipeline.ps1",
@@ -2268,6 +2301,7 @@
     {
       "Name": "Orchestrator-SendSummary",
       "Manual": true,
+      "Group": "Orchestrator",
       "HideInGui": true,
       "Description": "Sends the orchestrator execution summary email now.",
       "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator.ps1",
@@ -2279,6 +2313,8 @@
     {
       "Name": "Orchestrator-ScheduledTask-Installer",
       "Manual": true,
+      "Group": "Orchestrator",
+      "Advanced": true,
       "HideInGui": true,
       "Description": "Installs or removes the orchestrator scheduled task and the GUI shortcut (guided).",
       "ScriptPath": "Orchestrator\\Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1",

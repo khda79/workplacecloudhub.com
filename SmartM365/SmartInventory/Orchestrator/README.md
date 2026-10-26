@@ -653,6 +653,8 @@ The full job can declare `DependsOn` on its fast prerequisite when a quick CSV m
 | `Tokens` | `{ "Name": { "Value": "...", "MustExist": true } }`, used as `{{Name}}` in `Arguments`; `{{ScriptDirectory}}`, `{{SmartInventoryRoot}}` and `{{Tenant}}` are built in. |
 | `PassTenant` | `false` when the script asks for its tenant itself; otherwise `-Tenant` is passed when the script declares it. |
 | `LegacyLaunchers` | Former `.cmd` files that this entry replaces; their one-line aliases are generated from it. |
+| `Group` | Also on manual entries: domain of the `SmartInventory.cmd` menu (Active Directory, Exchange Online, Exchange 2016, Intune, Microsoft 365, SharePoint on-premises, Workplace Evidence, SmartFinOps, Orchestrator). |
+| `Advanced` | Manual entries only: `true` for a rarely used tool (migration, repair, diagnostic, setup); the menu lists it only after `A`, its name always works. |
 | `HideInGui` | Manual entries only: `true` keeps the entry out of the GUI `Manual launches` list (the orchestrator entries, already offered as buttons, and the installers); it stays in the `SmartInventory.cmd` menu and command line. |
 
 The `Launches` array holds the manual entries (`"Manual": true`): same fields, never scheduled, requested or loaded by the orchestrator. `New-SmartM365-OrchestratorJobLaunchers.ps1 -Check` validates both arrays (scripts, parameters by AST, execution, includes, tokens).

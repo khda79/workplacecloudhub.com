@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate offline the SmartInventory launch engine and its catalog against the legacy .cmd launchers.
 .VERSION
-1.3.0
+1.4.0
 .NOTES
 Runs under Windows PowerShell 5.1 and PowerShell 7. Nothing is executed outside a fictional fixture.
 Checks:
@@ -17,8 +17,8 @@ Checks:
 - real runs on a fictional fixture in %TEMP%: Direct without copy, LocalCache copy, missing
   Include (missing source, failed copy, absent after copy), output inside the cache refused,
   exit codes transmitted (5.1 and 7), extra arguments, the mailbox identity helper loads under 5.1;
-- menu of SmartInventory.cmd (sections, choice by number or name, run, show the command, quit) and
-  HideInGui validation;
+- menu of SmartInventory.cmd (domains, advanced entries on request, choice by number or name, run,
+  show the command, quit) and HideInGui, Advanced and Group validation;
 - cache hardening: explicit ACL, junction and untrusted owner refused, code integrity checked
   before the launch, orchestrator candidates without the shared Windows\Temp and C:\Temp.
 #>
@@ -179,10 +179,16 @@ try {
 
     # Menu: every entry once, jobs first, then manual launches, then the orchestrator entries.
     $menu = @(Get-SmartM365InventoryMenu -Catalog $catalog)
-    $sectionOrder = @($menu | ForEach-Object { $_.Section } | Select-Object -Unique)
-    Assert-True ($menu.Count -eq @($catalog.Entries).Count -and @($menu.Number) -join ',' -eq ((1..$menu.Count) -join ',')) 'The menu must number every catalog entry once.'
-    Assert-True ($sectionOrder.Count -eq 3 -and $sectionOrder[0] -like 'Jobs*' -and $sectionOrder[2] -eq 'Orchestrator' -and @($menu | Where-Object { $_.Section -eq 'Orchestrator' -and $_.Name -notlike 'Orchestrator-*' }).Count -eq 0) 'Menu sections: jobs, manual launches, orchestrator.'
-    Assert-True ((Resolve-SmartM365InventoryMenuChoice -Menu $menu -Choice ' 1 ').Name -eq $menu[0].Name -and (Resolve-SmartM365InventoryMenuChoice -Menu $menu -Choice 'orchestrator-gui').Name -eq 'Orchestrator-GUI' -and $null -eq (Resolve-SmartM365InventoryMenuChoice -Menu $menu -Choice '9999')) 'A menu choice resolves by number or by name.'
+    $domains = @(Get-SmartM365InventoryMenuDomains -Items $menu)
+    $allDomains = @(Get-SmartM365InventoryMenuDomains -Items $menu -IncludeAdvanced)
+    $advanced = @($menu | Where-Object Advanced | ForEach-Object Name)
+    Assert-True ($menu.Count -eq @($catalog.Entries).Count -and @($menu | Where-Object { $_.Domain -eq 'Other' }).Count -eq 0) 'Every catalog entry must belong to a menu domain.'
+    Assert-True ($advanced.Count -eq 9 -and $advanced -contains 'WorkplaceEvidence-ConvertMetadata' -and $advanced -contains 'Orchestrator-ScheduledTask-Installer' -and $advanced -notcontains 'M365-Usage-Inventory-D180') 'Nine advanced entries: migration, repair, diagnostics and setup tools.'
+    Assert-True ((($domains | Measure-Object -Property Count -Sum).Sum) -eq ($menu.Count - 9) -and (($allDomains | Measure-Object -Property Count -Sum).Sum) -eq $menu.Count) 'Advanced entries are listed only on request.'
+    Assert-True (@($domains.Domain) -join '|' -eq 'Active Directory|Exchange Online|Exchange 2016 (on-premises)|Intune|Microsoft 365|SharePoint (on-premises)|Workplace Evidence|SmartFinOps|Orchestrator') ('Unexpected menu domains: ' + (@($domains.Domain) -join '|'))
+    $adItems = @($domains[0].Items)
+    Assert-True ($adItems[0].Kind -eq 'Job' -and $adItems[-1].Kind -eq 'Manual') 'Jobs come before manual entries in a domain.'
+    Assert-True ((Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice ' 2 ').Domain -eq 'Exchange Online' -and (Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice 'workplaceevidence-convertmetadata').Name -eq 'WorkplaceEvidence-ConvertMetadata' -and $null -eq (Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice '99')) 'A choice resolves by number, or by name even for an advanced entry.'
     $hiddenInGui = @($catalog.Entries | Where-Object { $_.Definition.PSObject.Properties['HideInGui'] -and $_.Definition.HideInGui } | ForEach-Object { $_.Name })
     Assert-True ($hiddenInGui.Count -eq 8 -and $hiddenInGui -contains 'Orchestrator-GUI' -and $hiddenInGui -contains 'Exchange-HealthChecker-ScheduledTask-Installer') 'The orchestrator entries and the installers are hidden in the GUI.'
 
@@ -269,8 +275,8 @@ exit $ExitCode
             [ordered]@{ Name = 'Probe-JobMode'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-Marker jobmode'; Execution = [ordered]@{ Mode = 'Direct'; CacheName = 'Fixture\JobMode'; Include = @() } }
         )
         Launches = @(
-            [ordered]@{ Name = 'Probe-Manual'; Manual = $true; Description = 'Fixture manual entry.'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-Marker manual -Value {{PriceList}}'; WorkingDirectory = 'Fixture'; Tokens = [ordered]@{ PriceList = [ordered]@{ Value = '{{ScriptDirectory}}\prices.csv'; MustExist = $true } } },
-            [ordered]@{ Name = 'Probe-Write'; Manual = $true; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-Marker write'; RequiresConfirmation = $true; Interactive = $true }
+            [ordered]@{ Name = 'Probe-Manual'; Manual = $true; Group = 'Fixture'; Advanced = $true; Description = 'Fixture manual entry.'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-Marker manual -Value {{PriceList}}'; WorkingDirectory = 'Fixture'; Tokens = [ordered]@{ PriceList = [ordered]@{ Value = '{{ScriptDirectory}}\prices.csv'; MustExist = $true } } },
+            [ordered]@{ Name = 'Probe-Write'; Manual = $true; Group = 'Fixture'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-Marker write'; RequiresConfirmation = $true; Interactive = $true }
         )
     }
     Write-FixtureFile -Path (Join-Path $fixtureInventory 'Orchestrator\Orchestrator-Jobs.json.template') -Content ($fixtureCatalog | ConvertTo-Json -Depth 10)
@@ -456,12 +462,14 @@ exit $ExitCode
     Assert-True ($LASTEXITCODE -eq 7 -and $marker.Tenant -eq 'cli' -and $marker.Value -eq 'cli value' -and $marker.Edition -eq 'Core') "The entry script must relaunch pwsh 7 and return the job exit code (got $LASTEXITCODE)."
     # Menu driven through the input: show the command, go back, choose by name, run now; quitting runs nothing.
     Remove-Item -LiteralPath (Join-Path $markerFolder 'direct.json') -ErrorAction SilentlyContinue
-    $menuOutput = "3`nW`nB`nprobe-direct`nR`n" | & $powershell5 -NoProfile -ExecutionPolicy Bypass -File $engineScript -Menu -Tenant 'menu' 2>&1 | Out-String
+    # Domain 2 (Other: the fixture jobs, after the Fixture group), entry 3, show the command, back, then the entry by name, run.
+    $menuOutput = "2`n3`nW`nB`nprobe-direct`nR`n" | & $powershell5 -NoProfile -ExecutionPolicy Bypass -File $engineScript -Menu -Tenant 'menu' 2>&1 | Out-String
     $marker = Read-Marker -Name 'direct'
     Assert-True ($LASTEXITCODE -eq 7 -and $null -ne $marker -and $marker.Tenant -eq 'menu') "The menu must run the chosen entry and return its exit code (got $LASTEXITCODE)."
-    Assert-True ($menuOutput -match 'Jobs: run now' -and $menuOutput -match 'Manual launches' -and $menuOutput -match '\s3\s+Probe-Direct' -and $menuOutput -match 'Command: ') "The menu must list the sections and show the command: $menuOutput"
+    Assert-True ($menuOutput -match 'Domains' -and $menuOutput -match '\s1\s+Fixture \(1\)' -and $menuOutput -match '\s3\s+Probe-Direct' -and $menuOutput -match 'Command: ' -and $menuOutput -notmatch 'Probe-Manual') "The menu must list the domains and entries, hide advanced entries and show the command: $menuOutput"
     Remove-Item -LiteralPath (Join-Path $markerFolder 'direct.json') -ErrorAction SilentlyContinue
-    $quitOutput = "Q`n" | & $powershell5 -NoProfile -ExecutionPolicy Bypass -File $engineScript -Menu 2>&1 | Out-String
+    $quitOutput = "A`nQ`n" | & $powershell5 -NoProfile -ExecutionPolicy Bypass -File $engineScript -Menu 2>&1 | Out-String
+    Assert-True ($quitOutput -match 'advanced entries shown' -and $quitOutput -match 'Fixture \(2\)') 'A must show the advanced entries.'
     Assert-True ($LASTEXITCODE -eq 0 -and $null -eq (Read-Marker -Name 'direct')) 'Quitting the menu must run nothing.'
     & $powershell5 -NoProfile -ExecutionPolicy Bypass -File $engineScript 'No-Such-Job' *> $null
     Assert-True ($LASTEXITCODE -eq 1) 'An unknown entry must return 1.'

@@ -11,9 +11,10 @@ Orchestrator-Jobs.json.template (Jobs and Launches); see SmartM365.Inventory.Lau
 PowerShell 5.1) and execution mode (Direct or LocalCache), outside the orchestrator.
 -Name <Job>[,<Job>...] -Request submits the jobs through SmartM365-Inventory-Pipeline.ps1: the
 resident orchestrators run them on the elected server with their dependencies and locks.
-Without argument in a user console, a numbered menu lists the jobs, the manual launches and the
-orchestrator entries; type a number or a name, then run now, request through the orchestrators
-(jobs), or show the resolved command. -List (or no argument when the input is redirected) prints the
+Without argument in a user console, a menu lists the domains (Active Directory, Exchange Online,
+Exchange 2016, Intune, Microsoft 365, ...), then the entries of the chosen domain; type a number or an
+entry name, then run now, request through the orchestrators (jobs), or show the resolved command.
+Advanced entries (migration, repair, diagnostic, setup tools) are listed only after A. -List (or no argument when the input is redirected) prints the
 catalog. -WhatIf shows the resolved command without running anything.
 Any other argument is passed to the launched script (or to the pipeline with -Request).
 
@@ -34,7 +35,7 @@ The exit code of the launched script is returned. Preparation errors return 1.
 .\Invoke-SmartM365InventoryJob.ps1 AD-Inventory -Request -IncludeDependencies
 
 .VERSION
-1.2.0
+1.3.0
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -52,7 +53,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.2.0'
+$ScriptVersion = '1.3.0'
 
 function Write-Host {
     param([Parameter(Position = 0)][AllowEmptyString()][string]$Object = '', [ConsoleColor]$ForegroundColor = 'Gray')
@@ -85,57 +86,87 @@ function Resolve-InventoryJobsManifestPath {
     return (Get-SmartM365JsonReadPath -Path (Join-Path $sharedDataFolder 'Config\Orchestrator-Jobs.json') -Optional)
 }
 
-function Show-InventoryMenu {
-    param([Parameter(Mandatory)][object[]]$Items)
-    $section = ''
-    foreach ($item in $Items) {
-        if ($item.Section -ne $section) {
-            $section = $item.Section
-            Write-Host ''
-            Write-Host $section -ForegroundColor Cyan
-        }
+function Show-InventoryEntries {
+    param([Parameter(Mandatory)][object[]]$Choices, [Parameter(Mandatory)][string]$Title)
+    Write-Host ''
+    Write-Host $Title -ForegroundColor Cyan
+    foreach ($choice in $Choices) {
+        $item = $choice.Item
         $flags = @()
+        if ($item.Kind -eq 'Job') { $flags += 'job' }
         if ($item.Cache) { $flags += 'cache' }
         if ($item.Interactive) { $flags += 'interactive' }
         if ($item.RequiresConfirmation) { $flags += 'WRITE' }
-        $flagText = if ($flags.Count) { '[' + ($flags -join ', ') + '] ' } else { '' }
-        Write-Host ('{0,4}  {1,-54} {2,-6} {3}{4}' -f $item.Number, $item.Name, $item.Runtime, $flagText, $item.Description)
+        if ($item.Advanced) { $flags += 'advanced' }
+        Write-Host ('{0,4}  {1,-54} {2,-6} [{3}] {4}' -f $choice.Number, $item.Name, $item.Runtime, ($flags -join ', '), $item.Description)
     }
     Write-Host ''
 }
 
-function Read-InventoryMenuSelection {
-    <# Returns @{ Name; Action; ExtraArguments } or $null when the user quits. #>
-    param([Parameter(Mandatory)][object[]]$Items, [Parameter(Mandatory)]$Catalog, [AllowEmptyString()][string]$TenantValue)
-    Show-InventoryMenu -Items $Items
+function Read-InventoryAction {
+    <# Returns the selection, 'Back', or $null to quit. #>
+    param([Parameter(Mandatory)]$Item, [Parameter(Mandatory)]$Catalog, [AllowEmptyString()][string]$TenantValue)
+    Write-Host ('{0}: {1}' -f $Item.Name, $Item.Description) -ForegroundColor Cyan
     while ($true) {
-        $answer = Read-Host -Prompt 'Number or name (L = list again, Q or Enter = quit)'
-        if ($null -eq $answer -or [string]::IsNullOrWhiteSpace($answer) -or $answer.Trim() -ieq 'Q') { return $null }
-        if ($answer.Trim() -ieq 'L') { Show-InventoryMenu -Items $Items; continue }
-        $item = Resolve-SmartM365InventoryMenuChoice -Menu $Items -Choice $answer
-        if ($null -eq $item) { Write-Host ("Unknown entry: {0}" -f $answer.Trim()) -ForegroundColor Yellow; continue }
-        Write-Host ('{0}: {1}' -f $item.Name, $item.Description) -ForegroundColor Cyan
-        while ($true) {
-            $prompt = if ($item.Kind -eq 'Job') { 'R = run now on this computer, O = request through the orchestrators, W = show the command, B = back' } else { 'R = run now on this computer, W = show the command, B = back' }
-            $action = Read-Host -Prompt $prompt
-            if ($null -eq $action) { return $null }
-            switch ($action.Trim().ToUpperInvariant()) {
-                'R' { return [pscustomobject]@{ Name = $item.Name; Action = 'Now'; ExtraArguments = @() } }
-                'O' {
-                    if ($item.Kind -ne 'Job') { break }
+        $prompt = if ($Item.Kind -eq 'Job') { 'R = run now on this computer, O = request through the orchestrators, W = show the command, B = back' } else { 'R = run now on this computer, W = show the command, B = back' }
+        $action = Read-Host -Prompt $prompt
+        if ($null -eq $action) { return $null }
+        switch ($action.Trim().ToUpperInvariant()) {
+            'R' { return [pscustomobject]@{ Name = $Item.Name; Action = 'Now'; ExtraArguments = @() } }
+            'O' {
+                if ($Item.Kind -eq 'Job') {
                     $dependencies = Read-Host -Prompt 'Also run its enabled dependencies first? (Y/N)'
                     $extra = @()
                     if ([string]$dependencies -match '^\s*[YyOo]') { $extra = @('-IncludeDependencies') }
-                    return [pscustomobject]@{ Name = $item.Name; Action = 'Request'; ExtraArguments = $extra }
+                    return [pscustomobject]@{ Name = $Item.Name; Action = 'Request'; ExtraArguments = $extra }
                 }
-                'W' {
-                    try { Write-Host (Format-SmartM365InventoryPlan -Plan (Resolve-SmartM365InventoryLaunch -Catalog $Catalog -Name $item.Name -Tenant $TenantValue) -Catalog $Catalog) }
-                    catch { Write-Host ('[ERROR] {0}' -f $_.Exception.Message) -ForegroundColor Red }
-                }
-                'B' { Show-InventoryMenu -Items $Items }
             }
-            if ($action.Trim() -ieq 'B') { break }
+            'W' {
+                try { Write-Host (Format-SmartM365InventoryPlan -Plan (Resolve-SmartM365InventoryLaunch -Catalog $Catalog -Name $Item.Name -Tenant $TenantValue) -Catalog $Catalog) }
+                catch { Write-Host ('[ERROR] {0}' -f $_.Exception.Message) -ForegroundColor Red }
+            }
+            'B' { return 'Back' }
+            'Q' { return $null }
         }
+    }
+}
+
+function Read-InventoryMenuSelection {
+    <# Domains, then entries, then action. Returns @{ Name; Action; ExtraArguments } or $null when the user quits. #>
+    param([Parameter(Mandatory)][object[]]$Items, [Parameter(Mandatory)]$Catalog, [AllowEmptyString()][string]$TenantValue)
+    $showAdvanced = $false
+    while ($true) {
+        $domains = @(Get-SmartM365InventoryMenuDomains -Items $Items -IncludeAdvanced:$showAdvanced)
+        Write-Host ''
+        Write-Host $(if ($showAdvanced) { 'Domains (advanced entries shown)' } else { 'Domains' }) -ForegroundColor Cyan
+        foreach ($domain in $domains) { Write-Host ('{0,4}  {1} ({2})' -f $domain.Number, $domain.Domain, $domain.Count) }
+        Write-Host ''
+        $answer = Read-Host -Prompt ('Domain number or entry name ({0}, Q or Enter = quit)' -f $(if ($showAdvanced) { 'A = hide advanced entries' } else { 'A = show advanced entries' }))
+        if ($null -eq $answer -or [string]::IsNullOrWhiteSpace($answer) -or $answer.Trim() -ieq 'Q') { return $null }
+        if ($answer.Trim() -ieq 'A') { $showAdvanced = -not $showAdvanced; continue }
+        $choice = Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $Items -Choice $answer
+        if ($null -eq $choice) { Write-Host ("Unknown domain or entry: {0}" -f $answer.Trim()) -ForegroundColor Yellow; continue }
+        if ($choice.PSObject.Properties['Domain'] -and $choice.PSObject.Properties['Items'] -and -not $choice.PSObject.Properties['Kind']) {
+            # Entries of the chosen domain.
+            $number = 0
+            $entries = @(foreach ($item in $choice.Items) { $number++; [pscustomobject]@{ Number = $number; Item = $item } })
+            while ($true) {
+                Show-InventoryEntries -Choices $entries -Title $choice.Domain
+                $entryAnswer = Read-Host -Prompt 'Number or entry name (B = back, Q or Enter = quit)'
+                if ($null -eq $entryAnswer -or [string]::IsNullOrWhiteSpace($entryAnswer) -or $entryAnswer.Trim() -ieq 'Q') { return $null }
+                if ($entryAnswer.Trim() -ieq 'B') { break }
+                $picked = Resolve-SmartM365InventoryMenuChoice -Choices $entries -Items $Items -Choice $entryAnswer
+                if ($null -eq $picked) { Write-Host ("Unknown entry: {0}" -f $entryAnswer.Trim()) -ForegroundColor Yellow; continue }
+                $item = if ($picked.PSObject.Properties['Item']) { $picked.Item } else { $picked }
+                $result = Read-InventoryAction -Item $item -Catalog $Catalog -TenantValue $TenantValue
+                if ($null -eq $result) { return $null }
+                if ($result -isnot [string]) { return $result }
+            }
+            continue
+        }
+        $result = Read-InventoryAction -Item $choice -Catalog $Catalog -TenantValue $TenantValue
+        if ($null -eq $result) { return $null }
+        if ($result -isnot [string]) { return $result }
     }
 }
 
@@ -162,7 +193,7 @@ try {
         Write-SmartM365StartupBanner
         Write-Host ('SmartInventory catalog: {0}' -f $catalog.TemplatePath)
         foreach ($item in @(Get-SmartM365InventoryMenu -Catalog $catalog)) {
-            Write-Host ('{0,-54} {1,-6} {2,-6} {3,-6} {4}' -f $item.Name, $item.Kind, $item.Runtime, $(if ($item.Cache) { 'cache' } else { 'direct' }), $item.Description)
+            Write-Host ('{0,-54} {1,-6} {2,-6} {3,-6} {4,-28} {5}{6}' -f $item.Name, $item.Kind, $item.Runtime, $(if ($item.Cache) { 'cache' } else { 'direct' }), $item.Domain, $(if ($item.Advanced) { '[advanced] ' } else { '' }), $item.Description)
         }
         Write-SmartM365CompletionBanner -Status Success -ScriptName 'Invoke-SmartM365InventoryJob'
         exit 0
