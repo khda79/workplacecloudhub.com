@@ -11,7 +11,7 @@
   as the receipt qualification UsersDeletedDuringCollection. Any other user error still stops publication.
   The email, including SendLicenseSummaryEmailOnly, renders that published report after checking it against the receipt; it never recomputes.
   ForceAdCsvAnalysis (full runs only) uses a fresh, structurally valid AD CSV for the report when only its collector receipt is rejected.
-  ForceLicenseSummaryEmail sends the report again even when it was already sent on the current Europe/Paris day.
+  ForceLicenseSummaryEmail sends the report again even when it was already sent in the current Europe/Paris period.
   The report also lists target-suite users awaiting license capacity and other assignment errors from qualified existing CSVs.
   Qualified PartialAccepted AD coverage is usable but remains provisional; available allowlisted domains remain included.
   Per-SKU decisions (disabled accounts on every paid SKU, Copilot without licensed activity, unassigned capacity, dependency guard) are published
@@ -23,10 +23,13 @@
   workbook limited to its users, in addition to the tenant email. Email-only mode sends the tenant email only, or with
   LicenseSummaryEmailDomain one AD domain or All domains (1.62). When a run sends both, the tenant email goes first and the
   domain emails follow after LicenseSummaryDomainMailDelaySeconds (default 30, 1.63).
+  LicenseSummaryEmailFrequency (1.64) is Weekly by default: once per Monday-to-Sunday week, due from
+  LicenseSummaryEmailWeekDay (default Monday) and caught up later in the week; Daily keeps one email per day.
+  A domain entry may set its own Frequency and WeekDay.
   The recovery workbook uses the email style (1.61): an Overview sheet with KPI tiles, recovery by license and sheet links,
   readable headers, AD domain and country columns, colored reasons and dates, print setup and a tenant or domain file name.
 .VERSION
- 1.63
+ 1.64
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -2889,14 +2892,25 @@ function Enter-LicensesDailyMailGate {
     [Parameter(Mandatory)][string]$Path,
     [Parameter(Mandatory)][string]$TenantKey,
     [switch]$Force,
-    [datetimeoffset]$NowUtc = [datetimeoffset]::UtcNow
+    [datetimeoffset]$NowUtc = [datetimeoffset]::UtcNow,
+    # Weekly: at most once per Monday-to-Sunday week, due from WeekDay; a missed day is caught up later in the week.
+    [ValidateSet('Daily','Weekly')][string]$Frequency = 'Daily',
+    [DayOfWeek]$WeekDay = [DayOfWeek]::Monday,
+    # Manual email-only runs do not wait for WeekDay; the once-per-week limit still applies.
+    [switch]$IgnoreWeekDay
   )
   if (-not (Test-Path -LiteralPath (Split-Path -Path $Path -Parent) -PathType Container)) {
     throw "License summary mail state folder does not exist: $Path"
   }
   $timeZone = try { [TimeZoneInfo]::FindSystemTimeZoneById('Romance Standard Time') }
               catch { [TimeZoneInfo]::FindSystemTimeZoneById('Europe/Paris') }
-  $day = [TimeZoneInfo]::ConvertTime($NowUtc, $timeZone).ToString('yyyy-MM-dd')
+  $localDate = [TimeZoneInfo]::ConvertTime($NowUtc, $timeZone).Date
+  $day = $localDate.ToString('yyyy-MM-dd')
+  $mondayIndex = { param([DayOfWeek]$Value) ([int]$Value + 6) % 7 }
+  $weekStart = $localDate.AddDays(-(& $mondayIndex $localDate.DayOfWeek))
+  if ($Frequency -eq 'Weekly' -and -not $Force -and -not $IgnoreWeekDay -and (& $mondayIndex $localDate.DayOfWeek) -lt (& $mondayIndex $WeekDay)) {
+    return [pscustomobject]@{ Skip=$true; Reason=("weekly email is due from {0}, today is {1}" -f $WeekDay, $localDate.DayOfWeek); Stream=$null; Day=$day; PreviousBytes=$null }
+  }
   $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
   try {
     if ($stream.Length -gt 16384) { throw "License summary mail state is unexpectedly large: $Path" }
@@ -2925,9 +2939,15 @@ function Enter-LicensesDailyMailGate {
       if ($state -and [string]$state.TenantKey -ne $TenantKey) {
         throw "License summary mail state belongs to another tenant: $Path"
       }
-      if ($state -and [string]$state.LocalDate -eq $day -and -not $Force) {
-        $reason = if ([string]$state.Status -eq 'Sent') { "already sent on $day" }
-                  elseif ([string]$state.Status -eq 'Pending') { "delivery is pending or uncertain on $day" }
+      $stateDay = if ($state) { [string]$state.LocalDate } else { '' }
+      $samePeriod = if ($Frequency -eq 'Weekly' -and $stateDay) {
+        $stateDate = [datetime]::ParseExact($stateDay, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        $stateDate.AddDays(-(& $mondayIndex $stateDate.DayOfWeek)) -eq $weekStart
+      } else { $stateDay -eq $day }
+      if ($state -and $samePeriod -and -not $Force) {
+        $period = if ($Frequency -eq 'Weekly') { "this week ($stateDay)" } else { $day }
+        $reason = if ([string]$state.Status -eq 'Sent') { "already sent on $period" }
+                  elseif ([string]$state.Status -eq 'Pending') { "delivery is pending or uncertain on $period" }
                   else { throw "License summary mail state has an unknown status: $Path" }
         $stream.Dispose()
         return [pscustomobject]@{ Skip=$true; Reason=$reason; Stream=$null; Day=$day; PreviousBytes=$previous }
@@ -4021,9 +4041,36 @@ function New-LicensesSummaryMailContent {
     ScopeDomain=$scopeDomain; UserScopes=$(if ($publishedReport.PSObject.Properties['UserScopes']) { $publishedReport.UserScopes } else { $null }) }
 }
 
+function ConvertTo-LicensesMailSchedule {
+  param([AllowNull()]$Frequency, [AllowNull()]$WeekDay, [Parameter(Mandatory)][string]$Source, [AllowNull()]$Default)
+  # An empty value inherits the default schedule (the tenant one for a domain entry).
+  $frequencyText = ([string]$Frequency).Trim()
+  $weekDayText = ([string]$WeekDay).Trim()
+  $resolvedFrequency = if ($frequencyText) { $frequencyText } elseif ($Default) { $Default.Frequency } else { 'Weekly' }
+  if ($resolvedFrequency -notin @('Daily','Weekly')) { throw "$Source frequency must be Daily or Weekly: '$resolvedFrequency'." }
+  $resolvedWeekDay = if ($weekDayText) {
+    $parsed = [DayOfWeek]::Monday
+    if ($weekDayText -match '^\d+$' -or -not [Enum]::TryParse([DayOfWeek], $weekDayText, $true, [ref]$parsed)) {
+      throw "$Source week day must be an English day name such as Monday: '$weekDayText'."
+    }
+    $parsed
+  } elseif ($Default) { $Default.WeekDay } else { [DayOfWeek]::Monday }
+  return [pscustomobject]@{ Frequency=[string]$resolvedFrequency; WeekDay=[DayOfWeek]$resolvedWeekDay }
+}
+
+function Get-LicensesMailSchedule {
+  param([AllowNull()]$Config)
+  # Default (1.64): once a week, due from Monday. Daily keeps the former once-per-day limit.
+  return ConvertTo-LicensesMailSchedule -Source 'LicenseSummaryEmailFrequency/LicenseSummaryEmailWeekDay' -Default $null `
+    -Frequency (Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseSummaryEmailFrequency' -DefaultValue '') `
+    -WeekDay (Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseSummaryEmailWeekDay' -DefaultValue '')
+}
+
 function Get-LicensesDomainMailSettings {
   param([AllowNull()]$Config)
-  # LicenseSummaryDomainMails: [{ Domain, To, Cc, Enabled }]; Domain is the AD DomainName of the AD users export.
+  # LicenseSummaryDomainMails: [{ Domain, To, Cc, Enabled, Frequency, WeekDay }]; Domain is the AD DomainName of the AD users export.
+  # Frequency and WeekDay are optional and inherit the tenant schedule.
+  $tenantSchedule = Get-LicensesMailSchedule -Config $Config
   $entries = [System.Collections.Generic.List[object]]::new()
   $seen = @{}
   foreach ($item in @(Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseSummaryDomainMails' -DefaultValue @())) {
@@ -4039,7 +4086,8 @@ function Get-LicensesDomainMailSettings {
     if ($null -ne $enabled -and ([string]$enabled).Trim() -in @('False','false','0')) { continue }
     $to = ([string](& $read 'To')).Trim()
     if (-not $to) { throw "LicenseSummaryDomainMails entry $domain needs a To recipient." }
-    $entries.Add([pscustomobject]@{ Domain=$domain; To=$to; Cc=([string](& $read 'Cc')).Trim() })
+    $schedule = ConvertTo-LicensesMailSchedule -Frequency (& $read 'Frequency') -WeekDay (& $read 'WeekDay') -Source "LicenseSummaryDomainMails entry $domain" -Default $tenantSchedule
+    $entries.Add([pscustomobject]@{ Domain=$domain; To=$to; Cc=([string](& $read 'Cc')).Trim(); Schedule=$schedule })
   }
   return $entries.ToArray()
 }
@@ -4064,7 +4112,10 @@ function Send-LicensesSummaryMailScope {
     [AllowEmptyString()][string]$From,
     [string]$Domain = '',
     [switch]$Manual,
-    [switch]$ForceLicenseSummaryEmail
+    [switch]$ForceLicenseSummaryEmail,
+    [Parameter(Mandatory)]$Schedule,
+    # Runs once, only when this mail passes its gate (the pause before the first domain mail).
+    [scriptblock]$BeforeSend
   )
   $attachmentPath = $null
   $attachmentFolder = $null
@@ -4075,12 +4126,14 @@ function Send-LicensesSummaryMailScope {
     if ([string]::IsNullOrWhiteSpace($To) -or [string]::IsNullOrWhiteSpace($From)) {
       throw 'A report recipient (To) and sender (From) are required for the focused license summary email.'
     }
-    if ([string]::IsNullOrWhiteSpace($ExpectedTenantKey)) { throw 'Tenant key is required for the daily license summary mail limit.' }
-    $mailGate = Enter-LicensesDailyMailGate -Path $MailStatePath -TenantKey $ExpectedTenantKey -Force:$ForceLicenseSummaryEmail
+    if ([string]::IsNullOrWhiteSpace($ExpectedTenantKey)) { throw 'Tenant key is required for the license summary mail limit.' }
+    $mailGate = Enter-LicensesDailyMailGate -Path $MailStatePath -TenantKey $ExpectedTenantKey -Force:$ForceLicenseSummaryEmail `
+      -Frequency $Schedule.Frequency -WeekDay $Schedule.WeekDay -IgnoreWeekDay:$Manual
     if ($mailGate.Skip) {
       WriteLog -Message ("{0} skipped: {1} (Europe/Paris). Use -ForceLicenseSummaryEmail to send again." -f $label, $mailGate.Reason) 'INFO'
       return $false
     }
+    if ($BeforeSend) { & $BeforeSend }
 
     # The email never recomputes: it renders the report already published and qualified by the receipt.
     $report = & $ReadReport
@@ -4170,10 +4223,17 @@ function Send-LicensesFocusedSummaryEmail {
     return $reportCache['Report']
   }
   $from = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue '')
+  try { $tenantSchedule = Get-LicensesMailSchedule -Config $ScriptLocalConfig }
+  catch {
+    if ($Manual) { throw }
+    WriteLog -Message ("Focused license summary email skipped: {0}" -f $_.Exception.Message) 'WARNING'
+    return $false
+  }
   $sent = $false
   if (-not $Domain) {
     $sent = Send-LicensesSummaryMailScope -ReadReport $readReport -ExpectedTenantKey $ExpectedTenantKey -MailStatePath $MailStatePath `
-      -To ([string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')) -From $from -Manual:$Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail
+      -To ([string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')) -From $from -Manual:$Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail `
+      -Schedule $tenantSchedule
   }
   if ($TenantOnly -and -not $Domain) { return $sent }
   try { $settings = @(Get-LicensesDomainMailSettings -Config $ScriptLocalConfig) }
@@ -4190,18 +4250,23 @@ function Send-LicensesFocusedSummaryEmail {
     if ($settings.Count -ne 1) { throw "AD domain $key is not an enabled entry of LicenseSummaryDomainMails." }
   }
   # The tenant email goes first; the domain emails follow after a pause so they arrive as a separate batch.
+  # The pause runs only when the tenant email was sent and a domain email is actually due.
   $delay = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicenseSummaryDomainMailDelaySeconds' -DefaultValue 30)
   if ($delay -lt 0 -or $delay -gt 600) { throw 'LicenseSummaryDomainMailDelaySeconds must be between 0 and 600.' }
-  if ($sent -and -not $Domain -and $settings.Count -gt 0 -and $delay -gt 0) {
-    WriteLog -Message ("Waiting {0} seconds after the tenant license email before the AD domain emails." -f $delay) 'INFO'
-    Start-Sleep -Seconds $delay
+  $pause = @{ Pending = ($sent -and -not $Domain -and $delay -gt 0) }
+  $beforeDomainSend = {
+    if ($pause.Pending) {
+      $pause.Pending = $false
+      WriteLog -Message ("Waiting {0} seconds after the tenant license email before the AD domain emails." -f $delay) 'INFO'
+      Start-Sleep -Seconds $delay
+    }
   }
   $failures = [System.Collections.Generic.List[string]]::new()
   foreach ($entry in $settings) {
     try {
       $domainSent = Send-LicensesSummaryMailScope -ReadReport $readReport -ExpectedTenantKey $ExpectedTenantKey `
         -MailStatePath (Get-LicensesDomainMailStatePath -Path $MailStatePath -Domain $entry.Domain) -To $entry.To -Cc $entry.Cc -From $from `
-        -Domain $entry.Domain -Manual:$Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail
+        -Domain $entry.Domain -Manual:$Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail -Schedule $entry.Schedule -BeforeSend $beforeDomainSend
       if ($Domain) { $sent = $sent -or [bool]$domainSent }
     }
     catch { $failures.Add(('{0}: {1}' -f $entry.Domain, $_.Exception.Message)) }
@@ -4849,7 +4914,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.63"
+$ScriptVersion = "1.64"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''

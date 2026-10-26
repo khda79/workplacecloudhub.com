@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license overview and recovery email.
 .VERSION
-1.1.5
+1.1.6
 #>
 
 [CmdletBinding()]
@@ -36,7 +36,7 @@ if ($reportIndex -lt 0 -or $completeIndex -lt 0 -or $mailIndex -lt 0 -or
 $names = @(
   'Get-LicensesSuiteProduct', 'Get-LicensesOptionalProperty', 'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'Get-LicensesOtherProduct', 'New-LicensesOverviewCardHtml',
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource', 'Get-LicensesPublicationPath',
-  'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Import-LicensesSourceCsvCached', 'Get-LicensesUserAdScopes', 'Get-LicensesUserScope', 'Get-LicensesScopeBreakdown', 'New-LicensesScopeTablesHtml', 'New-LicensesSummaryMailContent', 'Send-LicensesSummaryMailScope', 'Get-LicensesDomainMailSettings', 'Get-LicensesDomainMailStatePath', 'Get-LicensesDomainPublishedReport', 'Format-LicensesMetric',
+  'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Import-LicensesSourceCsvCached', 'Get-LicensesUserAdScopes', 'Get-LicensesUserScope', 'Get-LicensesScopeBreakdown', 'New-LicensesScopeTablesHtml', 'New-LicensesSummaryMailContent', 'Send-LicensesSummaryMailScope', 'ConvertTo-LicensesMailSchedule', 'Get-LicensesMailSchedule', 'Get-LicensesDomainMailSettings', 'Get-LicensesDomainMailStatePath', 'Get-LicensesDomainPublishedReport', 'Format-LicensesMetric',
   'Get-LicensesAlertSummary', 'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
   'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot', 'ConvertFrom-LicensesJsonElement', 'ConvertTo-LicensesCountTable',
   'Read-LicensesPublishedReport'
@@ -243,6 +243,68 @@ $forcedGate.Stream.Dispose()
 $nextDayGate = Enter-LicensesDailyMailGate -Path $dayStatePath -TenantKey 'prod' -NowUtc ([datetimeoffset]::Parse('2026-10-25T23:30:00Z'))
 Assert-Equal $nextDayGate.Skip $false 'New Paris day allows another send'
 $nextDayGate.Stream.Dispose()
+
+# Weekly schedule (1.64): one email per Monday-to-Sunday Paris week, due from WeekDay, caught up later in the week.
+function Set-SyntheticSent([string]$Path, [string]$Day) {
+  [IO.File]::WriteAllText($Path, ('{{"TenantKey":"prod","LocalDate":"{0}","Status":"Sent"}}' -f $Day))
+}
+function Enter-WeeklyGate([string]$Path, [string]$NowUtc, [DayOfWeek]$WeekDay = [DayOfWeek]::Monday, [switch]$IgnoreWeekDay) {
+  $gate = Enter-LicensesDailyMailGate -Path $Path -TenantKey 'prod' -NowUtc ([datetimeoffset]::Parse($NowUtc)) -Frequency Weekly -WeekDay $WeekDay -IgnoreWeekDay:$IgnoreWeekDay
+  if ($gate.Stream) { $gate.Stream.Dispose() }
+  return $gate
+}
+$weekPath = Join-Path $mailGateRoot 'synthetic-week-state.json.txt'
+$mondayGate = Enter-WeeklyGate $weekPath '2026-10-26T08:00:00Z'
+Assert-Equal $mondayGate.Skip $false 'Weekly email is sent on Monday'
+Assert-Equal $mondayGate.Day '2026-10-26' 'Weekly gate records the Paris day'
+$weeklyPending = Enter-WeeklyGate $weekPath '2026-10-28T08:00:00Z'
+Assert-Equal $weeklyPending.Skip $true 'Pending weekly delivery prevents a duplicate later in the week'
+Set-SyntheticSent $weekPath '2026-10-26'
+Assert-Equal (Enter-WeeklyGate $weekPath '2026-10-27T08:00:00Z').Skip $true 'Weekly email is not sent again on Tuesday'
+Assert-Equal (Enter-WeeklyGate $weekPath '2026-11-01T20:00:00Z').Skip $true 'Weekly email is not sent again on Sunday evening'
+Assert-Equal (Enter-WeeklyGate $weekPath '2026-11-01T23:30:00Z').Skip $false 'Paris Monday 00:30 opens the next week'
+Set-SyntheticSent $weekPath '2026-10-26'
+$forcedWeekly = Enter-LicensesDailyMailGate -Path $weekPath -TenantKey 'prod' -NowUtc ([datetimeoffset]::Parse('2026-10-27T08:00:00Z')) -Frequency Weekly -Force
+Assert-Equal $forcedWeekly.Skip $false 'Force bypasses the weekly limit'
+$forcedWeekly.Stream.Dispose()
+$catchUpPath = Join-Path $mailGateRoot 'synthetic-catchup-state.json.txt'
+Set-SyntheticSent $catchUpPath '2026-10-19'
+Assert-Equal (Enter-WeeklyGate $catchUpPath '2026-10-28T08:00:00Z').Skip $false 'A missed Monday is caught up on Wednesday'
+$dueDayPath = Join-Path $mailGateRoot 'synthetic-dueday-state.json.txt'
+$notDue = Enter-WeeklyGate $dueDayPath '2026-10-27T08:00:00Z' -WeekDay Wednesday
+Assert-Equal $notDue.Skip $true 'Weekly email waits for its week day'
+if ($notDue.Reason -notmatch 'due from Wednesday') { throw "Not-due reason is unclear: $($notDue.Reason)" }
+if (Test-Path -LiteralPath $dueDayPath) { throw 'A not-due weekly email must not write a send state.' }
+Assert-Equal (Enter-WeeklyGate $dueDayPath '2026-10-27T08:00:00Z' -WeekDay Wednesday -IgnoreWeekDay).Skip $false 'Manual runs do not wait for the week day'
+Set-SyntheticSent $dueDayPath '2026-10-20'
+Assert-Equal (Enter-WeeklyGate $dueDayPath '2026-10-29T08:00:00Z' -WeekDay Wednesday).Skip $false 'Weekly email is sent after its week day'
+$dailyPath = Join-Path $mailGateRoot 'synthetic-daily-state.json.txt'
+Set-SyntheticSent $dailyPath '2026-10-26'
+$dailyGate = Enter-LicensesDailyMailGate -Path $dailyPath -TenantKey 'prod' -NowUtc ([datetimeoffset]::Parse('2026-10-27T08:00:00Z')) -Frequency Daily
+Assert-Equal $dailyGate.Skip $false 'Daily schedule still sends the next day'
+$dailyGate.Stream.Dispose()
+
+$defaultSchedule = Get-LicensesMailSchedule -Config @{}
+Assert-Equal $defaultSchedule.Frequency 'Weekly' 'Default frequency'
+Assert-Equal $defaultSchedule.WeekDay ([DayOfWeek]::Monday) 'Default week day'
+$dailySchedule = Get-LicensesMailSchedule -Config @{LicenseSummaryEmailFrequency='Daily';LicenseSummaryEmailWeekDay='friday'}
+Assert-Equal $dailySchedule.Frequency 'Daily' 'Configured frequency'
+Assert-Equal $dailySchedule.WeekDay ([DayOfWeek]::Friday) 'Configured week day is case-insensitive'
+foreach ($badSchedule in @(@{LicenseSummaryEmailFrequency='Monthly'}, @{LicenseSummaryEmailWeekDay='lundi'}, @{LicenseSummaryEmailWeekDay='1'})) {
+  $threw = $false
+  try { Get-LicensesMailSchedule -Config $badSchedule | Out-Null } catch { $threw = $true }
+  if (-not $threw) { throw "Invalid schedule was accepted: $($badSchedule | ConvertTo-Json -Compress)" }
+}
+$domainSchedules = @(Get-LicensesDomainMailSettings -Config @{LicenseSummaryEmailWeekDay='Tuesday';LicenseSummaryDomainMails=@(
+  @{Domain='a.example.invalid';To='a@example.invalid'}
+  @{Domain='b.example.invalid';To='b@example.invalid';Frequency='Daily'}
+  @{Domain='c.example.invalid';To='c@example.invalid';WeekDay='Thursday'})})
+Assert-Equal "$($domainSchedules[0].Schedule.Frequency)/$($domainSchedules[0].Schedule.WeekDay)" 'Weekly/Tuesday' 'Domain entry inherits the tenant schedule'
+Assert-Equal $domainSchedules[1].Schedule.Frequency 'Daily' 'Domain entry overrides the frequency'
+Assert-Equal "$($domainSchedules[2].Schedule.Frequency)/$($domainSchedules[2].Schedule.WeekDay)" 'Weekly/Thursday' 'Domain entry overrides the week day'
+$threw = $false
+try { Get-LicensesDomainMailSettings -Config @{LicenseSummaryDomainMails=@(@{Domain='a.example.invalid';To='a@example.invalid';Frequency='Hourly'})} | Out-Null } catch { $threw = $true }
+if (-not $threw) { throw 'Invalid domain frequency was accepted.' }
 
 $badRows = @([pscustomobject]@{TenantSkuPartNumber='SPE_E5';TenantPrepaidEnabled=$null;TenantConsumedUnits=1})
 $threw = $false

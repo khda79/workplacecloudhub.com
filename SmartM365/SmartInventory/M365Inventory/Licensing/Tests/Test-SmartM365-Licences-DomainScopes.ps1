@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license views by AD domain and country and the per-domain license summary emails.
 .VERSION
-1.3.0
+1.4.0
 #>
 
 [CmdletBinding()]
@@ -28,7 +28,7 @@ $names = @(
   'Get-LicensesUserAdScopes', 'Get-LicensesUserScope', 'Get-LicensesScopeBreakdown', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
   'Get-LicensesAlertSummary', 'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
   'Read-LicensesTenantSnapshot', 'ConvertFrom-LicensesJsonElement', 'ConvertTo-LicensesCountTable', 'Read-LicensesPublishedReport', 'Get-LicensesDomainPublishedReport',
-  'New-LicensesScopeTablesHtml', 'New-LicensesSummaryMailContent', 'Get-LicensesDomainMailSettings', 'Get-LicensesDomainMailStatePath', 'Send-LicensesSummaryMailScope',
+  'New-LicensesScopeTablesHtml', 'New-LicensesSummaryMailContent', 'ConvertTo-LicensesMailSchedule', 'Get-LicensesMailSchedule', 'Get-LicensesDomainMailSettings', 'Get-LicensesDomainMailStatePath', 'Send-LicensesSummaryMailScope',
   'Send-LicensesFocusedSummaryEmail'
 )
 $definitions = @($ast.FindAll({
@@ -277,15 +277,18 @@ try {
   Check ($tenantBook.HeaderFill -match 'EAF1F8$' -and $tenantBook.Landscape -and $tenantBook.RepeatRows -match '1:\$?1') 'Headers use the email color and pages print landscape with repeated headers'
 
   $sentAgain = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath
-  Check (-not $sentAgain -and $script:SentMail.Count -eq 4) 'Each mail is sent once per Paris day'
+  Check (-not $sentAgain -and $script:SentMail.Count -eq 4) 'Each mail is sent once per Paris week by default'
   Check ($script:Sleeps.Count -eq 1) 'No pause when the tenant mail was not sent'
   Remove-Item -LiteralPath (Get-LicensesDomainMailStatePath -Path $statePath -Domain $beta)
   [void](Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath)
   Check ($script:SentMail.Count -eq 5 -and $script:SentMail[4].To -eq 'beta@example.invalid') 'Domain send states are independent of each other and of the tenant'
+  Remove-Item -LiteralPath $statePath
+  [void](Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath)
+  Check ($script:SentMail.Count -eq 6 -and $script:SentMail[5].To -eq 'reports@example.invalid' -and $script:Sleeps.Count -eq 1) 'No pause when the tenant mail is sent but no domain mail is due'
   $only = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -ForceLicenseSummaryEmail -Domain 'ALPHA.example.invalid'
-  Check ($only -and $script:SentMail.Count -eq 6 -and $script:SentMail[5].To -eq 'alpha@example.invalid') 'Email-only domain option resends one domain'
+  Check ($only -and $script:SentMail.Count -eq 7 -and $script:SentMail[6].To -eq 'alpha@example.invalid') 'Email-only domain option resends one domain'
   $tenantOnly = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -ForceLicenseSummaryEmail -TenantOnly
-  Check ($tenantOnly -and $script:SentMail.Count -eq 7 -and $script:SentMail[6].To -eq 'reports@example.invalid') 'Email-only mode without a domain sends the tenant mail only'
+  Check ($tenantOnly -and $script:SentMail.Count -eq 8 -and $script:SentMail[7].To -eq 'reports@example.invalid') 'Email-only mode without a domain sends the tenant mail only'
   $allDomains = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -ForceLicenseSummaryEmail -Domain 'All' -TenantOnly:$false
   Check ($script:Sleeps.Count -eq 1) 'No pause for a single domain, the tenant mail only or All domains'
   $script:ScriptLocalConfig.LicenseSummaryDomainMailDelaySeconds = 601
@@ -293,7 +296,7 @@ try {
   try { Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -Domain $beta | Out-Null } catch { $threw = $_.Exception.Message -like '*between 0 and 600*' }
   Check $threw 'The pause is bounded to 600 seconds'
   $script:ScriptLocalConfig.Remove('LicenseSummaryDomainMailDelaySeconds')
-  Check ($allDomains -and $script:SentMail.Count -eq 10 -and @($script:SentMail[7..9] | Where-Object To -eq 'reports@example.invalid').Count -eq 0) 'Domain All sends every enabled domain without the tenant mail'
+  Check ($allDomains -and $script:SentMail.Count -eq 11 -and @($script:SentMail[8..10] | Where-Object To -eq 'reports@example.invalid').Count -eq 0) 'Domain All sends every enabled domain without the tenant mail'
   $threw = $false
   try { Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -Domain 'off.example.invalid' | Out-Null } catch { $threw = $_.Exception.Message -like '*not an enabled entry*' }
   Check $threw 'A disabled or unknown domain cannot be resent'
@@ -311,7 +314,7 @@ try {
   Remove-Item -LiteralPath $statePath
   $script:Warnings.Clear()
   $tenantMail2 = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath
-  Check ($tenantMail2 -and $script:SentMail.Count -eq 11 -and @($script:Warnings | Where-Object { $_ -like 'License summary emails by AD domain skipped*' }).Count -eq 1) 'Invalid domain settings never block the tenant mail'
+  Check ($tenantMail2 -and $script:SentMail.Count -eq 12 -and @($script:Warnings | Where-Object { $_ -like 'License summary emails by AD domain skipped*' }).Count -eq 1) 'Invalid domain settings never block the tenant mail'
 
   # Country table: all countries up to 25, otherwise the 20 largest plus one aggregated row.
   $manyCountries = [pscustomobject]@{ Available=$true; Provisional=$false; Reason=''; ByDomain=@()

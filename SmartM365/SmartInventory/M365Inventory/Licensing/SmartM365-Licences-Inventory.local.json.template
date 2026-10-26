@@ -17,6 +17,8 @@
   "SendMailMode": "__USE_GLOBAL__",
   "EnableLicenseSummaryEmail": true,
   "LicenseSummaryMailStatePath": "",
+  "LicenseSummaryEmailFrequency": "Weekly",
+  "LicenseSummaryEmailWeekDay": "Monday",
   "LicenseSummaryDomainMails": [],
   "LicenseSummaryDomainMailDelaySeconds": 30,
   "From": "__USE_GLOBAL__",

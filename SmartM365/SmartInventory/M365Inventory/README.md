@@ -122,7 +122,8 @@ tables and preserve JSON `null` as N/D rather than a verified zero. The
 candidate lists contain user identifiers and names and require the same private
 access control as the existing license-user exports.
 The license overview and recovery email is sent at most once per tenant and
-Europe/Paris calendar day, including runs with `-SendLicenseSummaryEmailOnly`.
+Europe/Paris period, including runs with `-SendLicenseSummaryEmailOnly`: a week
+by default, or a day with `LicenseSummaryEmailFrequency` set to `Daily` (1.64).
 It never recomputes: it renders the published snapshot after checking that the
 licensing receipt is completed for the tenant, that each report CSV has the hash
 recorded by that receipt, and that every report row carries the snapshot ID. The
@@ -161,7 +162,7 @@ delivery state. Set `LicenseSummaryMailStatePath` in the private local JSON to
 the same shared path on every collection host when runs can send from multiple
 machines. A failed preparation can be retried automatically; an interrupted
 or uncertain delivery stays pending to avoid a duplicate. After checking delivery,
-use `-ForceLicenseSummaryEmail` to send again that day. This switch works with
+use `-ForceLicenseSummaryEmail` to send again in the same period. This switch works with
 both a full inventory and email-only mode. On a full inventory, it does not
 override a disabled email configuration or permit sampled inventories to send.
 
@@ -192,13 +193,14 @@ export without `DomainName` leaves the views N/D; the tenant report is unchanged
   report only, not of the whole directory. A snapshot without `AdScope` (published
   before 1.60) stays readable.
 
-Per-domain emails are sent after the tenant email, each with its own daily state
+Per-domain emails are sent after the tenant email, each with its own send state
 `M365_Licenses_SummaryEmail_SendState.<domain>.json.txt` next to the tenant state.
 Configure them in the private local JSON:
 
 ```json
 "LicenseSummaryDomainMails": [
-  { "Domain": "<ad-domain-fqdn>", "To": "<recipient@domain>", "Cc": "", "Enabled": true }
+  { "Domain": "<ad-domain-fqdn>", "To": "<recipient@domain>", "Cc": "", "Enabled": true },
+  { "Domain": "<other-ad-domain-fqdn>", "To": "<recipient@domain>", "Frequency": "Daily" }
 ]
 ```
 
@@ -217,7 +219,31 @@ domain emails (1.63). Email-only mode sends exactly what is asked (1.62):
 `-SendLicenseSummaryEmailOnly` alone sends the tenant email only;
 `-LicenseSummaryEmailDomain <domain>` sends only that domain and
 `-LicenseSummaryEmailDomain All` every enabled domain without the tenant email.
-Add `-ForceLicenseSummaryEmail` to resend the same day.
+Add `-ForceLicenseSummaryEmail` to resend in the same period.
+
+### Weekly or daily email (1.64)
+
+```json
+"LicenseSummaryEmailFrequency": "Weekly",
+"LicenseSummaryEmailWeekDay": "Monday",
+```
+
+- `Weekly` (default): at most one email per Monday-to-Sunday week (Europe/Paris).
+  It is due from `LicenseSummaryEmailWeekDay` (English day name, default
+  `Monday`): the first full run on or after that day sends it. When that day's
+  run fails or does not run, the next run of the week catches up. Before that
+  day the log states that the weekly email is not due yet.
+- `Daily`: the former limit of one email per Europe/Paris day.
+- A `LicenseSummaryDomainMails` entry may set its own `Frequency` and `WeekDay`;
+  otherwise it inherits the tenant schedule.
+- Email-only mode does not wait for the week day but keeps the once-per-period
+  limit; `-ForceLicenseSummaryEmail` always sends.
+- The existing send state files stay valid: the weekly rule compares the week of
+  the recorded date. Collection and publication stay daily.
+- An invalid value fails email-only mode and skips the email with a warning on
+  a full run.
+- The pause before the domain emails runs only when the tenant email was sent
+  and a domain email is due.
 
 The attached recovery workbook (1.61) follows the email style. It is named
 `M365_Licenses_Recovery_<tenant or AD domain>_<yyyyMMdd>.xlsx` and opens on an
