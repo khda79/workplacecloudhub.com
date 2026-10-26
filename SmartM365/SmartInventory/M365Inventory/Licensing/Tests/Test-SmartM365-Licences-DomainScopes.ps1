@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license views by AD domain and country and the per-domain license summary emails.
 .VERSION
-1.1.0
+1.2.0
 #>
 
 [CmdletBinding()]
@@ -279,6 +279,10 @@ try {
   Check ($script:SentMail.Count -eq 5 -and $script:SentMail[4].To -eq 'beta@example.invalid') 'Domain send states are independent of each other and of the tenant'
   $only = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -ForceLicenseSummaryEmail -Domain 'ALPHA.example.invalid'
   Check ($only -and $script:SentMail.Count -eq 6 -and $script:SentMail[5].To -eq 'alpha@example.invalid') 'Email-only domain option resends one domain'
+  $tenantOnly = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -ForceLicenseSummaryEmail -TenantOnly
+  Check ($tenantOnly -and $script:SentMail.Count -eq 7 -and $script:SentMail[6].To -eq 'reports@example.invalid') 'Email-only mode without a domain sends the tenant mail only'
+  $allDomains = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -ForceLicenseSummaryEmail -Domain 'All' -TenantOnly:$false
+  Check ($allDomains -and $script:SentMail.Count -eq 10 -and @($script:SentMail[7..9] | Where-Object To -eq 'reports@example.invalid').Count -eq 0) 'Domain All sends every enabled domain without the tenant mail'
   $threw = $false
   try { Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -Domain 'off.example.invalid' | Out-Null } catch { $threw = $_.Exception.Message -like '*not an enabled entry*' }
   Check $threw 'A disabled or unknown domain cannot be resent'
@@ -295,8 +299,8 @@ try {
   $script:ScriptLocalConfig.LicenseSummaryDomainMails = @(@{ Domain=$alpha })
   Remove-Item -LiteralPath $statePath
   $script:Warnings.Clear()
-  $tenantOnly = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath
-  Check ($tenantOnly -and $script:SentMail.Count -eq 7 -and @($script:Warnings | Where-Object { $_ -like 'License summary emails by AD domain skipped*' }).Count -eq 1) 'Invalid domain settings never block the tenant mail'
+  $tenantMail2 = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath
+  Check ($tenantMail2 -and $script:SentMail.Count -eq 11 -and @($script:Warnings | Where-Object { $_ -like 'License summary emails by AD domain skipped*' }).Count -eq 1) 'Invalid domain settings never block the tenant mail'
 
   # Country table: all countries up to 25, otherwise the 20 largest plus one aggregated row.
   $manyCountries = [pscustomobject]@{ Available=$true; Provisional=$false; Reason=''; ByDomain=@()

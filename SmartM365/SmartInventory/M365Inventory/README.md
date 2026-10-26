@@ -210,9 +210,12 @@ recovery, E3-to-F3 review and sections 06/07 count only the domain accounts; uni
 are labeled as tenant-wide. Its workbook lists only the domain users. A configured
 domain with no attributed user, or a report without AD views, receives an explicit
 `N/D` notice without attachment, never an empty report. One domain failure never
-stops the other domains or the tenant email. In email-only mode,
-`-LicenseSummaryEmailDomain <domain>` sends only that domain (with
-`-ForceLicenseSummaryEmail` to resend it the same day).
+stops the other domains or the tenant email. A full run sends the tenant email
+and every configured domain. Email-only mode sends exactly what is asked (1.62):
+`-SendLicenseSummaryEmailOnly` alone sends the tenant email only;
+`-LicenseSummaryEmailDomain <domain>` sends only that domain and
+`-LicenseSummaryEmailDomain All` every enabled domain without the tenant email.
+Add `-ForceLicenseSummaryEmail` to resend the same day.
 
 The attached recovery workbook (1.61) follows the email style. It is named
 `M365_Licenses_Recovery_<tenant or AD domain>_<yyyyMMdd>.xlsx` and opens on an

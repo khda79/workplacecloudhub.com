@@ -20,11 +20,12 @@
   Licensed users are attributed to their AD domain and AD country (AD_Users_AllDomains.csv, ImmutableId then unique UPN):
   the tenant email shows licenses by AD domain and by country before section 01 (M365_Licenses_ReportByDomain.csv and
   M365_Licenses_ReportByCountry.csv), and LicenseSummaryDomainMails sends each configured AD domain its own report with a
-  workbook limited to its users, in addition to the tenant email. LicenseSummaryEmailDomain resends one domain in email-only mode.
+  workbook limited to its users, in addition to the tenant email. Email-only mode sends the tenant email only, or with
+  LicenseSummaryEmailDomain one AD domain or All domains (1.62).
   The recovery workbook uses the email style (1.61): an Overview sheet with KPI tiles, recovery by license and sheet links,
   readable headers, AD domain and country columns, colored reasons and dates, print setup and a tenant or domain file name.
 .VERSION
- 1.61
+ 1.62
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -4146,8 +4147,10 @@ function Send-LicensesFocusedSummaryEmail {
     [Parameter(Mandatory)][string]$MailStatePath,
     [switch]$Manual,
     [switch]$ForceLicenseSummaryEmail,
-    # Sends only this AD domain's mail (email-only mode); otherwise the tenant mail, then every configured domain.
-    [string]$Domain = ''
+    # Email-only mode: one AD domain, or All for every configured domain without the tenant mail.
+    [string]$Domain = '',
+    # Email-only mode without a domain: the tenant mail only. A full run sends the tenant mail and every domain.
+    [switch]$TenantOnly
   )
 
   if (-not $Manual -and -not [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableLicenseSummaryEmail' -DefaultValue $true)) {
@@ -4171,13 +4174,16 @@ function Send-LicensesFocusedSummaryEmail {
     $sent = Send-LicensesSummaryMailScope -ReadReport $readReport -ExpectedTenantKey $ExpectedTenantKey -MailStatePath $MailStatePath `
       -To ([string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')) -From $from -Manual:$Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail
   }
+  if ($TenantOnly -and -not $Domain) { return $sent }
   try { $settings = @(Get-LicensesDomainMailSettings -Config $ScriptLocalConfig) }
   catch {
     if ($Manual) { throw }
     WriteLog -Message ("License summary emails by AD domain skipped: {0}" -f $_.Exception.Message) 'WARNING'
     return $sent
   }
-  if ($Domain) {
+  $allDomains = $Domain -and $Domain.Trim() -ieq 'All'
+  if ($allDomains -and $settings.Count -eq 0) { throw 'LicenseSummaryDomainMails has no enabled AD domain.' }
+  if ($Domain -and -not $allDomains) {
     $key = $Domain.Trim().ToLowerInvariant()
     $settings = @($settings | Where-Object { $_.Domain -ceq $key })
     if ($settings.Count -ne 1) { throw "AD domain $key is not an enabled entry of LicenseSummaryDomainMails." }
@@ -4188,7 +4194,7 @@ function Send-LicensesFocusedSummaryEmail {
       $domainSent = Send-LicensesSummaryMailScope -ReadReport $readReport -ExpectedTenantKey $ExpectedTenantKey `
         -MailStatePath (Get-LicensesDomainMailStatePath -Path $MailStatePath -Domain $entry.Domain) -To $entry.To -Cc $entry.Cc -From $from `
         -Domain $entry.Domain -Manual:$Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail
-      if ($Domain) { $sent = [bool]$domainSent }
+      if ($Domain) { $sent = $sent -or [bool]$domainSent }
     }
     catch { $failures.Add(('{0}: {1}' -f $entry.Domain, $_.Exception.Message)) }
   }
@@ -4835,7 +4841,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.61"
+$ScriptVersion = "1.62"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -4861,8 +4867,10 @@ if ($SendLicenseSummaryEmailOnly) {
   $global:Thumb = [string]$Thumb
   $global:Thumbprint = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumbprint' -DefaultValue $Thumb)
   $global:OrgDomain = [string]$OrgDomain
-  $mailSent = Send-LicensesFocusedSummaryEmail -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -MailStatePath $licenseSummaryMailStatePath -Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail -Domain ([string]$LicenseSummaryEmailDomain)
-  $mailScope = if ($LicenseSummaryEmailDomain) { "AD domain $LicenseSummaryEmailDomain" } else { 'tenant' }
+  # Email-only mode sends exactly what is asked: the tenant mail, one AD domain, or All domains.
+  $mailSent = Send-LicensesFocusedSummaryEmail -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -MailStatePath $licenseSummaryMailStatePath -Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail `
+    -Domain ([string]$LicenseSummaryEmailDomain) -TenantOnly:([string]::IsNullOrWhiteSpace($LicenseSummaryEmailDomain))
+  $mailScope = if (-not $LicenseSummaryEmailDomain) { 'tenant' } elseif ($LicenseSummaryEmailDomain.Trim() -ieq 'All') { 'all AD domains' } else { "AD domain $LicenseSummaryEmailDomain" }
   if ($mailSent) { Write-Host ("License summary email ({0}) sent from the published license report: {1}" -f $mailScope, $LatestCsvFolderPath) }
   else { Write-Host ("License summary email ({0}) skipped: already sent or pending today (Europe/Paris)." -f $mailScope) }
   return
