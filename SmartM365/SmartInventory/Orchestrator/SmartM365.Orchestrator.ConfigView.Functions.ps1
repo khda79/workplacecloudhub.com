@@ -5,7 +5,7 @@ Pure helpers of the read-only Orchestrator GUI Configuration view.
 Flattening, descriptions, sensitive masking, effective values and filtering. No file access.
 Dot-sourced by SmartM365.Orchestrator.ConfigView.psm1 and by the demo, which must not import modules.
 .VERSION
-1.0.0
+1.0.1
 #>
 
 $script:ConfigViewPlaceholders = @('__USE_GLOBAL__', 'USE_GLOBAL')
@@ -166,6 +166,8 @@ function New-SmartM365OrchestratorConfigurationView {
                 })
             }
         }
+        # Alphabetical by full parameter path, case-insensitive and culture-independent.
+        $rows.Sort([Comparison[object]] { param($left, $right) [string]::Compare([string]$left.Parameter, [string]$right.Parameter, [StringComparison]::OrdinalIgnoreCase) })
         [pscustomobject]@{
             Kind = $file.Kind; Title = $file.Title; Path = $file.Path; Status = $file.Status; Error = $file.Error; Rows = @($rows)
             NotInTemplate = @($rows | Where-Object Model -eq 'Not in template').Count; MissingFromFile = @($rows | Where-Object Model -eq 'Missing from file').Count

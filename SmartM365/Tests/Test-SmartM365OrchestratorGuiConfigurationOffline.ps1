@@ -8,7 +8,7 @@ description points to a vanished key, then reads a synthetic Config folder: tran
 lock respect without writing, effective values and sources, template differences, sensitive
 masking, filtering, the background refresh contract and the absence of values in GUI logs.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -97,6 +97,11 @@ try {
     $files = @{}; foreach ($file in @($view.Files)) { $files[$file.Kind] = $file }
     Assert-Config ($view.ProfileKey -eq 'contoso' -and @($view.Files).Count -eq 3 -and @($view.Files | Where-Object Status -eq 'OK').Count -eq 3) 'Three files read for the requested profile.'
     Assert-Config ($files['Mail'].Path -like '*contoso.mail.local.json' -and $files['Tenant'].Path -like '*contoso.local.json.txt') 'Preferred .json.txt and legacy .json names resolved.'
+    foreach ($kind in @('Global', 'Tenant', 'Mail')) {
+        $names = @($files[$kind].Rows | ForEach-Object { [string]$_.Parameter })
+        $sorted = [string[]]$names.Clone(); [Array]::Sort($sorted, [StringComparer]::OrdinalIgnoreCase)
+        Assert-Config ($names.Count -gt 1 -and (($names -join '|') -ceq ($sorted -join '|'))) "$kind rows are sorted alphabetically by parameter."
+    }
     function Get-Row([string]$Kind, [string]$Parameter) { @($files[$Kind].Rows | Where-Object Parameter -eq $Parameter)[0] }
     Assert-Config ((Get-Row 'Global' 'MailClientLogoMaxKB').Model -eq 'Missing from file' -and $files['Global'].MissingFromFile -eq 1) 'Template key missing from the global file.'
     Assert-Config ((Get-Row 'Tenant' 'LegacyExtraKey').Model -eq 'Not in template' -and (Get-Row 'Tenant' 'RemoteRoutingDomain').Model -eq 'Missing from file') 'Tenant key outside the template and template key missing from the tenant.'
