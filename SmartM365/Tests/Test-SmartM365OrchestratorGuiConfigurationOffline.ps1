@@ -8,7 +8,7 @@ description points to a vanished key, then reads a synthetic Config folder: tran
 lock respect without writing, effective values and sources, template differences, sensitive
 masking, filtering, the background refresh contract and the absence of values in GUI logs.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -73,7 +73,7 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 function Write-Json([string]$Path, $Object) { [IO.File]::WriteAllText($Path, ($Object | ConvertTo-Json -Depth 20), $utf8) }
 $globalDoc = Get-Content -LiteralPath (Join-Path $config 'SmartM365.global.local.json.template') -Raw | ConvertFrom-Json
 $globalDoc.MailClientName = 'Contoso Global'
-$globalDoc.PSObject.Properties.Remove('MailFooterProductName')
+$globalDoc.PSObject.Properties.Remove('MailClientLogoMaxKB')
 Write-Json (Join-Path $config 'SmartM365.global.local.json.txt') $globalDoc
 $secret = 'C0FFEE00C0FFEE00C0FFEE00C0FFEE00C0FFEE00'
 $tenantDoc = Get-Content -LiteralPath (Join-Path $config 'Tenants/tenant.local.json.template') -Raw | ConvertFrom-Json
@@ -98,14 +98,14 @@ try {
     Assert-Config ($view.ProfileKey -eq 'contoso' -and @($view.Files).Count -eq 3 -and @($view.Files | Where-Object Status -eq 'OK').Count -eq 3) 'Three files read for the requested profile.'
     Assert-Config ($files['Mail'].Path -like '*contoso.mail.local.json' -and $files['Tenant'].Path -like '*contoso.local.json.txt') 'Preferred .json.txt and legacy .json names resolved.'
     function Get-Row([string]$Kind, [string]$Parameter) { @($files[$Kind].Rows | Where-Object Parameter -eq $Parameter)[0] }
-    Assert-Config ((Get-Row 'Global' 'MailFooterProductName').Model -eq 'Missing from file' -and $files['Global'].MissingFromFile -eq 1) 'Template key missing from the global file.'
+    Assert-Config ((Get-Row 'Global' 'MailClientLogoMaxKB').Model -eq 'Missing from file' -and $files['Global'].MissingFromFile -eq 1) 'Template key missing from the global file.'
     Assert-Config ((Get-Row 'Tenant' 'LegacyExtraKey').Model -eq 'Not in template' -and (Get-Row 'Tenant' 'RemoteRoutingDomain').Model -eq 'Missing from file') 'Tenant key outside the template and template key missing from the tenant.'
     Assert-Config ((Get-Row 'Tenant' 'AdComputerNameCountryPrefixes.FRP').Model -eq 'OK' -and (Get-Row 'Tenant' 'AdComputerNameCountryPrefixes.FRP').Description -like 'Country mapped*' -and $null -eq (Get-Row 'Tenant' 'AdComputerNameCountryPrefixes')) 'Free map entries belong to the template.'
     Assert-Config ((Get-Row 'Mail' 'Scripts.SmartM365-Retired-Script.From').Model -eq 'Not in template' -and (Get-Row 'Mail' 'Scripts.SmartM365-Retired-Script.From').Description -like 'Sender mailbox*') 'Unknown mail script flagged with the generic description.'
     $clientName = Get-Row 'Tenant' 'MailClientName'
     Assert-Config ($clientName.RawValue -eq '__USE_GLOBAL__' -and $clientName.RawEffective -eq 'Contoso Global' -and $clientName.Source -eq 'global') '__USE_GLOBAL__ resolves from the global file.'
-    $footer = Get-Row 'Tenant' 'MailFooterProductName'
-    Assert-Config ($footer.RawEffective -eq 'workplacecloudhub.com' -and $footer.Source -eq 'default (global template)') 'Missing global key falls back to the global template default.'
+    $footer = Get-Row 'Tenant' 'MailClientLogoMaxKB'
+    Assert-Config ([string]$footer.RawEffective -eq '200' -and $footer.Source -eq 'default (global template)') 'Missing global key falls back to the global template default.'
     $url = Get-Row 'Tenant' 'MailPowerBiUrl'
     Assert-Config ($url.RawValue -eq '' -and $url.Source -eq 'global') 'A blank tenant value inherits like __USE_GLOBAL__.'
     $cc = Get-Row 'Tenant' 'Cc'

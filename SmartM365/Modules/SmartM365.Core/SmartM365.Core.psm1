@@ -3240,10 +3240,11 @@ function Get-SmartM365MailBrandingConfig {
         PowerBiUrl = [string](Get-MailBrandingValue -Name 'MailPowerBiUrl' -DefaultValue '')
         PowerBiLogoPath = [string](Get-MailBrandingValue -Name 'MailPowerBiLogoPath' -DefaultValue 'Config/Branding/Assets/SmartPowerBI-logo.png')
         PowerBiLinkText = [string](Get-MailBrandingValue -Name 'MailPowerBiLinkText' -DefaultValue 'Click here to open the Power BI dashboard')
-        FooterProductName = [string](Get-MailBrandingValue -Name 'MailFooterProductName' -DefaultValue 'workplacecloudhub.com')
-        FooterWebsiteUrl = [string](Get-MailBrandingValue -Name 'MailFooterWebsiteUrl' -DefaultValue 'https://workplacecloudhub.com/')
-        FooterGitHubLabel = [string](Get-MailBrandingValue -Name 'MailFooterGitHubLabel' -DefaultValue 'khda79/workplacecloudhub.com')
-        FooterGitHubUrl = [string](Get-MailBrandingValue -Name 'MailFooterGitHubUrl' -DefaultValue 'https://github.com/khda79/workplacecloudhub.com')
+        # Product footer is fixed: never read from the global or tenant configuration.
+        FooterProductName = 'workplacecloudhub.com'
+        FooterWebsiteUrl = 'https://workplacecloudhub.com/'
+        FooterGitHubLabel = 'khda79/workplacecloudhub.com'
+        FooterGitHubUrl = 'https://github.com/khda79/workplacecloudhub.com'
     }
 }
 

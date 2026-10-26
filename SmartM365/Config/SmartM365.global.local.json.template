@@ -16,9 +16,5 @@
   "MailBrandingEnabled": true,
   "MailClientName": "",
   "MailClientLogoPath": "",
-  "MailClientLogoMaxKB": 200,
-  "MailFooterProductName": "workplacecloudhub.com",
-  "MailFooterWebsiteUrl": "https://workplacecloudhub.com/",
-  "MailFooterGitHubLabel": "khda79/workplacecloudhub.com",
-  "MailFooterGitHubUrl": "https://github.com/khda79/workplacecloudhub.com"
+  "MailClientLogoMaxKB": 200
 }
