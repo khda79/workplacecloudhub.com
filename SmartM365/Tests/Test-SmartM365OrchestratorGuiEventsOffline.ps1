@@ -7,7 +7,7 @@ Builds fictional daily logs for three servers, then verifies parsing, categories
 and display filters, repeat grouping, incremental cached reads, shared reads of a file
 held open by a writer, read-only behaviour, and the background GUI refresh contract.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -169,7 +169,7 @@ try {
     $guiAst = [Management.Automation.Language.Parser]::ParseFile($guiPath, [ref]$tokens, [ref]$errors)
     Assert-Events ($errors.Count -eq 0) 'GUI parses.'
     $guiText = [IO.File]::ReadAllText($guiPath)
-    Assert-Events ($guiText -match '<TabItem Header="Events">' -and $guiText -match "'Activity','Events'\)\]") 'Events tab and demo view exist.'
+    Assert-Events ($guiText -match '<TabItem Header="Events">' -and $guiText -match "'Activity','Events'[,)]") 'Events tab and demo view exist.'
     $startRefresh = $guiAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Start-GuiRefresh' }, $true)
     Assert-Events ($startRefresh.Extent.Text -match "LogEventsHours = \`$\(if \(\`$Mode -ne 'History' -and \(Test-GuiEventsTabVisible\)\)") 'Logs are read only by live/full refreshes while the Events tab is visible.'
     $updateView = $guiAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Update-GuiEventsView' }, $true)
@@ -206,9 +206,12 @@ Export-ModuleMember -Function Get-SmartM365OrchestratorOperations, Get-SmartM365
         Assert-Events (-not $received.Error -and @($received.Output).Count -eq 1) "Worker result: $($received.Error)"
         return $received.Output[0]
     }
+    # The worker reads the 24 hours before the real clock: add a line written now.
+    $realNow = Get-Date
+    Write-SyntheticLog -Path (Get-LogPath 'WorkerB' $realNow) -Lines @(('[{0}][ERROR] Central cluster configuration reload rejected; synthetic line written now.' -f $realNow.AddMinutes(-1).ToString('yyyy-MM-dd HH:mm:ss')))
     $guiCache = @{}
     $live = Invoke-RefreshWorker -Mode Live -Hours 24 -Cache $guiCache
-    Assert-Events ($null -ne $live.LogEvents -and -not $live.LogEventsError -and @($live.LogEvents.Events).Count -gt 0) 'Live refresh returns events when the tab is visible.'
+    Assert-Events ($null -ne $live.LogEvents -and -not $live.LogEventsError -and @($live.LogEvents.Events).Count -gt 0) ("Live refresh returns events when the tab is visible: " + $live.LogEventsError)
     Assert-Events ($guiCache.Count -gt 0) 'Worker fills the GUI-owned cache.'
     $hidden = Invoke-RefreshWorker -Mode Live -Hours 0 -Cache @{}
     Assert-Events ($null -eq $hidden.LogEvents -and -not $hidden.LogEventsError) 'No log read while the Events tab is hidden.'

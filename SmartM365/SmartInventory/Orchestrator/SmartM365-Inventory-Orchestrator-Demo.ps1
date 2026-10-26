@@ -3,10 +3,13 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.2.0
+1.3.0
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
+
+# Pure Configuration view helpers (no module import, no file access) shared with the GUI module.
+. (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ConfigView.Functions.ps1')
 
 function Get-OrchestratorDemoNextRun {
     param($Job,[datetime]$Clock)
@@ -226,6 +229,56 @@ function New-OrchestratorDemoDashboard {
     }
 }
 
+function New-OrchestratorDemoConfiguration {
+    # Fictional Contoso files built from the shipped templates only; no runtime JSON is read.
+    $configFolder = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'Config'
+    $readTemplate = { param($name) Get-Content -LiteralPath (Join-Path $configFolder $name) -Raw -Encoding UTF8 | ConvertFrom-Json }
+    $globalTemplate = & $readTemplate 'SmartM365.global.local.json.template'
+    $tenantTemplate = & $readTemplate 'Tenants\tenant.local.json.template'
+    $mailTemplate = & $readTemplate 'Tenants\tenant.mail.local.json.template'
+    $global = $globalTemplate | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    $global.DefaultTenant = 'contoso'; $global.MailClientName = 'Contoso (DEMO)'
+    $tenant = $tenantTemplate | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    $tenant.ProfileKey = 'contoso'; $tenant.OrganizationKey = 'contoso'; $tenant.EnvironmentKey = 'demo'; $tenant.TenantKey = 'contoso-demo'; $tenant.Environment = 'Demo'
+    $tenant.AppId = '11111111-2222-3333-4444-555555555555'; $tenant.TenantId = '66666666-7777-8888-9999-000000000000'
+    $tenant.Thumb = 'DEMO000000000000000000000000000000000000'; $tenant.Thumbprint = 'DEMO000000000000000000000000000000000000'
+    $tenant.OrgDomain = 'contoso.onmicrosoft.com'; $tenant.ErrorMailTo = 'it-alerts@contoso.example'; $tenant.To = 'it-reports@contoso.example'
+    $tenant.From = 'smartm365@contoso.example'; $tenant.MailSendAccessPolicyGroup = 'smartm365-mailsend@contoso.example'
+    $tenant.TeamsAlertsWebhookUrl = 'https://contoso.example/demo-webhook/alerts'; $tenant.EnableSharePointUpload = $true
+    $tenant.PSObject.Properties.Remove('RemoteRoutingDomain')
+    $tenant | Add-Member -NotePropertyName 'LegacyReportFolder' -NotePropertyValue 'D:\Reports (sample key not in the template)'
+    $mail = $mailTemplate | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    $mail.Scripts.'SmartM365-Licences-Inventory'.From = 'licensing@contoso.example'
+    $mail.Scripts.'SmartM365-Licences-Inventory'.Cc = 'finance@contoso.example'
+    $descriptions = Get-Content -LiteralPath (Join-Path $configFolder 'SmartM365.ConfigDescriptions.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $files = @(
+        [pscustomobject]@{ Kind = 'Global'; Title = 'SmartM365.global.local.json'; Path = 'Config\SmartM365.global.local.json.txt (DEMO)'; Status = 'OK'; Error = ''; Document = $global; Template = $globalTemplate; DescriptionKey = 'SmartM365.global.local.json'; SourceName = 'global' }
+        [pscustomobject]@{ Kind = 'Tenant'; Title = 'Tenants\contoso.local.json'; Path = 'Config\Tenants\contoso.local.json.txt (DEMO)'; Status = 'OK'; Error = ''; Document = $tenant; Template = $tenantTemplate; DescriptionKey = 'Tenants/tenant.local.json'; SourceName = 'tenant' }
+        [pscustomobject]@{ Kind = 'Mail'; Title = 'Tenants\contoso.mail.local.json'; Path = 'Config\Tenants\contoso.mail.local.json.txt (DEMO)'; Status = 'OK'; Error = ''; Document = $mail; Template = $mailTemplate; DescriptionKey = 'Tenants/tenant.mail.local.json'; SourceName = 'mail' }
+    )
+    $view = New-SmartM365OrchestratorConfigurationView -ProfileKey 'contoso' -Files $files -Descriptions $descriptions
+    $view | Add-Member -NotePropertyName ConfigFolder -NotePropertyValue $configFolder
+    $view | Add-Member -NotePropertyName ReadAt -NotePropertyValue $script:OrchestratorDemo.Data.Clock
+    return $view
+}
+
+function Update-OrchestratorDemoConfiguration {
+    $s = $script:OrchestratorDemo; $c = $s.Controls
+    if ($null -eq $s.Configuration) {
+        try { $s.Configuration = New-OrchestratorDemoConfiguration }
+        catch { $c.ConfigSummaryText.Text = 'DEMO configuration unavailable: copy Config templates and SmartM365.ConfigDescriptions.json with the GUI. ' + $_.Exception.Message; return }
+    }
+    $c.ConfigShowSensitiveButton.Content = if ($s.ConfigurationShow) { 'Hide' } else { 'Show' }
+    foreach ($pair in @(@('Global', 'ConfigGlobal'), @('Tenant', 'ConfigTenant'), @('Mail', 'ConfigMail'))) {
+        $file = @($s.Configuration.Files | Where-Object Kind -eq $pair[0])[0]
+        $rows = @(Select-SmartM365OrchestratorConfigRows -Rows @($file.Rows) -Filter $c.ConfigFilterBox.Text.Trim() -ShowSensitive:$s.ConfigurationShow)
+        $c[$pair[1] + 'Grid'].ItemsSource = $rows
+        $c[$pair[1] + 'Tab'].Header = '{0} ({1})' -f $pair[0], [IO.Path]::GetFileName(($file.Path -replace ' \(DEMO\)$', ''))
+        $c[$pair[1] + 'StatusText'].Text = 'DEMO: {0}. {1} key(s), {2} shown; {3} not in template, {4} missing from file; {5} sensitive value(s) {6}.' -f $file.Path, @($file.Rows).Count, $rows.Count, $file.NotInTemplate, $file.MissingFromFile, @($file.Rows | Where-Object Sensitive).Count, $(if ($s.ConfigurationShow) { 'shown' } else { 'hidden' })
+    }
+    $c.ConfigSummaryText.Text = 'DEMO - fictional Contoso configuration built from the shipped templates. Read-only: nothing is written; sensitive values are hidden unless Show is pressed.'
+}
+
 function Update-OrchestratorDemoViews {
     $s=$script:OrchestratorDemo; $d=$s.Data; $c=$s.Controls
     foreach($server in $d.Servers){
@@ -259,6 +312,7 @@ function Update-OrchestratorDemoViews {
     if($d.Versions.Count){$c.VersionsGrid.SelectedIndex=0}
     Update-OrchestratorDemoHistory
     Update-OrchestratorDemoEvents
+    Update-OrchestratorDemoConfiguration
 }
 
 function Export-OrchestratorDemoHistory {
@@ -399,7 +453,7 @@ function Invoke-OrchestratorDemo {
     }
     $script:OrchestratorDemo=[pscustomobject]@{
         Mode='Demo';Window=$window;Controls=$controls;Data=(New-OrchestratorDemoData -Scenario $Scenario)
-        FilteredHistory=@();FilteredEvents=@();Dashboard=$null;OutputRoot=(Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-Demo/InventoryOrchestrator/'+[guid]::NewGuid().ToString('N')))
+        FilteredHistory=@();FilteredEvents=@();Dashboard=$null;Configuration=$null;ConfigurationShow=$false;OutputRoot=(Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-Demo/InventoryOrchestrator/'+[guid]::NewGuid().ToString('N')))
     }
     $s=$script:OrchestratorDemo; $c=$s.Controls
     $body=$window.Content; $window.Content=$null
@@ -420,7 +474,7 @@ function Invoke-OrchestratorDemo {
     $c.SharedPathText.Text='Contoso | DEMO - Sample data | All actions are simulated'
     $c.ConnectionText.Text='Offline demo'; $c.LastRefreshText.Text='2026-10-18 09:30 (frozen)'
     $c.FooterText.Text='DEMO - Sample data. Exports use a separate temporary demo folder.'
-    $c.VersionText.Text='v1.4.0 | DEMO'
+    $c.VersionText.Text='v1.6.0 | DEMO'
     $c.AutoRefreshCheck.IsChecked=$false; $c.AutoRefreshCheck.IsEnabled=$false
     # Keep both running sample rows visible at the default capture size.
     $operationsLayout=$c.OperationsServersGrid.Parent
@@ -467,6 +521,10 @@ function Invoke-OrchestratorDemo {
     $c.OperationsMailsGrid.Add_MouseDoubleClick({Write-OrchestratorDemoActivity 'Sample mail: Contoso inventory completed successfully. No email was sent.'})
     foreach($name in @('EventsServerCombo','EventsLevelCombo','EventsCategoryCombo','EventsPeriodCombo')){$c[$name].Add_SelectionChanged({Update-OrchestratorDemoEvents})}
     $c.EventsTextBox.Add_TextChanged({Update-OrchestratorDemoEvents})
+    $c.ConfigFilterBox.Add_TextChanged({Update-OrchestratorDemoConfiguration})
+    $c.ConfigShowSensitiveButton.Add_Click({$script:OrchestratorDemo.ConfigurationShow=-not $script:OrchestratorDemo.ConfigurationShow;Update-OrchestratorDemoConfiguration})
+    $c.ConfigRefreshButton.Add_Click({Update-OrchestratorDemoConfiguration;Write-OrchestratorDemoActivity 'Sample configuration refreshed. No configuration file was read.'})
+    $c.ConfigOpenFolderButton.Add_Click({Write-OrchestratorDemoActivity 'Open folder is disabled in demo mode.'})
     $c.DashboardTimelineCanvas.Add_SizeChanged({param($sender) Update-OrchestratorDashboardTimeline -Canvas $sender})
     $c.DashboardTilesList.AddHandler([System.Windows.UIElement]::MouseLeftButtonUpEvent,[System.Windows.Input.MouseButtonEventHandler]{param($sender,$eventArgs)$tile=$eventArgs.OriginalSource.DataContext;if($tile -and $tile.PSObject.Properties['Target']){Select-OrchestratorDemoTarget ([string]$tile.Target)}})
     $c.DashboardActionsGrid.Add_MouseDoubleClick({$row=$script:OrchestratorDemo.Controls.DashboardActionsGrid.SelectedItem;if($row){Select-OrchestratorDemoTarget ([string]$row.Target)}})

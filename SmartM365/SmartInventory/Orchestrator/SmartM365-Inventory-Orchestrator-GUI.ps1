@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.5.1
+1.6.0
 #>
 [CmdletBinding()]
 param(
@@ -46,7 +46,7 @@ param(
     [switch]$Demo,
     [ValidateSet('Overview','Issues','Maintenance')]
     [string]$DemoScenario = 'Overview',
-    [ValidateSet('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity','Events')]
+    [ValidateSet('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity','Events','Configuration')]
     [string]$DemoView = 'Dashboard',
     [ValidateRange(1180,3840)][int]$DemoWindowWidth = 1500,
     [ValidateRange(720,2160)][int]$DemoWindowHeight = 900
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.5.1'
+$script:AppVersion = '1.6.0'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -84,6 +84,9 @@ $script:LogEventsCache = @{}
 $script:LogEventsResult = $null
 $script:LogEventsLastError = ''
 $script:DashboardData = $null
+$script:ConfigurationView = $null
+$script:ConfigurationShowUntil = [datetime]::MinValue
+$script:ConfigurationTimer = $null
 $script:DashboardLastError = ''
 $script:DashboardLoading = [pscustomobject]@{ Pending = $false; Clock = [Diagnostics.Stopwatch]::new() }
 $script:AutoRefreshTimer = $null
@@ -748,6 +751,97 @@ $xaml = @'
                     <TextBox x:Name="EventsDetailBox" Grid.Row="3" Margin="0,8,0,0" FontFamily="Consolas" FontSize="12" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
                 </Grid>
             </TabItem>
+
+            <TabItem Header="Configuration">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel Margin="0,0,8,0"><TextBlock Text="Filter (parameter, description, source, visible value)"/><TextBox x:Name="ConfigFilterBox"/></StackPanel>
+                        <Button x:Name="ConfigShowSensitiveButton" Grid.Column="1" Content="Show" VerticalAlignment="Bottom" Margin="4,0,4,8" ToolTip="Shows hidden sensitive values for 30 seconds."/>
+                        <Button x:Name="ConfigRefreshButton" Grid.Column="2" Content="Refresh" VerticalAlignment="Bottom" Margin="4,0,4,8"/>
+                        <Button x:Name="ConfigOpenFolderButton" Grid.Column="3" Content="Open folder" VerticalAlignment="Bottom" Margin="4,0,4,8" ToolTip="Opens the folder of the selected file in Explorer."/>
+                    </Grid>
+                    <TextBlock x:Name="ConfigSummaryText" Grid.Row="1" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="Read-only view of the configuration of the current tenant profile. Nothing is written."/>
+                    <TabControl x:Name="ConfigFileTabs" Grid.Row="2">
+                        <TabItem x:Name="ConfigGlobalTab" Header="Global">
+                            <Grid Margin="8">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <TextBlock x:Name="ConfigGlobalStatusText" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                <DataGrid x:Name="ConfigGlobalGrid" Grid.Row="1" SelectionMode="Single" ClipboardCopyMode="None">
+                                    <DataGrid.RowStyle>
+                                        <Style TargetType="DataGridRow">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Model}" Value="Not in template"><Setter Property="Background" Value="#FFF4CE"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding Model}" Value="Missing from file"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding Masked}" Value="True"><Setter Property="FontStyle" Value="Italic"/></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGrid.RowStyle>
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Parameter" Binding="{Binding Parameter}" Width="300"/>
+                                        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="220"/>
+                                        <DataGridTextColumn Header="Effective value" Binding="{Binding Effective}" Width="220"/>
+                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"/>
+                                        <DataGridTextColumn Header="Template" Binding="{Binding Model}" Width="115"/>
+                                        <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </TabItem>
+                        <TabItem x:Name="ConfigTenantTab" Header="Tenant">
+                            <Grid Margin="8">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <TextBlock x:Name="ConfigTenantStatusText" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                <DataGrid x:Name="ConfigTenantGrid" Grid.Row="1" SelectionMode="Single" ClipboardCopyMode="None">
+                                    <DataGrid.RowStyle>
+                                        <Style TargetType="DataGridRow">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Model}" Value="Not in template"><Setter Property="Background" Value="#FFF4CE"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding Model}" Value="Missing from file"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding Masked}" Value="True"><Setter Property="FontStyle" Value="Italic"/></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGrid.RowStyle>
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Parameter" Binding="{Binding Parameter}" Width="300"/>
+                                        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="220"/>
+                                        <DataGridTextColumn Header="Effective value" Binding="{Binding Effective}" Width="220"/>
+                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"/>
+                                        <DataGridTextColumn Header="Template" Binding="{Binding Model}" Width="115"/>
+                                        <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </TabItem>
+                        <TabItem x:Name="ConfigMailTab" Header="Mail">
+                            <Grid Margin="8">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <TextBlock x:Name="ConfigMailStatusText" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                <DataGrid x:Name="ConfigMailGrid" Grid.Row="1" SelectionMode="Single" ClipboardCopyMode="None">
+                                    <DataGrid.RowStyle>
+                                        <Style TargetType="DataGridRow">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Model}" Value="Not in template"><Setter Property="Background" Value="#FFF4CE"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding Model}" Value="Missing from file"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                                <DataTrigger Binding="{Binding Masked}" Value="True"><Setter Property="FontStyle" Value="Italic"/></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGrid.RowStyle>
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Parameter" Binding="{Binding Parameter}" Width="300"/>
+                                        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="220"/>
+                                        <DataGridTextColumn Header="Effective value" Binding="{Binding Effective}" Width="220"/>
+                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"/>
+                                        <DataGridTextColumn Header="Template" Binding="{Binding Model}" Width="115"/>
+                                        <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </TabItem>
+                    </TabControl>
+                </Grid>
+            </TabItem>
         </TabControl>
 
         <Border Grid.Row="3" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Margin="0,9,0,0" Padding="10,6">
@@ -884,6 +978,7 @@ Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchest
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Maintenance.psm1') -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Pipeline.psm1') -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.GuiWorker.psm1') -ErrorAction Stop
+Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ConfigView.psm1') -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Inventory.Launch.psm1') -Force -ErrorAction Stop
 $script:SmartInventoryRoot = Split-Path -Path $PSScriptRoot -Parent
 
@@ -896,6 +991,7 @@ if ($ValidateOnly) {
         'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
         'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
         'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
+        'ConfigFilterBox', 'ConfigShowSensitiveButton', 'ConfigRefreshButton', 'ConfigOpenFolderButton', 'ConfigSummaryText', 'ConfigFileTabs', 'ConfigGlobalTab', 'ConfigTenantTab', 'ConfigMailTab', 'ConfigGlobalStatusText', 'ConfigTenantStatusText', 'ConfigMailStatusText', 'ConfigGlobalGrid', 'ConfigTenantGrid', 'ConfigMailGrid',
         'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
     }
@@ -1753,6 +1849,58 @@ function Set-GuiEventsServers {
     if ($selected -and $selected -in @($script:Controls.EventsServerCombo.ItemsSource)) { $script:Controls.EventsServerCombo.SelectedItem = $selected } else { $script:Controls.EventsServerCombo.SelectedIndex = 0 }
 }
 
+function Test-GuiConfigurationTabVisible {
+    return $null -ne $script:Controls.MainTabs.SelectedItem -and [string]$script:Controls.MainTabs.SelectedItem.Header -eq 'Configuration'
+}
+
+function Update-GuiConfigurationView {
+    # UI-thread display of the last read: masking and filtering only, no file access, nothing logged.
+    $view = $script:ConfigurationView
+    $show = [datetime]::UtcNow -lt $script:ConfigurationShowUntil
+    $script:Controls.ConfigShowSensitiveButton.Content = if ($show) { 'Hide ({0:0} s)' -f ($script:ConfigurationShowUntil - [datetime]::UtcNow).TotalSeconds } else { 'Show' }
+    if ($null -eq $view) { return }
+    $filter = $script:Controls.ConfigFilterBox.Text.Trim()
+    foreach ($pair in @(@('Global', 'ConfigGlobal'), @('Tenant', 'ConfigTenant'), @('Mail', 'ConfigMail'))) {
+        $file = @($view.Files | Where-Object Kind -eq $pair[0])[0]
+        $grid = $script:Controls[$pair[1] + 'Grid']; $status = $script:Controls[$pair[1] + 'StatusText']; $tab = $script:Controls[$pair[1] + 'Tab']
+        if ($null -eq $file) { $grid.ItemsSource = @(); continue }
+        $rows = @(Select-SmartM365OrchestratorConfigRows -Rows @($file.Rows) -Filter $filter -ShowSensitive:$show)
+        $grid.ItemsSource = $rows
+        $tab.Header = '{0} ({1})' -f $pair[0], [IO.Path]::GetFileName([string]$file.Path)
+        $statusText = switch ($file.Status) { 'OK' { 'Read' } 'Missing' { 'File not found' } 'Busy' { 'Transport lock held by another process; previous values not shown' } default { 'Unreadable' } }
+        $status.Text = '{0}: {1}. {2} key(s), {3} shown; {4} not in template, {5} missing from file; {6} sensitive value(s) {7}.{8}' -f $statusText, $file.Path, @($file.Rows).Count, $rows.Count, $file.NotInTemplate, $file.MissingFromFile, @($file.Rows | Where-Object Sensitive).Count, $(if ($show) { 'shown' } else { 'hidden' }), $(if ($file.Error) { ' ' + $file.Error } else { '' })
+    }
+    $script:Controls.ConfigSummaryText.Text = 'Tenant profile {0}, read {1:HH:mm:ss}. Read-only: nothing is written; sensitive values are hidden unless Show is pressed.' -f $view.ProfileKey, $view.ReadAt
+}
+
+function Set-GuiConfiguration {
+    param([AllowNull()]$View, [string]$ErrorMessage = '')
+    if ($ErrorMessage) {
+        $script:Controls.ConfigSummaryText.Text = 'Configuration could not be read: ' + $ErrorMessage
+        Write-GuiActivity -Message 'Configuration view could not be read; see the Configuration tab.' -Level WARN -DisplayOnly
+        return
+    }
+    if ($null -eq $View) { return }
+    $script:ConfigurationView = $View
+    Update-GuiConfigurationView
+}
+
+function Show-GuiConfigurationSensitive {
+    if ([datetime]::UtcNow -lt $script:ConfigurationShowUntil) { $script:ConfigurationShowUntil = [datetime]::MinValue }
+    else {
+        $script:ConfigurationShowUntil = [datetime]::UtcNow.AddSeconds(30)
+        Write-GuiActivity -Message 'Sensitive configuration values shown for 30 seconds (values are not logged).' -Level WARN
+    }
+    Update-GuiConfigurationView
+}
+
+function Open-GuiConfigurationFolder {
+    $folder = if ($null -ne $script:ConfigurationView) { $script:ConfigurationView.ConfigFolder } else { Join-Path $script:SmartM365RootPath 'Config' }
+    if ([string]$script:Controls.ConfigFileTabs.SelectedItem.Name -ne 'ConfigGlobalTab') { $folder = Join-Path $folder 'Tenants' }
+    if (-not (Test-Path -LiteralPath $folder -PathType Container)) { throw "Configuration folder not found: $folder" }
+    Start-Process -FilePath 'explorer.exe' -ArgumentList ('"{0}"' -f $folder)
+}
+
 function Test-GuiDashboardTabVisible {
     return $null -ne $script:Controls.MainTabs.SelectedItem -and [string]$script:Controls.MainTabs.SelectedItem.Header -eq 'Dashboard'
 }
@@ -1913,11 +2061,23 @@ function Get-GuiRefreshWork {
             }
             catch { $dashboardError = $_.Exception.Message }
         }
+        $configuration = $null; $configurationError = ''
+        $configurationOption = $InputData.PSObject.Properties['ConfigurationProfile']
+        if ($null -ne $configurationOption -and -not [string]::IsNullOrWhiteSpace([string]$configurationOption.Value)) {
+            # Read-only; values never reach the progress text or any log.
+            $Progress.Message = 'Reading the configuration files...'
+            try {
+                Import-Module $InputData.ConfigViewModulePath -ErrorAction Stop
+                $configuration = Get-SmartM365OrchestratorConfigurationView -RootPath $InputData.ConfigRootPath -ProfileKey ([string]$configurationOption.Value)
+            }
+            catch { $configurationError = $_.Exception.Message }
+        }
         return [pscustomobject]@{
             Mode = $InputData.Mode; Snapshot = $snapshot; RecentRuns = $recentRuns; Servers = $servers
             Owners = $owners; History = $history; Versions = $versions; Operations = $operations
             Requests = $requests; LogEvents = $logEvents; LogEventsError = $logEventsError
-            Dashboard = $dashboard; DashboardError = $dashboardError; ReadAt = Get-Date
+            Dashboard = $dashboard; DashboardError = $dashboardError
+            Configuration = $configuration; ConfigurationError = $configurationError; ReadAt = Get-Date
         }
     }
 }
@@ -1954,6 +2114,8 @@ function Start-GuiRefresh {
         HistoryFrom = $from; HistoryTo = $to; HistoryServer = $server; HistoryJob = $job; HistoryStatus = $status; OnlyFailures = [bool]$OnlyFailures
         LogEventsHours = $(if ($Mode -ne 'History' -and (Test-GuiEventsTabVisible)) { Get-GuiEventsHours } else { 0 }); LogEventsCache = $script:LogEventsCache
         IncludeDashboard = $includeDashboard
+        ConfigurationProfile = $(if ($Mode -ne 'History' -and (Test-GuiConfigurationTabVisible)) { [string]$script:EffectiveConfig.ProfileKey } else { '' })
+        ConfigRootPath = $script:SmartM365RootPath; ConfigViewModulePath = (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ConfigView.psm1')
     }
     $script:RefreshContext.Input = $inputData
     $script:RefreshContext.Progress.Message = ''
@@ -2020,6 +2182,7 @@ function Receive-GuiRefresh {
             Set-GuiOperations -Operations $result.Operations
             if (-not $script:CancellationBusy) { Set-GuiRequestRows -Rows @($result.Requests) }
             if ([int]$script:RefreshContext.Input.LogEventsHours -gt 0) { Set-GuiLogEvents -Result $result.LogEvents -ErrorMessage ([string]$result.LogEventsError) }
+            if ([string]$script:RefreshContext.Input.ConfigurationProfile) { Set-GuiConfiguration -View $result.Configuration -ErrorMessage ([string]$result.ConfigurationError) }
             if ([bool]$script:RefreshContext.Input.IncludeDashboard) { Set-GuiDashboard -Dashboard $result.Dashboard -ErrorMessage ([string]$result.DashboardError) }
         }
         if ($mode -eq 'History') {
@@ -2264,6 +2427,7 @@ function Request-ElectionRebalance {
 }
 
 $smartM365Root = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
+$script:SmartM365RootPath = $smartM365Root
 $tenantContextPath = Join-Path -Path $smartM365Root -ChildPath 'Config\SmartM365-TenantContext.ps1'
 . $tenantContextPath
 $script:EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
@@ -2333,6 +2497,7 @@ foreach ($name in @(
     'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
     'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
     'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
+    'ConfigFilterBox', 'ConfigShowSensitiveButton', 'ConfigRefreshButton', 'ConfigOpenFolderButton', 'ConfigSummaryText', 'ConfigFileTabs', 'ConfigGlobalTab', 'ConfigTenantTab', 'ConfigMailTab', 'ConfigGlobalStatusText', 'ConfigTenantStatusText', 'ConfigMailStatusText', 'ConfigGlobalGrid', 'ConfigTenantGrid', 'ConfigMailGrid',
     'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox'
 )) {
     $script:Controls[$name] = $window.FindName($name)
@@ -2428,7 +2593,22 @@ $script:Controls.MainTabs.Add_SelectionChanged({
     }
     if (Test-GuiEventsTabVisible) { Start-GuiRefresh -Mode Live }
     if (Test-GuiDashboardTabVisible) { Start-GuiRefresh -Mode Live -ShowLoading }
+    if (Test-GuiConfigurationTabVisible) { Start-GuiRefresh -Mode Live }
+    elseif ([datetime]::UtcNow -lt $script:ConfigurationShowUntil) { $script:ConfigurationShowUntil = [datetime]::MinValue; Update-GuiConfigurationView }
 })
+$script:Controls.ConfigFilterBox.Add_TextChanged({ try { Update-GuiConfigurationView } catch { Write-GuiException -Context 'Configuration filter failed' -ErrorRecord $_ } })
+$script:Controls.ConfigShowSensitiveButton.Add_Click({ try { Show-GuiConfigurationSensitive } catch { Write-GuiException -Context 'Configuration display failed' -ErrorRecord $_ } })
+$script:Controls.ConfigRefreshButton.Add_Click({ Start-GuiRefresh -Mode Live })
+$script:Controls.ConfigOpenFolderButton.Add_Click({ try { Open-GuiConfigurationFolder } catch { Write-GuiException -Context 'Open configuration folder failed' -ErrorRecord $_ } })
+$script:ConfigurationTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:ConfigurationTimer.Interval = [TimeSpan]::FromSeconds(1)
+$script:ConfigurationTimer.Add_Tick({
+    # Re-mask when the 30-second window ends; refreshes the countdown on the button meanwhile.
+    if ($script:ConfigurationShowUntil -eq [datetime]::MinValue) { return }
+    if ([datetime]::UtcNow -ge $script:ConfigurationShowUntil) { $script:ConfigurationShowUntil = [datetime]::MinValue }
+    Update-GuiConfigurationView
+})
+$script:ConfigurationTimer.Start()
 $script:Controls.DashboardTimelineCanvas.Add_SizeChanged({ param($sender) Update-OrchestratorDashboardTimeline -Canvas $sender })
 $script:Controls.DashboardTilesList.AddHandler([System.Windows.UIElement]::MouseLeftButtonUpEvent, [System.Windows.Input.MouseButtonEventHandler]{
     param($sender, $eventArgs)
@@ -2726,6 +2906,10 @@ if ($SmokeTest) {
     Set-GuiLogEvents -Result (Get-SmartM365OrchestratorLogEvents -LogFolderPath $script:MailFolderPath -Server @($script:DraftCluster.ExpectedOrchestratorServers) -Hours 24 -Cache $script:LogEventsCache)
     if ($null -eq $script:DashboardData -or @($script:Controls.DashboardTilesList.ItemsSource).Count -ne 9 -or @($script:Controls.DashboardGrid.ItemsSource).Count -ne @($script:DraftCluster.ExpectedOrchestratorServers).Count) { throw 'Dashboard was not built from the shared data.' }
     Write-GuiActivity -Message ("SMOKE_TEST_DASHBOARD_OK Banner={0}; Tiles={1}; Actions={2}; TimelineItems={3}" -f $script:DashboardData.Banner.Level, @($script:DashboardData.Tiles).Count, @($script:DashboardData.Actions).Count, @($script:DashboardData.Timeline.Items).Count) -Level SUCCESS
+    Set-GuiConfiguration -View (Get-SmartM365OrchestratorConfigurationView -RootPath $script:SmartM365RootPath -ProfileKey ([string]$script:EffectiveConfig.ProfileKey))
+    $smokeConfigRows = @(@($script:Controls.ConfigGlobalGrid.ItemsSource) + @($script:Controls.ConfigTenantGrid.ItemsSource) + @($script:Controls.ConfigMailGrid.ItemsSource))
+    if (@($script:Controls.ConfigGlobalGrid.ItemsSource).Count -eq 0 -or @($smokeConfigRows | Where-Object { $_.Sensitive -and -not $_.Masked -and $_.Model -ne 'Missing from file' }).Count) { throw 'Configuration view is empty or shows a sensitive value by default.' }
+    Write-GuiActivity -Message ("SMOKE_TEST_CONFIGURATION_OK Files={0}; Rows={1}; Hidden={2}" -f @($script:ConfigurationView.Files | Where-Object Status -eq 'OK').Count, $smokeConfigRows.Count, @($smokeConfigRows | Where-Object Masked).Count) -Level SUCCESS
     Write-GuiActivity -Message ("SMOKE_TEST_EVENTS_OK Events={0}; Rows={1}; Logs={2}" -f @($script:LogEventsResult.Events).Count, @($script:Controls.EventsGrid.ItemsSource).Count, (@($script:LogEventsResult.Sources | ForEach-Object { '{0}={1}' -f $_.Server, $_.Status }) -join ',')) -Level SUCCESS
 
     $rebalanceRequest = Request-ElectionRebalance -SkipConfirmation
@@ -2765,6 +2949,7 @@ $window.Add_ContentRendered({
 })
 $window.Add_Closed({
     if ($script:AutoRefreshTimer) { $script:AutoRefreshTimer.Stop() }
+    if ($script:ConfigurationTimer) { $script:ConfigurationTimer.Stop() }
     if ($script:RefreshTimer) { $script:RefreshTimer.Stop() }
     if ($script:CancellationTimer) { $script:CancellationTimer.Stop() }
     Write-GuiActivity -Message 'GUI session closed.'
@@ -2786,7 +2971,7 @@ $window.Add_Closing({
 } finally {
     if ($smartM365RunGuard) {
     Complete-SmartM365InventoryRun -State $smartM365RunGuard -Cleanup {
-        foreach($name in @('AutoRefreshTimer','RefreshTimer','CancellationTimer')){
+        foreach($name in @('AutoRefreshTimer','RefreshTimer','CancellationTimer','ConfigurationTimer')){
             $timer=Get-Variable $name -Scope Script -ValueOnly -ErrorAction SilentlyContinue
             if($timer){Invoke-SmartM365RunCleanup $smartM365RunGuard $name { $timer.Stop() }}
         }

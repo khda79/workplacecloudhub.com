@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercises the two pilot demos with WPF events and forbidden operational commands.
 .VERSION
-1.0.3
+1.0.4
 .NOTES
 Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
 #>
@@ -132,7 +132,7 @@ try {
         Assert-Demo (@($s.Data.History|Where-Object {[datetime]$_.EventTime -gt $s.Data.Clock}).Count -eq 0) 'History contains future sample executions.'
         Assert-Demo (-not (Test-Path -LiteralPath $s.OutputRoot)) 'Demo wrote files during initialization.'
         Assert-Demo ($c.RequestJobsGrid.Items.Count -eq 3) 'Request detail selection failed.'
-        foreach($view in @('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity','Events')){
+        foreach($view in @('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity','Events','Configuration')){
             foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $view){$c.MainTabs.SelectedItem=$tab}}
             Assert-Demo ($c.MainTabs.SelectedItem.Header -eq $view) "Cannot navigate to $view"
             Export-DemoPreview $s.Window ('orchestrator-'+($view -replace ' ','-').ToLowerInvariant())
@@ -142,6 +142,23 @@ try {
         Select-OrchestratorDemoTarget 'Failures24h'
         Assert-Demo ($c.MainTabs.SelectedItem.Header -eq 'History' -and @($s.FilteredHistory | Where-Object Status -NE 'Failed').Count -eq 0) 'Dashboard failure tile navigation failed.'
         $c.HistoryStatusCombo.SelectedItem='All';Update-OrchestratorDemoHistory
+        $tenantRows=@($c.ConfigTenantGrid.ItemsSource)
+        Assert-Demo (@($c.ConfigGlobalGrid.ItemsSource).Count -gt 0 -and $tenantRows.Count -gt 0 -and @($c.ConfigMailGrid.ItemsSource).Count -gt 0) 'Configuration grids are empty.'
+        Assert-Demo (@($tenantRows | Where-Object { $_.Sensitive -and -not $_.Masked }).Count -eq 0 -and @($tenantRows | Where-Object Parameter -eq 'Thumbprint')[0].Value -notlike 'DEMO0*') 'Sensitive demo values are visible by default.'
+        Assert-Demo (@($tenantRows | Where-Object Model -eq 'Not in template').Count -eq 1 -and @($tenantRows | Where-Object Model -eq 'Missing from file').Count -eq 1) 'Template comparison missing in the demo.'
+        Assert-Demo (@($tenantRows | Where-Object Parameter -eq 'MailClientName')[0].Source -eq 'global' -and @($tenantRows | Where-Object Parameter -eq 'MailClientName')[0].Effective -eq 'Contoso (DEMO)') 'Inherited tenant value not resolved from global.'
+        Invoke-DemoClick $c.ConfigShowSensitiveButton
+        Assert-Demo (@($c.ConfigTenantGrid.ItemsSource | Where-Object Parameter -eq 'Thumbprint')[0].Value -like 'DEMO0*') 'Show did not reveal sensitive demo values.'
+        Invoke-DemoClick $c.ConfigShowSensitiveButton
+        $c.ConfigFilterBox.Text='DEMO0'
+        Assert-Demo (@($c.ConfigTenantGrid.ItemsSource).Count -eq 0) 'The filter matched a hidden value.'
+        $c.ConfigFilterBox.Text='Licences'
+        Assert-Demo (@($c.ConfigMailGrid.ItemsSource).Count -eq 2 -and @($c.ConfigMailGrid.ItemsSource | Where-Object Source -eq 'mail').Count -eq 2) 'Configuration filter or mail source failed.'
+        $c.ConfigFilterBox.Text=''
+        foreach($tab in $c.MainTabs.Items){if($tab.Header -eq 'Configuration'){$c.MainTabs.SelectedItem=$tab}}
+        $c.ConfigFileTabs.SelectedIndex=1
+        Export-DemoPreview $s.Window 'orchestrator-configuration-tenant'
+        $c.ConfigFileTabs.SelectedIndex=0
         $c.HistoryServerCombo.SelectedItem='CTSO-INV-01'
         Invoke-DemoClick $c.HistoryRefreshButton
         Assert-Demo ($s.FilteredHistory.Count -eq (@($s.Data.Jobs|Where-Object Server -EQ 'CTSO-INV-01').Count*7)) 'History server filter failed.'

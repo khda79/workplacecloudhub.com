@@ -42,6 +42,7 @@ SmartFinOps/**
 !/SmartM365/README.md
 !/SmartM365/Config/SmartM365.global.local.json.template
 !/SmartM365/Config/Tenants/tenant.local.json.template
+!/SmartM365/Config/SmartM365.ConfigDescriptions.json
 !/SmartM365/**/*.ps1
 !/SmartM365/**/*.psm1
 !/SmartM365/**/*.psd1
