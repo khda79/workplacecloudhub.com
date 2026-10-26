@@ -14,7 +14,7 @@
 - Diagnostics: failures include category, operation, attempts, duration, database and backend. Mixed successful/failed reads retain `CompletedWithWarnings` and their diagnostic CSV.
 - Weekly history: qualified permissions and mailbox-error CSVs are published together once per run under `Exchange\OnPrem\CalendarPermissions\WeeklyHistory`.
 
-Use `Start-SmartM365-Exchange-Local-MailboxCalendarPermissions-Inventory.cmd` directly. It copies the collector, configuration and complete Core module tree (including the lot A session helper) into a writable local cache. No orchestrator is required. A `-MaxItems` smoke run uses separate suffixed filenames and skips weekly history; full qualification requires a subsequent unrestricted run.
+Use `SmartInventory.cmd Exchange2016-Mailboxes-CalendarPermissions` directly. In `LocalCache` mode it copies the collector, configuration and complete Core module tree (including the lot A session helper) into a writable local cache. No orchestrator is required. A `-MaxItems` smoke run uses separate suffixed filenames and skips weekly history; full qualification requires a subsequent unrestricted run.
 
 The script-local `SmartM365-Exchange-MailboxCalendarPermissions-Inventory.local.json.txt` (or resolved `.local.json`) controls the connection:
 

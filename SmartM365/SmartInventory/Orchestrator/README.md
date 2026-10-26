@@ -263,16 +263,20 @@ It is started by a single Windows Task Scheduler task (at server startup plus a 
 | `Orchestrator-Jobs.json` | Legacy/local bootstrap manifest, Git-ignored. With central configuration enabled, its current values seed the shared manifest only when the shared manifest does not exist yet. |
 | `Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1` | Installs or removes the unattended Windows scheduled task under a dedicated service account. |
 | `..\..\..\Install-WorkplaceCloudHub-CodeSigningCertificate.ps1` | Installs the committed public Authenticode certificate into `LocalMachine` trust stores by default; `CurrentUser` remains available explicitly. |
-| `..\Launchers\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd` | Interactive elevated launcher for scheduled-task installation or removal. |
-| `..\Launchers\Orchestrator\Start-SmartM365-Inventory-Orchestrator.cmd` | Production launcher: `-Tenant prod -Connect`. |
-| `..\Launchers\Orchestrator\Start-SmartM365-Inventory-Full-Collect.cmd` | Submits the prod `Full` pipeline and waits for its shared completion status. |
-| `..\Launchers\Orchestrator\Start-SmartM365-Inventory-Orchestrator-GUI.cmd` | Opens the production WPF management console in an STA PowerShell 7 process. |
-| `..\Launchers\Orchestrator\Send-SmartM365-Inventory-Orchestrator-ExecutionSummary.cmd` | Sends the prod all-server execution-summary email with a consolidated row per job plus separate detailed tables for the last 24 hours and 7 days. |
+| `SmartM365.Inventory.Launch.psm1` | Launch engine (Windows PowerShell 5.1 and PowerShell 7): reads the catalog, resolves tenant, runtime and execution mode, prepares the local cache and runs the job or manual entry. The orchestrator uses it for every job whose catalog definition declares `Runtime` or `Execution`. |
+| `Invoke-SmartM365InventoryJob.ps1` | Command-line entry of the engine, started by `..\SmartInventory.cmd` (`-List`, `<Name> [-Now]`, `<Job> -Request`, `-WhatIf`, `-ExecutionMode`). |
+| `..\SmartInventory.cmd Orchestrator-ScheduledTask-Installer` | Guided elevated scheduled-task installation or removal (Windows PowerShell 5.1). Also creates or removes the Start menu shortcut of the GUI. |
+| `..\SmartInventory.cmd Orchestrator-Start` | Starts a resident orchestrator in the console (`-Connect`). GUI: `Operations` > `Start`. |
+| `..\SmartInventory.cmd Orchestrator-FullCollect` | Submits the `Full` pipeline and waits for its shared completion status. GUI: `Operations` > `Full collect`. |
+| `..\SmartInventory.cmd Orchestrator-GUI` | Opens the WPF management console (PowerShell 7, STA). The installer also creates a Start menu shortcut without a console window. |
+| `..\SmartInventory.cmd Orchestrator-SendSummary` | Sends the all-server execution-summary email with a consolidated row per job plus separate detailed tables for the last 24 hours and 7 days. GUI: `Operations` > `Send summary`. |
 
-| `..\Launchers\Orchestrator\Stop-SmartM365-Inventory-Orchestrator.cmd` | Launcher: requests a clean stop for the running prod orchestrator instance. |
+| `..\SmartInventory.cmd Orchestrator-Stop` | Requests a clean stop for the running orchestrator instance of this computer. GUI: `Operations` > `Stop`. |
 
 | `Restart-SmartM365-Inventory-Orchestrator.ps1` | Stops the orchestrator cleanly, then starts the existing scheduled task. |
-| `..\Launchers\Orchestrator\Restart-SmartM365-Inventory-Orchestrator.cmd` | Launcher: clean restart of the prod scheduled task. |
+| `..\SmartInventory.cmd Orchestrator-Restart` | Clean restart of the scheduled task. GUI: `Operations` > `Restart`. |
+
+The former `..\Launchers\Orchestrator\*.cmd` names remain for one version as one-line aliases of `SmartInventory.cmd` (see the SmartInventory README); the tenant comes from `-Tenant`, then `SMARTM365_ORCHESTRATOR_TENANT`, then `DefaultTenant` of `SmartM365.global.local.json`, where the old launchers always passed `prod`.
 
 
 Runtime files are tenant-isolated, created automatically and Git-ignored. State, job-run CSVs and logs use a per-server suffix (for example `{{DataAllRootPath}}\Orchestrator\SRV01`) to prevent collisions. The lifecycle CSV stays one level above the server folders so it provides a single tenant-wide history across all orchestrator servers:
@@ -306,10 +310,10 @@ When SharePoint upload is enabled, one resident server at a time mirrors `Config
 
 ### Central management GUI
 
-Launch `Start-SmartM365-Inventory-Orchestrator-GUI.cmd` from the Orchestrator launchers folder. The GUI:
+Open the Start menu shortcut `WorkplaceCloudHub\SmartM365 Orchestrator - <Tenant>` created by the scheduled-task installer, or run `..\SmartInventory.cmd Orchestrator-GUI`. The GUI:
 
 - opens on a `Dashboard` (GUI 1.4.0) that answers "is everything fine, and if not where to look": a coloured status banner (green, orange or red) summarizing online servers, running and pending jobs, failures in 24 hours and maintenance; nine clickable tiles (`Jobs`, `Enabled`, `Servers online`, `Running`, `Pending` with the main wait reason, `Job health` = failing/stale/no recent success, `Failures 24 h`, `Log errors 24 h` from the resident logs, lowest application `Certificate` validity from the heartbeats) that open the related tab or filter; a `To review` list sorted by severity (stale or missing heartbeats, paused state persistence, launch-prerequisite blocks, certificates under 30 days, maintenance on or unavailable, failing/stale jobs, unassigned election groups, peer incidents, pipeline requests active for more than 6 hours, heartbeat/state-persistence/configuration-reload log lines in the last hour, ignored once that resident has restarted after the last such line), where a double-click opens the related view; an enriched server grid (state, version, running/pending, recycle, elected jobs, certificate, state persistence, ready capabilities); and a `Next 24 hours` timeline with one lane per server showing each scheduled occurrence on its elected (or pinned) owner with its average duration, running jobs in dark blue, groups without owner in orange and occurrences suspended by maintenance in grey. The dashboard is built read-only by the background refresh worker, at startup, when the tab is opened, on `Refresh` and on each 60-second auto-refresh while it is visible; a failure is shown in the banner without hiding the other views. When a requested build lasts more than 350 ms, a non-modal `Loading dashboard...` overlay with the current step covers only the Dashboard tab (the rest of the window stays usable); the periodic auto-refresh updates in place without the overlay. Offline check: `pwsh -NoProfile -STA -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorGuiDashboardOffline.ps1`;
-- shows an `Operations` tab per server: heartbeat state (`Online`, `Starting`, `Recycling`, `Stale`), heartbeat age, version, running jobs with their duration, pending jobs with the orchestrator reason (dependency, `ConcurrencyKey`, peer claim), time until the planned recycle, active peer-monitoring incidents and orchestrator mails of the last 24 hours (double-click opens the mail copy);
+- runs operations from the `Operations` tab (GUI 1.5.0): the buttons `Start`, `Stop`, `Restart`, `Full collect` and `Send summary` run the same commands as the former `Launchers\Orchestrator` files, with the GUI tenant, in a new console after a confirmation; the `Jobs` sub-tab lists the catalog jobs with their runtime, effective execution mode and its source, previews the resolved command, runs a job now on this computer (`Run now`, like `SmartInventory.cmd <Job>`) or through the orchestrators (`Request`, with or without its dependencies), and sets the execution mode of the on-premises jobs in the draft (`(default)`, `LocalCache`, `Direct`, `Auto`; one job or all of them, applied by `Publish changes`); the `Manual launches` sub-tab lists the manual entries with their resolved command and asks for a confirmation before an entry that modifies data (the console then asks for `WRITE`). Previews use the published configuration. `Live` shows, per server: heartbeat state (`Online`, `Starting`, `Recycling`, `Stale`), heartbeat age, version, running jobs with their duration, pending jobs with the orchestrator reason (dependency, `ConcurrencyKey`, peer claim), time until the planned recycle, active peer-monitoring incidents and orchestrator mails of the last 24 hours (double-click opens the mail copy);
 - shows enabled jobs, next occurrences, current elected owners and server health, plus per-job health columns computed from 21 days of all-server runs: `Health` (`OK`, `Stale`, `Failing`, `NoRecentSuccess`, `Disabled`, `Manual`), last status, last success, its age, the expected maximum age (longest schedule gap + 2 h + average duration, the same rule as the `FreshSuccess` gate) and the average duration;
 - edits frequency, times, weekly days, missed-run policy, enabled state, retry/timeout values and assignment mode;
 - edits `DependsOn`, `DependencyMode` (`LatestOccurrence` or `FreshSuccess`) and `DependencyMaxAgeHours` (0 = automatic; a value is a floor), shows why the selected job waits (per dependency: rule, state, last success, age, maximum age) and lists the jobs that depend on it; disabling a job used by enabled jobs asks for confirmation, and an invalid dependency (unknown job, cycle, self) leaves the draft unchanged;
@@ -445,6 +449,7 @@ For an explicit user-scoped install:
 
 - One resident instance per tenant, bounded lifetime (`MaxLifetimeHours`, default 24), exit code 0 on recycle.
 - 60-second tick: reload the manifest if it changed on disk, supervise running children, compute due occurrences, launch jobs, send the optional daily summary, rewrite the heartbeat, save state.
+- Since v1.5.60, a job whose definition in `Orchestrator-Jobs.json.template` declares `Runtime` or `Execution` runs through the catalog engine `SmartM365.Inventory.Launch.psm1`: the supervisor child runs in that runtime, resolves the job (catalog launch fields, published `Arguments` and `Execution.Mode`), prepares the local cache when the mode is `LocalCache`, and appends the script output to the job log. The job log shows `Launch mode: CatalogEngine`, the effective execution mode with its source (and zone for `Auto`), the cache candidates, then the cache folder actually used. Its `LauncherPath` is ignored (logged); the launch prerequisites and Authenticode validation check the module instead of the launcher. Other jobs keep the `ScriptPath` launch, or `LauncherPath` with a deprecation warning.
 - Every job runs in its own detached child process (`-NoProfile -ExecutionPolicy Bypass`), which also isolates module/assembly conflicts between scripts (Graph SDK vs MSAL). Before launch, optional Authenticode validation can audit or enforce signatures on the job script and SmartM365 modules. The engine is `pwsh` by default; jobs with `PowerShellEdition = "WindowsPowerShell"` run in `powershell.exe` 5.1 instead (required by the Exchange on-premises scripts). Since v1.5.55 the 5.1 child first repairs the `PSModulePath` it inherits from the PowerShell 7 orchestrator: Windows PowerShell modules (`$PSHOME\Modules`) come first and the `PowerShell\Modules`, `PowerShell\7*\Modules` and `Documents\PowerShell\Modules` folders are removed (other entries, such as `Documents\WindowsPowerShell\Modules` and `Program Files\WindowsPowerShell\Modules`, are kept). Otherwise the PowerShell 7 build of `Microsoft.PowerShell.Security` is found first and `Get-Acl` or `Get-AuthenticodeSignature` fail in 5.1. The prefix is visible in the job log (`Child command`); the orchestrator process and `pwsh` jobs keep their environment. Offline test: `Tests/Test-SmartM365OrchestratorWindowsPowerShellModulePathOffline.ps1`.
 
 ### Distributed assignment, capabilities and election
@@ -586,8 +591,9 @@ Offline regression suite: `Tests/Test-SmartM365OrchestratorDependencyActivityOff
 | --- | --- |
 | `Name` | Unique job name (letters, digits, `.`, `_`, `-`). Used for state, logs and CSV. |
 | `ScriptPath` | Script path relative to the SmartInventory root (the parent folder of `Orchestrator`). This remains the canonical inventory script used for validation and Authenticode checks. A relative path may point to a sibling project of the same checkout, for example `..\..\SmartFinOps\SmartFinOps-Workplace-Valuation.ps1` (doubled backslashes in JSON); such a script must accept `-Tenant`, return 0/3/1 and write one of the default success-evidence lines (for example `Starting <name> v<version>`) to its output. |
-| `LauncherPath` | Optional launcher path relative to the SmartInventory root. When present, the orchestrator verifies `ScriptPath` but launches the `.cmd` instead. This is intended for AD/on-prem Exchange jobs that need local cache/unblock/bootstrap behavior. `{{Tenant}}` resolves to the profile selector (for example `prod`); `{{TenantKey}}` resolves to the effective tenant key (for example `example-prod`). Centralized launchers default to `prod` for manual use; the orchestrator passes its own tenant through an isolated child-process environment variable. |
+| `LauncherPath` | Deprecated, accepted for one more version with a warning in the job and orchestrator logs. Ignored when the catalog definition of the job declares `Runtime` or `Execution`: the job then runs through `SmartM365.Inventory.Launch.psm1` (see the SmartInventory README). Otherwise the orchestrator verifies `ScriptPath` but launches the `.cmd` instead. This is intended for AD/on-prem Exchange jobs that need local cache/unblock/bootstrap behavior. `{{Tenant}}` resolves to the profile selector (for example `prod`); `{{TenantKey}}` resolves to the effective tenant key (for example `example-prod`). Centralized launchers default to `prod` for manual use; the orchestrator passes its own tenant through an isolated child-process environment variable. |
 | `Arguments` | Extra arguments appended verbatim to the child command line. `{{Tenant}}` resolves to the profile selector and `{{TenantKey}}` to the effective tenant key. For direct `ScriptPath` launches, `-Tenant <tenant>` is appended by the orchestrator. `-Connect` is appended only when the target script declares that parameter; do not repeat either argument. For `LauncherPath` launches, the launcher owns tenant/connect handling, so the orchestrator does not append them. |
+| `Execution` | Runtime manifest: only `Execution.Mode` (`Direct`, `LocalCache` or `Auto`) is read; it overrides the catalog mode of an on-premises job. The GUI writes it (`Operations` > `Jobs`). |
 | `Enabled` | `false` by default; only enabled jobs are scheduled. |
 | `Group` | Logical group (AD, Exchange, M365, Intune); informational. |
 | `DependsOn` | List of job names that must complete first (cycle-checked at load). |
@@ -631,6 +637,24 @@ Template schedule (current committed template, see also `DAILY-SCHEDULE.md`):
 - Timeouts follow the timeout policy (1380 minutes for one daily time, 8640 for one weekly day and time); jobs with several daily occurrences use a timeout below their shortest interval.
 
 The full job can declare `DependsOn` on its fast prerequisite when a quick CSV must be published first; dependent jobs are marked `BlockedDependencyFailed` or `BlockedDependencyTimeout` instead of silently waiting forever. Fast jobs should use `ContinueOnError=false` when downstream jobs depend on their outputs. Before enabling a job, make sure its own runtime `.local.json` exists next to the target script (the child runs unattended; app-only auth must be configured).
+
+### Launch catalog fields
+
+`Orchestrator-Jobs.json.template` is also the launch catalog read by `SmartM365.Inventory.Launch.psm1`, `SmartInventory.cmd` and the GUI. Its launch fields are read from the committed template, because the template merge does not add new keys to existing jobs of the shared manifest; the shared manifest only overrides `Arguments` and `Execution.Mode`.
+
+| Field | Description |
+| --- | --- |
+| `Runtime` | `PowerShell7` or `WindowsPowerShell`; defaults to `PowerShellEdition`. Declaring it (or `Execution`) makes the orchestrator use the catalog engine. |
+| `Execution` | `{ "Mode": optional, "CacheName": "...", "Include": [...] }`: the entry may run from a local cache. `CacheName` is the folder under the cache roots; `Include` lists extra files or folders (relative to SmartM365) copied and checked before and after the copy. Without `Execution`, the entry always runs `Direct`. |
+| `LaunchArguments` | Jobs only: fixed arguments that the former launcher added before the job `Arguments` (for example `-IncludeADPermission`). |
+| `WorkingDirectory` | Current directory of the script, relative to SmartInventory (replaces `pushd`). |
+| `Interactive` | The entry needs a user console (interactive sign-in or prompts); it is refused unattended. |
+| `RequiresConfirmation` | The user must type `WRITE` before the script starts; refused unattended. |
+| `Tokens` | `{ "Name": { "Value": "...", "MustExist": true } }`, used as `{{Name}}` in `Arguments`; `{{ScriptDirectory}}`, `{{SmartInventoryRoot}}` and `{{Tenant}}` are built in. |
+| `PassTenant` | `false` when the script asks for its tenant itself; otherwise `-Tenant` is passed when the script declares it. |
+| `LegacyLaunchers` | Former `.cmd` files that this entry replaces; their one-line aliases are generated from it. |
+
+The `Launches` array holds the manual entries (`"Manual": true`): same fields, never scheduled, requested or loaded by the orchestrator. `New-SmartM365-OrchestratorJobLaunchers.ps1 -Check` validates both arrays (scripts, parameters by AST, execution, includes, tokens).
 
 ## State file schema (`Orchestrator-State.json`)
 
@@ -753,13 +777,13 @@ Orchestrator-specific keys: `JobMailMode` (Always/OnError/Never), `SendMailMode`
 
 The installer can be started from a standard PowerShell session and requests UAC elevation automatically. It securely prompts for the dedicated service-account password; the password is never accepted as a command-line parameter. `SYSTEM` and `LocalSystem` are explicitly refused because a privileged task must not launch repository files that could be modified by non-administrators.
 
-For interactive setup, run or double-click the thin launcher below. The PowerShell installer itself requests UAC elevation, prompts for install/uninstall and prod/test, validates the service account, and asks whether the task should start immediately. The CMD file only invokes the PowerShell workflow.
-
-All CMD launchers under `..\Launchers` use `pushd` / `popd` so they can start from a UNC share. The installer launcher preserves the original UNC script path, tries the trusted PowerShell 7 executable under Program Files first, and falls back to Windows PowerShell only when PowerShell 7 is unavailable.
+For interactive setup, run the manual catalog entry below. The PowerShell installer itself requests UAC elevation, prompts for install/uninstall and prod/test, validates the service account, and asks whether the task should start immediately. It runs under Windows PowerShell 5.1 in `Direct` mode and asks for its tenant itself (`PassTenant: false`). `SmartInventory.cmd` starts from a UNC share without `pushd`.
 
 ```text
-.\SmartM365\SmartInventory\Launchers\Orchestrator\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd
+.\SmartM365\SmartInventory\SmartInventory.cmd Orchestrator-ScheduledTask-Installer
 ```
+
+The installation also creates the Start menu shortcut `WorkplaceCloudHub\SmartM365 Orchestrator - <Tenant>`: PowerShell 7 hidden (`-WindowStyle Hidden`, started minimized), so the GUI opens without a console window. Uninstalling removes it.
 
 Running the PowerShell installer directly without parameters opens the same guided workflow. Supplying parameters keeps it suitable for repeatable administration and deployment automation.
 
@@ -821,10 +845,10 @@ A lower version, changed content without a version increase, parser failure, or 
 To make the scheduled task pick up a newly deployed orchestrator version, request a clean stop instead of killing `pwsh.exe` directly:
 
 ```text
-.\SmartM365\SmartInventory\Launchers\Orchestrator\Stop-SmartM365-Inventory-Orchestrator.cmd
+.\SmartM365\SmartInventory\SmartInventory.cmd Orchestrator-Stop
 ```
 
-The launcher calls `SmartM365-Inventory-Orchestrator.ps1 -Tenant prod -Stop`. The running instance consumes `Orchestrator-StopRequested.json` on its next tick, stops launching new jobs, saves state, releases the lock, finalizes lifecycle tracking and performs the final SharePoint upload. Detached inventory jobs are not killed; the next orchestrator instance re-adopts them from state.
+The entry calls `SmartM365-Inventory-Orchestrator.ps1 -Tenant <tenant> -Stop -StopTimeoutSeconds 180` (the GUI `Stop` button runs the same command). The running instance consumes `Orchestrator-StopRequested.json` on its next tick, stops launching new jobs, saves state, releases the lock, finalizes lifecycle tracking and performs the final SharePoint upload. Detached inventory jobs are not killed; the next orchestrator instance re-adopts them from state.
 
 A stop request left behind for an earlier instance whose exact process (PID and start time) no longer runs on the server can never be consumed. Since v1.5.57 the stop command retires it through the JSON transport, logs its original requester and date, then writes the new request. A pending request for a live process, or one without a target, is still preserved for review and the stop command fails.
 
@@ -833,22 +857,22 @@ If no live orchestrator lock is found, the stop command removes any stale stop r
 To stop the resident instance and immediately start the registered scheduled task again, use:
 
 ```text
-.\SmartM365\SmartInventory\Launchers\Orchestrator\Restart-SmartM365-Inventory-Orchestrator.cmd
+.\SmartM365\SmartInventory\SmartInventory.cmd Orchestrator-Restart
 ```
 
-The restart launcher does not start the orchestrator directly. It first calls the same clean stop workflow, verifies that the scheduled task is no longer running, then calls `Start-ScheduledTask` for `\WCH\SmartM365 Inventory Orchestrator - prod`. This keeps the restart under the registered service account, task folder, triggers and task security settings.
+The restart does not start the orchestrator directly. It first calls the same clean stop workflow, verifies that the scheduled task is no longer running, then calls `Start-ScheduledTask` for `\WCH\SmartM365 Inventory Orchestrator - prod`. This keeps the restart under the registered service account, task folder, triggers and task security settings.
 
 For the three-server production cluster, deploy the script and the same local capacity map everywhere, then restart one server at a time. Wait until its heartbeat is fresh and the startup log shows the expected `MaxConcurrency`, `atomicWriteRetrySeconds` and zero timeout-policy mismatches before restarting the next server.
 
 ## Manual execution-summary email
 
-Run the dedicated launcher to send an immediate prod summary without stopping or duplicating the resident orchestrator:
+Run the manual entry (or the GUI `Send summary` button) to send an immediate summary without stopping or duplicating the resident orchestrator:
 
 ```text
-.\SmartM365\SmartInventory\Launchers\Orchestrator\Send-SmartM365-Inventory-Orchestrator-ExecutionSummary.cmd
+.\SmartM365\SmartInventory\SmartInventory.cmd Orchestrator-SendSummary
 ```
 
-The launcher calls `SmartM365-Inventory-Orchestrator.ps1 -Tenant prod -SendExecutionSummary`. This one-shot mode enumerates every `<Server>\JobRuns` folder under the tenant's shared orchestrator data root and reads the per-server `Orchestrator_JobRuns_<yyyyMMdd>.csv` files. It sends a consolidated table with one row per job observed across all servers during the last 7 days and a `Server(s)` column, then detailed 24-hour and 7-day tables with a `Server` column on every execution. Counts include retries and skipped attempts across all servers. It does not load the jobs manifest, acquire the resident lock, launch jobs, stop jobs, install Authenticode trust certificates, or change `LastDailySummaryDate`.
+The entry calls `SmartM365-Inventory-Orchestrator.ps1 -Tenant <tenant> -SendExecutionSummary`. This one-shot mode enumerates every `<Server>\JobRuns` folder under the tenant's shared orchestrator data root and reads the per-server `Orchestrator_JobRuns_<yyyyMMdd>.csv` files. It sends a consolidated table with one row per job observed across all servers during the last 7 days and a `Server(s)` column, then detailed 24-hour and 7-day tables with a `Server` column on every execution. Counts include retries and skipped attempts across all servers. It does not load the jobs manifest, acquire the resident lock, launch jobs, stop jobs, install Authenticode trust certificates, or change `LastDailySummaryDate`.
 
 ## Testing before scheduling
 

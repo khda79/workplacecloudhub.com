@@ -16,8 +16,8 @@ Intune-focused inventory and export scripts, grouped under `SmartInventory/M365I
 
 ## Recurring Device System observations
 
-Run `SmartInventory/Launchers/Cloud/Start-SmartM365-Create-DeviceSystemRemediation.cmd`
-to create the package in the `prod` tenant profile with interactive Graph sign-in.
+Run `SmartInventory.cmd Intune-DeviceSystemRemediation-Create`
+to create the package with interactive Graph sign-in (the tenant comes from `-Tenant`, then `SMARTM365_ORCHESTRATOR_TENANT`, then `DefaultTenant` of `SmartM365.global.local.json`).
 The standalone script also accepts `-Tenant test` and requires the delegated
 `DeviceManagementScripts.ReadWrite.All` permission. It refuses to update a
 package with the same name, prints the new package GUID, verifies zero

@@ -43,17 +43,17 @@ Lock inspection reads `SPSite` and `SPContentDatabase` properties and uses the r
 
 ## Manual commands
 
-Run from a SharePoint farm server after the administrator has prepared the local tenant configuration and SharePoint Shell rights. Replace `<SmartM365Root>` with the deployed path. Each launcher copies this collector folder, `Config`, and `SmartM365.Core` to its own local cache before invoking Windows PowerShell 5.1. The caches are separate for Infrastructure and Content. The launchers default to `prod`, forward additional parameters, and return the collector exit code.
+Run from a SharePoint farm server after the administrator has prepared the local tenant configuration and SharePoint Shell rights. Replace `<SmartM365Root>` with the deployed path. `SmartInventory.cmd` runs the catalog jobs `SharePointOnPrem-Infrastructure-Inventory` and `SharePointOnPrem-Content-Inventory`. In `LocalCache` mode (the default for on-premises jobs) the engine copies this collector folder, `Config`, and `SmartM365.Core` to a local cache before invoking Windows PowerShell 5.1. The caches are separate for Infrastructure and Content. The tenant comes from `-Tenant`, then `SMARTM365_ORCHESTRATOR_TENANT`, then `DefaultTenant` of `SmartM365.global.local.json`; additional parameters are forwarded and the collector exit code is returned.
 
-Copy each `*.local.json.template` to the same basename ending in `.local.json` in the deployed source tree on the share, then review the tenant paths and optional `IncludedWebApplicationUrls` / `ExcludedWebApplicationUrls` arrays. The launchers rebuild their local caches on every run, so edits made only in `C:\ProgramData\SmartM365\LauncherCache` are discarded. Configure `WorkspaceRootPath` or the resolved `DataAllRootPath` in the source tenant configuration to a persistent location outside the launcher cache; a resolved output path inside the disposable cache is rejected. Nested path tokens such as `{{DataAllRootPath}}`, `{{WorkspaceRootPath}}`, and `{{ProfileKey}}` are resolved before path validation. Before a full run, configure `SharePointSiteHostname`, `SharePointSitePath`, `SharePointLibraryDisplayName`, `SharePointTargetFolderPath`, `AppId`, `TenantId`, and `Thumbprint` in the source tenant or collector configuration. An existing source `local.json` with `EnableSharePointUpload=false` keeps that explicit value until changed.
+Copy each `*.local.json.template` to the same basename ending in `.local.json` in the deployed source tree on the share, then review the tenant paths and optional `IncludedWebApplicationUrls` / `ExcludedWebApplicationUrls` arrays. The engine rebuilds the local caches on every run, so edits made only in `C:\ProgramData\SmartM365\LauncherCache` are discarded. Configure `WorkspaceRootPath` or the resolved `DataAllRootPath` in the source tenant configuration to a persistent location outside the launcher cache; a resolved output path inside the disposable cache is rejected. Nested path tokens such as `{{DataAllRootPath}}`, `{{WorkspaceRootPath}}`, and `{{ProfileKey}}` are resolved before path validation. Before a full run, configure `SharePointSiteHostname`, `SharePointSitePath`, `SharePointLibraryDisplayName`, `SharePointTargetFolderPath`, `AppId`, `TenantId`, and `Thumbprint` in the source tenant or collector configuration. An existing source `local.json` with `EnableSharePointUpload=false` keeps that explicit value until changed.
 
 ```powershell
-& "<SmartM365Root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.cmd" -ValidateOnly
-& "<SmartM365Root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-SharePoint-OnPrem-Content-Inventory.cmd" -ValidateOnly
-& "<SmartM365Root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.cmd"
-& "<SmartM365Root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-SharePoint-OnPrem-Content-Inventory.cmd" -MaxItems 2
-& "<SmartM365Root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-SharePoint-OnPrem-Content-Inventory.cmd"
-& "<SmartM365Root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-SharePoint-OnPrem-Content-Inventory.cmd" -ForceSendDailySummary
+& "<SmartM365Root>\SmartInventory\SmartInventory.cmd" SharePointOnPrem-Infrastructure-Inventory -ValidateOnly
+& "<SmartM365Root>\SmartInventory\SmartInventory.cmd" SharePointOnPrem-Content-Inventory -ValidateOnly
+& "<SmartM365Root>\SmartInventory\SmartInventory.cmd" SharePointOnPrem-Infrastructure-Inventory
+& "<SmartM365Root>\SmartInventory\SmartInventory.cmd" SharePointOnPrem-Content-Inventory -MaxItems 2
+& "<SmartM365Root>\SmartInventory\SmartInventory.cmd" SharePointOnPrem-Content-Inventory
+& "<SmartM365Root>\SmartInventory\SmartInventory.cmd" SharePointOnPrem-Content-Inventory -ForceSendDailySummary
 ```
 
 Run each collector on 2016 and 2019 separately. Inspect the two `-ValidateOnly` results before limited or full runs. The `-MaxItems 2` run is not a complete-farm qualification.

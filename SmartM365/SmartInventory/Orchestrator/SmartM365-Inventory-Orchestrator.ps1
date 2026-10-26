@@ -26,6 +26,10 @@ Features:
 - Per-job PowerShellEdition: jobs run in pwsh (PowerShell7, default) or powershell.exe
   (WindowsPowerShell) child processes; Exchange on-premises scripts require
   WindowsPowerShell.
+- Catalog engine: a job whose definition in Orchestrator-Jobs.json.template declares Runtime or
+  Execution is started through SmartM365.Inventory.Launch.psm1 (Direct or LocalCache, cache
+  folder written to the job log); its LauncherPath is ignored. LauncherPath remains accepted
+  for one version, with a warning in the job log.
 - Per-server folders: the orchestrator data and log folders are automatically suffixed
   with the local computer name, so several servers can share the same UNC
   DataAllRootPath/LogAllRootPath without state, lock or log collisions.
@@ -101,7 +105,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.59
+1.5.60
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -151,7 +155,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.59"
+$ScriptVersion = "1.5.60"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1229,6 +1233,12 @@ function ConvertTo-NormalizedJob {
     }
     $powerShellEdition = 'PowerShell7'
     if ($RawJob.PSObject.Properties['PowerShellEdition'] -and $RawJob.PowerShellEdition) { $powerShellEdition = [string]$RawJob.PowerShellEdition }
+    # Execution.Mode in the runtime manifest overrides the catalog mode of the job.
+    $executionMode = ''
+    if ($RawJob.PSObject.Properties['Execution'] -and $null -ne $RawJob.Execution -and $RawJob.Execution.PSObject.Properties['Mode'] -and $RawJob.Execution.Mode) {
+        $executionMode = [string]$RawJob.Execution.Mode
+        if ($executionMode -notin @('Direct', 'LocalCache', 'Auto')) { $Errors.Add("Job '$name': Execution.Mode must be 'Direct', 'LocalCache' or 'Auto'.") }
+    }
     if ($powerShellEdition -notin @('PowerShell7', 'WindowsPowerShell')) {
         $Errors.Add("Job '$name': PowerShellEdition must be 'PowerShell7' or 'WindowsPowerShell'.")
     }
@@ -1287,6 +1297,7 @@ function ConvertTo-NormalizedJob {
         DependencyMode = $dependencyMode
         DependencyMaxAgeHours = $dependencyMaxAgeHours
         PowerShellEdition = $powerShellEdition
+        ExecutionMode = $executionMode
         RequiredPaths = $requiredPaths
         Schedule = [pscustomobject]@{
             Type = $scheduleType
@@ -3234,6 +3245,10 @@ function Get-OrchestratorAuthenticodeFileList {
         }
     }
 
+    if ($Job.PSObject.Properties['LaunchEngine'] -and $Job.LaunchEngine) {
+        $items.Add([pscustomobject]@{ Role = 'SmartInventory launch module'; Path = $script:LaunchModulePath })
+    }
+
     if ($script:Settings.AuthenticodeCheckWindowsPowerShellModule -and $Job.PowerShellEdition -eq 'WindowsPowerShell') {
         $coreRoot = Split-Path -Path ([string]$script:Settings.CoreModulePath) -Parent
         $ps5Root = Join-Path -Path $coreRoot -ChildPath 'Compatibility\WindowsPowerShell5'
@@ -3638,6 +3653,36 @@ function Invoke-OrchestratorAuthenticodeValidation {
 
 # Child process management
 # ==========================================================
+function Get-OrchestratorJobLaunchDefinition {
+    # Launch definition of a job in the committed catalog (Orchestrator-Jobs.json.template). A job that
+    # declares Runtime or Execution there runs through the catalog engine; $null keeps the legacy launch.
+    param([Parameter(Mandatory = $true)]$Job)
+
+    try {
+        # The template is read again only when it changes (hot update of the shared runtime).
+        $templatePath = Join-Path -Path $script:SmartInventoryRoot -ChildPath 'Orchestrator\Orchestrator-Jobs.json.template'
+        $writeTime = (Get-Item -LiteralPath $templatePath -ErrorAction Stop).LastWriteTimeUtc
+        $cache = Get-Variable -Name LaunchCatalogCache -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        if ($null -eq $cache -or $cache.WriteTime -ne $writeTime) {
+            $cache = [pscustomobject]@{ WriteTime = $writeTime; Catalog = (Get-SmartM365InventoryCatalog -SmartInventoryRoot $script:SmartInventoryRoot) }
+            $script:LaunchCatalogCache = $cache
+        }
+        $catalog = $cache.Catalog
+        $entry = @($catalog.Entries | Where-Object { $_.Kind -eq 'Job' -and $_.Name -eq $Job.Name }) | Select-Object -First 1
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Job {0}: jobs catalog unreadable, legacy launch kept: {1}" -f $Job.Name, $_.Exception.Message) -Level WARN
+        return $null
+    }
+    if ($null -eq $entry) { return $null }
+    $definition = $entry.Definition
+    $runtime = if ($definition.PSObject.Properties['Runtime'] -and $definition.Runtime) { [string]$definition.Runtime } else { '' }
+    $hasExecution = [bool]($definition.PSObject.Properties['Execution'] -and $null -ne $definition.Execution)
+    if (-not $runtime -and -not $hasExecution) { return $null }
+    if (-not $runtime) { $runtime = [string]$Job.PowerShellEdition }
+    return [pscustomobject]@{ Catalog = $catalog; Runtime = $runtime; HasExecution = $hasExecution }
+}
+
 function Get-PwshPath {
     $candidate = Join-Path -Path $PSHOME -ChildPath 'pwsh.exe'
     if (Test-Path -LiteralPath $candidate) { return $candidate }
@@ -3771,6 +3816,19 @@ function Start-InventoryJob {
         $launcherFullPath = Resolve-OrchestratorJobPath -Path ([string]$Job.LauncherPath)
     }
     $useLauncher = -not [string]::IsNullOrWhiteSpace($launcherFullPath)
+    # A job declared with Runtime or Execution in the catalog runs through the catalog engine; its LauncherPath is ignored.
+    $launchDefinition = Get-OrchestratorJobLaunchDefinition -Job $Job
+    $useEngine = $null -ne $launchDefinition
+    $ignoredLauncherPath = ''
+    $launchJob = $Job
+    if ($useEngine) {
+        $ignoredLauncherPath = $launcherFullPath
+        $useLauncher = $false
+        $launcherFullPath = ''
+        $launchJob = $Job.PSObject.Copy()
+        $launchJob.PowerShellEdition = $launchDefinition.Runtime
+        $launchJob | Add-Member -NotePropertyName LaunchEngine -NotePropertyValue $true -Force
+    }
     $startTime = Get-Date
     $logFolder = $script:Settings.JobLogFolderPath
     if (-not (Test-Path -LiteralPath $logFolder)) { New-Item -ItemType Directory -Path $logFolder -Force | Out-Null }
@@ -3791,7 +3849,7 @@ function Start-InventoryJob {
         Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText ("Launcher not found: {0}" -f $launcherFullPath)
         return
     }
-    $authenticodeResult = Invoke-OrchestratorAuthenticodeValidation -Job $Job -ScriptFullPath $scriptFullPath
+    $authenticodeResult = Invoke-OrchestratorAuthenticodeValidation -Job $launchJob -ScriptFullPath $scriptFullPath
     if (-not $authenticodeResult.Allowed) {
         Write-OrchestratorLog -Message ("Job {0}: launch rejected by Authenticode validation. {1}" -f $Job.Name, $authenticodeResult.Summary) -Level ERROR
         $rejectLine = "[{0}] {1} rejected job {2}: AuthenticodeRejected. {3}" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $authenticodeResult.Summary
@@ -3808,7 +3866,7 @@ function Start-InventoryJob {
     $argumentPart = ''
     if (-not [string]::IsNullOrWhiteSpace($Job.Arguments)) { $argumentPart = ' ' + $Job.Arguments.Trim() }
     $connectPart = ''
-    if ($Connect -and -not $useLauncher) {
+    if ($Connect -and -not $useLauncher -and -not $useEngine) {
         try {
             $tokens = $null
             $parseErrors = $null
@@ -3835,11 +3893,22 @@ function Start-InventoryJob {
             return
         }
     }
-    $engine = Get-JobEngine -Job $Job
+    $engine = Get-JobEngine -Job $launchJob
     $escapedEnginePath = $engine.Path.Replace("'", "''")
     # Out-File:Encoding pins the *>> redirection to UTF-8: Windows PowerShell 5.1
     # would otherwise append UTF-16 output to the UTF-8 job log.
-    if ($useLauncher) {
+    if ($useEngine) {
+        $engineArguments = ''
+        if (-not [string]::IsNullOrWhiteSpace($Job.Arguments)) { $engineArguments = $Job.Arguments.Trim() }
+        $noAutoConnectPart = if ($Connect) { '' } else { ' -NoAutoConnect' }
+        $command = "`$env:SMARTM365_ORCHESTRATOR_TENANT = '" + $escapedTenant + "'; " +
+            "`$ErrorActionPreference = 'Continue'; " +
+            "`$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'; " +
+            "try { Import-Module -Name '" + $script:LaunchModulePath.Replace("'", "''") + "' -Force -ErrorAction Stop; " +
+            "`$resultExitCode = Invoke-SmartM365InventoryOrchestratedLaunch -SmartInventoryRoot '" + $script:SmartInventoryRoot.Replace("'", "''") + "' -Name '" + ([string]$Job.Name).Replace("'", "''") + "' -Tenant '" + $escapedTenant + "' -LogPath '" + $escapedLog + "' -ExecutionMode '" + ([string]$Job.ExecutionMode).Replace("'", "''") + "' -JobArguments '" + $engineArguments.Replace("'", "''") + "'" + $noAutoConnectPart + " } " +
+            "catch { ('Catalog engine launch failed: ' + `$_.Exception.Message) | Out-File -FilePath '" + $escapedLog + "' -Append; `$resultExitCode = 1 }"
+    }
+    elseif ($useLauncher) {
         $cmdLine = 'call "' + $launcherFullPath.Replace('"', '""') + '"' + $argumentPart
         $escapedCmdLine = $cmdLine.Replace("'", "''")
         $command = "`$env:SMARTM365_ORCHESTRATOR_TENANT = '" + $escapedTenant + "'; " +
@@ -3871,12 +3940,33 @@ function Start-InventoryJob {
     if ($engine.ProcessName -eq 'powershell') { $command = (Get-OrchestratorWindowsPowerShellModulePathCommand) + ' ' + $command }
     $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
 
+    $stamp = $startTime.ToString('yyyy-MM-dd HH:mm:ss')
+    $launchModeText = if ($useEngine) { 'CatalogEngine' } elseif ($useLauncher) { 'LauncherPath' } else { 'ScriptPath' }
+    $launchDetailLines = New-Object System.Collections.Generic.List[string]
+    if ($useEngine) {
+        try {
+            $plan = Resolve-SmartM365InventoryLaunch -Catalog $launchDefinition.Catalog -Name $Job.Name -Tenant $Tenant -ExecutionMode ([string]$Job.ExecutionMode) -ExecutionModeSource 'Job (runtime manifest)' -JobArguments ([string]$Job.Arguments) -NoAutoConnect:(-not $Connect)
+            $zoneText = if ($plan.ModeInfo.Zone) { ', zone ' + $plan.ModeInfo.Zone } else { '' }
+            $launchDetailLines.Add(("[{0}] Execution mode: {1} (requested {2}, source {3}{4})" -f $stamp, $plan.Mode, $plan.ModeInfo.Requested, $plan.ModeInfo.Source, $zoneText))
+            if ($plan.Mode -eq 'LocalCache') {
+                $launchDetailLines.Add(("[{0}] Cache folder: first writable of {1}; the engine logs the folder it uses below." -f $stamp, ((Get-SmartM365InventoryCacheCandidates -CacheName $plan.CacheName) -join ' | ')))
+            }
+        }
+        catch { $launchDetailLines.Add(("[{0}] Execution mode: not resolved before launch ({1})" -f $stamp, $_.Exception.Message)) }
+        if ($ignoredLauncherPath) { $launchDetailLines.Add(("[{0}] LauncherPath ignored (catalog engine): {1}" -f $stamp, $ignoredLauncherPath)) }
+    }
+    elseif ($useLauncher) {
+        $deprecation = 'LauncherPath is deprecated and will be removed in the next version: declare Runtime or Execution for this job in Orchestrator-Jobs.json.template.'
+        $launchDetailLines.Add(("[{0}] WARNING: {1}" -f $stamp, $deprecation))
+        Write-OrchestratorLog -Message ("Job {0}: {1}" -f $Job.Name, $deprecation) -Level WARN
+    }
     $headerLines = @(
-        ("[{0}] {1} launching job {2} (attempt {3}, scheduled {4})" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $ScriptName, $Job.Name, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm:ss')),
-        ("[{0}] Script path verified: {1}" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $scriptFullPath),
-        ("[{0}] Launch mode: {1}" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $(if ($useLauncher) { 'LauncherPath' } else { 'ScriptPath' })),
-        ("[{0}] Launcher path: {1}" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $(if ($useLauncher) { $launcherFullPath } else { 'n/a' })),
-        ("[{0}] PowerShell engine: {1} ({2})" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $engine.Path, $Job.PowerShellEdition),
+        ("[{0}] {1} launching job {2} (attempt {3}, scheduled {4})" -f $stamp, $ScriptName, $Job.Name, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm:ss')),
+        ("[{0}] Script path verified: {1}" -f $stamp, $scriptFullPath),
+        ("[{0}] Launch mode: {1}" -f $stamp, $launchModeText),
+        ("[{0}] Launcher path: {1}" -f $stamp, $(if ($useLauncher) { $launcherFullPath } else { 'n/a' }))
+    ) + @($launchDetailLines) + @(
+        ("[{0}] PowerShell engine: {1} ({2})" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $engine.Path, $launchJob.PowerShellEdition),
         ("[{0}] Child command: {1}" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'), $command),
         ("[{0}] Start-Process arguments: -NoProfile -ExecutionPolicy Bypass -EncodedCommand <encoded; decoded child command logged above>" -f $startTime.ToString('yyyy-MM-dd HH:mm:ss'))
     )
@@ -3945,7 +4035,7 @@ function Start-InventoryJob {
         Set-OrchestratorPipelineJobStatus -BatchId $PipelineBatchId -JobName $Job.Name -Status Running -Attempt $Attempt
     }
 
-    $launchTarget = if ($useLauncher) { $launcherFullPath } else { $scriptFullPath }
+    $launchTarget = if ($useEngine) { 'catalog engine: ' + $scriptFullPath } elseif ($useLauncher) { $launcherFullPath } else { $scriptFullPath }
     Write-OrchestratorLog -Message ("Job {0}: started PID {1} ({2}, attempt {3}, scheduled {4}, timeout {5} min, log {6}, target {7}; command {8})." -f $Job.Name, $process.Id, $engine.ProcessName, $Attempt, $Occurrence.ToString('yyyy-MM-dd HH:mm'), $Job.TimeoutMinutes, $logPath, $launchTarget, $command)
 }
 
@@ -4974,7 +5064,11 @@ function Get-OrchestratorJobPrerequisitePathCheck {
 
     $checks = [System.Collections.Generic.List[object]]::new()
     $checks.Add([pscustomobject]@{ Name = 'Job script'; Path = (Resolve-OrchestratorJobPath -Path $Job.ScriptPath); Access = 'Read'; PathType = 'Leaf'; Capability = '' })
-    if ($Job.PSObject.Properties['LauncherPath'] -and -not [string]::IsNullOrWhiteSpace([string]$Job.LauncherPath)) {
+    if ($null -ne (Get-OrchestratorJobLaunchDefinition -Job $Job)) {
+        # The catalog engine replaces the launcher: check the module instead.
+        $checks.Add([pscustomobject]@{ Name = 'Launch module'; Path = $script:LaunchModulePath; Access = 'Read'; PathType = 'Leaf'; Capability = '' })
+    }
+    elseif ($Job.PSObject.Properties['LauncherPath'] -and -not [string]::IsNullOrWhiteSpace([string]$Job.LauncherPath)) {
         $checks.Add([pscustomobject]@{ Name = 'Job launcher'; Path = (Resolve-OrchestratorJobPath -Path ([string]$Job.LauncherPath)); Access = 'Read'; PathType = 'Leaf'; Capability = '' })
     }
     foreach ($dataCheck in @(Get-OrchestratorTenantDataPathCheck)) { $checks.Add($dataCheck) }
@@ -6704,7 +6798,8 @@ function Show-DryRunPlan {
         if (-not (Test-JobSelected -JobName $job.Name)) { $flags += 'filtered out by -Only/-Skip' }
         if ($job.DependsOn.Count -gt 0) { $flags += ('depends on ' + ($job.DependsOn -join ', ')) }
         if ($job.PowerShellEdition -eq 'WindowsPowerShell') { $flags += 'WindowsPowerShell' }
-        if ($job.PSObject.Properties['LauncherPath'] -and -not [string]::IsNullOrWhiteSpace([string]$job.LauncherPath)) { $flags += ('launcher ' + [string]$job.LauncherPath) }
+        if ($null -ne (Get-OrchestratorJobLaunchDefinition -Job $job)) { $flags += 'catalog engine' }
+        elseif ($job.PSObject.Properties['LauncherPath'] -and -not [string]::IsNullOrWhiteSpace([string]$job.LauncherPath)) { $flags += ('launcher ' + [string]$job.LauncherPath + ' (deprecated)') }
         if ($job.AssignmentMode -eq 'Manual') { $flags += 'manual; schedule disabled by assignment policy' }
         elseif (-not (Test-JobAllowedOnServer -Job $job)) { $flags += ('not owned on this server; elected/pinned owner: ' + (Get-ElectedJobOwner -JobName $job.Name)) }
         $flagText = ''
@@ -6870,6 +6965,8 @@ try {
     Import-Module (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.JobStop.psm1') -Force -ErrorAction Stop
     $pipelineModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Pipeline.psm1'
     Import-Module -Name $pipelineModulePath -Force -ErrorAction Stop
+    $script:LaunchModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Inventory.Launch.psm1'
+    Import-Module -Name $script:LaunchModulePath -Force -ErrorAction Stop
     . $tenantContextPath
     $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     $localConfig = Get-SmartM365ScriptLocalConfig

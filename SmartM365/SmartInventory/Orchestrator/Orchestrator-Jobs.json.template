@@ -4,6 +4,10 @@
       "Name": "AD-Inventory",
       "ScriptPath": "ActiveDirectoryInventory\\SmartM365-ActiveDirectory-Inventory.ps1",
       "Arguments": "",
+      "Runtime": "PowerShell7",
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-ActiveDirectory-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "AD",
       "DependsOn": [],
@@ -34,6 +38,9 @@
       "Name": "M365-ActiveUsers-Inventory",
       "ScriptPath": "M365Inventory\\Users\\SmartM365-ActiveUsers-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-ActiveUsers-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -66,6 +73,9 @@
       "Name": "M365-EntraDevices-Inventory",
       "ScriptPath": "M365Inventory\\Devices\\SmartM365-EntraDevices-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-EntraDevices-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -97,6 +107,9 @@
       "Name": "Intune-Devices-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Devices-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Devices-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -128,6 +141,9 @@
       "Name": "M365-VerifiedDomains-Inventory",
       "ScriptPath": "M365Inventory\\Domains\\SmartM365-VerifiedDomains-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-VerifiedDomains-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -156,6 +172,9 @@
       "Name": "EXO-AcceptedDomains-Inventory",
       "ScriptPath": "ExchangeInventory\\AcceptedDomains\\SmartM365-EXO-AcceptedDomains-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-EXO-AcceptedDomains-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
@@ -184,6 +203,9 @@
       "Name": "M365-Licences-Inventory",
       "ScriptPath": "M365Inventory\\Licensing\\SmartM365-Licences-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Licences-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [
@@ -221,6 +243,17 @@
       "ConcurrencyKey": "ExchangeOnPremServer",
       "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
       "Arguments": "",
+      "Runtime": "WindowsPowerShell",
+      "LaunchArguments": "-IncludeADPermission",
+      "Execution": {
+        "CacheName": "ExchangeLocalMailboxes\\WithADPermissions",
+        "Include": [
+          "SmartInventory\\Common\\SmartM365.IdentityDateEvidence.ps1"
+        ]
+      },
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange2016",
       "DependsOn": [
@@ -255,6 +288,9 @@
       "Name": "Intune-Devices-BIOS-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Devices-BIOS-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Devices-BIOS-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -283,6 +319,9 @@
       "Name": "Intune-DeviceSystem-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Device-System-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Device-System-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -315,6 +354,9 @@
       "Name": "Intune-Devices-Compliance-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Devices-Compliance-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Devices-Compliance-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -347,6 +389,9 @@
       "Name": "Intune-Devices-UpgradeEligibility",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Devices-UpgradeEligibility.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Devices-UpgradeEligibility.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -376,6 +421,9 @@
       "ConcurrencyKey": "EXOMailboxes",
       "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-EXO-Mailboxes-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [
@@ -410,6 +458,9 @@
       "ConcurrencyKey": "EXOMailboxes",
       "ScriptPath": "ExchangeInventory\\Mailboxes\\SmartM365-EXO-Mailboxes-Inventory.ps1",
       "Arguments": "-IncludeStats -ForceLiveStats",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-EXO-Mailboxes-Inventory-IncludeStats.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [
@@ -478,6 +529,9 @@
       "Name": "Intune-WinUpdate-Status",
       "ScriptPath": "M365Inventory\\IntuneInventory\\WindowsUpdate\\SmartM365-WinUpdate_Status_From_Intune.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-WinUpdate_Status_From_Intune.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [
@@ -511,6 +565,9 @@
       "Name": "Intune-Windows11-Readiness-Issues",
       "ScriptPath": "M365Inventory\\IntuneInventory\\WindowsUpdate\\SmartM365-Intune-Windows11-Readiness-Issues-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Intune-Windows11-Readiness-Issues-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [
@@ -550,6 +607,15 @@
       "Name": "Exchange2016-ProxyAddresses-Check",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ProxyAddresses\\SmartM365-Check-ProxyAddresses-Exchange.ps1",
       "Arguments": "",
+      "Runtime": "WindowsPowerShell",
+      "LaunchArguments": "-AllOrganizationalUnit",
+      "Execution": {
+        "CacheName": "ExchangeProxyAddresses",
+        "Include": []
+      },
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-Check-ProxyAddresses-Exchange-ReadOnly.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange2016",
       "DependsOn": [],
@@ -582,6 +648,11 @@
       "Name": "Exchange2016-Infrastructure-Inventory",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1",
       "Arguments": "-IncludeServicesHealth -IncludeMailboxDatabasePaths -IncludeHealthChecker",
+      "Runtime": "WindowsPowerShell",
+      "Execution": {
+        "CacheName": "ExchangeInfrastructureAndReadiness",
+        "Include": []
+      },
       "Enabled": true,
       "Group": "Exchange2016",
       "DependsOn": [],
@@ -614,6 +685,14 @@
       "Name": "Exchange2016-FreeBusy-Check",
       "ScriptPath": "ExchangeInventory\\Hybrid\\FreeBusy\\SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1",
       "Arguments": "",
+      "Runtime": "WindowsPowerShell",
+      "Execution": {
+        "CacheName": "ExchangeHybridFreeBusy",
+        "Include": []
+      },
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-Exchange-Hybrid-FreeBusy-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange2016",
       "DependsOn": [],
@@ -647,6 +726,15 @@
       "Name": "Exchange2016-Mailboxes-CalendarPermissions",
       "ScriptPath": "ExchangeInventory\\OnPremises\\CalendarPermissions\\SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1",
       "Arguments": "",
+      "Runtime": "WindowsPowerShell",
+      "Execution": {
+        "CacheName": "ExchangeCalendarPermissions",
+        "Include": []
+      },
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-MailboxCalendarPermissions-Inventory.cmd",
+        "Launchers\\OnPremises\\Start-SmartM365-Exchange-MailboxCalendarPermissions-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange2016",
       "DependsOn": [],
@@ -683,6 +771,9 @@
       "Name": "M365-SecureScore-Inventory",
       "ScriptPath": "M365Inventory\\Security\\SecureScore\\SmartM365-SecureScore-Inventory.ps1",
       "Arguments": "-EnableConfiguredExternalActions",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-SecureScore-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -711,6 +802,9 @@
       "Name": "M365-AuthenticationMethodsRegistration-Inventory",
       "ScriptPath": "M365Inventory\\Security\\AuthenticationMethods\\SmartM365-AuthenticationMethodsRegistration-Inventory.ps1",
       "Arguments": "-EnableConfiguredExternalActions",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-AuthenticationMethodsRegistration-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -739,6 +833,9 @@
       "Name": "M365-ConditionalAccess-Inventory",
       "ScriptPath": "M365Inventory\\Security\\ConditionalAccess\\SmartM365-ConditionalAccess-Inventory.ps1",
       "Arguments": "-EnableConfiguredExternalActions",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-ConditionalAccess-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -767,6 +864,9 @@
       "Name": "Intune-EndpointSecurityHealth-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Security\\SmartM365-Intune-EndpointSecurityHealth-Inventory.ps1",
       "Arguments": "-EnableConfiguredExternalActions -ExportTimeoutSeconds 1200",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Intune-EndpointSecurityHealth-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -795,6 +895,9 @@
       "Name": "Intune-EndpointAnalytics-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\EndpointAnalytics\\SmartM365-EndpointAnalytics-Inventory.ps1",
       "Arguments": "-Reports All -IncludeStartupProcesses",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-EndpointAnalytics-Inventory-IncludeStartupProcesses.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -823,6 +926,9 @@
       "Name": "Intune-AutopatchAlerts-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\WindowsUpdate\\AutopatchAlerts\\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1",
       "Arguments": "-IncludeFeatureUpdates -IncludeQualityUpdates",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -855,6 +961,9 @@
       "Name": "Intune-RBAC-GroupMembers",
       "ScriptPath": "M365Inventory\\IntuneInventory\\RBAC\\SmartM365-Intune-RBAC-GroupMembers.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Intune-RBAC-GroupMembers.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -886,6 +995,9 @@
       "Name": "Intune-Remediations-Export",
       "ScriptPath": "M365Inventory\\IntuneInventory\\SmartM365-Intune-ExportRemediationScripts.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Intune-ExportRemediationScripts.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -944,6 +1056,9 @@
       "Name": "M365-BackupPolicyScope-Inventory",
       "ScriptPath": "ExchangeInventory\\BackupProtection\\SmartM365-M365-BackupPolicyScope-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-M365-BackupPolicyScope-Inventory.cmd"
+      ],
       "Enabled": false,
       "Group": "Exchange",
       "DependsOn": [
@@ -1003,6 +1118,9 @@
       "Name": "M365-PowerBIFabricActivity-Inventory",
       "ScriptPath": "M365Inventory\\PowerBI\\SmartM365-PowerBIFabricActivity-Inventory.ps1",
       "Arguments": "-LookbackDays 28",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-PowerBIFabricActivity-Inventory.cmd"
+      ],
       "Enabled": false,
       "Group": "M365",
       "DependsOn": [],
@@ -1055,6 +1173,9 @@
       "Name": "M365-CopilotUsage-Inventory",
       "ScriptPath": "M365Inventory\\Usage\\SmartM365-CopilotUsage-Inventory.ps1",
       "Arguments": "-Period D180 -ReportVersion v2",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-CopilotUsage-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -1083,6 +1204,9 @@
       "Name": "M365-TeamsPhonePstnUsage-Inventory",
       "ScriptPath": "M365Inventory\\Teams\\SmartM365-TeamsPhonePstnUsage-Inventory.ps1",
       "Arguments": "-LookbackDays 90 -IncludePhoneAssignments",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-TeamsPhonePstnUsage-Inventory-IncludePhoneAssignments.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -1217,6 +1341,9 @@
       "Name": "Exchange-HybridIdentity-Issues",
       "ScriptPath": "ExchangeInventory\\Migration\\SmartM365-Exchange-HybridIdentity-Issues-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Exchange-HybridIdentity-Issues-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [
@@ -1255,6 +1382,9 @@
       "Name": "Mailboxes-PermissionsByUser-Report",
       "ScriptPath": "ExchangeInventory\\Permissions\\SmartM365-Mailboxes-AllSources-PermissionsByUserReport.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Mailboxes-AllSources-PermissionsByUserReport.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [
@@ -1285,6 +1415,10 @@
       "Name": "AD-HealthCheck",
       "ScriptPath": "ActiveDirectoryInventory\\SmartM365-ActiveDirectory-HealthCheck.ps1",
       "Arguments": "",
+      "Runtime": "PowerShell7",
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-ActiveDirectory-HealthCheck.cmd"
+      ],
       "Enabled": true,
       "Group": "AD",
       "DependsOn": [],
@@ -1314,6 +1448,10 @@
       "Name": "WorkplaceEvidence-Prepare",
       "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
       "Arguments": "",
+      "WorkingDirectory": "PreparedEvidence",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-WorkplaceEvidence-Prepare.cmd"
+      ],
       "Enabled": true,
       "Group": "PreparedEvidence",
       "DependsOn": [
@@ -1385,6 +1523,10 @@
       "Name": "EXO-QuarantineMessages-Report",
       "ScriptPath": "ExchangeInventory\\Quarantine\\SmartM365-EXO-QuarantineMessages-Report.ps1",
       "Arguments": "",
+      "Runtime": "PowerShell7",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-EXO-QuarantineMessages-Report.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
@@ -1414,6 +1556,9 @@
       "Name": "M365-SyncHealth-Inventory",
       "ScriptPath": "M365Inventory\\SyncHealth\\SmartM365-AzureADConnect-SyncHealth-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-AzureADConnect-SyncHealth-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -1453,6 +1598,9 @@
       "Name": "EXO-MigrationJobs-Inventory",
       "ScriptPath": "ExchangeInventory\\Migration\\SmartM365-EXO-MigJob-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-EXO-MigJob-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
@@ -1483,6 +1631,9 @@
       "Name": "EXO-Mailboxes-CalendarPermissions",
       "ScriptPath": "ExchangeInventory\\CalendarPermissions\\SmartM365-EXO-Mailboxes-CalPerm_Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-EXO-Mailboxes-CalPerm_Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Exchange",
       "DependsOn": [],
@@ -1514,6 +1665,10 @@
       "Name": "Intune-DiscoveredApps-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Applications\\SmartM365-Intune-DiscoveredApps-Inventory.ps1",
       "Arguments": "-DeviceDetailMode All -FreshDeviceDetails",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Intune-DiscoveredApps-Inventory.cmd",
+        "Launchers\\Cloud\\Start-SmartM365-Intune-DiscoveredApps-Inventory-FreshDeviceDetails.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -1547,6 +1702,9 @@
       "Name": "M365-Teams-Inventory",
       "ScriptPath": "M365Inventory\\Teams\\SmartM365-Teams-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Teams-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [],
@@ -1582,6 +1740,9 @@
       "Name": "M365-SPO-Inventory",
       "ScriptPath": "M365Inventory\\SharePoint\\SmartM365-SPO-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-SPO-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [
@@ -1617,6 +1778,9 @@
       "Name": "Intune-WindowsAutopilot-Inventory",
       "ScriptPath": "M365Inventory\\IntuneInventory\\Autopilot\\SmartM365-WindowsAutopilot-Inventory.ps1",
       "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-WindowsAutopilot-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -1681,6 +1845,9 @@
       "Name": "Intune-Configurations-Inventory",
       "ScriptPath": "M365Inventory\\WorkplaceScope\\SmartM365-IntuneConfigurations-Inventory.ps1",
       "Arguments": "-EnableConfiguredExternalActions",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-IntuneConfigurations-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -1701,6 +1868,9 @@
       "Name": "Intune-ManagedApps-Inventory",
       "ScriptPath": "M365Inventory\\WorkplaceScope\\SmartM365-IntuneManagedApps-Inventory.ps1",
       "Arguments": "-EnableConfiguredExternalActions",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-IntuneManagedApps-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -1721,6 +1891,9 @@
       "Name": "Intune-EnrollmentFailures-Inventory",
       "ScriptPath": "M365Inventory\\WorkplaceScope\\SmartM365-IntuneEnrollmentFailures-Inventory.ps1",
       "Arguments": "-EnableConfiguredExternalActions",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-IntuneEnrollmentFailures-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "Intune",
       "DependsOn": [],
@@ -1741,6 +1914,14 @@
       "Name": "SharePointOnPrem-Infrastructure-Inventory",
       "ScriptPath": "SharePointInventory\\OnPremises\\SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.ps1",
       "Arguments": "",
+      "Runtime": "WindowsPowerShell",
+      "Execution": {
+        "CacheName": "SharePointInfrastructure",
+        "Include": []
+      },
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "SharePointOnPrem",
       "DependsOn": [],
@@ -1760,6 +1941,14 @@
       "Name": "SharePointOnPrem-Content-Inventory",
       "ScriptPath": "SharePointInventory\\OnPremises\\SmartM365-SharePoint-OnPrem-Content-Inventory.ps1",
       "Arguments": "",
+      "Runtime": "WindowsPowerShell",
+      "Execution": {
+        "CacheName": "SharePointContent",
+        "Include": []
+      },
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-SharePoint-OnPrem-Content-Inventory.cmd"
+      ],
       "Enabled": true,
       "Group": "SharePointOnPrem",
       "DependsOn": [],
@@ -1774,6 +1963,324 @@
       "TimeoutMinutes": 780,
       "EstimatedDurationMinutes": 120,
       "Schedule": {"Type": "Daily", "Times": ["06:30"], "DaysOfWeek": [], "MissedRunPolicy": "RunOnce"}
+    }
+  ],
+  "Launches": [
+    {
+      "Name": "AD-DuplicateIdentity-Mail",
+      "Manual": true,
+      "Description": "Duplicate identity analysis of the AD inventory and its notification mail.",
+      "ScriptPath": "ActiveDirectoryInventory\\SmartM365-ActiveDirectory-Inventory.ps1",
+      "Arguments": "-DuplicateAnalysisOnly -ForceSendDuplicateNotification",
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-ActiveDirectory-DuplicateIdentity-Mail.cmd"
+      ]
+    },
+    {
+      "Name": "Exchange2016-Local-Mailboxes-Inventory-MailboxesOnly",
+      "Manual": true,
+      "Description": "Exchange 2016 local mailboxes inventory without AD permissions.",
+      "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
+      "Arguments": "",
+      "Runtime": "WindowsPowerShell",
+      "Execution": {
+        "CacheName": "ExchangeLocalMailboxes\\Inventory",
+        "Include": [
+          "SmartInventory\\Common\\SmartM365.IdentityDateEvidence.ps1"
+        ]
+      },
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-Mailboxes-Inventory.cmd"
+      ]
+    },
+    {
+      "Name": "Exchange2016-Local-Mailboxes-OnlyADPermissions",
+      "Manual": true,
+      "Description": "Exchange 2016 local mailboxes: AD permissions only.",
+      "ScriptPath": "ExchangeInventory\\OnPremises\\Mailboxes\\SmartM365-Exchange-Local-Mailboxes-Inventory.ps1",
+      "Arguments": "-OnlyADPermission",
+      "Runtime": "WindowsPowerShell",
+      "Execution": {
+        "CacheName": "ExchangeLocalMailboxes\\OnlyADPermissions",
+        "Include": [
+          "SmartInventory\\Common\\SmartM365.IdentityDateEvidence.ps1"
+        ]
+      },
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-Exchange-Local-Mailboxes-Inventory-OnlyADPermissions.cmd"
+      ]
+    },
+    {
+      "Name": "Exchange2016-ProxyAddresses-Write",
+      "Manual": true,
+      "Description": "Adds the missing proxy addresses in Exchange on-premises (write mode).",
+      "ScriptPath": "ExchangeInventory\\OnPremises\\ProxyAddresses\\SmartM365-Check-ProxyAddresses-Exchange.ps1",
+      "Arguments": "-AllOrganizationalUnit -AddMissingAddress",
+      "Runtime": "WindowsPowerShell",
+      "Execution": {
+        "CacheName": "ExchangeProxyAddresses",
+        "Include": []
+      },
+      "Interactive": true,
+      "RequiresConfirmation": true,
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-Check-ProxyAddresses-Exchange-Write.cmd"
+      ]
+    },
+    {
+      "Name": "Exchange2016-Infrastructure-Inventory-Basic",
+      "Manual": true,
+      "Description": "Exchange 2016 servers and storage inventory without the optional health sections.",
+      "ScriptPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1",
+      "Arguments": "",
+      "Runtime": "WindowsPowerShell",
+      "Execution": {
+        "CacheName": "ExchangeInfrastructureAndReadiness",
+        "Include": []
+      },
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd"
+      ]
+    },
+    {
+      "Name": "Exchange-HealthChecker-ScheduledTask-Installer",
+      "Manual": true,
+      "Description": "Installs the HealthChecker scheduled task on the Exchange servers (Windows PowerShell 5.1 for the CIM sessions).",
+      "ScriptPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1",
+      "Arguments": "-Interactive",
+      "Runtime": "WindowsPowerShell",
+      "Interactive": true,
+      "LegacyLaunchers": [
+        "Launchers\\OnPremises\\Start-SmartM365-Exchange-HealthChecker-ScheduledTask-Installer.cmd"
+      ]
+    },
+    {
+      "Name": "Intune-DeviceSystemRemediation-Create",
+      "Manual": true,
+      "Description": "Creates the Intune device system remediation package.",
+      "ScriptPath": "M365Inventory\\IntuneInventory\\Devices\\SmartM365-Create-DeviceSystemRemediation.ps1",
+      "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-Create-DeviceSystemRemediation.cmd"
+      ]
+    },
+    {
+      "Name": "Intune-EndpointAnalytics-Inventory-NoStartupProcesses",
+      "Manual": true,
+      "Description": "Endpoint Analytics reports without startup processes.",
+      "ScriptPath": "M365Inventory\\IntuneInventory\\EndpointAnalytics\\SmartM365-EndpointAnalytics-Inventory.ps1",
+      "Arguments": "-Reports All -Connect",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-EndpointAnalytics-Inventory.cmd"
+      ]
+    },
+    {
+      "Name": "M365-LicensePricing-Inventory-PublicPrices",
+      "Manual": true,
+      "Description": "License pricing from the public price list shipped with the script.",
+      "ScriptPath": "M365Inventory\\Licensing\\SmartM365-LicensePricing-Inventory.ps1",
+      "Arguments": "-PricingSourceCsvPath {{PricingSourceCsvPath}} -EnableConfiguredExternalActions",
+      "Tokens": {
+        "PricingSourceCsvPath": {
+          "Value": "{{ScriptDirectory}}\\M365_License_Prices_Public-France.csv",
+          "MustExist": true
+        }
+      },
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-LicensePricing-Inventory.cmd"
+      ]
+    },
+    {
+      "Name": "M365-BackupProtectedMailboxes-Interactive",
+      "Manual": true,
+      "Description": "Microsoft 365 Backup protected mailboxes with interactive sign-in.",
+      "ScriptPath": "ExchangeInventory\\BackupProtection\\SmartM365-M365-BackupProtectedMailboxes-Inventory.ps1",
+      "Arguments": "-InteractiveAuth",
+      "Interactive": true,
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-M365-BackupProtectedMailboxes-Inventory-Interactive.cmd"
+      ]
+    },
+    {
+      "Name": "M365-BackupProtectedSitesAndDrives-Interactive",
+      "Manual": true,
+      "Description": "Microsoft 365 Backup protected sites and drives with interactive sign-in.",
+      "ScriptPath": "ExchangeInventory\\BackupProtection\\SmartM365-M365-BackupProtectedSitesAndDrives-Inventory.ps1",
+      "Arguments": "-InteractiveAuth -EnableConfiguredExternalActions",
+      "Interactive": true,
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-M365-BackupProtectedSitesAndDrives-Inventory-Interactive.cmd"
+      ]
+    },
+    {
+      "Name": "M365-Usage-Inventory-D180",
+      "Manual": true,
+      "Description": "Microsoft 365 usage reports (all) over 180 days.",
+      "ScriptPath": "M365Inventory\\Usage\\SmartM365-M365UserActivity-Inventory.ps1",
+      "Arguments": "-Period D180 -Reports All -Connect",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-M365UsageReports-Inventory.cmd"
+      ]
+    },
+    {
+      "Name": "M365-UserActivity-Inventory-D180",
+      "Manual": true,
+      "Description": "Microsoft 365 user activity (default reports) over 180 days.",
+      "ScriptPath": "M365Inventory\\Usage\\SmartM365-M365UserActivity-Inventory.ps1",
+      "Arguments": "-Period D180 -Connect",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-M365UserActivity-Inventory.cmd"
+      ]
+    },
+    {
+      "Name": "M365-TeamsPhonePstnUsage-Inventory-NoPhoneAssignments",
+      "Manual": true,
+      "Description": "Teams Phone PSTN usage over 90 days without phone assignments.",
+      "ScriptPath": "M365Inventory\\Teams\\SmartM365-TeamsPhonePstnUsage-Inventory.ps1",
+      "Arguments": "-LookbackDays 90",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-TeamsPhonePstnUsage-Inventory.cmd"
+      ]
+    },
+    {
+      "Name": "WorkplaceEvidence-Prepare-Offline",
+      "Manual": true,
+      "Description": "Workplace evidence preparation from local data only.",
+      "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
+      "Arguments": "-Offline",
+      "WorkingDirectory": "PreparedEvidence",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-WorkplaceEvidence-Prepare-Offline.cmd"
+      ]
+    },
+    {
+      "Name": "WorkplaceEvidence-Transfer",
+      "Manual": true,
+      "Description": "Workplace evidence transfer only.",
+      "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
+      "Arguments": "-TransferOnly",
+      "WorkingDirectory": "PreparedEvidence",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Start-SmartM365-WorkplaceEvidence-Transfer.cmd"
+      ]
+    },
+    {
+      "Name": "WorkplaceEvidence-Validate",
+      "Manual": true,
+      "Description": "Workplace evidence preparation, validation only.",
+      "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
+      "Arguments": "-ValidateOnly",
+      "WorkingDirectory": "PreparedEvidence",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Test-SmartM365-WorkplaceEvidence-Prepare.cmd"
+      ]
+    },
+    {
+      "Name": "WorkplaceEvidence-WorkforceDiagnostic",
+      "Manual": true,
+      "Description": "Workplace evidence workforce memory diagnostic.",
+      "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
+      "Arguments": "-WorkforceDiagnostic",
+      "WorkingDirectory": "PreparedEvidence",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Test-SmartM365-WorkplaceEvidence-WorkforceMemory.cmd"
+      ]
+    },
+    {
+      "Name": "WorkplaceEvidence-ConvertMetadata",
+      "Manual": true,
+      "Description": "Workplace evidence metadata conversion.",
+      "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
+      "Arguments": "-ConvertMetadata",
+      "WorkingDirectory": "PreparedEvidence",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Convert-SmartM365-WorkplaceEvidence-Metadata.cmd"
+      ]
+    },
+    {
+      "Name": "WorkplaceEvidence-RepairTenantKeys",
+      "Manual": true,
+      "Description": "Workplace evidence legacy history TenantKey repair.",
+      "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
+      "Arguments": "-RepairLegacyHistory",
+      "WorkingDirectory": "PreparedEvidence",
+      "LegacyLaunchers": [
+        "Launchers\\Cloud\\Repair-SmartM365-WorkplaceEvidence-TenantKeys.cmd"
+      ]
+    },
+    {
+      "Name": "Orchestrator-GUI",
+      "Manual": true,
+      "Description": "Orchestrator management console (WPF).",
+      "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator-GUI.ps1",
+      "Arguments": "",
+      "Interactive": true,
+      "LegacyLaunchers": [
+        "Launchers\\Orchestrator\\Start-SmartM365-Inventory-Orchestrator-GUI.cmd"
+      ]
+    },
+    {
+      "Name": "Orchestrator-Start",
+      "Manual": true,
+      "Description": "Starts a resident orchestrator in this console.",
+      "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator.ps1",
+      "Arguments": "-Connect",
+      "LegacyLaunchers": [
+        "Launchers\\Orchestrator\\Start-SmartM365-Inventory-Orchestrator.cmd"
+      ]
+    },
+    {
+      "Name": "Orchestrator-Stop",
+      "Manual": true,
+      "Description": "Asks the resident orchestrator of this computer to stop cleanly.",
+      "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator.ps1",
+      "Arguments": "-Stop -StopTimeoutSeconds 180",
+      "LegacyLaunchers": [
+        "Launchers\\Orchestrator\\Stop-SmartM365-Inventory-Orchestrator.cmd"
+      ]
+    },
+    {
+      "Name": "Orchestrator-Restart",
+      "Manual": true,
+      "Description": "Stops the orchestrator cleanly, then starts its scheduled task.",
+      "ScriptPath": "Orchestrator\\Restart-SmartM365-Inventory-Orchestrator.ps1",
+      "Arguments": "",
+      "LegacyLaunchers": [
+        "Launchers\\Orchestrator\\Restart-SmartM365-Inventory-Orchestrator.cmd"
+      ]
+    },
+    {
+      "Name": "Orchestrator-FullCollect",
+      "Manual": true,
+      "Description": "Requests the full pipeline from the resident orchestrators and waits for it.",
+      "ScriptPath": "Orchestrator\\SmartM365-Inventory-Pipeline.ps1",
+      "Arguments": "-Pipeline Full -Collect",
+      "LegacyLaunchers": [
+        "Launchers\\Orchestrator\\Start-SmartM365-Inventory-Full-Collect.cmd"
+      ]
+    },
+    {
+      "Name": "Orchestrator-SendSummary",
+      "Manual": true,
+      "Description": "Sends the orchestrator execution summary email now.",
+      "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator.ps1",
+      "Arguments": "-SendExecutionSummary",
+      "LegacyLaunchers": [
+        "Launchers\\Orchestrator\\Send-SmartM365-Inventory-Orchestrator-ExecutionSummary.cmd"
+      ]
+    },
+    {
+      "Name": "Orchestrator-ScheduledTask-Installer",
+      "Manual": true,
+      "Description": "Installs or removes the orchestrator scheduled task and the GUI shortcut (guided).",
+      "ScriptPath": "Orchestrator\\Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1",
+      "Arguments": "-Interactive",
+      "Runtime": "WindowsPowerShell",
+      "Interactive": true,
+      "PassTenant": false,
+      "LegacyLaunchers": [
+        "Launchers\\Orchestrator\\Start-SmartM365-Inventory-OrchestratorScheduledTask-Installer.cmd"
+      ]
     }
   ]
 }

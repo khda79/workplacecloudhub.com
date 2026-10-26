@@ -3,7 +3,7 @@
 .SYNOPSIS
 Runs a synthetic collector that calls exit and checks its durable completion result.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -32,6 +32,7 @@ try {
         function script:Get-JobState { param($JobName) $script:JobState }
         function script:Resolve-OrchestratorJobPath { param($Path) $Path }
         function script:Invoke-OrchestratorAuthenticodeValidation { param($Job,$ScriptFullPath) [pscustomobject]@{ Allowed=$true } }
+        function script:Get-OrchestratorJobLaunchDefinition { param($Job) $null }
         function script:Get-JobEngine { param($Job) [pscustomobject]@{Path=(Get-Command pwsh).Source;ProcessName='pwsh'} }
         function script:ConvertTo-StateTime { param($Value) ([datetime]$Value).ToString('o') }
         function script:Save-OrchestratorState {}

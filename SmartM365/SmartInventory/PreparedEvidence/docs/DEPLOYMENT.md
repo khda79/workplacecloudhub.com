@@ -69,8 +69,9 @@ DATA-ALL); Offline never downloads a missing workbook or falls back to SharePoin
 
 ## 2. Preflight
 
-Run `SmartM365\SmartInventory\Launchers\Cloud\Test-SmartM365-WorkplaceEvidence-Prepare.cmd` under the
-collection account. It selects `-Tenant prod -ValidateOnly` (not Offline), can create the missing runtime JSON
+Run `SmartM365\SmartInventory\SmartInventory.cmd WorkplaceEvidence-Validate` under the
+collection account. It selects `-ValidateOnly` (not Offline) for the tenant resolved from `-Tenant`,
+`SMARTM365_ORCHESTRATOR_TENANT` or `DefaultTenant`, can create the missing runtime JSON
 from the template and merge missing keys, and checks source presence, fingerprints and transport age. It
 downloads and structurally checks the two mappings. It generates no prepared CSV, publishes no batch and
 sends no notification. Execution logs/transcripts may still be uploaded in non-Offline modes; this is
@@ -89,10 +90,10 @@ update does not change an existing deployed manifest (see [the orchestrator guid
 out-of-schedule run, ask the orchestrators instead of starting the script by hand:
 
 ```
-\\<server>\<share>\SmartM365\SmartInventory\LaunchersByOrchestrator\Request-WorkplaceEvidence-Prepare.cmd
+\\<server>\<share>\SmartM365\SmartInventory\SmartInventory.cmd WorkplaceEvidence-Prepare -Request
 ```
 
-`Start-SmartM365-WorkplaceEvidence-Prepare-Offline.cmd` remains available for a local rebuild without API
+`SmartInventory.cmd WorkplaceEvidence-Prepare-Offline` remains available for a local rebuild without API
 collection, upload or notification. It still writes logs, snapshots inputs, generates all CSVs and publishes
 the validated local DATA-POWERBI pointer; do not overlap it with collection or another preparation run.
 
@@ -152,11 +153,11 @@ in this launch mode.
 
 ## Manual diagnostics
 
-The Cloud launchers follow the existing prod convention:
-- Test-SmartM365-WorkplaceEvidence-Prepare.cmd: ValidateOnly, with SharePoint mapping reads.
-- Start-SmartM365-WorkplaceEvidence-Prepare.cmd: full preparation with SharePoint mapping reads.
-- Start-SmartM365-WorkplaceEvidence-Prepare-Offline.cmd: full local preparation.
-- Start-SmartM365-WorkplaceEvidence-Transfer.cmd: transfer the existing validated local batch only, without collection, mapping downloads or CSV generation. Optional `-ExpectedBatchId <id>` refuses a different current batch. This explicit mode enables its transfer without changing the saved EnableSharePointUpload setting; it cannot be combined with Offline or other diagnostic/repair modes.
+The catalog entries (`SmartInventory.cmd <Name>`):
+- WorkplaceEvidence-Validate: ValidateOnly, with SharePoint mapping reads.
+- WorkplaceEvidence-Prepare: full preparation with SharePoint mapping reads.
+- WorkplaceEvidence-Prepare-Offline: full local preparation.
+- WorkplaceEvidence-Transfer: transfer the existing validated local batch only, without collection, mapping downloads or CSV generation. Optional `-ExpectedBatchId <id>` refuses a different current batch. This explicit mode enables its transfer without changing the saved EnableSharePointUpload setting; it cannot be combined with Offline or other diagnostic/repair modes.
 
 ValidateOnly downloads/structurally checks the two workbooks, captures the required sources and checks transport age, CSV record shape and every row TenantKey on the verified copies. It aggregates validation failures with relative paths, including history. Later live-source changes do not invalidate these copies. It writes temporary source copies and small private audit files but does not generate/publish prepared CSVs or notify, nor certify collection success or business completeness. Non-Offline execution-log upload remains separate from prepared-data publication. Offline suppresses all SharePoint access and notifications: it requires the two workbooks already present in the tenant data root and never downloads missing files. A full offline run still writes logs, temporary snapshots, prepared CSVs and the validated local pointer.
 
@@ -166,7 +167,7 @@ The normal orchestrator job uses neither switch. Existing configured notificatio
  
 #### Manual Workforce memory diagnostic
 
-Run Test-SmartM365-WorkplaceEvidence-WorkforceMemory.cmd on the collecting machine to execute only the unchanged Workforce calculations, including all available history. Do not add this diagnostic mode to the scheduled job. It uses the same prod profile/configuration and downloads the two mapping workbooks from SharePoint unless explicitly Offline. No raw collector, DATA-POWERBI publication, Power BI operation, prepared-output upload or notification is performed. Diagnostic and normal preparation runs share the existing preparation locks.
+Run `SmartInventory.cmd WorkplaceEvidence-WorkforceDiagnostic` on the collecting machine to execute only the unchanged Workforce calculations, including all available history. Do not add this diagnostic mode to the scheduled job. It uses the same tenant profile/configuration and downloads the two mapping workbooks from SharePoint unless explicitly Offline. No raw collector, DATA-POWERBI publication, Power BI operation, prepared-output upload or notification is performed. Diagnostic and normal preparation runs share the existing preparation locks.
 
 The child process runs New-WorkforceIdentityEvidence.ps1 directly against existing raw exports (read-only, not an atomic snapshot). All five output paths are redirected to a unique private PreparedWorkRootPath/workforce-diagnostics/<run>/outputs folder; no production CSV is overwritten. There is no extra full source copy and no automatic cancellation or memory-setting change. Avoid a simultaneous normal preparation run, but leave other machine activity representative when investigating global memory pressure.
 
@@ -183,7 +184,7 @@ source validation uses semicolons for Exchange_OnPrem_Servers_Inventory.csv as w
 A compiled strict reader (`SmartWorkplaceIntelligence/scripts/PreparedCsvReader.cs`, deployed with the scripts) performs these checks for well-formed files. Blank lines, ambiguous quoting, a field-count or tenant mismatch and any read error send the file back to the original TextFieldParser check, so results and error messages are unchanged; the final validation log line reports how many files used that reference parser. The Workforce weekly history reads its selected columns with the same reader and falls back to Import-Csv in the same way. The native build and the SharePoint transfer log per-table and per-file durations (timings only, no values). Before upload and again before the root pointer, the transfer hashes the local batch CSVs four files at a time; every SHA256 is still compared individually, and any changed file stops the transfer before the pointer. Just before each upload only the file size is re-checked; the uploaded bytes are verified by the SharePoint read-back against the manifest SHA256.
 #### Legacy tenant-key repair (manual only)
 
-`Repair-SmartM365-WorkplaceEvidence-TenantKeys.cmd` previews explicitly selected
+`SmartInventory.cmd WorkplaceEvidence-RepairTenantKeys` previews explicitly selected
 weeks and expected file count. `-ApplyRepair` requires confirmed source ownership.
 It never changes existing TenantKey values or DATA-LAST. Original bytes are
 backed up/hash-verified; every parsed field/order/count is checked. Serialization
@@ -212,7 +213,7 @@ DATA-POWERBI/current.json.txt selects an immutable batches/<batch-id> directory 
 Current metadata uses `.json.txt`. Readers prefer it and reject malformed preferred
 files rather than falling back to stale legacy copies. An unconverted legacy root
 pointer prevents normal publication.
-`Convert-SmartM365-WorkplaceEvidence-Metadata.cmd` previews validated legacy
+`SmartInventory.cmd WorkplaceEvidence-ConvertMetadata` previews validated legacy
 renaming; `-ApplyMetadataConversion` preserves bytes, batch IDs and hashes,
 publishing the root pointer last. Conflicting old/new names stop conversion.
 Do not refresh/transfer during conversion or mass-rename unrelated files.

@@ -1,5 +1,5 @@
 ﻿#Requires -Version 5.1
-<# .SYNOPSIS Offline certificate budgets, workers, projections and infrastructure continuation. .VERSION 1.1.1 #>
+<# .SYNOPSIS Offline certificate budgets, workers, projections and infrastructure continuation. .VERSION 1.1.2 #>
 [CmdletBinding()]
 param()
 Set-StrictMode -Version Latest
@@ -250,8 +250,10 @@ try{
     Invoke-SmartM365InfrastructureCertificateInventory -Rows $rows -ExchangeServerNames @('SYNTHETIC-EX01','SYNTHETIC-EX02')
     Check ($rows.Count -eq 2 -and @($rows|Where-Object CollectionStatus -eq ERROR).Count -eq 2 -and $script:starts.Count -eq 0) 'Missing cached worker blocked infrastructure or became known zero'
     $script:InfrastructureCertificateWorkerPath=$worker
-    $launcher=Join-Path $smartRoot 'SmartInventory/Launchers/OnPremises/Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd'
-    Check ((Get-Content $launcher -Raw) -match 'robocopy "%SCRIPT_DIR%" "%LOCAL_SCRIPT_DIR%" /MIR') 'Worker not covered by launcher cache copy'
+    # The local cache copies the whole script folder (/MIR), so the worker next to the collector is cached.
+    $catalogJob=@((Get-Content (Join-Path $smartRoot 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template') -Raw | ConvertFrom-Json).Jobs | Where-Object Name -eq 'Exchange2016-Infrastructure-Inventory')
+    $launchModuleText=Get-Content (Join-Path $smartRoot 'SmartInventory/Orchestrator/SmartM365.Inventory.Launch.psm1') -Raw
+    Check ($catalogJob.Count -eq 1 -and $catalogJob[0].Execution.CacheName -and $launchModuleText -match "Label = 'script'; Source = \`$scriptFolder" -and $launchModuleText -match "-Options @\('/MIR'\) -LogOption \`$copy\.Log") 'Worker not covered by launcher cache copy'
 
     # Cleanup failure stays explicit but cannot abort unrelated infrastructure phases.
     $fakeStop=(Get-Command Stop-SmartM365CertificateWorker).ScriptBlock

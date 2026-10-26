@@ -1,5 +1,5 @@
 ﻿#Requires -Version 5.1
-<# .SYNOPSIS Offline session ownership, mode and cache regression tests. .VERSION 1.0.0 #>
+<# .SYNOPSIS Offline session ownership, mode and cache regression tests. .VERSION 1.0.1 #>
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
@@ -89,20 +89,21 @@ try {
     $template=Get-Content ($collector -replace '\.ps1$','.local.json.template') -Raw | ConvertFrom-Json
     Check ($template.ExchangeConnectionMode -eq 'Remote') 'Template default missing'
 
-    foreach ($name in @('Start-SmartM365-Exchange-Local-Mailboxes-Inventory.cmd','Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions.cmd','Start-SmartM365-Exchange-Local-Mailboxes-Inventory-OnlyADPermissions.cmd')) {
-        $launcher=[IO.File]::ReadAllText((Join-Path $smartRoot ('SmartInventory/Launchers/OnPremises/' + $name)))
-        Check ($launcher -match 'robocopy "%SMARTM365_ROOT%\\Modules\\SmartM365.Core" "%LOCAL_SMARTM365_ROOT%\\Modules\\SmartM365.Core" /MIR') ($name + ': shared helper not covered by cache')
+    # The catalog engine copies Modules\SmartM365.Core (/MIR) into every local cache.
+    $launchModule=Import-Module (Join-Path $smartRoot 'SmartInventory/Orchestrator/SmartM365.Inventory.Launch.psm1') -Force -PassThru
+    $launchModuleText=[IO.File]::ReadAllText($launchModule.Path)
+    $catalog=Get-Content (Join-Path $smartRoot 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template') -Raw | ConvertFrom-Json
+    foreach ($name in @('Exchange2016-Local-Mailboxes-Inventory','Exchange2016-Local-Mailboxes-Inventory-MailboxesOnly','Exchange2016-Local-Mailboxes-OnlyADPermissions')) {
+        $entry=@(@($catalog.Jobs) + @($catalog.Launches) | Where-Object Name -eq $name)
+        Check ($entry.Count -eq 1 -and $entry[0].Runtime -eq 'WindowsPowerShell' -and $entry[0].Execution.CacheName -and $launchModuleText -match "Label = 'SmartM365.Core'; Source = \(Join-Path \`$smartM365Root 'Modules\\SmartM365.Core'\)") ($name + ': shared helper not covered by cache')
         Check (Test-Path -LiteralPath $helperPath -PathType Leaf) ($name + ': missing dot-sourced helper')
         $sourceRoot=Join-Path $fixtureRoot 'source'
         $cacheRoot=Join-Path $fixtureRoot ([IO.Path]::GetFileNameWithoutExtension($name))
         $sourceModule=Join-Path $sourceRoot 'Modules/SmartM365.Core'
         $null=New-Item -ItemType Directory -Path $sourceModule -Force
         Copy-Item -LiteralPath $helperPath -Destination $sourceModule
-        $copyLine=($launcher -split '\r?\n' | Where-Object { $_ -like 'robocopy *Modules*' }) -replace '%SMARTM365_ROOT%', $sourceRoot -replace '%LOCAL_SMARTM365_ROOT%', $cacheRoot -replace '%CACHE_LOG%', (Join-Path $fixtureRoot 'copy.log')
-        $copyBatch=Join-Path $fixtureRoot 'copy-only.cmd'
-        [IO.File]::WriteAllText($copyBatch,('@echo off' + "`r`n" + $copyLine + "`r`nexit /b %ERRORLEVEL%`r`n"),[Text.Encoding]::ASCII)
-        & $env:ComSpec /d /c ('"' + $copyBatch + '"') | Out-Null
-        Check ($LASTEXITCODE -lt 8) ($name + ': real cache copy failed')
+        $copyExit=& $launchModule { param($source,$destination,$log) Invoke-SmartM365InventoryRobocopy -Source $source -Destination $destination -Options @('/MIR') -LogOption ('/LOG:' + $log) } $sourceModule (Join-Path $cacheRoot 'Modules/SmartM365.Core') (Join-Path $fixtureRoot 'copy.log')
+        Check ($copyExit -lt 8) ($name + ': real cache copy failed')
         $cachedHelper=Join-Path $cacheRoot 'Modules/SmartM365.Core/SmartM365-ExchangeOnPremSession.ps1'
         Check ((Get-FileHash $cachedHelper).Hash -eq (Get-FileHash $helperPath).Hash) ($name + ': cached helper bytes changed')
         $loader=@($ast.EndBlock.Statements | Where-Object { $_.Extent.Text -match '^\$exchangeSessionHelperPath =|^if \(-not \(Test-Path -LiteralPath \$exchangeSessionHelperPath|^\. \$exchangeSessionHelperPath' } | ForEach-Object { $_.Extent.Text })

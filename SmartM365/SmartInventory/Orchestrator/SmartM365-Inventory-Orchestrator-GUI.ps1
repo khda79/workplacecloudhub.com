@@ -9,6 +9,10 @@ concurrency, atomic publication, version history and an audit CSV. It also
 shows the live operations of every server, job health, dependency readiness,
 the all-server execution history and the current election plan, and submits
 job run requests that the resident orchestrators execute.
+The Operations tab also runs catalog jobs and manual launches on this computer
+(Invoke-SmartM365InventoryJob.ps1 in a new console), sets the execution mode of
+the on-premises jobs in the draft, and starts, stops or restarts the orchestrator,
+the full collect and the execution summary.
 
 .PARAMETER Tenant
 SmartM365 tenant profile. Defaults to test.
@@ -30,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.4.0
+1.5.0
 #>
 [CmdletBinding()]
 param(
@@ -64,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.4.0'
+$script:AppVersion = '1.5.0'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -279,99 +283,187 @@ $xaml = @'
             </TabItem>
 
             <TabItem Header="Operations">
-                <Grid Margin="12">
+                <Grid Margin="12,8,12,12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="150"/>
                         <RowDefinition Height="*"/>
-                        <RowDefinition Height="210"/>
                     </Grid.RowDefinitions>
-                    <StackPanel Margin="0,0,0,10">
-                        <TextBlock x:Name="MaintenanceDetailText" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Reason" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <TextBox x:Name="MaintenanceReasonBox" Width="330" MaxLength="1000" ToolTip="Required to enable maintenance. Does not publish the configuration draft."/>
-                            <Button x:Name="EnableMaintenanceButton" Content="Enable maintenance" Background="#FFF4CE" IsEnabled="False"/>
-                            <Button x:Name="DisableMaintenanceButton" Content="Disable maintenance" IsEnabled="False"/>
-                        </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="Orchestrator on this computer" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,10,0"/>
+                        <Button x:Name="OrchestratorStartButton" Content="Start" ToolTip="Starts a resident orchestrator in a new console on this computer."/>
+                        <Button x:Name="OrchestratorStopButton" Content="Stop" ToolTip="Asks the resident orchestrator of this computer to stop cleanly."/>
+                        <Button x:Name="OrchestratorRestartButton" Content="Restart" ToolTip="Stops the orchestrator cleanly, then starts its scheduled task."/>
+                        <Button x:Name="FullCollectButton" Content="Full collect" Background="#FFF4CE" ToolTip="Requests the full pipeline from the resident orchestrators and follows it in a new console."/>
+                        <Button x:Name="SendSummaryButton" Content="Send summary" ToolTip="Sends the execution summary email now."/>
                     </StackPanel>
-                    <DataGrid x:Name="OperationsServersGrid" Grid.Row="1">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="160"/>
-                            <DataGridTextColumn Header="State" Binding="{Binding State}" Width="100"/>
-                            <DataGridTextColumn Header="Heartbeat age (min)" Binding="{Binding HeartbeatAgeMinutes}" Width="140"/>
-                            <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="80"/>
-                            <DataGridTextColumn Header="Maintenance" Binding="{Binding Maintenance}" Width="100"/>
-                            <DataGridTextColumn Header="Acknowledgement" Binding="{Binding MaintenanceAcknowledgement}" Width="145"/>
-                            <DataGridTextColumn Header="Running" Binding="{Binding Running}" Width="70"/>
-                            <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="70"/>
-                            <DataGridTextColumn Header="Recycle in" Binding="{Binding RecycleIn}" Width="90"/>
-                            <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="70"/>
-                            <DataGridTextColumn Header="State persistence" Binding="{Binding StatePersistence}" Width="*"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                    <Grid Grid.Row="2" Margin="0,10,0,0">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="9*"/><ColumnDefinition Width="11*"/></Grid.ColumnDefinitions>
-                        <GroupBox Header="Running jobs" Margin="0,0,6,0">
-                            <Grid>
-                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                <StackPanel Orientation="Horizontal" Margin="6,4,6,5">
-                                    <TextBlock Text="Stop reason" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                    <TextBox x:Name="JobStopReasonBox" Width="260" MaxLength="1000" ToolTip="Required. Select one running job, then request its owner to stop it."/>
-                                    <Button x:Name="StopRunningJobButton" Content="Stop selected job" IsEnabled="False" Margin="8,0,0,0" Background="#FDE7E9" ToolTip="The owning orchestrator verifies the selected process and records the stop. The job is not retried automatically."/>
+                    <TabControl x:Name="OperationsTabs" Grid.Row="1">
+                        <TabItem Header="Live">
+                        <Grid Margin="12">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="150"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="210"/>
+                            </Grid.RowDefinitions>
+                            <StackPanel Margin="0,0,0,10">
+                                <TextBlock x:Name="MaintenanceDetailText" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Reason" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox x:Name="MaintenanceReasonBox" Width="330" MaxLength="1000" ToolTip="Required to enable maintenance. Does not publish the configuration draft."/>
+                                    <Button x:Name="EnableMaintenanceButton" Content="Enable maintenance" Background="#FFF4CE" IsEnabled="False"/>
+                                    <Button x:Name="DisableMaintenanceButton" Content="Disable maintenance" IsEnabled="False"/>
                                 </StackPanel>
-                            <DataGrid x:Name="OperationsRunningGrid" Grid.Row="1">
+                            </StackPanel>
+                            <DataGrid x:Name="OperationsServersGrid" Grid.Row="1">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="130"/>
-                                    <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="90"/>
-                                    <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="*"/>
-                                    <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="65"/>
-                                    <DataGridTextColumn Header="Started" Binding="{Binding Started}" Width="120"/>
-                                    <DataGridTextColumn Header="Duration (min)" Binding="{Binding DurationMinutes}" Width="100"/>
+                                    <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="160"/>
+                                    <DataGridTextColumn Header="State" Binding="{Binding State}" Width="100"/>
+                                    <DataGridTextColumn Header="Heartbeat age (min)" Binding="{Binding HeartbeatAgeMinutes}" Width="140"/>
+                                    <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="80"/>
+                                    <DataGridTextColumn Header="Maintenance" Binding="{Binding Maintenance}" Width="100"/>
+                                    <DataGridTextColumn Header="Acknowledgement" Binding="{Binding MaintenanceAcknowledgement}" Width="145"/>
+                                    <DataGridTextColumn Header="Running" Binding="{Binding Running}" Width="70"/>
+                                    <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="70"/>
+                                    <DataGridTextColumn Header="Recycle in" Binding="{Binding RecycleIn}" Width="90"/>
+                                    <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="70"/>
+                                    <DataGridTextColumn Header="State persistence" Binding="{Binding StatePersistence}" Width="*"/>
                                 </DataGrid.Columns>
                             </DataGrid>
+                            <Grid Grid.Row="2" Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="9*"/><ColumnDefinition Width="11*"/></Grid.ColumnDefinitions>
+                                <GroupBox Header="Running jobs" Margin="0,0,6,0">
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                        <StackPanel Orientation="Horizontal" Margin="6,4,6,5">
+                                            <TextBlock Text="Stop reason" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                            <TextBox x:Name="JobStopReasonBox" Width="260" MaxLength="1000" ToolTip="Required. Select one running job, then request its owner to stop it."/>
+                                            <Button x:Name="StopRunningJobButton" Content="Stop selected job" IsEnabled="False" Margin="8,0,0,0" Background="#FDE7E9" ToolTip="The owning orchestrator verifies the selected process and records the stop. The job is not retried automatically."/>
+                                        </StackPanel>
+                                    <DataGrid x:Name="OperationsRunningGrid" Grid.Row="1">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="130"/>
+                                            <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="90"/>
+                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="*"/>
+                                            <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="65"/>
+                                            <DataGridTextColumn Header="Started" Binding="{Binding Started}" Width="120"/>
+                                            <DataGridTextColumn Header="Duration (min)" Binding="{Binding DurationMinutes}" Width="100"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    </Grid>
+                                </GroupBox>
+                                <GroupBox Grid.Column="1" Header="Pending jobs (why they wait)" Margin="6,0,0,0">
+                                    <DataGrid x:Name="OperationsPendingGrid">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="110"/>
+                                            <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="90"/>
+                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="165"/>
+                                            <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="125"/>
+                                            <DataGridTextColumn Header="Waiting (min)" Binding="{Binding WaitingMinutes}" Width="85"/>
+                                            <DataGridTextColumn Header="Details" Binding="{Binding Details}" Width="*">
+                                                <DataGridTextColumn.ElementStyle>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="TextWrapping" Value="Wrap"/>
+                                                        <Setter Property="ToolTip" Value="{Binding Details}"/>
+                                                    </Style>
+                                                </DataGridTextColumn.ElementStyle>
+                                            </DataGridTextColumn>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </GroupBox>
                             </Grid>
-                        </GroupBox>
-                        <GroupBox Grid.Column="1" Header="Pending jobs (why they wait)" Margin="6,0,0,0">
-                            <DataGrid x:Name="OperationsPendingGrid">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="110"/>
-                                    <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="90"/>
-                                    <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="165"/>
-                                    <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="125"/>
-                                    <DataGridTextColumn Header="Waiting (min)" Binding="{Binding WaitingMinutes}" Width="85"/>
-                                    <DataGridTextColumn Header="Details" Binding="{Binding Details}" Width="*">
-                                        <DataGridTextColumn.ElementStyle>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="TextWrapping" Value="Wrap"/>
-                                                <Setter Property="ToolTip" Value="{Binding Details}"/>
-                                            </Style>
-                                        </DataGridTextColumn.ElementStyle>
-                                    </DataGridTextColumn>
-                                </DataGrid.Columns>
-                            </DataGrid>
-                        </GroupBox>
-                    </Grid>
-                    <Grid Grid.Row="3" Margin="0,10,0,0">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="9*"/><ColumnDefinition Width="11*"/></Grid.ColumnDefinitions>
-                        <GroupBox Header="Active peer-monitoring incidents" Margin="0,0,6,0">
-                            <DataGrid x:Name="OperationsIncidentsGrid">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Observed by" Binding="{Binding ObservedBy}" Width="130"/>
-                                    <DataGridTextColumn Header="Issue" Binding="{Binding Issue}" Width="*"/>
-                                </DataGrid.Columns>
-                            </DataGrid>
-                        </GroupBox>
-                        <GroupBox Grid.Column="1" Header="Orchestrator mails (24 h) - double-click to open" Margin="6,0,0,0">
-                            <DataGrid x:Name="OperationsMailsGrid">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="120"/>
-                                    <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="120"/>
-                                    <DataGridTextColumn Header="Subject" Binding="{Binding Subject}" Width="*"/>
-                                </DataGrid.Columns>
-                            </DataGrid>
-                        </GroupBox>
-                    </Grid>
+                            <Grid Grid.Row="3" Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="9*"/><ColumnDefinition Width="11*"/></Grid.ColumnDefinitions>
+                                <GroupBox Header="Active peer-monitoring incidents" Margin="0,0,6,0">
+                                    <DataGrid x:Name="OperationsIncidentsGrid">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Observed by" Binding="{Binding ObservedBy}" Width="130"/>
+                                            <DataGridTextColumn Header="Issue" Binding="{Binding Issue}" Width="*"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </GroupBox>
+                                <GroupBox Grid.Column="1" Header="Orchestrator mails (24 h) - double-click to open" Margin="6,0,0,0">
+                                    <DataGrid x:Name="OperationsMailsGrid">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="120"/>
+                                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="120"/>
+                                            <DataGridTextColumn Header="Subject" Binding="{Binding Subject}" Width="*"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </GroupBox>
+                            </Grid>
+                        </Grid>
+                        </TabItem>
+                        <TabItem Header="Jobs">
+                            <Grid Margin="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="150"/>
+                                </Grid.RowDefinitions>
+                                <StackPanel Margin="0,0,0,8">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="On-premises execution mode (OnPremExecutionMode):" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <TextBlock x:Name="OnPremModeText" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                        <TextBlock Text="Mode of the selected on-premises job" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <ComboBox x:Name="JobExecutionModeCombo" Width="130" IsEnabled="False">
+                                            <ComboBoxItem Content="(default)"/>
+                                            <ComboBoxItem Content="LocalCache"/>
+                                            <ComboBoxItem Content="Direct"/>
+                                            <ComboBoxItem Content="Auto"/>
+                                        </ComboBox>
+                                        <Button x:Name="ApplyJobExecutionModeButton" Content="Apply to draft" IsEnabled="False"/>
+                                        <Button x:Name="ApplyModeToAllOnPremButton" Content="Apply to all on-premises jobs"/>
+                                        <TextBlock Text="Then publish the changes. (default) follows OnPremExecutionMode." VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                <DataGrid x:Name="LaunchJobsGrid" Grid.Row="1">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Job" Binding="{Binding Name}" Width="290"/>
+                                        <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="90"/>
+                                        <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="65"/>
+                                        <DataGridTextColumn Header="Runtime" Binding="{Binding Runtime}" Width="130"/>
+                                        <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="85"/>
+                                        <DataGridTextColumn Header="Mode source" Binding="{Binding ModeSource}" Width="180"/>
+                                        <DataGridTextColumn Header="Draft mode" Binding="{Binding DraftMode}" Width="90"/>
+                                        <DataGridTextColumn Header="Cache" Binding="{Binding CacheName}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,6">
+                                    <Button x:Name="RunJobNowButton" Content="Run now on this computer" IsEnabled="False" ToolTip="Runs the job in a new console on this computer, outside the orchestrators (no election, lock or dependency check)."/>
+                                    <Button x:Name="RequestJobButton" Content="Request (orchestrators)" Background="#FFF4CE" IsEnabled="False" ToolTip="Submits the job to the resident orchestrators: elected server, shared locks and dependency rules."/>
+                                    <CheckBox x:Name="LaunchIncludeDependenciesCheck" Content="Also run the enabled dependencies (Request)" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                </StackPanel>
+                                <TextBox x:Name="LaunchJobCommandBox" Grid.Row="3" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                            </Grid>
+                        </TabItem>
+                        <TabItem Header="Manual launches">
+                            <Grid Margin="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="150"/>
+                                </Grid.RowDefinitions>
+                                <DataGrid x:Name="ManualLaunchesGrid">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Launch" Binding="{Binding Name}" Width="320"/>
+                                        <DataGridTextColumn Header="Runtime" Binding="{Binding Runtime}" Width="130"/>
+                                        <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="85"/>
+                                        <DataGridCheckBoxColumn Header="Interactive" Binding="{Binding Interactive}" Width="80"/>
+                                        <DataGridCheckBoxColumn Header="Confirmation" Binding="{Binding RequiresConfirmation}" Width="90"/>
+                                        <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,6">
+                                    <Button x:Name="RunManualLaunchButton" Content="Run on this computer" IsEnabled="False" ToolTip="Runs the entry in a new console on this computer."/>
+                                    <TextBlock Text="Manual entries never run through the orchestrators." VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"/>
+                                </StackPanel>
+                                <TextBox x:Name="ManualLaunchCommandBox" Grid.Row="2" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                            </Grid>
+                        </TabItem>
+                    </TabControl>
                 </Grid>
             </TabItem>
 
@@ -792,6 +884,8 @@ Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchest
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Maintenance.psm1') -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Pipeline.psm1') -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.GuiWorker.psm1') -ErrorAction Stop
+Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Inventory.Launch.psm1') -Force -ErrorAction Stop
+$script:SmartInventoryRoot = Split-Path -Path $PSScriptRoot -Parent
 
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
@@ -801,7 +895,8 @@ if ($ValidateOnly) {
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
         'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
         'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
-        'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText')) {
+        'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
+        'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
     }
     $source = [IO.File]::ReadAllText($PSCommandPath)
@@ -1426,12 +1521,15 @@ function Test-JobDraftChanged {
 }
 
 function Request-SelectedJobRun {
-    param([switch]$SkipConfirmation)
+    param([switch]$SkipConfirmation, [string]$JobName = '', [AllowNull()]$IncludeDependencies = $null)
 
-    $row = $script:Controls.PlanningGrid.SelectedItem
-    if ($null -eq $row) { throw 'Select a job first.' }
-    $jobName = [string]$row.Name
-    $includeDependencies = [bool]$script:Controls.IncludeDependenciesCheck.IsChecked
+    if ([string]::IsNullOrWhiteSpace($JobName)) {
+        $row = $script:Controls.PlanningGrid.SelectedItem
+        if ($null -eq $row) { throw 'Select a job first.' }
+        $JobName = [string]$row.Name
+    }
+    $jobName = $JobName
+    $includeDependencies = if ($null -ne $IncludeDependencies) { [bool]$IncludeDependencies } else { [bool]$script:Controls.IncludeDependenciesCheck.IsChecked }
     # Fast pre-check; New-SmartM365OrchestratorPipelineRequest repeats it under the submission lock.
     Refresh-RequestsView
     $activeRequest = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling') | Select-Object -First 1)
@@ -1452,6 +1550,190 @@ function Request-SelectedJobRun {
         [System.Windows.MessageBox]::Show("Request submitted.`nBatch: $($request.BatchId)`nJobs: $($request.TotalCount)`n`nFollow it in the Requests tab.", 'Run requested', 'OK', 'Information') | Out-Null
     }
     return $request
+}
+
+function Get-GuiLaunchCatalog {
+    # Catalog of the committed template; the published jobs give the Arguments and Execution.Mode that really run.
+    $catalog = Get-SmartM365InventoryCatalog -SmartInventoryRoot $script:SmartInventoryRoot
+    $published = @{}
+    if ($null -ne $script:Snapshot) { foreach ($job in @($script:Snapshot.Jobs.Jobs)) { $published[[string]$job.Name] = $job } }
+    foreach ($entry in @($catalog.Entries)) {
+        if ($entry.Kind -eq 'Job' -and $published.ContainsKey($entry.Name)) { $entry.Overlay = $published[$entry.Name] }
+    }
+    return $catalog
+}
+
+function Refresh-LaunchView {
+    try {
+        $catalog = Get-GuiLaunchCatalog
+        $script:LaunchCatalog = $catalog
+        $globalMode = [string](Get-SmartM365InventoryGlobalSetting -SmartM365Root $catalog.SmartM365Root -Name 'OnPremExecutionMode')
+        if ([string]::IsNullOrWhiteSpace($globalMode)) { $globalMode = 'LocalCache' }
+        $script:LaunchGlobalMode = $globalMode
+        $script:Controls.OnPremModeText.Text = $globalMode
+        $draft = @{}
+        foreach ($job in @($script:DraftJobs.Jobs)) { $draft[[string]$job.Name] = $job }
+        $jobRows = foreach ($entry in @($catalog.Entries | Where-Object { $_.Kind -eq 'Job' })) {
+            $definition = $entry.Definition
+            $execution = Get-OrchestratorGuiPropertyValue -Object $definition -Name 'Execution' -DefaultValue $null
+            $runtime = [string](Get-OrchestratorGuiPropertyValue -Object $definition -Name 'Runtime' -DefaultValue (Get-OrchestratorGuiPropertyValue -Object $definition -Name 'PowerShellEdition' -DefaultValue 'PowerShell7'))
+            $mode = Resolve-SmartM365InventoryExecutionMode -Entry $entry -Catalog $catalog -DefaultOnPremExecutionMode $globalMode
+            $draftJob = if ($draft.ContainsKey($entry.Name)) { $draft[$entry.Name] } else { $null }
+            $draftMode = [string](Get-OrchestratorGuiPropertyValue -Object (Get-OrchestratorGuiPropertyValue -Object $draftJob -Name 'Execution' -DefaultValue $null) -Name 'Mode' -DefaultValue '')
+            [pscustomobject]@{
+                Name = $entry.Name
+                Group = [string](Get-OrchestratorGuiPropertyValue -Object $draftJob -Name 'Group' -DefaultValue (Get-OrchestratorGuiPropertyValue -Object $definition -Name 'Group' -DefaultValue ''))
+                Enabled = [bool](Get-OrchestratorGuiPropertyValue -Object $draftJob -Name 'Enabled' -DefaultValue $false)
+                Runtime = $runtime
+                OnPremises = $null -ne $execution
+                Mode = $mode.Mode
+                ModeSource = if ($mode.Zone) { '{0}, zone {1}' -f $mode.Source, $mode.Zone } else { $mode.Source }
+                DraftMode = if ($null -eq $execution) { '' } elseif ($draftMode) { $draftMode } else { '(default)' }
+                CacheName = [string](Get-OrchestratorGuiPropertyValue -Object $execution -Name 'CacheName' -DefaultValue '')
+                InManifest = $null -ne $draftJob
+            }
+        }
+        $manualRows = foreach ($entry in @($catalog.Entries | Where-Object { $_.Kind -eq 'Manual' })) {
+            $definition = $entry.Definition
+            $mode = Resolve-SmartM365InventoryExecutionMode -Entry $entry -Catalog $catalog -DefaultOnPremExecutionMode $globalMode
+            [pscustomobject]@{
+                Name = $entry.Name
+                Runtime = [string](Get-OrchestratorGuiPropertyValue -Object $definition -Name 'Runtime' -DefaultValue 'PowerShell7')
+                Mode = $mode.Mode
+                Interactive = [bool](Get-OrchestratorGuiPropertyValue -Object $definition -Name 'Interactive' -DefaultValue $false)
+                RequiresConfirmation = [bool](Get-OrchestratorGuiPropertyValue -Object $definition -Name 'RequiresConfirmation' -DefaultValue $false)
+                Description = [string](Get-OrchestratorGuiPropertyValue -Object $definition -Name 'Description' -DefaultValue '')
+            }
+        }
+        $script:LaunchJobRows = @($jobRows | Sort-Object -Property Name)
+        $script:ManualLaunchRows = @($manualRows | Sort-Object -Property Name)
+        $script:Controls.LaunchJobsGrid.ItemsSource = $script:LaunchJobRows
+        $script:Controls.ManualLaunchesGrid.ItemsSource = $script:ManualLaunchRows
+        Update-SelectedLaunchPreview -Kind Job
+        Update-SelectedLaunchPreview -Kind Manual
+    }
+    catch { Write-GuiException -Context 'Launch catalog refresh failed' -ErrorRecord $_ }
+}
+
+function Get-GuiLaunchPlanText {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    try {
+        $plan = Resolve-SmartM365InventoryLaunch -Catalog $script:LaunchCatalog -Name $Name -Tenant $Tenant -DefaultOnPremExecutionMode $script:LaunchGlobalMode
+        return [pscustomobject]@{ Plan = $plan; Text = (Format-SmartM365InventoryPlan -Plan $plan -Catalog $script:LaunchCatalog) }
+    }
+    catch { return [pscustomobject]@{ Plan = $null; Text = ('Command not resolved: ' + $_.Exception.Message) } }
+}
+
+function Update-SelectedLaunchPreview {
+    param([Parameter(Mandatory = $true)][ValidateSet('Job', 'Manual')][string]$Kind)
+    if ($Kind -eq 'Job') {
+        $row = $script:Controls.LaunchJobsGrid.SelectedItem
+        $script:Controls.RunJobNowButton.IsEnabled = $null -ne $row
+        $script:Controls.RequestJobButton.IsEnabled = $null -ne $row -and [bool]$row.InManifest
+        $script:Controls.JobExecutionModeCombo.IsEnabled = $null -ne $row -and [bool]$row.OnPremises -and [bool]$row.InManifest
+        $script:Controls.ApplyJobExecutionModeButton.IsEnabled = $script:Controls.JobExecutionModeCombo.IsEnabled
+        if ($null -eq $row) { $script:Controls.LaunchJobCommandBox.Text = ''; return }
+        if ($row.OnPremises) { Select-ComboText -Combo $script:Controls.JobExecutionModeCombo -Text ([string]$row.DraftMode) }
+        $script:Controls.LaunchJobCommandBox.Text = (Get-GuiLaunchPlanText -Name ([string]$row.Name)).Text
+        return
+    }
+    $row = $script:Controls.ManualLaunchesGrid.SelectedItem
+    $script:Controls.RunManualLaunchButton.IsEnabled = $null -ne $row
+    $script:Controls.ManualLaunchCommandBox.Text = if ($null -eq $row) { '' } else { (Get-GuiLaunchPlanText -Name ([string]$row.Name)).Text }
+}
+
+function Start-GuiConsoleProcess {
+    # Starts a script in its own console window; the GUI does not wait for it.
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('PowerShell7', 'WindowsPowerShell')][string]$Runtime,
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [string[]]$Arguments = @(),
+        [switch]$KeepOpen,
+        [ValidateSet('Normal', 'Hidden', 'Minimized')][string]$WindowStyle = 'Normal'
+    )
+    $engine = Get-SmartM365InventoryEnginePath -Runtime $Runtime
+    $all = @('-NoProfile', '-ExecutionPolicy', 'Bypass')
+    if ($KeepOpen) { $all += '-NoExit' }
+    $all += @('-File', $ScriptPath) + @($Arguments)
+    $commandLine = (@($all) | ForEach-Object { ConvertTo-SmartM365InventoryCommandLineArgument -Value $_ }) -join ' '
+    $process = Start-Process -FilePath $engine -ArgumentList $commandLine -WindowStyle $WindowStyle -PassThru
+    Write-GuiActivity -Message ("Console started on {0} (PID {1}): {2} {3}" -f $env:COMPUTERNAME, $process.Id, $engine, $commandLine)
+    return $process
+}
+
+function Get-GuiOrchestratorActionCommand {
+    # Same commands as the former Launchers\Orchestrator .cmd files, with the tenant of this GUI.
+    param([Parameter(Mandatory = $true)][ValidateSet('Start', 'Stop', 'Restart', 'FullCollect', 'SendSummary')][string]$Action)
+    $folder = Join-Path $script:SmartInventoryRoot 'Orchestrator'
+    $orchestrator = Join-Path $folder 'SmartM365-Inventory-Orchestrator.ps1'
+    switch ($Action) {
+        'Start' { [pscustomobject]@{ Title = 'Start the orchestrator'; ScriptPath = $orchestrator; Arguments = @('-Tenant', $Tenant, '-Connect'); Icon = 'Question'; KeepOpen = $false
+                Message = "Start a resident orchestrator in a new console on this computer ($env:COMPUTERNAME)?`n`nUse Restart to run it through its scheduled task instead." } }
+        'Stop' { [pscustomobject]@{ Title = 'Stop the orchestrator'; ScriptPath = $orchestrator; Arguments = @('-Tenant', $Tenant, '-Stop', '-StopTimeoutSeconds', '180'); Icon = 'Warning'; KeepOpen = $true
+                Message = "Ask the resident orchestrator of this computer ($env:COMPUTERNAME) to stop cleanly?`n`nIt saves its state and releases its lock; it stops waiting for jobs after 180 seconds." } }
+        'Restart' { [pscustomobject]@{ Title = 'Restart the orchestrator'; ScriptPath = (Join-Path $folder 'Restart-SmartM365-Inventory-Orchestrator.ps1'); Arguments = @('-Tenant', $Tenant); Icon = 'Warning'; KeepOpen = $true
+                Message = "Restart the orchestrator of this computer ($env:COMPUTERNAME)?`n`nIt is stopped cleanly, then its scheduled task is started." } }
+        'FullCollect' { [pscustomobject]@{ Title = 'Full collect'; ScriptPath = (Join-Path $folder 'SmartM365-Inventory-Pipeline.ps1'); Arguments = @('-Tenant', $Tenant, '-Pipeline', 'Full', '-Collect'); Icon = 'Warning'; KeepOpen = $true
+                Message = "Request the full pipeline from the resident orchestrators?`n`nEvery enabled job runs on its elected server with the shared locks and dependency rules. Only one request can be active; follow it in the new console or the Requests tab." } }
+        'SendSummary' { [pscustomobject]@{ Title = 'Send summary'; ScriptPath = $orchestrator; Arguments = @('-Tenant', $Tenant, '-SendExecutionSummary'); Icon = 'Question'; KeepOpen = $true
+                Message = 'Send the execution summary email now? The resident orchestrator and its jobs are not affected.' } }
+    }
+}
+
+function Invoke-GuiOrchestratorAction {
+    param([Parameter(Mandatory = $true)][string]$Action)
+    $command = Get-GuiOrchestratorActionCommand -Action $Action
+    $preview = (@($command.ScriptPath) + @($command.Arguments) | ForEach-Object { ConvertTo-SmartM365InventoryCommandLineArgument -Value $_ }) -join ' '
+    if ([System.Windows.MessageBox]::Show(("{0}`n`nCommand (PowerShell 7):`n{1}" -f $command.Message, $preview), $command.Title, 'YesNo', $command.Icon) -ne 'Yes') { return }
+    [void](Start-GuiConsoleProcess -Runtime PowerShell7 -ScriptPath $command.ScriptPath -Arguments $command.Arguments -KeepOpen:([bool]$command.KeepOpen))
+    $script:Controls.StatusText.Text = "$($command.Title): started in a new console."
+}
+
+function Invoke-GuiLaunch {
+    # Runs a catalog job or a manual entry now on this computer, like SmartInventory.cmd <Name>.
+    param([Parameter(Mandatory = $true)][ValidateSet('Job', 'Manual')][string]$Kind)
+    $row = if ($Kind -eq 'Job') { $script:Controls.LaunchJobsGrid.SelectedItem } else { $script:Controls.ManualLaunchesGrid.SelectedItem }
+    if ($null -eq $row) { throw 'Select an entry first.' }
+    $preview = Get-GuiLaunchPlanText -Name ([string]$row.Name)
+    if ($null -eq $preview.Plan) { throw $preview.Text }
+    $icon = 'Question'
+    $message = "Run '{0}' now on this computer ({1}), outside the orchestrators?`n`n{2}" -f $row.Name, $env:COMPUTERNAME, $preview.Text
+    if ($Kind -eq 'Job') { $message += "`n`nNo election, shared lock or dependency check. Use Request to run it through the orchestrators." }
+    if ($preview.Plan.Interactive) { $message += "`n`nThis entry needs you in the console (interactive sign-in or prompts)." }
+    if ($preview.Plan.RequiresConfirmation) {
+        $icon = 'Warning'
+        $message += "`n`nTHIS ENTRY MODIFIES DATA. The console will also ask you to type WRITE before it starts."
+    }
+    if ([System.Windows.MessageBox]::Show($message, ('Run ' + $row.Name), 'YesNo', $icon) -ne 'Yes') { return }
+    $engineScript = Join-Path $script:SmartInventoryRoot 'Orchestrator\Invoke-SmartM365InventoryJob.ps1'
+    [void](Start-GuiConsoleProcess -Runtime WindowsPowerShell -ScriptPath $engineScript -Arguments @([string]$row.Name, '-Now', '-Tenant', $Tenant) -KeepOpen)
+    Write-GuiActivity -Message ("Run now: {0} ({1}) started on {2}." -f $row.Name, $Kind, $env:COMPUTERNAME) -Level SUCCESS
+    $script:Controls.StatusText.Text = "$($row.Name): started in a new console."
+}
+
+function Set-GuiJobExecutionMode {
+    # Writes Execution.Mode of on-premises jobs in the draft; (default) removes it so OnPremExecutionMode applies.
+    param([Parameter(Mandatory = $true)][string[]]$JobName, [Parameter(Mandatory = $true)][ValidateSet('(default)', 'Direct', 'LocalCache', 'Auto')][string]$Mode)
+    $changed = @()
+    foreach ($name in $JobName) {
+        $job = @($script:DraftJobs.Jobs | Where-Object { [string]$_.Name -eq $name })[0]
+        if ($null -eq $job) { throw "Job '$name' is not in the published jobs configuration." }
+        $execution = Get-OrchestratorGuiPropertyValue -Object $job -Name 'Execution' -DefaultValue $null
+        if ($Mode -eq '(default)') {
+            if ($null -eq $execution) { continue }
+            if ($execution.PSObject.Properties['Mode']) { $execution.PSObject.Properties.Remove('Mode') }
+            if (@($execution.PSObject.Properties).Count -eq 0) { $job.PSObject.Properties.Remove('Execution') }
+        }
+        elseif ($null -eq $execution) { Set-JsonProperty -Object $job -Name 'Execution' -Value ([pscustomobject]@{ Mode = $Mode }) }
+        else { Set-JsonProperty -Object $execution -Name 'Mode' -Value $Mode }
+        $changed += $name
+    }
+    if ($changed.Count) {
+        Write-GuiActivity -Message ("Draft execution mode set to {0} for: {1}. Publish the changes to apply." -f $Mode, ($changed -join ', ')) -Level WARN
+        $script:Controls.StatusText.Text = "Execution mode changed in the draft ($($changed.Count) job(s)); publish to apply."
+    }
+    Refresh-LaunchView
+    return $changed
 }
 
 function Show-FailuresLast24Hours {
@@ -1714,6 +1996,7 @@ function Receive-GuiRefresh {
             $script:DraftCluster = Copy-JsonDocument -Document $script:Snapshot.Cluster
             Update-JobHealth -Runs $result.RecentRuns
             Refresh-PlanningView -Owners $result.Owners
+            Refresh-LaunchView
             $servers = @(Refresh-ServersView -Servers $result.Servers)
             $script:Controls.HistoryServerCombo.ItemsSource = @('All') + @($script:DraftCluster.ExpectedOrchestratorServers)
             $script:Controls.HistoryServerCombo.SelectedIndex = 0
@@ -1782,6 +2065,7 @@ function Refresh-AllViewsSync {
         $script:DraftCluster = Copy-JsonDocument -Document $script:Snapshot.Cluster
         try { Update-JobHealth } catch { $script:HealthByName = @{}; Write-GuiException -Context 'Job health could not be computed' -ErrorRecord $_ }
         Refresh-PlanningView
+        Refresh-LaunchView
         $servers = @(Refresh-ServersView)
         $historyNow = Get-Date
         $historyFrom = $historyNow.AddDays(-7)
@@ -2047,7 +2331,8 @@ foreach ($name in @(
     'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
     'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
     'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
-    'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox'
+    'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
+    'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox'
 )) {
     $script:Controls[$name] = $window.FindName($name)
 }
@@ -2188,6 +2473,48 @@ $script:Controls.StopRunningJobButton.Add_Click({
     try { Request-SelectedRunningJobStop }
     catch { Write-GuiException -Context 'Job stop request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Stop request failed', 'OK', 'Error') | Out-Null }
 })
+$script:Controls.LaunchJobsGrid.Add_SelectionChanged({ try { Update-SelectedLaunchPreview -Kind Job } catch { Write-GuiException -Context 'Job preview failed' -ErrorRecord $_ } })
+$script:Controls.ManualLaunchesGrid.Add_SelectionChanged({ try { Update-SelectedLaunchPreview -Kind Manual } catch { Write-GuiException -Context 'Launch preview failed' -ErrorRecord $_ } })
+$script:Controls.RunJobNowButton.Add_Click({
+    try { Invoke-GuiLaunch -Kind Job }
+    catch { Write-GuiException -Context 'Run now failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Run now failed', 'OK', 'Error') | Out-Null }
+})
+$script:Controls.RunManualLaunchButton.Add_Click({
+    try { Invoke-GuiLaunch -Kind Manual }
+    catch { Write-GuiException -Context 'Manual launch failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Manual launch failed', 'OK', 'Error') | Out-Null }
+})
+$script:Controls.RequestJobButton.Add_Click({
+    try {
+        $row = $script:Controls.LaunchJobsGrid.SelectedItem
+        if ($null -eq $row) { throw 'Select a job first.' }
+        [void](Request-SelectedJobRun -JobName ([string]$row.Name) -IncludeDependencies ([bool]$script:Controls.LaunchIncludeDependenciesCheck.IsChecked))
+    }
+    catch { Write-GuiException -Context 'Run request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Run request failed', 'OK', 'Error') | Out-Null }
+})
+$script:Controls.ApplyJobExecutionModeButton.Add_Click({
+    try {
+        $row = $script:Controls.LaunchJobsGrid.SelectedItem
+        if ($null -eq $row) { throw 'Select an on-premises job first.' }
+        [void](Set-GuiJobExecutionMode -JobName ([string]$row.Name) -Mode (Get-ComboText -Combo $script:Controls.JobExecutionModeCombo))
+    }
+    catch { Write-GuiException -Context 'Execution mode change failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Execution mode', 'OK', 'Error') | Out-Null }
+})
+$script:Controls.ApplyModeToAllOnPremButton.Add_Click({
+    try {
+        $mode = Get-ComboText -Combo $script:Controls.JobExecutionModeCombo
+        if ([string]::IsNullOrWhiteSpace($mode)) { $mode = '(default)' }
+        $names = @($script:LaunchJobRows | Where-Object { $_.OnPremises -and $_.InManifest } | ForEach-Object { [string]$_.Name })
+        if ($names.Count -eq 0) { throw 'No on-premises job in the published configuration.' }
+        if ([System.Windows.MessageBox]::Show(("Set the execution mode {0} in the draft for {1} on-premises job(s)?`n`n{2}`n`nPublish the changes to apply." -f $mode, $names.Count, ($names -join [Environment]::NewLine)), 'Execution mode', 'YesNo', 'Question') -ne 'Yes') { return }
+        [void](Set-GuiJobExecutionMode -JobName $names -Mode $mode)
+    }
+    catch { Write-GuiException -Context 'Execution mode change failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Execution mode', 'OK', 'Error') | Out-Null }
+})
+$script:Controls.OrchestratorStartButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action Start } catch { Write-GuiException -Context 'Orchestrator action Start failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
+$script:Controls.OrchestratorStopButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action Stop } catch { Write-GuiException -Context 'Orchestrator action Stop failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
+$script:Controls.OrchestratorRestartButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action Restart } catch { Write-GuiException -Context 'Orchestrator action Restart failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
+$script:Controls.FullCollectButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action FullCollect } catch { Write-GuiException -Context 'Orchestrator action FullCollect failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
+$script:Controls.SendSummaryButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action SendSummary } catch { Write-GuiException -Context 'Orchestrator action SendSummary failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
 $script:Controls.RequestRunButton.Add_Click({
     try { [void](Request-SelectedJobRun) }
     catch { Write-GuiException -Context 'Run request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Run request failed', 'OK', 'Error') | Out-Null }
@@ -2278,6 +2605,10 @@ if ($SmokeTest) {
 else { Refresh-AllViews }
 Write-GuiActivity -Message ('Startup initial refresh dispatched after {0} ms.' -f $script:StartupClock.ElapsedMilliseconds)
 if ($SmokeTest) {
+    if (@($script:LaunchJobRows).Count -eq 0 -or @($script:ManualLaunchRows).Count -eq 0) { throw 'Operations launch lists are empty.' }
+    $script:Controls.ManualLaunchesGrid.SelectedItem = $script:ManualLaunchRows[0]
+    if (-not $script:Controls.RunManualLaunchButton.IsEnabled -or [string]::IsNullOrWhiteSpace($script:Controls.ManualLaunchCommandBox.Text)) { throw 'Manual launch preview is not displayed.' }
+    foreach ($action in @('Start', 'Stop', 'Restart', 'FullCollect', 'SendSummary')) { if (-not (Test-Path -LiteralPath (Get-GuiOrchestratorActionCommand -Action $action).ScriptPath)) { throw "Orchestrator action script missing: $action" } }
     $planningNames = @($script:PlanningRows | ForEach-Object { [string]$_.Name })
     $sortedPlanningNames = @($planningNames | Sort-Object)
     if (($planningNames -join "`0") -cne ($sortedPlanningNames -join "`0")) { throw 'Planning rows are not sorted by Job ascending.' }

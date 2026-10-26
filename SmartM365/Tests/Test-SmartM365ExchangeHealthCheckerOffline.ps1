@@ -32,7 +32,7 @@ Checker is never executed: process runs use a synthetic stand-in script. Covers:
 - activation config/defaults, explicit false/true switch precedence and disabled report section.
 
 .VERSION
-1.8.0
+1.8.1
 #>
 [CmdletBinding()]
 param([string]$SourceRoot)
@@ -830,8 +830,8 @@ Copy-Item -LiteralPath $env:SMARTM365_FAKE_HC_FIXTURE -Destination (Join-Path $O
 
     # Windows PowerShell 5.1 only: under PowerShell 7 the ScheduledTasks module runs through Windows
     # compatibility and receives CIM sessions deserialized.
-    $launcherText = [IO.File]::ReadAllText((Join-Path $SourceRoot 'SmartInventory/Launchers/OnPremises/Start-SmartM365-Exchange-HealthChecker-ScheduledTask-Installer.cmd'))
-    Assert-HealthChecker ($launcherText -match '"%WINDOWS_POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER_PATH%" -Interactive' -and $launcherText -match 'WindowsPowerShell\\v1\.0\\powershell\.exe' -and $launcherText -notmatch '(?i)pwsh') 'The installer launcher starts Windows PowerShell 5.1, never PowerShell 7.'
+    $catalogEntry = @(([IO.File]::ReadAllText((Join-Path $SourceRoot 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template')) | ConvertFrom-Json).Launches | Where-Object Name -eq 'Exchange-HealthChecker-ScheduledTask-Installer')
+    Assert-HealthChecker ($catalogEntry.Count -eq 1 -and $catalogEntry[0].Runtime -eq 'WindowsPowerShell' -and $catalogEntry[0].Arguments -eq '-Interactive' -and -not $catalogEntry[0].PSObject.Properties['Execution'] -and $catalogEntry[0].ScriptPath -match 'Install-SmartM365-Exchange-HealthCheckerScheduledTask\.ps1$') 'The installer catalog entry starts Windows PowerShell 5.1 in Direct mode, never PowerShell 7.'
     Assert-HealthChecker ($installerText -match "\`$isWindowsPowerShell = \`$PSVersionTable\.PSEdition -eq 'Desktop'" -and $installerText -match 'if \(-not \$isAdministrator -or -not \$isWindowsPowerShell\) \{' -and $installerText -match 'FilePath\s+= \$windowsPowerShellPath') 'The installer restarts itself in Windows PowerShell 5.1 when started from PowerShell 7.'
     $relaunchIf = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -eq '-not $isAdministrator -or -not $isWindowsPowerShell' }, $true)
     $firstCimUse = @($installerAst.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in @('New-HealthCheckerCimSession', 'Register-ScheduledTask', 'Get-Credential') }, $true) | Sort-Object { $_.Extent.StartOffset })[0]

@@ -4,6 +4,7 @@
   "MailPowerBiLogoPath": "Config/Branding/Assets/SmartPowerBI-logo.png",
   "MailPowerBiLinkText": "Click here to open the Power BI dashboard",
   "DefaultTenant": "test",
+  "OnPremExecutionMode": "LocalCache",
   "SmartM365RootPath": ".",
   "WorkspaceRootPath": "{{SmartM365RootPath}}",
   "DataAllRootPath": "{{WorkspaceRootPath}}\\Data\\Tenants\\{{ProfileKey}}\\DATA-ALL",

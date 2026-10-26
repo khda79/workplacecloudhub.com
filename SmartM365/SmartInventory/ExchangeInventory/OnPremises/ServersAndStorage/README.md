@@ -5,7 +5,7 @@ Exchange 2016 on-premises infrastructure and migration readiness inventory for s
 ## Scripts
 
 - `SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1`: inventories Exchange 2016 infrastructure through Exchange Management Shell plus WMI/DCOM only, then renders a full HTML readiness report. Compute/storage inventory and Health Checker task triggering keep their existing WMI/DCOM paths. Certificate reads try the native snap-in first and retry failed targets through a constrained Exchange `/PowerShell/` session; `Get-CimInstance` and remote scriptblocks are not introduced. `New-CimSession` is still DCOM-only for Health Checker task triggering.
-- `Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1`: installs, updates or removes the Health Checker scheduled task on the other Exchange servers (launcher: `Launchers/OnPremises/Start-SmartM365-Exchange-HealthChecker-ScheduledTask-Installer.cmd`).
+- `Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1`: installs, updates or removes the Health Checker scheduled task on the other Exchange servers (manual entry: `SmartInventory.cmd Exchange-HealthChecker-ScheduledTask-Installer`, Windows PowerShell 5.1, Direct).
 - `SmartM365-Exchange-OnPrem-HealthChecker-LocalRunner.ps1`: deployed to each of those servers; runs Health Checker for the local server only.
 - Version 1.6.1 routes each timestamped/current CSV pair through the shared
   atomic exporter. A failed current promotion is terminating and does not replace
@@ -67,10 +67,11 @@ Health Checker requires the existing elevated account and installed remote tasks
 
 `HealthCheckerTimeoutMinutesPerServer` remains independent of activation. Existing local values (including 10 minutes) are preserved; the template default remains 30. Check `Per-server limit: 10 min` in the log. This limits the local child and the collector's wait; remote runners retain their own timeout and may continue after the collector stops waiting. Completing before the deadline does not exercise timeout enforcement.
 
-Direct launcher from PowerShell:
+Run from PowerShell (the job with its arguments, or the manual entry without the optional sections):
 
 ```powershell
-& '<source-root>\SmartInventory\Launchers\OnPremises\Start-SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.cmd'
+& '<source-root>\SmartInventory\SmartInventory.cmd' Exchange2016-Infrastructure-Inventory
+& '<source-root>\SmartInventory\SmartInventory.cmd' Exchange2016-Infrastructure-Inventory-Basic
 # Explicit opt-out when invoking the cached script from Windows PowerShell 5.1:
 & '<cached-script-folder>\SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1' -Tenant prod -IncludeHealthChecker:$false
 ```

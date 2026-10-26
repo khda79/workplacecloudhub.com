@@ -6,7 +6,7 @@ One offline acceptance run for the Exchange A/B/C closure, on both PowerShell en
 Executes only synthetic test scripts in child hosts. Never launches a collector,
 Exchange connection, task, runner, tenant initialization or server command.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param(
@@ -32,7 +32,7 @@ $tests = @(
     'Tests/Test-SmartM365SourceReceiptsOffline.ps1',
     'Tests/Test-SmartM365SourceReceiptReadersOffline.ps1',
     'Tests/Test-SmartM365InventoryLifecycleOffline.ps1',
-    'Tests/Test-SmartM365MailboxLauncherCacheOffline.ps1',
+    'Tests/Test-SmartM365InventoryLaunchOffline.ps1',
     'Tests/Test-SmartM365-JsonWeeklyHistory.ps1',
     'Tests/Test-SmartM365NonGraphCollectorsOffline.ps1',
     'SmartInventory/ExchangeInventory/OnPremises/Mailboxes/Tests/Test-SmartM365-Exchange-MailHtmlRegression.ps1'

@@ -21,9 +21,9 @@ Exchange 2016 local mailbox inventory script with integrated reporting.
 
 ## Launchers
 
-- `SmartM365\SmartInventory\Launchers\OnPremises\Start-SmartM365-Exchange-Local-Mailboxes-Inventory.cmd`: standard production mailbox inventory.
-- `SmartM365\SmartInventory\Launchers\OnPremises\Start-SmartM365-Exchange-Local-Mailboxes-Inventory-OnlyADPermissions.cmd`: AD permission export only (`-OnlyADPermission`).
-- `SmartM365\SmartInventory\Launchers\OnPremises\Start-SmartM365-Exchange-Local-Mailboxes-InventoryWithADPermissions.cmd`: standard inventory with AD permissions (`-IncludeADPermission`).
+- `SmartM365\SmartInventory\SmartInventory.cmd Exchange2016-Local-Mailboxes-Inventory-MailboxesOnly`: standard mailbox inventory without AD permissions.
+- `SmartM365\SmartInventory\SmartInventory.cmd Exchange2016-Local-Mailboxes-OnlyADPermissions`: AD permission export only (`-OnlyADPermission`).
+- `SmartM365\SmartInventory\SmartInventory.cmd Exchange2016-Local-Mailboxes-Inventory`: standard inventory with AD permissions (`-IncludeADPermission`), the orchestrator job.
 ## Configuration
 
 ### Exchange connection mode (1.70)

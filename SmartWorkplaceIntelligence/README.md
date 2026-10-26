@@ -225,7 +225,7 @@ counts in those explanations.
 Update the matching `SmartM365` and `SmartWorkplaceIntelligence` sibling
 folders on the operational share after the reviewed changes have been pushed.
 Request the preparation through
-`SmartM365/SmartInventory/LaunchersByOrchestrator/Request-WorkplaceEvidence-Prepare.cmd`
+`SmartM365\SmartInventory\SmartInventory.cmd WorkplaceEvidence-Prepare -Request`
 on an execution machine. The resident orchestrator retains election,
 dependency, and concurrency control. Do not invoke preparation against a
 synchronized review copy of the data.

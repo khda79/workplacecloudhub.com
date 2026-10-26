@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for the complete SmartInventory Microsoft Graph collector audit.
 .VERSION
-1.0.27
+1.0.28
 #>
 [CmdletBinding()]
 param(
@@ -251,13 +251,14 @@ try {
     }
     Test-OfflineCase 'Compliance canonical detail export is default and uses one launcher' {
         $text=Get-OfflineSourceText $paths.Compliance
-        $launcher=Get-OfflineSourceText 'SmartInventory/Launchers/Cloud/Start-SmartM365-Devices-Compliance-Inventory.cmd'
+        $catalog=Get-OfflineSourceText 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template' | ConvertFrom-Json
+        $complianceJob=@($catalog.Jobs | Where-Object Name -eq 'Intune-Devices-Compliance-Inventory')
         $template=Get-OfflineSourceText 'SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Compliance-Inventory.local.json.template'
         $orchestrator=Get-OfflineSourceText 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template'
         Assert-Offline ($text -match '\[switch\]\$CollectPolicyDetails') 'Compliance collector does not expose the dedicated detail switch.'
         Assert-Offline ($text -match '\[switch\]\$SummaryOnly') 'Compliance collector does not expose the explicit summary-only escape hatch.'
         Assert-Offline ($text -match '\$script:PolicyExportEnabled\s*=\s*-not\s+\$SummaryOnly\.IsPresent') 'Canonical compliance detail export is not enabled by default.'
-        Assert-Offline ($launcher -match '-File\s+"%SCRIPT_DIR%SmartM365-Devices-Compliance-Inventory\.ps1"\s+-Tenant\s+prod\s+-Connect\s+%\*') 'Standard compliance launcher does not run the default complete collection.'
+        Assert-Offline ($complianceJob.Count -eq 1 -and [string]::IsNullOrWhiteSpace([string]$complianceJob[0].Arguments) -and @($complianceJob[0].LegacyLaunchers) -contains 'Launchers\Cloud\Start-SmartM365-Devices-Compliance-Inventory.cmd') 'Standard compliance launch does not run the default complete collection.'
         Assert-Offline (-not (Test-Path -LiteralPath (Join-Path $SourceRoot 'SmartInventory/Launchers/Cloud/Start-SmartM365-Devices-Compliance-Detailed-Inventory.cmd'))) 'The redundant detailed compliance launcher still exists.'
         Assert-Offline ($text -match "reportName\s*=\s*'DevicePolicySettingsComplianceReportV3'") 'Canonical compliance export does not use the qualified setting-level report.'
         Assert-Offline ($text -match '-CanonicalPath\s+\$policyMainCsv' -and $text -match '-TimestampedPath\s+\$policyTsCsv' -and $text -match '-LatestPath\s+\$policyLastCsv') 'Canonical compliance export is not wired to the official DATA-ALL and DATA-LAST paths.'

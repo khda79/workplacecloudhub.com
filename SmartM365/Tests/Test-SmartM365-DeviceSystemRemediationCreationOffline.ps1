@@ -2,7 +2,7 @@
 <#
 Synthetic and local-file checks only. No authentication or Graph mutation.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -14,7 +14,7 @@ $smartM365Root = Join-Path $repoRoot 'SmartM365'
 $deviceRoot = Join-Path $smartM365Root 'SmartInventory/M365Inventory/IntuneInventory/Devices'
 $creatorPath = Join-Path $deviceRoot 'SmartM365-Create-DeviceSystemRemediation.ps1'
 $detectionPath = Join-Path $deviceRoot 'SmartM365-Detect-DeviceSystemInfo.ps1'
-$launcherPath = Join-Path $smartM365Root 'SmartInventory/Launchers/Cloud/Start-SmartM365-Create-DeviceSystemRemediation.cmd'
+$catalogPath = Join-Path $smartM365Root 'SmartInventory/Orchestrator/Orchestrator-Jobs.json.template'
 $checks = 0
 function Assert([bool]$Condition, [string]$Message) { $script:checks++; if (-not $Condition) { throw $Message } }
 
@@ -165,10 +165,9 @@ Assert ($source -match 'Connect-MgGraph -TenantId \$tenantId -Scopes' -and $sour
 Assert ($source -match 'Invoke-MgGraphRequest -Method POST -Uri \$GraphRoot' -and $source -notmatch 'Invoke-MgGraphRequest -Method POST -Uri .*\/assign') 'The creator calls an assignment action.'
 Assert ($source -match '\$GraphRoot/\$createdId/assignments' -and $source -match '\$assignments.Count -ne 0') 'Post-creation zero-assignment verification is missing.'
 Assert ($source -match 'Set-DeviceSystemCollectorPackageId -Path \$collectorConfigPath -PackageId \$packageId') 'Package creation does not register the collector ID.'
-$launcher = Get-Content -LiteralPath $launcherPath -Raw
-Assert ($launcher -match 'SmartM365-Create-DeviceSystemRemediation.ps1' -and $launcher -match '-Tenant prod') 'The production launcher does not target the creator.'
-$launcherScript = [regex]::Match($launcher, 'set "SCRIPT=%~dp0([^\"]+)"').Groups[1].Value
-Assert ([IO.File]::Exists([IO.Path]::GetFullPath((Join-Path (Split-Path $launcherPath -Parent) $launcherScript)))) 'The launcher script path does not resolve.'
+$catalogEntry = @((Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json).Launches | Where-Object Name -eq 'Intune-DeviceSystemRemediation-Create')
+Assert ($catalogEntry.Count -eq 1 -and $catalogEntry[0].Manual -and [string]$catalogEntry[0].ScriptPath -match 'SmartM365-Create-DeviceSystemRemediation\.ps1$') 'The catalog manual entry does not target the creator.'
+Assert ([IO.File]::Exists([IO.Path]::GetFullPath((Join-Path (Join-Path $smartM365Root 'SmartInventory') $catalogEntry[0].ScriptPath)))) 'The catalog script path does not resolve.'
 
 [pscustomobject]@{Passed=$true;Checks=$checks;GraphCalled=$false;GraphMutation=$false;InteractiveAuth=$false} | ConvertTo-Json
 

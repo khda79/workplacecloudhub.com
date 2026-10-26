@@ -8,7 +8,7 @@ on the Exchange on-premises side and on the Exchange Online side, for DAuth and 
 
 - `SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1`: collector, Windows PowerShell 5.1, elevated,
   on an Exchange server. Started by the orchestrator job `Exchange2016-FreeBusy-Check` (Sunday 05:00)
-  or by `Launchers/OnPremises/Start-SmartM365-Exchange-Hybrid-FreeBusy-Inventory.cmd`.
+  or by `SmartInventory.cmd Exchange2016-FreeBusy-Check` (local cache, see the SmartInventory README).
 - `SmartM365-Exchange-Hybrid-FreeBusy-Runner.ps1`: started by the collector in its own process.
 - `ThirdParty/CSS-Exchange/FreeBusyChecker`: the vendored Microsoft script (see its `PROVENANCE.md`).
 

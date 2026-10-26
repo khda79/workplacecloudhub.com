@@ -165,6 +165,20 @@ There is no 100-percent cross-source synchronization requirement. Cross-source
 identity differences can occur between acquisitions, even with this timetable.
 Their qualification policy is separate and is not weakened by a schedule change.
 
+## Launch engine and execution mode
+
+The schedule does not depend on how a job starts. The on-premises jobs
+(`Exchange2016-Local-Mailboxes-Inventory`, `Exchange2016-ProxyAddresses-Check`,
+`Exchange2016-Infrastructure-Inventory`, `Exchange2016-FreeBusy-Check`,
+`Exchange2016-Mailboxes-CalendarPermissions` and the manual SharePoint on-premises
+jobs) run through the catalog engine in Windows PowerShell 5.1, from a local
+cache by default (`OnPremExecutionMode = LocalCache`). Switching to `Direct` or
+`Auto` (see the SmartInventory README, "On-premises execution mode") removes the
+cache copy but changes neither times, dependencies,
+`ConcurrencyKey` nor timeouts. `AD-Inventory`, `AD-HealthCheck` and
+`EXO-QuarantineMessages-Report` run through the engine in PowerShell 7, always
+`Direct`. Every job log states the effective mode.
+
 ## Election fallback duration estimates
 
 These rounded fallback values reflect local acquisition receipts and successful
@@ -201,6 +215,9 @@ does not mix with full collection history.
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365OrchestratorDailyScheduleOffline.ps1
 # Optionally verify the reviewed private jobs file too:
 # ... -AdditionalManifestPath '<absolute local reviewed jobs file>'
+# Launch catalog (scripts, parameters, execution, aliases) and engine parity:
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\SmartInventory\Orchestrator\New-SmartM365-OrchestratorJobLaunchers.ps1 -Check
+powershell -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\Test-SmartM365InventoryLaunchOffline.ps1
 ```
 
 Editing a template does not reschedule existing shared jobs: normal template

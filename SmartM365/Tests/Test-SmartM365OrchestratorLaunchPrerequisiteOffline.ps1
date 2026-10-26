@@ -4,7 +4,7 @@ Offline tests for the orchestrator launch prerequisites: application certificate
 without private key, expiring soon), runtime and tenant data shares, cache, capability withdrawal,
 election exclusion, alerts, recovery and no impact when everything is ready.
 .VERSION
-1.0
+1.1
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -155,6 +155,7 @@ function Send-OrchestratorMail { param($Subject, $HtmlBody, [switch]$IsError) $s
 function Write-FileAtomically { param($Path, $Content) [IO.File]::WriteAllText($Path, $Content) }
 function ConvertTo-HtmlText { param($Text) [Net.WebUtility]::HtmlEncode([string]$Text) }
 function Get-SmartM365ScriptConfigValue { param($Config, $Name, $DefaultValue) $DefaultValue }
+function Get-OrchestratorJobLaunchDefinition { param($Job) $null }
 function Test-SmartM365OrchestratorLaunchPrerequisite { SmartM365.Orchestrator.Distributed\Test-SmartM365OrchestratorLaunchPrerequisite @args -CertificateProvider $global:PrereqTestProvider }
 function Get-SmartM365OrchestratorCachedCertificateReadiness { SmartM365.Orchestrator.Distributed\Get-SmartM365OrchestratorCachedCertificateReadiness @args -CertificateProvider $global:PrereqTestProvider }
 '@

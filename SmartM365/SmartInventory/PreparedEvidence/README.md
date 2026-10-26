@@ -40,13 +40,14 @@ during transfer. Source acquisition age is not reset by preparation.
 
 ## Workplace Intelligence quick start
 
-Cloud launchers under `SmartInventory/Launchers/Cloud` select the existing prod convention:
+Run these catalog entries with `SmartInventory\SmartInventory.cmd <Name>`
+(the tenant comes from `-Tenant`, then `SMARTM365_ORCHESTRATOR_TENANT`, then `DefaultTenant` of `SmartM365.global.local.json`):
 
-- `Test-SmartM365-WorkplaceEvidence-Prepare.cmd`: validate sources and mappings.
-- `Start-SmartM365-WorkplaceEvidence-Prepare.cmd`: normal preparation.
-- `Start-SmartM365-WorkplaceEvidence-Prepare-Offline.cmd`: local preparation
+- `WorkplaceEvidence-Validate`: validate sources and mappings.
+- `WorkplaceEvidence-Prepare`: normal preparation (the orchestrator job).
+- `WorkplaceEvidence-Prepare-Offline`: local preparation
   without SharePoint access or notifications.
-- `Start-SmartM365-WorkplaceEvidence-Transfer.cmd`: transfer an existing validated
+- `WorkplaceEvidence-Transfer`: transfer an existing validated
   batch without collection or CSV generation.
 
 Unlike CMDB validation, Intelligence `-ValidateOnly` reads SharePoint mappings

@@ -322,6 +322,7 @@ function Test-SmartM365OrchestratorJobsDocument {
         if (@($roles).Count -gt 0 -and 'Graph' -notin $capabilities) { $errors.Add("Job '$name': RequiredGraphAppRoles requires Graph.") }
         if ($job.PSObject.Properties['EstimatedDurationMinutes'] -and [double]$job.EstimatedDurationMinutes -le 0) { $errors.Add("Job '$name': EstimatedDurationMinutes must be greater than zero.") }
         if ($job.PSObject.Properties['DependencyMode'] -and $job.DependencyMode -and [string]$job.DependencyMode -notin @('LatestOccurrence', 'FreshSuccess')) { $errors.Add("Job '$name': DependencyMode must be LatestOccurrence or FreshSuccess.") }
+        if ($job.PSObject.Properties['Execution'] -and $null -ne $job.Execution -and $job.Execution.PSObject.Properties['Mode'] -and $job.Execution.Mode -and [string]$job.Execution.Mode -notin @('Direct', 'LocalCache', 'Auto')) { $errors.Add("Job '$name': Execution.Mode must be Direct, LocalCache or Auto.") }
         foreach ($propertyName in @('TimeoutMinutes', 'MaxRetries', 'RetryDelaySeconds', 'MinimumSuccessDurationSeconds', 'DependencyWaitTimeoutMinutes', 'DependencyMaxAgeHours')) {
             if ($job.PSObject.Properties[$propertyName] -and [double]$job.$propertyName -lt 0) { $errors.Add("Job '$name': $propertyName cannot be negative.") }
         }

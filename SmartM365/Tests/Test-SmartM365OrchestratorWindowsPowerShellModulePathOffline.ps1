@@ -15,7 +15,7 @@ the PowerShell 7 module folders (as in the resident orchestrator). Checks:
 - the orchestrator process environment is not changed.
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -74,6 +74,7 @@ function Invoke-SyntheticJob {
         $script:Tenant = 'test'
         $script:Connect = $false
         function script:Get-JobState { param($JobName) $script:JobState }
+        function script:Get-OrchestratorJobLaunchDefinition { param($Job) $null }
         function script:Resolve-OrchestratorJobPath { param($Path) $Path }
         function script:Invoke-OrchestratorAuthenticodeValidation { param($Job, $ScriptFullPath) [pscustomobject]@{ Allowed = $true } }
         function script:ConvertTo-StateTime { param($Value) ([datetime]$Value).ToString('o') }

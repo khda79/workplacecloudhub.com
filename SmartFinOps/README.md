@@ -147,7 +147,7 @@ Both jobs end with code 3 while a source of the Licences report is provisional. 
 Launchers:
 
 - direct: `Start-SmartFinOps-Workplace-Prod.cmd` (Valuation then Report, see below), or `Start-SmartFinOps-Workplace-Valuation-Prod.cmd` and `Start-SmartFinOps-Workplace-Report-Prod.cmd` separately (this folder);
-- through the orchestrators: `SmartM365/SmartInventory/LaunchersByOrchestrator/Request-SmartFinOps-Workplace-Valuation.cmd` and `Request-SmartFinOps-Workplace-Report.cmd` (add `-IncludeDependencies` to collect the sources first).
+- through the orchestrators: `SmartM365\SmartInventory\SmartInventory.cmd SmartFinOps-Workplace-Valuation -Request` and `SmartInventory.cmd SmartFinOps-Workplace-Report -Request` (add `-IncludeDependencies` to collect the sources first).
 
 ## Data location and SharePoint mirror (lot V2.4c)
 

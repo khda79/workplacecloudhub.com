@@ -73,13 +73,13 @@ Microsoft documentation:
 .\SmartM365-PowerBIFabricActivity-Inventory.ps1 -Tenant test -LookbackDays 2 -MaxItems 100
 ```
 
-Production launcher:
+Production run:
 
 ```powershell
-..\..\Launchers\Cloud\Start-SmartM365-PowerBIFabricActivity-Inventory.cmd
+..\..\SmartInventory.cmd M365-PowerBIFabricActivity-Inventory
 ```
 
-The launcher defaults to `-Tenant prod -LookbackDays 28`, locates PowerShell 7 from Program Files or `PATH`, supports UNC execution, and forwards additional arguments to the collector.
+The catalog entry passes `-LookbackDays 28`; the tenant comes from `-Tenant`, then `SMARTM365_ORCHESTRATOR_TENANT`, then `DefaultTenant` of `SmartM365.global.local.json`. The engine locates PowerShell 7 from Program Files or `PATH`, supports UNC execution, and forwards additional arguments to the collector.
 
 Main parameters:
 

@@ -61,9 +61,9 @@ The jobs are enabled in `Orchestrator-Jobs.json.template` at 04:30, 05:00 and
 after tenant-run evidence. Template changes do not publish the live orchestrator
 configuration. Tenant runs and publication remain separate operator actions.
 
-For a direct run on the current host, use the three matching
-`SmartInventory/Launchers/Cloud/Start-SmartM365-Intune*.cmd` launchers.
-They default to tenant `prod`, pass additional script arguments such as
-`-ValidateOnly`, and bypass orchestrator claims and scheduling. Use the
-`LaunchersByOrchestrator/Request-Intune-*.cmd` launchers to request a run
-through the resident orchestrator after the jobs are present in its live manifest.
+For a direct run on the current host, use `SmartInventory.cmd` with the job
+name (`Intune-Configurations-Inventory`, `Intune-ManagedApps-Inventory`,
+`Intune-EnrollmentFailures-Inventory`). It passes additional script arguments such
+as `-ValidateOnly` and bypasses orchestrator claims and scheduling; the tenant comes from `-Tenant`, then `SMARTM365_ORCHESTRATOR_TENANT`, then `DefaultTenant` of `SmartM365.global.local.json`.
+Add `-Request` to run the job through the resident orchestrator after it is present
+in its live manifest.
