@@ -21,11 +21,12 @@
   the tenant email shows licenses by AD domain and by country before section 01 (M365_Licenses_ReportByDomain.csv and
   M365_Licenses_ReportByCountry.csv), and LicenseSummaryDomainMails sends each configured AD domain its own report with a
   workbook limited to its users, in addition to the tenant email. Email-only mode sends the tenant email only, or with
-  LicenseSummaryEmailDomain one AD domain or All domains (1.62).
+  LicenseSummaryEmailDomain one AD domain or All domains (1.62). When a run sends both, the tenant email goes first and the
+  domain emails follow after LicenseSummaryDomainMailDelaySeconds (default 30, 1.63).
   The recovery workbook uses the email style (1.61): an Overview sheet with KPI tiles, recovery by license and sheet links,
   readable headers, AD domain and country columns, colored reasons and dates, print setup and a tenant or domain file name.
 .VERSION
- 1.62
+ 1.63
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -4188,6 +4189,13 @@ function Send-LicensesFocusedSummaryEmail {
     $settings = @($settings | Where-Object { $_.Domain -ceq $key })
     if ($settings.Count -ne 1) { throw "AD domain $key is not an enabled entry of LicenseSummaryDomainMails." }
   }
+  # The tenant email goes first; the domain emails follow after a pause so they arrive as a separate batch.
+  $delay = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicenseSummaryDomainMailDelaySeconds' -DefaultValue 30)
+  if ($delay -lt 0 -or $delay -gt 600) { throw 'LicenseSummaryDomainMailDelaySeconds must be between 0 and 600.' }
+  if ($sent -and -not $Domain -and $settings.Count -gt 0 -and $delay -gt 0) {
+    WriteLog -Message ("Waiting {0} seconds after the tenant license email before the AD domain emails." -f $delay) 'INFO'
+    Start-Sleep -Seconds $delay
+  }
   $failures = [System.Collections.Generic.List[string]]::new()
   foreach ($entry in $settings) {
     try {
@@ -4841,7 +4849,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.62"
+$ScriptVersion = "1.63"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''

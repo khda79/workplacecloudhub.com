@@ -211,7 +211,9 @@ are labeled as tenant-wide. Its workbook lists only the domain users. A configur
 domain with no attributed user, or a report without AD views, receives an explicit
 `N/D` notice without attachment, never an empty report. One domain failure never
 stops the other domains or the tenant email. A full run sends the tenant email
-and every configured domain. Email-only mode sends exactly what is asked (1.62):
+and every configured domain: the tenant email first, then, when it was sent, a
+pause of `LicenseSummaryDomainMailDelaySeconds` (default 30, 0 to 600) before the
+domain emails (1.63). Email-only mode sends exactly what is asked (1.62):
 `-SendLicenseSummaryEmailOnly` alone sends the tenant email only;
 `-LicenseSummaryEmailDomain <domain>` sends only that domain and
 `-LicenseSummaryEmailDomain All` every enabled domain without the tenant email.

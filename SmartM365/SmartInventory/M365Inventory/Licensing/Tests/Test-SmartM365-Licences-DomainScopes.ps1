@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license views by AD domain and country and the per-domain license summary emails.
 .VERSION
-1.2.0
+1.3.0
 #>
 
 [CmdletBinding()]
@@ -52,6 +52,9 @@ function Get-ScriptLocalConfigValue {
 function Test-SmartM365MaxItemsMode { return $false }
 $script:Warnings = [System.Collections.Generic.List[string]]::new()
 function WriteLog { param([string]$Message, [string]$Level) if ($Level -eq 'WARNING') { $script:Warnings.Add($Message) } }
+# Records the pause between the tenant email and the domain emails instead of waiting.
+$script:Sleeps = [System.Collections.Generic.List[int]]::new()
+function Start-Sleep { param([int]$Seconds) $script:Sleeps.Add($Seconds) }
 function New-SmartM365EmailBody {
   param([string]$Title, [string]$Category, [string]$HostName, [string]$GeneratedAt, [string]$BodyHtml, [string]$Footer)
   return "<html><body><header>$Title</header><main>$BodyHtml</main><footer>$Footer</footer></body></html>"
@@ -239,6 +242,7 @@ try {
   Check ((Get-LicensesDomainMailStatePath -Path $statePath -Domain $alpha) -like '*M365_Licenses_SummaryEmail_SendState.alpha.example.invalid.json.txt') 'Domain send state sits next to the tenant state'
   $sent = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath
   Check ($sent -and $script:SentMail.Count -eq 4) 'Tenant mail plus three enabled domain mails'
+  Check (($script:Sleeps -join ',') -eq '30' -and $script:SentMail[0].To -eq 'reports@example.invalid') 'Tenant mail first, then a 30 second pause before the domain mails'
   $tenantMail = $script:SentMail[0]
   Check ($tenantMail.To -eq 'reports@example.invalid' -and -not $tenantMail.CcBound -and $tenantMail.Subject -eq 'Microsoft 365 license overview and recovery') 'Tenant mail keeps its recipients and the global Cc'
   $tablesAt = $tenantMail.BodyHtml.IndexOf('Licenses by AD domain and country')
@@ -274,6 +278,7 @@ try {
 
   $sentAgain = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath
   Check (-not $sentAgain -and $script:SentMail.Count -eq 4) 'Each mail is sent once per Paris day'
+  Check ($script:Sleeps.Count -eq 1) 'No pause when the tenant mail was not sent'
   Remove-Item -LiteralPath (Get-LicensesDomainMailStatePath -Path $statePath -Domain $beta)
   [void](Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath)
   Check ($script:SentMail.Count -eq 5 -and $script:SentMail[4].To -eq 'beta@example.invalid') 'Domain send states are independent of each other and of the tenant'
@@ -282,6 +287,12 @@ try {
   $tenantOnly = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -ForceLicenseSummaryEmail -TenantOnly
   Check ($tenantOnly -and $script:SentMail.Count -eq 7 -and $script:SentMail[6].To -eq 'reports@example.invalid') 'Email-only mode without a domain sends the tenant mail only'
   $allDomains = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -ForceLicenseSummaryEmail -Domain 'All' -TenantOnly:$false
+  Check ($script:Sleeps.Count -eq 1) 'No pause for a single domain, the tenant mail only or All domains'
+  $script:ScriptLocalConfig.LicenseSummaryDomainMailDelaySeconds = 601
+  $threw = $false
+  try { Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -Domain $beta | Out-Null } catch { $threw = $_.Exception.Message -like '*between 0 and 600*' }
+  Check $threw 'The pause is bounded to 600 seconds'
+  $script:ScriptLocalConfig.Remove('LicenseSummaryDomainMailDelaySeconds')
   Check ($allDomains -and $script:SentMail.Count -eq 10 -and @($script:SentMail[7..9] | Where-Object To -eq 'reports@example.invalid').Count -eq 0) 'Domain All sends every enabled domain without the tenant mail'
   $threw = $false
   try { Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath -Manual -Domain 'off.example.invalid' | Out-Null } catch { $threw = $_.Exception.Message -like '*not an enabled entry*' }
