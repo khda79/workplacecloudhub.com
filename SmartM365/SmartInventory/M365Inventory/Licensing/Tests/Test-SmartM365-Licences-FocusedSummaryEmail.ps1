@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license overview and recovery email.
 .VERSION
-1.1.4
+1.1.5
 #>
 
 [CmdletBinding()]
@@ -63,7 +63,7 @@ function Send-SmartM365Mail {
   param([string]$From, [string]$To, [string]$Subject, [string]$BodyHtml, [string]$MailPurpose, [string[]]$Attachments, [switch]$AllowAttachments, [switch]$SuppressAttachmentLinks)
   if ($script:FailMail) { throw 'Simulated mail transport failure.' }
   if (-not $AllowAttachments -or -not $SuppressAttachmentLinks -or $Attachments.Count -ne 1 -or -not (Test-Path -LiteralPath $Attachments[0])) { throw 'Recovery workbook was not attached privately.' }
-  $bookSummary = @(Import-Excel -Path $Attachments[0] -WorksheetName Summary)
+  $bookSummary = @(Import-Excel -Path $Attachments[0] -WorksheetName Overview -StartRow 14 -EndRow 18 -StartColumn 2 -EndColumn 8)
   $bookCandidates = @(Import-Excel -Path $Attachments[0] -WorksheetName 'Recovery candidates' -WarningAction SilentlyContinue)
   $bookDowngrade = @(Import-Excel -Path $Attachments[0] -WorksheetName 'E3 to F3 review' -WarningAction SilentlyContinue)
   $bookDates = @{}
@@ -572,12 +572,12 @@ try {
   if ($script:SentMail[0].BodyHtml -notmatch [regex]::Escape("Snapshot: $($reportSnapshot.SnapshotId)")) { throw 'Email does not identify its Power BI snapshot.' }
   Assert-Equal $script:SentMail[0].BookCandidates.Count 4 'Workbook row count matches recovery totals'
   Assert-Equal @($script:SentMail[0].BookCandidates | Where-Object License -eq 'Microsoft 365 E3').Count 2 'Workbook E3 rows match the email KPI'
-  Assert-Equal @($script:SentMail[0].BookSummary | Where-Object License -eq 'Microsoft 365 E3')[0].RecoveryCandidates 2 'Workbook Summary E3 total'
-  Assert-Equal @($script:SentMail[0].BookSummary | Where-Object License -eq 'Microsoft 365 E3')[0].E3toF3ReviewCandidates 1 'Workbook Summary E3 review total'
+  Assert-Equal @($script:SentMail[0].BookSummary | Where-Object License -eq 'Microsoft 365 E3')[0].'Recovery candidates' 2 'Workbook Summary E3 total'
+  Assert-Equal @($script:SentMail[0].BookSummary | Where-Object License -eq 'Microsoft 365 E3')[0].'E3 to F3 review' 1 'Workbook Summary E3 review total'
   Assert-Equal $script:SentMail[0].BookDowngrade.Count 1 'Workbook E3 to F3 rows match the email KPI'
-  Assert-Equal $script:SentMail[0].BookDowngrade[0].UserId 'u6' 'Workbook E3 to F3 review identity'
-  Assert-Equal $script:SentMail[0].BookDowngrade[0].MailboxSizeGB ([decimal]1.4) 'Workbook E3 to F3 review mailbox size'
-  Assert-Equal $script:SentMail[0].BookDowngrade[0].OneDriveUsedBytes 1073741824 'Workbook E3 to F3 review exact OneDrive bytes'
+  Assert-Equal $script:SentMail[0].BookDowngrade[0].'User ID' 'u6' 'Workbook E3 to F3 review identity'
+  Assert-Equal $script:SentMail[0].BookDowngrade[0].'Mailbox (GB)' ([decimal]1.4) 'Workbook E3 to F3 review mailbox size'
+  Assert-Equal $script:SentMail[0].BookDowngrade[0].'OneDrive (bytes)' 1073741824 'Workbook E3 to F3 review exact OneDrive bytes'
   $bookU2 = $script:SentMail[0].BookDates['u2']
   Assert-Equal ([datetime]::FromOADate([double]$bookU2.AdValue)).ToString('yyyy-MM-dd') $old 'Workbook has AD activity date'
   Assert-Equal ([datetime]::FromOADate([double]$bookU2.M365Value)).ToString('yyyy-MM-dd') $old 'Workbook has M365 activity date'
@@ -622,7 +622,7 @@ try {
   $emptyReviewRows = @(Import-Excel -Path $emptyReviewPath -WorksheetName 'E3 to F3 review' -WarningAction SilentlyContinue)
   Assert-Equal $emptyReviewRows.Count 0 'Empty E3 to F3 review sheet has no candidate rows'
   $emptyPackage = Open-ExcelPackage -Path $emptyReviewPath
-  try { Assert-Equal $emptyPackage.Workbook.Worksheets['E3 to F3 review'].Cells[1,1].Text 'UserId' 'Empty E3 to F3 review sheet retains headers' }
+  try { Assert-Equal $emptyPackage.Workbook.Worksheets['E3 to F3 review'].Cells[1,1].Text 'User ID' 'Empty E3 to F3 review sheet retains headers' }
   finally { $emptyPackage.Dispose() }
   Remove-Item -LiteralPath $emptyReviewPath -Force
   $oneDriveRows[0].'Storage Used (Byte)' = ''

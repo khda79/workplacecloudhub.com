@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for failed license assignments in the mail and Power BI source.
 .VERSION
-1.0.2
+1.0.3
 #>
 
 [CmdletBinding()]
@@ -21,7 +21,7 @@ Import-Module -Name $corePath -Force -ErrorAction Stop
 function Initialize-SmartM365ImportExcel {
   SmartM365.Core\Initialize-SmartM365ImportExcel -CheckOnly | Out-Null
 }
-$names = @('Get-LicensesSuiteProduct','Get-LicensesOptionalProperty','Get-LicensesCsvSource', 'Get-LicensesPublicationPath','Import-LicensesSourceCsv','Read-LicensesIndexedSource','Get-LicensesAssignmentIssues','Get-LicensesAlertSummary','New-LicensesRecoveryWorkbook','Publish-LicensesReportCsv')
+$names = @('Get-LicensesSuiteProduct','Get-LicensesOptionalProperty','Get-LicensesCsvSource', 'Get-LicensesPublicationPath','Import-LicensesSourceCsv','Read-LicensesIndexedSource','Get-LicensesAssignmentIssues','Get-LicensesAlertSummary','Format-LicensesMetric','New-LicensesRecoveryWorkbook','Publish-LicensesReportCsv')
 foreach ($name in $names) {
   $definition = $ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
   if (-not $definition) { throw "Missing function: $name" }
@@ -108,7 +108,7 @@ try {
   Assert-Equal @(Import-Excel -Path $book -WorksheetName 'Awaiting licenses').Count 1 'Workbook awaiting sheet'
   Assert-Equal @(Import-Excel -Path $book -WorksheetName 'Licensing errors').Count 4 'Workbook errors sheet'
   $excelErrors = @(Import-Excel -Path $book -WorksheetName 'Licensing errors')
-  Assert-Equal @($excelErrors | Where-Object UserId -eq 'u2')[0].DisplayName "'=2+2" 'Workbook formula text is escaped'
+  Assert-Equal @($excelErrors | Where-Object 'User ID' -eq 'u2')[0].'Display name' "'=2+2" 'Workbook formula text is escaped'
   $package = Open-ExcelPackage -Path $book -ErrorAction Stop
   try {
     $sheet = $package.Workbook.Worksheets['Awaiting licenses']
@@ -116,9 +116,9 @@ try {
     Assert-Equal $sheet.Cells[2,14].Style.Numberformat.Format 'yyyy-mm-dd hh:mm:ss' 'Assignment update date format'
   }
   finally { $package.Dispose() }
-  $bookSummary = @(Import-Excel -Path $book -WorksheetName Summary)
-  Assert-Equal $bookSummary[1].AwaitingLicense 1 'Workbook F3 waiting KPI'
-  Assert-Equal $bookSummary[1].LicensingErrors 3 'Workbook F3 error KPI'
+  $bookSummary = @(Import-Excel -Path $book -WorksheetName Overview -StartRow 14 -EndRow 18 -StartColumn 2 -EndColumn 8)
+  Assert-Equal $bookSummary[1].'Awaiting license' 1 'Workbook F3 waiting KPI'
+  Assert-Equal $bookSummary[1].'Licensing errors' 3 'Workbook F3 error KPI'
 
   $snapshotId = [guid]::NewGuid().ToString('N')
   $snapshot = [pscustomobject]@{

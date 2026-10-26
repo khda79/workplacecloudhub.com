@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license views by AD domain and country and the per-domain license summary emails.
 .VERSION
-1.0.0
+1.1.0
 #>
 
 [CmdletBinding()]
@@ -61,13 +61,30 @@ function Send-SmartM365Mail {
   param([string]$From, [string]$To, [string]$Cc, [string]$Subject, [string]$BodyHtml, [string]$MailPurpose, [string[]]$Attachments, [switch]$AllowAttachments, [switch]$SuppressAttachmentLinks)
   $candidates = @()
   $downgrade = @()
+  $book = $null
   if ($Attachments) {
     if (-not $AllowAttachments -or -not $SuppressAttachmentLinks -or $Attachments.Count -ne 1) { throw 'Recovery workbook was not attached privately.' }
     $candidates = @(Import-Excel -Path $Attachments[0] -WorksheetName 'Recovery candidates' -WarningAction SilentlyContinue)
     $downgrade = @(Import-Excel -Path $Attachments[0] -WorksheetName 'E3 to F3 review' -WarningAction SilentlyContinue)
+    $package = Open-ExcelPackage -Path $Attachments[0] -ErrorAction Stop
+    try {
+      $sheet = $package.Workbook.Worksheets['Recovery candidates']
+      $overview = $package.Workbook.Worksheets['Overview']
+      $book = [pscustomobject]@{
+        Name = [IO.Path]::GetFileName($Attachments[0]); Folder = [IO.Path]::GetDirectoryName($Attachments[0])
+        Sheets = @($package.Workbook.Worksheets | ForEach-Object Name)
+        Headers = @(for ($c = 1; $c -le $sheet.Dimension.End.Column; $c++) { [string]$sheet.Cells[1, $c].Text })
+        Rules = @($sheet.ConditionalFormatting).Count
+        Links = @($overview.Cells | Where-Object { $_.Hyperlink }).Count
+        Title = [string]$overview.Cells['B3'].Text; Scope = [string]$overview.Cells['B4'].Text
+        HeaderFill = [string]$sheet.Cells[1, 1].Style.Fill.BackgroundColor.Rgb
+        RepeatRows = [string]$sheet.PrinterSettings.RepeatRows.Address; Landscape = $sheet.PrinterSettings.Orientation -eq [OfficeOpenXml.eOrientation]::Landscape
+      }
+    }
+    finally { $package.Dispose() }
   }
   $script:SentMail.Add([pscustomobject]@{ From=$From; To=$To; Cc=$Cc; CcBound=$PSBoundParameters.ContainsKey('Cc'); Subject=$Subject; BodyHtml=$BodyHtml
-    MailPurpose=$MailPurpose; HasAttachment=[bool]$Attachments; Candidates=$candidates; Downgrade=$downgrade }) | Out-Null
+    MailPurpose=$MailPurpose; HasAttachment=[bool]$Attachments; Candidates=$candidates; Downgrade=$downgrade; Book=$book }) | Out-Null
 }
 function Update-TestLicensesReceipt {
   param([Parameter(Mandatory)][string]$Folder, [Parameter(Mandatory)][string[]]$CsvPaths)
@@ -233,14 +250,27 @@ try {
   Check ($alphaMail.CcBound -and $alphaMail.Cc -eq 'alpha-cc@example.invalid' -and $alphaMail.Subject -ceq "Microsoft 365 license overview and recovery - $alpha") 'Alpha mail uses its own recipients and subject'
   Check ($alphaMail.BodyHtml -match "Scope: AD domain $([regex]::Escape($alpha))" -and $alphaMail.BodyHtml -match 'Assigned users in domain' -and $alphaMail.BodyHtml -match 'Tenant enabled units') 'Alpha mail states its scope and tenant-wide units'
   Check ($alphaMail.BodyHtml -notmatch 'Licenses by AD domain and country') 'Domain tables are in the tenant mail only'
-  Check ($alphaMail.Candidates.Count -eq 1 -and $alphaMail.Candidates[0].UserId -eq 'a1') 'Alpha workbook lists only alpha recovery candidates'
-  Check ($alphaMail.BodyHtml -notmatch 'b1@example\.invalid|c1@example\.invalid' -and @($alphaMail.Candidates | Where-Object { $_.UserPrincipalName -notlike 'a*' }).Count -eq 0) 'No user of another domain reaches the alpha mail'
+  Check ($alphaMail.Candidates.Count -eq 1 -and $alphaMail.Candidates[0].'User ID' -eq 'a1') 'Alpha workbook lists only alpha recovery candidates'
+  Check ($alphaMail.BodyHtml -notmatch 'b1@example\.invalid|c1@example\.invalid' -and @($alphaMail.Candidates | Where-Object { $_.'User principal name' -notlike 'a*' }).Count -eq 0) 'No user of another domain reaches the alpha mail'
   $betaMail = @($script:SentMail | Where-Object To -eq 'beta@example.invalid')[0]
-  Check ($betaMail.CcBound -and $betaMail.Cc -eq '' -and $betaMail.Candidates.Count -eq 1 -and $betaMail.Candidates[0].UserId -eq 'b1') 'Beta mail and workbook are limited to beta'
+  Check ($betaMail.CcBound -and $betaMail.Cc -eq '' -and $betaMail.Candidates.Count -eq 1 -and $betaMail.Candidates[0].'User ID' -eq 'b1') 'Beta mail and workbook are limited to beta'
   $missingMail = @($script:SentMail | Where-Object To -eq 'missing@example.invalid')[0]
   Check ($missingMail.Subject -like '* - missing.example.invalid - N/D' -and -not $missingMail.HasAttachment -and $missingMail.BodyHtml -match 'no licensed or mailbox user') 'A configured domain without data receives an explicit N/D notice'
   Check (@($script:SentMail | Where-Object To -eq 'off@example.invalid').Count -eq 0) 'Disabled domain entry sends nothing'
   Check (Test-Path -LiteralPath (Get-LicensesDomainMailStatePath -Path $statePath -Domain $alpha)) 'Alpha send state is written'
+
+  # Workbook in the email style: Overview first, readable headers, scope columns, colors, links, print setup, readable name.
+  $today = Get-Date -Format 'yyyyMMdd'
+  $tenantBook = $tenantMail.Book
+  Check ($tenantBook.Name -eq "M365_Licenses_Recovery_prod_$today.xlsx" -and $alphaMail.Book.Name -eq "M365_Licenses_Recovery_$($alpha)_$today.xlsx") 'Attachment names carry the tenant or the domain and the date'
+  Check (-not (Test-Path -LiteralPath $tenantBook.Folder)) 'Temporary attachment folder is removed after sending'
+  Check (($tenantBook.Sheets -join '|') -eq 'Overview|Recovery candidates|E3 to F3 review|Awaiting licenses|Licensing errors') 'Overview is the first of five sheets'
+  Check ($tenantBook.Title -eq 'License recovery workbook' -and $tenantBook.Scope -like 'example.invalid*Snapshot*' -and $alphaMail.Book.Scope -like "AD domain $alpha*") 'Overview header names the scope and the snapshot'
+  Check ($tenantBook.Headers -contains 'AD domain' -and $tenantBook.Headers -contains 'Country' -and $tenantBook.Headers -contains 'Last AD logon') 'Tenant workbook has readable headers with AD domain and country'
+  Check ($alphaMail.Book.Headers -notcontains 'AD domain' -and $alphaMail.Book.Headers -contains 'Country') 'Domain workbook keeps the country but not its own domain'
+  Check (@($tenantMail.Candidates | Where-Object { $_.'User ID' -eq 'c1' })[0].'AD domain' -eq 'Cloud-only (no AD account)' -and @($tenantMail.Candidates | Where-Object { $_.'User ID' -eq 'b1' })[0].Country -eq 'Spain') 'Candidate rows carry their AD domain and country'
+  Check ($tenantBook.Rules -ge 6 -and $tenantBook.Links -eq 4) 'Recovery reasons, Intune PC, old dates and banding are colored; Overview links every sheet'
+  Check ($tenantBook.HeaderFill -match 'EAF1F8$' -and $tenantBook.Landscape -and $tenantBook.RepeatRows -match '1:\$?1') 'Headers use the email color and pages print landscape with repeated headers'
 
   $sentAgain = Send-LicensesFocusedSummaryEmail -CsvFolderPath $testRoot -ExpectedTenantKey 'prod' -MailStatePath $statePath
   Check (-not $sentAgain -and $script:SentMail.Count -eq 4) 'Each mail is sent once per Paris day'

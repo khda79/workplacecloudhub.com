@@ -214,8 +214,21 @@ stops the other domains or the tenant email. In email-only mode,
 `-LicenseSummaryEmailDomain <domain>` sends only that domain (with
 `-ForceLicenseSummaryEmail` to resend it the same day).
 
-The attached recovery workbook includes `LastAdActivityDate` from the AD
-`LastLogonDate` export and `LastM365ActivityDate` from the M365 active-user
+The attached recovery workbook (1.61) follows the email style. It is named
+`M365_Licenses_Recovery_<tenant or AD domain>_<yyyyMMdd>.xlsx` and opens on an
+`Overview` sheet: the email header (scope and snapshot), KPI tiles (recovery E5,
+E3, F3/F1, E3-to-F3 review, awaiting capacity, licensing errors), the recovery by
+license table that reconciles with the email, links to every sheet and a reminder
+that these are indicators, not removals. The `Recovery candidates`, `E3 to F3
+review`, `Awaiting licenses` and `Licensing errors` sheets are Excel tables from
+A1 with readable headers, fixed widths, banded rows that survive a sort, `AD
+domain` and `Country` columns when the report has its AD views (a domain workbook
+keeps only `Country`), recovery reasons colored by type (disabled, no activity,
+shared mailbox), a highlighted primary Intune PC, activity dates older than 90 days
+greyed, data bars on mailbox and OneDrive sizes, and a landscape print setup with
+repeated headers and a scope and snapshot footer.
+The recovery sheet includes `Last AD logon` from the AD
+`LastLogonDate` export and `Last M365 activity` from the M365 active-user
 activity report. Both are Excel date values displayed as `yyyy-mm-dd`, so they
 can be sorted chronologically. An empty cell means the date could not be
 qualified; identified shared mailboxes have empty date cells. AD last logon is

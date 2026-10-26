@@ -21,8 +21,10 @@
   the tenant email shows licenses by AD domain and by country before section 01 (M365_Licenses_ReportByDomain.csv and
   M365_Licenses_ReportByCountry.csv), and LicenseSummaryDomainMails sends each configured AD domain its own report with a
   workbook limited to its users, in addition to the tenant email. LicenseSummaryEmailDomain resends one domain in email-only mode.
+  The recovery workbook uses the email style (1.61): an Overview sheet with KPI tiles, recovery by license and sheet links,
+  readable headers, AD domain and country columns, colored reasons and dates, print setup and a tenant or domain file name.
 .VERSION
- 1.60
+ 1.61
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -2070,7 +2072,12 @@ function New-LicensesRecoveryWorkbook {
     [Parameter(Mandatory)][object[]]$SummaryRows,
     [AllowNull()]$Usage,
     [AllowNull()]$AssignmentIssues,
-    [Parameter(Mandatory)][string]$CollectedAtUtc
+    [Parameter(Mandatory)][string]$CollectedAtUtc,
+    [string]$ScopeLabel = '',
+    [string]$ScopeDomain = '',
+    [string]$SnapshotId = '',
+    # UserId -> AD domain and country; adds those columns when the report carries its AD views.
+    [AllowNull()][System.Collections.IDictionary]$UserScopes
   )
 
   Initialize-SmartM365ImportExcel | Out-Null
@@ -2091,133 +2098,343 @@ function New-LicensesRecoveryWorkbook {
     if ($available -and $expected -ne $actual) {
       throw ("Recovery detail count differs from the email KPI for {0}: {1} versus {2}." -f $product.Product,$actual,$expected)
     }
-    [pscustomobject]@{
-      License = $product.Product
-      RecoveryCandidates = if ($available) { $expected } else { 'N/D' }
-      UnknownUsers = if ($available) { [long]$metric.Counts.RecoveryUnknown } else { 'N/D' }
-      E3toF3ReviewCandidates = if ($product.Product -ne 'Microsoft 365 E3') { 'N/A' } elseif ($downgradeReview -and $downgradeReview.Available) { [long]$downgradeReview.Candidates } else { 'N/D' }
-      AwaitingLicense = if ($AssignmentIssues -and $AssignmentIssues.Available) { [long]$AssignmentIssues.Counts[$product.Product].CapacityWait } else { 'N/D' }
-      LicensingErrors = if ($AssignmentIssues -and $AssignmentIssues.Available) { [long]$AssignmentIssues.Counts[$product.Product].OtherErrors } else { 'N/D' }
-      Qualification = if (-not $available) { 'Source not qualified' } else { 'Qualified' }
-      LicenseSnapshotUtc = $CollectedAtUtc
+    [ordered]@{
+      'License' = $product.Product
+      'Recovery candidates' = if ($available) { $expected } else { 'N/D' }
+      'Not qualified' = if ($available) { [long]$metric.Counts.RecoveryUnknown } else { 'N/D' }
+      'E3 to F3 review' = if ($product.Product -ne 'Microsoft 365 E3') { 'N/A' } elseif ($downgradeReview -and $downgradeReview.Available) { [long]$downgradeReview.Candidates } else { 'N/D' }
+      'Awaiting license' = if ($AssignmentIssues -and $AssignmentIssues.Available) { [long]$AssignmentIssues.Counts[$product.Product].CapacityWait } else { 'N/D' }
+      'Licensing errors' = if ($AssignmentIssues -and $AssignmentIssues.Available) { [long]$AssignmentIssues.Counts[$product.Product].OtherErrors } else { 'N/D' }
+      'Qualification' = if (-not $available) { 'Source not qualified' } else { 'Qualified' }
     }
   }
-  $summary | Export-Excel -Path $Path -WorksheetName 'Summary' -TableName 'LicenseRecoverySummary' -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter -ErrorAction Stop
-  if ($details.Count -gt 0) {
-    $safeDetails = foreach ($item in ($details | Sort-Object License,UserPrincipalName,UserId)) {
-      $safeUpn = [string]$item.UserPrincipalName
-      $safeDisplayName = [string]$item.DisplayName
-      if ($safeUpn -match '^\s*[=+\-@]') { $safeUpn = "'$safeUpn" }
-      if ($safeDisplayName -match '^\s*[=+\-@]') { $safeDisplayName = "'$safeDisplayName" }
-      $adDateText = ([string]$item.LastAdActivityDate).Trim()
-      $m365DateText = ([string]$item.LastM365ActivityDate).Trim()
-      [pscustomobject]@{
-        License = $item.License
-        UserId = $item.UserId
-        UserPrincipalName = $safeUpn
-        DisplayName = $safeDisplayName
-        RecoveryReason = $item.RecoveryReason
-        LastAdActivityDate = if ($adDateText -and $adDateText -ne 'N/D') { [datetime]::ParseExact($adDateText,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture) } else { $null }
-        LastM365ActivityDate = if ($m365DateText -and $m365DateText -ne 'N/D') { [datetime]::ParseExact($m365DateText,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture) } else { $null }
-        PrimaryOnIntuneWindowsPc = $item.PrimaryOnIntuneWindowsPc
-        TargetSuites = $item.TargetSuites
+
+  # Email palette: navy title, slate text, teal accent, blue-grey table headers and borders.
+  $color = { param([string]$Hex) $value = [Convert]::ToInt32($Hex.TrimStart('#'), 16); [System.Drawing.Color]::FromArgb(255, ($value -shr 16) -band 255, ($value -shr 8) -band 255, $value -band 255) }
+  $palette = @{ Navy='#0f172a'; Text='#334155'; Muted='#64748b'; Teal='#0f766e'; Head='#eaf1f8'; HeadBorder='#cbd5e1'; Row='#e2e8f0'; Band='#f8fafc'; Panel='#eff6f8'; PanelBorder='#cbdfe2'; Link='#2563eb' }
+  $fontName = 'Segoe UI'
+  $setFill = { param($Range, [string]$Hex) $Range.Style.Fill.PatternType = [OfficeOpenXml.Style.ExcelFillStyle]::Solid; $Range.Style.Fill.BackgroundColor.SetColor((& $color $Hex)) }
+  $setFont = { param($Range, [double]$Size, [string]$Hex, [bool]$Bold) $Range.Style.Font.Name = $fontName; $Range.Style.Font.Size = $Size; $Range.Style.Font.Color.SetColor((& $color $Hex)); $Range.Style.Font.Bold = $Bold }
+  $safeText = { param($Value) $text = [string]$Value; if ($text -match '^\s*[=+\-@]') { "'$text" } else { $text } }
+  $scopeLookup = { param($UserId) $key = ([string]$UserId).Trim().ToLowerInvariant(); if ($UserScopes -and $key -and $UserScopes.Contains($key)) { $UserScopes[$key] } else { $null } }
+  $withDomain = [bool]($UserScopes -and -not $ScopeDomain)
+  $withCountry = [bool]$UserScopes
+  $scopeColumns = {
+    param($UserId)
+    $scope = & $scopeLookup $UserId
+    $values = [ordered]@{}
+    if ($withDomain) { $values['AD domain'] = if ($scope) { [string]$scope.Domain } else { 'N/D' } }
+    if ($withCountry) { $values['Country'] = if ($scope) { [string]$scope.Country } else { 'N/D' } }
+    return $values
+  }
+  $collected = [datetimeoffset]::MinValue
+  $collectedText = if ([datetimeoffset]::TryParse($CollectedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$collected)) { $collected.ToUniversalTime().ToString('yyyy-MM-dd HH:mm') } else { $CollectedAtUtc }
+  $snapshotText = if ($SnapshotId) { 'Snapshot {0} UTC ({1})' -f $collectedText, $SnapshotId } else { 'Snapshot {0} UTC' -f $collectedText }
+  $scopeText = if ($ScopeDomain) { 'AD domain {0}' -f $ScopeDomain } elseif ($ScopeLabel) { $ScopeLabel } else { 'Tenant' }
+
+  # Data sheets: one Excel table from A1 so sorting and filtering stay native; banding survives a sort.
+  $writeSheet = {
+    param($Package, [string]$Name, [string]$TableName, [object[]]$Columns, [object[]]$Rows, [string]$TabHex)
+    $sheet = $Package.Workbook.Worksheets.Add($Name)
+    $sheet.TabColor = & $color $TabHex
+    for ($c = 0; $c -lt $Columns.Count; $c++) {
+      $sheet.Cells[1, ($c + 1)].Value = $Columns[$c].Header
+      $sheet.Column($c + 1).Width = $Columns[$c].Width
+    }
+    $last = [Math]::Max(1, $Rows.Count + 1)
+    for ($r = 0; $r -lt $Rows.Count; $r++) {
+      for ($c = 0; $c -lt $Columns.Count; $c++) { $sheet.Cells[($r + 2), ($c + 1)].Value = $Rows[$r][$Columns[$c].Header] }
+    }
+    $all = $sheet.Cells[1, 1, $last, $Columns.Count]
+    & $setFont $all 10 $palette.Text $false
+    $all.Style.VerticalAlignment = [OfficeOpenXml.Style.ExcelVerticalAlignment]::Top
+    $header = $sheet.Cells[1, 1, 1, $Columns.Count]
+    & $setFill $header $palette.Head
+    & $setFont $header 10 $palette.Text $true
+    $header.Style.WrapText = $true
+    $header.Style.VerticalAlignment = [OfficeOpenXml.Style.ExcelVerticalAlignment]::Bottom
+    $header.Style.Border.Bottom.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Medium
+    $header.Style.Border.Bottom.Color.SetColor((& $color $palette.HeadBorder))
+    $sheet.Row(1).Height = 32
+    for ($c = 0; $c -lt $Columns.Count; $c++) {
+      if ($Rows.Count -eq 0) { continue }
+      $range = $sheet.Cells[2, ($c + 1), $last, ($c + 1)]
+      if ($Columns[$c]['Format']) { $range.Style.Numberformat.Format = $Columns[$c]['Format'] }
+      if ($Columns[$c]['Wrap']) { $range.Style.WrapText = $true }
+      if ($Columns[$c]['Center']) { $range.Style.HorizontalAlignment = [OfficeOpenXml.Style.ExcelHorizontalAlignment]::Center }
+    }
+    if ($Rows.Count -gt 0) {
+      $body = $sheet.Cells[2, 1, $last, $Columns.Count]
+      $body.Style.Border.Bottom.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
+      $body.Style.Border.Bottom.Color.SetColor((& $color $palette.Row))
+      $table = $sheet.Tables.Add($sheet.Cells[1, 1, $last, $Columns.Count], $TableName)
+      $table.TableStyle = [OfficeOpenXml.Table.TableStyles]::None
+      $table.ShowFilter = $true
+    }
+    $sheet.View.FreezePanes(2, 1)
+    $sheet.PrinterSettings.Orientation = [OfficeOpenXml.eOrientation]::Landscape
+    $sheet.PrinterSettings.FitToPage = $true
+    $sheet.PrinterSettings.FitToWidth = 1
+    $sheet.PrinterSettings.FitToHeight = 0
+    $sheet.PrinterSettings.RepeatRows = [OfficeOpenXml.ExcelAddress]::new('$1:$1')
+    $sheet.HeaderFooter.OddFooter.LeftAlignedText = '{0} | {1}' -f $scopeText, $snapshotText
+    $sheet.HeaderFooter.OddFooter.RightAlignedText = 'Page &P of &N'
+    return $sheet
+  }
+  $addRule = {
+    param($Sheet, [string]$Address, [string]$Formula, [string]$FillHex, [string]$FontHex, [bool]$Bold, [int]$Priority)
+    $rule = $Sheet.ConditionalFormatting.AddExpression([OfficeOpenXml.ExcelAddress]::new($Address))
+    $rule.Formula = $Formula
+    $rule.Priority = $Priority
+    if ($FillHex) { $rule.Style.Fill.BackgroundColor.Color = & $color $FillHex }
+    if ($FontHex) { $rule.Style.Font.Color.Color = & $color $FontHex }
+    if ($Bold) { $rule.Style.Font.Bold = $true }
+  }
+  $columnLetter = { param([int]$Index) [OfficeOpenXml.ExcelCellAddress]::new(1, $Index).Address -replace '\d', '' }
+  $band = {
+    param($Sheet, [int]$Rows, [int]$Columns)
+    if ($Rows -eq 0) { return }
+    & $addRule $Sheet ('A2:{0}{1}' -f (& $columnLetter $Columns), ($Rows + 1)) 'MOD(ROW(),2)=0' $palette.Band '' $false 100
+  }
+  $indexOf = { param([object[]]$Columns, [string]$Header) for ($i = 0; $i -lt $Columns.Count; $i++) { if ($Columns[$i].Header -ceq $Header) { return $i + 1 } }; return 0 }
+
+  if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
+  $package = Open-ExcelPackage -Path $Path -Create -ErrorAction Stop
+  try {
+    # Overview: the email header, KPI tiles, recovery by license and the sheet guide.
+    $overview = $package.Workbook.Worksheets.Add('Overview')
+    $overview.TabColor = & $color $palette.Teal
+    $overview.View.ShowGridLines = $false
+    $overview.Column(1).Width = 2
+    $overview.Column(2).Width = 20
+    for ($c = 3; $c -le 13; $c++) { $overview.Column($c).Width = 13 }
+    $overview.Cells['B2'].Value = 'MICROSOFT 365 {0} LICENSE SUMMARY' -f [char]0x00B7
+    & $setFont $overview.Cells['B2'] 9 $palette.Teal $true
+    $overview.Cells['B3'].Value = 'License recovery workbook'
+    & $setFont $overview.Cells['B3'] 20 $palette.Navy $true
+    $overview.Row(3).Height = 30
+    $overview.Cells['B4'].Value = '{0}  {1}  {2}' -f $scopeText, [char]0x00B7, $snapshotText
+    & $setFont $overview.Cells['B4'] 10 $palette.Muted $false
+    if ($ScopeDomain) {
+      $overview.Cells['B5'].Value = 'Users, alerts, recovery and review rows count only accounts attributed to this AD domain. Subscription units are tenant-wide.'
+      & $setFont $overview.Cells['B5'] 9 $palette.Muted $false
+      $overview.Cells['B5'].Style.Font.Italic = $true
+    }
+
+    $metric = { param([string]$Product, [string]$Value, [string]$Unknown) $m = if ($usageByProduct.ContainsKey($Product)) { $usageByProduct[$Product] } else { $null }; Format-LicensesMetric -Counts $(if ($m) { $m.Counts } else { $null }) -ValueName $Value -UnknownName $Unknown -Available ($m -and $m.Available) }
+    $f3f1 = 'N/D'
+    $f3f1Counts = @{ Assigned=0; RecoveryCandidates=0; RecoveryUnknown=0 }
+    $f3f1Ready = $true
+    foreach ($name in @('Microsoft 365 F3','Microsoft 365 F1')) {
+      if (-not $usageByProduct.ContainsKey($name) -or -not $usageByProduct[$name].Available) { $f3f1Ready = $false; continue }
+      foreach ($key in @('Assigned','RecoveryCandidates','RecoveryUnknown')) { $f3f1Counts[$key] += [long]$usageByProduct[$name].Counts[$key] }
+    }
+    $f3f1 = Format-LicensesMetric -Counts $f3f1Counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available $f3f1Ready
+    $alerts = Get-LicensesAlertSummary -AssignmentIssues $AssignmentIssues
+    $review = if ($downgradeReview -and $downgradeReview.Available) { [string]$downgradeReview.Candidates } else { 'N/D' }
+    $tiles = @(
+      @{ Value=(& $metric 'Microsoft 365 E5' 'RecoveryCandidates' 'RecoveryUnknown'); Label='Recovery candidates E5'; Note=''; Accent='#7c3aed'; Ink='#6d28d9' }
+      @{ Value=(& $metric 'Microsoft 365 E3' 'RecoveryCandidates' 'RecoveryUnknown'); Label='Recovery candidates E3'; Note=''; Accent='#2563eb'; Ink='#1d4ed8' }
+      @{ Value=$f3f1; Label='Recovery candidates F3/F1'; Note=''; Accent='#0f766e'; Ink='#0f766e' }
+      @{ Value=$review; Label='E3 to F3 review'; Note='Manual review'; Accent='#d97706'; Ink='#b45309' }
+      @{ Value=[string]$alerts.AwaitingCapacity; Label='Awaiting capacity'; Note=[string]$alerts.AwaitingBreakdown; Accent='#d97706'; Ink='#b45309' }
+      @{ Value=[string]$alerts.LicensingErrors; Label='Licensing errors'; Note=[string]$alerts.ErrorsBreakdown; Accent='#dc2626'; Ink='#b91c1c' }
+    )
+    $panel = $overview.Cells['B7:M11']
+    & $setFill $panel $palette.Panel
+    for ($t = 0; $t -lt $tiles.Count; $t++) {
+      $first = 2 + 2 * $t
+      $tile = $overview.Cells[8, $first, 10, ($first + 1)]
+      & $setFill $tile '#ffffff'
+      $overview.Cells[8, $first, 10, $first].Style.Border.Left.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Thick
+      $overview.Cells[8, $first, 10, $first].Style.Border.Left.Color.SetColor((& $color $tiles[$t].Accent))
+      foreach ($line in @(@{ Row=8; Text=$tiles[$t].Value; Size=20; Hex=$tiles[$t].Ink; Bold=$true }, @{ Row=9; Text=$tiles[$t].Label; Size=10; Hex=$palette.Text; Bold=$false }, @{ Row=10; Text=$tiles[$t].Note; Size=8; Hex=$palette.Muted; Bold=$false })) {
+        $cell = $overview.Cells[$line.Row, $first, $line.Row, ($first + 1)]
+        $cell.Merge = $true
+        $cell.Value = $line.Text
+        & $setFont $cell $line.Size $line.Hex $line.Bold
+        $cell.Style.Indent = 1
+        $cell.Style.HorizontalAlignment = [OfficeOpenXml.Style.ExcelHorizontalAlignment]::Left
+        $cell.Style.WrapText = $line.Row -eq 10
       }
     }
-    $safeDetails | Export-Excel -Path $Path -WorksheetName 'Recovery candidates' -TableName 'LicenseRecoveryCandidates' -Append -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter -ErrorAction Stop
-    $package = Open-ExcelPackage -Path $Path -ErrorAction Stop
-    try {
-      $sheet = $package.Workbook.Worksheets['Recovery candidates']
-      $sheet.Cells[2,6,$sheet.Dimension.End.Row,7].Style.Numberformat.Format = 'yyyy-mm-dd'
+    $overview.Row(8).Height = 30
+    $overview.Row(10).Height = 24
+
+    $overview.Cells['B13'].Value = 'Recovery by license'
+    & $setFont $overview.Cells['B13'] 13 $palette.Navy $true
+    $summaryHeaders = @('License','Recovery candidates','Not qualified','E3 to F3 review','Awaiting license','Licensing errors','Qualification')
+    for ($c = 0; $c -lt $summaryHeaders.Count; $c++) { $overview.Cells[14, (2 + $c)].Value = $summaryHeaders[$c] }
+    $summaryRowsOut = @($summary)
+    for ($r = 0; $r -lt $summaryRowsOut.Count; $r++) {
+      for ($c = 0; $c -lt $summaryHeaders.Count; $c++) { $overview.Cells[(15 + $r), (2 + $c)].Value = $summaryRowsOut[$r][$summaryHeaders[$c]] }
     }
-    finally { Close-ExcelPackage -ExcelPackage $package -ErrorAction Stop }
-  }
-  else {
-    $package = Open-ExcelPackage -Path $Path -ErrorAction Stop
-    try {
-      $sheet = $package.Workbook.Worksheets.Add('Recovery candidates')
-      $headers = @('License','UserId','UserPrincipalName','DisplayName','RecoveryReason','LastAdActivityDate','LastM365ActivityDate','PrimaryOnIntuneWindowsPc','TargetSuites')
-      for ($column=0; $column -lt $headers.Count; $column++) { $sheet.Cells[1,($column+1)].Value = $headers[$column] }
-      $sheet.Cells[1,1,1,$headers.Count].Style.Font.Bold = $true
-      $sheet.View.FreezePanes(2,1)
+    $summaryLast = 14 + $summaryRowsOut.Count
+    $summaryRange = $overview.Cells[14, 2, $summaryLast, (1 + $summaryHeaders.Count)]
+    & $setFont $summaryRange 10 $palette.Text $false
+    $summaryHead = $overview.Cells[14, 2, 14, (1 + $summaryHeaders.Count)]
+    & $setFill $summaryHead $palette.Head
+    & $setFont $summaryHead 10 $palette.Text $true
+    $summaryHead.Style.WrapText = $true
+    $summaryHead.Style.Border.Bottom.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Medium
+    $summaryHead.Style.Border.Bottom.Color.SetColor((& $color $palette.HeadBorder))
+    $overview.Row(14).Height = 30
+    if ($summaryRowsOut.Count -gt 0) {
+      $summaryBody = $overview.Cells[15, 2, $summaryLast, (1 + $summaryHeaders.Count)]
+      $summaryBody.Style.Border.Bottom.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
+      $summaryBody.Style.Border.Bottom.Color.SetColor((& $color $palette.Row))
+      $overview.Cells[15, 2, $summaryLast, 2].Style.Font.Bold = $true
+      $overview.Cells[15, 3, $summaryLast, 3].Style.Font.Color.SetColor((& $color $palette.Teal))
+      $overview.Cells[15, 3, $summaryLast, 3].Style.Font.Bold = $true
+      $overview.Cells[15, 3, $summaryLast, 7].Style.HorizontalAlignment = [OfficeOpenXml.Style.ExcelHorizontalAlignment]::Center
+      $summaryTable = $overview.Tables.Add($summaryRange, 'LicenseRecoverySummary')
+      $summaryTable.TableStyle = [OfficeOpenXml.Table.TableStyles]::None
+      $summaryTable.ShowFilter = $false
     }
-    finally { Close-ExcelPackage -ExcelPackage $package -ErrorAction Stop }
-  }
-  if ($downgradeDetails.Count -gt 0) {
-    $safeDowngradeDetails = foreach ($item in ($downgradeDetails | Sort-Object UserPrincipalName,UserId)) {
-      $safeUpn = [string]$item.UserPrincipalName
-      $safeDisplayName = [string]$item.DisplayName
-      if ($safeUpn -match '^\s*[=+\-@]') { $safeUpn = "'$safeUpn" }
-      if ($safeDisplayName -match '^\s*[=+\-@]') { $safeDisplayName = "'$safeDisplayName" }
-      [pscustomobject]@{
-        UserId = [string]$item.UserId
-        UserPrincipalName = $safeUpn
-        DisplayName = $safeDisplayName
-        MailboxSizeGB = [decimal]$item.MailboxSizeGB
-        OneDriveUsedGB = [decimal]$item.OneDriveUsedGB
-        OneDriveUsedBytes = [long]$item.OneDriveUsedBytes
-        ArchiveStatus = [string]$item.ArchiveStatus
-        LitigationHoldEnabled = [string]$item.LitigationHoldEnabled
-        RetentionHoldEnabled = [string]$item.RetentionHoldEnabled
-        WindowsAppsUse180d = [string]$item.WindowsAppsUse180d
-        MacAppsUse180d = [string]$item.MacAppsUse180d
+
+    $guideRow = $summaryLast + 3
+    $overview.Cells[$guideRow, 2].Value = 'Contents'
+    & $setFont $overview.Cells[$guideRow, 2] 13 $palette.Navy $true
+    $guide = @(
+      @{ Sheet='Recovery candidates'; Text='One row per qualified recovery candidate and suite, with the reason, primary Intune PC and last activity dates.' }
+      @{ Sheet='E3 to F3 review'; Text='Enabled E3 user mailboxes meeting every downgrade check; a manual review list, not recoverable licenses.' }
+      @{ Sheet='Awaiting licenses'; Text='Users waiting for capacity on a F1/F3/E3/E5 assignment (CountViolation without an effective suite).' }
+      @{ Sheet='Licensing errors'; Text='Other failed assignment paths, with error codes and assigning groups.' }
+    )
+    for ($g = 0; $g -lt $guide.Count; $g++) {
+      $row = $guideRow + 1 + $g
+      $link = $overview.Cells[$row, 2]
+      $link.Hyperlink = [OfficeOpenXml.ExcelHyperLink]::new(("'{0}'!A1" -f $guide[$g].Sheet), $guide[$g].Sheet)
+      $link.Value = $guide[$g].Sheet
+      & $setFont $link 10 $palette.Link $true
+      $link.Style.Font.UnderLine = $true
+      $text = $overview.Cells[$row, 3, $row, 13]
+      $text.Merge = $true
+      $text.Value = $guide[$g].Text
+      & $setFont $text 10 $palette.Text $false
+    }
+    $noteRow = $guideRow + $guide.Count + 2
+    $note = $overview.Cells[$noteRow, 2, ($noteRow + 1), 13]
+    $note.Merge = $true
+    $note.Value = 'These are indicators, not removals. Before removing a license, confirm advanced features, the assignment path (direct or group) and the commercial contract. Indicators overlap and must not be added together. N/D means a source or identity could not be qualified.'
+    & $setFill $note $palette.Band
+    & $setFont $note 9 $palette.Text $false
+    $note.Style.WrapText = $true
+    $note.Style.VerticalAlignment = [OfficeOpenXml.Style.ExcelVerticalAlignment]::Center
+    $note.Style.Border.Left.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Thick
+    $note.Style.Border.Left.Color.SetColor((& $color '#94a3b8'))
+    $overview.Row($noteRow).Height = 22
+    $overview.Row($noteRow + 1).Height = 22
+    $overview.PrinterSettings.Orientation = [OfficeOpenXml.eOrientation]::Landscape
+    $overview.PrinterSettings.FitToPage = $true
+    $overview.PrinterSettings.FitToWidth = 1
+    $overview.PrinterSettings.FitToHeight = 1
+    $overview.HeaderFooter.OddFooter.LeftAlignedText = '{0} | {1}' -f $scopeText, $snapshotText
+
+    $identity = @(
+      @{ Header='User ID'; Width=38 }, @{ Header='User principal name'; Width=36 }, @{ Header='Display name'; Width=28 }
+    )
+    $scopeHeaders = @()
+    if ($withDomain) { $scopeHeaders += @{ Header='AD domain'; Width=20 } }
+    if ($withCountry) { $scopeHeaders += @{ Header='Country'; Width=16 } }
+
+    $candidateColumns = @(@{ Header='License'; Width=18 }) + $identity + $scopeHeaders + @(
+      @{ Header='Recovery reason'; Width=34; Wrap=$true }, @{ Header='Last AD logon'; Width=14; Format='yyyy-mm-dd'; Center=$true },
+      @{ Header='Last M365 activity'; Width=14; Format='yyyy-mm-dd'; Center=$true }, @{ Header='Primary Intune PC'; Width=12; Center=$true },
+      @{ Header='Target suites'; Width=32; Wrap=$true })
+    $toDate = { param($Text) $value = ([string]$Text).Trim(); if ($value -and $value -ne 'N/D') { [datetime]::ParseExact($value,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture) } else { $null } }
+    $candidateRows = @(foreach ($item in ($details | Sort-Object License,UserPrincipalName,UserId)) {
+      $row = [ordered]@{ 'License'=$item.License; 'User ID'=[string]$item.UserId; 'User principal name'=(& $safeText $item.UserPrincipalName); 'Display name'=(& $safeText $item.DisplayName) }
+      foreach ($pair in (& $scopeColumns $item.UserId).GetEnumerator()) { $row[$pair.Key] = $pair.Value }
+      $row['Recovery reason'] = $item.RecoveryReason
+      $row['Last AD logon'] = & $toDate $item.LastAdActivityDate
+      $row['Last M365 activity'] = & $toDate $item.LastM365ActivityDate
+      $row['Primary Intune PC'] = $item.PrimaryOnIntuneWindowsPc
+      $row['Target suites'] = $item.TargetSuites
+      $row
+    })
+    $sheet = & $writeSheet $package 'Recovery candidates' 'LicenseRecoveryCandidates' $candidateColumns $candidateRows '#0f766e'
+    if ($candidateRows.Count -gt 0) {
+      $last = $candidateRows.Count + 1
+      $reason = & $columnLetter (& $indexOf $candidateColumns 'Recovery reason')
+      $pc = & $columnLetter (& $indexOf $candidateColumns 'Primary Intune PC')
+      $priority = 1
+      foreach ($rule in @(
+          @{ Text='Disabled account'; Fill='#fee2e2'; Font='#991b1b' },
+          @{ Text='No M365 activity in 90 days'; Fill='#ffedd5'; Font='#9a3412' },
+          @{ Text='Eligible shared mailbox under 50 GB'; Fill='#dbeafe'; Font='#1e40af' })) {
+        & $addRule $sheet ('{0}2:{0}{1}' -f $reason, $last) ('{0}2="{1}"' -f $reason, $rule.Text) $rule.Fill $rule.Font $false ($priority++)
+      }
+      & $addRule $sheet ('{0}2:{0}{1}' -f $pc, $last) ('{0}2="Yes"' -f $pc) '#fef3c7' '#92400e' $true ($priority++)
+      foreach ($header in @('Last AD logon','Last M365 activity')) {
+        $letter = & $columnLetter (& $indexOf $candidateColumns $header)
+        & $addRule $sheet ('{0}2:{0}{1}' -f $letter, $last) ('AND(ISNUMBER({0}2),{0}2<TODAY()-90)' -f $letter) '' '#94a3b8' $false ($priority++)
       }
     }
-    $safeDowngradeDetails | Export-Excel -Path $Path -WorksheetName 'E3 to F3 review' -TableName 'LicenseE3ToF3Review' -Append -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter -ErrorAction Stop
-  }
-  else {
-    $package = Open-ExcelPackage -Path $Path -ErrorAction Stop
-    try {
-      $sheet = $package.Workbook.Worksheets.Add('E3 to F3 review')
-      $headers = @('UserId','UserPrincipalName','DisplayName','MailboxSizeGB','OneDriveUsedGB','OneDriveUsedBytes','ArchiveStatus','LitigationHoldEnabled','RetentionHoldEnabled','WindowsAppsUse180d','MacAppsUse180d')
-      for ($column=0; $column -lt $headers.Count; $column++) { $sheet.Cells[1,($column+1)].Value = $headers[$column] }
-      $sheet.Cells[1,1,1,$headers.Count].Style.Font.Bold = $true
-      $sheet.View.FreezePanes(2,1)
+    & $band $sheet $candidateRows.Count $candidateColumns.Count
+
+    $reviewColumns = $identity + $scopeHeaders + @(
+      @{ Header='Mailbox (GB)'; Width=13; Format='0.00' }, @{ Header='OneDrive (GB)'; Width=13; Format='0.00' }, @{ Header='OneDrive (bytes)'; Width=16; Format='#,##0' },
+      @{ Header='Archive status'; Width=13; Center=$true }, @{ Header='Litigation hold'; Width=12; Center=$true }, @{ Header='Retention hold'; Width=12; Center=$true },
+      @{ Header='Windows Apps 180d'; Width=12; Center=$true }, @{ Header='Mac Apps 180d'; Width=12; Center=$true })
+    $reviewRows = @(foreach ($item in ($downgradeDetails | Sort-Object UserPrincipalName,UserId)) {
+      $row = [ordered]@{ 'User ID'=[string]$item.UserId; 'User principal name'=(& $safeText $item.UserPrincipalName); 'Display name'=(& $safeText $item.DisplayName) }
+      foreach ($pair in (& $scopeColumns $item.UserId).GetEnumerator()) { $row[$pair.Key] = $pair.Value }
+      $row['Mailbox (GB)'] = [decimal]$item.MailboxSizeGB
+      $row['OneDrive (GB)'] = [decimal]$item.OneDriveUsedGB
+      $row['OneDrive (bytes)'] = [long]$item.OneDriveUsedBytes
+      $row['Archive status'] = [string]$item.ArchiveStatus
+      $row['Litigation hold'] = [string]$item.LitigationHoldEnabled
+      $row['Retention hold'] = [string]$item.RetentionHoldEnabled
+      $row['Windows Apps 180d'] = [string]$item.WindowsAppsUse180d
+      $row['Mac Apps 180d'] = [string]$item.MacAppsUse180d
+      $row
+    })
+    $sheet = & $writeSheet $package 'E3 to F3 review' 'LicenseE3ToF3Review' $reviewColumns $reviewRows '#d97706'
+    if ($reviewRows.Count -gt 0) {
+      foreach ($header in @('Mailbox (GB)','OneDrive (GB)')) {
+        $letter = & $columnLetter (& $indexOf $reviewColumns $header)
+        [void]$sheet.ConditionalFormatting.AddDatabar([OfficeOpenXml.ExcelAddress]::new(('{0}2:{0}{1}' -f $letter, ($reviewRows.Count + 1))), (& $color '#5eead4'))
+      }
     }
-    finally { Close-ExcelPackage -ExcelPackage $package -ErrorAction Stop }
-  }
-  foreach ($category in @('Capacity wait','Licensing error')) {
-    $sheetName = if ($category -eq 'Capacity wait') { 'Awaiting licenses' } else { 'Licensing errors' }
-    $tableName = if ($category -eq 'Capacity wait') { 'LicenseCapacityWait' } else { 'LicenseAssignmentErrors' }
-    $issueRows = @(if ($AssignmentIssues -and $AssignmentIssues.Available) { $AssignmentIssues.Rows | Where-Object Category -eq $category })
-    if ($issueRows.Count -gt 0) {
-      $safeRows = foreach ($item in ($issueRows | Sort-Object Product,UserPrincipalName,UserId)) {
-        $upn = [string]$item.UserPrincipalName
-        $display = [string]$item.DisplayName
-        $groupNames = [string]$item.AssignedByGroupNames
-        if ($upn -match '^\s*[=+\-@]') { $upn = "'$upn" }
-        if ($display -match '^\s*[=+\-@]') { $display = "'$display" }
-        if ($groupNames -match '^\s*[=+\-@]') { $groupNames = "'$groupNames" }
+    & $band $sheet $reviewRows.Count $reviewColumns.Count
+
+    $issueColumns = @(@{ Header='License'; Width=18 }) + $identity + $scopeHeaders + @(
+      @{ Header='Account enabled'; Width=11; Center=$true }, @{ Header='User type'; Width=10; Center=$true }, @{ Header='Identity status'; Width=12 },
+      @{ Header='Error code'; Width=18 }, @{ Header='Assignment states'; Width=18; Wrap=$true }, @{ Header='Assignment routes'; Width=14 },
+      @{ Header='Assigning groups'; Width=36; Wrap=$true }, @{ Header='Assigning group IDs'; Width=38; Wrap=$true },
+      @{ Header='Effective target suite'; Width=12; Center=$true }, @{ Header='Last updated (UTC)'; Width=19; Format='yyyy-mm-dd hh:mm:ss'; Center=$true },
+      @{ Header='Assignment paths'; Width=11; Center=$true })
+    foreach ($category in @('Capacity wait','Licensing error')) {
+      $sheetName = if ($category -eq 'Capacity wait') { 'Awaiting licenses' } else { 'Licensing errors' }
+      $tableName = if ($category -eq 'Capacity wait') { 'LicenseCapacityWait' } else { 'LicenseAssignmentErrors' }
+      $categoryRows = @(if ($AssignmentIssues -and $AssignmentIssues.Available) { $AssignmentIssues.Rows | Where-Object Category -eq $category })
+      $issueRows = @(foreach ($item in ($categoryRows | Sort-Object Product,UserPrincipalName,UserId)) {
         $updated = ([string]$item.LastUpdatedDateTime).Trim()
-        [pscustomobject][ordered]@{
-          Product=$item.Product; UserId=$item.UserId; UserPrincipalName=$upn; DisplayName=$display
-          AccountEnabled=$item.AccountEnabled; UserType=$item.UserType; IdentityStatus=$item.IdentityStatus
-          AssignmentError=$item.AssignmentError; AssignmentStates=$item.AssignmentStates
-          AssignmentRoutes=$item.AssignmentRoutes; AssignedByGroupNames=$groupNames; AssignedByGroupIds=$item.AssignedByGroupIds
-          HasEffectiveTargetSuite=$item.HasEffectiveTargetSuite
-          LastUpdatedDateTime=if ($updated) { [datetimeoffset]::Parse($updated,[Globalization.CultureInfo]::InvariantCulture).UtcDateTime } else { $null }
-          AssignmentPaths=$item.AssignmentPaths
-        }
-      }
-      $safeRows | Export-Excel -Path $Path -WorksheetName $sheetName -TableName $tableName -Append -AutoSize -FreezeTopRow -BoldTopRow -AutoFilter -ErrorAction Stop
-      $package = Open-ExcelPackage -Path $Path -ErrorAction Stop
-      try {
-        $sheet = $package.Workbook.Worksheets[$sheetName]
-        $sheet.Cells[2,14,$sheet.Dimension.End.Row,14].Style.Numberformat.Format = 'yyyy-mm-dd hh:mm:ss'
-      }
-      finally { Close-ExcelPackage -ExcelPackage $package -ErrorAction Stop }
+        $row = [ordered]@{ 'License'=$item.Product; 'User ID'=[string]$item.UserId; 'User principal name'=(& $safeText $item.UserPrincipalName); 'Display name'=(& $safeText $item.DisplayName) }
+        foreach ($pair in (& $scopeColumns $item.UserId).GetEnumerator()) { $row[$pair.Key] = $pair.Value }
+        $row['Account enabled'] = $item.AccountEnabled
+        $row['User type'] = $item.UserType
+        $row['Identity status'] = $item.IdentityStatus
+        $row['Error code'] = $item.AssignmentError
+        $row['Assignment states'] = $item.AssignmentStates
+        $row['Assignment routes'] = $item.AssignmentRoutes
+        $row['Assigning groups'] = & $safeText $item.AssignedByGroupNames
+        $row['Assigning group IDs'] = $item.AssignedByGroupIds
+        $row['Effective target suite'] = $item.HasEffectiveTargetSuite
+        $row['Last updated (UTC)'] = if ($updated) { [datetimeoffset]::Parse($updated,[Globalization.CultureInfo]::InvariantCulture).UtcDateTime } else { $null }
+        $row['Assignment paths'] = $item.AssignmentPaths
+        $row
+      })
+      $tab = if ($category -eq 'Capacity wait') { '#d97706' } else { '#dc2626' }
+      $sheet = & $writeSheet $package $sheetName $tableName $issueColumns $issueRows $tab
+      & $band $sheet $issueRows.Count $issueColumns.Count
     }
-    else {
-      $package = Open-ExcelPackage -Path $Path -ErrorAction Stop
-      try {
-        $sheet = $package.Workbook.Worksheets.Add($sheetName)
-        $headers = @('Product','UserId','UserPrincipalName','DisplayName','AccountEnabled','UserType','IdentityStatus','AssignmentError','AssignmentStates','AssignmentRoutes','AssignedByGroupNames','AssignedByGroupIds','HasEffectiveTargetSuite','LastUpdatedDateTime','AssignmentPaths')
-        for ($column=0; $column -lt $headers.Count; $column++) { $sheet.Cells[1,($column+1)].Value = $headers[$column] }
-        $sheet.Cells[1,1,1,$headers.Count].Style.Font.Bold = $true
-        $sheet.View.FreezePanes(2,1)
-      }
-      finally { Close-ExcelPackage -ExcelPackage $package -ErrorAction Stop }
-    }
+    $package.Workbook.Properties.Title = 'Microsoft 365 license recovery'
+    $package.Workbook.Properties.Subject = '{0} | {1}' -f $scopeText, $snapshotText
+    $package.Workbook.View.ActiveTab = 0
   }
+  finally { Close-ExcelPackage -ExcelPackage $package -ErrorAction Stop }
   $file = Get-Item -LiteralPath $Path -ErrorAction Stop
   if ($file.Length -gt 3MB) {
     throw ('Recovery workbook is {0:N1} MB; Graph mail attachments must be at most 3 MB.' -f ($file.Length / 1MB))
@@ -3410,6 +3627,12 @@ function Read-LicensesPublishedReport {
     if ($issues.Available) { foreach ($property in $issues.Counts.PSObject.Properties) { $counts[$property.Name] = ConvertTo-LicensesCountTable $property.Value } }
     $assignmentIssues = [pscustomobject]@{ Available=[bool]$issues.Available; Reason=[string]$issues.Reason; Counts=$counts; Rows=@($issues.Rows) }
   }
+  # AD domain and country of the users listed in this report, for the workbook columns.
+  $userScopes = $null
+  if ($hasAdScope -and $document.AdScope.Available) {
+    $userScopes = @{}
+    foreach ($user in @($document.AdScope.Users)) { $userScopes[([string]$user.UserId).ToLowerInvariant()] = $user }
+  }
   return [pscustomobject]@{
     SnapshotId = [string]$document.SnapshotId
     CollectedAtUtc = [string]$document.LicenseCollectedAtUtc
@@ -3419,6 +3642,7 @@ function Read-LicensesPublishedReport {
     AssignmentIssues = $assignmentIssues
     AdScope = if ($hasAdScope) { $document.AdScope } else { $null }
     ScopeDomain = ''
+    UserScopes = $userScopes
   }
 }
 
@@ -3483,6 +3707,7 @@ function Get-LicensesDomainPublishedReport {
     AdScope = $null
     ScopeDomain = $key
     ScopeProvisional = [bool]$scope.Provisional
+    UserScopes = if ($Report.PSObject.Properties['UserScopes']) { $Report.UserScopes } else { $null }
   }
   $result.Available = $true
   return $result
@@ -3758,7 +3983,7 @@ function New-LicensesSummaryMailContent {
   $assignmentStatusNote
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">02 &nbsp; Recovery by license</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Recovery candidates</th><th style="$headStyle">Disabled users</th><th style="$headStyle">No M365 activity (90d)</th><th style="$headStyle">Candidates primary on Intune PC</th><th style="$headStyle">Multiple target suites</th></tr></thead><tbody>$($recoveryRows -join "`n")</tbody></table>
-  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook lists each qualified recovery candidate once per license, with the recovery reason, Intune primary-PC indicator, last AD logon date and last M365 activity date. Its Summary sheet reconciles with this table. Activity dates are sortable Excel dates; an empty date cell means no qualified date was observed. AD LastLogonDate is replicated and approximate. Dates are not populated for identified shared mailboxes.</p>
+  <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook lists each qualified recovery candidate once per license, with the recovery reason, Intune primary-PC indicator, last AD logon date and last M365 activity date. Its Overview sheet reconciles with this table. Activity dates are sortable Excel dates; an empty date cell means no qualified date was observed. AD LastLogonDate is replicated and approximate. Dates are not populated for identified shared mailboxes.</p>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">03 &nbsp; E3 to F3 downgrade review</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">E3 assignments</th><th style="$headStyle">Review candidates</th><th style="$headStyle">N/D</th><th style="$headStyle">Excluded by checks</th><th style="$headStyle">Already in recovery</th></tr></thead><tbody><tr><td style="$cell">$e3ReviewAssigned</td><td style="$cell"><strong style="color:#0f766e;">$e3ReviewCandidates</strong></td><td style="$cell">$e3ReviewUnknown</td><td style="$cell">$e3ReviewExcluded</td><td style="$cell">$e3ReviewRecovery</td></tr></tbody></table>
   <p style="margin:7px 0 0;font-size:11px;line-height:16px;color:#64748b;">The attached Excel workbook has an E3 to F3 review tab listing every qualified review candidate and the values used by these checks. Review candidates are enabled E3 UserMailbox users with mailbox size below 2 GB, no active archive or hold, no Windows/Mac Apps use in the 180-day report, OneDrive storage below 2 GB, and no second F1/F3/E5 suite. Missing or unqualified data is N/D. This is a manual downgrade review, not a recoverable E3 license count: confirm frontline eligibility, required E3 features, device rights and the commercial contract before changing a license. Usage reports, including OneDrive, are used only when the completed UserActivity receipt lists them with the same hash.</p>
@@ -3790,7 +4015,8 @@ function New-LicensesSummaryMailContent {
   $bodyRow = '<tr><td style="padding:18px 24px 22px 24px;font-size:13px;line-height:19px;color:#334155;">{0}</td></tr>' -f $bodyHtml
   $executionFooter = 'Host: {0} | Generated: {1} | Snapshot: {2}' -f [string]$env:COMPUTERNAME, (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'), $reportSnapshot.Id
   $mailBody = New-SmartM365EmailBody -Title $subject -Category 'SmartM365' -HostName '' -GeneratedAt '' -BodyHtml $bodyRow -Footer $executionFooter
-  return [pscustomobject]@{ Subject=$subject; Body=$mailBody; SummaryRows=$summaryRows; Usage=$usage; AssignmentIssues=$assignmentIssues; CollectedAtUtc=$CollectedAtUtc; SnapshotId=$reportSnapshot.Id }
+  return [pscustomobject]@{ Subject=$subject; Body=$mailBody; SummaryRows=$summaryRows; Usage=$usage; AssignmentIssues=$assignmentIssues; CollectedAtUtc=$CollectedAtUtc; SnapshotId=$reportSnapshot.Id
+    ScopeDomain=$scopeDomain; UserScopes=$(if ($publishedReport.PSObject.Properties['UserScopes']) { $publishedReport.UserScopes } else { $null }) }
 }
 
 function Get-LicensesDomainMailSettings {
@@ -3839,6 +4065,7 @@ function Send-LicensesSummaryMailScope {
     [switch]$ForceLicenseSummaryEmail
   )
   $attachmentPath = $null
+  $attachmentFolder = $null
   $mailGate = $null
   $sendStarted = $false
   $label = if ($Domain) { "License summary email for AD domain $Domain" } else { 'License summary email' }
@@ -3870,9 +4097,14 @@ function Send-LicensesSummaryMailScope {
     else {
       if ($scoped) { $report = $scoped.Report }
       $content = New-LicensesSummaryMailContent -PublishedReport $report -Manual:$Manual
-      $attachmentPath = Join-Path ([System.IO.Path]::GetTempPath()) ("M365_Licenses_RecoveryCandidates_{0}_{1}.xlsx" -f (Get-Date -Format 'yyyyMMdd_HHmmss'),[guid]::NewGuid().ToString('N').Substring(0,8))
+      # A readable attachment name in a private temporary folder: M365_Licenses_Recovery_<tenant or domain>_<date>.xlsx.
+      $attachmentFolder = Join-Path ([System.IO.Path]::GetTempPath()) ('SmartM365-LicenseMail-' + [guid]::NewGuid().ToString('N'))
+      [void](New-Item -ItemType Directory -Path $attachmentFolder -Force)
+      $fileScope = $(if ($Domain) { $Domain } else { $ExpectedTenantKey }) -replace '[^A-Za-z0-9._-]', '_'
+      $attachmentPath = Join-Path $attachmentFolder ('M365_Licenses_Recovery_{0}_{1}.xlsx' -f $fileScope, (Get-Date -Format 'yyyyMMdd'))
       # The workbook of a domain mail lists only that domain's users.
-      [void](New-LicensesRecoveryWorkbook -Path $attachmentPath -SummaryRows $content.SummaryRows -Usage $content.Usage -AssignmentIssues $content.AssignmentIssues -CollectedAtUtc $content.CollectedAtUtc)
+      [void](New-LicensesRecoveryWorkbook -Path $attachmentPath -SummaryRows $content.SummaryRows -Usage $content.Usage -AssignmentIssues $content.AssignmentIssues -CollectedAtUtc $content.CollectedAtUtc `
+        -ScopeLabel ([string]$OrgDomain) -ScopeDomain ([string]$content.ScopeDomain) -SnapshotId ([string]$content.SnapshotId) -UserScopes $content.UserScopes)
       $mailArgs.Subject = $content.Subject
       $mailArgs.BodyHtml = $content.Body
       $mailArgs.Attachments = @($attachmentPath)
@@ -3900,6 +4132,9 @@ function Send-LicensesSummaryMailScope {
     if ($mailGate -and $mailGate.Stream) { $mailGate.Stream.Dispose() }
     if ($attachmentPath -and (Test-Path -LiteralPath $attachmentPath -PathType Leaf)) {
       try { Remove-Item -LiteralPath $attachmentPath -Force -ErrorAction Stop } catch { Write-Warning "Temporary mail attachment cleanup failed: $($_.Exception.Message)" }
+    }
+    if ($attachmentFolder -and (Test-Path -LiteralPath $attachmentFolder -PathType Container)) {
+      try { Remove-Item -LiteralPath $attachmentFolder -Recurse -Force -ErrorAction Stop } catch { Write-Warning "Temporary mail attachment folder cleanup failed: $($_.Exception.Message)" }
     }
   }
 }
@@ -4600,7 +4835,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.60"
+$ScriptVersion = "1.61"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
