@@ -134,7 +134,8 @@ qualification remain separate.
 Every job and manual launch is declared in the catalog `Orchestrator/Orchestrator-Jobs.json.template`: the `Jobs` array (orchestrator jobs) and the `Launches` array (manual entries, `"Manual": true`, never scheduled or requested). `SmartInventory.cmd` starts Windows PowerShell 5.1 with `Orchestrator/Invoke-SmartM365InventoryJob.ps1`; the engine starts PowerShell 7 when the entry needs it, so it also works on Exchange servers.
 
 ```text
-SmartInventory.cmd                                   lists the catalog (also -List)
+SmartInventory.cmd                                   menu: choose a number or a name, then run, request or show the command
+SmartInventory.cmd -List                             prints the catalog (also without argument when the input is redirected)
 SmartInventory.cmd <Name> [script options]           runs the entry now on this computer, outside the orchestrator
 SmartInventory.cmd <Job>[,<Job>...] -Request [-IncludeDependencies] [-NoWait]
                                                      runs the jobs through the resident orchestrators

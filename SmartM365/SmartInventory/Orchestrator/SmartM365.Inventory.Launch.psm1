@@ -19,6 +19,8 @@ Launch fields of an entry:
 - LegacyLaunchers: the .cmd files this entry replaces (relative to SmartInventory).
 - PassTenant: false when the script asks for its tenant itself (default: -Tenant is passed
   when the script declares it).
+- HideInGui: true to keep a manual entry out of the orchestrator GUI (the GUI already offers it
+  as a button, or it is a setup tool); it stays in the SmartInventory.cmd menu and command line.
 
 LocalCache reproduces the legacy on-premises launchers: first usable folder among
 ProgramData\SmartM365\LauncherCache\<CacheName>, Windows\Temp, C:\Temp and %TEMP% (the orchestrator
@@ -33,11 +35,11 @@ emptied; right before the launch, every code file of the cache must be byte-iden
 Compatible with Windows PowerShell 5.1 and PowerShell 7.
 
 .VERSION
-1.3.0
+1.4.0
 #>
 Set-StrictMode -Version 2.0
 
-$script:LaunchModuleVersion = '1.3.0'
+$script:LaunchModuleVersion = '1.4.0'
 $script:ValidRuntimes = @('PowerShell7', 'WindowsPowerShell')
 $script:ValidModes = @('Direct', 'LocalCache', 'Auto')
 # Test hook: replaced by the offline tests to simulate the zone of a share.
@@ -904,6 +906,52 @@ function Initialize-SmartM365InventoryLaunch {
     return $command
 }
 
+function Get-SmartM365InventoryMenu {
+    <#
+    Numbered menu of the catalog for SmartInventory.cmd: the jobs sorted by group, the manual
+    launches, then the orchestrator entries (Orchestrator-*).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Catalog)
+    $sections = @(
+        [pscustomobject]@{ Title = 'Jobs: run now on this computer, or request through the orchestrators'; Entries = @($Catalog.Entries | Where-Object { $_.Kind -eq 'Job' } | Sort-Object -Property @{ Expression = { [string](Get-SmartM365InventoryProperty -Object $_.Definition -Name 'Group' -Default '') } }, Name) },
+        [pscustomobject]@{ Title = 'Manual launches: run on this computer'; Entries = @($Catalog.Entries | Where-Object { $_.Kind -eq 'Manual' -and $_.Name -notlike 'Orchestrator-*' } | Sort-Object -Property Name) },
+        [pscustomobject]@{ Title = 'Orchestrator'; Entries = @($Catalog.Entries | Where-Object { $_.Kind -eq 'Manual' -and $_.Name -like 'Orchestrator-*' }) }
+    )
+    $number = 0
+    foreach ($section in $sections) {
+        foreach ($entry in $section.Entries) {
+            $number++
+            $definition = $entry.Definition
+            $runtime = [string](Get-SmartM365InventoryProperty -Object $definition -Name 'Runtime' -Default (Get-SmartM365InventoryProperty -Object $definition -Name 'PowerShellEdition' -Default 'PowerShell7'))
+            $description = [string](Get-SmartM365InventoryProperty -Object $definition -Name 'Description' -Default '')
+            if (-not $description) { $description = 'Group ' + [string](Get-SmartM365InventoryProperty -Object $definition -Name 'Group' -Default '-') }
+            [pscustomobject]@{
+                Number = $number
+                Section = $section.Title
+                Name = $entry.Name
+                Kind = $entry.Kind
+                Runtime = $(if ($runtime -eq 'WindowsPowerShell') { 'PS 5.1' } else { 'PS 7' })
+                Cache = $null -ne (Get-SmartM365InventoryProperty -Object $definition -Name 'Execution')
+                Interactive = [bool](Get-SmartM365InventoryProperty -Object $definition -Name 'Interactive' -Default $false)
+                RequiresConfirmation = [bool](Get-SmartM365InventoryProperty -Object $definition -Name 'RequiresConfirmation' -Default $false)
+                Description = $description
+            }
+        }
+    }
+}
+
+function Resolve-SmartM365InventoryMenuChoice {
+    <# Menu item for a typed number or entry name (case-insensitive), or $null. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object[]]$Menu, [AllowEmptyString()][string]$Choice)
+    $value = ([string]$Choice).Trim()
+    if (-not $value) { return $null }
+    $number = 0
+    if ([int]::TryParse($value, [ref]$number)) { return (@($Menu | Where-Object { $_.Number -eq $number }) | Select-Object -First 1) }
+    return (@($Menu | Where-Object { $_.Name -ieq $value }) | Select-Object -First 1)
+}
+
 function Test-SmartM365InventoryCatalog {
     <#
     Validates the catalog without executing anything: names, scripts, runtimes, execution,
@@ -937,6 +985,8 @@ function Test-SmartM365InventoryCatalog {
                 if (-not (Test-Path -LiteralPath (Join-Path $Catalog.SmartM365Root ([string]$item)))) { $errors.Add("$name : Include not found: $item") }
             }
         }
+        $hideInGui = Get-SmartM365InventoryProperty -Object $definition -Name 'HideInGui'
+        if ($null -ne $hideInGui -and ($hideInGui -isnot [bool] -or $entry.Kind -ne 'Manual')) { $errors.Add("$name : HideInGui must be true or false, on manual entries only.") }
         $workingDirectory = [string](Get-SmartM365InventoryProperty -Object $definition -Name 'WorkingDirectory' -Default '')
         if ($workingDirectory -and -not (Test-Path -LiteralPath (Join-Path $Catalog.SmartInventoryRoot $workingDirectory) -PathType Container)) { $errors.Add("$name : WorkingDirectory not found: $workingDirectory") }
         $tokenNames = @('Tenant', 'ScriptDirectory', 'SmartInventoryRoot')
@@ -968,7 +1018,7 @@ Export-ModuleMember -Function Get-SmartM365InventoryCatalog, Find-SmartM365Inven
     Get-SmartM365InventoryEnginePath, Get-SmartM365InventoryCacheCandidates, Initialize-SmartM365InventoryLocalCache, Get-SmartM365InventoryOutputRoots,
     Assert-SmartM365InventoryOutputOutsideCache, Get-SmartM365InventoryCommand, Format-SmartM365InventoryPlan, Invoke-SmartM365InventoryLaunch,
     Initialize-SmartM365InventoryLaunch, Invoke-SmartM365InventoryOrchestratedLaunch, Test-SmartM365InventoryCacheLocation,
-    Assert-SmartM365InventoryCacheIntegrity,
+    Assert-SmartM365InventoryCacheIntegrity, Get-SmartM365InventoryMenu, Resolve-SmartM365InventoryMenuChoice,
     Test-SmartM365InventoryCatalog, Write-SmartM365InventoryLaunchMessage
 
 # SIG # Begin signature block

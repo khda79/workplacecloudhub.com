@@ -2045,6 +2045,7 @@
     {
       "Name": "Exchange-HealthChecker-ScheduledTask-Installer",
       "Manual": true,
+      "HideInGui": true,
       "Description": "Installs the HealthChecker scheduled task on the Exchange servers (Windows PowerShell 5.1 for the CIM sessions).",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ServersAndStorage\\Install-SmartM365-Exchange-HealthCheckerScheduledTask.ps1",
       "Arguments": "-Interactive",
@@ -2211,6 +2212,7 @@
     {
       "Name": "Orchestrator-GUI",
       "Manual": true,
+      "HideInGui": true,
       "Description": "Orchestrator management console (WPF).",
       "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator-GUI.ps1",
       "Arguments": "",
@@ -2222,6 +2224,7 @@
     {
       "Name": "Orchestrator-Start",
       "Manual": true,
+      "HideInGui": true,
       "Description": "Starts a resident orchestrator in this console.",
       "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator.ps1",
       "Arguments": "-Connect",
@@ -2232,6 +2235,7 @@
     {
       "Name": "Orchestrator-Stop",
       "Manual": true,
+      "HideInGui": true,
       "Description": "Asks the resident orchestrator of this computer to stop cleanly.",
       "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator.ps1",
       "Arguments": "-Stop -StopTimeoutSeconds 180",
@@ -2242,6 +2246,7 @@
     {
       "Name": "Orchestrator-Restart",
       "Manual": true,
+      "HideInGui": true,
       "Description": "Stops the orchestrator cleanly, then starts its scheduled task.",
       "ScriptPath": "Orchestrator\\Restart-SmartM365-Inventory-Orchestrator.ps1",
       "Arguments": "",
@@ -2252,6 +2257,7 @@
     {
       "Name": "Orchestrator-FullCollect",
       "Manual": true,
+      "HideInGui": true,
       "Description": "Requests the full pipeline from the resident orchestrators and waits for it.",
       "ScriptPath": "Orchestrator\\SmartM365-Inventory-Pipeline.ps1",
       "Arguments": "-Pipeline Full -Collect",
@@ -2262,6 +2268,7 @@
     {
       "Name": "Orchestrator-SendSummary",
       "Manual": true,
+      "HideInGui": true,
       "Description": "Sends the orchestrator execution summary email now.",
       "ScriptPath": "Orchestrator\\SmartM365-Inventory-Orchestrator.ps1",
       "Arguments": "-SendExecutionSummary",
@@ -2272,6 +2279,7 @@
     {
       "Name": "Orchestrator-ScheduledTask-Installer",
       "Manual": true,
+      "HideInGui": true,
       "Description": "Installs or removes the orchestrator scheduled task and the GUI shortcut (guided).",
       "ScriptPath": "Orchestrator\\Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1",
       "Arguments": "-Interactive",

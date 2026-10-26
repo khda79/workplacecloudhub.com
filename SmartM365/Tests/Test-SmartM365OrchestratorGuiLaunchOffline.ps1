@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline tests of the Operations launch features of the orchestrator GUI.
 .VERSION
-1.0.0
+1.1.0
 .NOTES
 GUI functions are extracted by AST and bound to the real XAML. The catalog is the committed
 template (read only); the published configuration is a copy of its jobs. No orchestrator, request
@@ -64,7 +64,9 @@ try {
     # Lists, global mode and previews.
     Refresh-LaunchView
     Assert-Case (@($script:LaunchJobRows).Count -eq @($template.Jobs).Count) 'Every catalog job must be listed.'
-    Assert-Case (@($script:ManualLaunchRows).Count -eq @($template.Launches).Count) 'Every manual entry must be listed separately.'
+    $visibleLaunches = @($template.Launches | Where-Object { -not ($_.PSObject.Properties['HideInGui'] -and $_.HideInGui) })
+    Assert-Case (@($script:ManualLaunchRows).Count -eq $visibleLaunches.Count -and $visibleLaunches.Count -lt @($template.Launches).Count) 'Every visible manual entry must be listed separately.'
+    Assert-Case (@($script:ManualLaunchRows | Where-Object { $_.Name -like 'Orchestrator-*' -or $_.Name -like '*-Installer' }).Count -eq 0) 'Orchestrator entries and installers must stay out of the GUI.'
     Assert-Case ($script:Controls.OnPremModeText.Text -in @('LocalCache', 'Direct', 'Auto')) 'The global on-premises mode must be shown.'
     $mailboxes = @($script:LaunchJobRows | Where-Object Name -eq 'Exchange2016-Local-Mailboxes-Inventory')[0]
     Assert-Case ($mailboxes.OnPremises -and $mailboxes.Runtime -eq 'WindowsPowerShell' -and $mailboxes.DraftMode -eq '(default)' -and $mailboxes.ModeSource -eq 'OnPremExecutionMode') 'An on-premises job must show its runtime, default mode and source.'

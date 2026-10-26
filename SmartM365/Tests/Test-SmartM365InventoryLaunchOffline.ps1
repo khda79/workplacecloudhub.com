@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate offline the SmartInventory launch engine and its catalog against the legacy .cmd launchers.
 .VERSION
-1.2.0
+1.3.0
 .NOTES
 Runs under Windows PowerShell 5.1 and PowerShell 7. Nothing is executed outside a fictional fixture.
 Checks:
@@ -17,6 +17,8 @@ Checks:
 - real runs on a fictional fixture in %TEMP%: Direct without copy, LocalCache copy, missing
   Include (missing source, failed copy, absent after copy), output inside the cache refused,
   exit codes transmitted (5.1 and 7), extra arguments, the mailbox identity helper loads under 5.1;
+- menu of SmartInventory.cmd (sections, choice by number or name, run, show the command, quit) and
+  HideInGui validation;
 - cache hardening: explicit ACL, junction and untrusted owner refused, code integrity checked
   before the launch, orchestrator candidates without the shared Windows\Temp and C:\Temp.
 #>
@@ -175,6 +177,15 @@ try {
     $aliasFiles = @(Get-ChildItem -LiteralPath (Join-Path $inventoryRoot 'Launchers'), (Join-Path $inventoryRoot 'LaunchersByOrchestrator') -Filter '*.cmd' -File -Recurse)
     Assert-True ($aliasFiles.Count -eq $reference.Count) "Only the aliases of the legacy names may remain ($($aliasFiles.Count) .cmd files)."
 
+    # Menu: every entry once, jobs first, then manual launches, then the orchestrator entries.
+    $menu = @(Get-SmartM365InventoryMenu -Catalog $catalog)
+    $sectionOrder = @($menu | ForEach-Object { $_.Section } | Select-Object -Unique)
+    Assert-True ($menu.Count -eq @($catalog.Entries).Count -and @($menu.Number) -join ',' -eq ((1..$menu.Count) -join ',')) 'The menu must number every catalog entry once.'
+    Assert-True ($sectionOrder.Count -eq 3 -and $sectionOrder[0] -like 'Jobs*' -and $sectionOrder[2] -eq 'Orchestrator' -and @($menu | Where-Object { $_.Section -eq 'Orchestrator' -and $_.Name -notlike 'Orchestrator-*' }).Count -eq 0) 'Menu sections: jobs, manual launches, orchestrator.'
+    Assert-True ((Resolve-SmartM365InventoryMenuChoice -Menu $menu -Choice ' 1 ').Name -eq $menu[0].Name -and (Resolve-SmartM365InventoryMenuChoice -Menu $menu -Choice 'orchestrator-gui').Name -eq 'Orchestrator-GUI' -and $null -eq (Resolve-SmartM365InventoryMenuChoice -Menu $menu -Choice '9999')) 'A menu choice resolves by number or by name.'
+    $hiddenInGui = @($catalog.Entries | Where-Object { $_.Definition.PSObject.Properties['HideInGui'] -and $_.Definition.HideInGui } | ForEach-Object { $_.Name })
+    Assert-True ($hiddenInGui.Count -eq 8 -and $hiddenInGui -contains 'Orchestrator-GUI' -and $hiddenInGui -contains 'Exchange-HealthChecker-ScheduledTask-Installer') 'The orchestrator entries and the installers are hidden in the GUI.'
+
     $requestPlan = Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'AD-Inventory' -Action Request -ExtraArguments @('-IncludeDependencies', '-NoWait')
     $requestCommand = Get-SmartM365InventoryCommand -Plan $requestPlan -EnginePath 'pwsh.exe' -ScriptPath $requestPlan.ScriptPath -SmartInventoryRoot $inventoryRoot
     Assert-True (((@($requestCommand.Arguments) | Select-Object -Skip 5) -join ' ') -eq '-Tenant prod -Job AD-Inventory -Collect -IncludeDependencies -NoWait') ('Request extra arguments must be passed once: ' + (@($requestCommand.Arguments) -join ' '))
@@ -271,7 +282,7 @@ exit $ExitCode
     Write-FixtureFile -Path (Join-Path $cacheRoot 'Unwritable') -Content 'not a folder'
 
     # Catalog validation: unknown parameter, missing script, undefined token (checked by AST, nothing runs).
-    $broken = [ordered]@{ Jobs = @([ordered]@{ Name = 'Broken'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-NoSuchParameter -Value {{Undefined}}' }, [ordered]@{ Name = 'Gone'; ScriptPath = 'Fixture\Absent.ps1' }) }
+    $broken = [ordered]@{ Jobs = @([ordered]@{ Name = 'Broken'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-NoSuchParameter -Value {{Undefined}}'; HideInGui = $true }, [ordered]@{ Name = 'Gone'; ScriptPath = 'Fixture\Absent.ps1' }) }
     $brokenRoot = Join-Path $fixtureBase 'Broken\SmartInventory'
     Write-FixtureFile -Path (Join-Path $brokenRoot 'Orchestrator\Orchestrator-Jobs.json.template') -Content ($broken | ConvertTo-Json -Depth 10)
     Copy-Item -LiteralPath (Join-Path $fixtureInventory 'Fixture') -Destination (Join-Path $brokenRoot 'Fixture') -Recurse
@@ -279,6 +290,7 @@ exit $ExitCode
     Assert-True ($brokenErrors -match 'NoSuchParameter is not declared') 'AST check must report an unknown parameter.'
     Assert-True ($brokenErrors -match 'Gone : script not found') 'Catalog check must report a missing script.'
     Assert-True ($brokenErrors -match '\{\{Undefined\}\} is not defined') 'Catalog check must report an undefined token.'
+    Assert-True ($brokenErrors -match 'Broken : HideInGui must be') 'HideInGui is reserved for manual entries.'
 
     # Tenant: parameter, then SMARTM365_ORCHESTRATOR_TENANT, then DefaultTenant.
     $env:SMARTM365_ORCHESTRATOR_TENANT = ''
@@ -442,6 +454,15 @@ exit $ExitCode
     & $powershell5 -NoProfile -ExecutionPolicy Bypass -File $engineScript 'Probe-Direct' -Tenant 'cli' -Value 'cli value' *> $null
     $marker = Read-Marker -Name 'direct'
     Assert-True ($LASTEXITCODE -eq 7 -and $marker.Tenant -eq 'cli' -and $marker.Value -eq 'cli value' -and $marker.Edition -eq 'Core') "The entry script must relaunch pwsh 7 and return the job exit code (got $LASTEXITCODE)."
+    # Menu driven through the input: show the command, go back, choose by name, run now; quitting runs nothing.
+    Remove-Item -LiteralPath (Join-Path $markerFolder 'direct.json') -ErrorAction SilentlyContinue
+    $menuOutput = "3`nW`nB`nprobe-direct`nR`n" | & $powershell5 -NoProfile -ExecutionPolicy Bypass -File $engineScript -Menu -Tenant 'menu' 2>&1 | Out-String
+    $marker = Read-Marker -Name 'direct'
+    Assert-True ($LASTEXITCODE -eq 7 -and $null -ne $marker -and $marker.Tenant -eq 'menu') "The menu must run the chosen entry and return its exit code (got $LASTEXITCODE)."
+    Assert-True ($menuOutput -match 'Jobs: run now' -and $menuOutput -match 'Manual launches' -and $menuOutput -match '\s3\s+Probe-Direct' -and $menuOutput -match 'Command: ') "The menu must list the sections and show the command: $menuOutput"
+    Remove-Item -LiteralPath (Join-Path $markerFolder 'direct.json') -ErrorAction SilentlyContinue
+    $quitOutput = "Q`n" | & $powershell5 -NoProfile -ExecutionPolicy Bypass -File $engineScript -Menu 2>&1 | Out-String
+    Assert-True ($LASTEXITCODE -eq 0 -and $null -eq (Read-Marker -Name 'direct')) 'Quitting the menu must run nothing.'
     & $powershell5 -NoProfile -ExecutionPolicy Bypass -File $engineScript 'No-Such-Job' *> $null
     Assert-True ($LASTEXITCODE -eq 1) 'An unknown entry must return 1.'
 }

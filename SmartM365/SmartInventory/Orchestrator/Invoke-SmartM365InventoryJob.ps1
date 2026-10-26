@@ -11,7 +11,10 @@ Orchestrator-Jobs.json.template (Jobs and Launches); see SmartM365.Inventory.Lau
 PowerShell 5.1) and execution mode (Direct or LocalCache), outside the orchestrator.
 -Name <Job>[,<Job>...] -Request submits the jobs through SmartM365-Inventory-Pipeline.ps1: the
 resident orchestrators run them on the elected server with their dependencies and locks.
--List (or no argument) shows the catalog. -WhatIf shows the resolved command without running anything.
+Without argument in a user console, a numbered menu lists the jobs, the manual launches and the
+orchestrator entries; type a number or a name, then run now, request through the orchestrators
+(jobs), or show the resolved command. -List (or no argument when the input is redirected) prints the
+catalog. -WhatIf shows the resolved command without running anything.
 Any other argument is passed to the launched script (or to the pipeline with -Request).
 
 Tenant: -Tenant, then SMARTM365_ORCHESTRATOR_TENANT, then DefaultTenant of
@@ -31,7 +34,7 @@ The exit code of the launched script is returned. Preparation errors return 1.
 .\Invoke-SmartM365InventoryJob.ps1 AD-Inventory -Request -IncludeDependencies
 
 .VERSION
-1.1.0
+1.2.0
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -42,12 +45,14 @@ param(
     [string]$Tenant = '',
     [ValidateSet('', 'Auto', 'Direct', 'LocalCache')][string]$ExecutionMode = '',
     [string]$JobsManifestPath = '',
+    # Shows the menu even when the input is redirected (scripted use and tests).
+    [switch]$Menu,
     [Parameter(ValueFromRemainingArguments)][string[]]$ExtraArguments = @()
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.1.0'
+$ScriptVersion = '1.2.0'
 
 function Write-Host {
     param([Parameter(Position = 0)][AllowEmptyString()][string]$Object = '', [ConsoleColor]$ForegroundColor = 'Gray')
@@ -80,6 +85,60 @@ function Resolve-InventoryJobsManifestPath {
     return (Get-SmartM365JsonReadPath -Path (Join-Path $sharedDataFolder 'Config\Orchestrator-Jobs.json') -Optional)
 }
 
+function Show-InventoryMenu {
+    param([Parameter(Mandatory)][object[]]$Items)
+    $section = ''
+    foreach ($item in $Items) {
+        if ($item.Section -ne $section) {
+            $section = $item.Section
+            Write-Host ''
+            Write-Host $section -ForegroundColor Cyan
+        }
+        $flags = @()
+        if ($item.Cache) { $flags += 'cache' }
+        if ($item.Interactive) { $flags += 'interactive' }
+        if ($item.RequiresConfirmation) { $flags += 'WRITE' }
+        $flagText = if ($flags.Count) { '[' + ($flags -join ', ') + '] ' } else { '' }
+        Write-Host ('{0,4}  {1,-54} {2,-6} {3}{4}' -f $item.Number, $item.Name, $item.Runtime, $flagText, $item.Description)
+    }
+    Write-Host ''
+}
+
+function Read-InventoryMenuSelection {
+    <# Returns @{ Name; Action; ExtraArguments } or $null when the user quits. #>
+    param([Parameter(Mandatory)][object[]]$Items, [Parameter(Mandatory)]$Catalog, [AllowEmptyString()][string]$TenantValue)
+    Show-InventoryMenu -Items $Items
+    while ($true) {
+        $answer = Read-Host -Prompt 'Number or name (L = list again, Q or Enter = quit)'
+        if ($null -eq $answer -or [string]::IsNullOrWhiteSpace($answer) -or $answer.Trim() -ieq 'Q') { return $null }
+        if ($answer.Trim() -ieq 'L') { Show-InventoryMenu -Items $Items; continue }
+        $item = Resolve-SmartM365InventoryMenuChoice -Menu $Items -Choice $answer
+        if ($null -eq $item) { Write-Host ("Unknown entry: {0}" -f $answer.Trim()) -ForegroundColor Yellow; continue }
+        Write-Host ('{0}: {1}' -f $item.Name, $item.Description) -ForegroundColor Cyan
+        while ($true) {
+            $prompt = if ($item.Kind -eq 'Job') { 'R = run now on this computer, O = request through the orchestrators, W = show the command, B = back' } else { 'R = run now on this computer, W = show the command, B = back' }
+            $action = Read-Host -Prompt $prompt
+            if ($null -eq $action) { return $null }
+            switch ($action.Trim().ToUpperInvariant()) {
+                'R' { return [pscustomobject]@{ Name = $item.Name; Action = 'Now'; ExtraArguments = @() } }
+                'O' {
+                    if ($item.Kind -ne 'Job') { break }
+                    $dependencies = Read-Host -Prompt 'Also run its enabled dependencies first? (Y/N)'
+                    $extra = @()
+                    if ([string]$dependencies -match '^\s*[YyOo]') { $extra = @('-IncludeDependencies') }
+                    return [pscustomobject]@{ Name = $item.Name; Action = 'Request'; ExtraArguments = $extra }
+                }
+                'W' {
+                    try { Write-Host (Format-SmartM365InventoryPlan -Plan (Resolve-SmartM365InventoryLaunch -Catalog $Catalog -Name $item.Name -Tenant $TenantValue) -Catalog $Catalog) }
+                    catch { Write-Host ('[ERROR] {0}' -f $_.Exception.Message) -ForegroundColor Red }
+                }
+                'B' { Show-InventoryMenu -Items $Items }
+            }
+            if ($action.Trim() -ieq 'B') { break }
+        }
+    }
+}
+
 function Wait-InventoryLauncherKey {
     # Same as the pause of the legacy .cmd launchers: only in a user console, never unattended.
     $inputRedirected = $true
@@ -96,15 +155,14 @@ try {
     Import-Module -Name $launchModuleFile -Force -ErrorAction Stop
 
     $catalog = Get-SmartM365InventoryCatalog -SmartInventoryRoot (Split-Path -Path $PSScriptRoot -Parent)
-    if ($List -or @($Name).Count -eq 0) {
+    $inputRedirected = $true
+    try { $inputRedirected = [Console]::IsInputRedirected } catch { $inputRedirected = $true }
+    $menuMode = @($Name).Count -eq 0 -and -not $List -and ($Menu -or ([Environment]::UserInteractive -and -not $inputRedirected))
+    if ($List -or (@($Name).Count -eq 0 -and -not $menuMode)) {
         Write-SmartM365StartupBanner
         Write-Host ('SmartInventory catalog: {0}' -f $catalog.TemplatePath)
-        foreach ($entry in $catalog.Entries) {
-            $definition = $entry.Definition
-            $runtime = if ($definition.PSObject.Properties['Runtime'] -and $definition.Runtime) { [string]$definition.Runtime } elseif ($definition.PSObject.Properties['PowerShellEdition'] -and $definition.PowerShellEdition) { [string]$definition.PowerShellEdition } else { 'PowerShell7' }
-            $execution = if ($definition.PSObject.Properties['Execution'] -and $null -ne $definition.Execution) { 'Execution:' + [string]$definition.Execution.CacheName } else { 'Direct' }
-            $description = if ($definition.PSObject.Properties['Description']) { [string]$definition.Description } else { [string]$definition.ScriptPath }
-            Write-Host ('{0,-58} {1,-6} {2,-17} {3,-42} {4}' -f $entry.Name, $entry.Kind, $runtime, $execution, $description)
+        foreach ($item in @(Get-SmartM365InventoryMenu -Catalog $catalog)) {
+            Write-Host ('{0,-54} {1,-6} {2,-6} {3,-6} {4}' -f $item.Name, $item.Kind, $item.Runtime, $(if ($item.Cache) { 'cache' } else { 'direct' }), $item.Description)
         }
         Write-SmartM365CompletionBanner -Status Success -ScriptName 'Invoke-SmartM365InventoryJob'
         exit 0
@@ -112,7 +170,8 @@ try {
     if ($Now -and $Request) { throw 'Choose either -Now or -Request.' }
     $action = if ($Request) { 'Request' } else { 'Now' }
 
-    if (-not [string]::IsNullOrWhiteSpace($JobsManifestPath) -or $action -eq 'Now') {
+    if ($menuMode) { Write-SmartM365StartupBanner }
+    if (-not [string]::IsNullOrWhiteSpace($JobsManifestPath) -or $action -eq 'Now' -or $menuMode) {
         $overlayPath = $JobsManifestPath
         if ([string]::IsNullOrWhiteSpace($overlayPath)) {
             try {
@@ -127,6 +186,17 @@ try {
         if ($overlayPath) { $catalog = Get-SmartM365InventoryCatalog -SmartInventoryRoot $catalog.SmartInventoryRoot -OverlayPath $overlayPath }
     }
 
+    if ($menuMode) {
+        Write-SmartM365StartupBanner
+        $menuTenant = (Resolve-SmartM365InventoryTenant -Tenant $Tenant -SmartM365Root $catalog.SmartM365Root).Value
+        Write-Host ('SmartInventory - tenant {0} - computer {1}' -f $menuTenant, $env:COMPUTERNAME) -ForegroundColor Cyan
+        $selection = Read-InventoryMenuSelection -Items @(Get-SmartM365InventoryMenu -Catalog $catalog) -Catalog $catalog -TenantValue $menuTenant
+        if ($null -eq $selection) { exit 0 }
+        $Name = @($selection.Name)
+        $action = $selection.Action
+        $ExtraArguments = @($ExtraArguments) + @($selection.ExtraArguments)
+    }
+
     $plan = Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name $Name -Action $action -Tenant $Tenant -ExecutionMode $ExecutionMode -ExtraArguments $ExtraArguments
     if ($WhatIfPreference) {
         Write-SmartM365StartupBanner
@@ -137,6 +207,9 @@ try {
     }
     $exitCode = Invoke-SmartM365InventoryLaunch -Plan $plan -Catalog $catalog
     if ($exitCode -ne 0) { Write-Host ('{0} ended with exit code {1}.' -f $plan.Name, $exitCode) -ForegroundColor Yellow }
+    elseif ($menuMode) { Write-Host ('{0} ended with exit code 0.' -f $plan.Name) }
+    # Started from the menu (often by a double-click): keep the window open on the result.
+    if ($menuMode) { Wait-InventoryLauncherKey }
 }
 catch {
     Write-Host ('[ERROR] {0}' -f $_.Exception.Message) -ForegroundColor Red

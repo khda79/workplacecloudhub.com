@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.5.0
+1.5.1
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.5.0'
+$script:AppVersion = '1.5.1'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -1593,7 +1593,8 @@ function Refresh-LaunchView {
                 InManifest = $null -ne $draftJob
             }
         }
-        $manualRows = foreach ($entry in @($catalog.Entries | Where-Object { $_.Kind -eq 'Manual' })) {
+        # HideInGui entries (orchestrator actions already offered as buttons, setup tools) stay in SmartInventory.cmd only.
+        $manualRows = foreach ($entry in @($catalog.Entries | Where-Object { $_.Kind -eq 'Manual' -and -not [bool](Get-OrchestratorGuiPropertyValue -Object $_.Definition -Name 'HideInGui' -DefaultValue $false) })) {
             $definition = $entry.Definition
             $mode = Resolve-SmartM365InventoryExecutionMode -Entry $entry -Catalog $catalog -DefaultOnPremExecutionMode $globalMode
             [pscustomobject]@{
