@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate offline the SmartInventory launch engine and its catalog against the legacy .cmd launchers.
 .VERSION
-1.1.0
+1.2.0
 .NOTES
 Runs under Windows PowerShell 5.1 and PowerShell 7. Nothing is executed outside a fictional fixture.
 Checks:
@@ -16,7 +16,9 @@ Checks:
 - tenant and execution-mode resolution order, Auto zone detection;
 - real runs on a fictional fixture in %TEMP%: Direct without copy, LocalCache copy, missing
   Include (missing source, failed copy, absent after copy), output inside the cache refused,
-  exit codes transmitted (5.1 and 7), extra arguments, the mailbox identity helper loads under 5.1.
+  exit codes transmitted (5.1 and 7), extra arguments, the mailbox identity helper loads under 5.1;
+- cache hardening: explicit ACL, junction and untrusted owner refused, code integrity checked
+  before the launch, orchestrator candidates without the shared Windows\Temp and C:\Temp.
 #>
 [CmdletBinding()]
 param()
@@ -354,6 +356,46 @@ exit $ExitCode
     Write-FixtureFile -Path (Join-Path $cacheBase 'SmartM365\SmartInventory\Fixture\stale.txt') -Content 'stale'
     [void](Invoke-SmartM365InventoryLaunch -Plan $plan -Catalog $fixture -CacheBaseCandidates $cacheCandidates)
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $cacheBase 'SmartM365\SmartInventory\Fixture\stale.txt'))) 'The cache must be emptied before each run.'
+
+    # Hardened cache: explicit ACL limited to SYSTEM, Administrators and the launching account.
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $cacheAcl = Get-Acl -LiteralPath $cacheBase
+    $aclSids = @($cacheAcl.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object -Unique)
+    Assert-True ($cacheAcl.AreAccessRulesProtected -and @($aclSids | Where-Object { $_ -notin @('S-1-5-18', 'S-1-5-32-544', $currentSid) }).Count -eq 0 -and $aclSids -contains $currentSid) "The cache folder ACL must be explicit (found: $($aclSids -join ', '))."
+    # A junction and a folder owned by another account are refused; the next safe candidate is used.
+    $junctionTarget = Join-Path $fixtureBase 'JunctionTarget'
+    New-Item -ItemType Directory -Path $junctionTarget | Out-Null
+    $junction = Join-Path $cacheRoot 'Junction'
+    & $env:ComSpec /d /c mklink /J "$junction" "$junctionTarget" | Out-Null
+    $untrusted = Join-Path $cacheRoot 'Untrusted'
+    New-Item -ItemType Directory -Path $untrusted | Out-Null
+    & $launchModule { $script:OwnerResolver = { param($path) if ($path -like '*\Untrusted') { 'S-1-5-32-545' } else { (Get-Acl -LiteralPath $path).GetOwner([Security.Principal.SecurityIdentifier]).Value } } }
+    try {
+        Assert-True ((Test-SmartM365InventoryCacheLocation -Path $junction) -match 'junction') 'A junction must be refused as cache folder.'
+        Assert-True ((Test-SmartM365InventoryCacheLocation -Path (Join-Path $untrusted 'Child')) -match 'owned by S-1-5-32-545') 'A folder under a parent owned by another account must be refused.'
+        Remove-Item -LiteralPath (Join-Path $markerFolder 'cache.json') -ErrorAction SilentlyContinue
+        $exitCode = Invoke-SmartM365InventoryLaunch -Plan $plan -Catalog $fixture -CacheBaseCandidates @($junction, $untrusted, (Join-Path $cacheRoot 'Safe'))
+        $marker = Read-Marker -Name 'cache'
+        Assert-True ($exitCode -eq 3 -and $marker.ScriptRoot -like (Join-Path $cacheRoot 'Safe\SmartM365\SmartInventory\Fixture')) 'Refused candidates must be skipped for the next safe one.'
+        Assert-True (@(Get-ChildItem -LiteralPath $junctionTarget -Force).Count -eq 0) 'Nothing may be written through a junction.'
+        Assert-Throws { Invoke-SmartM365InventoryLaunch -Plan $plan -Catalog $fixture -CacheBaseCandidates @($junction, $untrusted) } 'safe local cache' 'Without a safe candidate the launch must stop.'
+    }
+    finally {
+        & $launchModule { $script:OwnerResolver = $null }
+        & $env:ComSpec /d /c rmdir "$junction" | Out-Null
+    }
+    # Code integrity: a cached code file that differs from its source, or an extra one, stops the launch.
+    $sourceFolder = Join-Path $fixtureInventory 'Fixture'
+    $cachedFolder = Join-Path $cacheBase 'SmartM365\SmartInventory\Fixture'
+    Assert-SmartM365InventoryCacheIntegrity -Source $sourceFolder -Destination $cachedFolder
+    [IO.File]::AppendAllText((Join-Path $cachedFolder 'SmartM365-Fixture-Probe.ps1'), '# tampered')
+    Assert-Throws { Assert-SmartM365InventoryCacheIntegrity -Source $sourceFolder -Destination $cachedFolder } 'differs from its source' 'A modified cached script must be detected.'
+    Write-FixtureFile -Path (Join-Path $cachedFolder 'Extra.ps1') -Content '# extra'
+    Assert-Throws { Assert-SmartM365InventoryCacheIntegrity -Source $sourceFolder -Destination $cachedFolder } 'unexpected code file' 'An extra cached script must be detected.'
+    # The orchestrator never uses the shared Windows\Temp and C:\Temp folders.
+    $orchestratedCandidates = @(Get-SmartM365InventoryCacheCandidates -CacheName 'Fixture\Probe' -Orchestrated)
+    Assert-True ($orchestratedCandidates[0] -like '*\SmartM365\LauncherCache\Fixture\Probe' -and @($orchestratedCandidates | Where-Object { $_ -like 'C:\Temp\*' -or $_ -like (Join-Path $env:SystemRoot 'Temp\*') }).Count -eq 0) 'Orchestrator cache candidates must exclude Windows\Temp and C:\Temp.'
+    Assert-True (@(Get-SmartM365InventoryCacheCandidates -CacheName 'Fixture\Probe').Count -eq (@($orchestratedCandidates).Count + 2)) 'Manual runs keep the four legacy candidates.'
 
     # Missing Include: the launch fails before the script.
     Assert-Throws { Invoke-SmartM365InventoryLaunch -Plan (Resolve-SmartM365InventoryLaunch -Catalog $fixture -Name 'Probe-MissingInclude') -Catalog $fixture -CacheBaseCandidates @((Join-Path $cacheRoot 'Missing')) } 'Include source missing' 'A missing Include must stop the launch.'

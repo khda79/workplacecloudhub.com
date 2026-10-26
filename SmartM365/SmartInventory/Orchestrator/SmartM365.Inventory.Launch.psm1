@@ -20,25 +20,32 @@ Launch fields of an entry:
 - PassTenant: false when the script asks for its tenant itself (default: -Tenant is passed
   when the script declares it).
 
-LocalCache reproduces the legacy on-premises launchers: first writable folder among
-ProgramData\SmartM365\LauncherCache\<CacheName>, Windows\Temp, C:\Temp and %TEMP%; cache
-emptied; robocopy /MIR of the script folder, Config and Modules\SmartM365.Core; failure from
-exit code 8; PrepareCache.log; Include files checked before and after the copy; Unblock-File.
-Outputs that resolve inside the cache are refused.
+LocalCache reproduces the legacy on-premises launchers: first usable folder among
+ProgramData\SmartM365\LauncherCache\<CacheName>, Windows\Temp, C:\Temp and %TEMP% (the orchestrator
+uses only ProgramData and %TEMP%); robocopy /MIR of the script folder, Config and
+Modules\SmartM365.Core; failure from exit code 8; PrepareCache.log; Include files checked before and
+after the copy; Unblock-File. Outputs that resolve inside the cache are refused.
+The cache is hardened: a folder or parent that is a junction or link, or that is owned by another
+account than SYSTEM, Administrators, TrustedInstaller or the launching account, is refused; the
+cache folder gets an explicit ACL (SYSTEM, Administrators and the launching account only) and is
+emptied; right before the launch, every code file of the cache must be byte-identical to the source.
 
 Compatible with Windows PowerShell 5.1 and PowerShell 7.
 
 .VERSION
-1.2.0
+1.3.0
 #>
 Set-StrictMode -Version 2.0
 
-$script:LaunchModuleVersion = '1.2.0'
+$script:LaunchModuleVersion = '1.3.0'
 $script:ValidRuntimes = @('PowerShell7', 'WindowsPowerShell')
 $script:ValidModes = @('Direct', 'LocalCache', 'Auto')
 # Test hook: replaced by the offline tests to simulate the zone of a share.
 $script:PathZoneResolver = $null
 $script:LaunchLogPath = ''
+# Test hook: replaced by the offline tests to simulate the owner (SID) of a cache folder.
+$script:OwnerResolver = $null
+$script:CodeFileExtensions = @('.ps1', '.psm1', '.psd1', '.ps1xml', '.dll', '.exe', '.cs', '.cmd', '.bat', '.vbs', '.js')
 
 function Write-SmartM365InventoryLaunchMessage {
     [CmdletBinding()]
@@ -433,11 +440,96 @@ function Get-SmartM365InventoryEnginePath {
 }
 
 function Get-SmartM365InventoryCacheCandidates {
+    <# Cache folders in order. The orchestrator (-Orchestrated) skips the shared Windows\Temp and C:\Temp. #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$CacheName)
-    $candidates = @((Join-Path $env:ProgramData ('SmartM365\LauncherCache\' + $CacheName)), (Join-Path $env:SystemRoot ('Temp\SmartM365LauncherCache\' + $CacheName)), ('C:\Temp\SmartM365LauncherCache\' + $CacheName))
+    param([Parameter(Mandatory)][string]$CacheName, [switch]$Orchestrated)
+    $candidates = @((Join-Path $env:ProgramData ('SmartM365\LauncherCache\' + $CacheName)))
+    if (-not $Orchestrated) { $candidates += @((Join-Path $env:SystemRoot ('Temp\SmartM365LauncherCache\' + $CacheName)), ('C:\Temp\SmartM365LauncherCache\' + $CacheName)) }
     if ($env:TEMP) { $candidates += (Join-Path $env:TEMP ('SmartM365LauncherCache\' + $CacheName)) }
     return $candidates
+}
+
+function Get-SmartM365InventoryTrustedOwnerSids {
+    # SYSTEM, Administrators, TrustedInstaller and the account that launches.
+    return @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464', [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+}
+
+function Get-SmartM365InventoryFolderOwner {
+    param([Parameter(Mandatory)][string]$Path)
+    if ($null -ne $script:OwnerResolver) { return [string](& $script:OwnerResolver $Path) }
+    return (Get-Acl -LiteralPath $Path).GetOwner([Security.Principal.SecurityIdentifier]).Value
+}
+
+function Test-SmartM365InventoryCacheLocation {
+    <#
+    Returns why a cache folder cannot be used, or an empty string: the folder and its existing
+    parents (drive root excepted) must not be junctions or links and must be owned by a trusted
+    account, otherwise another account could replace the files between the copy and the launch.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    $trusted = Get-SmartM365InventoryTrustedOwnerSids
+    $directory = New-Object System.IO.DirectoryInfo ([IO.Path]::GetFullPath($Path))
+    while ($null -ne $directory -and $null -ne $directory.Parent) {
+        if (Test-Path -LiteralPath $directory.FullName) {
+            $item = Get-Item -LiteralPath $directory.FullName -Force
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return ('{0} is a junction or a link' -f $directory.FullName) }
+            $owner = Get-SmartM365InventoryFolderOwner -Path $directory.FullName
+            if ($owner -notin $trusted) { return ('{0} is owned by {1}' -f $directory.FullName, $owner) }
+        }
+        $directory = $directory.Parent
+    }
+    return ''
+}
+
+function Protect-SmartM365InventoryCacheFolder {
+    <# Explicit ACL without inheritance: SYSTEM, Administrators and the launching account only. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544', [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)) {
+        $identity = New-Object System.Security.Principal.SecurityIdentifier $sid
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($identity, 'FullControl', $inheritance, 'None', 'Allow')))
+    }
+    # Only the modified DACL is written (Set-Acl would also write the SACL, which needs SeSecurityPrivilege).
+    $directory = New-Object System.IO.DirectoryInfo $Path
+    if ('System.IO.FileSystemAclExtensions' -as [type]) { [System.IO.FileSystemAclExtensions]::SetAccessControl($directory, $acl) }
+    else { $directory.SetAccessControl($acl) }
+}
+
+function Assert-SmartM365InventoryCacheIntegrity {
+    <# Every code file of a cached copy (file or folder) must be byte-identical to its source. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Destination)
+    if (Test-Path -LiteralPath $Source -PathType Leaf) {
+        $pairs = @([pscustomobject]@{ Relative = (Split-Path $Source -Leaf); Source = $Source; Destination = $Destination })
+        if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) { throw "Cache integrity: $Destination is missing." }
+    }
+    else {
+        $list = {
+            param([string]$Root)
+            $full = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+            $map = @{}
+            foreach ($file in @(Get-ChildItem -LiteralPath $full -File -Recurse -Force -ErrorAction Stop)) {
+                if ($script:CodeFileExtensions -contains $file.Extension.ToLowerInvariant()) { $map[$file.FullName.Substring($full.Length + 1).ToLowerInvariant()] = $file.FullName }
+            }
+            return $map
+        }
+        $sourceFiles = & $list $Source
+        $cachedFiles = & $list $Destination
+        foreach ($relative in @($cachedFiles.Keys)) { if (-not $sourceFiles.ContainsKey($relative)) { throw "Cache integrity: unexpected code file in the cache: $($cachedFiles[$relative])" } }
+        $pairs = foreach ($relative in @($sourceFiles.Keys)) {
+            if (-not $cachedFiles.ContainsKey($relative)) { throw "Cache integrity: $relative is missing from $Destination." }
+            [pscustomobject]@{ Relative = $relative; Source = $sourceFiles[$relative]; Destination = $cachedFiles[$relative] }
+        }
+    }
+    foreach ($pair in @($pairs)) {
+        if ((Get-FileHash -LiteralPath $pair.Source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $pair.Destination -Algorithm SHA256).Hash) {
+            throw "Cache integrity: $($pair.Destination) differs from its source $($pair.Source)."
+        }
+    }
 }
 
 function Test-SmartM365InventoryPathInside {
@@ -491,23 +583,40 @@ function Initialize-SmartM365InventoryLocalCache {
     param(
         [Parameter(Mandatory)]$Plan,
         [Parameter(Mandatory)]$Catalog,
-        [string[]]$CacheBaseCandidates = @()
+        [string[]]$CacheBaseCandidates = @(),
+        [switch]$Orchestrated
     )
     if (-not $Plan.CacheName) { throw "Entry '$($Plan.Name)' declares no Execution.CacheName." }
-    if ($CacheBaseCandidates.Count -eq 0) { $CacheBaseCandidates = Get-SmartM365InventoryCacheCandidates -CacheName $Plan.CacheName }
+    if ($CacheBaseCandidates.Count -eq 0) { $CacheBaseCandidates = Get-SmartM365InventoryCacheCandidates -CacheName $Plan.CacheName -Orchestrated:$Orchestrated }
     $cacheBase = ''
+    $refusals = New-Object System.Collections.Generic.List[string]
     foreach ($candidate in $CacheBaseCandidates) {
         try {
+            $reason = Test-SmartM365InventoryCacheLocation -Path $candidate
+            if ($reason) { $refusals.Add(('{0}: {1}' -f $candidate, $reason)); continue }
+            if ((Test-Path -LiteralPath $candidate) -and -not (Test-Path -LiteralPath $candidate -PathType Container)) { $refusals.Add(('{0}: not a folder' -f $candidate)); continue }
             New-Item -ItemType Directory -Path $candidate -Force -ErrorAction Stop | Out-Null
+            # Checked again once created: another account may have created it in the meantime.
+            $reason = Test-SmartM365InventoryCacheLocation -Path $candidate
+            if ($reason) { $refusals.Add(('{0}: {1}' -f $candidate, $reason)); continue }
+            Protect-SmartM365InventoryCacheFolder -Path $candidate
+            # The cache is rebuilt for every run (same as rmdir /s /q in the legacy launchers), so nothing
+            # left by an earlier run, or by another account before the ACL was set, is reused.
+            foreach ($child in @(Get-ChildItem -LiteralPath $candidate -Force -ErrorAction Stop)) {
+                if ($child.PSIsContainer -and ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { & (Join-Path $env:SystemRoot 'System32\cmd.exe') /d /c rmdir /s /q "$($child.FullName)" 2>$null | Out-Null }
+                else { Remove-Item -LiteralPath $child.FullName -Force -Recurse -ErrorAction SilentlyContinue }
+            }
+            if (@(Get-ChildItem -LiteralPath $candidate -Force -ErrorAction Stop).Count -gt 0) { $refusals.Add(('{0}: could not be emptied' -f $candidate)); continue }
             $probe = Join-Path $candidate '.smartm365-cache-write-test'
             [IO.File]::WriteAllText($probe, '')
             Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
             $cacheBase = $candidate
             break
         }
-        catch { continue }
+        catch { $refusals.Add(('{0}: {1}' -f $candidate, $_.Exception.Message)); continue }
     }
-    if (-not $cacheBase) { throw ("Failed to create a writable local cache base folder. Tried:{0}  {1}" -f [Environment]::NewLine, ($CacheBaseCandidates -join ([Environment]::NewLine + '  '))) }
+    if (-not $cacheBase) { throw ("Failed to prepare a safe local cache base folder. Tried:{0}  {1}" -f [Environment]::NewLine, ($refusals -join ([Environment]::NewLine + '  '))) }
+    if ($refusals.Count -gt 0) { Write-SmartM365InventoryLaunchMessage -Level WARN -Message ("Cache folder(s) skipped:{0}  {1}" -f [Environment]::NewLine, ($refusals -join ([Environment]::NewLine + '  '))) }
 
     $smartM365Root = $Catalog.SmartM365Root
     $scriptFolder = Split-Path -Path $Plan.ScriptPath -Parent
@@ -517,8 +626,6 @@ function Initialize-SmartM365InventoryLocalCache {
     $localScriptFolder = Join-Path $localRoot $scriptFolderRelative
     $cacheLog = Join-Path $cacheBase 'PrepareCache.log'
 
-    # The cache is rebuilt for every run (same as rmdir /s /q in the legacy launchers).
-    if (Test-Path -LiteralPath $localRoot) { & (Join-Path $env:SystemRoot 'System32\cmd.exe') /d /c rmdir /s /q "$localRoot" 2>$null | Out-Null }
     foreach ($folder in @($localScriptFolder, (Join-Path $localRoot 'Config'), (Join-Path $localRoot 'Modules\SmartM365.Core'))) {
         New-Item -ItemType Directory -Path $folder -Force -ErrorAction SilentlyContinue | Out-Null
     }
@@ -536,6 +643,8 @@ function Initialize-SmartM365InventoryLocalCache {
 
     $unblockFolders = New-Object System.Collections.Generic.List[string]
     $unblockFolders.Add($localScriptFolder)
+    $integrity = New-Object System.Collections.Generic.List[object]
+    foreach ($copy in $copies) { $integrity.Add([pscustomobject]@{ Source = $copy.Source; Destination = $copy.Destination }) }
     foreach ($item in $Plan.Include) {
         $relative = ([string]$item).Trim().TrimStart('\', '/')
         $source = Join-Path $smartM365Root $relative
@@ -551,11 +660,14 @@ function Initialize-SmartM365InventoryLocalCache {
         }
         if ($exitCode -ge 8) { throw ("Include copy failed: {0}; destination: {1}; robocopy exit: {2}; cache log: {3}" -f $source, $destination, $exitCode, $cacheLog) }
         if (-not (Test-Path -LiteralPath $destination)) { throw ("Include absent after copy: {0}; source: {1}; cache log: {2}" -f $destination, $source, $cacheLog) }
+        $integrity.Add([pscustomobject]@{ Source = $source; Destination = $destination })
     }
     $unblockFolders.Add((Join-Path $localRoot 'Config'))
     $unblockFolders.Add((Join-Path $localRoot 'Modules\SmartM365.Core'))
     Get-ChildItem -LiteralPath @($unblockFolders | Select-Object -Unique) -Include '*.ps1', '*.psm1', '*.psd1' -File -Recurse -ErrorAction SilentlyContinue |
         Unblock-File -ErrorAction SilentlyContinue
+    # Last check before the cached code is loaded (output check, then the launch).
+    foreach ($pair in $integrity) { Assert-SmartM365InventoryCacheIntegrity -Source $pair.Source -Destination $pair.Destination }
 
     [pscustomobject]@{
         CacheBase = $cacheBase
@@ -705,7 +817,9 @@ function Invoke-SmartM365InventoryOrchestratedLaunch {
         [Parameter(Mandatory)][string]$LogPath,
         [AllowEmptyString()][string]$ExecutionMode = '',
         [AllowNull()]$JobArguments = $null,
-        [switch]$NoAutoConnect
+        [switch]$NoAutoConnect,
+        # Script validated by the orchestrator (Authenticode); the launch is refused if the catalog resolves another one.
+        [AllowEmptyString()][string]$ExpectedScriptPath = ''
     )
     $script:LaunchLogPath = $LogPath
     $ErrorActionPreference = 'Continue'
@@ -713,7 +827,10 @@ function Invoke-SmartM365InventoryOrchestratedLaunch {
         try {
             $catalog = Get-SmartM365InventoryCatalog -SmartInventoryRoot $SmartInventoryRoot
             $plan = Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name $Name -Tenant $Tenant -ExecutionMode $ExecutionMode -ExecutionModeSource 'Job (runtime manifest)' -JobArguments $JobArguments -NoAutoConnect:$NoAutoConnect
-            $command = Initialize-SmartM365InventoryLaunch -Plan $plan -Catalog $catalog
+            if ($ExpectedScriptPath -and [IO.Path]::GetFullPath($plan.ScriptPath) -ine [IO.Path]::GetFullPath($ExpectedScriptPath)) {
+                throw ("the catalog script {0} differs from the validated script {1}" -f $plan.ScriptPath, $ExpectedScriptPath)
+            }
+            $command = Initialize-SmartM365InventoryLaunch -Plan $plan -Catalog $catalog -Orchestrated
         }
         catch {
             Write-SmartM365InventoryLaunchMessage -Level ERROR -Message ("Catalog engine could not prepare {0}: {1}" -f $Name, $_.Exception.Message)
@@ -746,7 +863,8 @@ function Initialize-SmartM365InventoryLaunch {
     param(
         [Parameter(Mandatory)]$Plan,
         [Parameter(Mandatory)]$Catalog,
-        [string[]]$CacheBaseCandidates = @()
+        [string[]]$CacheBaseCandidates = @(),
+        [switch]$Orchestrated
     )
     $inputRedirected = $false
     try { $inputRedirected = [Console]::IsInputRedirected } catch { $inputRedirected = $true }
@@ -771,7 +889,7 @@ function Initialize-SmartM365InventoryLaunch {
     $inventoryRoot = $Catalog.SmartInventoryRoot
     $outputCheckArguments = @($Plan.Arguments) + @($Plan.ExtraArguments)
     if ($Plan.Mode -eq 'LocalCache') {
-        $cache = Initialize-SmartM365InventoryLocalCache -Plan $Plan -Catalog $Catalog -CacheBaseCandidates $CacheBaseCandidates
+        $cache = Initialize-SmartM365InventoryLocalCache -Plan $Plan -Catalog $Catalog -CacheBaseCandidates $CacheBaseCandidates -Orchestrated:$Orchestrated
         Write-SmartM365InventoryLaunchMessage -Message ("Execution mode: LocalCache; cache folder: {0}" -f $cache.LocalSmartM365Root)
         Assert-SmartM365InventoryOutputOutsideCache -Plan $Plan -Cache $cache -Arguments $outputCheckArguments | Out-Null
         $scriptPath = $cache.LocalScriptPath
@@ -849,7 +967,8 @@ Export-ModuleMember -Function Get-SmartM365InventoryCatalog, Find-SmartM365Inven
     Get-SmartM365InventoryGlobalSetting, Get-SmartM365InventoryPathZone, Resolve-SmartM365InventoryExecutionMode, Resolve-SmartM365InventoryLaunch,
     Get-SmartM365InventoryEnginePath, Get-SmartM365InventoryCacheCandidates, Initialize-SmartM365InventoryLocalCache, Get-SmartM365InventoryOutputRoots,
     Assert-SmartM365InventoryOutputOutsideCache, Get-SmartM365InventoryCommand, Format-SmartM365InventoryPlan, Invoke-SmartM365InventoryLaunch,
-    Initialize-SmartM365InventoryLaunch, Invoke-SmartM365InventoryOrchestratedLaunch,
+    Initialize-SmartM365InventoryLaunch, Invoke-SmartM365InventoryOrchestratedLaunch, Test-SmartM365InventoryCacheLocation,
+    Assert-SmartM365InventoryCacheIntegrity,
     Test-SmartM365InventoryCatalog, Write-SmartM365InventoryLaunchMessage
 
 # SIG # Begin signature block

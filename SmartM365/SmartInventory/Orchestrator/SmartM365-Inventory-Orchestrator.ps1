@@ -29,7 +29,8 @@ Features:
 - Catalog engine: a job whose definition in Orchestrator-Jobs.json.template declares Runtime or
   Execution is started through SmartM365.Inventory.Launch.psm1 (Direct or LocalCache, cache
   folder written to the job log); its LauncherPath is ignored. LauncherPath remains accepted
-  for one version, with a warning in the job log.
+  for one version, with a warning in the job log. The launch is refused when the catalog script
+  differs from the manifest ScriptPath, so Authenticode validates the script that runs.
 - Per-server folders: the orchestrator data and log folders are automatically suffixed
   with the local computer name, so several servers can share the same UNC
   DataAllRootPath/LogAllRootPath without state, lock or log collisions.
@@ -105,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.60
+1.5.61
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -155,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.60"
+$ScriptVersion = "1.5.61"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -3680,7 +3681,8 @@ function Get-OrchestratorJobLaunchDefinition {
     $hasExecution = [bool]($definition.PSObject.Properties['Execution'] -and $null -ne $definition.Execution)
     if (-not $runtime -and -not $hasExecution) { return $null }
     if (-not $runtime) { $runtime = [string]$Job.PowerShellEdition }
-    return [pscustomobject]@{ Catalog = $catalog; Runtime = $runtime; HasExecution = $hasExecution }
+    $catalogScriptPath = [IO.Path]::GetFullPath((Join-Path -Path $script:SmartInventoryRoot -ChildPath ([string]$definition.ScriptPath)))
+    return [pscustomobject]@{ Catalog = $catalog; Runtime = $runtime; HasExecution = $hasExecution; ScriptPath = $catalogScriptPath }
 }
 
 function Get-PwshPath {
@@ -3843,6 +3845,15 @@ function Start-InventoryJob {
         return
     }
 
+    # Authenticode validates the manifest ScriptPath: the catalog engine must run that same script.
+    if ($useEngine -and [IO.Path]::GetFullPath($scriptFullPath) -ine $launchDefinition.ScriptPath) {
+        $mismatch = "Catalog script {0} differs from the manifest ScriptPath {1}; launch refused so that the validated script is the one that runs." -f $launchDefinition.ScriptPath, $scriptFullPath
+        Write-OrchestratorLog -Message ("Job {0}: {1}" -f $Job.Name, $mismatch) -Level ERROR
+        $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
+        Complete-JobRun -JobName $Job.Name -RunInfo $runInfo -StatusHint 'LaunchFailed' -ExitCode $null -EndTime $startTime -ErrorText $mismatch
+        return
+    }
+
     if ($useLauncher -and -not (Test-Path -LiteralPath $launcherFullPath)) {
         Write-OrchestratorLog -Message ("Job {0}: launcher not found: {1}" -f $Job.Name, $launcherFullPath) -Level ERROR
         $runInfo = @{ StartTime = $startTime; Occurrence = $Occurrence; LogPath = ''; Attempt = $Attempt; TimeoutMinutes = $Job.TimeoutMinutes; ClaimPath = $ClaimPath; ConcurrencyLeasePath = $ConcurrencyLeasePath; ConcurrencyLeaseId = $ConcurrencyLeaseId; PipelineBatchId = $PipelineBatchId; PipelineStatusPath = $PipelineStatusPath }
@@ -3905,7 +3916,7 @@ function Start-InventoryJob {
             "`$ErrorActionPreference = 'Continue'; " +
             "`$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'; " +
             "try { Import-Module -Name '" + $script:LaunchModulePath.Replace("'", "''") + "' -Force -ErrorAction Stop; " +
-            "`$resultExitCode = Invoke-SmartM365InventoryOrchestratedLaunch -SmartInventoryRoot '" + $script:SmartInventoryRoot.Replace("'", "''") + "' -Name '" + ([string]$Job.Name).Replace("'", "''") + "' -Tenant '" + $escapedTenant + "' -LogPath '" + $escapedLog + "' -ExecutionMode '" + ([string]$Job.ExecutionMode).Replace("'", "''") + "' -JobArguments '" + $engineArguments.Replace("'", "''") + "'" + $noAutoConnectPart + " } " +
+            "`$resultExitCode = Invoke-SmartM365InventoryOrchestratedLaunch -SmartInventoryRoot '" + $script:SmartInventoryRoot.Replace("'", "''") + "' -Name '" + ([string]$Job.Name).Replace("'", "''") + "' -Tenant '" + $escapedTenant + "' -LogPath '" + $escapedLog + "' -ExecutionMode '" + ([string]$Job.ExecutionMode).Replace("'", "''") + "' -JobArguments '" + $engineArguments.Replace("'", "''") + "' -ExpectedScriptPath '" + $escapedScript + "'" + $noAutoConnectPart + " } " +
             "catch { ('Catalog engine launch failed: ' + `$_.Exception.Message) | Out-File -FilePath '" + $escapedLog + "' -Append; `$resultExitCode = 1 }"
     }
     elseif ($useLauncher) {
@@ -3949,7 +3960,7 @@ function Start-InventoryJob {
             $zoneText = if ($plan.ModeInfo.Zone) { ', zone ' + $plan.ModeInfo.Zone } else { '' }
             $launchDetailLines.Add(("[{0}] Execution mode: {1} (requested {2}, source {3}{4})" -f $stamp, $plan.Mode, $plan.ModeInfo.Requested, $plan.ModeInfo.Source, $zoneText))
             if ($plan.Mode -eq 'LocalCache') {
-                $launchDetailLines.Add(("[{0}] Cache folder: first writable of {1}; the engine logs the folder it uses below." -f $stamp, ((Get-SmartM365InventoryCacheCandidates -CacheName $plan.CacheName) -join ' | ')))
+                $launchDetailLines.Add(("[{0}] Cache folder: first writable of {1}; the engine logs the folder it uses below." -f $stamp, ((Get-SmartM365InventoryCacheCandidates -CacheName $plan.CacheName -Orchestrated) -join ' | ')))
             }
         }
         catch { $launchDetailLines.Add(("[{0}] Execution mode: not resolved before launch ({1})" -f $stamp, $_.Exception.Message)) }

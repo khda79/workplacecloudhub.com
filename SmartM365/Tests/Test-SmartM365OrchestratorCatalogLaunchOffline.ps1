@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate offline that the orchestrator starts catalog jobs through SmartM365.Inventory.Launch.psm1.
 .VERSION
-1.0.0
+1.1.0
 .NOTES
 The orchestrator functions are extracted by AST and run against a fictional SmartM365 tree in
 %TEMP% (no tenant, no network, no collector). Real supervisor and job processes are started:
@@ -14,7 +14,9 @@ The orchestrator functions are extracted by AST and run against a fictional Smar
 - an output inside the cache stops the launch with exit code 1;
 - a legacy LauncherPath job still runs, with a deprecation warning in the job and orchestrator logs;
 - prerequisites check the launch module instead of the launcher; Authenticode includes the module;
-- the manifest normalization accepts Execution.Mode and rejects an invalid value.
+- the manifest normalization accepts Execution.Mode and rejects an invalid value;
+- a manifest ScriptPath that differs from the catalog script is refused before Authenticode, and
+  the engine refuses a catalog script that differs from the validated one.
 The LocalCache job uses a unique cache name under the standard cache folders; they are removed.
 #>
 [CmdletBinding()]
@@ -134,7 +136,7 @@ exit $ExitCode
     Assert-True ($run.ExitCode -eq 4) "Engine-Cache exit code 4 expected, got $($run.ExitCode)."
     Assert-True ($run.Log -match 'Launch mode: CatalogEngine') 'The job log must show the catalog engine launch mode.'
     Assert-True ($run.Log -match 'Execution mode: LocalCache \(requested LocalCache, source OnPremExecutionMode\)') 'The job log must show the effective execution mode and its source.'
-    Assert-True ($run.Log -match 'Cache folder: first writable of ') 'The job log must list the cache folder candidates.'
+    Assert-True ($run.Log -match 'Cache folder: first writable of ' -and $run.Log -notmatch 'C:\\Temp\\SmartM365LauncherCache') 'The job log must list the orchestrator cache candidates (no C:\Temp).'
     Assert-True ($run.Log -match '\[INFO\] Execution mode: LocalCache; cache folder: (?<Folder>[^\r\n]+)') 'The engine must log the cache folder it used.'
     $usedCache = $Matches['Folder'].Trim()
     Assert-True ($usedCache -like ('*' + $cacheName + '\SmartM365')) "Unexpected cache folder: $usedCache"
@@ -169,6 +171,16 @@ exit $ExitCode
     $warnings = @(& $module { $script:OrchestratorLog } | Where-Object { $_.Level -eq 'WARN' -and $_.Message -match 'Legacy-Launcher: LauncherPath is deprecated' })
     Assert-True ($run.ExitCode -eq 2 -and (Read-Marker 'legacy').Tenant -eq 'demo') 'A LauncherPath job must still run through its launcher.'
     Assert-True ($run.Log -match 'Launch mode: LauncherPath' -and $run.Log -match 'WARNING: LauncherPath is deprecated' -and $warnings.Count -eq 1) 'LauncherPath must be reported as deprecated in the job and orchestrator logs.'
+
+    # The validated (manifest) script must be the catalog script that runs.
+    Write-FixtureFile (Join-Path $inventory 'Fixture\SmartM365-Fixture-Other.ps1') 'exit 0'
+    $mismatchJob = [pscustomobject]@{ Name = 'Engine-Core'; ScriptPath = 'Fixture\SmartM365-Fixture-Other.ps1'; LauncherPath = ''; Arguments = ''; PowerShellEdition = 'PowerShell7'; ExecutionMode = ''; TimeoutMinutes = 5 }
+    $mismatchError = ''
+    try { & $module { param($job) Start-InventoryJob -Job $job -Occurrence (Get-Date) } $mismatchJob } catch { $mismatchError = $_.Exception.Message }
+    Assert-True ($mismatchError -match 'differs from the manifest ScriptPath' -and @(& $module { $script:OrchestratorLog } | Where-Object { $_.Level -eq 'ERROR' -and $_.Message -match 'Engine-Core: Catalog script' }).Count -eq 1) 'A manifest ScriptPath different from the catalog must refuse the launch.'
+    $expectedLog = Join-Path $base 'expected.log'
+    $expectedExit = & $module { param($root, $log) Invoke-SmartM365InventoryOrchestratedLaunch -SmartInventoryRoot $root -Name 'Engine-Core' -Tenant 'demo' -LogPath $log -ExpectedScriptPath (Join-Path $root 'Fixture\SmartM365-Fixture-Other.ps1') } $inventory $expectedLog
+    Assert-True ($expectedExit -eq 1 -and (Get-Content -LiteralPath $expectedLog -Raw) -match 'differs from the validated script') 'The engine must refuse a script other than the validated one.'
 
     # Prerequisites and Authenticode.
     $engineChecks = & $module { Get-OrchestratorJobPrerequisitePathCheck -Job ([pscustomobject]@{ Name = 'Engine-Cache'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; LauncherPath = 'Launchers\Start-Fixture-Probe.cmd'; PowerShellEdition = 'PowerShell7' }) }
