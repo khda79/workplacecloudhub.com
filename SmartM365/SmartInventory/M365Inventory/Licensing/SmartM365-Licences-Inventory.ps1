@@ -17,8 +17,12 @@
   Per-SKU decisions (disabled accounts on every paid SKU, Copilot without licensed activity, unassigned capacity, dependency guard) are published
   as optional files M365_Licenses_ReportSkuCandidates.csv and M365_Licenses_ReportSkuCapacity.csv with the report snapshot identity;
   ReportSkuCapacity names the report product family of each SKU (ReportProduct) so consumers never re-implement the SKU rules.
+  Licensed users are attributed to their AD domain and AD country (AD_Users_AllDomains.csv, ImmutableId then unique UPN):
+  the tenant email shows licenses by AD domain and by country before section 01 (M365_Licenses_ReportByDomain.csv and
+  M365_Licenses_ReportByCountry.csv), and LicenseSummaryDomainMails sends each configured AD domain its own report with a
+  workbook limited to its users, in addition to the tenant email. LicenseSummaryEmailDomain resends one domain in email-only mode.
 .VERSION
- 1.59
+ 1.60
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -48,6 +52,7 @@ param(
   [switch]$InteractiveAuth,
   [switch]$SendLicenseSummaryEmailOnly,
   [switch]$ForceLicenseSummaryEmail,
+  [string]$LicenseSummaryEmailDomain,
   [switch]$ForceAdCsvAnalysis,
     [int]$MaxItems = 0
 )
@@ -968,6 +973,14 @@ function Import-LicensesSourceCsv {
   return $data
 }
 
+# One verified read per source when the same rows feed the tenant view and every AD domain view.
+function Import-LicensesSourceCsvCached {
+  param([Parameter(Mandatory)]$Source, [AllowNull()][hashtable]$Cache)
+  if ($null -eq $Cache) { return (Import-LicensesSourceCsv -Source $Source) }
+  if (-not $Cache.ContainsKey($Source.Path)) { $Cache[$Source.Path] = @(Import-LicensesSourceCsv -Source $Source) }
+  return $Cache[$Source.Path]
+}
+
 function Read-LicensesIndexedSource {
   param(
     [Parameter(Mandatory)]$Source,
@@ -1017,7 +1030,10 @@ function Get-LicensesMailboxGapSummary {
     [Parameter(Mandatory)]$ActiveSource,
     [Parameter(Mandatory)][string]$ExpectedTenantKey,
     [Parameter(Mandatory)][System.Collections.IDictionary]$TargetSuitesByUser,
-    [Parameter(Mandatory)][System.Collections.IDictionary]$AllSkusByUser
+    [Parameter(Mandatory)][System.Collections.IDictionary]$AllSkusByUser,
+    # Entra IDs of one AD domain; rows without an Entra ID cannot be attributed and stay in the tenant view only.
+    [AllowNull()][System.Collections.IDictionary]$ScopeUserIds,
+    [AllowNull()][hashtable]$ReadCache
   )
 
   $userMailboxes = [pscustomobject]@{ Available=$false; Universe=0; Total=0; OtherSkus=0; NoSkus=0; Unknown=0; EntraEnabled=0; EntraDisabled=0; EntraStateUnknown=0; EntraStateAvailable=$false; EntraStateReason=''; Reason='' }
@@ -1034,14 +1050,14 @@ function Get-LicensesMailboxGapSummary {
   $userMailboxCandidateIds = @{}
   $unjoinedMailboxRows = 0
   try {
-    foreach ($row in (Import-LicensesSourceCsv -Source $MailboxSource)) {
+    foreach ($row in (Import-LicensesSourceCsvCached -Source $MailboxSource -Cache $ReadCache)) {
       if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
       $id = ([string]$row.ExternalDirectoryObjectId).Trim().ToLowerInvariant()
       $kind = ([string]$row.RecipientTypeDetails).Trim()
       $observed = ([string]$row.NativeIdentityStatus).Trim() -eq 'Observed'
       if (-not $id) {
         $unjoinedMailboxRows++
-        if ($kind -eq 'UserMailbox') { $userMailboxes.Unknown++ }
+        if ($kind -eq 'UserMailbox' -and $null -eq $ScopeUserIds) { $userMailboxes.Unknown++ }
         continue
       }
       if ($mailboxTypes.ContainsKey($id)) {
@@ -1054,6 +1070,7 @@ function Get-LicensesMailboxGapSummary {
           -not $TargetSuitesByUser.ContainsKey($id)) { $unqualifiedUserMailboxIds[$id] = $true }
     }
     foreach ($id in $mailboxTypes.Keys) {
+      if ($null -ne $ScopeUserIds -and -not $ScopeUserIds.Contains($id)) { continue }
       if ($duplicateMailboxIds.ContainsKey($id) -or $mailboxTypes[$id] -eq 'Unknown') {
         if (-not $TargetSuitesByUser.ContainsKey($id) -and $unqualifiedUserMailboxIds.ContainsKey($id)) { $userMailboxes.Unknown++ }
         continue
@@ -1076,12 +1093,12 @@ function Get-LicensesMailboxGapSummary {
   if ($ActiveSource.Ready) {
     try {
       $accountRows = 0
-      foreach ($row in (Import-LicensesSourceCsv -Source $ActiveSource)) {
+      foreach ($row in (Import-LicensesSourceCsvCached -Source $ActiveSource -Cache $ReadCache)) {
         $accountRows++
         if (-not $row.PSObject.Properties['UserType']) { throw 'missing UserType column' }
         if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
         $id = ([string]$row.'Object Id').Trim().ToLowerInvariant()
-        if (-not $id) { $noUserMailbox.Unknown++; continue }
+        if (-not $id) { if ($null -eq $ScopeUserIds) { $noUserMailbox.Unknown++ }; continue }
         if ($accounts.ContainsKey($id)) { $duplicateAccounts[$id] = $true; continue }
         $accounts[$id] = $row
       }
@@ -1138,7 +1155,7 @@ function Get-LicensesMailboxGapSummary {
       $onPremConflicts = 0
       $onPremTypeConflicts = 0
       $onPremUnmatched = 0
-      foreach ($row in (Import-LicensesSourceCsv -Source $OnPremSource)) {
+      foreach ($row in (Import-LicensesSourceCsvCached -Source $OnPremSource -Cache $ReadCache)) {
         if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present in on-premises mailboxes' }
         if (([string]$row.NativeIdentityStatus).Trim() -ne 'Observed') { throw 'on-premises mailbox identity is not observed' }
         $kind = ([string]$row.RecipientType).Trim()
@@ -1172,6 +1189,7 @@ function Get-LicensesMailboxGapSummary {
         $OnPremSource.Provenance = "collector completed; $onPremConflicts identity conflicts, $onPremTypeConflicts EXO/on-premises type conflicts and $onPremUnmatched unmatched mailbox rows"
       }
       foreach ($id in $accounts.Keys) {
+        if ($null -ne $ScopeUserIds -and -not $ScopeUserIds.Contains($id)) { continue }
         if ($duplicateAccounts.ContainsKey($id) -or $onPremAmbiguousAccounts.ContainsKey($id) -or $duplicateMailboxIds.ContainsKey($id) -or
             ($mailboxTypes.ContainsKey($id) -and $mailboxTypes[$id] -eq 'Unknown')) {
           if (-not $TargetSuitesByUser.ContainsKey($id)) { $noUserMailbox.Unknown++ }
@@ -1260,6 +1278,143 @@ function Get-LicensesAdAccountActivitySummary {
   return $result
 }
 
+function Get-LicensesUserAdScopes {
+  param(
+    [Parameter(Mandatory)]$ActiveSource,
+    [Parameter(Mandatory)]$AdSource,
+    [Parameter(Mandatory)][string]$ExpectedTenantKey,
+    [AllowNull()][hashtable]$ReadCache
+  )
+  # AD domain and country of each Entra account: ImmutableId first, then a unique UPN, as for AD activity.
+  # Never inferred from the UPN suffix; unmatched or ambiguous accounts keep an explicit label.
+  $result = [pscustomobject]@{ Available=$false; Provisional=$false; Reason=''; Users=@{} }
+  if (-not $ActiveSource.Ready) { $result.Reason = "Entra user source: $($ActiveSource.Reason)"; return $result }
+  if (-not $AdSource.Ready) { $result.Reason = "AD user source: $($AdSource.Reason)"; return $result }
+  $partial = [bool]($AdSource.PSObject.Properties['PartialScopeAccepted'] -and $AdSource.PartialScopeAccepted)
+  try {
+    $byImmutable = @{}
+    $byUpn = @{}
+    $ambiguousImmutable = @{}
+    $ambiguousUpn = @{}
+    $adRows = 0
+    foreach ($row in (Import-LicensesSourceCsvCached -Source $AdSource -Cache $ReadCache)) {
+      if ($adRows -eq 0 -and -not $row.PSObject.Properties['DomainName']) { throw 'AD user export has no DomainName column' }
+      $adRows++
+      if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present in AD users' }
+      $domain = ([string]$row.DomainName).Trim().ToLowerInvariant()
+      if (-not $domain) { throw 'an AD user has no DomainName' }
+      $country = ''
+      foreach ($column in @('CountryName','Country')) {
+        $property = $row.PSObject.Properties[$column]
+        $text = if ($property) { ([string]$property.Value).Trim() } else { '' }
+        if ($text -and $text -ne 'Unknown') { $country = $text; break }
+      }
+      $value = [pscustomobject]@{ Domain=$domain; Country=$country }
+      $immutable = ([string]$row.ImmutableId_AD).Trim().ToLowerInvariant()
+      $upn = ([string]$row.UserPrincipalName).Trim().ToLowerInvariant()
+      if ($immutable) {
+        if ($byImmutable.ContainsKey($immutable)) { $ambiguousImmutable[$immutable] = $true }
+        else { $byImmutable[$immutable] = $value }
+      }
+      if ($upn) {
+        if ($byUpn.ContainsKey($upn)) { $ambiguousUpn[$upn] = $true }
+        else { $byUpn[$upn] = $value }
+      }
+    }
+    if ($adRows -eq 0) { throw 'empty AD user export' }
+    $accountRows = 0
+    foreach ($row in (Import-LicensesSourceCsvCached -Source $ActiveSource -Cache $ReadCache)) {
+      $accountRows++
+      if ([string]$row.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present in Entra users' }
+      $id = ([string]$row.'Object Id').Trim().ToLowerInvariant()
+      if (-not $id) { continue }
+      $immutable = ([string]$row.OnPremisesImmutableId).Trim().ToLowerInvariant()
+      $upn = ([string]$row.'User principal name').Trim().ToLowerInvariant()
+      $status = 'Matched'
+      $match = $null
+      if ($result.Users.ContainsKey($id)) { $status = 'Ambiguous' }
+      elseif (-not $immutable) { $status = 'CloudOnly' }
+      else {
+        $immutableMatch = if (-not $ambiguousImmutable.ContainsKey($immutable) -and $byImmutable.ContainsKey($immutable)) { $byImmutable[$immutable] } else { $null }
+        $upnMatch = if ($upn -and -not $ambiguousUpn.ContainsKey($upn) -and $byUpn.ContainsKey($upn)) { $byUpn[$upn] } else { $null }
+        if ($ambiguousImmutable.ContainsKey($immutable) -or
+            ($immutableMatch -and $upnMatch -and -not [object]::ReferenceEquals($immutableMatch,$upnMatch)) -or
+            ($upn -and $ambiguousUpn.ContainsKey($upn) -and -not $immutableMatch)) { $status = 'Ambiguous' }
+        elseif ($immutableMatch) { $match = $immutableMatch }
+        elseif ($upnMatch) { $match = $upnMatch }
+        elseif ($partial) { $status = 'Unassessed' }
+        else { $status = 'NoMatch' }
+      }
+      $result.Users[$id] = if ($match) {
+        [pscustomobject]@{ Status='Matched'; Domain=$match.Domain; Country=if ($match.Country) { $match.Country } else { 'Country not set' } }
+      }
+      else {
+        $label = switch ($status) {
+          'CloudOnly' { 'Cloud-only (no AD account)' }
+          'NoMatch' { 'No AD match' }
+          'Unassessed' { 'AD domain not collected' }
+          default { 'Ambiguous AD match' }
+        }
+        [pscustomobject]@{ Status=$status; Domain=$label; Country=$label }
+      }
+    }
+    if ($accountRows -eq 0) { throw 'empty Entra user export' }
+    $result.Available = $true
+    $result.Provisional = ([bool]$AdSource.Forced -or $partial)
+  }
+  catch { $result.Reason = $_.Exception.Message; $result.Users = @{} }
+  return $result
+}
+
+function Get-LicensesUserScope {
+  param([Parameter(Mandatory)]$AdScopes, [AllowNull()][string]$UserId)
+  $key = ([string]$UserId).Trim().ToLowerInvariant()
+  if ($AdScopes.Available -and $key -and $AdScopes.Users.ContainsKey($key)) { return $AdScopes.Users[$key] }
+  $label = if ($AdScopes.Available) { 'Not in Entra user export' } else { 'AD scope N/D' }
+  return [pscustomobject]@{ Status='NotFound'; Domain=$label; Country=$label }
+}
+
+function Get-LicensesScopeBreakdown {
+  param(
+    [Parameter(Mandatory)]$AdScopes,
+    [Parameter(Mandatory)][ValidateSet('Domain','Country')][string]$Dimension,
+    [Parameter(Mandatory)][System.Collections.IDictionary]$ProductUsers,
+    [Parameter(Mandatory)][System.Collections.IDictionary]$CopilotUsers,
+    [Parameter(Mandatory)][System.Collections.IDictionary]$RecoveryUsers
+  )
+  # Distinct assigned users per scope; every licensed user lands in exactly one row, so the rows add up to the tenant.
+  $suites = [ordered]@{ F1='Microsoft 365 F1'; F3='Microsoft 365 F3'; E3='Microsoft 365 E3'; E5='Microsoft 365 E5' }
+  $licensed = @{}
+  foreach ($label in $suites.Keys) { foreach ($userId in $ProductUsers[$suites[$label]].Keys) { $licensed[$userId] = $true } }
+  foreach ($userId in $CopilotUsers.Keys) { $licensed[$userId] = $true }
+  $rows = @{}
+  foreach ($userId in $licensed.Keys) {
+    $scope = Get-LicensesUserScope -AdScopes $AdScopes -UserId $userId
+    $name = if ($Dimension -eq 'Domain') { [string]$scope.Domain } else { [string]$scope.Country }
+    $attributed = $scope.Status -eq 'Matched' -and $name -ne 'Country not set'
+    if (-not $rows.ContainsKey($name)) {
+      $rows[$name] = [ordered]@{ Scope=$name; ScopeKind=if ($attributed) { 'Attributed' } else { 'Unattributed' }; F1=0L; F3=0L; E3=0L; E5=0L; Copilot=0L; LicensedUsers=0L; RecoveryCandidates=0L }
+    }
+    $row = $rows[$name]
+    foreach ($label in $suites.Keys) { if ($ProductUsers[$suites[$label]].ContainsKey($userId)) { $row[$label]++ } }
+    if ($CopilotUsers.ContainsKey($userId)) { $row['Copilot']++ }
+    $row['LicensedUsers']++
+    if ($RecoveryUsers.ContainsKey($userId)) { $row['RecoveryCandidates']++ }
+  }
+  foreach ($userId in $RecoveryUsers.Keys) {
+    if (-not $licensed.ContainsKey($userId)) { throw "A recovery candidate has no licensed suite in the $Dimension breakdown." }
+  }
+  $expected = [ordered]@{ Copilot=$CopilotUsers.Count; LicensedUsers=$licensed.Count; RecoveryCandidates=$RecoveryUsers.Count }
+  foreach ($label in $suites.Keys) { $expected[$label] = $ProductUsers[$suites[$label]].Count }
+  foreach ($label in $expected.Keys) {
+    $sum = 0L
+    foreach ($row in $rows.Values) { $sum += [long]$row[$label] }
+    if ($sum -ne [long]$expected[$label]) { throw "License $Dimension breakdown does not reconcile with the tenant for ${label}: $sum versus $($expected[$label])." }
+  }
+  return @($rows.Values | Sort-Object @{ Expression={ if ($_['ScopeKind'] -eq 'Attributed') { 0 } else { 1 } } },
+    @{ Expression={ [long]$_['LicensedUsers'] }; Descending=$true }, @{ Expression={ [string]$_['Scope'] } })
+}
+
 function Get-LicensesFocusedUsageRows {
   param(
     [Parameter(Mandatory)][string]$CsvFolderPath,
@@ -1287,6 +1442,8 @@ function Get-LicensesFocusedUsageRows {
   foreach ($product in $products) { $productUsers[$product.Name] = @{} }
   $targetSuitesByUser = @{}
   $allSkusByUser = @{}
+  $copilotUsers = @{}
+  $readCache = @{}
   $licenseIdentityByUser = @{}
   if ($licenseSource.Ready) {
     try {
@@ -1297,6 +1454,7 @@ function Get-LicensesFocusedUsageRows {
         if ($rowUserId -and $rowSku) {
           if (-not $allSkusByUser.ContainsKey($rowUserId)) { $allSkusByUser[$rowUserId] = @{} }
           $allSkusByUser[$rowUserId][$rowSku] = $true
+          if ((Get-LicensesOtherProduct -SkuPartNumber $rowSku) -eq 'Microsoft 365 Copilot') { $copilotUsers[$rowUserId] = $true }
           if (-not $licenseIdentityByUser.ContainsKey($rowUserId)) {
             $licenseIdentityByUser[$rowUserId] = [pscustomobject]@{
               UserPrincipalName = if ($row.PSObject.Properties['User principal name']) { [string]$row.'User principal name' } else { '' }
@@ -1322,7 +1480,7 @@ function Get-LicensesFocusedUsageRows {
     $unavailableRows = foreach ($product in $products) {
       [pscustomobject]@{ Product=$product.Name; Counts=@{}; Available=$false }
     }
-    return [pscustomobject]@{ Rows=@($unavailableRows); RecoveryDetails=@(); DowngradeReview=$null; DowngradeDetails=@(); Sources=$sources.ToArray(); SharedSourceReady=$false; IntuneSourceReady=$false; AdSourceForced=$false; MailboxGap=$null; AdGapActivity=$null }
+    return [pscustomobject]@{ Rows=@($unavailableRows); RecoveryDetails=@(); DowngradeReview=$null; DowngradeDetails=@(); Sources=$sources.ToArray(); SharedSourceReady=$false; IntuneSourceReady=$false; AdSourceForced=$false; MailboxGap=$null; AdGapActivity=$null; AdScope=$null }
   }
 
   $sharedSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'Exchange_EXO_Mailboxes_AllDomains.csv' -Columns @(
@@ -1337,7 +1495,7 @@ function Get-LicensesFocusedUsageRows {
   $active = Read-LicensesIndexedSource -Source $activeSource -ExpectedTenantKey $ExpectedTenantKey -KeyColumn 'Object Id' -WantedKeys $targetSuitesByUser -AsOfUtc $AsOfUtc
   $onPremSource = Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'Exchange_OnPrem_Mailboxes_AllDomains.csv' -Columns @('TenantKey','ObjectGUID','UserPrincipalName','RecipientType','NativeIdentityStatus') -AsOfUtc $AsOfUtc -CollectorManifestName 'SmartInventory_SmartM365-Exchange-Local-Mailboxes-Inventory.current.json.txt' -RequireFileReceipt -RequireConsumerScope
   $sources.Add($onPremSource)
-  $mailboxGap = Get-LicensesMailboxGapSummary -MailboxSource $sharedSource -OnPremSource $onPremSource -ActiveSource $activeSource -ExpectedTenantKey $ExpectedTenantKey -TargetSuitesByUser $targetSuitesByUser -AllSkusByUser $allSkusByUser
+  $mailboxGap = Get-LicensesMailboxGapSummary -MailboxSource $sharedSource -OnPremSource $onPremSource -ActiveSource $activeSource -ExpectedTenantKey $ExpectedTenantKey -TargetSuitesByUser $targetSuitesByUser -AllSkusByUser $allSkusByUser -ReadCache $readCache
   $wantedUpns = @{}
   $wantedImmutableIds = @{}
   if ($active.Ready) {
@@ -1400,7 +1558,7 @@ function Get-LicensesFocusedUsageRows {
   $adDuplicateUpns = @{}
   if ($adSource.Ready) {
     try {
-      Import-LicensesSourceCsv -Source $adSource | ForEach-Object {
+      Import-LicensesSourceCsvCached -Source $adSource -Cache $readCache | ForEach-Object {
         if ([string]$_.TenantKey -ine $ExpectedTenantKey) { throw 'another tenant is present' }
         if ($adSource.PartialScopeAccepted -and ([string]$_.DomainName).Trim() -notin @($adSource.DomainCoverage.CollectedDomains)) {
           throw 'AD CSV row is outside the qualified collected domains.'
@@ -1426,6 +1584,8 @@ function Get-LicensesFocusedUsageRows {
     WriteLog -Message ("AD CSV analysis forced despite collector receipt: {0}. AD/Entra inactivity is provisional." -f $adReceiptReason) 'WARNING'
   }
   $adGapActivity = Get-LicensesAdAccountActivitySummary -MailboxGap $mailboxGap -AdSource $adSource -AdByImmutable $adByImmutable -AdByUpn $adByUpn -DuplicateAdUpns $adDuplicateUpns -Cutoff $AsOfUtc.Date.AddDays(-90)
+  $adScopes = Get-LicensesUserAdScopes -ActiveSource $activeSource -AdSource $adSource -ExpectedTenantKey $ExpectedTenantKey -ReadCache $readCache
+  [void]$readCache.Remove($adSource.Path)
 
   $reportDefinitions = @(
     @{ Name='M365_Users_Activity.csv'; Key='UserPrincipalName'; Columns=@('TenantKey','UserPrincipalName','ReportPeriod','ReportRefreshDate','LastActivityDate','IsDeleted'); Refresh='ReportRefreshDate'; Period='ReportPeriod'; Expected='D180' }
@@ -1444,6 +1604,9 @@ function Get-LicensesFocusedUsageRows {
   $oneDrive = $reports['M365_OneDrive_Usage.csv']
 
   $cutoff = $AsOfUtc.Date.AddDays(-90)
+  # Measures the tenant ($null) or one AD domain; per-user rules never depend on other users, so a domain is an exact subset.
+  $measureScope = {
+  param([AllowNull()][System.Collections.IDictionary]$ScopeUsers)
   $recoveryDetails = [System.Collections.Generic.List[object]]::new()
   $metricRows = foreach ($product in $products) {
     $count = @{ Assigned=0; Disabled=0; DisabledUnknown=0; AdEntraInactive=0; AdEntraUnknown=0; MailboxInactive=0; MailboxUnknown=0; M365Inactive=0; M365Unknown=0; LocalAppsInactive=0; LocalAppsUnknown=0; Multiple=0; MultipleUnknown=0; MultipleAll=0; MultipleAllUnknown=0; SharedLicensed=0; SharedUnder50=0; SharedEligible=0; SharedUnknown=0; RecoveryCandidates=0; RecoveryUnknown=0; RecoveryPrimaryPc=0; RecoveryPrimaryPcUnknown=0 }
@@ -1452,6 +1615,7 @@ function Get-LicensesFocusedUsageRows {
     $candidateReasons = @{}
     $unknownUsers = @{}
     foreach ($userId in $productUsers[$product.Name].Keys) {
+      if ($null -ne $ScopeUsers -and -not $ScopeUsers.Contains($userId)) { continue }
       $count.Assigned++
       $sharedStatus = 'NotShared'
       $mailboxKind = 'Other'
@@ -1629,13 +1793,14 @@ function Get-LicensesFocusedUsageRows {
     [pscustomobject]@{ Product=$product.Name; Counts=$count; Available=$true }
   }
   $e3Review = [pscustomobject]@{ Available=$false; Assigned=0; Candidates=0; Unknown=0; Excluded=0; RecoveryExcluded=0; Reason='' }
-  $e3Review.Assigned = $productUsers['Microsoft 365 E3'].Count
+  $e3Review.Assigned = @($productUsers['Microsoft 365 E3'].Keys | Where-Object { $null -eq $ScopeUsers -or $ScopeUsers.Contains($_) }).Count
   $e3Review.Available = $true
   $e3ReviewDetails = [System.Collections.Generic.List[object]]::new()
   $e3RecoveryIds = @{}
   foreach ($item in $recoveryDetails) { if ($item.License -eq 'Microsoft 365 E3') { $e3RecoveryIds[[string]$item.UserId] = $true } }
   $appsReport = $reports['M365_Apps_Usage_180D.csv']
   foreach ($userId in $productUsers['Microsoft 365 E3'].Keys) {
+    if ($null -ne $ScopeUsers -and -not $ScopeUsers.Contains($userId)) { continue }
     if ($e3RecoveryIds.ContainsKey($userId)) { $e3Review.RecoveryExcluded++; continue }
     if ($targetSuitesByUser[$userId].Count -gt 1) { $e3Review.Excluded++; continue }
     if (-not $active.Ready -or $active.Duplicates.ContainsKey($userId) -or -not $active.Rows.ContainsKey($userId) -or
@@ -1688,7 +1853,47 @@ function Get-LicensesFocusedUsageRows {
     throw 'E3 to F3 review categories do not reconcile with assigned E3 users.'
   }
   if ($e3ReviewDetails.Count -ne $e3Review.Candidates) { throw 'E3 to F3 review details do not reconcile with candidate count.' }
-  return [pscustomobject]@{ Rows=@($metricRows); RecoveryDetails=$recoveryDetails.ToArray(); DowngradeReview=$e3Review; DowngradeDetails=$e3ReviewDetails.ToArray(); Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; IntuneSourceReady=$intuneSource.Ready; AdSourceForced=$adSource.Forced; MailboxGap=$mailboxGap; AdGapActivity=$adGapActivity }
+  return [pscustomobject]@{ Rows=@($metricRows); RecoveryDetails=$recoveryDetails.ToArray(); DowngradeReview=$e3Review; DowngradeDetails=$e3ReviewDetails.ToArray() }
+  }
+  $tenantMeasure = & $measureScope $null
+
+  # AD domain and country views are additive: their failure leaves the tenant report unchanged.
+  $adScope = [pscustomobject]@{ Available=$false; Provisional=$false; Reason=[string]$adScopes.Reason; Users=@{}; ByDomain=@(); ByCountry=@(); Domains=@() }
+  if ($adScopes.Available) {
+    try {
+      $recoveryUsers = @{}
+      foreach ($item in $tenantMeasure.RecoveryDetails) { $recoveryUsers[[string]$item.UserId] = $true }
+      $byDomain = @(Get-LicensesScopeBreakdown -AdScopes $adScopes -Dimension Domain -ProductUsers $productUsers -CopilotUsers $copilotUsers -RecoveryUsers $recoveryUsers)
+      $byCountry = @(Get-LicensesScopeBreakdown -AdScopes $adScopes -Dimension Country -ProductUsers $productUsers -CopilotUsers $copilotUsers -RecoveryUsers $recoveryUsers)
+      $domainUsers = @{}
+      foreach ($userId in $adScopes.Users.Keys) {
+        $scope = $adScopes.Users[$userId]
+        if ($scope.Status -ne 'Matched') { continue }
+        if (-not $domainUsers.ContainsKey($scope.Domain)) { $domainUsers[$scope.Domain] = @{} }
+        $domainUsers[$scope.Domain][$userId] = $true
+      }
+      $recoveryByDomain = @{}
+      foreach ($item in $tenantMeasure.RecoveryDetails) {
+        $domain = [string](Get-LicensesUserScope -AdScopes $adScopes -UserId $item.UserId).Domain
+        if (-not $recoveryByDomain.ContainsKey($domain)) { $recoveryByDomain[$domain] = 0 }
+        $recoveryByDomain[$domain]++
+      }
+      $domains = foreach ($domain in @($domainUsers.Keys | Sort-Object)) {
+        $measure = & $measureScope $domainUsers[$domain]
+        $expected = if ($recoveryByDomain.ContainsKey($domain)) { $recoveryByDomain[$domain] } else { 0 }
+        if (@($measure.RecoveryDetails).Count -ne $expected) { throw "Recovery candidates of AD domain $domain do not reconcile with the tenant report." }
+        $domainGap = Get-LicensesMailboxGapSummary -MailboxSource $sharedSource -OnPremSource $onPremSource -ActiveSource $activeSource -ExpectedTenantKey $ExpectedTenantKey -TargetSuitesByUser $targetSuitesByUser -AllSkusByUser $allSkusByUser -ScopeUserIds $domainUsers[$domain] -ReadCache $readCache
+        $domainAdGap = Get-LicensesAdAccountActivitySummary -MailboxGap $domainGap -AdSource $adSource -AdByImmutable $adByImmutable -AdByUpn $adByUpn -DuplicateAdUpns $adDuplicateUpns -Cutoff $AsOfUtc.Date.AddDays(-90)
+        [pscustomobject]@{ Domain=$domain; Rows=@($measure.Rows); DowngradeReview=$measure.DowngradeReview; DowngradeCount=@($measure.DowngradeDetails).Count; MailboxGap=$domainGap; AdGapActivity=$domainAdGap }
+      }
+      $adScope = [pscustomobject]@{ Available=$true; Provisional=[bool]$adScopes.Provisional; Reason=''; Users=$adScopes.Users; ByDomain=$byDomain; ByCountry=$byCountry; Domains=@($domains) }
+    }
+    catch {
+      $adScope.Reason = $_.Exception.Message
+      WriteLog -Message ("License views by AD domain and country unavailable: {0}" -f $adScope.Reason) 'WARNING'
+    }
+  }
+  return [pscustomobject]@{ Rows=@($tenantMeasure.Rows); RecoveryDetails=$tenantMeasure.RecoveryDetails; DowngradeReview=$tenantMeasure.DowngradeReview; DowngradeDetails=$tenantMeasure.DowngradeDetails; Sources=$sources.ToArray(); SharedSourceReady=$mailboxes.Ready; IntuneSourceReady=$intuneSource.Ready; AdSourceForced=$adSource.Forced; MailboxGap=$mailboxGap; AdGapActivity=$adGapActivity; AdScope=$adScope }
 }
 
 function Format-LicensesMetric {
@@ -2131,14 +2336,34 @@ function Publish-LicensesReportCsv {
       @($assignmentIssues).Count -ne @($Snapshot.AssignmentIssues.Rows).Count -or @($gaps).Count -ne 25) {
     throw 'License report CSV rows do not reconcile with the mail snapshot.'
   }
-  $publishedPaths = [System.Collections.Generic.List[string]]::new()
+  $specs = [System.Collections.Generic.List[object]]::new()
   foreach ($spec in @(
     @{ Name='M365_Licenses_ReportSummary.csv'; Columns=$summaryColumns; Rows=$summary },
     @{ Name='M365_Licenses_ReportCandidates.csv'; Columns=$candidateColumns; Rows=$candidates },
     @{ Name='M365_Licenses_ReportAssignmentIssues.csv'; Columns=$assignmentColumns; Rows=$assignmentIssues },
     @{ Name='M365_Licenses_ReportGaps.csv'; Columns=$gapColumns; Rows=$gaps },
     @{ Name='M365_Licenses_ReportSources.csv'; Columns=$sourceColumns; Rows=$sources }
-  )) {
+  )) { $specs.Add($spec) }
+  # New files rather than new columns: existing report CSV schemas are exact consumer contracts.
+  $adScope = if ($Snapshot -is [System.Collections.IDictionary]) { if ($Snapshot.Contains('AdScope')) { $Snapshot['AdScope'] } else { $null } }
+             elseif ($Snapshot.PSObject.Properties['AdScope']) { $Snapshot.AdScope } else { $null }
+  if ($adScope) {
+    $scopeColumns = @('SnapshotId','TenantKey','Dimension','Scope','ScopeKind','F1Users','F3Users','E3Users','E5Users','CopilotUsers','LicensedUsers','RecoveryCandidateUsers','EvidenceStatus')
+    foreach ($dimension in @('Domain','Country')) {
+      $scopeRows = @(foreach ($item in @(if ($adScope.Available) { if ($dimension -eq 'Domain') { $adScope.ByDomain } else { $adScope.ByCountry } })) {
+        [pscustomobject][ordered]@{
+          SnapshotId=$Snapshot.SnapshotId; TenantKey=$Snapshot.TenantKey; Dimension=$dimension; Scope=$item.Scope; ScopeKind=$item.ScopeKind
+          F1Users=$item.F1; F3Users=$item.F3; E3Users=$item.E3; E5Users=$item.E5; CopilotUsers=$item.Copilot
+          LicensedUsers=$item.LicensedUsers; RecoveryCandidateUsers=$item.RecoveryCandidates
+          EvidenceStatus=if ($adScope.Provisional -or $provisional) { 'Provisional' } else { 'Qualified' }
+        }
+      })
+      $fileName = if ($dimension -eq 'Domain') { 'M365_Licenses_ReportByDomain.csv' } else { 'M365_Licenses_ReportByCountry.csv' }
+      $specs.Add(@{ Name=$fileName; Columns=$scopeColumns; Rows=$scopeRows })
+    }
+  }
+  $publishedPaths = [System.Collections.Generic.List[string]]::new()
+  foreach ($spec in $specs) {
     $path = Get-LicensesPublicationPath -Path (Join-Path $Folder $spec.Name)
     $pending = "$path.$($Snapshot.SnapshotId).pending"
     try {
@@ -2172,26 +2397,29 @@ function Publish-LicensesReportSnapshot {
     [AllowNull()]$ReceiptRun
   )
   $snapshotId = [guid]::NewGuid().ToString('N')
+  $convertCounts = {
+    param($Metric, [string]$Product)
+    if (-not ($Metric -and $Metric.Available)) { return $null }
+    $counts = [ordered]@{}
+    foreach ($key in @('Assigned','Disabled','DisabledUnknown','AdEntraInactive','AdEntraUnknown',
+                       'MailboxInactive','MailboxUnknown','M365Inactive','M365Unknown',
+                       'LocalAppsInactive','LocalAppsUnknown','Multiple','MultipleUnknown',
+                       'MultipleAll','MultipleAllUnknown','SharedLicensed','SharedUnder50',
+                       'SharedEligible','SharedUnknown','RecoveryCandidates','RecoveryUnknown',
+                       'RecoveryPrimaryPc','RecoveryPrimaryPcUnknown')) {
+      $counts[$key] = if (($key -like 'LocalApps*' -and $Product -notin @('Microsoft 365 E3','Microsoft 365 E5')) -or
+                          ($key -like 'Shared*' -and -not $Usage.SharedSourceReady) -or
+                          ($key -like 'RecoveryPrimaryPc*' -and -not $Usage.IntuneSourceReady)) {
+        $null
+      } else { [long]$Metric.Counts[$key] }
+    }
+    return $counts
+  }
   $metricByProduct = @{}
   if ($Usage) { foreach ($metric in @($Usage.Rows)) { $metricByProduct[[string]$metric.Product] = $metric } }
   $products = foreach ($row in $SummaryRows) {
     $metric = if ($metricByProduct.ContainsKey([string]$row.Product)) { $metricByProduct[[string]$row.Product] } else { $null }
-    $counts = $null
-    if ($metric -and $metric.Available) {
-      $counts = [ordered]@{}
-      foreach ($key in @('Assigned','Disabled','DisabledUnknown','AdEntraInactive','AdEntraUnknown',
-                         'MailboxInactive','MailboxUnknown','M365Inactive','M365Unknown',
-                         'LocalAppsInactive','LocalAppsUnknown','Multiple','MultipleUnknown',
-                         'MultipleAll','MultipleAllUnknown','SharedLicensed','SharedUnder50',
-                         'SharedEligible','SharedUnknown','RecoveryCandidates','RecoveryUnknown',
-                         'RecoveryPrimaryPc','RecoveryPrimaryPcUnknown')) {
-        $counts[$key] = if (($key -like 'LocalApps*' -and $row.Product -notin @('Microsoft 365 E3','Microsoft 365 E5')) -or
-                            ($key -like 'Shared*' -and -not $Usage.SharedSourceReady) -or
-                            ($key -like 'RecoveryPrimaryPc*' -and -not $Usage.IntuneSourceReady)) {
-          $null
-        } else { [long]$metric.Counts[$key] }
-      }
-    }
+    $counts = & $convertCounts $metric ([string]$row.Product)
     [ordered]@{
       Product = [string]$row.Product
       Enabled = [long]$row.Enabled
@@ -2254,11 +2482,12 @@ function Publish-LicensesReportSnapshot {
       if ($source.PSObject.Properties['PartialScopeAccepted'] -and $source.PartialScopeAccepted) { $sourceMetadata.DomainCoverage = $source.DomainCoverage }
       $sources.Add($sourceMetadata)
   }
-  $gap = $null
-  if ($Usage -and $Usage.MailboxGap) {
+  $convertGap = {
+    param($MailboxGap)
+    if (-not $MailboxGap) { return $null }
     $gap = [ordered]@{}
     foreach ($name in @('UserMailboxes','NoUserMailbox')) {
-      $item = $Usage.MailboxGap.$name
+      $item = $MailboxGap.$name
       if (-not $item -or -not $item.Available) {
         $gap[$name] = [ordered]@{ Available=$false; Reason=if ($item) { [string]$item.Reason } else { 'source unavailable' } }
         continue
@@ -2276,10 +2505,12 @@ function Publish-LicensesReportSnapshot {
       }
       $gap[$name] = $values
     }
+    return $gap
   }
-  $adGap = $null
-  if ($Usage -and $Usage.AdGapActivity) {
-    $ad = $Usage.AdGapActivity
+  $convertAdGap = {
+    param($AdGapActivity)
+    if (-not $AdGapActivity) { return $null }
+    $ad = $AdGapActivity
     $adGap = [ordered]@{ Available=[bool]$ad.Available; Provisional=[bool]$ad.Provisional; Reason=[string]$ad.Reason }
     if ($ad.Available) {
       foreach ($key in @('Members','AdObserved','NoObservedMatch','Ambiguous','AdEnabledRecent','AdEnabledInactive','AdEnabledNoDate','AdDisabled','AdEnabledUnknown')) {
@@ -2287,7 +2518,10 @@ function Publish-LicensesReportSnapshot {
       }
       $adGap.UnmatchedScopeUnknown = [long]$ad.UnmatchedScopeUnknown
     }
+    return $adGap
   }
+  $gap = if ($Usage) { & $convertGap $Usage.MailboxGap } else { $null }
+  $adGap = if ($Usage) { & $convertAdGap $Usage.AdGapActivity } else { $null }
   $recovery = @(if ($Usage) { $Usage.RecoveryDetails })
   $downgrade = @(if ($Usage) { $Usage.DowngradeDetails })
   $assignment = if ($AssignmentIssues) { $AssignmentIssues } else { [pscustomobject]@{ Available=$false; Reason='assignment issues not analyzed'; Counts=@{}; Rows=@() } }
@@ -2298,6 +2532,69 @@ function Publish-LicensesReportSnapshot {
   }
   if ($Usage -and $Usage.DowngradeReview -and $Usage.DowngradeReview.Available -and
       $downgrade.Count -ne [long]$Usage.DowngradeReview.Candidates) { throw 'Downgrade detail does not reconcile with its KPI.' }
+  # Additive in schema 2: AD domain and country views; their failure never withholds the tenant report.
+  $adScopeDocument = $null
+  $usageScope = if ($Usage -and $Usage.PSObject.Properties['AdScope']) { $Usage.AdScope } else { $null }
+  if ($usageScope) {
+    $adScopeDocument = [ordered]@{ Available=$false; Provisional=[bool]$usageScope.Provisional; Reason=[string]$usageScope.Reason; ByDomain=@(); ByCountry=@(); Users=@(); Domains=@() }
+    if ($usageScope.Available) {
+      try {
+        $referenced = @{}
+        foreach ($item in @($recovery) + @($downgrade) + @($assignment.Rows)) {
+          $key = ([string]$item.UserId).Trim().ToLowerInvariant()
+          if ($key) { $referenced[$key] = $true }
+        }
+        # Only users that appear in this report are published with their scope, never the whole directory.
+        $scopeOf = @{}
+        $users = @(foreach ($userId in @($referenced.Keys | Sort-Object)) {
+          $scope = Get-LicensesUserScope -AdScopes $usageScope -UserId $userId
+          $scopeOf[$userId] = [string]$scope.Domain
+          [ordered]@{ UserId=$userId; Status=[string]$scope.Status; Domain=[string]$scope.Domain; Country=[string]$scope.Country }
+        })
+        $domainDocuments = @(foreach ($domainScope in @($usageScope.Domains)) {
+          $domain = [string]$domainScope.Domain
+          $domainMetrics = @{}
+          foreach ($metric in @($domainScope.Rows)) { $domainMetrics[[string]$metric.Product] = $metric }
+          $domainProducts = @(foreach ($row in $SummaryRows) {
+            $metric = if ($domainMetrics.ContainsKey([string]$row.Product)) { $domainMetrics[[string]$row.Product] } else { $null }
+            $counts = & $convertCounts $metric ([string]$row.Product)
+            if ($counts) {
+              $actual = @($recovery | Where-Object { $_.License -eq $row.Product -and $scopeOf[([string]$_.UserId).ToLowerInvariant()] -ceq $domain }).Count
+              if ($actual -ne [long]$counts.RecoveryCandidates) { throw "Recovery detail does not reconcile with $($row.Product) in AD domain $domain." }
+            }
+            [ordered]@{ Product=[string]$row.Product; UsageAvailable=[bool]($metric -and $metric.Available); Counts=$counts }
+          })
+          $review = $domainScope.DowngradeReview
+          if ($review -and $review.Available -and
+              @($downgrade | Where-Object { $scopeOf[([string]$_.UserId).ToLowerInvariant()] -ceq $domain }).Count -ne [long]$review.Candidates) {
+            throw "Downgrade detail does not reconcile with its KPI in AD domain $domain."
+          }
+          $assignmentCounts = $null
+          if ($assignment.Available) {
+            $assignmentCounts = [ordered]@{}
+            foreach ($product in @($SummaryRows | ForEach-Object { [string]$_.Product })) {
+              $domainRows = @($assignment.Rows | Where-Object { $_.Product -eq $product -and $scopeOf[([string]$_.UserId).ToLowerInvariant()] -ceq $domain })
+              $assignmentCounts[$product] = [ordered]@{
+                CapacityWait = @($domainRows | Where-Object Category -eq 'Capacity wait' | Select-Object -ExpandProperty UserId -Unique).Count
+                OtherErrors = @($domainRows | Where-Object Category -eq 'Licensing error' | Select-Object -ExpandProperty UserId -Unique).Count
+              }
+            }
+          }
+          [ordered]@{ Domain=$domain; Products=$domainProducts; E3ToF3Review=$review; MailboxGap=(& $convertGap $domainScope.MailboxGap)
+            AdGapActivity=(& $convertAdGap $domainScope.AdGapActivity); AssignmentCounts=$assignmentCounts }
+        })
+        $adScopeDocument.ByDomain = @($usageScope.ByDomain)
+        $adScopeDocument.ByCountry = @($usageScope.ByCountry)
+        $adScopeDocument.Users = $users
+        $adScopeDocument.Domains = $domainDocuments
+        $adScopeDocument.Available = $true
+      }
+      catch {
+        $adScopeDocument = [ordered]@{ Available=$false; Provisional=[bool]$usageScope.Provisional; Reason=$_.Exception.Message; ByDomain=@(); ByCountry=@(); Users=@(); Domains=@() }
+        WriteLog -Message ("License views by AD domain and country not published: {0}" -f $_.Exception.Message) 'WARNING'
+      }
+    }
+  }
   $snapshot = [ordered]@{
     SchemaVersion = 2
     LogicVersion = '1.44'
@@ -2334,6 +2631,7 @@ function Publish-LicensesReportSnapshot {
   }
   # Additive in schema 2: the licensing receipt run that proves this report's licensing inputs.
   if ($ReceiptRun) { $snapshot.ReceiptRun = [ordered]@{ Producer=[string]$ReceiptRun.Producer; RunId=[string]$ReceiptRun.RunId; StartedAtUtc=[string]$ReceiptRun.StartedAtUtc } }
+  if ($adScopeDocument) { $snapshot.AdScope = $adScopeDocument }
   # Promoted with the report CSVs and the receipt when the run is staged.
   $path = Get-LicensesPublicationPath -Path (Join-Path $Folder 'M365_Licenses_ReportSnapshot.json.txt') -Artifact
   $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($snapshot | ConvertTo-Json -Depth 16 -Compress))
@@ -3054,7 +3352,11 @@ function Read-LicensesPublishedReport {
   if ($document.PSObject.Properties['ReceiptRun'] -and [string]$document.ReceiptRun.RunId -cne [string]$receipt.RunId) {
     throw 'Published license report snapshot belongs to another licensing receipt run.'
   }
-  foreach ($name in @('M365_Licenses_ReportSummary.csv','M365_Licenses_ReportCandidates.csv','M365_Licenses_ReportAssignmentIssues.csv','M365_Licenses_ReportGaps.csv','M365_Licenses_ReportSources.csv')) {
+  $hasAdScope = [bool]($document.PSObject.Properties['AdScope'] -and $null -ne $document.AdScope)
+  $reportFiles = @('M365_Licenses_ReportSummary.csv','M365_Licenses_ReportCandidates.csv','M365_Licenses_ReportAssignmentIssues.csv','M365_Licenses_ReportGaps.csv','M365_Licenses_ReportSources.csv')
+  # Snapshots published before the AD domain views have no AdScope and no scope CSV files.
+  if ($hasAdScope) { $reportFiles += @('M365_Licenses_ReportByDomain.csv','M365_Licenses_ReportByCountry.csv') }
+  foreach ($name in $reportFiles) {
     $records = @($receipt.Files | Where-Object { [string]$_.File -ceq $name })
     if ($records.Count -ne 1) { throw "License report CSV is not recorded by the current licensing receipt: $name" }
     $path = Join-Path -Path $Folder -ChildPath $name
@@ -3115,199 +3417,314 @@ function Read-LicensesPublishedReport {
     AdditionalRows = $additionalRows
     Usage = $usage
     AssignmentIssues = $assignmentIssues
+    AdScope = if ($hasAdScope) { $document.AdScope } else { $null }
+    ScopeDomain = ''
   }
 }
 
-function Send-LicensesFocusedSummaryEmail {
+function Get-LicensesDomainPublishedReport {
+  param([Parameter(Mandatory)]$Report, [Parameter(Mandatory)][string]$Domain)
+  # Same shape as the tenant report, restricted to one AD domain; units stay tenant-wide subscription values.
+  $key = $Domain.Trim().ToLowerInvariant()
+  $scope = $Report.AdScope
+  $result = [pscustomobject]@{ Available=$false; Reason=''; Report=$null }
+  if (-not $scope) { $result.Reason = 'the published license report predates the AD domain views'; return $result }
+  if (-not $scope.Available) { $result.Reason = "AD domain views are not available in this report: $([string]$scope.Reason)"; return $result }
+  $domainScope = @($scope.Domains | Where-Object { ([string]$_.Domain) -ceq $key })
+  if ($domainScope.Count -ne 1) { $result.Reason = "no licensed or mailbox user of AD domain $key was attributed in this report"; return $result }
+  $domainScope = $domainScope[0]
+  $inDomain = @{}
+  foreach ($user in @($scope.Users)) { if ([string]$user.Status -ceq 'Matched' -and ([string]$user.Domain) -ceq $key) { $inDomain[[string]$user.UserId] = $true } }
+  $isInDomain = { param($Item) $inDomain.ContainsKey(([string]$Item.UserId).Trim().ToLowerInvariant()) }
+  $usage = $null
+  if ($Report.Usage) {
+    $mailboxGap = $null
+    if ($null -ne $domainScope.MailboxGap) {
+      $userMailboxes = $domainScope.MailboxGap.UserMailboxes
+      $tenantReason = if ($Report.Usage.MailboxGap -and $Report.Usage.MailboxGap.UserMailboxes) { [string]$Report.Usage.MailboxGap.UserMailboxes.EntraStateReason } else { '' }
+      $userMailboxes | Add-Member -NotePropertyName EntraStateReason -NotePropertyValue $tenantReason -Force
+      $mailboxGap = [pscustomobject]@{ UserMailboxes=$userMailboxes; NoUserMailbox=$domainScope.MailboxGap.NoUserMailbox }
+    }
+    $usage = [pscustomobject]@{
+      Rows = @(foreach ($product in @($domainScope.Products)) {
+        [pscustomobject]@{ Product=[string]$product.Product; Counts=(ConvertTo-LicensesCountTable $product.Counts); Available=[bool]$product.UsageAvailable }
+      })
+      RecoveryDetails = @($Report.Usage.RecoveryDetails | Where-Object { & $isInDomain $_ })
+      DowngradeReview = $domainScope.E3ToF3Review
+      DowngradeDetails = @($Report.Usage.DowngradeDetails | Where-Object { & $isInDomain $_ })
+      Sources = $Report.Usage.Sources
+      SharedSourceReady = $Report.Usage.SharedSourceReady
+      IntuneSourceReady = $Report.Usage.IntuneSourceReady
+      AdSourceForced = $Report.Usage.AdSourceForced
+      MailboxGap = $mailboxGap
+      AdGapActivity = $domainScope.AdGapActivity
+    }
+  }
+  $assignmentIssues = $null
+  if ($Report.AssignmentIssues) {
+    $counts = @{}
+    if ($Report.AssignmentIssues.Available -and $domainScope.AssignmentCounts) {
+      foreach ($property in $domainScope.AssignmentCounts.PSObject.Properties) { $counts[$property.Name] = ConvertTo-LicensesCountTable $property.Value }
+    }
+    $assignmentIssues = [pscustomobject]@{
+      Available = [bool]($Report.AssignmentIssues.Available -and $domainScope.AssignmentCounts)
+      Reason = [string]$Report.AssignmentIssues.Reason
+      Counts = $counts
+      Rows = @($Report.AssignmentIssues.Rows | Where-Object { & $isInDomain $_ })
+    }
+  }
+  $result.Report = [pscustomobject]@{
+    SnapshotId = $Report.SnapshotId
+    CollectedAtUtc = $Report.CollectedAtUtc
+    SummaryRows = $Report.SummaryRows
+    AdditionalRows = $Report.AdditionalRows
+    Usage = $usage
+    AssignmentIssues = $assignmentIssues
+    AdScope = $null
+    ScopeDomain = $key
+    ScopeProvisional = [bool]$scope.Provisional
+  }
+  $result.Available = $true
+  return $result
+}
+
+function New-LicensesScopeTablesHtml {
   param(
-    [Parameter(Mandatory)][string]$CsvFolderPath,
-    [Parameter(Mandatory)][string]$ExpectedTenantKey,
-    [Parameter(Mandatory)][string]$MailStatePath,
-    [switch]$Manual,
-    [switch]$ForceLicenseSummaryEmail
+    [AllowNull()]$AdScope,
+    [Parameter(Mandatory)][string]$TableStyle,
+    [Parameter(Mandatory)][string]$HeadStyle,
+    [int]$MaxCountryRows = 20,
+    [int]$AllCountriesUpTo = 25
   )
-
-  if (-not $Manual -and -not [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableLicenseSummaryEmail' -DefaultValue $true)) {
-    WriteLog -Message 'Focused license summary email is disabled by configuration.' 'INFO'
-    return $false
+  # Tenant mail only: distinct users with an assigned license by AD domain and by AD country.
+  if ($null -eq $AdScope) { return '' }
+  $heading = '<h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">Licenses by AD domain and country</h2>'
+  if (-not $AdScope.Available) {
+    return $heading + ('<p style="margin:0 0 18px;font-size:11px;line-height:16px;color:#9a3412;">N/D: {0}</p>' -f [System.Net.WebUtility]::HtmlEncode([string]$AdScope.Reason))
   }
-  if (-not $Manual -and (Test-SmartM365MaxItemsMode)) {
-    WriteLog -Message 'Focused license summary email skipped for a sampled inventory.' 'INFO'
-    return $false
+  $cell = 'padding:8px;border-bottom:1px solid #e2e8f0;font-size:12px;line-height:17px;color:#334155;vertical-align:top;'
+  $lead = $cell + 'color:#0f172a;font-weight:700;'
+  $muted = $cell + 'color:#64748b;font-style:italic;'
+  $totalStyle = 'padding:8px;border-top:2px solid #cbd5e1;font-size:12px;line-height:17px;color:#0f172a;font-weight:700;'
+  $metrics = @('F1','F3','E3','E5','Copilot','LicensedUsers','RecoveryCandidates')
+  $renderRow = {
+    param($Row, [string]$LeadStyle, [string]$ValueStyle)
+    $values = foreach ($metric in $metrics) { '<td style="{0}">{1}</td>' -f $ValueStyle, [long]$Row.$metric }
+    '<tr><td style="{0}">{1}</td>{2}</tr>' -f $LeadStyle, [System.Net.WebUtility]::HtmlEncode([string]$Row.Scope), ($values -join '')
   }
+  $renderTable = {
+    param([object[]]$Rows, [string]$ScopeHeader, [int]$MaxAttributed)
+    $attributed = @($Rows | Where-Object { [string]$_.ScopeKind -ceq 'Attributed' })
+    $shown = $attributed
+    $html = [System.Collections.Generic.List[string]]::new()
+    if ($MaxAttributed -gt 0 -and $attributed.Count -gt $AllCountriesUpTo) {
+      $shown = @($attributed | Select-Object -First $MaxAttributed)
+      $rest = @($attributed | Select-Object -Skip $MaxAttributed)
+      $other = [ordered]@{ Scope=('Other countries ({0})' -f $rest.Count) }
+      foreach ($metric in $metrics) { $sum = 0L; foreach ($item in $rest) { $sum += [long]$item.$metric }; $other[$metric] = $sum }
+    }
+    else { $other = $null }
+    foreach ($row in $shown) { $html.Add((& $renderRow $row $lead $cell)) }
+    if ($other) { $html.Add((& $renderRow ([pscustomobject]$other) $muted $muted)) }
+    foreach ($row in @($Rows | Where-Object { [string]$_.ScopeKind -cne 'Attributed' })) { $html.Add((& $renderRow $row $muted $muted)) }
+    $total = [ordered]@{ Scope='Total' }
+    foreach ($metric in $metrics) { $sum = 0L; foreach ($item in $Rows) { $sum += [long]$item.$metric }; $total[$metric] = $sum }
+    $html.Add((& $renderRow ([pscustomobject]$total) $totalStyle $totalStyle))
+    $headers = foreach ($name in @($ScopeHeader,'F1','F3','E3','E5','Copilot','Licensed users','Recovery candidates')) { '<th style="{0}">{1}</th>' -f $HeadStyle, $name }
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="{0}"><thead><tr>{1}</tr></thead><tbody>{2}</tbody></table>' -f $TableStyle, ($headers -join ''), ($html -join "`n")
+  }
+  $subheading = '<h3 style="margin:12px 0 7px;font-size:14px;line-height:20px;color:#0f172a;">{0}</h3>'
+  $provisional = if ($AdScope.Provisional) { ' The AD source is provisional: confirm AD inventory completeness before using these splits.' } else { '' }
+  return ($heading +
+    ($subheading -f 'Licenses by AD domain') + (& $renderTable @($AdScope.ByDomain) 'AD domain' 0) +
+    ($subheading -f 'Licenses by country') + (& $renderTable @($AdScope.ByCountry) 'Country (AD)' $MaxCountryRows) +
+    ('<p style="margin:7px 0 20px;font-size:11px;line-height:16px;color:#64748b;">Distinct users with an assigned license, attributed to their AD account by ImmutableId, then by unique UPN; country comes from that AD account. A user with several suites counts once in Licensed users; recovery candidates count distinct users. Subscription units are tenant-wide and are not split. Italic rows are users without a unique AD account or without an AD country.{0}</p>' -f $provisional))
+}
 
-  $attachmentPath = $null
-  $mailGate = $null
-  $sendStarted = $false
-  try {
-    $mailTo = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')
-    $mailFrom = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue '')
-    if ([string]::IsNullOrWhiteSpace($mailTo) -or [string]::IsNullOrWhiteSpace($mailFrom)) {
-      throw 'A report recipient (To) and sender (From) are required for the focused license summary email.'
+function New-LicensesSummaryMailContent {
+  param(
+    [Parameter(Mandatory)]$PublishedReport,
+    [switch]$Manual
+  )
+  # Renders the tenant report or one AD domain view of it (Get-LicensesDomainPublishedReport); it never recomputes.
+  $publishedReport = $PublishedReport
+  $summaryRows = @($publishedReport.SummaryRows)
+  $additionalRows = @($publishedReport.AdditionalRows)
+  $usage = $publishedReport.Usage
+  $assignmentIssues = $publishedReport.AssignmentIssues
+  $CollectedAtUtc = $publishedReport.CollectedAtUtc
+  $reportSnapshot = [pscustomobject]@{ Id=$publishedReport.SnapshotId }
+  $usageByProduct = @{}
+  if ($usage) { foreach ($usageRow in $usage.Rows) { $usageByProduct[$usageRow.Product] = $usageRow } }
+  $recoveryByProduct = @{}
+  foreach ($name in @('Microsoft 365 E5','Microsoft 365 E3')) {
+    $metric = if ($usageByProduct.ContainsKey($name)) { $usageByProduct[$name] } else { $null }
+    $counts = if ($metric) { $metric.Counts } else { $null }
+    $recoveryByProduct[$name] = Format-LicensesMetric -Counts $counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available ($metric -and $metric.Available)
+  }
+  $topRecoveryE5 = $recoveryByProduct['Microsoft 365 E5']
+  $topRecoveryE3 = $recoveryByProduct['Microsoft 365 E3']
+  $f3F1Counts = @{ Assigned=0; RecoveryCandidates=0; RecoveryUnknown=0 }
+  $f3F1Available = $true
+  foreach ($name in @('Microsoft 365 F3','Microsoft 365 F1')) {
+    if (-not $usageByProduct.ContainsKey($name) -or -not $usageByProduct[$name].Available) { $f3F1Available = $false; continue }
+    foreach ($key in @('Assigned','RecoveryCandidates','RecoveryUnknown')) { $f3F1Counts[$key] += [long]$usageByProduct[$name].Counts[$key] }
+  }
+  $topRecoveryF3F1 = Format-LicensesMetric -Counts $f3F1Counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available $f3F1Available
+  $licenseAlerts = Get-LicensesAlertSummary -AssignmentIssues $assignmentIssues
+  $suiteColors = @('#0f766e','#2563eb','#6d28d9','#475569')
+  $suiteCards = for ($index=0; $index -lt $summaryRows.Count; $index++) {
+    New-LicensesOverviewCardHtml -Row $summaryRows[$index] -Width 25 -Accent $suiteColors[$index]
+  }
+  $otherColors = @('#d97706','#7c3aed','#0284c7')
+  $otherCards = for ($index=0; $index -lt $additionalRows.Count; $index++) {
+    $width = if ($index -eq 2) { 34 } else { 33 }
+    New-LicensesOverviewCardHtml -Row $additionalRows[$index] -Width $width -Accent $otherColors[$index]
+  }
+  $percentCulture = [Globalization.CultureInfo]::InvariantCulture
+  $capacityRows = @()
+  $assignmentRows = @()
+  $recoveryRows = @()
+  $activityRows = @()
+  foreach ($row in $summaryRows) {
+    $status = if ($row.Subscribed) { 'Subscribed' } else { 'Not subscribed' }
+    $metrics = if ($usageByProduct.ContainsKey($row.Product)) { $usageByProduct[$row.Product] } else { $null }
+    $counts = if ($metrics) { $metrics.Counts } else { $null }
+    $assigned = if ($metrics -and $metrics.Available) { [string]$counts.Assigned } else { 'N/D' }
+    $multiple = Format-LicensesMetric -Counts $counts -ValueName 'Multiple' -UnknownName 'MultipleUnknown' -Available ($metrics -and $metrics.Available)
+    $multipleAll = Format-LicensesMetric -Counts $counts -ValueName 'MultipleAll' -UnknownName 'MultipleAllUnknown' -Available ($metrics -and $metrics.Available)
+    $disabled = Format-LicensesMetric -Counts $counts -ValueName 'Disabled' -UnknownName 'DisabledUnknown' -Available ($metrics -and $metrics.Available)
+    $adEntra = Format-LicensesMetric -Counts $counts -ValueName 'AdEntraInactive' -UnknownName 'AdEntraUnknown' -Available ($metrics -and $metrics.Available)
+    $mailbox = Format-LicensesMetric -Counts $counts -ValueName 'MailboxInactive' -UnknownName 'MailboxUnknown' -Available ($metrics -and $metrics.Available)
+    $m365 = Format-LicensesMetric -Counts $counts -ValueName 'M365Inactive' -UnknownName 'M365Unknown' -Available ($metrics -and $metrics.Available)
+    $apps = if ($row.Product -in @('Microsoft 365 E3','Microsoft 365 E5')) {
+      Format-LicensesMetric -Counts $counts -ValueName 'LocalAppsInactive' -UnknownName 'LocalAppsUnknown' -Available ($metrics -and $metrics.Available)
+    } else { 'N/A' }
+    $recovery = Format-LicensesMetric -Counts $counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available ($metrics -and $metrics.Available)
+    $recoveryPrimaryPc = Format-LicensesMetric -Counts $counts -ValueName 'RecoveryPrimaryPc' -UnknownName 'RecoveryPrimaryPcUnknown' -Available ($usage -and $usage.IntuneSourceReady -and $metrics -and $metrics.Available)
+    $availableUnits = [long]$row.Enabled - [long]$row.Consumed
+    $usedPercent = if ([long]$row.Enabled -gt 0) { (([decimal]$row.Consumed * 100 / [decimal]$row.Enabled).ToString('0.#', $percentCulture) + '%') } else { 'N/A' }
+    $freePercent = if ([long]$row.Enabled -gt 0) { (([decimal]$availableUnits * 100 / [decimal]$row.Enabled).ToString('0.#', $percentCulture) + '%') } else { 'N/A' }
+    $consumedCapacity = '{0} ({1})' -f $row.Consumed, $usedPercent
+    $availableCapacity = '{0} ({1})' -f $availableUnits, $freePercent
+    $license = [System.Net.WebUtility]::HtmlEncode($row.Product.Replace('Microsoft 365 ',''))
+    $cell = 'padding:10px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;line-height:17px;color:#334155;vertical-align:top;'
+    $lead = 'padding:10px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;line-height:17px;color:#0f172a;font-weight:700;vertical-align:top;'
+    $capacityRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td><td style="{2}">{7}</td></tr>' -f $lead,$license,$cell,$row.Enabled,$consumedCapacity,$availableCapacity,$assigned,$status
+    $capacityWait = if ($assignmentIssues -and $assignmentIssues.Available) { [string]$assignmentIssues.Counts[$row.Product].CapacityWait } else { 'N/D' }
+    $otherErrors = if ($assignmentIssues -and $assignmentIssues.Available) { [string]$assignmentIssues.Counts[$row.Product].OtherErrors } else { 'N/D' }
+    $assignmentRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td></tr>' -f $lead,$license,$cell,$capacityWait,$otherErrors
+    $recoveryRows += '<tr><td style="{0}">{1}</td><td style="{2}font-weight:700;color:#0f766e;">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td><td style="{2}">{7}</td></tr>' -f $lead,$license,$cell,$recovery,$disabled,$m365,$recoveryPrimaryPc,$multiple
+    $activityRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td></tr>' -f $lead,$license,$cell,$adEntra,$mailbox,$apps,$multipleAll
+  }
+  $sharedRows = foreach ($row in $summaryRows) {
+    $metrics = if ($usageByProduct.ContainsKey($row.Product)) { $usageByProduct[$row.Product] } else { $null }
+    $sharedReady = ($usage -and $usage.SharedSourceReady -and $metrics -and $metrics.Available)
+    $licensed = if ($sharedReady) { [string]$metrics.Counts.SharedLicensed } else { 'N/D' }
+    $under50 = if ($sharedReady) { [string]$metrics.Counts.SharedUnder50 } else { 'N/D' }
+    $eligible = if ($sharedReady) { [string]$metrics.Counts.SharedEligible } else { 'N/D' }
+    $unknown = if ($sharedReady) { [string]$metrics.Counts.SharedUnknown } else { 'N/D' }
+    '<tr><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:700;">{0}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">{1}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">{2}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#0f766e;">{3}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">{4}</td></tr>' -f `
+       [System.Net.WebUtility]::HtmlEncode($row.Product.Replace('Microsoft 365 ','')), $licensed, $under50, $eligible, $unknown
+  }
+  $gap05 = if ($usage -and $usage.MailboxGap) { $usage.MailboxGap.UserMailboxes } else { $null }
+  $gap06 = if ($usage -and $usage.MailboxGap) { $usage.MailboxGap.NoUserMailbox } else { $null }
+  $gap05Total = if ($gap05 -and $gap05.Available) { [string]$gap05.Total } else { 'N/D' }
+  $gap05Universe = if ($gap05 -and $gap05.Available) { [string]$gap05.Universe } else { 'N/D' }
+  $gap05Percent = if ($gap05 -and $gap05.Available -and $gap05.Universe -gt 0) { (([decimal]$gap05.Total * 100 / [decimal]$gap05.Universe).ToString('0.#', $percentCulture) + '%') } elseif ($gap05 -and $gap05.Available) { 'N/A' } else { 'N/D' }
+  $gap05Other = if ($gap05 -and $gap05.Available) { [string]$gap05.OtherSkus } else { 'N/D' }
+  $gap05None = if ($gap05 -and $gap05.Available) { [string]$gap05.NoSkus } else { 'N/D' }
+  $gap05Unknown = if ($gap05 -and $gap05.Available) { [string]$gap05.Unknown } else { 'N/D' }
+  $gap05EntraReady = ($gap05 -and $gap05.Available -and $gap05.EntraStateAvailable)
+  $gap05EntraEnabled = if ($gap05EntraReady) { [string]$gap05.EntraEnabled } else { 'N/D' }
+  $gap05EntraDisabled = if ($gap05EntraReady) { [string]$gap05.EntraDisabled } else { 'N/D' }
+  $gap05EntraUnknown = if ($gap05EntraReady) { [string]$gap05.EntraStateUnknown } else { 'N/D' }
+  $gap06Total = if ($gap06 -and $gap06.Available) { [string]$gap06.Total } else { 'N/D' }
+  $gap06Universe = if ($gap06 -and $gap06.Available) { [string]$gap06.Universe } else { 'N/D' }
+  $gap06Percent = if ($gap06 -and $gap06.Available -and $gap06.Universe -gt 0) { (([decimal]$gap06.Total * 100 / [decimal]$gap06.Universe).ToString('0.#', $percentCulture) + '%') } elseif ($gap06 -and $gap06.Available) { 'N/A' } else { 'N/D' }
+  $gap06Other = if ($gap06 -and $gap06.Available) { [string]$gap06.OtherSkus } else { 'N/D' }
+  $gap06None = if ($gap06 -and $gap06.Available) { [string]$gap06.NoSkus } else { 'N/D' }
+  $gap06Guests = if ($gap06 -and $gap06.Available) { [string]$gap06.Guests } else { 'N/D' }
+  $gap06MemberEnabled = if ($gap06 -and $gap06.Available) { [string]$gap06.MemberEnabled } else { 'N/D' }
+  $gap06MemberDisabled = if ($gap06 -and $gap06.Available) { [string]$gap06.MemberDisabled } else { 'N/D' }
+  $gap06Unknown = if ($gap06 -and $gap06.Available) { [string]$gap06.Unknown } else { 'N/D' }
+  $adGap = if ($usage) { $usage.AdGapActivity } else { $null }
+  $adGapReady = ($adGap -and $adGap.Available)
+  $adGapMembers = if ($adGapReady) { [string]$adGap.Members } else { 'N/D' }
+  $adGapObserved = if ($adGapReady) { [string]$adGap.AdObserved } else { 'N/D' }
+  $adGapNoMatch = if ($adGapReady -and $null -ne $adGap.NoObservedMatch) { [string]$adGap.NoObservedMatch } else { 'N/D' }
+  $adGapAmbiguous = if ($adGapReady) { [string]$adGap.Ambiguous } else { 'N/D' }
+  $adGapRecent = if ($adGapReady) { [string]$adGap.AdEnabledRecent } else { 'N/D' }
+  $adGapInactive = if ($adGapReady) { [string]$adGap.AdEnabledInactive } else { 'N/D' }
+  $adGapNoDate = if ($adGapReady) { [string]$adGap.AdEnabledNoDate } else { 'N/D' }
+  $adGapDisabled = if ($adGapReady) { [string]$adGap.AdDisabled } else { 'N/D' }
+  $adGapStateUnknown = if ($adGapReady) { [string]$adGap.AdEnabledUnknown } else { 'N/D' }
+  $adGapStatus = if ($adGapReady -and $adGap.Provisional) { 'Provisional AD source' } elseif ($adGapReady) { 'Qualified AD source' } else { 'AD source N/D' }
+  $e3Review = if ($usage) { $usage.DowngradeReview } else { $null }
+  $e3ReviewAssigned = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Assigned } else { 'N/D' }
+  $e3ReviewCandidates = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Candidates } else { 'N/D' }
+  $e3ReviewUnknown = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Unknown } else { 'N/D' }
+  $e3ReviewExcluded = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Excluded } else { 'N/D' }
+  $e3ReviewRecovery = if ($e3Review -and $e3Review.Available) { [string]$e3Review.RecoveryExcluded } else { 'N/D' }
+  $gapNotes = @()
+  foreach ($item in @(@{ Section='06'; Value=$gap05 }, @{ Section='07'; Value=$gap06 })) {
+    if ($item.Value -and -not $item.Value.Available -and $item.Value.Reason) {
+      $gapNotes += '<p style="margin:7px 0 0;font-size:11px;color:#9a3412;">Section {0} N/D: {1}</p>' -f `
+        $item.Section, [System.Net.WebUtility]::HtmlEncode([string]$item.Value.Reason)
     }
-    if ([string]::IsNullOrWhiteSpace($ExpectedTenantKey)) { throw 'Tenant key is required for the daily license summary mail limit.' }
-    $mailGate = Enter-LicensesDailyMailGate -Path $MailStatePath -TenantKey $ExpectedTenantKey -Force:$ForceLicenseSummaryEmail
-    if ($mailGate.Skip) {
-      WriteLog -Message ("License summary email skipped: {0} (Europe/Paris). Use -ForceLicenseSummaryEmail to send again." -f $mailGate.Reason) 'INFO'
-      return $false
+  }
+  if ($gap05 -and $gap05.Available -and -not $gap05.EntraStateAvailable -and $gap05.EntraStateReason) {
+    $gapNotes += '<p style="margin:7px 0 0;font-size:11px;color:#9a3412;">Section 06 Entra state N/D: {0}</p>' -f `
+      [System.Net.WebUtility]::HtmlEncode([string]$gap05.EntraStateReason)
+  }
+  if ($adGapReady -and $adGap.Provisional -and $adGap.Reason) {
+    $gapNotes += '<p style="margin:7px 0 0;font-size:11px;color:#9a3412;">AD activity scope: {0}</p>' -f [System.Net.WebUtility]::HtmlEncode([string]$adGap.Reason)
+  }
+  $sourceRows = if ($usage) {
+    foreach ($source in $usage.Sources) {
+      $state = if ($source.Ready -and ($source.Forced -or ($source.PSObject.Properties['PartialScopeAccepted'] -and $source.PartialScopeAccepted))) { "PROVISIONAL ($($source.Date); $($source.Provenance))" }
+               elseif ($source.Ready) { "Ready ($($source.Date); $($source.Provenance))" }
+               else { "N/D ($($source.Reason))" }
+      '<li>{0}: {1}</li>' -f [System.Net.WebUtility]::HtmlEncode($source.Name), [System.Net.WebUtility]::HtmlEncode($state)
     }
-
-    # The email never recomputes: it renders the report already published and qualified by the receipt.
-    $publishedReport = Read-LicensesPublishedReport -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey
-    $summaryRows = @($publishedReport.SummaryRows)
-    $additionalRows = @($publishedReport.AdditionalRows)
-    $usage = $publishedReport.Usage
-    $assignmentIssues = $publishedReport.AssignmentIssues
-    $CollectedAtUtc = $publishedReport.CollectedAtUtc
-    $reportSnapshot = [pscustomobject]@{ Id=$publishedReport.SnapshotId }
-    $usageByProduct = @{}
-    if ($usage) { foreach ($usageRow in $usage.Rows) { $usageByProduct[$usageRow.Product] = $usageRow } }
-    $recoveryByProduct = @{}
-    foreach ($name in @('Microsoft 365 E5','Microsoft 365 E3')) {
-      $metric = if ($usageByProduct.ContainsKey($name)) { $usageByProduct[$name] } else { $null }
-      $counts = if ($metric) { $metric.Counts } else { $null }
-      $recoveryByProduct[$name] = Format-LicensesMetric -Counts $counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available ($metric -and $metric.Available)
-    }
-    $topRecoveryE5 = $recoveryByProduct['Microsoft 365 E5']
-    $topRecoveryE3 = $recoveryByProduct['Microsoft 365 E3']
-    $f3F1Counts = @{ Assigned=0; RecoveryCandidates=0; RecoveryUnknown=0 }
-    $f3F1Available = $true
-    foreach ($name in @('Microsoft 365 F3','Microsoft 365 F1')) {
-      if (-not $usageByProduct.ContainsKey($name) -or -not $usageByProduct[$name].Available) { $f3F1Available = $false; continue }
-      foreach ($key in @('Assigned','RecoveryCandidates','RecoveryUnknown')) { $f3F1Counts[$key] += [long]$usageByProduct[$name].Counts[$key] }
-    }
-    $topRecoveryF3F1 = Format-LicensesMetric -Counts $f3F1Counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available $f3F1Available
-    $licenseAlerts = Get-LicensesAlertSummary -AssignmentIssues $assignmentIssues
-    $suiteColors = @('#0f766e','#2563eb','#6d28d9','#475569')
-    $suiteCards = for ($index=0; $index -lt $summaryRows.Count; $index++) {
-      New-LicensesOverviewCardHtml -Row $summaryRows[$index] -Width 25 -Accent $suiteColors[$index]
-    }
-    $otherColors = @('#d97706','#7c3aed','#0284c7')
-    $otherCards = for ($index=0; $index -lt $additionalRows.Count; $index++) {
-      $width = if ($index -eq 2) { 34 } else { 33 }
-      New-LicensesOverviewCardHtml -Row $additionalRows[$index] -Width $width -Accent $otherColors[$index]
-    }
-    $percentCulture = [Globalization.CultureInfo]::InvariantCulture
-    $capacityRows = @()
-    $assignmentRows = @()
-    $recoveryRows = @()
-    $activityRows = @()
-    foreach ($row in $summaryRows) {
-      $status = if ($row.Subscribed) { 'Subscribed' } else { 'Not subscribed' }
-      $metrics = if ($usageByProduct.ContainsKey($row.Product)) { $usageByProduct[$row.Product] } else { $null }
-      $counts = if ($metrics) { $metrics.Counts } else { $null }
-      $assigned = if ($metrics -and $metrics.Available) { [string]$counts.Assigned } else { 'N/D' }
-      $multiple = Format-LicensesMetric -Counts $counts -ValueName 'Multiple' -UnknownName 'MultipleUnknown' -Available ($metrics -and $metrics.Available)
-      $multipleAll = Format-LicensesMetric -Counts $counts -ValueName 'MultipleAll' -UnknownName 'MultipleAllUnknown' -Available ($metrics -and $metrics.Available)
-      $disabled = Format-LicensesMetric -Counts $counts -ValueName 'Disabled' -UnknownName 'DisabledUnknown' -Available ($metrics -and $metrics.Available)
-      $adEntra = Format-LicensesMetric -Counts $counts -ValueName 'AdEntraInactive' -UnknownName 'AdEntraUnknown' -Available ($metrics -and $metrics.Available)
-      $mailbox = Format-LicensesMetric -Counts $counts -ValueName 'MailboxInactive' -UnknownName 'MailboxUnknown' -Available ($metrics -and $metrics.Available)
-      $m365 = Format-LicensesMetric -Counts $counts -ValueName 'M365Inactive' -UnknownName 'M365Unknown' -Available ($metrics -and $metrics.Available)
-      $apps = if ($row.Product -in @('Microsoft 365 E3','Microsoft 365 E5')) {
-        Format-LicensesMetric -Counts $counts -ValueName 'LocalAppsInactive' -UnknownName 'LocalAppsUnknown' -Available ($metrics -and $metrics.Available)
-      } else { 'N/A' }
-      $recovery = Format-LicensesMetric -Counts $counts -ValueName 'RecoveryCandidates' -UnknownName 'RecoveryUnknown' -Available ($metrics -and $metrics.Available)
-      $recoveryPrimaryPc = Format-LicensesMetric -Counts $counts -ValueName 'RecoveryPrimaryPc' -UnknownName 'RecoveryPrimaryPcUnknown' -Available ($usage -and $usage.IntuneSourceReady -and $metrics -and $metrics.Available)
-      $availableUnits = [long]$row.Enabled - [long]$row.Consumed
-      $usedPercent = if ([long]$row.Enabled -gt 0) { (([decimal]$row.Consumed * 100 / [decimal]$row.Enabled).ToString('0.#', $percentCulture) + '%') } else { 'N/A' }
-      $freePercent = if ([long]$row.Enabled -gt 0) { (([decimal]$availableUnits * 100 / [decimal]$row.Enabled).ToString('0.#', $percentCulture) + '%') } else { 'N/A' }
-      $consumedCapacity = '{0} ({1})' -f $row.Consumed, $usedPercent
-      $availableCapacity = '{0} ({1})' -f $availableUnits, $freePercent
-      $license = [System.Net.WebUtility]::HtmlEncode($row.Product.Replace('Microsoft 365 ',''))
-      $cell = 'padding:10px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;line-height:17px;color:#334155;vertical-align:top;'
-      $lead = 'padding:10px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;line-height:17px;color:#0f172a;font-weight:700;vertical-align:top;'
-      $capacityRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td><td style="{2}">{7}</td></tr>' -f $lead,$license,$cell,$row.Enabled,$consumedCapacity,$availableCapacity,$assigned,$status
-      $capacityWait = if ($assignmentIssues -and $assignmentIssues.Available) { [string]$assignmentIssues.Counts[$row.Product].CapacityWait } else { 'N/D' }
-      $otherErrors = if ($assignmentIssues -and $assignmentIssues.Available) { [string]$assignmentIssues.Counts[$row.Product].OtherErrors } else { 'N/D' }
-      $assignmentRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td></tr>' -f $lead,$license,$cell,$capacityWait,$otherErrors
-      $recoveryRows += '<tr><td style="{0}">{1}</td><td style="{2}font-weight:700;color:#0f766e;">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td><td style="{2}">{7}</td></tr>' -f $lead,$license,$cell,$recovery,$disabled,$m365,$recoveryPrimaryPc,$multiple
-      $activityRows += '<tr><td style="{0}">{1}</td><td style="{2}">{3}</td><td style="{2}">{4}</td><td style="{2}">{5}</td><td style="{2}">{6}</td></tr>' -f $lead,$license,$cell,$adEntra,$mailbox,$apps,$multipleAll
-    }
-    $sharedRows = foreach ($row in $summaryRows) {
-      $metrics = if ($usageByProduct.ContainsKey($row.Product)) { $usageByProduct[$row.Product] } else { $null }
-      $sharedReady = ($usage -and $usage.SharedSourceReady -and $metrics -and $metrics.Available)
-      $licensed = if ($sharedReady) { [string]$metrics.Counts.SharedLicensed } else { 'N/D' }
-      $under50 = if ($sharedReady) { [string]$metrics.Counts.SharedUnder50 } else { 'N/D' }
-      $eligible = if ($sharedReady) { [string]$metrics.Counts.SharedEligible } else { 'N/D' }
-      $unknown = if ($sharedReady) { [string]$metrics.Counts.SharedUnknown } else { 'N/D' }
-      '<tr><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:700;">{0}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">{1}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">{2}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#0f766e;">{3}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">{4}</td></tr>' -f `
-         [System.Net.WebUtility]::HtmlEncode($row.Product.Replace('Microsoft 365 ','')), $licensed, $under50, $eligible, $unknown
-    }
-    $gap05 = if ($usage -and $usage.MailboxGap) { $usage.MailboxGap.UserMailboxes } else { $null }
-    $gap06 = if ($usage -and $usage.MailboxGap) { $usage.MailboxGap.NoUserMailbox } else { $null }
-    $gap05Total = if ($gap05 -and $gap05.Available) { [string]$gap05.Total } else { 'N/D' }
-    $gap05Universe = if ($gap05 -and $gap05.Available) { [string]$gap05.Universe } else { 'N/D' }
-    $gap05Percent = if ($gap05 -and $gap05.Available -and $gap05.Universe -gt 0) { (([decimal]$gap05.Total * 100 / [decimal]$gap05.Universe).ToString('0.#', $percentCulture) + '%') } elseif ($gap05 -and $gap05.Available) { 'N/A' } else { 'N/D' }
-    $gap05Other = if ($gap05 -and $gap05.Available) { [string]$gap05.OtherSkus } else { 'N/D' }
-    $gap05None = if ($gap05 -and $gap05.Available) { [string]$gap05.NoSkus } else { 'N/D' }
-    $gap05Unknown = if ($gap05 -and $gap05.Available) { [string]$gap05.Unknown } else { 'N/D' }
-    $gap05EntraReady = ($gap05 -and $gap05.Available -and $gap05.EntraStateAvailable)
-    $gap05EntraEnabled = if ($gap05EntraReady) { [string]$gap05.EntraEnabled } else { 'N/D' }
-    $gap05EntraDisabled = if ($gap05EntraReady) { [string]$gap05.EntraDisabled } else { 'N/D' }
-    $gap05EntraUnknown = if ($gap05EntraReady) { [string]$gap05.EntraStateUnknown } else { 'N/D' }
-    $gap06Total = if ($gap06 -and $gap06.Available) { [string]$gap06.Total } else { 'N/D' }
-    $gap06Universe = if ($gap06 -and $gap06.Available) { [string]$gap06.Universe } else { 'N/D' }
-    $gap06Percent = if ($gap06 -and $gap06.Available -and $gap06.Universe -gt 0) { (([decimal]$gap06.Total * 100 / [decimal]$gap06.Universe).ToString('0.#', $percentCulture) + '%') } elseif ($gap06 -and $gap06.Available) { 'N/A' } else { 'N/D' }
-    $gap06Other = if ($gap06 -and $gap06.Available) { [string]$gap06.OtherSkus } else { 'N/D' }
-    $gap06None = if ($gap06 -and $gap06.Available) { [string]$gap06.NoSkus } else { 'N/D' }
-    $gap06Guests = if ($gap06 -and $gap06.Available) { [string]$gap06.Guests } else { 'N/D' }
-    $gap06MemberEnabled = if ($gap06 -and $gap06.Available) { [string]$gap06.MemberEnabled } else { 'N/D' }
-    $gap06MemberDisabled = if ($gap06 -and $gap06.Available) { [string]$gap06.MemberDisabled } else { 'N/D' }
-    $gap06Unknown = if ($gap06 -and $gap06.Available) { [string]$gap06.Unknown } else { 'N/D' }
-    $adGap = if ($usage) { $usage.AdGapActivity } else { $null }
-    $adGapReady = ($adGap -and $adGap.Available)
-    $adGapMembers = if ($adGapReady) { [string]$adGap.Members } else { 'N/D' }
-    $adGapObserved = if ($adGapReady) { [string]$adGap.AdObserved } else { 'N/D' }
-    $adGapNoMatch = if ($adGapReady -and $null -ne $adGap.NoObservedMatch) { [string]$adGap.NoObservedMatch } else { 'N/D' }
-    $adGapAmbiguous = if ($adGapReady) { [string]$adGap.Ambiguous } else { 'N/D' }
-    $adGapRecent = if ($adGapReady) { [string]$adGap.AdEnabledRecent } else { 'N/D' }
-    $adGapInactive = if ($adGapReady) { [string]$adGap.AdEnabledInactive } else { 'N/D' }
-    $adGapNoDate = if ($adGapReady) { [string]$adGap.AdEnabledNoDate } else { 'N/D' }
-    $adGapDisabled = if ($adGapReady) { [string]$adGap.AdDisabled } else { 'N/D' }
-    $adGapStateUnknown = if ($adGapReady) { [string]$adGap.AdEnabledUnknown } else { 'N/D' }
-    $adGapStatus = if ($adGapReady -and $adGap.Provisional) { 'Provisional AD source' } elseif ($adGapReady) { 'Qualified AD source' } else { 'AD source N/D' }
-    $e3Review = if ($usage) { $usage.DowngradeReview } else { $null }
-    $e3ReviewAssigned = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Assigned } else { 'N/D' }
-    $e3ReviewCandidates = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Candidates } else { 'N/D' }
-    $e3ReviewUnknown = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Unknown } else { 'N/D' }
-    $e3ReviewExcluded = if ($e3Review -and $e3Review.Available) { [string]$e3Review.Excluded } else { 'N/D' }
-    $e3ReviewRecovery = if ($e3Review -and $e3Review.Available) { [string]$e3Review.RecoveryExcluded } else { 'N/D' }
-    $gapNotes = @()
-    foreach ($item in @(@{ Section='06'; Value=$gap05 }, @{ Section='07'; Value=$gap06 })) {
-      if ($item.Value -and -not $item.Value.Available -and $item.Value.Reason) {
-        $gapNotes += '<p style="margin:7px 0 0;font-size:11px;color:#9a3412;">Section {0} N/D: {1}</p>' -f `
-          $item.Section, [System.Net.WebUtility]::HtmlEncode([string]$item.Value.Reason)
-      }
-    }
-    if ($gap05 -and $gap05.Available -and -not $gap05.EntraStateAvailable -and $gap05.EntraStateReason) {
-      $gapNotes += '<p style="margin:7px 0 0;font-size:11px;color:#9a3412;">Section 06 Entra state N/D: {0}</p>' -f `
-        [System.Net.WebUtility]::HtmlEncode([string]$gap05.EntraStateReason)
-    }
-    if ($adGapReady -and $adGap.Provisional -and $adGap.Reason) {
-      $gapNotes += '<p style="margin:7px 0 0;font-size:11px;color:#9a3412;">AD activity scope: {0}</p>' -f [System.Net.WebUtility]::HtmlEncode([string]$adGap.Reason)
-    }
-    $sourceRows = if ($usage) {
-      foreach ($source in $usage.Sources) {
-        $state = if ($source.Ready -and ($source.Forced -or ($source.PSObject.Properties['PartialScopeAccepted'] -and $source.PartialScopeAccepted))) { "PROVISIONAL ($($source.Date); $($source.Provenance))" }
-                 elseif ($source.Ready) { "Ready ($($source.Date); $($source.Provenance))" }
-                 else { "N/D ($($source.Reason))" }
-        '<li>{0}: {1}</li>' -f [System.Net.WebUtility]::HtmlEncode($source.Name), [System.Net.WebUtility]::HtmlEncode($state)
-      }
-    } else { @('<li>Usage sources: N/D</li>') }
-    $sourceNote = if ($Manual) { '<span style="color:#0f766e;font-weight:700;">Source: existing published CSV. No new inventory was run.</span>' } else { '<span style="color:#0f766e;font-weight:700;">Source: published inventory.</span>' }
-    $adOverrideNote = if ($usage -and $usage.AdSourceForced) { '<div style="margin:0 0 16px;padding:11px 14px;background:#fff7ed;border-left:4px solid #d97706;font-size:12px;line-height:18px;color:#7c2d12;"><strong>Provisional AD/Entra indicator.</strong> The AD CSV was analyzed despite a rejected collector receipt. Confirm AD inventory completeness before using its inactivity counts for a license decision.</div>' } else { '' }
-    $subject = 'Microsoft 365 license overview and recovery'
-    $assignmentStatusNote = if ($assignmentIssues -and -not $assignmentIssues.Available -and $assignmentIssues.Reason) {
-      '<p style="margin:5px 0 14px;font-size:11px;color:#b45309;">Assignment issues N/D: {0}</p>' -f [System.Net.WebUtility]::HtmlEncode([string]$assignmentIssues.Reason)
-    } else { '' }
-    $tableStyle = 'width:100%;border-collapse:collapse;table-layout:fixed;font-family:Segoe UI,Arial,sans-serif;font-size:12px;line-height:17px;color:#334155;'
-    $headStyle = 'padding:9px 8px;background:#eaf1f8;border-bottom:2px solid #cbd5e1;text-align:left;font-size:11px;line-height:15px;color:#334155;vertical-align:bottom;'
-    $bodyHtml = @"
+  } else { @('<li>Usage sources: N/D</li>') }
+  $sourceNote = if ($Manual) { '<span style="color:#0f766e;font-weight:700;">Source: existing published CSV. No new inventory was run.</span>' } else { '<span style="color:#0f766e;font-weight:700;">Source: published inventory.</span>' }
+  $adOverrideNote = if ($usage -and $usage.AdSourceForced) { '<div style="margin:0 0 16px;padding:11px 14px;background:#fff7ed;border-left:4px solid #d97706;font-size:12px;line-height:18px;color:#7c2d12;"><strong>Provisional AD/Entra indicator.</strong> The AD CSV was analyzed despite a rejected collector receipt. Confirm AD inventory completeness before using its inactivity counts for a license decision.</div>' } else { '' }
+  $subject = 'Microsoft 365 license overview and recovery'
+  $assignmentStatusNote = if ($assignmentIssues -and -not $assignmentIssues.Available -and $assignmentIssues.Reason) {
+    '<p style="margin:5px 0 14px;font-size:11px;color:#b45309;">Assignment issues N/D: {0}</p>' -f [System.Net.WebUtility]::HtmlEncode([string]$assignmentIssues.Reason)
+  } else { '' }
+  $tableStyle = 'width:100%;border-collapse:collapse;table-layout:fixed;font-family:Segoe UI,Arial,sans-serif;font-size:12px;line-height:17px;color:#334155;'
+  $headStyle = 'padding:9px 8px;background:#eaf1f8;border-bottom:2px solid #cbd5e1;text-align:left;font-size:11px;line-height:15px;color:#334155;vertical-align:bottom;'
+  $scopeDomain = if ($publishedReport.PSObject.Properties['ScopeDomain']) { [string]$publishedReport.ScopeDomain } else { '' }
+  $scopeLabel = ''
+  $scopeNote = ''
+  $scopeTables = ''
+  $enabledHeader = 'Enabled units'
+  $consumedHeader = 'Consumed (used %)'
+  $availableHeader = 'Available (free %)'
+  $assignedHeader = 'Assigned users'
+  if ($scopeDomain) {
+    $encodedDomain = [System.Net.WebUtility]::HtmlEncode($scopeDomain)
+    $subject = '{0} - {1}' -f $subject, $scopeDomain
+    $scopeLabel = ' &nbsp;&middot;&nbsp; AD domain {0}' -f $encodedDomain
+    $provisionalText = if ($publishedReport.PSObject.Properties['ScopeProvisional'] -and $publishedReport.ScopeProvisional) { ' The AD source of this attribution is provisional.' } else { '' }
+    $scopeNote = '<div style="margin:0 0 16px;padding:11px 14px;background:#eff6f8;border-left:4px solid #0f766e;font-size:12px;line-height:18px;color:#334155;"><strong>Scope: AD domain {0}.</strong> User counts, alerts, recovery, review and coverage sections count only accounts attributed to this AD domain (AD ImmutableId, then unique UPN). Enabled, consumed and available units are tenant-wide subscription values and are not split by domain.{1}</div>' -f $encodedDomain, $provisionalText
+    $enabledHeader = 'Tenant enabled units'
+    $consumedHeader = 'Tenant consumed (used %)'
+    $availableHeader = 'Tenant available (free %)'
+    $assignedHeader = 'Assigned users in domain'
+  }
+  elseif ($publishedReport.PSObject.Properties['AdScope']) {
+    $scopeTables = New-LicensesScopeTablesHtml -AdScope $publishedReport.AdScope -TableStyle $tableStyle -HeadStyle $headStyle
+  }
+  $bodyHtml = @"
 <div style="font-family:Segoe UI,Arial,sans-serif;color:#0f172a;max-width:700px;margin:0 auto;">
   <p style="margin:0 0 5px;font-size:11px;letter-spacing:1px;font-weight:700;color:#0f766e;">MICROSOFT 365 &middot; LICENSE SUMMARY</p>
   <h1 style="margin:0 0 8px;font-size:24px;line-height:30px;color:#0f172a;">License overview and recovery</h1>
-  <p style="margin:0 0 18px;font-size:12px;line-height:18px;color:#64748b;">$([System.Net.WebUtility]::HtmlEncode([string]$OrgDomain)) &nbsp;&middot;&nbsp; Snapshot $([System.Net.WebUtility]::HtmlEncode($CollectedAtUtc)) UTC</p>
+  <p style="margin:0 0 18px;font-size:12px;line-height:18px;color:#64748b;">$([System.Net.WebUtility]::HtmlEncode([string]$OrgDomain))$scopeLabel &nbsp;&middot;&nbsp; Snapshot $([System.Net.WebUtility]::HtmlEncode($CollectedAtUtc)) UTC</p>
   $adOverrideNote
+  $scopeNote
   <h2 style="margin:0 0 10px;font-size:18px;line-height:24px;color:#0f172a;">License overview</h2>
   <h3 style="margin:0 0 7px;font-size:14px;line-height:20px;color:#0f172a;">License alerts</h3>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#fff7ed;border:1px solid #fed7aa;">
@@ -3332,8 +3749,9 @@ function Send-LicensesFocusedSummaryEmail {
   <p style="margin:14px 0 5px;font-size:11px;line-height:16px;font-weight:700;color:#475569;">COPILOT, DYNAMICS 365 AND POWER BI</p>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#f8f5f1;border:1px solid #e5ddd2;"><tr>$($otherCards -join "`n")</tr></table>
   <p style="margin:7px 0 17px;font-size:11px;line-height:16px;color:#64748b;">Enabled and used counts come from the tenant subscription snapshot. Used means consumed license units, not measured app activity. Percent used = used / enabled; N/A means no enabled units. Dynamics 365 and Power BI add SKU units, not distinct users. Copilot covers Microsoft 365 Copilot; Dynamics 365 excludes sandbox, trial and preview SKUs; Power BI covers Pro and Premium Per User, excluding free Standard.</p>
+  $scopeTables
   <h2 style="margin:0 0 8px;font-size:16px;line-height:22px;color:#0f172a;">01 &nbsp; License capacity</h2>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Enabled units</th><th style="$headStyle">Consumed (used %)</th><th style="$headStyle">Available (free %)</th><th style="$headStyle">Assigned users</th><th style="$headStyle">Status</th></tr></thead><tbody>$($capacityRows -join "`n")</tbody></table>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">$enabledHeader</th><th style="$headStyle">$consumedHeader</th><th style="$headStyle">$availableHeader</th><th style="$headStyle">$assignedHeader</th><th style="$headStyle">Status</th></tr></thead><tbody>$($capacityRows -join "`n")</tbody></table>
   <h3 style="margin:18px 0 7px;font-size:14px;line-height:20px;color:#0f172a;">License assignment issues</h3>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Awaiting capacity</th><th style="$headStyle">Other licensing errors</th></tr></thead><tbody>$($assignmentRows -join "`n")</tbody></table>
   <p style="margin:6px 0 16px;font-size:11px;line-height:16px;color:#64748b;">Awaiting capacity counts distinct users with a CountViolation assignment path and no effective F1/F3/E3/E5 suite of the same product. Other errors include different Graph assignment failures and failed paths where another route already grants the suite. The Excel tabs Awaiting licenses and Licensing errors list the affected users, error codes and assigning groups. These counts reflect the collected Graph snapshot and can differ from the live admin center.</p>
@@ -3369,16 +3787,104 @@ function Send-LicensesFocusedSummaryEmail {
   <p style="margin:14px 0 0;font-size:11px;line-height:16px;color:#64748b;">$sourceNote</p>
 </div>
 "@
-    $bodyRow = '<tr><td style="padding:18px 24px 22px 24px;font-size:13px;line-height:19px;color:#334155;">{0}</td></tr>' -f $bodyHtml
-    $executionFooter = 'Host: {0} | Generated: {1} | Snapshot: {2}' -f [string]$env:COMPUTERNAME, (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'), $reportSnapshot.Id
-    $mailBody = New-SmartM365EmailBody -Title $subject -Category 'SmartM365' -HostName '' -GeneratedAt '' -BodyHtml $bodyRow -Footer $executionFooter
-    $attachmentPath = Join-Path ([System.IO.Path]::GetTempPath()) ("M365_Licenses_RecoveryCandidates_{0}_{1}.xlsx" -f (Get-Date -Format 'yyyyMMdd_HHmmss'),[guid]::NewGuid().ToString('N').Substring(0,8))
-    [void](New-LicensesRecoveryWorkbook -Path $attachmentPath -SummaryRows $summaryRows -Usage $usage -AssignmentIssues $assignmentIssues -CollectedAtUtc $CollectedAtUtc)
+  $bodyRow = '<tr><td style="padding:18px 24px 22px 24px;font-size:13px;line-height:19px;color:#334155;">{0}</td></tr>' -f $bodyHtml
+  $executionFooter = 'Host: {0} | Generated: {1} | Snapshot: {2}' -f [string]$env:COMPUTERNAME, (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'), $reportSnapshot.Id
+  $mailBody = New-SmartM365EmailBody -Title $subject -Category 'SmartM365' -HostName '' -GeneratedAt '' -BodyHtml $bodyRow -Footer $executionFooter
+  return [pscustomobject]@{ Subject=$subject; Body=$mailBody; SummaryRows=$summaryRows; Usage=$usage; AssignmentIssues=$assignmentIssues; CollectedAtUtc=$CollectedAtUtc; SnapshotId=$reportSnapshot.Id }
+}
+
+function Get-LicensesDomainMailSettings {
+  param([AllowNull()]$Config)
+  # LicenseSummaryDomainMails: [{ Domain, To, Cc, Enabled }]; Domain is the AD DomainName of the AD users export.
+  $entries = [System.Collections.Generic.List[object]]::new()
+  $seen = @{}
+  foreach ($item in @(Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseSummaryDomainMails' -DefaultValue @())) {
+    if ($null -eq $item) { continue }
+    $read = { param($Name) if ($item -is [System.Collections.IDictionary]) { $item[$Name] } else { Get-LicensesOptionalProperty $item $Name } }
+    $domain = ([string](& $read 'Domain')).Trim().ToLowerInvariant()
+    if ($domain -notmatch '^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$') {
+      throw "LicenseSummaryDomainMails has an invalid AD domain: '$domain'."
+    }
+    if ($seen.ContainsKey($domain)) { throw "LicenseSummaryDomainMails lists AD domain $domain more than once." }
+    $seen[$domain] = $true
+    $enabled = & $read 'Enabled'
+    if ($null -ne $enabled -and ([string]$enabled).Trim() -in @('False','false','0')) { continue }
+    $to = ([string](& $read 'To')).Trim()
+    if (-not $to) { throw "LicenseSummaryDomainMails entry $domain needs a To recipient." }
+    $entries.Add([pscustomobject]@{ Domain=$domain; To=$to; Cc=([string](& $read 'Cc')).Trim() })
+  }
+  return $entries.ToArray()
+}
+
+function Get-LicensesDomainMailStatePath {
+  param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Domain)
+  # One daily send state per AD domain, next to the tenant state.
+  $folder = Split-Path -Path $Path -Parent
+  $name = Split-Path -Path $Path -Leaf
+  $suffix = @('.json.txt','.json','.txt') | Where-Object { $name.EndsWith($_, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
+  $name = if ($suffix) { $name.Substring(0, $name.Length - $suffix.Length) + '.' + $Domain + $suffix } else { $name + '.' + $Domain }
+  return (Join-Path -Path $folder -ChildPath $name)
+}
+
+function Send-LicensesSummaryMailScope {
+  param(
+    [Parameter(Mandatory)][scriptblock]$ReadReport,
+    [Parameter(Mandatory)][AllowEmptyString()][string]$ExpectedTenantKey,
+    [Parameter(Mandatory)][string]$MailStatePath,
+    [AllowEmptyString()][string]$To,
+    [AllowEmptyString()][string]$Cc,
+    [AllowEmptyString()][string]$From,
+    [string]$Domain = '',
+    [switch]$Manual,
+    [switch]$ForceLicenseSummaryEmail
+  )
+  $attachmentPath = $null
+  $mailGate = $null
+  $sendStarted = $false
+  $label = if ($Domain) { "License summary email for AD domain $Domain" } else { 'License summary email' }
+  try {
+    if ([string]::IsNullOrWhiteSpace($To) -or [string]::IsNullOrWhiteSpace($From)) {
+      throw 'A report recipient (To) and sender (From) are required for the focused license summary email.'
+    }
+    if ([string]::IsNullOrWhiteSpace($ExpectedTenantKey)) { throw 'Tenant key is required for the daily license summary mail limit.' }
+    $mailGate = Enter-LicensesDailyMailGate -Path $MailStatePath -TenantKey $ExpectedTenantKey -Force:$ForceLicenseSummaryEmail
+    if ($mailGate.Skip) {
+      WriteLog -Message ("{0} skipped: {1} (Europe/Paris). Use -ForceLicenseSummaryEmail to send again." -f $label, $mailGate.Reason) 'INFO'
+      return $false
+    }
+
+    # The email never recomputes: it renders the report already published and qualified by the receipt.
+    $report = & $ReadReport
+    # The tenant mail keeps the global Cc; a domain mail uses only its own recipients.
+    $mailArgs = @{ From=$From; To=$To; MailPurpose='Report' }
+    if ($Domain) { $mailArgs.Cc = $Cc }
+    $scoped = if ($Domain) { Get-LicensesDomainPublishedReport -Report $report -Domain $Domain } else { $null }
+    if ($scoped -and -not $scoped.Available) {
+      # A configured domain without qualified data gets an explicit N/D notice, never an empty report.
+      $mailArgs.Subject = 'Microsoft 365 license overview and recovery - {0} - N/D' -f $Domain
+      $notice = '<tr><td style="padding:18px 24px 22px 24px;font-family:Segoe UI,Arial,sans-serif;font-size:13px;line-height:19px;color:#334155;"><p style="margin:0 0 8px;font-size:18px;line-height:24px;font-weight:700;color:#0f172a;">License report N/D for AD domain {0}</p><p style="margin:0;">{1}</p></td></tr>' -f `
+        [System.Net.WebUtility]::HtmlEncode($Domain), [System.Net.WebUtility]::HtmlEncode([string]$scoped.Reason)
+      $footer = 'Host: {0} | Generated: {1} | Snapshot: {2}' -f [string]$env:COMPUTERNAME, (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'), $report.SnapshotId
+      $mailArgs.BodyHtml = New-SmartM365EmailBody -Title $mailArgs.Subject -Category 'SmartM365' -HostName '' -GeneratedAt '' -BodyHtml $notice -Footer $footer
+    }
+    else {
+      if ($scoped) { $report = $scoped.Report }
+      $content = New-LicensesSummaryMailContent -PublishedReport $report -Manual:$Manual
+      $attachmentPath = Join-Path ([System.IO.Path]::GetTempPath()) ("M365_Licenses_RecoveryCandidates_{0}_{1}.xlsx" -f (Get-Date -Format 'yyyyMMdd_HHmmss'),[guid]::NewGuid().ToString('N').Substring(0,8))
+      # The workbook of a domain mail lists only that domain's users.
+      [void](New-LicensesRecoveryWorkbook -Path $attachmentPath -SummaryRows $content.SummaryRows -Usage $content.Usage -AssignmentIssues $content.AssignmentIssues -CollectedAtUtc $content.CollectedAtUtc)
+      $mailArgs.Subject = $content.Subject
+      $mailArgs.BodyHtml = $content.Body
+      $mailArgs.Attachments = @($attachmentPath)
+      $mailArgs.AllowAttachments = $true
+      $mailArgs.SuppressAttachmentLinks = $true
+    }
     $sendStarted = $true
-    [void](Send-SmartM365Mail -From $mailFrom -To $mailTo -Subject $subject -BodyHtml $mailBody -MailPurpose Report -Attachments @($attachmentPath) -AllowAttachments -SuppressAttachmentLinks)
+    [void](Send-SmartM365Mail @mailArgs)
     $sentState = [ordered]@{ TenantKey=$ExpectedTenantKey; LocalDate=$mailGate.Day; Status='Sent'; SentAtUtc=[datetimeoffset]::UtcNow.ToString('o') }
     Write-LicensesDailyMailState -Stream $mailGate.Stream -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($sentState | ConvertTo-Json -Compress)))
-    WriteLog -Message 'Microsoft 365 license overview and recovery email sent with recovery candidate workbook.' 'INFO'
+    if ($Domain) { WriteLog -Message ("Microsoft 365 license overview and recovery email sent for AD domain {0}." -f $Domain) 'INFO' }
+    else { WriteLog -Message 'Microsoft 365 license overview and recovery email sent with recovery candidate workbook.' 'INFO' }
     return $true
   }
   catch {
@@ -3387,7 +3893,8 @@ function Send-LicensesFocusedSummaryEmail {
       catch { WriteLog -Message ("License summary mail state could not be restored: {0}" -f $_.Exception.Message) 'WARNING' }
     }
     if ($Manual) { throw }
-    WriteLog -Message ("Focused license summary email failed: {0}" -f $_.Exception.Message) 'WARNING'
+    $failure = if ($Domain) { "Focused license summary email for AD domain $Domain" } else { 'Focused license summary email' }
+    WriteLog -Message ("{0} failed: {1}" -f $failure, $_.Exception.Message) 'WARNING'
   }
   finally {
     if ($mailGate -and $mailGate.Stream) { $mailGate.Stream.Dispose() }
@@ -3395,6 +3902,64 @@ function Send-LicensesFocusedSummaryEmail {
       try { Remove-Item -LiteralPath $attachmentPath -Force -ErrorAction Stop } catch { Write-Warning "Temporary mail attachment cleanup failed: $($_.Exception.Message)" }
     }
   }
+}
+
+function Send-LicensesFocusedSummaryEmail {
+  param(
+    [Parameter(Mandatory)][string]$CsvFolderPath,
+    [Parameter(Mandatory)][string]$ExpectedTenantKey,
+    [Parameter(Mandatory)][string]$MailStatePath,
+    [switch]$Manual,
+    [switch]$ForceLicenseSummaryEmail,
+    # Sends only this AD domain's mail (email-only mode); otherwise the tenant mail, then every configured domain.
+    [string]$Domain = ''
+  )
+
+  if (-not $Manual -and -not [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableLicenseSummaryEmail' -DefaultValue $true)) {
+    WriteLog -Message 'Focused license summary email is disabled by configuration.' 'INFO'
+    return $false
+  }
+  if (-not $Manual -and (Test-SmartM365MaxItemsMode)) {
+    WriteLog -Message 'Focused license summary email skipped for a sampled inventory.' 'INFO'
+    return $false
+  }
+
+  # One verified read of the published report serves the tenant mail and every domain mail.
+  $reportCache = @{}
+  $readReport = {
+    if (-not $reportCache.ContainsKey('Report')) { $reportCache['Report'] = Read-LicensesPublishedReport -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey }
+    return $reportCache['Report']
+  }
+  $from = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue '')
+  $sent = $false
+  if (-not $Domain) {
+    $sent = Send-LicensesSummaryMailScope -ReadReport $readReport -ExpectedTenantKey $ExpectedTenantKey -MailStatePath $MailStatePath `
+      -To ([string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')) -From $from -Manual:$Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail
+  }
+  try { $settings = @(Get-LicensesDomainMailSettings -Config $ScriptLocalConfig) }
+  catch {
+    if ($Manual) { throw }
+    WriteLog -Message ("License summary emails by AD domain skipped: {0}" -f $_.Exception.Message) 'WARNING'
+    return $sent
+  }
+  if ($Domain) {
+    $key = $Domain.Trim().ToLowerInvariant()
+    $settings = @($settings | Where-Object { $_.Domain -ceq $key })
+    if ($settings.Count -ne 1) { throw "AD domain $key is not an enabled entry of LicenseSummaryDomainMails." }
+  }
+  $failures = [System.Collections.Generic.List[string]]::new()
+  foreach ($entry in $settings) {
+    try {
+      $domainSent = Send-LicensesSummaryMailScope -ReadReport $readReport -ExpectedTenantKey $ExpectedTenantKey `
+        -MailStatePath (Get-LicensesDomainMailStatePath -Path $MailStatePath -Domain $entry.Domain) -To $entry.To -Cc $entry.Cc -From $from `
+        -Domain $entry.Domain -Manual:$Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail
+      if ($Domain) { $sent = [bool]$domainSent }
+    }
+    catch { $failures.Add(('{0}: {1}' -f $entry.Domain, $_.Exception.Message)) }
+  }
+  # Reached only in manual mode: automatic runs log each domain failure and continue.
+  if ($failures.Count -gt 0) { throw ("License summary email failed for AD domain(s): {0}" -f ($failures -join '; ')) }
+  return $sent
 }
 
 function Read-LicensesTenantSnapshot {
@@ -4035,7 +4600,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.59"
+$ScriptVersion = "1.60"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -4044,6 +4609,9 @@ $licenseSummaryMailStatePath = [string](Get-ScriptLocalConfigValue -Config $Scri
 # Includes email-only mode; the workbook remains optional for raw CSV collection.
 try { Initialize-SmartM365ImportExcel | Out-Null }
 catch { Write-Warning ("Optional license workbook unavailable at startup: {0}" -f $_.Exception.Message) }
+if ($LicenseSummaryEmailDomain -and -not $SendLicenseSummaryEmailOnly) {
+  throw '-LicenseSummaryEmailDomain applies to -SendLicenseSummaryEmailOnly; a full run sends the tenant mail and every configured AD domain mail.'
+}
 if ($SendLicenseSummaryEmailOnly) {
   if ($MaxItems -gt 0 -or $TopUsers -gt 0 -or $FastSample -or $InteractiveAuth) {
     throw '-SendLicenseSummaryEmailOnly cannot be combined with collection or sampling switches.'
@@ -4058,9 +4626,10 @@ if ($SendLicenseSummaryEmailOnly) {
   $global:Thumb = [string]$Thumb
   $global:Thumbprint = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumbprint' -DefaultValue $Thumb)
   $global:OrgDomain = [string]$OrgDomain
-  $mailSent = Send-LicensesFocusedSummaryEmail -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -MailStatePath $licenseSummaryMailStatePath -Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail
-  if ($mailSent) { Write-Host ("License summary email sent from the published license report: {0}" -f $LatestCsvFolderPath) }
-  else { Write-Host 'License summary email skipped: already sent or pending today (Europe/Paris).' }
+  $mailSent = Send-LicensesFocusedSummaryEmail -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -MailStatePath $licenseSummaryMailStatePath -Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail -Domain ([string]$LicenseSummaryEmailDomain)
+  $mailScope = if ($LicenseSummaryEmailDomain) { "AD domain $LicenseSummaryEmailDomain" } else { 'tenant' }
+  if ($mailSent) { Write-Host ("License summary email ({0}) sent from the published license report: {1}" -f $mailScope, $LatestCsvFolderPath) }
+  else { Write-Host ("License summary email ({0}) skipped: already sent or pending today (Europe/Paris)." -f $mailScope) }
   return
 }
 $connectedGraphInThisRun = $false

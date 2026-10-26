@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks for the license overview and recovery email.
 .VERSION
-1.1.3
+1.1.4
 #>
 
 [CmdletBinding()]
@@ -36,7 +36,7 @@ if ($reportIndex -lt 0 -or $completeIndex -lt 0 -or $mailIndex -lt 0 -or
 $names = @(
   'Get-LicensesSuiteProduct', 'Get-LicensesOptionalProperty', 'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'Get-LicensesOtherProduct', 'New-LicensesOverviewCardHtml',
   'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource', 'Get-LicensesPublicationPath',
-  'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Format-LicensesMetric',
+  'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Import-LicensesSourceCsvCached', 'Get-LicensesUserAdScopes', 'Get-LicensesUserScope', 'Get-LicensesScopeBreakdown', 'New-LicensesScopeTablesHtml', 'New-LicensesSummaryMailContent', 'Send-LicensesSummaryMailScope', 'Get-LicensesDomainMailSettings', 'Get-LicensesDomainMailStatePath', 'Get-LicensesDomainPublishedReport', 'Format-LicensesMetric',
   'Get-LicensesAlertSummary', 'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv', 'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate',
   'Send-LicensesFocusedSummaryEmail', 'Read-LicensesTenantSnapshot', 'ConvertFrom-LicensesJsonElement', 'ConvertTo-LicensesCountTable',
   'Read-LicensesPublishedReport'

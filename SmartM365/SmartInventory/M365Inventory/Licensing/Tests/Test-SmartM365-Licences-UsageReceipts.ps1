@@ -2,7 +2,7 @@
 .SYNOPSIS
   Offline checks: the five usage reports read by the license report are qualified only by the UserActivity source receipt.
 .VERSION
-1.0.1
+1.0.2
 .NOTES
   Receipts are written by the real SmartM365.Core receipt commands in an isolated temporary folder.
 #>
@@ -24,7 +24,7 @@ if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
 $names = @(
   'Get-LicensesSuiteProduct', 'Get-LicensesOptionalProperty', 'ConvertTo-LicensesActivityDate', 'ConvertTo-LicensesMailboxSizeGb',
   'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource', 'Get-LicensesPublicationPath', 'Import-LicensesSourceCsv', 'Read-LicensesIndexedSource',
-  'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows'
+  'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Import-LicensesSourceCsvCached', 'Get-LicensesUserAdScopes', 'Get-LicensesUserScope', 'Get-LicensesScopeBreakdown', 'Get-LicensesOtherProduct'
 )
 $definitions = @($ast.FindAll({
   param($node)

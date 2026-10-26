@@ -3,7 +3,7 @@
 .SYNOPSIS
   Offline checks for the license report published by every full licensing run and declared as optional receipt outputs.
 .VERSION
-1.1.2
+1.1.3
 .NOTES
   Synthetic data only. Uses the real SmartM365.Core receipt commands and exports; no tenant, Graph, mail or SharePoint access.
 #>
@@ -25,7 +25,7 @@ if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
 $names = @(
   'Get-LicensesSuiteProduct', 'Get-LicensesFocusedSummaryRows', 'Get-LicensesAdditionalOverviewRows', 'Get-LicensesOtherProduct', 'New-LicensesOverviewCardHtml', 'ConvertTo-LicensesActivityDate',
   'ConvertTo-LicensesMailboxSizeGb', 'Get-LicensesQualifiedPartialAdCoverage', 'Get-LicensesCsvSource', 'Get-LicensesPublicationPath', 'Import-LicensesSourceCsv',
-  'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows',
+  'Read-LicensesIndexedSource', 'Get-LicensesMailboxGapSummary', 'Get-LicensesAdAccountActivitySummary', 'Get-LicensesFocusedUsageRows', 'Import-LicensesSourceCsvCached', 'Get-LicensesUserAdScopes', 'Get-LicensesUserScope', 'Get-LicensesScopeBreakdown', 'New-LicensesScopeTablesHtml', 'New-LicensesSummaryMailContent', 'Send-LicensesSummaryMailScope', 'Get-LicensesDomainMailSettings', 'Get-LicensesDomainMailStatePath', 'Get-LicensesDomainPublishedReport',
   'Format-LicensesMetric', 'Get-LicensesAssignmentIssues', 'Get-LicensesAlertSummary', 'New-LicensesRecoveryWorkbook', 'Publish-LicensesReportCsv',
   'Publish-LicensesReportSnapshot', 'Write-LicensesDailyMailState', 'Enter-LicensesDailyMailGate', 'Send-LicensesFocusedSummaryEmail',
   'Read-LicensesTenantSnapshot', 'Publish-LicensesRunReport', 'Invoke-LicensesReportUpload', 'ConvertFrom-LicensesJsonElement', 'ConvertTo-LicensesCountTable',
@@ -248,7 +248,7 @@ try {
   $script:FailUpload = $false
   $script:Uploads.Clear()
   $uploaded = Invoke-LicensingRun
-  Check ($uploaded.Report.UploadSatisfied -and $script:Uploads.Count -eq 8 -and $script:Uploads[0] -eq 'M365_Licenses_ReportSnapshot.json.txt' -and $script:Uploads[7] -eq 'M365_Licenses_ReportSkuCapacity.csv') 'Snapshot, five report CSVs and two SKU decision CSVs are uploaded after registration.'
+  Check ($uploaded.Report.UploadSatisfied -and $script:Uploads.Count -eq 10 -and $script:Uploads[0] -eq 'M365_Licenses_ReportSnapshot.json.txt' -and $script:Uploads[6] -eq 'M365_Licenses_ReportByDomain.csv' -and $script:Uploads[7] -eq 'M365_Licenses_ReportByCountry.csv' -and $script:Uploads[9] -eq 'M365_Licenses_ReportSkuCapacity.csv') 'Snapshot, five report CSVs, two AD scope CSVs and two SKU decision CSVs are uploaded after registration.'
   Remove-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
 
   # 5b. SKU decision failure: the report stays published, the decision files are not recorded.
@@ -329,7 +329,7 @@ try {
   Check ($staged.RunState.Status -eq 'Completed' -and -not $staged.RunState.UnqualifiedPublication -and $staged.RunState.StagedPublication) 'The staged licensing run state is not qualified.'
   Check ($staged.Report.UploadDeferred -and $script:Uploads.Count -eq 0) 'The staged report upload was not deferred to the promotion.'
   $uploadedStaged = Invoke-LicensesReportUpload -Result $staged.Report -ReportPaths $staged.Report.ReportPaths -SkuPaths $staged.Report.SkuPaths
-  Check ($uploadedStaged.UploadSatisfied -and $script:Uploads.Count -eq 8 -and $script:Uploads[0] -eq 'M365_Licenses_ReportSnapshot.json.txt') 'The promoted report was not uploaded by canonical name.'
+  Check ($uploadedStaged.UploadSatisfied -and $script:Uploads.Count -eq 10 -and $script:Uploads[0] -eq 'M365_Licenses_ReportSnapshot.json.txt') 'The promoted report was not uploaded by canonical name.'
   Check (@($staged.Report.ReportPaths + $staged.Report.SkuPaths | Where-Object { $_ -like '*.staging*' }).Count -eq 0) 'A staging path reached the report upload.'
   Remove-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
   $read = Read-LicensesPublishedReport -Folder $dataLast -TenantKey 'prod'

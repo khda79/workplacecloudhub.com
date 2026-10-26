@@ -32,6 +32,7 @@ assignment.
 | Licensing groups | `M365_Licenses_Groups.csv` | Groups discovered as license assignment sources. |
 | License report | `M365_Licenses_ReportSummary.csv`, `M365_Licenses_ReportCandidates.csv`, `M365_Licenses_ReportAssignmentIssues.csv`, `M365_Licenses_ReportGaps.csv`, `M365_Licenses_ReportSources.csv` | Recovery, E3-to-F3 review, assignment issues, gaps and source states of one snapshot; optional outputs of the licensing source receipt. |
 | License SKU decisions | `M365_Licenses_ReportSkuCandidates.csv`, `M365_Licenses_ReportSkuCapacity.csv` | Per-SKU candidates (disabled accounts, Copilot without licensed activity) and per-SKU capacity of the same snapshot; optional outputs of the licensing source receipt. |
+| License views by AD scope | `M365_Licenses_ReportByDomain.csv`, `M365_Licenses_ReportByCountry.csv` | Distinct F1/F3/E3/E5/Copilot users, licensed users and recovery candidates per AD domain and per AD country of the same snapshot (1.60); optional outputs of the licensing source receipt. |
 
 Every full inventory (no `-MaxItems` or `-TopUsers`) publishes the license report,
 whether or not an email is sent: `DATA-LAST/M365_Licenses_ReportSnapshot.json.txt`
@@ -163,6 +164,55 @@ or uncertain delivery stays pending to avoid a duplicate. After checking deliver
 use `-ForceLicenseSummaryEmail` to send again that day. This switch works with
 both a full inventory and email-only mode. On a full inventory, it does not
 override a disabled email configuration or permit sampled inventories to send.
+
+### Licenses by AD domain and country (1.60)
+
+Each Entra account is attributed to one AD account of `AD_Users_AllDomains.csv`
+by `ImmutableId_AD`, then by a unique UPN, the same rule as the AD activity
+indicators. Its AD domain is `DomainName` (lower case) and its country is
+`CountryName`, or the `Country` code when the name is empty. Cloud-only accounts,
+synchronized accounts without AD match, ambiguous matches (duplicate AD UPN, or
+ImmutableId and UPN pointing to different AD accounts) and accounts without an AD
+country keep explicit rows (`ScopeKind=Unattributed`); a domain is never inferred
+from the UPN suffix. With qualified `PartialAccepted` AD coverage, unmatched
+accounts are `AD domain not collected` and the views are `Provisional`. An AD
+export without `DomainName` leaves the views N/D; the tenant report is unchanged.
+
+- The tenant email shows, before section 01, `Licenses by AD domain` and
+  `Licenses by country`: distinct users per suite, Copilot, licensed users (a user
+  with several suites counts once) and recovery candidates. Rows add up to the
+  tenant totals; any difference leaves the views N/D, never approximate. Up to 25 countries
+  are listed; above, the 20 largest plus `Other countries (n)`. Subscription units
+  are tenant-wide and are never split.
+- The same rows are published in `M365_Licenses_ReportByDomain.csv` and
+  `M365_Licenses_ReportByCountry.csv`. The existing report CSVs keep their exact
+  schemas. The snapshot gains an additive `AdScope` object: both breakdowns, the
+  per-domain measures (suite counts, E3-to-F3 review, sections 06/07, AD activity,
+  assignment issue counts) and the domain and country of the users listed in the
+  report only, not of the whole directory. A snapshot without `AdScope` (published
+  before 1.60) stays readable.
+
+Per-domain emails are sent after the tenant email, each with its own daily state
+`M365_Licenses_SummaryEmail_SendState.<domain>.json.txt` next to the tenant state.
+Configure them in the private local JSON:
+
+```json
+"LicenseSummaryDomainMails": [
+  { "Domain": "<ad-domain-fqdn>", "To": "<recipient@domain>", "Cc": "", "Enabled": true }
+]
+```
+
+`Domain` is the AD `DomainName`, case-insensitive; `To` is required; `Enabled`
+defaults to true. A duplicate or invalid entry fails email-only mode and is logged
+as a warning on a full run, where the tenant email is still sent. A domain email
+uses only its own `To`/`Cc` (never the global `Cc`). Its user counts, alerts,
+recovery, E3-to-F3 review and sections 06/07 count only the domain accounts; units
+are labeled as tenant-wide. Its workbook lists only the domain users. A configured
+domain with no attributed user, or a report without AD views, receives an explicit
+`N/D` notice without attachment, never an empty report. One domain failure never
+stops the other domains or the tenant email. In email-only mode,
+`-LicenseSummaryEmailDomain <domain>` sends only that domain (with
+`-ForceLicenseSummaryEmail` to resend it the same day).
 
 The attached recovery workbook includes `LastAdActivityDate` from the AD
 `LastLogonDate` export and `LastM365ActivityDate` from the M365 active-user
