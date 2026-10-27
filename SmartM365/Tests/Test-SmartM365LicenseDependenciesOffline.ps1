@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic licensing dependency policy checks. No scheduler entry point or collector is executed.
 .VERSION
-1.0.0
+1.0.1
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -35,6 +35,16 @@ $checks=0
 $previousTenant=Get-Variable SmartM365TenantKey -Scope Global -ValueOnly -ErrorAction SilentlyContinue
 $global:SmartM365TenantKey='synthetic'
 function Check($Value,$Message){if(-not $Value){throw $Message};$script:checks++}
+$versionDefinitions=foreach($name in @('Get-OrchestratorFileFingerprint','Get-OrchestratorRuntimeSnapshot','Test-OrchestratorRuntimeUpdate')){
+ $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true).Extent.Text
+}
+# Exercise the real disk-version detector, without running the resident process or sending mail.
+$versionDefinitions+=@'
+function Write-OrchestratorLog { param($Message,$Level) }
+function Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now) throw $Message }
+function Test-OrchestratorAuthenticodeFile { param($Path,$Role) [pscustomobject]@{IsValid=$true} }
+'@
+$versionGate=New-Module -ScriptBlock ([scriptblock]::Create($versionDefinitions -join "`n"))
 $document=Get-Content -LiteralPath (Join-Path $base 'Orchestrator-Jobs.json.template') -Raw | ConvertFrom-Json
 $licences=@($document.Jobs | Where-Object Name -eq 'M365-Licences-Inventory')[0]
 $prepare=@($document.Jobs | Where-Object Name -eq 'WorkplaceEvidence-Prepare')[0]
@@ -48,6 +58,30 @@ function Write-Claim($Job,[datetime]$When,[string]$Status){
 }
 function Status($Consumer,$Parent){& $gate {param($j,$p,$n) Get-OrchestratorExternalDependencyStatus -Job $j -DependencyName $p.Name -Now $n} $Consumer $Parent $now}
 try {
+ $snapshot=& $versionGate {
+  param($b)
+  $script:Settings=[pscustomobject]@{
+   OrchestratorScriptPath=(Join-Path $b 'SmartM365-Inventory-Orchestrator.ps1')
+   CoreModulePath=(Join-Path $b '../../Modules/SmartM365.Core/SmartM365.Core.psd1')
+   DistributedModulePath=(Join-Path $b 'SmartM365.Orchestrator.Distributed.psm1')
+   ManagementModulePath=(Join-Path $b 'SmartM365.Orchestrator.Management.psm1')
+   PipelineModulePath=(Join-Path $b 'SmartM365.Orchestrator.Pipeline.psm1')
+   AutoRecycleOnRuntimeUpdate=$true;RuntimeUpdateCheckIntervalSeconds=60
+   RuntimeUpdateStableChecks=2;MonitorCoreModuleVersion=$false;SendRuntimeUpdateEmail=$false
+  }
+  $current=Get-OrchestratorRuntimeSnapshot
+  $script:RuntimeUpdateBaseline=$current.PSObject.Copy()
+  $script:RuntimeUpdateBaseline.ScriptVersion=[version]'1.5.64'
+  $script:RuntimeUpdateBaseline.ScriptFingerprint='previous-runtime'
+  $script:LastRuntimeUpdateCheckUtc=[datetime]::MinValue
+  $script:RuntimeUpdateCandidateIdentity='';$script:RuntimeUpdateCandidateStableCount=0
+  $current
+ } $base
+ $headerVersion=[regex]::Match($ast.Extent.Text,'(?m)^\.VERSION\s*\r?\n(?<Version>\d+\.\d+\.\d+)').Groups['Version'].Value
+ Check ([string]$snapshot.ScriptVersion -ceq $headerVersion) 'Header and executable ScriptVersion differ: automatic recycle would use the wrong version.'
+ Check ($snapshot.ScriptVersion -eq [version]'1.5.65') 'The delivered licensing runtime does not declare version 1.5.65.'
+ Check (-not (& $versionGate {param($n) Test-OrchestratorRuntimeUpdate -Now $n} $now)) 'Runtime update bypassed its first stability check.'
+ Check (& $versionGate {param($n) Test-OrchestratorRuntimeUpdate -Now $n} $now.AddSeconds(61)) 'The 1.5.64 to 1.5.65 update was not accepted after two stable checks.'
  New-Item -ItemType Directory -Path $claims -Force|Out-Null
  $jobsByName=@{};foreach($j in $document.Jobs){$jobsByName[$j.Name]=$j}
  & $gate {param($c,$j) $script:Settings=[pscustomobject]@{DistributedSchedulingEnabled=$true;ElectionClaimsPath=$c};$script:Manifest=[pscustomobject]@{JobsByName=$j};$script:FreshCalls=0} $claims $jobsByName
@@ -100,8 +134,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA24xAHGAM+ZCFE
-# tYvacodnaU1Sb5oSgghmmiS+8YncPKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA/3JMOG1foRqYw
+# yUUqMenaAStHaPA9/kA+/PhL11IQA6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -234,31 +268,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG8n/CoqKOiOHe3DHmcSfM9FLlYtfzHHQUEBsk5goqWGMA0GCSqG
-# SIb3DQEBAQUABIIBgI8BsBF7SK3vDo9xqffh9P2cK6ysahx724B7bqR8CYonxVNc
-# XyO51XvG/rP9paYwYSbgVc07GEikT7JDoaaty1GhwVVNwsQzInU2enDMuze3sJrm
-# Ivhlf1waLm0d938YL+/Ms9Sdxwu97Uei8zwDeCZc9BY6ugQAWcNKoYh6C2yTFgWn
-# WyLnIzQKqnuvoi5uQMY8+nicxpCfri8flhe/TgHGZxhFHtjZetG8oJB/DsJ6f0lb
-# zVxBYAP55hsv96ChL2F9Gd35Q4UTCF3BUSE870KjgoT7QMK6LDg2uAdKCSSDvIla
-# GenRyCDGGZwioWTFsFXiw3jnVkm7s9jbbcQbCzasZpBPcrE9p5cdF4/v0Tt+jUm7
-# FRsvsMOa1M0lhxhBQ7QwD1IHED2vTgvkUpeQD8K2KTeUwRNkyDpjcz4sK+rDqG9N
-# k/4F6fqV6juW6JidFJo2zOB1mzJpz6y9YFSAVO7QQEyUqy44qdj3VAYiiJGgnCn1
-# zTkHGXmTyp9W71bw2aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIH7MjULPtmHZVqFMasGwbswhoswHEwEcynxYKasZ8Uk4MA0GCSqG
+# SIb3DQEBAQUABIIBgJMpdiDB5pe+YqzOahIz+H04/kfnjGYGN3FZoLtFllBLPyH6
+# oV6Ai4qnRVVSAsJbPOaEfS0mXgZMfDj+SiCwDN8u3yTYYt3P6EIs3AuPEnwvWJYB
+# RTuAmYg9Z9aObNtn6IiRjXTc9gpi59n5fFYe9LAShUVj7ghNPIMfaR4o5ZfLuQZa
+# ADqC5N8G5BgDtXmzWD1qZlu+opwYFvGK2fy5bWMjlWrZZc1G38sjeO8Cx54WyoFw
+# iqLHYDa6+l/7G0uhfPaW1yd0/eRlTfM6PsxaYTCuzwj417BOu//CnIvZmSoGNchS
+# inkoqbMfMx36X5eASeKiM5ABti1uaq1NJXql9HVnhzKAtHENqK+glzK8/IuATxrK
+# 5bYQc6+Ck7Sj6yIzMzjlauqhoWvq+dhi5x8o2a/Ti3kgxnAoXxQwruzQ7gf3S/ey
+# 1tdzJ/eQT1nCGK0KSSR7k0PediCyoedrhke71KQ7jDVMWCmFw+iuSeSPNWWovDNU
+# WSLgaPjj9VcX37rlyKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcyMTEx
-# MDRaMC8GCSqGSIb3DQEJBDEiBCAUPyv6ZGrzI/xXClKtciz59EabXTi2/gBk7mjX
-# F+rmUDANBgkqhkiG9w0BAQEFAASCAgCUCKGUAluJmLS0tuo/e7bgDb83+CzeG8aE
-# fBbDy6QU3fnGyy++qQA2UEDRjsLktFgagU+N+W6ghmqZWCW+D9h2zxO6dPya7N35
-# CdSQs6j1vsX/0Na09moC+qURMSsPb0V1iTjzTFMV1Xm7WTH7KVSngqKPwQr7Mkiw
-# O93bVcNVkfQAN7pV30Yhc6e5xVPdx9vlEyNpb5tZoFK755FkJ+/jPhR5AcgnjY9j
-# CKa/fLKhdYI7r91dxxl5mEK7Vw9J90fF/qDF9RLSyXeDy0aq/3G3AqUV8Du5EWWa
-# Abm32FPlnCWZL0JYs6dcKVLYXJ040RrSCRWNYDlBAs5uzgYbLzzvRFXxuFYUpgRj
-# xVslKVQCFIt4sn9sdQ8XYnWVZi/ESgueC+o9ZD0QG2R7IXtbQETODuBw0dX1708M
-# CgyxnCN/9H0mKIGYkhaFJai1d6d7eL3iGJqa2cBaAtt5SHeW2xWbOFs4b0ueFw4s
-# A1fDgpF0DNISG359Sv3Lqa8+h888X4WMRYi020h0bZ7ldcc6hpYYCKx/2C7PiwkK
-# rp8a4IZNhBOtiURmi0lGZf6/hdPJiniwtoodYV64mZmvw8bIR+wuBkhO0Kfs2kv+
-# 6IqcG8a5Tnf8FBjZrxjFSWNRHCeDKECf8RRmEqYuze8eDp9lJD1ss93z36UiXMfQ
-# 5+ovWPF2Ig==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcyMjA1
+# MDNaMC8GCSqGSIb3DQEJBDEiBCBS59d2apBfLCv02xb9jhW5F47xRWe+rfW4Q9wu
+# yosckDANBgkqhkiG9w0BAQEFAASCAgBQbqwRgNqn9swZKgY+jUpxalyFFVkjD/f1
+# +bCK7Qe9VvsrzbfBdSK5SnNc4k+oQTYlFChxapvIQ4e3B6Cq+Q7Qzt1ieroQ2QMh
+# 5zwkx8/+8QV9yecoyAUBUEORUMADOp/WLv5Sgrwh5U+bshL9qnUKx1q09Vp2iA7G
+# 7waOBCAvjiLtrMu5FRg7uiR2fGDIRpyk91luFw7pk7NrhxwjjDujCt0CK98EqntR
+# 3vOToJnfje87cmNjRFh9yZoS182Xu7TxnT5i/dNM65CJm2aHfWzR0U8l0yT0SXa4
+# 5+Go2hYIEU9LVnBSxSHFw5nDJ4cnQOzFvPjIPtGW/zbv53Itos+CYRo65UDoyFBl
+# rZgF/8OnH38RHS2/UMMap76n8YMEN3aEGglFjDpug+DGlsiSDiaHuVn6hUvvmDxM
+# LJSQnKrSdjVDxqbJdX6BIG3TMyG/BP5G/YMZG7uVLqDMPIJSqjmTUc2AEfsR5x+Q
+# aqOpY/pb7RmNqnHRv/viHwb4YkO4UihsGv3jbcPM5Q7N9Ok9SVj4E/cg1X8rwpNL
+# VUgQKK1i0IJBV+UX7InRd2EADLheY88b0T3PZVuVnyefOU/2GAfCuVWKHFheZlCu
+# Ue0X7xX9aVs0GsMoy9GLjqIdN2p4eN8dKiPtMkDnwvzXOIlw/pKBJTeBOOAUFoDA
+# 2LIfNfaShg==
 # SIG # End signature block
