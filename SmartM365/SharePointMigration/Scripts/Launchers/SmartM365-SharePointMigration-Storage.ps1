@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-    Resolves the SharePointMigration data roots (Migrations, ArchivedMigrations, shared logs).
+    Resolves the SharePointMigration data roots (Migrations, ArchivedMigrations, shared logs,
+    Entra users cache).
 .DESCRIPTION
     Config/storage.json.txt may point the data roots to a shared folder. Empty values keep
     the historical layout inside the toolkit: Migrations, ArchivedMigrations and
-    Migrations\logs. The runtime file is created from, and completed with, its template.
+    Migrations\logs, _Local\EntraUsersCache. The runtime file is created from, and completed with, its template.
     Windows PowerShell 5.1 compatible; no dependency on other toolkit helpers.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 
 function Initialize-SmartM365MigrationStorageConfig {
@@ -79,20 +80,22 @@ function Get-SmartM365MigrationStorage {
         catch { throw "Invalid SharePointMigration storage configuration '$configPath': $($_.Exception.Message)" }
     }
     $values = @{}
-    foreach ($name in @('MigrationsRoot', 'ArchivedMigrationsRoot', 'LogsRoot')) {
+    foreach ($name in @('MigrationsRoot', 'ArchivedMigrationsRoot', 'LogsRoot', 'EntraUsersCacheRoot')) {
         $values[$name] = ''
         if ($data -and $data.PSObject.Properties[$name] -and $null -ne $data.$name) { $values[$name] = [string]$data.$name }
     }
     $migrationsRoot = Resolve-SmartM365MigrationStoragePath -ProjectRoot $root -Value $values.MigrationsRoot -Default 'Migrations'
     $archivedRoot = Resolve-SmartM365MigrationStoragePath -ProjectRoot $root -Value $values.ArchivedMigrationsRoot -Default 'ArchivedMigrations'
     $logsRoot = Resolve-SmartM365MigrationStoragePath -ProjectRoot $root -Value $values.LogsRoot -Default (Join-Path $migrationsRoot 'logs')
+    $entraRoot = Resolve-SmartM365MigrationStoragePath -ProjectRoot $root -Value $values.EntraUsersCacheRoot -Default '_Local\EntraUsersCache'
     $storage = [pscustomobject]@{
         ProjectRoot            = $root
         ConfigPath             = $configPath
         MigrationsRoot         = $migrationsRoot
         ArchivedMigrationsRoot = $archivedRoot
         LogsRoot               = $logsRoot
-        IsDefault              = -not ($values.MigrationsRoot.Trim() -or $values.ArchivedMigrationsRoot.Trim() -or $values.LogsRoot.Trim())
+        EntraUsersCacheRoot    = $entraRoot
+        IsDefault              = -not ($values.MigrationsRoot.Trim() -or $values.ArchivedMigrationsRoot.Trim() -or $values.LogsRoot.Trim() -or $values.EntraUsersCacheRoot.Trim())
     }
     $script:SmartM365MigrationStorageCache = @{ Key = $cacheKey; Value = $storage }
     return $storage

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Shared helpers for SharePoint migration launchers, source scan batches and the GUI.
 .VERSION
-    1.0.5
+    1.0.6
 #>
 
 . (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-SharePointMigration-Storage.ps1')
@@ -120,7 +120,7 @@ function Get-SmartM365ComplexityEntraCache {
         if (Test-Path -LiteralPath $path -PathType Leaf) { return Get-Item -LiteralPath $path }
         return $null
     }
-    $directory = Join-Path $ProjectRoot '_Local\EntraUsersCache'
+    $directory = (Get-SmartM365MigrationStorage -ProjectRoot $ProjectRoot).EntraUsersCacheRoot
     # The GUI asks once per migration on each refresh: reuse the folder listing for a few seconds.
     $memo = Get-Variable -Name SmartM365ComplexityEntraMemo -Scope Script -ValueOnly -ErrorAction SilentlyContinue
     if ($memo -and $memo.Directory -eq $directory -and ((Get-Date) - $memo.At).TotalSeconds -lt 15) { return $memo.Item }

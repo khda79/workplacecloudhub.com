@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.33
+    1.0.34
 #>
 
 [CmdletBinding()]
@@ -1090,7 +1090,8 @@ function Resolve-EntraUsersCachePath {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $hash = -join @($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($key)) | ForEach-Object { $_.ToString('x2') }) }
     finally { $sha.Dispose() }
-    return (Join-Path -Path (Join-Path $ProjectRoot '_Local\EntraUsersCache') -ChildPath ("{0}-{1}.csv" -f $TenantHost, $hash.Substring(0, 16)))
+    $cacheRoot = (Get-SmartM365MigrationStorage -ProjectRoot $ProjectRoot).EntraUsersCacheRoot
+    return (Join-Path -Path $cacheRoot -ChildPath ("{0}-{1}.csv" -f $TenantHost, $hash.Substring(0, 16)))
 }
 
 function Get-AuthConfigValue {

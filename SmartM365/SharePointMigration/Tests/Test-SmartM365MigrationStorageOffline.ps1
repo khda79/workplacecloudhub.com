@@ -6,7 +6,7 @@
     template self-heal, shared roots, launcher config lookup, GUI activity and batch log roots,
     cross-volume archive move and the toolkit.root.txt pointer read by the template launchers.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 [CmdletBinding()]
 # CrossVolumeRoot: optional writable folder on another volume than TEMP for the archive copy path.
@@ -44,6 +44,7 @@ try {
     Assert-Storage ($storage.MigrationsRoot -eq (Join-Path $toolkit 'Migrations')) 'default Migrations root'
     Assert-Storage ($storage.ArchivedMigrationsRoot -eq (Join-Path $toolkit 'ArchivedMigrations')) 'default ArchivedMigrations root'
     Assert-Storage ($storage.LogsRoot -eq (Join-Path $toolkit 'Migrations\logs')) 'default logs root'
+    Assert-Storage ($storage.EntraUsersCacheRoot -eq (Join-Path $toolkit '_Local\EntraUsersCache')) 'default Entra users cache root'
     Assert-Storage $storage.IsDefault 'default flag'
     Assert-Storage (Test-Path -LiteralPath (Join-Path $toolkit 'Config\storage.json.txt')) 'runtime created from template'
 
@@ -64,8 +65,9 @@ try {
 
     $env:SPMIG_STORAGE_TEST = $shared
     Start-Sleep -Milliseconds 20
-    Write-StorageJson $toolkit @{ MigrationsRoot = '%SPMIG_STORAGE_TEST%\Migrations\'; ArchivedMigrationsRoot = 'Old'; LogsRoot = (Join-Path $shared 'Logs') }
+    Write-StorageJson $toolkit @{ MigrationsRoot = '%SPMIG_STORAGE_TEST%\Migrations\'; ArchivedMigrationsRoot = 'Old'; LogsRoot = (Join-Path $shared 'Logs'); EntraUsersCacheRoot = (Join-Path $shared 'Entra') }
     $storage = Get-SmartM365MigrationStorage -ProjectRoot $toolkit
+    Assert-Storage ($storage.EntraUsersCacheRoot -eq (Join-Path $shared 'Entra')) 'shared Entra users cache root'
     Assert-Storage ($storage.MigrationsRoot -eq (Join-Path $shared 'Migrations')) 'environment variable and trailing slash'
     Assert-Storage ($storage.ArchivedMigrationsRoot -eq (Join-Path $toolkit 'Old')) 'relative path resolved from the toolkit'
     Assert-Storage ($storage.LogsRoot -eq (Join-Path $shared 'Logs')) 'dedicated logs root'
@@ -77,6 +79,10 @@ try {
     [IO.File]::WriteAllText((Join-Path $migration 'migration.config.psd1'), "@{ Name='Alpha'; Source=@{Type='SP2019'}; Target=@{Type='SPO'} }")
     $loaded = Import-LauncherMigrationConfig -ProjectRoot $toolkit -MigrationName 'Alpha'
     Assert-Storage ($loaded.Root -eq $migration -and $loaded.Data.Name -eq 'Alpha') 'launcher reads the shared migration'
+    [void](New-Item -ItemType Directory -Path (Join-Path $shared 'Entra') -Force)
+    [IO.File]::WriteAllText((Join-Path $shared 'Entra\tenant-0123456789abcdef.csv'), 'UserPrincipalName')
+    $entra = Get-SmartM365ComplexityEntraCache -Migration ([pscustomobject]@{ Root = $loaded.Root; Config = $loaded.Data }) -ProjectRoot $toolkit
+    Assert-Storage ($entra -and $entra.FullName -eq (Join-Path $shared 'Entra\tenant-0123456789abcdef.csv')) 'complexity reads the shared Entra users cache'
     $activity = New-SmartM365GuiActivity -ProjectRoot $toolkit -Migration 'Alpha' -Action 'Test'
     Assert-Storage ($activity.StartsWith((Join-Path $shared 'Logs\gui-activity\'), [StringComparison]::OrdinalIgnoreCase)) 'GUI activity under the shared logs root'
     $batchId = '20260101-010101-abcdef12'

@@ -465,12 +465,15 @@ versioned) can move them to a share:
 {
   "MigrationsRoot": "\\\\server\\share\\SPMig\\Migrations",
   "ArchivedMigrationsRoot": "\\\\server\\share\\SPMig\\ArchivedMigrations",
-  "LogsRoot": ""
+  "LogsRoot": "",
+  "EntraUsersCacheRoot": "\\\\server\\share\\SPMig\\EntraUsersCache"
 }
 ```
 
 An empty value keeps the default. An empty `LogsRoot` follows
-`MigrationsRoot` (`<MigrationsRoot>\logs`). Relative values resolve from the
+`MigrationsRoot` (`<MigrationsRoot>\logs`); an empty `EntraUsersCacheRoot`
+keeps `_Local\EntraUsersCache`. A migration's `Comparison.EntraUsersCachePath`
+still overrides the cache folder. Relative values resolve from the
 toolkit root and environment variables are expanded. Each migration's own
 `logs`, scans, comparisons and the global reports (`reports/global`) stay in
 the migration root. The GUI, the generic launcher, the batches, the farm
