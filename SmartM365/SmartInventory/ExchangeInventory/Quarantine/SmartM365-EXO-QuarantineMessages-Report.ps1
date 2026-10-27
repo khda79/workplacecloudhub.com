@@ -31,7 +31,7 @@
     Generates and publishes the report without sending the report email.
 
 .VERSION
-1.0.9
+1.0.10
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -69,7 +69,7 @@ try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:ScriptVersion = '1.0.9'
+$script:ScriptVersion = '1.0.10'
 $script:ScriptBaseName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $script:TaskName = "$script:ScriptBaseName v$script:ScriptVersion"
 $script:CurrentOperation = 'Initialize'
@@ -507,6 +507,37 @@ function Format-SmartM365QuarantineMailBody {
         }) -join [Environment]::NewLine
     }
 
+    # Daily history from the collected window: one Outlook-safe table bar per received day (UTC).
+    $countsByDay = @{}
+    foreach ($row in $Rows) {
+        $receivedText = [string]$row.ReceivedTimeUtc
+        if ($receivedText.Length -lt 10) { continue }
+        $dayKey = $receivedText.Substring(0, 10)
+        $countsByDay[$dayKey] = 1 + $(if ($countsByDay.ContainsKey($dayKey)) { $countsByDay[$dayKey] } else { 0 })
+    }
+    $historyDays = [System.Collections.Generic.List[object]]::new()
+    $day = $StartReceivedDateUtc.Date
+    while ($day -le $EndReceivedDateUtc.Date) {
+        $dayKey = $day.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        [void]$historyDays.Add([pscustomobject]@{
+            Day   = $day
+            Count = $(if ($countsByDay.ContainsKey($dayKey)) { [int]$countsByDay[$dayKey] } else { 0 })
+        })
+        $day = $day.AddDays(1)
+    }
+    $maxDayCount = [int](($historyDays | Measure-Object -Property Count -Maximum).Maximum)
+    $historyRows = @($historyDays | Sort-Object -Property Day -Descending | ForEach-Object {
+        $dayLabel = $_.Day.ToString('ddd dd/MM', [Globalization.CultureInfo]::GetCultureInfo('fr-FR'))
+        $barCell = if ($_.Count -gt 0 -and $maxDayCount -gt 0) {
+            $barPercent = [math]::Max(1, [math]::Round(100 * $_.Count / $maxDayCount))
+            '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="{0}%"><tr><td height="14" bgcolor="#0f4c81" style="background:#0f4c81;height:14px;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>' -f $barPercent
+        }
+        else {
+            '&nbsp;'
+        }
+        '<tr><td style="padding:2px 8px;white-space:nowrap;font-size:12px;color:#475569;">{0}</td><td style="padding:2px 0;width:100%;">{1}</td><td style="padding:2px 8px;text-align:right;font-size:12px;">{2}</td></tr>' -f $dayLabel, $barCell, $_.Count
+    }) -join [Environment]::NewLine
+
     $workbookName = [System.Net.WebUtility]::HtmlEncode((Split-Path -Path $WorkbookPath -Leaf))
     return @"
 <!DOCTYPE html>
@@ -525,6 +556,11 @@ function Format-SmartM365QuarantineMailBody {
     <tr><th style="padding:8px;text-align:left;background:#f8fafc;">Reason</th><th style="padding:8px;text-align:right;background:#f8fafc;">Count</th></tr>
     $reasonRows
   </table>
+  <h3 style="color:#0f4c81;">Blocked messages per received day (UTC)</h3>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;max-width:720px;border:1px solid #e2e8f0;">
+    $historyRows
+  </table>
+  <p style="font-size:12px;color:#64748b;">Daily counts cover messages still blocked at collection time; messages released since then are not counted.</p>
   <p style="font-size:12px;color:#64748b;">No message body or attachment content is collected by this report.</p>
 </body>
 </html>
