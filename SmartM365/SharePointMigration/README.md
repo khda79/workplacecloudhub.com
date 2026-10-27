@@ -11,8 +11,14 @@ date is older than the source, so a copied file that is not at the latest source
 version is visible in the comparison workbook.
 
 The toolkit validates and reconciles evidence; it does not copy or migrate content.
-Release **1.0.78** includes dashboard **1.0.78** and generic launcher **1.0.33**.
-See [release notes](RELEASE-NOTES-1.0.78.md) for the changes and validation boundary.
+Release **1.0.79** includes dashboard **1.0.79** and generic launcher **1.0.34**.
+See [release notes](RELEASE-NOTES-1.0.79.md) for the changes and validation boundary.
+
+## Shared storage (1.0.79)
+
+Migrations, archives, shared logs and the Entra users cache can live on a share
+through `Config/storage.json.txt`; empty values keep the folders inside the
+toolkit. See [Shared storage for migrations, archives and logs](#shared-storage-for-migrations-archives-and-logs).
 
 ## Dashboard loading feedback
 
@@ -84,8 +90,8 @@ Existing unprefixed comparison folders remain readable by exports and reports.
 
 ## Install, Start, and Update
 
-Version **1.0.78** is distributed through the
-[GitHub release](https://github.com/khda79/workplacecloudhub.com/releases/tag/sharepoint-migration-toolkit-v1.0.78)
+Version **1.0.79** is distributed through the
+[GitHub release](https://github.com/khda79/workplacecloudhub.com/releases/tag/sharepoint-migration-toolkit-v1.0.79)
 and the [existing source folder](https://github.com/khda79/workplacecloudhub.com/tree/main/SmartM365/SharePointMigration).
 Download the release ZIP together with its `.sha256` and `.manifest.json` assets.
 Verify the ZIP with `Get-FileHash -Algorithm SHA256` before extracting it, then open
