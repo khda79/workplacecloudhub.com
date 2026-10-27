@@ -12,7 +12,7 @@
     Migration configuration files are intentionally not overwritten because they
     contain environment-specific source and target values.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -35,35 +35,22 @@ $script:ConsoleLifecycleFailure = $null
 $script:ConsoleLifecycleStatus = 'SUCCESS'
 try {
 
-function Resolve-DefaultMigrationsRoot {
-    $currentDirectory = if ($PSScriptRoot) {
-        Get-Item -LiteralPath $PSScriptRoot
-    }
-    else {
-        Get-Item -LiteralPath (Get-Location).Path
-    }
-
-    while ($currentDirectory) {
-        $candidate = Join-Path -Path $currentDirectory.FullName -ChildPath 'Migrations'
-        $templateCandidate = Join-Path -Path $currentDirectory.FullName -ChildPath 'Migrations_Template'
-        if (Test-Path -LiteralPath $templateCandidate -PathType Container) {
-            return $candidate
-        }
-
-        $currentDirectory = $currentDirectory.Parent
-    }
-
-    throw 'Could not resolve the Migrations directory. Use -MigrationsRoot.'
-}
+# The template always comes from the toolkit; migrations may live in the configured shared root.
+$ToolkitRoot = [System.IO.Path]::GetFullPath((Join-Path -Path $PSScriptRoot -ChildPath '..\..'))
+. (Join-Path -Path $PSScriptRoot -ChildPath '..\Launchers\SmartM365-SharePointMigration-Storage.ps1')
+$Storage = Get-SmartM365MigrationStorage -ProjectRoot $ToolkitRoot
 
 if ([string]::IsNullOrWhiteSpace($MigrationsRoot)) {
-    $MigrationsRoot = Resolve-DefaultMigrationsRoot
+    $MigrationsRoot = $Storage.MigrationsRoot
+    if (-not (Test-Path -LiteralPath $MigrationsRoot -PathType Container)) {
+        throw "Migrations directory not found: $MigrationsRoot. Check Config\storage.json.txt or use -MigrationsRoot."
+    }
 }
 else {
     $MigrationsRoot = (Resolve-Path -LiteralPath $MigrationsRoot).ProviderPath
 }
 
-$TemplateRoot = Join-Path -Path (Split-Path -Path $MigrationsRoot -Parent) -ChildPath 'Migrations_Template'
+$TemplateRoot = Join-Path -Path $ToolkitRoot -ChildPath 'Migrations_Template'
 $TemplateConfigPath = Join-Path -Path $TemplateRoot -ChildPath 'migration.config.psd1'
 
 function Get-ConsoleTimestamp {
@@ -115,7 +102,7 @@ function Stop-TimestampedTranscript {
 }
 
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
-    $LogPath = Join-Path -Path (Join-Path -Path $MigrationsRoot -ChildPath 'logs') -ChildPath ("SmartM365-SharePointMigration-UpdateFromTemplate-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
+    $LogPath = Join-Path -Path $Storage.LogsRoot -ChildPath ("SmartM365-SharePointMigration-UpdateFromTemplate-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 }
 
 $logDirectory = Split-Path -Path $LogPath -Parent
@@ -252,18 +239,20 @@ function Sync-TemplateLaunchers {
         }
     }
 
+    # Launchers are grouped in interactive/* and scheduled-tasks/* subfolders: match by relative path.
     $templateLauncherNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($templateFile in Get-ChildItem -LiteralPath $templateLauncherRoot -File -Filter '*.cmd') {
-        [void]$templateLauncherNames.Add($templateFile.Name)
-        $destinationPath = Join-Path -Path $destinationLauncherRoot -ChildPath $templateFile.Name
+    foreach ($templateFile in Get-ChildItem -LiteralPath $templateLauncherRoot -File -Filter '*.cmd' -Recurse) {
+        $relativeLauncher = Get-RelativePath -BasePath $templateLauncherRoot -Path $templateFile.FullName
+        [void]$templateLauncherNames.Add($relativeLauncher)
+        $destinationPath = Join-Path -Path $destinationLauncherRoot -ChildPath $relativeLauncher
         $result = Copy-TemplateFile -SourcePath $templateFile.FullName -DestinationPath $destinationPath
         if ($result -eq 'Created') { $created++ }
         elseif ($result -eq 'Updated') { $updated++ }
     }
 
     if ($RemoveUnknownLaunchers) {
-        foreach ($existingLauncher in Get-ChildItem -LiteralPath $destinationLauncherRoot -File -Filter '*.cmd' -ErrorAction SilentlyContinue) {
-            if (-not $templateLauncherNames.Contains($existingLauncher.Name)) {
+        foreach ($existingLauncher in Get-ChildItem -LiteralPath $destinationLauncherRoot -File -Filter '*.cmd' -Recurse -ErrorAction SilentlyContinue) {
+            if (-not $templateLauncherNames.Contains((Get-RelativePath -BasePath $destinationLauncherRoot -Path $existingLauncher.FullName))) {
                 if ($PSCmdlet.ShouldProcess($existingLauncher.FullName, 'Remove launcher not present in template')) {
                     Remove-Item -LiteralPath $existingLauncher.FullName -Force
                 }

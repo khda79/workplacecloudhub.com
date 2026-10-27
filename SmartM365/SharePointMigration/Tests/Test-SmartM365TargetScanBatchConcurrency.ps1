@@ -2,7 +2,7 @@
 .SYNOPSIS
     Verify destination batch concurrency with offline child processes.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 #requires -Version 7.4
 $ErrorActionPreference = 'Stop'
@@ -22,6 +22,9 @@ $certificateFunction = $ast.Find({ param($node)
     $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-CertificateAuth'
 }, $true)
 $source = $source.Replace($certificateFunction.Extent.Text, 'function Assert-CertificateAuth { param([string]$Root) }')
+# The batch copy runs outside the toolkit: load the storage helper from the repository.
+$storageHelper = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\Scripts\Launchers\SmartM365-SharePointMigration-Storage.ps1'))
+$source = $source.Replace(". (Join-Path `$PSScriptRoot '..\SmartM365-SharePointMigration-Storage.ps1')", ". '$storageHelper'")
 
 try {
     [void](New-Item -ItemType Directory -Path $testRoot)

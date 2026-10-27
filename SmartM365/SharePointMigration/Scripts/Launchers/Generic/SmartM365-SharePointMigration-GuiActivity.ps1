@@ -1,6 +1,9 @@
+# Shared GUI activity records live under the configured logs root (Config/storage.json.txt).
+. (Join-Path $PSScriptRoot '..\SmartM365-SharePointMigration-Storage.ps1')
+
 function Get-SmartM365GuiActivityDirectory {
     param([Parameter(Mandatory = $true)][string]$ProjectRoot)
-    $directory = Join-Path $ProjectRoot 'Migrations\logs\gui-activity'
+    $directory = Get-SmartM365MigrationLogsRoot -ProjectRoot $ProjectRoot -ChildPath 'gui-activity'
     [void][System.IO.Directory]::CreateDirectory($directory)
     return $directory
 }

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Collect read-only SharePoint farm diagnostics and correlate them with ShareGate peaks.
 .VERSION
-    1.0.8
+    1.0.9
 #>
 #Requires -Version 5.1
 [CmdletBinding(DefaultParameterSetName='Peaks')]
@@ -24,11 +24,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:FarmDiagVersion = '1.0.8'
+$script:FarmDiagVersion = '1.0.9'
 $script:FarmDiagScriptPath = $PSCommandPath
 $script:FarmDiagMode = $PSCmdlet.ParameterSetName
 $script:FarmDiagToolkitRoot = if ($ToolkitRoot) { $ToolkitRoot } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..')) }
-$script:FarmDiagDefaultRoot = Join-Path $script:FarmDiagToolkitRoot 'Migrations'
+$storageHelper = Join-Path $script:FarmDiagToolkitRoot 'Scripts\Launchers\SmartM365-SharePointMigration-Storage.ps1'
+if (-not (Test-Path -LiteralPath $storageHelper -PathType Leaf)) { $storageHelper = Join-Path $PSScriptRoot '..\Launchers\SmartM365-SharePointMigration-Storage.ps1' }
+. $storageHelper
+$script:FarmDiagDefaultRoot = Get-SmartM365MigrationsRoot -ProjectRoot $script:FarmDiagToolkitRoot
 $script:FarmDiagCoverage = New-Object 'System.Collections.Generic.List[object]'
 $script:FarmDiagLog = New-Object 'System.Collections.Generic.List[string]'
 

@@ -5,7 +5,7 @@
     Lists migration projects when -Project is omitted, then finds the selected
     project's latest ShareGate five-minute access CSV. DryRun is the default.
 .VERSION
-    1.0.7
+    1.0.8
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -84,7 +84,10 @@ try {
     }
     $root = if ($ToolkitRoot) { $ToolkitRoot } else { Join-Path $PSScriptRoot '..\..' }
     $root = [IO.Path]::GetFullPath($root)
-    $migrationsRoot = Join-Path $root 'Migrations'
+    $storageHelper = Join-Path $root 'Scripts\Launchers\SmartM365-SharePointMigration-Storage.ps1'
+    if (-not (Test-Path -LiteralPath $storageHelper -PathType Leaf)) { $storageHelper = Join-Path $PSScriptRoot '..\Launchers\SmartM365-SharePointMigration-Storage.ps1' }
+    . $storageHelper
+    $migrationsRoot = Get-SmartM365MigrationsRoot -ProjectRoot $root
     if (-not (Test-Path -LiteralPath $migrationsRoot -PathType Container)) {
         throw "Migrations folder is missing: $migrationsRoot. Launch from the shared toolkit or supply -ToolkitRoot."
     }

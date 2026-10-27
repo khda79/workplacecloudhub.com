@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.78
+    1.0.79
 #>
 
 #Requires -Version 7.4
@@ -38,7 +38,7 @@ if ($Demo) {
 }
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.78'
+$script:AppVersion = '1.0.79'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
@@ -86,7 +86,8 @@ function Get-MigrationFolders {
         [ValidateSet('Migrations', 'ArchivedMigrations')][string]$DirectoryName = 'Migrations',
         [switch]$IncludeInvalid
     )
-    $root = Join-Path $script:ScriptRoot $DirectoryName
+    $storage = Get-SmartM365MigrationStorage -ProjectRoot $script:ScriptRoot
+    $root = if ($DirectoryName -eq 'ArchivedMigrations') { $storage.ArchivedMigrationsRoot } else { $storage.MigrationsRoot }
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { return @() }
     $results = [System.Collections.Generic.List[object]]::new()
     foreach ($dir in (Get-ChildItem -LiteralPath $root -Directory)) {
@@ -112,8 +113,9 @@ function Get-MigrationFolders {
 
 function Move-MigrationToArchive {
     param([Parameter(Mandatory)]$Migration, [Parameter(Mandatory)][string]$ProjectRoot)
-    $activeRoot = [IO.Path]::GetFullPath((Join-Path $ProjectRoot 'Migrations'))
-    $archiveRoot = [IO.Path]::GetFullPath((Join-Path $ProjectRoot 'ArchivedMigrations'))
+    $storage = Get-SmartM365MigrationStorage -ProjectRoot $ProjectRoot
+    $activeRoot = $storage.MigrationsRoot
+    $archiveRoot = $storage.ArchivedMigrationsRoot
     $source = [IO.Path]::GetFullPath([string]$Migration.Root)
     $expectedSource = [IO.Path]::GetFullPath((Join-Path $activeRoot ([string]$Migration.Name)))
     if (-not [string]::Equals($source, $expectedSource, [StringComparison]::OrdinalIgnoreCase)) {
@@ -126,7 +128,7 @@ function Move-MigrationToArchive {
         throw 'A linked migration folder cannot be archived.'
     }
     if (-not (Test-Path -LiteralPath $archiveRoot -PathType Container)) {
-        [void](New-Item -ItemType Directory -Path $archiveRoot -ErrorAction Stop)
+        [void](New-Item -ItemType Directory -Path $archiveRoot -Force -ErrorAction Stop)
     }
     if ((Get-Item -LiteralPath $archiveRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) {
         throw 'The archive root must not be a linked folder.'
@@ -135,7 +137,7 @@ function Move-MigrationToArchive {
     if (Test-Path -LiteralPath $destination) {
         throw "An archived migration with the name '$($Migration.Name)' already exists."
     }
-    [IO.Directory]::Move($source, $destination)
+    Move-SmartM365MigrationDirectory -Source $source -Destination $destination
     if (-not (Test-Path -LiteralPath $destination -PathType Container) -or
         (Test-Path -LiteralPath $source)) {
         throw 'The archive move could not be verified. Check both folders before retrying.'
@@ -3415,8 +3417,9 @@ function Refresh-ArchivedOverview {
 
 function Refresh-GuiState {
     try {
-        if (-not (Test-Path -LiteralPath (Join-Path $script:ScriptRoot 'Migrations') -PathType Container)) {
-            throw 'Migration folder is unavailable.'
+        $migrationsRoot = Get-SmartM365MigrationsRoot -ProjectRoot $script:ScriptRoot
+        if (-not (Test-Path -LiteralPath $migrationsRoot -PathType Container)) {
+            throw "Migration folder is unavailable: $migrationsRoot"
         }
         Load-Migrations
         if ($tabSummary.IsChecked) { Refresh-PortfolioSummary }
@@ -3460,7 +3463,14 @@ function Get-DiagnosticReportDisplayPath {
     if (-not $Folder) { return 'SharePointMigration\Migrations' }
     $relative = [IO.Path]::GetRelativePath($script:ScriptRoot, $Folder).Replace('/', '\')
     if ($relative -eq '..' -or $relative.StartsWith('..\', [StringComparison]::Ordinal) -or
-        [IO.Path]::IsPathRooted($relative)) { return 'Report folder is outside SharePointMigration.' }
+        [IO.Path]::IsPathRooted($relative)) {
+        # Shared storage (Config\storage.json.txt): display the path relative to the migrations root.
+        $migrationsRoot = Get-SmartM365MigrationsRoot -ProjectRoot $script:ScriptRoot
+        $inShared = [IO.Path]::GetRelativePath($migrationsRoot, $Folder).Replace('/', '\')
+        if ($inShared -eq '..' -or $inShared.StartsWith('..\', [StringComparison]::Ordinal) -or
+            [IO.Path]::IsPathRooted($inShared)) { return 'Report folder is outside SharePointMigration.' }
+        return 'Migrations (shared)\' + $inShared
+    }
     return 'SharePointMigration\' + $relative
 }
 
@@ -3711,7 +3721,7 @@ $btnArchiveMigration.Add_Click({
         return
     }
     $answer = [System.Windows.MessageBox]::Show(
-        "Archive '$($migration.Name)'? Its complete folder will move from Migrations to ArchivedMigrations. Ensure no scan or migration is running for this folder. The GUI has no restore action.",
+        "Archive '$($migration.Name)'? Its complete folder will move from Migrations to ArchivedMigrations ($((Get-SmartM365MigrationStorage -ProjectRoot $script:ScriptRoot).ArchivedMigrationsRoot)). Ensure no scan or migration is running for this folder. The GUI has no restore action.",
         $script:AppName, 'YesNo', 'Warning')
     if ($answer -ne [System.Windows.MessageBoxResult]::Yes) { return }
     $btnArchiveMigration.IsEnabled = $false
@@ -3876,7 +3886,7 @@ function Invoke-GlobalComparisonReport {
         $python = Get-SmartM365PythonCommand -ProjectRoot $script:ScriptRoot
         $generatorName = if ($Kind -eq 'Files') { 'build_global_report.py' } else { 'build_global_permissions_report.py' }
         $generator = Join-Path $script:ScriptRoot "Scripts\Compare\$generatorName"
-        $migrationRoot = Join-Path $script:ScriptRoot 'Migrations'
+        $migrationRoot = Get-SmartM365MigrationsRoot -ProjectRoot $script:ScriptRoot
         $reportDirectory = Join-Path $migrationRoot 'reports\global'
         if ($Kind -eq 'Permissions') { $reportDirectory = Join-Path $reportDirectory 'permissions' }
         $result = @(& $python.Executable @($python.Arguments) $generator --migrations-root $migrationRoot --output-directory $reportDirectory 2>&1)
@@ -4412,7 +4422,7 @@ function Refresh-FarmDiagnostics {
         return
     }
     $scriptPath = Join-Path $farmRoot 'Scripts\Diagnostics\SmartM365-SharePointMigration-FarmDiagnostic.ps1'
-    $uncPeakPath = Join-Path (Join-Path (Join-Path $farmRoot 'Migrations') $project) $relative
+    $uncPeakPath = Join-Path (Join-Path (Get-SmartM365MigrationsRoot -ProjectRoot $farmRoot) $project) $relative
     $script:FarmInvocation = [pscustomobject]@{ ScriptPath=$scriptPath; Project=$project; Around=$utc; PeaksCsv=$uncPeakPath; ToolkitRoot=$farmRoot }
     $btnFarmCheck.IsEnabled = $true
     $common = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" -Project "{1}" -Around "{2}" -WindowMinutes 30 -ShareGatePeaksCsv "{3}" -ToolkitRoot "{4}"' -f $scriptPath,$project,$utc,$uncPeakPath,$farmRoot

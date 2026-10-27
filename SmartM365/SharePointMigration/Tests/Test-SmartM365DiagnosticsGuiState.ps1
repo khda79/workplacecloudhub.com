@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline GUI checks for newest ShareGate report selection and cached analysis.
 .VERSION
-    1.0.10
+    1.0.11
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -18,6 +18,7 @@ foreach ($name in @('Clear-DiagnosticResult','Get-CurrentDiagnosticAnalysis','Re
     if (-not $definition) { throw "Missing GUI function: $name" }
     . ([scriptblock]::Create($definition.Extent.Text))
 }
+. (Join-Path $PSScriptRoot '..\Scripts\Launchers\SmartM365-SharePointMigration-Storage.ps1')
 function Start-AutomaticDiagnosticAnalysis { } # Automatic launch policy has its own worker-free tests.
 function Load-DiagnosticResult {
     param([string]$Directory)

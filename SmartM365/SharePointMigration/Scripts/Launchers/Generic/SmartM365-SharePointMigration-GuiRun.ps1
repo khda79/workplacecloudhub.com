@@ -2,7 +2,7 @@
 .SYNOPSIS
     Runs a SharePointMigration entry script.
 .VERSION
-    1.0.4
+    1.0.5
 #>
 [CmdletBinding()]
 param(
@@ -27,7 +27,7 @@ $script:GuiActivityFinalized = $false
 try {
 . (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-GuiActivity.ps1')
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
-$migrationRoot = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $projectRoot 'Migrations') $MigrationName))
+$migrationRoot = [System.IO.Path]::GetFullPath((Join-Path (Get-SmartM365MigrationsRoot -ProjectRoot $projectRoot) $MigrationName))
 $activityRoot = Get-SmartM365GuiActivityDirectory -ProjectRoot $projectRoot
 
 try {

@@ -1,9 +1,12 @@
 @echo off
 setlocal
-echo Script  : %~nx0 v1.0.0
+echo Script  : %~nx0 v1.0.1
 
 set "SCRIPT_DIR=%~dp0"
-pushd "%SCRIPT_DIR%..\..\..\..\.." || (
+set "PROJECT_ROOT=%SCRIPT_DIR%..\..\..\..\.."
+rem Migrations stored outside the toolkit: toolkit.root.txt in the migrations root names the toolkit.
+if exist "%SCRIPT_DIR%..\..\..\..\toolkit.root.txt" set /p PROJECT_ROOT=<"%SCRIPT_DIR%..\..\..\..\toolkit.root.txt"
+pushd "%PROJECT_ROOT%" || (
     echo Failed to access project root from: %SCRIPT_DIR%
     exit /b 1
 )

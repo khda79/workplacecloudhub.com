@@ -5,7 +5,7 @@
     The migration directory is created only after every configured web and the
     SharePoint Online admin endpoint have passed authenticated read checks.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 [CmdletBinding()]
 param(
@@ -23,7 +23,8 @@ $script:ConsoleLifecycleFailure = $null
 $script:ConsoleLifecycleStatus = 'SUCCESS'
 try {
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$migrationsRoot = Join-Path $projectRoot 'Migrations'
+. (Join-Path $PSScriptRoot 'Launchers\SmartM365-SharePointMigration-Storage.ps1')
+$migrationsRoot = Get-SmartM365MigrationsRoot -ProjectRoot $projectRoot
 
 function Assert-WebUrl {
     param([string]$Value, [string]$Label, [string]$Type)
@@ -183,7 +184,7 @@ function Assert-MigrationRequest {
     $name = [string]$Request.Name
     if ($name -notmatch '^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$' -or
         $name -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$' -or
-        $name -in @('_Template', '_Local', 'logs')) {
+        $name -in @('_Template', '_Local', 'logs', 'reports')) {
         throw 'Migration name must be a new Windows-safe folder name (letters, digits, dot, dash or underscore).'
     }
     if ($Request.SourceType -notin @('SP2016', 'SP2019', 'SPO') -or

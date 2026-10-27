@@ -309,7 +309,8 @@ choose a site. Invalid or missing HTTP/HTTPS URLs disable the corresponding butt
 The Logs tab shows shared GUI activity across migrations as well as the
 selected migration's script logs. Each GUI session, migration creation,
 configuration save, and GUI-launched action has a separate activity file under
-`Migrations/logs/gui-activity`. Records include the Windows user who used the
+`Migrations/logs/gui-activity` (or the configured `LogsRoot`, see
+Shared storage). Records include the Windows user who used the
 GUI, machine, action, local and UTC times, status, exit code, and the detailed
 run log when available. The script's execution account may differ from the
 GUI user. These records require write access to the shared migration folder;
@@ -452,6 +453,39 @@ comparisons\
 operations\generated\
 logs\
 ```
+
+### Shared storage for migrations, archives and logs
+
+By default, migrations live in `Migrations`, archives in `ArchivedMigrations`
+and the shared GUI/batch logs in `Migrations/logs`, all inside the toolkit.
+`Config/storage.json.txt` (created from `Config/storage.json.template`, not
+versioned) can move them to a share:
+
+```json
+{
+  "MigrationsRoot": "\\\\server\\share\\SPMig\\Migrations",
+  "ArchivedMigrationsRoot": "\\\\server\\share\\SPMig\\ArchivedMigrations",
+  "LogsRoot": ""
+}
+```
+
+An empty value keeps the default. An empty `LogsRoot` follows
+`MigrationsRoot` (`<MigrationsRoot>\logs`). Relative values resolve from the
+toolkit root and environment variables are expanded. Each migration's own
+`logs`, scans, comparisons and the global reports (`reports/global`) stay in
+the migration root. The GUI, the generic launcher, the batches, the farm
+diagnostic, the site operations, `NewMigration` and `Update-MigrationsFromTemplate`
+all resolve the same roots. An unreadable file stops the scripts instead of
+silently using the toolkit folders.
+
+When `MigrationsRoot` is outside the toolkit, `toolkit.root.txt` at the root
+of the migrations folder contains the toolkit path (UNC preferably, ASCII
+only). The template `.cmd` launchers read it to find the scripts; refresh the
+existing migrations with `Update-MigrationsFromTemplate.cmd`, which now
+updates the launchers in their `interactive/*` and `scheduled-tasks/*`
+subfolders. Re-point scheduled tasks whose action references the former
+folder. Archiving between two shares uses a verified copy (file count and
+bytes) and then removes the source.
 
 `Migrations/*` is ignored by Git except for each migration's `ShareGate`
 folder structure. Put ShareGate

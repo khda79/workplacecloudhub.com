@@ -1,11 +1,10 @@
 @echo off
 setlocal
-echo Script  : %~nx0 v1.0.1
+echo Script  : %~nx0 v1.0.2
 
 set "UNC_WORK_DIR=%~dp0."
 
 set "PROJECT_ROOT=%UNC_WORK_DIR%"
-set "MIGRATIONS_ROOT=%PROJECT_ROOT%\Migrations"
 set "SCRIPT_PATH=%PROJECT_ROOT%\Scripts\Operations\SmartM365-SharePointMigration-UpdateFromTemplate.ps1"
 
 if not exist "%SCRIPT_PATH%" (
@@ -23,10 +22,10 @@ if errorlevel 1 (
 )
 
 echo Using PowerShell: %POWERSHELL_EXE%
-echo Migrations root: %MIGRATIONS_ROOT%
+echo Migrations root: Config\storage.json.txt, default Migrations
 echo.
 
-"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_PATH%" -MigrationsRoot "%MIGRATIONS_ROOT%" %*
+"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_PATH%" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.

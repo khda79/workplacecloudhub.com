@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline Migration Diagnostics farm-result and command-generation test.
 .VERSION
-    1.0.5
+    1.0.6
 #>
 #Requires -Version 7.4
 [CmdletBinding()]
@@ -21,6 +21,7 @@ if (-not $preflight) { throw 'Farm prerequisite check is missing from the GUI.' 
 . ([scriptblock]::Create($preflight.Extent.Text))
 $constructor = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'New-FarmDiagnosticsWindow' },$true)
 . ([scriptblock]::Create($constructor.Extent.Text))
+. (Join-Path $PSScriptRoot '..\Scripts\Launchers\SmartM365-SharePointMigration-Storage.ps1')
 Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
 $layoutWindow=$null; $farmWindow=$null
 function Refresh-DiagnosticReportState { param([switch]$Force) }

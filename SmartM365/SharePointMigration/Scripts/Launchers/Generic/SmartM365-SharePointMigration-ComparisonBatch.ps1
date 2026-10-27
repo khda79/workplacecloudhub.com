@@ -7,7 +7,7 @@
     validate scan evidence, refresh the Entra cache, and generate reports.
     Continues after individual failures and returns a nonzero batch exit code.
 .VERSION
-    1.0.1
+    1.0.2
 .EXAMPLE
     .\SmartM365-SharePointMigration-ComparisonBatch.ps1 -PlanOnly
 .EXAMPLE
@@ -55,7 +55,7 @@ function Write-BatchLine {
 
 function Get-ComparisonMigrations {
     param([string]$Root, [string[]]$Names)
-    $directory = Join-Path $Root 'Migrations'
+    $directory = Get-SmartM365MigrationsRoot -ProjectRoot $Root
     if (-not (Test-Path -LiteralPath $directory -PathType Container)) { throw "Migrations directory not found: $directory" }
     $available = @{}
     foreach ($item in (Get-ChildItem -LiteralPath $directory -Directory)) {
@@ -83,6 +83,7 @@ function Get-ComparisonMigrations {
 }
 
 $ProjectRoot = [IO.Path]::GetFullPath($ProjectRoot)
+. (Join-Path $PSScriptRoot '..\SmartM365-SharePointMigration-Storage.ps1')
 if ([string]::IsNullOrWhiteSpace($LauncherPath)) {
     $LauncherPath = Join-Path $ProjectRoot 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-Launcher.ps1'
 }
@@ -95,7 +96,7 @@ $interrupted = $true
 try {
     if (-not $PlanOnly) {
         $id = if ($BatchId) { $BatchId } else { '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), [guid]::NewGuid().ToString('N').Substring(0,8) }
-        $batchRoot = Join-Path $ProjectRoot "Migrations\logs\comparison-batches\$id"
+        $batchRoot = Get-SmartM365MigrationLogsRoot -ProjectRoot $ProjectRoot -ChildPath "comparison-batches\$id"
         Write-BatchLine ("Creating comparison batch logs: {0}" -f $batchRoot)
         [void](New-Item -ItemType Directory -Path $batchRoot)
         $script:BatchLogPath = Join-Path $batchRoot 'batch.log'

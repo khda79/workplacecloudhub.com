@@ -2,11 +2,13 @@
 .SYNOPSIS
     Batch launcher UI and command helpers for the migration dashboard.
 .VERSION
-    1.0.2
+    1.0.3
 .DESCRIPTION
     Function-only library. Uses existing batch launchers and small batch summaries;
     never reads inventories or connects to a tenant to populate the dashboard.
 #>
+
+. (Join-Path $PSScriptRoot '..\SmartM365-SharePointMigration-Storage.ps1')
 
 function Get-SmartM365BatchDefinition {
     param([ValidateSet('Source','Target','Comparison')][string]$Kind)
@@ -54,7 +56,7 @@ function Read-SmartM365BatchTail {
 
 function Get-SmartM365BatchResult {
     param([string]$Root, [ValidateSet('Source','Target','Comparison')][string]$Kind, [string]$BatchId='')
-    $parent = Join-Path $Root ('Migrations\logs\' + (Get-SmartM365BatchDefinition $Kind).LogFolder)
+    $parent = Get-SmartM365MigrationLogsRoot -ProjectRoot $Root -ChildPath (Get-SmartM365BatchDefinition $Kind).LogFolder
     $directory = $null
     if ($BatchId) { $path=Join-Path $parent $BatchId; if (Test-Path -LiteralPath $path -PathType Container) { $directory=Get-Item -LiteralPath $path } }
     elseif (Test-Path -LiteralPath $parent -PathType Container) {
@@ -185,7 +187,7 @@ function Start-SmartM365BatchFromGui {
         $request=Get-SmartM365BatchSelection $Kind -PlanOnly:$PlanOnly -BatchId $id
         $invocation=Get-SmartM365BatchCommand @request
         if(-not (Test-Path -LiteralPath $invocation.Launcher -PathType Leaf)){throw "Launcher not found: $($invocation.Launcher)"}
-        $folder=Join-Path $script:BatchGui.Root 'Migrations\logs\batch-gui-runs'
+        $folder=Get-SmartM365MigrationLogsRoot -ProjectRoot $script:BatchGui.Root -ChildPath 'batch-gui-runs'
         [void](New-Item -ItemType Directory -Path $folder -Force)
         $path=Join-Path $folder "$id.json.txt"
         $request.Status='Starting'; $request.StartedUtc=[DateTimeOffset]::UtcNow.ToString('o'); $request.Computer=$env:COMPUTERNAME
@@ -206,7 +208,8 @@ function Start-SmartM365SourceProbe {
         $command=Get-SmartM365BatchCommand @selection
         if(-not (Test-Path -LiteralPath $command.Launcher -PathType Leaf)){throw 'Source launcher not found in the toolkit path.'}
         # Read-only SharePoint checks in Windows PowerShell 5.1 plus a log-write probe.
-        $probeCode="`$root='" + $selection.Root.Replace("'","''") + "'`r`n" + @'
+        $logsRoot=Get-SmartM365MigrationLogsRoot -ProjectRoot $selection.Root
+        $probeCode="`$root='" + $selection.Root.Replace("'","''") + "'`r`n`$logsRoot='" + $logsRoot.Replace("'","''") + "'`r`n" + @'
 $ErrorActionPreference='Stop'
 try {
  if($PSVersionTable.PSVersion.Major -ne 5){throw 'Windows PowerShell 5.1 is required.'}
@@ -221,7 +224,7 @@ try {
   if(-not (Test-Path -LiteralPath $path -PathType Leaf)){throw ('Required toolkit dependency not found: '+$relative)}
   if($relative.EndsWith('.ps1') -and (Get-AuthenticodeSignature -LiteralPath $path).Status -ne 'Valid'){throw ('Toolkit signature is not trusted: '+$relative)}
  }
- $testFile=Join-Path $root ('Migrations\logs\source-probe-'+[guid]::NewGuid().ToString('N')+'.tmp')
+ $testFile=Join-Path $logsRoot ('source-probe-'+[guid]::NewGuid().ToString('N')+'.tmp')
  $null=New-Item -ItemType Directory -Path (Split-Path $testFile) -Force
  try{[IO.File]::WriteAllText($testFile,'write access probe')}finally{if(Test-Path -LiteralPath $testFile){Remove-Item -LiteralPath $testFile -Force}}
  $python=Join-Path $root 'Tools\Python\python.exe'

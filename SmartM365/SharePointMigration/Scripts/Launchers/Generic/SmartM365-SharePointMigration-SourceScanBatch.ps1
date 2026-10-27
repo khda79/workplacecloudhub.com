@@ -10,7 +10,7 @@
     filter is an error so a batch cannot accidentally scan an entire farm.
 
 .VERSION
-    1.0.4
+    1.0.5
 
 .EXAMPLE
     powershell.exe -NoProfile -File .\SmartM365-SharePointMigration-SourceScanBatch.ps1 -PlanOnly
@@ -114,7 +114,7 @@ function Get-SourceUrls {
 
 function Get-SourceMigrations {
     param([string]$Root, [string[]]$Names)
-    $migrationsRoot = Join-Path $Root 'Migrations'
+    $migrationsRoot = Get-SmartM365MigrationsRoot -ProjectRoot $Root
     if (-not (Test-Path -LiteralPath $migrationsRoot -PathType Container)) {
         throw "Migrations directory not found: $migrationsRoot"
     }
@@ -298,6 +298,12 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = Join-Path $PSScriptRoot '..\..\..'
 }
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
+# The entry script runs from a local copy, so the storage helper is read from the toolkit.
+$storageHelper = Join-Path $ProjectRoot 'Scripts\Launchers\SmartM365-SharePointMigration-Storage.ps1'
+if (-not (Test-Path -LiteralPath $storageHelper -PathType Leaf)) {
+    $storageHelper = Join-Path $PSScriptRoot '..\SmartM365-SharePointMigration-Storage.ps1'
+}
+. $storageHelper
 $script:ComplexityHelpersLoaded = $false
 $script:ComplexityDependenciesReady = $null
 $script:ComplexityPendingMarkers = @{}
@@ -310,14 +316,14 @@ $LocalRunRoot = [System.IO.Path]::GetFullPath($LocalRunRoot)
 if ($LocalRunRoot.StartsWith('\\')) { throw 'LocalRunRoot must be on a local disk of the farm server.' }
 if (-not $PlanOnly) {
     if (-not $BatchId) { $BatchId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8)) }
-    $batchRoot = Join-Path $ProjectRoot "Migrations\logs\source-scan-batches\$batchId"
+    $batchRoot = Get-SmartM365MigrationLogsRoot -ProjectRoot $ProjectRoot -ChildPath "source-scan-batches\$batchId"
     Write-BatchLine ("Creating source batch log: {0}" -f (Join-Path $batchRoot 'batch.log'))
     New-Item -ItemType Directory -Path $batchRoot -ErrorAction Stop | Out-Null
     $script:BatchLogPath = Join-Path $batchRoot 'batch.log'
     Write-BatchLine ("Source batch preflight started. Logs: {0}" -f $batchRoot)
 }
 try {
-Write-BatchLine ("Loading source migration configurations from: {0}" -f (Join-Path $ProjectRoot 'Migrations'))
+Write-BatchLine ("Loading source migration configurations from: {0}" -f (Get-SmartM365MigrationsRoot -ProjectRoot $ProjectRoot))
 $migrations = @(Get-SourceMigrations -Root $ProjectRoot -Names $requestedNames.ToArray())
 if ($migrations.Count -eq 0) { throw 'No configured SharePoint Server source migrations found.' }
 $actions = @()

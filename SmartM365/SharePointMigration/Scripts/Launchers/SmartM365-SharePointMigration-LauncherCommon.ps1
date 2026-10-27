@@ -2,8 +2,10 @@
 .SYNOPSIS
     Shared helpers for SharePoint migration launchers, source scan batches and the GUI.
 .VERSION
-    1.0.4
+    1.0.5
 #>
+
+. (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-SharePointMigration-Storage.ps1')
 
 function Get-LauncherProjectRoot {
     param(
@@ -25,7 +27,7 @@ function Import-LauncherMigrationConfig {
         [string]$ConfigFileName = 'migration.config.psd1'
     )
 
-    $migrationRoot = Join-Path -Path $ProjectRoot -ChildPath ("Migrations\{0}" -f $MigrationName)
+    $migrationRoot = Join-Path -Path (Get-SmartM365MigrationsRoot -ProjectRoot $ProjectRoot) -ChildPath $MigrationName
     $configPath = Join-Path -Path $migrationRoot -ChildPath $ConfigFileName
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
         throw "Migration config not found: $configPath"

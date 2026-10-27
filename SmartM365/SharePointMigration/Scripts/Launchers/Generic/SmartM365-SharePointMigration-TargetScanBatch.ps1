@@ -8,7 +8,7 @@
     use separate visible consoles for sign-in. The limit applies to this batch.
 
 .VERSION
-    1.0.3
+    1.0.4
 
 .EXAMPLE
     pwsh -File .\SmartM365-SharePointMigration-TargetScanBatch.ps1 -PlanOnly
@@ -64,7 +64,7 @@ function Write-BatchLine {
 function Get-BatchMigrations {
     param([string]$Root, [string[]]$Names)
 
-    $migrationsRoot = Join-Path $Root 'Migrations'
+    $migrationsRoot = Get-SmartM365MigrationsRoot -ProjectRoot $Root
     if (-not (Test-Path -LiteralPath $migrationsRoot -PathType Container)) {
         throw "Migrations directory not found: $migrationsRoot"
     }
@@ -164,9 +164,10 @@ foreach ($value in $MigrationNames) {
     }
 }
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
+. (Join-Path $PSScriptRoot '..\SmartM365-SharePointMigration-Storage.ps1')
 if (-not $PlanOnly) {
     if (-not $BatchId) { $BatchId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8)) }
-    $batchRoot = Join-Path $ProjectRoot "Migrations\logs\target-scan-batches\$batchId"
+    $batchRoot = Get-SmartM365MigrationLogsRoot -ProjectRoot $ProjectRoot -ChildPath "target-scan-batches\$batchId"
     Write-BatchLine ("Creating destination batch log: {0}" -f (Join-Path $batchRoot 'batch.log'))
     New-Item -ItemType Directory -Path $batchRoot -ErrorAction Stop | Out-Null
     $script:BatchLogPath = Join-Path $batchRoot 'batch.log'
@@ -181,7 +182,7 @@ if (-not (Test-Path -LiteralPath $LauncherPath -PathType Leaf)) {
 }
 $limit = if ($MaxParallel -gt 0) { $MaxParallel } else { 2 }
 
-Write-BatchLine ("Loading destination migration configurations from: {0}" -f (Join-Path $ProjectRoot 'Migrations'))
+Write-BatchLine ("Loading destination migration configurations from: {0}" -f (Get-SmartM365MigrationsRoot -ProjectRoot $ProjectRoot))
 $migrations = @(Get-BatchMigrations -Root $ProjectRoot -Names $requestedNames.ToArray())
 if ($migrations.Count -eq 0) { throw 'No configured SPO migrations found.' }
 $actions = @()

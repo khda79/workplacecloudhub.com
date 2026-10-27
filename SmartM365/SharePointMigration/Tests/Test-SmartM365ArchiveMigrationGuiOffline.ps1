@@ -2,7 +2,7 @@
 .SYNOPSIS
     Verifies the GUI archive routing using synthetic migration folders.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -18,6 +18,8 @@ foreach ($name in @('Get-MigrationFolders', 'Move-MigrationToArchive',
     if (-not $definition) { throw "Missing GUI function: $name" }
     Set-Item -Path "function:script:$name" -Value $definition.Body.GetScriptBlock()
 }
+# GUI helpers resolve roots through Config\storage.json.txt.
+. (Join-Path $project 'Scripts\Launchers\SmartM365-SharePointMigration-Storage.ps1')
 function Assert-Archive { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message } }
 $guiText = Get-Content -LiteralPath $guiPath -Raw
 $activeGrid = [regex]::Match($guiText, '(?s)<DataGrid x:Name="gridSummary".*?</DataGrid>').Value

@@ -33,6 +33,7 @@ try {
         Set-Content -LiteralPath (Join-Path $migration 'migration.mapping.txt') -Encoding UTF8
     Copy-Item -LiteralPath (Join-Path $toolkit 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-SiteLockStateLauncher.ps1') -Destination $generic
     Copy-Item -LiteralPath (Join-Path $toolkit 'Scripts\Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1') -Destination $launchers
+    Copy-Item -LiteralPath (Join-Path $toolkit 'Scripts\Launchers\SmartM365-SharePointMigration-Storage.ps1') -Destination $launchers
     Copy-Item -LiteralPath (Join-Path $toolkit 'Scripts\Operations\SmartM365-SharePointSource-SiteLockStateSet.ps1') -Destination $operations
     Copy-Item -LiteralPath (Join-Path $toolkit 'Scripts\Operations\SmartM365-SharePointTarget-SiteLockStateSet.ps1') -Destination $operations
     $launcher = Join-Path $generic 'SmartM365-SharePointMigration-SiteLockStateLauncher.ps1'

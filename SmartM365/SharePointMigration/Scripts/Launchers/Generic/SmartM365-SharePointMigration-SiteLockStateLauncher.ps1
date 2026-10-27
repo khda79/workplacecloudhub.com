@@ -5,7 +5,7 @@
     Reads migration mapping pairs, shows a review, and requires EXECUTE before
     calling the SharePoint Server or SharePoint Online lock operation.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -57,7 +57,10 @@ try {
     }
     $root = if ($ToolkitRoot) { $ToolkitRoot } else { Join-Path $PSScriptRoot '..\..\..' }
     $root = [IO.Path]::GetFullPath($root)
-    $migrationsRoot = Join-Path $root 'Migrations'
+    $storageHelper = Join-Path $root 'Scripts\Launchers\SmartM365-SharePointMigration-Storage.ps1'
+    if (-not (Test-Path -LiteralPath $storageHelper -PathType Leaf)) { $storageHelper = Join-Path $PSScriptRoot '..\SmartM365-SharePointMigration-Storage.ps1' }
+    . $storageHelper
+    $migrationsRoot = Get-SmartM365MigrationsRoot -ProjectRoot $root
     if (-not (Test-Path -LiteralPath $migrationsRoot -PathType Container)) {
         throw "Migrations folder is missing: $migrationsRoot"
     }

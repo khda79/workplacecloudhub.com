@@ -2,7 +2,7 @@
 .SYNOPSIS
     Tests real child-process host routing with mock inventory files only.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -17,6 +17,7 @@ try {
     $launcher = Join-Path $root 'Scripts/Launchers/Generic/SmartM365-SharePointMigration-Launcher.ps1'
     Copy-Item (Join-Path $project 'Scripts/Launchers/Generic/SmartM365-SharePointMigration-Launcher.ps1') $launcher
     Copy-Item (Join-Path $project 'Scripts/Launchers/SmartM365-SharePointMigration-LauncherCommon.ps1') (Join-Path $root 'Scripts/Launchers')
+    Copy-Item (Join-Path $project 'Scripts/Launchers/SmartM365-SharePointMigration-Storage.ps1') (Join-Path $root 'Scripts/Launchers')
     Copy-Item (Join-Path $project 'Scripts/console_lifecycle.py') (Join-Path $root 'Scripts')
     Copy-Item (Join-Path $project 'Scripts/Compare/scan_evidence.py') (Join-Path $root 'Scripts/Compare')
     $fixture = @'

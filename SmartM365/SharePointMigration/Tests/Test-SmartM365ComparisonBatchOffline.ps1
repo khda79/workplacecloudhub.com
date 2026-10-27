@@ -2,7 +2,7 @@
 .SYNOPSIS
     Verify comparison batch discovery, failure handling, logging and CMD forwarding offline.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #requires -Version 7.4
 $ErrorActionPreference = 'Stop'
@@ -35,6 +35,7 @@ try {
     [void](New-Item -ItemType Directory -Path $generic -Force)
     $batch = Join-Path $generic 'SmartM365-SharePointMigration-ComparisonBatch.ps1'
     Copy-Item -LiteralPath (Join-Path $project 'Scripts\Launchers\Generic\SmartM365-SharePointMigration-ComparisonBatch.ps1') -Destination $batch
+    Copy-Item -LiteralPath (Join-Path $project 'Scripts\Launchers\SmartM365-SharePointMigration-Storage.ps1') -Destination (Split-Path $generic)
     $cmd = Join-Path $root 'Start-SmartM365-SharePointMigration-ComparisonBatch.cmd'
     Copy-Item -LiteralPath (Join-Path $project 'Start-SmartM365-SharePointMigration-ComparisonBatch.cmd') -Destination $cmd
     foreach ($name in @('SiteA','Site B','SiteC','BrokenConfig','NewMigration')) {
