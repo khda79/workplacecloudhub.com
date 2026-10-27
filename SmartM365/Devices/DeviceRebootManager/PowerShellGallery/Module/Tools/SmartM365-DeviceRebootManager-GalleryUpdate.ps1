@@ -6,15 +6,28 @@ Updates and deploys SmartM365 Device Reboot Manager from PowerShell Gallery.
 
 .DESCRIPTION
 This helper is packaged with the PowerShell Gallery module and copied to the
-stable ProgramData installation. It updates the module, validates the pinned
-WorkplaceCloudHub signer, deploys the runtime, preserves local configuration,
-and optionally registers the automatic update task.
+admin-only Program Files installation. It updates the module, validates the
+signed file catalog and the pinned WorkplaceCloudHub signer, deploys the
+runtime, preserves local configuration, and optionally registers the automatic
+update task.
+
+Without -SkipPackageUpdate, the newest installed module version is deployed
+after the Gallery update. With -SkipPackageUpdate, the module that contains
+this script (or the version named by -ModuleVersion) is deployed, so an older
+installed version can be redeployed for rollback.
+
+Signature rule (WinVerifyTrust, WINTRUST_ACTION_GENERIC_VERIFY_V2, no revocation
+check): a signature is accepted only when the result is 0, CERT_E_UNTRUSTEDROOT
+or CERT_E_CHAINING (self-signed root not trusted locally, logged as a warning)
+AND the signer thumbprint equals the pinned thumbprint. Any other result, such
+as TRUST_E_BAD_DIGEST, TRUST_E_NOSIGNATURE or an expired untimestamped
+certificate, is rejected.
 #>
 
 [CmdletBinding()]
 param(
     [string]$ModuleName = 'SmartM365.DeviceRebootManager',
-    [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+    [string]$InstallPath = (Join-Path -Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) -ChildPath 'WCH\SmartDeviceRebootManager'),
     [string]$ConfigSourcePath = '',
     [switch]$ForceConfig,
     [switch]$SkipScheduledTask,
@@ -22,18 +35,33 @@ param(
     [string]$TaskName = 'Device Reboot Manager',
     [ValidateRange(15, 10080)]
     [int]$RepeatIntervalMinutes = 240,
-    [bool]$EnableAutomaticUpdate = $false,
+    [switch]$EnableAutomaticUpdate,
     [string]$UpdateTaskPath = '\SmartM365\',
     [string]$UpdateTaskName = 'Device Reboot Manager Update',
     [ValidateRange(1, 168)]
     [int]$UpdateIntervalHours = 24,
-    [bool]$IncludePrerelease = $false,
+    [switch]$IncludePrerelease,
     [string]$ExpectedSignerThumbprint = 'D70ECB7B00377EBFB76B304C08DFC6620584E114',
+    [string]$ModuleVersion = '',
     [switch]$SkipPackageUpdate
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$script:PackageCatalogFileName = 'SmartM365.DeviceRebootManager.Files.cat'
+# Package-manager metadata added at install time (PowerShellGet/PSResourceGet).
+# The catalog itself is excluded because it cannot list its own hash.
+$script:CatalogFilesToSkip = @(
+    '*.cat'
+    'PSGetModuleInfo.xml'
+    '*.nupkg'
+    '*.nupkg.sha512'
+    '*.nuspec'
+    '*.psmdcp'
+    '.rels'
+    '`[Content_Types`].xml'
+)
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -74,6 +102,42 @@ function Get-LatestModuleInfo {
         throw "Installed module not found: $Name"
     }
     return $module
+}
+
+function Resolve-DeploymentModuleInfo {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [string]$RequestedVersion,
+        [bool]$PreferLatest
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedVersion)) {
+        $parsedVersion = $null
+        if (-not [version]::TryParse($RequestedVersion, [ref]$parsedVersion)) {
+            throw "Invalid -ModuleVersion value: $RequestedVersion"
+        }
+        $module = Get-Module -ListAvailable -Name $Name |
+            Where-Object { $_.Version -eq $parsedVersion } |
+            Select-Object -First 1
+        if (-not $module) {
+            throw "Requested module version is not installed: $Name $RequestedVersion"
+        }
+        return $module
+    }
+
+    if (-not $PreferLatest) {
+        # Deploy the module that contains this helper (Tools\ under the module base).
+        $ownManifestPath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath "$Name.psd1"
+        if (Test-Path -LiteralPath $ownManifestPath -PathType Leaf) {
+            $module = Test-ModuleManifest -Path $ownManifestPath -ErrorAction Stop
+            if ($module.Name -eq $Name) {
+                return $module
+            }
+        }
+        Write-UpdateLog -Level WARN -Message 'Helper is not running from a module folder and no -ModuleVersion was supplied; deploying the newest installed version.'
+    }
+
+    return Get-LatestModuleInfo -Name $Name
 }
 
 function Invoke-GalleryPackageUpdate {
@@ -121,32 +185,286 @@ function Invoke-GalleryPackageUpdate {
     throw 'No supported PowerShell Gallery update command is available.'
 }
 
-function Assert-ModuleSignature {
+function Get-WinVerifyTrustResult {
+    # Direct WinVerifyTrust (WINTRUST_ACTION_GENERIC_VERIFY_V2, no UI, no
+    # revocation check, file choice, VERIFY then CLOSE). Returns the HRESULT.
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not ('SmartM365.DeviceRebootManagerWinTrust' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace SmartM365
+{
+    public static class DeviceRebootManagerWinTrust
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WINTRUST_FILE_INFO
+        {
+            public uint cbStruct;
+            public string pcwszFilePath;
+            public IntPtr hFile;
+            public IntPtr pgKnownSubject;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WINTRUST_DATA
+        {
+            public uint cbStruct;
+            public IntPtr pPolicyCallbackData;
+            public IntPtr pSIPClientData;
+            public uint dwUIChoice;
+            public uint fdwRevocationChecks;
+            public uint dwUnionChoice;
+            public IntPtr pFile;
+            public uint dwStateAction;
+            public IntPtr hWVTStateData;
+            public IntPtr pwszURLReference;
+            public uint dwProvFlags;
+            public uint dwUIContext;
+            public IntPtr pSignatureSettings;
+        }
+
+        [DllImport("wintrust.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
+        private static extern int WinVerifyTrust(IntPtr hwnd, [MarshalAs(UnmanagedType.LPStruct)] Guid pgActionID, IntPtr pWVTData);
+
+        private const uint WTD_UI_NONE = 2;
+        private const uint WTD_REVOKE_NONE = 0;
+        private const uint WTD_CHOICE_FILE = 1;
+        private const uint WTD_STATEACTION_VERIFY = 1;
+        private const uint WTD_STATEACTION_CLOSE = 2;
+        private const uint WTD_REVOCATION_CHECK_NONE = 0x10;
+
+        public static int Verify(string path)
+        {
+            Guid action = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+            WINTRUST_FILE_INFO fileInfo = new WINTRUST_FILE_INFO();
+            fileInfo.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_FILE_INFO));
+            fileInfo.pcwszFilePath = path;
+            IntPtr filePointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WINTRUST_FILE_INFO)));
+            IntPtr dataPointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WINTRUST_DATA)));
+            try
+            {
+                Marshal.StructureToPtr(fileInfo, filePointer, false);
+                WINTRUST_DATA data = new WINTRUST_DATA();
+                data.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_DATA));
+                data.dwUIChoice = WTD_UI_NONE;
+                data.fdwRevocationChecks = WTD_REVOKE_NONE;
+                data.dwUnionChoice = WTD_CHOICE_FILE;
+                data.pFile = filePointer;
+                data.dwStateAction = WTD_STATEACTION_VERIFY;
+                data.dwProvFlags = WTD_REVOCATION_CHECK_NONE;
+                Marshal.StructureToPtr(data, dataPointer, false);
+                int result = WinVerifyTrust(IntPtr.Zero, action, dataPointer);
+
+                data = (WINTRUST_DATA)Marshal.PtrToStructure(dataPointer, typeof(WINTRUST_DATA));
+                data.dwStateAction = WTD_STATEACTION_CLOSE;
+                Marshal.StructureToPtr(data, dataPointer, true);
+                WinVerifyTrust(IntPtr.Zero, action, dataPointer);
+                return result;
+            }
+            finally
+            {
+                Marshal.DestroyStructure(filePointer, typeof(WINTRUST_FILE_INFO));
+                Marshal.FreeHGlobal(filePointer);
+                Marshal.FreeHGlobal(dataPointer);
+            }
+        }
+    }
+}
+'@
+    }
+    return [SmartM365.DeviceRebootManagerWinTrust]::Verify($Path)
+}
+
+function Get-PinnedSignatureState {
+    # Signature rule: WinVerifyTrust must return 0, CERT_E_UNTRUSTEDROOT or
+    # CERT_E_CHAINING (self-signed root not trusted locally) and the signer
+    # thumbprint must equal the pinned one. Any other result, including
+    # TRUST_E_BAD_DIGEST, TRUST_E_NOSIGNATURE or an expired untimestamped
+    # certificate, is rejected.
     param(
-        [Parameter(Mandatory = $true)][string]$ModuleBase,
+        [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$Thumbprint
     )
 
-    $expected = Get-NormalizedThumbprint $Thumbprint
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    $actual = if ($signature.SignerCertificate) {
+        ([string]$signature.SignerCertificate.Thumbprint).Replace(' ', '').ToUpperInvariant()
+    }
+    else {
+        ''
+    }
+    $pinnedSignerMatch = ($actual -ne '' -and $actual -eq ([string]$Thumbprint).Replace(' ', '').ToUpperInvariant())
+    $trustResult = Get-WinVerifyTrustResult -Path ([IO.Path]::GetFullPath($Path))
+    # 0x800B0109 CERT_E_UNTRUSTEDROOT, 0x800B010A CERT_E_CHAINING
+    $untrustedChainResults = @([int]-2146762487, [int]-2146762486)
+    $chainTrusted = ($trustResult -eq 0)
+
+    [pscustomobject]@{
+        Path              = $Path
+        Status            = [string]$signature.Status
+        TrustResult       = ('0x{0:X8}' -f $trustResult)
+        SignerThumbprint  = $actual
+        PinnedSignerMatch = $pinnedSignerMatch
+        ChainTrusted      = $chainTrusted
+        Accepted          = ($pinnedSignerMatch -and ($chainTrusted -or $untrustedChainResults -contains $trustResult))
+    }
+}
+
+function Assert-PinnedSignature {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Thumbprint
+    )
+
+    $state = Get-PinnedSignatureState -Path $Path -Thumbprint $Thumbprint
+    if (-not $state.Accepted) {
+        throw ("Package signature validation failed: file={0}; status={1}; winVerifyTrust={2}; signer={3}" -f $Path,$state.Status,$state.TrustResult,$state.SignerThumbprint)
+    }
+    if (-not $state.ChainTrusted) {
+        Write-UpdateLog -Level WARN -Message ("Pinned signer accepted but its certificate chain is not trusted on this device: file={0}; winVerifyTrust={1}" -f $Path,$state.TrustResult)
+    }
+}
+
+function Get-FileCatalogDifference {
+    param([Parameter(Mandatory = $true)][object]$CatalogResult)
+
+    $differences = New-Object Collections.Generic.List[string]
+    $catalogItems = $CatalogResult.CatalogItems
+    $pathItems = $CatalogResult.PathItems
+    foreach ($key in @($catalogItems.Keys)) {
+        if (-not $pathItems.ContainsKey($key)) {
+            $differences.Add("missing=$key")
+        }
+        elseif ([string]$pathItems[$key] -ne [string]$catalogItems[$key]) {
+            $differences.Add("changed=$key")
+        }
+    }
+    foreach ($key in @($pathItems.Keys)) {
+        if (-not $catalogItems.ContainsKey($key)) {
+            $differences.Add("extra=$key")
+        }
+    }
+    return @($differences | Sort-Object)
+}
+
+function Assert-ModulePackageIntegrity {
+    param(
+        [Parameter(Mandatory = $true)][string]$ModuleBase,
+        [Parameter(Mandatory = $true)][string]$Thumbprint,
+        [switch]$SkipSignatureValidation
+    )
+
+    # The signed catalog covers every packaged file, including .cmd launchers,
+    # templates, images and version metadata that cannot carry Authenticode.
+    $catalogPath = Join-Path -Path $ModuleBase -ChildPath $script:PackageCatalogFileName
+    if (-not (Test-Path -LiteralPath $catalogPath -PathType Leaf)) {
+        throw "Package file catalog not found: $catalogPath"
+    }
+    if (-not $SkipSignatureValidation) {
+        Assert-PinnedSignature -Path $catalogPath -Thumbprint $Thumbprint
+    }
+
+    $catalogResult = Test-FileCatalog `
+        -Path $ModuleBase `
+        -CatalogFilePath $catalogPath `
+        -FilesToSkip $script:CatalogFilesToSkip `
+        -Detailed
+    if ([string]$catalogResult.Status -ne 'Valid') {
+        $differences = @(Get-FileCatalogDifference -CatalogResult $catalogResult)
+        throw ("Package file catalog validation failed: status={0}; differences={1}" -f
+            $catalogResult.Status,(@($differences | Select-Object -First 20) -join ', '))
+    }
+
     $powerShellFiles = @(Get-ChildItem -LiteralPath $ModuleBase -Recurse -File |
         Where-Object { $_.Extension -in @('.ps1', '.psm1', '.psd1') })
     if ($powerShellFiles.Count -eq 0) {
         throw "No PowerShell files found in package: $ModuleBase"
     }
-
-    foreach ($file in $powerShellFiles) {
-        $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
-        $actual = if ($signature.SignerCertificate) {
-            Get-NormalizedThumbprint $signature.SignerCertificate.Thumbprint
-        }
-        else {
-            ''
-        }
-
-        if ($signature.Status -ne 'Valid' -or $actual -ne $expected) {
-            throw ("Package signature validation failed: file={0}; status={1}; signer={2}" -f $file.FullName,$signature.Status,$actual)
+    if (-not $SkipSignatureValidation) {
+        foreach ($file in $powerShellFiles) {
+            Assert-PinnedSignature -Path $file.FullName -Thumbprint $Thumbprint
         }
     }
+}
+
+function ConvertTo-ProcessArgument {
+    param([AllowEmptyString()][string]$Value)
+
+    # Quotes one argument for the MSVCRT/CommandLineToArgvW rules used by
+    # powershell.exe -File: embedded quotes are escaped and every backslash run
+    # that precedes a quote, including the closing quote, is doubled.
+    $builder = New-Object Text.StringBuilder
+    [void]$builder.Append('"')
+    $backslashCount = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq [char]'\') {
+            $backslashCount++
+            continue
+        }
+        if ($character -eq [char]'"') {
+            [void]$builder.Append([char]'\', (2 * $backslashCount) + 1)
+        }
+        elseif ($backslashCount -gt 0) {
+            [void]$builder.Append([char]'\', $backslashCount)
+        }
+        [void]$builder.Append($character)
+        $backslashCount = 0
+    }
+    if ($backslashCount -gt 0) {
+        [void]$builder.Append([char]'\', 2 * $backslashCount)
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function Get-GalleryUpdateTaskArgumentString {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [Parameter(Mandatory = $true)][string]$TargetModuleName,
+        [Parameter(Mandatory = $true)][string]$TargetInstallPath,
+        [Parameter(Mandatory = $true)][string]$GuiTaskPath,
+        [Parameter(Mandatory = $true)][string]$GuiTaskName,
+        [Parameter(Mandatory = $true)][int]$GuiRepeatIntervalMinutes,
+        [Parameter(Mandatory = $true)][string]$ScheduledTaskPath,
+        [Parameter(Mandatory = $true)][string]$ScheduledTaskName,
+        [Parameter(Mandatory = $true)][int]$IntervalHours,
+        [bool]$Prerelease,
+        [Parameter(Mandatory = $true)][string]$SignerThumbprint
+    )
+
+    # Switches are passed bare: powershell.exe -File cannot convert the strings
+    # '$true'/'$false' to [bool] parameters.
+    $arguments = New-Object Collections.Generic.List[string]
+    foreach ($token in @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File')) {
+        $arguments.Add($token)
+    }
+    $arguments.Add((ConvertTo-ProcessArgument $ScriptPath))
+    $arguments.Add('-ModuleName')
+    $arguments.Add((ConvertTo-ProcessArgument $TargetModuleName))
+    $arguments.Add('-InstallPath')
+    $arguments.Add((ConvertTo-ProcessArgument $TargetInstallPath))
+    $arguments.Add('-TaskPath')
+    $arguments.Add((ConvertTo-ProcessArgument $GuiTaskPath))
+    $arguments.Add('-TaskName')
+    $arguments.Add((ConvertTo-ProcessArgument $GuiTaskName))
+    $arguments.Add('-RepeatIntervalMinutes')
+    $arguments.Add([string]$GuiRepeatIntervalMinutes)
+    $arguments.Add('-EnableAutomaticUpdate')
+    $arguments.Add('-UpdateTaskPath')
+    $arguments.Add((ConvertTo-ProcessArgument $ScheduledTaskPath))
+    $arguments.Add('-UpdateTaskName')
+    $arguments.Add((ConvertTo-ProcessArgument $ScheduledTaskName))
+    $arguments.Add('-UpdateIntervalHours')
+    $arguments.Add([string]$IntervalHours)
+    if ($Prerelease) {
+        $arguments.Add('-IncludePrerelease')
+    }
+    $arguments.Add('-ExpectedSignerThumbprint')
+    $arguments.Add((ConvertTo-ProcessArgument $SignerThumbprint))
+    return ($arguments -join ' ')
 }
 
 function Register-GalleryUpdateTask {
@@ -162,35 +480,20 @@ function Register-GalleryUpdateTask {
         $powerShellPath = 'powershell.exe'
     }
 
-    $arguments = @(
-        '-NoProfile'
-        '-ExecutionPolicy'
-        'Bypass'
-        '-File'
-        ('"{0}"' -f $ScriptPath)
-        '-ModuleName'
-        ('"{0}"' -f $ModuleName)
-        '-InstallPath'
-        ('"{0}"' -f $InstallPath)
-        '-TaskPath'
-        ('"{0}"' -f $TaskPath)
-        '-TaskName'
-        ('"{0}"' -f $TaskName)
-        '-RepeatIntervalMinutes'
-        $RepeatIntervalMinutes
-        '-EnableAutomaticUpdate:$true'
-        '-UpdateTaskPath'
-        ('"{0}"' -f $ScheduledTaskPath)
-        '-UpdateTaskName'
-        ('"{0}"' -f $ScheduledTaskName)
-        '-UpdateIntervalHours'
-        $IntervalHours
-        ('-IncludePrerelease:${0}' -f $IncludePrerelease.ToString().ToLowerInvariant())
-        '-ExpectedSignerThumbprint'
-        ('"{0}"' -f $ExpectedSignerThumbprint)
-    )
+    $argumentString = Get-GalleryUpdateTaskArgumentString `
+        -ScriptPath $ScriptPath `
+        -TargetModuleName $ModuleName `
+        -TargetInstallPath $InstallPath `
+        -GuiTaskPath $TaskPath `
+        -GuiTaskName $TaskName `
+        -GuiRepeatIntervalMinutes $RepeatIntervalMinutes `
+        -ScheduledTaskPath $ScheduledTaskPath `
+        -ScheduledTaskName $ScheduledTaskName `
+        -IntervalHours $IntervalHours `
+        -Prerelease ([bool]$IncludePrerelease) `
+        -SignerThumbprint $ExpectedSignerThumbprint
 
-    $action = New-ScheduledTaskAction -Execute $powerShellPath -Argument ($arguments -join ' ')
+    $action = New-ScheduledTaskAction -Execute $powerShellPath -Argument $argumentString
     $now = Get-Date
     $firstRun = $now.Date.AddHours(3)
     if ($firstRun -le $now) {
@@ -225,15 +528,23 @@ if (-not (Test-IsAdministrator)) {
 }
 
 try {
-    Write-UpdateLog "Starting Device Reboot Manager Gallery deployment. Module=$ModuleName; SkipPackageUpdate=$SkipPackageUpdate"
+    Write-UpdateLog "Starting Device Reboot Manager Gallery deployment. Module=$ModuleName; SkipPackageUpdate=$SkipPackageUpdate; RequestedVersion=$ModuleVersion"
+
+    if (-not [string]::IsNullOrWhiteSpace($ModuleVersion) -and -not $SkipPackageUpdate) {
+        throw '-ModuleVersion selects an installed version and requires -SkipPackageUpdate.'
+    }
 
     if (-not $SkipPackageUpdate) {
         Invoke-GalleryPackageUpdate -Name $ModuleName
     }
 
-    $moduleInfo = Get-LatestModuleInfo -Name $ModuleName
+    $moduleInfo = Resolve-DeploymentModuleInfo `
+        -Name $ModuleName `
+        -RequestedVersion $ModuleVersion `
+        -PreferLatest (-not $SkipPackageUpdate)
     $moduleBase = $moduleInfo.ModuleBase
-    Assert-ModuleSignature -ModuleBase $moduleBase -Thumbprint $ExpectedSignerThumbprint
+    Write-UpdateLog ("Selected module version {0} from {1}" -f $moduleInfo.Version,$moduleBase)
+    Assert-ModulePackageIntegrity -ModuleBase $moduleBase -Thumbprint $ExpectedSignerThumbprint
 
     $latestToolPath = Join-Path -Path $moduleBase -ChildPath 'Tools\SmartM365-DeviceRebootManager-GalleryUpdate.ps1'
     if (-not $SkipPackageUpdate -and $latestToolPath -ne $PSCommandPath) {
@@ -252,6 +563,7 @@ try {
             -UpdateIntervalHours $UpdateIntervalHours `
             -IncludePrerelease:$IncludePrerelease `
             -ExpectedSignerThumbprint $ExpectedSignerThumbprint `
+            -ModuleVersion ([string]$moduleInfo.Version) `
             -SkipPackageUpdate
         return
     }
@@ -297,6 +609,7 @@ try {
     $metadataPath = Join-Path $InstallPath 'SmartM365-DeviceRebootManager.installation.json'
     $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
     $metadata | Add-Member -NotePropertyName ModuleName -NotePropertyValue $ModuleName -Force
+    $metadata | Add-Member -NotePropertyName ModuleVersion -NotePropertyValue ([string]$moduleInfo.Version) -Force
     $metadata | Add-Member -NotePropertyName SignerThumbprint `
         -NotePropertyValue (Get-NormalizedThumbprint $ExpectedSignerThumbprint) -Force
     $metadata | Add-Member -NotePropertyName AutomaticUpdateEnabled `
@@ -316,8 +629,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqRVJVefXuqISM
-# ecSsajV7Co8AQqaiPu1cKUqB4UU2MqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCvni7Sfl+AXCu6
+# cvj85hm3USY/pwuPfLBCC5tFH42SC6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -408,25 +721,25 @@ catch {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -434,47 +747,47 @@ catch {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOF5EE1inR67fseaXIjPqYm8mpfj+oLyC4z2uauD2pQWMA0GCSqG
-# SIb3DQEBAQUABIIBgEwBd7wHYc7ogJ0Ni6ugd+aS5EFvknuS+J4Ymm9Ei1lhUTMU
-# 0ZnyfXF8yHiNZ7gR72x4vaRvmXDhPW+DpCY9KNBlz/K4sQzhuOrQGKnjQRo2LqQA
-# exh1Zdpg4kAgGB7o5CRAcBpuwFlQ8u589o0h0J9SQrAxn6tNmpAOk5oWhvCpb0Fj
-# FlwTzDlK6QR/8lPU7g1kDH1kOBW5gqtWti/JNBP3/o5nRg1VM4Wbh1SSS7Sk89qJ
-# rNvrKuMDJCmX90DDjOB8r5buQjv9rcwWS0x1C6Ulo3BQq9u9gzZGIvLaKnFZ0aQ9
-# f9auQBqdsfJyO4MZvD46W8e3WnfS2azFS3ts2h3l8/3AbnFIjgQ4wt7DWiul874A
-# zmo6IxUJfR12dOzc0z+7+FGS9Bf4cZZOtyuhmnsv9p3pysYcY3r+0jEwc5W3lbA5
-# ns4nsDnt7E/7p8dFOOskmH+4JlIqT1ZANVahMsOMTASa/44KINAFimgqNE1jqcJd
-# N40jQgo5y7hsw7tfqaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFAYjZoF/n4+osx9ozbdmm2WFH6qZ+TZSC4QNbjRMOMTMA0GCSqG
+# SIb3DQEBAQUABIIBgFRKxvx7YajpnisjLegGNRoRfidtT95snWPXhjC0V1L91i8r
+# M7bq1Jr6FyOtrcFUgFZQ3VIubgzQjo4YCZxVRpMzM1sZ3CT6QWAfddxJgyGL5cTN
+# RvUyZRYn0ULLA4geNPwzgoGTNcTs1NypmbuLFRPMD8g29iM/zbllv8jyPssRrGi5
+# V0dU9Rz6Dqpgf2+ThPtmCrpYmZZxqQ0+Evn5imaLtCof2Hm4ocLyyu/yjwnbfC2D
+# a1Rv/4NaeVIJ4WwCKEv666hEFadBN+ZsFinrCj/xhLovww0Hm/hmH4UDT+y3d56h
+# n4ofVPoyVBanNWlML0TPp0bUAxPjgl3TUn0KNiV4riaY9ct6mccVNfKio0ZNPcKa
+# M4RqEgLNPkNUhjy2S51NY8F2bypgN7nZIsVvrG8snJ1tRZ/BIumPZtdQ05aJqtwf
+# POmWKoSmBoBubCpTjI38JWlmQam+FkyDEHglJ75hTLiohPOsNVIWBYUXDEZojmA/
+# BwvUjRtvzrcoFVUocaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjkwNzU0
-# MThaMC8GCSqGSIb3DQEJBDEiBCCA8IHvMF8VwQRTdVE1A/hnX50bdwOtlzSmzqZr
-# YZHwIDANBgkqhkiG9w0BAQEFAASCAgB6rCvP/2Ysf3ILDeIdoUndDlSNhXMRgjAd
-# ZnJXqS2pBYEe4J2T/OS5u0WCOnEzISfxtwgeaYr0VaxDDlTqYaMBX4xlO3JIA1WZ
-# cR3gSn+O4uioLiU3xO+AyMcgHRWfjOYIBPwm4YUelPa3REFR7wV2XEpgBn+xPwjh
-# Pncc2YMdrSLxQgTcmxMJ81ub12mZcIazIq/1RoqBeX9T2O4yqrskqacWmFex47s9
-# dsLUmpVlJNEf1EtW4v4Xp4zR2SffVLKdiPbl2/bD7fMSvxDQ1TyHLeD0lgkePTVe
-# 8/DLKNrhfMPtzg+EtNDd9QRtfoa+s7skH6CXzYsC9yViMR3YdRi7etRM3idN0bEI
-# YE0GXHYLerrQUbXPN9DFvKuTH4XlrkZgGkoiJb1MnxItJjOL0/x27yfdHFKo5Vwz
-# y1oR3HiC2ocs5LSfT6zxgsJRJKR9JB5aDy4KE2QkVRWiXrmqFW9ykjXjHVoElfTh
-# nktEONkIWG3NlA/RzgCHccfEr69iryRiMrnnmQZSkQUYb++7YN+ADzAVPYI+YSgb
-# lSKdQp35BDm+l1vIKicQC20OX3+4NTJ/So+kK2fWcNAyuj68LNaeHur9oFJ0W0G1
-# USmU8VNuatVD5K3ntCrpofPlljf2yL8jR8TQC+WNBn7nRkZy7YHLyVbjIElx35vO
-# q5HJk1ToXA==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjJaMC8GCSqGSIb3DQEJBDEiBCC2jD6etXlfsyaTRxlxrZidL+EtMPHucXSYYXIO
+# E5I+pzANBgkqhkiG9w0BAQEFAASCAgCKmcWITdAhmLP9XJG264yVwInfsCed0QFG
+# 0EtJcGeJmMsP4mQRkvFOyjQA5eFimN83tpFgwGaoAiQd/IDneNs4nQw7nEKZH1gq
+# y2SM52TJSnxVMWJyA4rdNY78NDMT8/NBMO6aLXDySxAPb+u0ctM7tLZ0JY8WcHax
+# VGEc/rY1BeK89e33pliVWEw9mtam+dNDFOVmBgod8cMYqIeNlvAMBrSTPpo9rhCk
+# sW9sbaBTShZZ4prSYEqqo2xMgm4UBNwA2GHpFa5p0yog6aqmjptTbKD2bCfnjR/c
+# MV4aoGrITCtNKwgtMXmdMt+5InddnSH3dtR+Jg9TeTmBubPT1ve2mn2LlacoBEew
+# QlzaYZQCdu1FiyduciwenaCl2RfH4EV+mowlFcWTB0zhYP/VdAxCefxY8oOD1vwZ
+# NgXRxVeXmcrDc+ny72cUcy+MDgefAdfm2YGvSwvj1Cu3R4u6Hq+TzGaVj8z6t7ca
+# QL/rkiSk9BP9Q/ZfmRjZ2iR7wGAzR2nupgHPKIA2clAqCkMnJfI/ObGVT+j0+1zV
+# BCYmqBebIe1DlJdtcYfj+5IgUcb2AN6wtZwEfDPIEj8ODrPkLnbekbnwtHg0Zclr
+# RiUDhkb/s4/DmfFb46BRVQJmN53+Y/17t1d0VO6j93ZLTnLJ14RjAnx6+Efo5opg
+# vZwb5BeksA==
 # SIG # End signature block

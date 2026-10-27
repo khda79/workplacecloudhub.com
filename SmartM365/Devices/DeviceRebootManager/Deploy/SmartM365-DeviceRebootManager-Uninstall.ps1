@@ -3,11 +3,18 @@
 <#
 .SYNOPSIS
     Uninstalls SmartM365 Device Reboot Manager.
+
+.DESCRIPTION
+    Removes the scheduled tasks, the Program Files installation and any
+    pre-1.1.0 ProgramData installation left on the device.
+.VERSION
+    1.1.0
 #>
 
 [CmdletBinding()]
 param(
-    [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+    [string]$InstallPath = (Join-Path -Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) -ChildPath 'WCH\SmartDeviceRebootManager'),
+    [string]$LegacyInstallPath = (Join-Path -Path $env:ProgramData -ChildPath 'SmartM365\DeviceRebootManager'),
     [string]$TaskPath = '\SmartM365\',
     [string]$TaskName = 'Device Reboot Manager',
     [string]$UpdateTaskPath = '\SmartM365\',
@@ -16,6 +23,34 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Remove-DirectoryWithoutFollowingLinks {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $item) { return }
+
+    # Explicit walk: links (junctions, symlinks) are removed, never traversed, so a
+    # user-created junction cannot redirect a SYSTEM deletion. Remove-Item -Recurse
+    # follows junctions in PS 5.1 and Directory.Delete(recursive) is not portable here.
+    if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        foreach ($child in $item.GetFileSystemInfos()) {
+            $isLink = [bool]($child.Attributes -band [IO.FileAttributes]::ReparsePoint)
+            if ($child -is [IO.DirectoryInfo] -and -not $isLink) {
+                Remove-DirectoryWithoutFollowingLinks -Path $child.FullName
+            }
+            elseif ($child -is [IO.DirectoryInfo]) {
+                [IO.Directory]::Delete($child.FullName, $false)
+            }
+            else {
+                $child.Attributes = [IO.FileAttributes]::Normal
+                [IO.File]::Delete($child.FullName)
+            }
+        }
+    }
+
+    [IO.Directory]::Delete($item.FullName, $false)
+}
 
 try {
     $task = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -42,10 +77,24 @@ if (Test-Path -LiteralPath $InstallPath) {
         $configPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json'
         Get-ChildItem -LiteralPath $InstallPath -Force |
             Where-Object { $_.FullName -ne $configPath } |
-            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+            ForEach-Object {
+                if ($_.PSIsContainer) { Remove-DirectoryWithoutFollowingLinks -Path $_.FullName }
+                else { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+            }
     }
     else {
-        Remove-Item -LiteralPath $InstallPath -Recurse -Force
+        Remove-DirectoryWithoutFollowingLinks -Path $InstallPath
+    }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($LegacyInstallPath) -and
+    [IO.Path]::GetFullPath($LegacyInstallPath).TrimEnd('\') -ne [IO.Path]::GetFullPath($InstallPath).TrimEnd('\') -and
+    (Test-Path -LiteralPath $LegacyInstallPath)) {
+    try {
+        Remove-DirectoryWithoutFollowingLinks -Path $LegacyInstallPath
+    }
+    catch {
+        Write-Warning ("Unable to remove legacy installation {0}: {1}" -f $LegacyInstallPath, $_.Exception.Message)
     }
 }
 
@@ -54,8 +103,8 @@ Write-Output 'SmartM365 Device Reboot Manager uninstalled.'
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBdkMfQp//Gbqkn
-# Fh0rBr3Z2mKGiNDzX8WI+5oX3SdwlaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCR58pFMK8fT/wb
+# Ed2l990KskUvaR9PB2zWEYdVu65sBqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -146,25 +195,25 @@ Write-Output 'SmartM365 Device Reboot Manager uninstalled.'
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -172,47 +221,47 @@ Write-Output 'SmartM365 Device Reboot Manager uninstalled.'
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIMuoCWnYolizJZ3CKxoQZvmsWK9POi2rp7NOqMwso0gMA0GCSqG
-# SIb3DQEBAQUABIIBgDq+AJ7fA+ShBs98Il5ZsBWhgpsB0dwMakl/M22UjfNXhU+S
-# 5KVTKuDoxXj7nqcbFO+ZeTr7osJIijgJ8v7EDXFCcKIVhD2U6rMZJu6h47IZYZ63
-# it3YEm3ARX5BR73N3/IatGB+45DV7XW82zsMYRN9ym8wzV44LqHJxZofk5eZgC6d
-# i/I9HGc+CR4WnJ38INKw3dqPwrfJQEdxxJVOuuK2QN9jjxp4lSLdp0oZnKR5qN2X
-# U3svGTaFGonDgjCzORhKyDq632V6s/7GZxnyd4VOy7B7L4/Qw4MQcNQ4UzGXplq5
-# JKif2LDc689I37tbc0KrB4xrgxEkO7QNkw4WzNlT6V2LHNwDRU9+baOcaHymVOVy
-# H/c0QX4DuFxoLtXfbM4fUZ8pJ/knidYXf/4nrFiG5yQtVKU0H+YXrqL4IHVvHzqq
-# Euoqnmktw+fVt/b+chaWJgBCkCpgKdi6jl08l7R0tE4wH4a9v9EHIP48yUpUO6f3
-# 8o+uoaRGLhKS0hoW+6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIAmMF512HS2agNIqpTD1RhAICK2bi0XHH3/P5E51SH9MA0GCSqG
+# SIb3DQEBAQUABIIBgIkxRurnAfzeLTdCc25rdqJuBeHnatFJAbXz391m0F0GZUk0
+# vy/9VXA5HXihuJCeoKovyQFUqYW6LK1OQxL3L5WE/4OgSNhGG8z4PCrwEvQks1kf
+# gJgNoIGvKB93o3NCMv/++RJdQoHKn9wMq7TlKpW6FdR+A5xdTlEf1UCljaf5MQKR
+# U3bnTfi3/bcEcjI2dSSCpP4aj87UM9gxzCXaoroDoAjsXToX4Yd6qbuA90dQBg1S
+# I+HMEfAvMB8eBuHzTPIMBqqq3ygk+suZ+qAKCfMXIcrWg7dSq9RYxTZkDuWZOB0N
+# pd6dfVXmjoz2G1IatDXCwCACEx3Fk9MEfZoF+Z0Sm7F36omp6d9LRWv3oJ02FOSv
+# Df3WFPGhTPQqy35j2+RZF6/ylKCiDFkuKSUvCMujfJy3xGNWLriS1bUG71Uy6sgv
+# J4tNUs1Fb5QrQmfxkFauuCkD7OVFAHqdI+crfpCKNzsKDJKeu21/HKqHEBaPMPg2
+# Z9yFz4T4IdXF6I3Te6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjgyMzA2
-# NTVaMC8GCSqGSIb3DQEJBDEiBCClnEvuV1j9kKt5lXjk76SaFfcjzyAhuYecowYb
-# eVG4XTANBgkqhkiG9w0BAQEFAASCAgABL/2cGENrY7ExpCNlBiThpuU/iAnZ8OUv
-# qQjKGJBXncZeaUo+GFbgPOBCqlvpIh5o32rzE2xA5Kfjn6cahNE5IPgtMOTsPY+v
-# zpwcMxCkhxTPKXJ3N7jtJb7QG9QZ9VeUiFnQzfCn4XE4cfjPnLKM7AAS4zMVaBP6
-# MH3BCmZps8/I3Djpw/WsR1JVvRcJm1CqifQI1BEVopOnZl20aCVWMdZcudN46iYE
-# RfrtFqMWkvv3X/mfbg3G4W5AUFuosvyJHi2/9yNhR1dOMizTk2h4XTgzePtkrt5q
-# zSn1NvD0n83LO44BMtW2xDcanZKZ9hJCa7FMiceP+Q+hXSRizojQ+IGDMQUDbI+l
-# AEo76ffLXk6wNWsAqWJfzKkU6e+S1FkoyaCvrOo6LVByMjlAdwLZrxeeUfOFLWQh
-# lcPqBxqPR1q81+NYx1N+sGlX2zUwlPiZBhE4b+3A8UBZXRHvS+W7asKyaphtEaMw
-# 222UMB6R2kYFCn7LBtt5meh+jC3CKNx0z1t/UDX6dPddfkRWUZq33bIFczdCDnMh
-# pRDd5cMP5fY8yX+62EjEGS9FeR0yoQZ1KK/cvzB0EuV5bHJoebgRr7YCVZjb8bim
-# 6Spzweh0uwageY1c/AtKhrJM+RP8BsJYhhxNgF2rjU/Pl8Guj4LcYZbZJf2kPzpR
-# raKKZnZRmg==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjJaMC8GCSqGSIb3DQEJBDEiBCC0q4TBtgkw+1F7Fme0z0polbrh7vnXPYq6Oh6H
+# Okn3MzANBgkqhkiG9w0BAQEFAASCAgCbj2rupGR2IbWOKM1NwkiWN2f4DlKYy8QL
+# X8l/t9TlfX9cGbFg2T/OPnbsiYS9dXByqLFpyHlW+3pYf/EcKZLv/zkMWPVVGGlf
+# yYqs4wJIkPI7lyl2TwVIJvQpIBtH6rN+sU2x4EwIw7zfgY+Bzdk/I1ZegLLqASU+
+# Dk0k36KWH6KHJ5FNwM7JwsVCB9ty0jcFf59/oAC8w0NBUFBg93/TXIsVfm3gOpLZ
+# 8hAqeyUbcaDmllHoAsHAPDhtwAmM8SbhhRo1zKPGUG3wFesC/nvD6oED7LCCamKG
+# cL1Xf+lh21rgYhqeGQJ1ZSj/iTp8a6Ua+98sr5xgT69lcHGigzPRfR9j6nRKhYrC
+# aSAc+Cso6XRJqPWFCL4JMSgTlYqvNZN+aFHW418LlwxAkaNUemVdlOkQLy5vKLXn
+# /sSTeVxhXuGhl0ABQtHw2nrQAgAy7R7/tfU9srXMzPHXIgvKIBn4A2Zv//6JJMd4
+# PMRFfoehyQD9aFJAAK4OLeifFm4oVl1ov2OOazKnjVaIqWqDNf9DxlK6BO5Q3kZh
+# KHdJqRV4wN+AWmyBFmMtoR8BuKuN6HbYHAGYB8WO/P04gYtQWzGl6r/49CjptZag
+# he2HZ5ohpHpYxpiKF0uIo9/bwIFhobK9i1jQ7CjLq2tnnuEnZ1cVxgwtFeeI3t5r
+# 7fMwNCHkpQ==
 # SIG # End signature block

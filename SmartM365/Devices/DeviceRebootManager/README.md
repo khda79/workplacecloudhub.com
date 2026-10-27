@@ -17,6 +17,17 @@ Launch `Start-SmartM365-DeviceRebootManager-Demo.cmd` from the root of the extra
 
 The signed runtime source is identified by the [build 2 source tag](https://github.com/khda79/workplacecloudhub.com/tree/device-reboot-manager-v1.0.0-build.2/SmartM365/Devices/DeviceRebootManager). GitHub publication does not publish a version to the PowerShell Gallery service.
 
+## Next release 1.1.0 (source, not yet published)
+
+The repository source is version **1.1.0**. It is not published yet; until then the 1.0.0 build 2 downloads above remain current. When built and published, the release will use the tag `releases/tag/device-reboot-manager-v1.1.0` and the artifacts `SmartM365-DeviceRebootManager-1.1.0.zip`, `SmartM365-DeviceRebootManager-1.1.0.intunewin` and `SmartM365-DeviceRebootManager-1.1.0.sha256`.
+
+Changes in 1.1.0:
+
+- Installs to `C:\Program Files\WCH\SmartDeviceRebootManager` (administrator-only) and removes the legacy, user-writable `C:\ProgramData\SmartM365\DeviceRebootManager` installation.
+- Restart enforcement: no forced restart when the boot time is unreadable, forced and verified restart command, wall-clock countdown persisted per boot, locale-independent disconnected-session detection.
+- Gallery channel: working automatic-update task, signed file catalog covering every packaged file, one signature rule, rollback to an installed module version.
+- Release and Intune publication: the `.intunewin` is decrypted and compared with the runtime, interrupted publications can be resumed, SAS upload URLs are renewed.
+
 Local WPF user notification app for SmartM365 device restart governance.
 
 ## Scripts
@@ -36,7 +47,7 @@ Local WPF user notification app for SmartM365 device restart governance.
 - The app is Windows-only and uses Windows PowerShell 5.1, WPF, and the Windows ScheduledTasks module.
 - The published Intune Win32 metadata targets x64 devices and declares Windows 10 version 1607 as its minimum supported operating system.
 - Direct GUI and preview launches run in the signed-in user's interactive session. The deployed GUI task also runs interactively with `RunLevel Limited`; it does not run the user interface in session 0 or with administrator rights.
-- Installation, update, and removal write under `C:\ProgramData` and register or remove scheduled tasks, so they must run elevated. The Intune Win32 install and uninstall commands are designed to run as `SYSTEM`.
+- Installation, update, and removal write under `C:\Program Files\WCH\SmartDeviceRebootManager` and register or remove scheduled tasks, so they must run elevated. The Intune Win32 install and uninstall commands are designed to run as `SYSTEM`.
 - A real restart remains subject to local Windows rights and policy. Use `-PreviewOnly` or the test launcher to review required and recommended states without restarting the device.
 - The shipped PowerShell files are Authenticode-signed with the self-signed `workplacecloudhub.com` code-signing certificate, thumbprint `D70ECB7B00377EBFB76B304C08DFC6620584E114`. A valid file signature does not make that certificate trusted automatically on every endpoint; trust still depends on the local certificate stores and execution policy. Verify the published SHA-256 values as well as the expected signer before deployment.
 - The tool provides local restart notification and governance. Intune remains responsible for application assignment, rollout, retry, reporting, and rollback when the Win32 package is used.
@@ -74,7 +85,7 @@ powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -File .\SmartM365\Tests\T
 
 1. `-ConfigPath` when provided.
 2. `SmartM365-DeviceRebootManager-GUI.config.json` next to the script.
-3. `%ProgramData%\SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.config.json`.
+3. `%ProgramData%\SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.config.json`. Standard users can create files there, so deployed installs always pass `-ConfigPath` to the installed, administrator-owned file.
 4. `%APPDATA%\SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.config.json`.
 
 The committed template contains safe generic defaults only. Runtime `.json` files are local operational configuration.
@@ -91,6 +102,8 @@ Users can change the UI language from the language selector in the GUI. The choi
 
 `SplashEnabled` controls the startup WorkplaceCloudHub splash. Set it to `false` to disable the splash. Keep it enabled and customize `SplashMinimumDurationMs`, `SplashProductName`, `SplashBadgeText`, `SplashSubtitle`, and `SplashLogoPath` to adapt the splash for a deployment. The splash URL remains `https://workplacecloudhub.com`.
 
+Missing keys are added from the committed template when the configuration is loaded. The installer persists them on upgrade; the GUI saves them only when the configuration file is writable, otherwise it applies them in memory. Boolean values accept JSON booleans or the strings `true`/`false`; any other value is rejected.
+
 At each launch, the current `SmartM365-DeviceRebootManager.log` is archived to a timestamped log file and a fresh log is created. Only the 10 most recent archived logs are retained.
 
 ## Intune Win32 Deployment
@@ -101,8 +114,18 @@ Do not package the whole working folder because it can contain private runtime
 configuration. The install script copies the runtime files to:
 
 ```text
-C:\ProgramData\SmartM365\DeviceRebootManager
+C:\Program Files\WCH\SmartDeviceRebootManager
 ```
+
+Only administrators and `SYSTEM` can write there, so a standard user cannot
+modify code that runs in other users' sessions or, for the Gallery updater, as
+`SYSTEM`. Versions before 1.1.0 installed into
+`C:\ProgramData\SmartM365\DeviceRebootManager`, where standard users can
+create files and folders. The 1.1.0 installer and uninstaller remove that
+legacy folder without following links and do not migrate its configuration:
+deploy a custom configuration again with `-ConfigSourcePath`. Per-user log,
+reminder state and language preference stay under
+`%APPDATA%\SmartM365\DeviceRebootManager`.
 
 It also creates this scheduled task:
 
@@ -111,6 +134,13 @@ It also creates this scheduled task:
 ```
 
 The task runs in the interactive user session, not in session 0. It starts at user logon and repeats every 240 minutes by default. The GUI script exits silently when the restart threshold is not reached, so regular execution is expected.
+
+Restart behavior:
+
+- When the last boot time cannot be read, the GUI exits without reminder or restart; it never assumes the required threshold.
+- A forced restart uses `Restart-Computer -Force` for administrators and `shutdown.exe /r /f /t 0` for standard users, so open applications cannot block it. The command result is checked; a failure is logged, shown to the user and recorded as `RestartFailed`, which does not start the reminder cooldown.
+- The forced countdown follows the wall clock. Its deadline and postpone count are stored per boot in the user's reminder state, so closing the process or signing out does not grant a new countdown or new postpones. An already expired deadline gets a 5-minute grace period. Preview and test runs never store this state.
+- Disconnected sessions are detected from the Windows session state, independently of the display language.
 
 Recommended Intune Win32 commands:
 
@@ -124,7 +154,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-Devic
 
 Use `Deploy\SmartM365-DeviceRebootManager-Detection.ps1` directly as the
 Intune custom detection script. Its default expected version is
-`0.1.0`; update that value for every new Intune package:
+`1.1.0`; update that value for every new Intune package:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-DeviceRebootManager-Detection.ps1
@@ -195,11 +225,13 @@ new installer performs the in-place update without first uninstalling the old
 version. The script does not enable the local Gallery updater and does not
 replace other app assignments.
 
-If publication fails after the app content is committed, rerun with
+If publication fails after the app is created, rerun with
 `-ResumeAppId <incomplete-app-id>`. The script validates the existing app name,
-publisher, package-version notes, and committed content version before it resumes
-supersedence and assignment. It does not upload the package or create another app
-in recovery mode.
+publisher and package-version notes before it resumes. When the app has no
+committed content version (a failure during upload), it uploads and commits the
+package into that app instead of creating a duplicate; otherwise it resumes
+supersedence and assignment only. The duplicate-name check points to
+`-ResumeAppId` when an app with the same name already exists.
 
 To recreate only the scheduled task on an already installed device:
 
@@ -253,9 +285,25 @@ Install-SmartM365DeviceRebootManager -EnableAutomaticUpdate $true
 
 When enabled, the deployment registers
 `\SmartM365\Device Reboot Manager Update` under `SYSTEM`. Every 24 hours, it
-checks the stable PowerShell Gallery channel by default, validates every
-packaged PowerShell file against the pinned WorkplaceCloudHub signer, preserves
-the local runtime configuration, and redeploys the runtime.
+checks the stable PowerShell Gallery channel by default, validates the module
+against the pinned WorkplaceCloudHub signer, preserves the local runtime
+configuration, and redeploys the runtime.
+
+Package integrity: every PowerShell file must carry a valid signature from the
+pinned WorkplaceCloudHub certificate, and the signed
+`SmartM365.DeviceRebootManager.Files.cat` catalog must match every packaged file
+(launchers, configuration template, version file, images): a changed, missing or
+extra file stops the installation. Signatures are checked with WinVerifyTrust:
+a signature is accepted only when the file digest is intact and the signer is the
+pinned certificate. A root that the device does not trust (the current
+self-signed certificate) is accepted with a warning; any other failure, such as a
+modified file, is rejected.
+
+`Install-SmartM365DeviceRebootManager` deploys the runtime of the module version
+that runs it, so importing an older installed version
+(`Import-Module SmartM365.DeviceRebootManager -RequiredVersion <version>`) and
+installing again rolls back. The newest installed version is selected only after
+an automatic update.
 
 Operational commands:
 
@@ -286,8 +334,9 @@ checks from an elevated Windows PowerShell session:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SmartM365-Test-DeviceRebootManagerGalleryVm.ps1 -Execute -TrustSignerCertificate
 ```
 
-`-TrustSignerCertificate` is intended only for the isolated pilot VM while the
-package uses the current self-signed WorkplaceCloudHub certificate. Add
+`-TrustSignerCertificate` is optional: an untrusted self-signed root is accepted
+with a warning when the signer is the pinned certificate. Use it only on the
+isolated pilot VM to test with a trusted chain. Add
 `-CleanupAfterTest` to remove the product and the certificate trust entries
 created by the validation.
 
@@ -316,7 +365,7 @@ powershell.exe -STA -NoProfile -File .\SmartM365-DeviceRebootManager-GUI.ps1 -Ne
 Use a specific config file:
 
 ```powershell
-powershell.exe -STA -NoProfile -File .\SmartM365-DeviceRebootManager-GUI.ps1 -ConfigPath C:\ProgramData\SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.config.json
+powershell.exe -STA -NoProfile -File .\SmartM365-DeviceRebootManager-GUI.ps1 -ConfigPath "C:\Program Files\WCH\SmartDeviceRebootManager\SmartM365-DeviceRebootManager-GUI.config.json"
 ```
 
 Launch through the CMD wrapper:

@@ -205,7 +205,7 @@ $drm=$reboot+@'
 
 Initialize-Observation 'Pending-Reboot-Age-DeviceRebootManager'
 function Get-ScheduledTask { [CmdletBinding()]param($TaskPath,$TaskName)
- $gui=Join-Path $env:ProgramData 'SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1'
+ $gui=Join-Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) 'WCH\SmartDeviceRebootManager\SmartM365-DeviceRebootManager-GUI.ps1'
  [pscustomobject]@{State='Ready';Principal=[pscustomobject]@{RunLevel='Limited';GroupId='S-1-5-32-545';LogonType='Group'};Actions=@([pscustomobject]@{Execute=(Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe');Arguments=('-STA -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$gui+'"')})}
 }
 function Get-AuthenticodeSignature { [CmdletBinding()]param($LiteralPath) [pscustomobject]@{Status='Valid'} }
@@ -215,6 +215,7 @@ Invoke-PackageCase 'drm-task-start' Reboot Pending-Reboot-Age-DeviceRebootManage
 Invoke-PackageCase 'drm-elevated-task' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm.Replace("RunLevel='Limited'","RunLevel='Highest'")) 1 'Status=Error'
 Invoke-PackageCase 'drm-invalid-signature' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm.Replace("Status='Valid'","Status='HashMismatch'")) 1 'Status=Error'
 Invoke-PackageCase 'drm-injected-action' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm.Replace('-STA -NoProfile','-Command evil -STA -NoProfile')) 1 'Status=Error'
+Invoke-PackageCase 'drm-legacy-programdata' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm.Replace('$(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) ''WCH\SmartDeviceRebootManager\','$env:ProgramData ''SmartM365\DeviceRebootManager\')) 1 'Status=Error'
 Invoke-PackageCase 'drm-running-task' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm.Replace("State='Ready'","State='Running'")) 0 'AlreadyRunning'
 Invoke-PackageCase 'drm-missing-task' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm+"`nfunction Get-ScheduledTask { [CmdletBinding()]param(`$TaskPath,`$TaskName) throw 'Synthetic task missing' }") 1 'Status=Error'
 
@@ -253,8 +254,8 @@ if($failed.Count){exit 1}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDeQfGNYiHt3bjc
-# /N1VKTQbe7ESsgecZLONOB2q6rcmC6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCbKBZZsL2aFH9C
+# 8YyC+tJWEdCDetFLKRXIy1E4kw4xf6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -387,31 +388,31 @@ if($failed.Count){exit 1}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINGuQ8TTPmDWzCp7tdzpdfoVuud4BETZrdzMbHsH+AC3MA0GCSqG
-# SIb3DQEBAQUABIIBgEmdCh4PV+meeR7E7/yKEGHV2HdMEpyZB9y6fYCnSHJXCtVg
-# IMhmQ8uM+ycabdt+j+Q12TMsD2OzmAQt9w9gZCzRieMOW9LIx7VaNb69s/6qr1zK
-# 0bJBY6TIZhxYTygS2IDTfCYmK15pvaYaxAibdivDhhTKmh9IaAygCFLty4UqQ03X
-# EXf2rMntCBdKh5Ddc5o9l7RXBfMY2ptYwYu23VI6+c5hHWVWxRmg5Pjs90KHnmKS
-# 4uheIcvug4IRfj1DpU4d5F3+sZSej6PJTJl7qPVf+ISarM18uLtXZ4H0zW6xumwg
-# 00rqKz0Wt14fVTWJrTBAtOTlwV5eIUDM4ds4ttZ7UGN5GLplTfsRmvgTSa7wKQwI
-# gvBQvXIs30m5DFhE+RpLNWP0wuipngzKvH+c90ecB5r3ViEzx6OsUoCakbY7F5QC
-# u6FHH8Dtl1iF+taeKjvfQ2vAkQKsUjuie+528cM21SkDsKfDxLz4JWqVAUa6sN2O
-# cG9qlHxiIsk5L2Sf1KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINEXaSLYQKRmZFnppjjocpm85VUdJoYUpeXaV2gefYTsMA0GCSqG
+# SIb3DQEBAQUABIIBgJdFH7cX4GFLWbIBWKTokQxWRirNpZeDdXpRJ5e3X4EEqD87
+# mKp9eLdulqd7KQzl+wpX95p4Bd7O25/obw/B75QJdwC738zu+xpagmP65EIDLmsp
+# sbZVDo4obcaNUPoPdpkHa/GcQuFp/fYp7vDWUkXdMjsZx7JoAEYDmHV37k8Iviom
+# z25ytzvfml1GhEpnkT5teshIVGLFzze7JSn3Grl0RqElRKcFl+RHM9dgmaHOC5oL
+# 637O31/fpeINCR1DcXYzJBphZBMoFm02S/yr9qvjkHZesghmBc5528npjFM9haGD
+# IHlu/fwSSMSaMaQfsVZycsVMHSfczOJBF5dNg1HjNK84PkdI/fqCmU74MjIIG9hW
+# ONN2o3zSRgh+BTBQ/sMGy9C9eULMiFvko4h3yy1Qupb/MXUMKdCfCjYWevarn72t
+# 1PmOQDcI0fGFGDO8O5XrFXDjjxKIgIiSFsYPhz1yTl8CqPbDc0gyCZ3rrXr8CK8e
+# IECzyAhY9jpOeB8Pr6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzQ1
-# MzFaMC8GCSqGSIb3DQEJBDEiBCD5VNvGLK+hW1N0M7D9rRfRycVyqDxXGhTr8l7d
-# RRm4jTANBgkqhkiG9w0BAQEFAASCAgCtXWLVke0feL+neIDFyGj1BY4XQ41pma7b
-# 5LaLnvrq5CFmfGxo+SbPRtKuH5/A6+4UuTWAfkg5oXV7b0xTwockIegS8oiL5NPp
-# 5QGSlQ402tFwc5z+oaUcdgvcKKBzsFS/FGj7/wfjkjJYegl70Ew1U2lg3FB9iSSh
-# mFh2sD9X2SvFfwoqa8gxXK+WS3sDRkFFTDuRCIiW169QL8MHlgpgMyJqux2VDc1C
-# hZPTZ8WEEoowqn3Jn5MsTDZUKb/MWg7LF4Qqj4BoHv2ecK9xqrO7G6aTxZdADRIC
-# pZ3cfYmi6b41V8stqpP4RcdBLODMGmjJjgAYx2FXtttqbv2dL4mz1V94ivDRVIbf
-# yXJtFpadaxqjAq0wYJIDt1ggCNqkTen1ZdgdEQypR9K7GoR8U96D/W4wZY7d/4HL
-# 0VKxdIRQGsWlxbCbb6pzq4ME1wRWvsA6qTrRlpih7NQ5JAFG9zeNzsMqtJxFKsMJ
-# oL8TAzagWMy6ifMHBEcNVB2dpb3o9Nif+MrPuYrTeygqNDbw51LiFS/e9Dii3s68
-# cU2vLcV5Hr/0aDCQQQqmaNdW4j981Wd90XwptWEs3rXKks2npeI3qo1oOG3svA5j
-# B5GRwZL4fTtekasZWYLvUHuu5QUMAgfruyulSl/wsqCdNlCfpZYEgnYhuSgf7MqA
-# nlf3aag5zA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjVaMC8GCSqGSIb3DQEJBDEiBCAdS86F9c6r6z2cv00dWlqpubQ0bdJV/s3xvH62
+# HAhVkTANBgkqhkiG9w0BAQEFAASCAgBBGn395UkK2ioWRZn6k19xahLBMnpyIFtH
+# 9ZLY2rUmKSgs2kOyC8gko1jAv/2xu6ke0N1jPBdlkUIRnMwvfUgzp8aH9dBKqiXq
+# PeclRqSif41AO01H1NgpRkMcwBspnBkcMdOqjLeVGC+4HBxrDL7f6/t/SWPw6lhd
+# ngm0TtBL3g6cT2t8tsAmyJfkxDFeoBm/SwTUTftPdAr8xFkCWKhSPjjOLcluiwzA
+# wsQYiWQXZLfL9RYYdLjto9C3KiTcL6rFHpK9c++VUvDbb0Qy0cLNK7C8pvP6F4Fo
+# qXsQHew0OWeHbrxPA5U+4s2rC9+s2ZNEh0UAioULizrn2moC2IK9lswblTW5K1xf
+# mWhQ1boPUXsKTU84fQ9s2rY8bhyexp/kQNlkdcqLVetaV+WQKDy4ErmXd3d7Fi3L
+# J/O7qOXbky3/9KQEBWj/F/wTPRef1hlSjksbDPVZVwCX97LiShGLlm+sbcLXIwqx
+# 2bqLp4Fz4nZ05a5VEB+2PgFkCziqXIsFcJcenFEOycX+VGkXwhAwU3xUdsFYIH59
+# NsMuopuhTd8vf4TyeN0rBNBtq+cQvADp8PpgyD7w50ZKjgBNqi70qaXNtRFowpi5
+# zdUIz6gyHK/ZNkclDCHkLWnRke5O8IDX2PC9YXyGot26xN+qg0d9iyhkUg7+kZuN
+# dk7o5hPTLA==
 # SIG # End signature block

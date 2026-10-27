@@ -1,8 +1,12 @@
 ﻿<#
 .SYNOPSIS
-Validates or packages the complete application runtime, including offline demo dependencies.
+PowerShell Gallery module that installs, updates, reports and removes SmartM365 Device Reboot Manager.
+.DESCRIPTION
+Install deploys the runtime carried by this module version. Update first updates
+the module from PowerShell Gallery, then deploys the newest installed version.
+The default installation path is the admin-only Program Files\WCH\SmartDeviceRebootManager.
 .VERSION
-1.0.1
+1.1.0
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -13,7 +17,7 @@ $script:GalleryUpdateScriptName = 'SmartM365-DeviceRebootManager-GalleryUpdate.p
 function Get-SmartM365DeviceRebootManager {
     [CmdletBinding()]
     param(
-        [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+        [string]$InstallPath = (Join-Path -Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) -ChildPath 'WCH\SmartDeviceRebootManager'),
         [string]$TaskPath = '\SmartM365\',
         [string]$TaskName = 'Device Reboot Manager',
         [string]$UpdateTaskPath = '\SmartM365\',
@@ -68,7 +72,7 @@ function Get-SmartM365DeviceRebootManager {
 function Install-SmartM365DeviceRebootManager {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
-        [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+        [string]$InstallPath = (Join-Path -Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) -ChildPath 'WCH\SmartDeviceRebootManager'),
         [string]$ConfigSourcePath = '',
         [switch]$ForceConfig,
         [switch]$SkipScheduledTask,
@@ -89,6 +93,9 @@ function Install-SmartM365DeviceRebootManager {
         throw "Package deployment helper not found: $toolPath"
     }
 
+    # Deploy exactly this module version, even when a newer one is installed.
+    $currentModuleVersion = [string]$MyInvocation.MyCommand.Module.Version
+
     if ($PSCmdlet.ShouldProcess($InstallPath, 'Install SmartM365 Device Reboot Manager')) {
         & $toolPath `
             -ModuleName $script:ModuleName `
@@ -104,6 +111,7 @@ function Install-SmartM365DeviceRebootManager {
             -UpdateTaskName $UpdateTaskName `
             -UpdateIntervalHours $UpdateIntervalHours `
             -IncludePrerelease:$IncludePrerelease `
+            -ModuleVersion $currentModuleVersion `
             -SkipPackageUpdate
     }
 }
@@ -111,7 +119,7 @@ function Install-SmartM365DeviceRebootManager {
 function Update-SmartM365DeviceRebootManager {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
-        [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+        [string]$InstallPath = (Join-Path -Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) -ChildPath 'WCH\SmartDeviceRebootManager'),
         [string]$TaskPath = '\SmartM365\',
         [string]$TaskName = 'Device Reboot Manager',
         [ValidateRange(15, 10080)]
@@ -155,7 +163,7 @@ function Update-SmartM365DeviceRebootManager {
 function Uninstall-SmartM365DeviceRebootManager {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param(
-        [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+        [string]$InstallPath = (Join-Path -Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) -ChildPath 'WCH\SmartDeviceRebootManager'),
         [string]$TaskPath = '\SmartM365\',
         [string]$TaskName = 'Device Reboot Manager',
         [string]$UpdateTaskPath = '\SmartM365\',
@@ -194,8 +202,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC9BrnEhc4qE1fQ
-# DnKJfmAiG0gKosI6NefNpjreDCj9eKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3wSK2eig+Cius
+# /vW5jvqMzlaHRqqk+vsHKUI6caip06CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -328,31 +336,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKTru+BYGgfz7/nojTGzjJjMKiGMRTtpm0uil9HrN6DBMA0GCSqG
-# SIb3DQEBAQUABIIBgIQOMGfVZiCxZx/dPTLLvndWmS+W/eKHmdcX6YLgn29FsATp
-# 17NB8x7Vst2gsTtwZVUJQ8LKrNkK2Oy7OvOq2GHzyMffALxFTPKnhzhP8C/arU8B
-# pglDeAESbGVjdVhZ0AZpkgCrBFtfmnGPYlWO7E9WACPTuK4gfwL/bHm6UUyiVZp7
-# UKkE1WbH9F0H54uHp8Yzm9sv4uP0ahso2F5WOW7nQ7/3Z2ZRWKCdIvTLjAk6TNkq
-# K0z3f9SST7r9zGChmT7/FqpNL4wLjLpvP4ex/hHw/lj1PurdkNfGvQ18YVEPDAgx
-# SwWasy43BiWzT3RbFP1qRmp1teUgTO2RMTveB4Fg4ojbcXzlsB0p64bXIE+rwDB0
-# pXjGqbVMjCAZnGE0GvhBH5555DQDvO4h2KWuJbkSpylZRVYVqdLVdP1Mlc3hx4Xh
-# DSqH1SLEmgh+tdvyUAsZ/P3641Oc73iSlDo3jfeur3ZH1Z9aPCGJtgI4ruET+aH0
-# ImVY3Fdj+h+YM8/ytaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILJCyAEI+U276Qhpvuq7emK+zj2nL01CzZMoO33ua6LmMA0GCSqG
+# SIb3DQEBAQUABIIBgGFLBPjiUtzFpZsdBwMkCeVT1M1G655v+rQFHs/3PX7+/ET8
+# EABDlQjB2WWMr0FaBTIrMcvk5yUPqHpFGcS447RMsfTxjBhMVlHFkJmi+b7KYic0
+# gDOJRyXEY/dEyuna2u2hdg1PQfvvgBUkEw5r4wAHAOZ//U7P44mQFa80TIUXSBv8
+# N1K8bfIyVlUMFgmUd+moBp+Mx4NW5ake/6lFYIWNKqDXoQ8nIFGM6iPEyD7bAZvK
+# AuDKNq8ewM1esXDYPYIx2jDa5VaXxHZi3Zu8XtnUHUecNtMVP0LfS3bFHJsko+iV
+# bRF8WSdEnKuqwyG1GW3qnjoac1i1ttkZkWPVMahRoLpjAV4lG/9dR28YT0KeeF+C
+# eer288n+EkWHMReKcfXvgdFkG+AwK9QeU2oXpNCPodT3VIrUUBAJnCXiga5VxKlK
+# BLAo53S5WfbeFTqwufeduxBmhYUtihuuRxuLg0osyq5M+3bykqi2wjR/hfzzEg+U
+# dMFzT73kr09QZX/PjaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMjM5
-# NTdaMC8GCSqGSIb3DQEJBDEiBCAX5vYfFXOQWzeI5wdwJEBWqPnEIYZfiiYLsjhL
-# P4RuiTANBgkqhkiG9w0BAQEFAASCAgBbG5DdQsdcHPcprjNt6hnC5hNIl80vcq0I
-# FsnvPQmxHNRM2YKIKk31Lx50WNRkDITUnADzPMapaJ4nNRvEBa5N/YVjWktI68uC
-# GNXVuZKTfomvBU8X1woBRFMMTHo3cJs2kdp4zHNPAuJOLrd6NG4AukmfHK7xsod5
-# Ia0n7Y+KvYi9QeJUwyCHCvET44pz9DKw5/iG5iIhlOAem8nFYAkjPgSTfOKEEPSy
-# WZURx8XZsmy9l+C/5AV5B9/kR6dTTT7Ggo13xXqBMYxtxBAnPSxO1JEmc0/igVVW
-# DRpIzibtl2Bo9xcBkTAZov9Xo/UWbKvqHPsd5uoRoJ4MF7cq7thp77taHhrpDK0V
-# LWTLDymt+LbtLd+pvdehFTNpXftyOKtNRWc/nacu1III+6KqyHQZrJkv3+ka4kEb
-# FEZb+WflVXWUaz8yeJFxd4HwI8AjCYfWxJroCo2dhbCSt89Ns0iid3SkJx/G92y/
-# mFk3hJmeMXE42uiO4JbhZ0YBIE5HgNjzcLwvRXrzIlM1Fy25XVYCjorplstXOXK7
-# oWfJ9Mqn/EfizKaGEqQhoLdar1n4NflCNpnFtpVlWRDhRZUgLiEHIgzkQrwmZwne
-# XIk1vmFA6WoZCkDok59vekN4dY2ghWhEPsSq7/695wQ4NCTlAW8j5UVltxIdX6YB
-# NEh6r395LQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjJaMC8GCSqGSIb3DQEJBDEiBCBgKsZv5oU22bGEH+L75eLSuEGc/Dn4needR9XS
+# T5wvqzANBgkqhkiG9w0BAQEFAASCAgBruzeDEIbnIQvyxaEi2/cg7Corwe/qh89w
+# VhfZ4b07j/QrFoDOnybVGOYyffLa70d5czPXX64GHr2IPVDv9RpoeOHJeSiufqgY
+# bqVZYnTDIK6CcMEU5CSe1wCj8z/Nou5P1swok9/L2Kt8ELb2eeaT2yfTJtQ6en6p
+# tHw1BIVyive2KWCX+bUBFONjULE3Z32HtcV9h3cXBsUs0olKfiEPwlsbbTk2zbUH
+# z8VWdpMUfLR7dbjEHZ8BKkXIr2GMHUkrGGlbFYgyrFx6IKVhZqzPZdsHl8Hv3sNH
+# W+WUzYX301a0JTVfkf1n1q2R8qsjByYU7EDirYZvLb32cHP+vGR6LlP33adOLbgg
+# ElK2Wxw1dulBQEvigRH5c8aQ/g4t7EXg53rsoyUCn6YHQDVBj0S+FRxKk3eiK/JW
+# 0Djw1iPn7/48t8MJMLOV0ZY0wlIakjpxf0Emq0oZdvFiYiJ/UyRkbBpJqhl8Xn+N
+# p9JpZnafAWxLsZdBZ/Iy20T1cwlHlHSOXkpRvrWUBA/V1gijb8U2sJ9QB4Jdw6jk
+# couJtB+g7geGll8aG/+GBK5DAGvX6XNhhmUSKW3waFuqkvVmP8M2xC5TjEh/wimR
+# XsgoZ0BQsCdT3KvxCDw0RwX5yQhixTLHAWEC0drq+8GUhe8UtDJezat4T9ePF5MU
+# J/FalsfA6w==
 # SIG # End signature block

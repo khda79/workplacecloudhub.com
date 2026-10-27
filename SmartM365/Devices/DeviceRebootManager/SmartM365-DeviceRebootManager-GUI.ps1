@@ -11,7 +11,7 @@
     local logging.
 
 .VERSION
-    1.0.0
+    1.1.0
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -60,7 +60,12 @@ foreach ($key in $PSBoundParameters.Keys) {
 }
 
 $script:AppName = 'Smart Device Reboot Manager'
+$script:AppVersion = '1.1.0'
 $script:AppFolderName = 'SmartM365\DeviceRebootManager'
+# Grace period granted when a forced countdown persisted for this boot has already expired.
+$script:ResumedCountdownMinimumSeconds = 300
+$script:PersistForcedCountdown = $false
+$script:DeadlineUtc = $null
 $script:StartTopmost = $true
 $script:RestoreTopmostAfterPostpone = $true
 $script:RestoreTopmostAfterMinutes = 5
@@ -244,11 +249,17 @@ function Read-AppConfig {
     $programConfig = Join-Path -Path $script:ProgramDataRoot -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json'
     $userConfig = Join-Path -Path $script:UserDataRoot -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json'
 
-    if (-not [string]::IsNullOrWhiteSpace($ConfigPath) -and -not (Test-Path -LiteralPath $ConfigPath)) {
-        Initialize-AppConfigFromTemplate -ConfigPath $ConfigPath -TemplatePath $scriptTemplateConfig | Out-Null
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($ConfigPath) -and -not (Test-Path -LiteralPath $ConfigPath)) {
+            Initialize-AppConfigFromTemplate -ConfigPath $ConfigPath -TemplatePath $scriptTemplateConfig | Out-Null
+        }
+        elseif (-not (Test-Path -LiteralPath $scriptConfig) -and -not (Test-Path -LiteralPath $programConfig) -and -not (Test-Path -LiteralPath $userConfig)) {
+            Initialize-AppConfigFromTemplate -ConfigPath $scriptConfig -TemplatePath $scriptTemplateConfig | Out-Null
+        }
     }
-    elseif (-not (Test-Path -LiteralPath $scriptConfig) -and -not (Test-Path -LiteralPath $programConfig) -and -not (Test-Path -LiteralPath $userConfig)) {
-        Initialize-AppConfigFromTemplate -ConfigPath $scriptConfig -TemplatePath $scriptTemplateConfig | Out-Null
+    catch {
+        # Read-only application folders (Program Files, shares) are expected for standard users.
+        Write-AppLog -Level WARN -Message ("Unable to create local configuration from template. Defaults will be used. {0}" -f $_.Exception.Message)
     }
 
     $effectivePath = Get-FirstExistingPath -Paths @($ConfigPath, $scriptConfig, $programConfig, $userConfig)
@@ -258,7 +269,78 @@ function Read-AppConfig {
     }
 
     Write-AppLog -Message ("Loading configuration: {0}" -f $effectivePath)
-    return Get-Content -LiteralPath $effectivePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $config = Get-Content -LiteralPath $effectivePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (Test-Path -LiteralPath $scriptTemplateConfig) {
+        Add-MissingConfigKeys -Config $config -ConfigPath $effectivePath -TemplatePath $scriptTemplateConfig
+    }
+    return $config
+}
+
+function Add-MissingTemplateProperties {
+    param(
+        [Parameter(Mandatory = $true)][object]$Target,
+        [Parameter(Mandatory = $true)][object]$Template,
+        [string]$Prefix = ''
+    )
+
+    $added = New-Object System.Collections.Generic.List[string]
+    foreach ($templateProperty in $Template.PSObject.Properties) {
+        $name = $templateProperty.Name
+        $existing = $Target.PSObject.Properties[$name]
+        if ($null -eq $existing) {
+            $Target | Add-Member -NotePropertyName $name -NotePropertyValue $templateProperty.Value
+            $added.Add($Prefix + $name)
+        }
+        elseif ($templateProperty.Value -is [System.Management.Automation.PSCustomObject] -and $existing.Value -is [System.Management.Automation.PSCustomObject]) {
+            foreach ($nestedName in (Add-MissingTemplateProperties -Target $existing.Value -Template $templateProperty.Value -Prefix ($Prefix + $name + '.'))) {
+                $added.Add($nestedName)
+            }
+        }
+    }
+
+    return $added.ToArray()
+}
+
+function Add-MissingConfigKeys {
+    param(
+        [Parameter(Mandatory = $true)][object]$Config,
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [Parameter(Mandatory = $true)][string]$TemplatePath
+    )
+
+    try {
+        $template = Get-Content -LiteralPath $TemplatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $added = @(Add-MissingTemplateProperties -Target $Config -Template $template)
+        if ($added.Count -eq 0) { return }
+
+        Write-AppLog -Message ("Configuration keys added from template: {0}" -f ($added -join ', '))
+        try {
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [IO.File]::WriteAllText($ConfigPath, ($Config | ConvertTo-Json -Depth 8), $utf8NoBom)
+            Write-AppLog -Message ("Configuration saved with template keys: {0}" -f $ConfigPath)
+        }
+        catch {
+            # Installed configurations are admin-owned; the installer persists new keys on upgrade.
+            Write-AppLog -Level DEBUG -Message ("Configuration not writable; template keys applied in memory only. {0}" -f $_.Exception.Message)
+        }
+    }
+    catch {
+        Write-AppLog -Level WARN -Message ("Unable to merge configuration template keys. {0}" -f $_.Exception.Message)
+    }
+}
+
+function ConvertTo-ConfigBoolean {
+    param([object]$Value, [string]$Name)
+
+    if ($Value -is [bool]) { return $Value }
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double]) { return ($Value -ne 0) }
+
+    switch -Regex (([string]$Value).Trim()) {
+        '^(?i:true|1|yes|on)$' { return $true }
+        '^(?i:false|0|no|off|)$' { return $false }
+    }
+
+    throw ("Invalid boolean value for configuration key '{0}': {1}" -f $Name, $Value)
 }
 function Get-ConfigValue {
     param(
@@ -277,7 +359,7 @@ function Get-ConfigValue {
     switch ($Type) {
         'int' { return [int]$property.Value }
         'intArray' { return @($property.Value | ForEach-Object { [int]$_ }) }
-        'bool' { return [bool]$property.Value }
+        'bool' { return (ConvertTo-ConfigBoolean -Value $property.Value -Name $Name) }
         default { return [string]$property.Value }
     }
 }
@@ -389,6 +471,10 @@ function Save-ReminderState {
         ComputerName = $env:COMPUTERNAME
         UserName = $env:USERNAME
     }
+    if ($script:PersistForcedCountdown -and $null -ne $script:DeadlineUtc) {
+        $state.ForcedDeadlineUtc = $script:DeadlineUtc.ToString('o')
+        $state.PostponeCount = [int]$script:PostponeCount
+    }
 
     Initialize-AppFolder
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -439,15 +525,25 @@ function Test-ReminderCooldown {
 
     if ($null -eq $State) { return $false }
     if (-not $State.LastReminderUtc) { return $false }
+    # A failed restart must not silence the next reminder.
+    if ([string]$State.LastReason -eq 'RestartFailed') { return $false }
 
     try {
-        $lastReminder = [datetime]::Parse($State.LastReminderUtc).ToUniversalTime()
+        $lastReminder = ConvertFrom-StateTimestamp -Value $State.LastReminderUtc
         $ageHours = ((Get-Date).ToUniversalTime() - $lastReminder).TotalHours
         return ($ageHours -lt [double]$script:Effective.ReminderCooldownHours)
     }
     catch {
         return $false
     }
+}
+
+function ConvertFrom-StateTimestamp {
+    param([object]$Value)
+
+    # PowerShell 7 ConvertFrom-Json already returns DateTime values for ISO 8601 strings.
+    if ($Value -is [datetime]) { return $Value.ToUniversalTime() }
+    return [datetime]::Parse([string]$Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
 }
 
 function Get-LastBootTime {
@@ -457,9 +553,41 @@ function Get-LastBootTime {
         return [Management.ManagementDateTimeConverter]::ToDateTime($os.LastBootUpTime)
     }
     catch {
-        Write-AppLog -Level WARN -Message ("Last boot detection failed, falling back to max threshold. {0}" -f $_.Exception.Message)
-        return (Get-Date).AddDays(-[int]$script:Effective.RequiredRestartAfterDays)
+        # Never infer a forced restart from a failed uptime query.
+        Write-AppLog -Level WARN -Message ("Last boot detection failed. {0}" -f $_.Exception.Message)
+        return $null
     }
+}
+
+function Restore-ForcedCountdownState {
+    param(
+        [object]$State,
+        [Parameter(Mandatory = $true)][datetime]$LastBoot
+    )
+
+    if ($null -eq $State -or -not $State.ForcedDeadlineUtc -or -not $State.LastBootUtc) { return $false }
+
+    try {
+        $savedBootUtc = ConvertFrom-StateTimestamp -Value $State.LastBootUtc
+        # LastBootUpTime can drift by a few seconds between CIM queries for the same boot.
+        if ([Math]::Abs(($savedBootUtc - $LastBoot.ToUniversalTime()).TotalMinutes) -gt 2) { return $false }
+
+        $savedDeadlineUtc = ConvertFrom-StateTimestamp -Value $State.ForcedDeadlineUtc
+        $minimumDeadlineUtc = (Get-Date).ToUniversalTime().AddSeconds($script:ResumedCountdownMinimumSeconds)
+        $script:DeadlineUtc = if ($savedDeadlineUtc -lt $minimumDeadlineUtc) { $minimumDeadlineUtc } else { $savedDeadlineUtc }
+        $script:PostponeCount = [Math]::Max(0, [int]$State.PostponeCount)
+        Write-AppLog -Message ("Forced countdown resumed for this boot. DeadlineUtc={0}; PostponeCount={1}" -f $script:DeadlineUtc.ToString('o'), $script:PostponeCount)
+        return $true
+    }
+    catch {
+        Write-AppLog -Level WARN -Message ("Unable to resume forced countdown state. A new countdown starts. {0}" -f $_.Exception.Message)
+        return $false
+    }
+}
+
+function Update-SecondsRemainingFromDeadline {
+    if ($null -eq $script:DeadlineUtc) { return }
+    $script:SecondsRemaining = [int][Math]::Ceiling(($script:DeadlineUtc - (Get-Date).ToUniversalTime()).TotalSeconds)
 }
 
 function Get-PrimaryIPv4Address {
@@ -542,10 +670,29 @@ function Test-UserSessionVisible {
     if ($script:Effective.TestRequiredRestart -or $script:Effective.TestRecommendedRestart) { return $true }
 
     try {
-        $sessionLines = & query session $env:USERNAME 2>$null
-        $sessionMatch = $sessionLines | Where-Object { $_ -match [regex]::Escape($env:USERNAME) } | Select-Object -First 1
-        if ($sessionMatch -match 'Disc') {
-            Write-AppLog -Level WARN -Message ("Session for {0} appears disconnected. Exiting without showing UI." -f $env:USERNAME)
+        # Query the WTS connect state of this process session; 'query session' output is localized.
+        if (-not ('SmartM365.DeviceRebootManager.WtsSession' -as [type])) {
+            Add-Type -Namespace 'SmartM365.DeviceRebootManager' -Name 'WtsSession' -MemberDefinition @'
+[DllImport("wtsapi32.dll", SetLastError = true)]
+public static extern bool WTSQuerySessionInformation(IntPtr hServer, int sessionId, int infoClass, out IntPtr buffer, out int bytesReturned);
+[DllImport("wtsapi32.dll")]
+public static extern void WTSFreeMemory(IntPtr memory);
+'@
+        }
+
+        $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+        $buffer = [IntPtr]::Zero
+        $bytesReturned = 0
+        $wtsConnectState = 8
+        if (-not [SmartM365.DeviceRebootManager.WtsSession]::WTSQuerySessionInformation([IntPtr]::Zero, $sessionId, $wtsConnectState, [ref]$buffer, [ref]$bytesReturned)) {
+            throw (New-Object System.ComponentModel.Win32Exception([Runtime.InteropServices.Marshal]::GetLastWin32Error()))
+        }
+        try { $connectState = [Runtime.InteropServices.Marshal]::ReadInt32($buffer) }
+        finally { [SmartM365.DeviceRebootManager.WtsSession]::WTSFreeMemory($buffer) }
+
+        $wtsDisconnected = 4
+        if ($connectState -eq $wtsDisconnected) {
+            Write-AppLog -Level WARN -Message ("Session {0} for {1} is disconnected. Exiting without showing UI." -f $sessionId, $env:USERNAME)
             return $false
         }
     }
@@ -556,6 +703,15 @@ function Test-UserSessionVisible {
     return $true
 }
 
+function ConvertTo-ProcessArgument {
+    param([AllowEmptyString()][string]$Value)
+
+    # CommandLineToArgvW rules: double backslashes that precede a quote, escape embedded quotes.
+    $escaped = [regex]::Replace($Value, '(\\*)"', { param($m) ($m.Groups[1].Value * 2) + '\"' })
+    $escaped = [regex]::Replace($escaped, '(\\+)$', { param($m) $m.Groups[1].Value * 2 })
+    return ('"{0}"' -f $escaped)
+}
+
 function Invoke-RelaunchSta {
     $exe = (Get-Process -Id $PID).Path
     $arguments = New-Object System.Collections.Generic.List[string]
@@ -564,13 +720,13 @@ function Invoke-RelaunchSta {
     $arguments.Add('Bypass')
     $arguments.Add('-Sta')
     $arguments.Add('-File')
-    $arguments.Add(('"{0}"' -f $PSCommandPath))
+    $arguments.Add((ConvertTo-ProcessArgument -Value $PSCommandPath))
 
     foreach ($key in @('RecommendedRestartAfterDays','RequiredRestartAfterDays','RestartCountdownMinutes','DefaultPostponeMinutes','MaxPostponeCount','ReminderCooldownHours','DefaultLanguage','WindowIconPath','WindowTitle','CompanyName','LanguageCatalogPath')) {
         $value = $script:Effective[$key]
         if ($null -ne $value -and "$value" -ne '') {
             $arguments.Add("-$key")
-            $arguments.Add(('"{0}"' -f $value))
+            $arguments.Add((ConvertTo-ProcessArgument -Value ([string]$value)))
         }
     }
 
@@ -588,7 +744,7 @@ function Invoke-RelaunchSta {
     if ($script:Effective.ForceLanguage) { $arguments.Add('-ForceLanguage') }
     if ($ConfigPath) {
         $arguments.Add('-ConfigPath')
-        $arguments.Add(('"{0}"' -f $ConfigPath))
+        $arguments.Add((ConvertTo-ProcessArgument -Value $ConfigPath))
     }
 
     Start-Process -FilePath $exe -ArgumentList ($arguments -join ' ') -WindowStyle Hidden | Out-Null
@@ -596,22 +752,26 @@ function Invoke-RelaunchSta {
 }
 
 function Invoke-SafeRestart {
+    <#
+    Returns $true when the restart was initiated (or intentionally simulated/skipped),
+    $false when the restart command failed. Failures are logged and shown to the user.
+    #>
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Reason = 'User action')
 
     if ($Demo) {
         Write-AppLog -Message 'DEMO: restart simulated. No restart command was executed.'
-        return
+        return $true
     }
     if ($script:PreviewOnly) {
         Write-AppLog -Level WARN -Message ("PreviewOnly is enabled. Restart skipped. Reason={0}" -f $Reason)
         [System.Windows.MessageBox]::Show('Preview mode is enabled. No restart was triggered.', $script:AppName, 'OK', 'Information') | Out-Null
-        return
+        return $true
     }
 
     if (-not $PSCmdlet.ShouldProcess($env:COMPUTERNAME, 'Restart computer')) {
         Write-AppLog -Level WARN -Message 'Restart skipped by ShouldProcess.'
-        return
+        return $true
     }
 
     Write-AppLog -Level WARN -Message ("Restart requested. Reason={0}" -f $Reason)
@@ -621,12 +781,26 @@ function Invoke-SafeRestart {
             Restart-Computer -Force
         }
         else {
-            Start-Process -FilePath 'shutdown.exe' -ArgumentList '/r /t 0' -WindowStyle Hidden
+            # /f is required: with /t 0 it is not implied, and open applications could block the restart.
+            $shutdownPath = Join-Path -Path $env:SystemRoot -ChildPath 'System32\shutdown.exe'
+            $process = Start-Process -FilePath $shutdownPath -ArgumentList '/r /f /t 0' -WindowStyle Hidden -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+                throw ("shutdown.exe exited with code {0}." -f $process.ExitCode)
+            }
         }
+        return $true
     }
     catch {
-        Stop-AppWithError -Message ("Restart failed: {0}" -f $_.Exception.Message) -ExitCode 20
+        Write-AppLog -Level ERROR -Message ("Restart failed. Reason={0}; Error={1}" -f $Reason, $_.Exception.Message)
+        try { Save-ReminderState -Reason 'RestartFailed' -DaysSinceReboot $script:DaysSinceReboot -LastBoot $script:LastBoot }
+        catch { Write-AppLog -Level WARN -Message ("Unable to save failed restart state. {0}" -f $_.Exception.Message) }
+        Show-RestartFailedMessage
+        return $false
     }
+}
+
+function Show-RestartFailedMessage {
+    [System.Windows.MessageBox]::Show($script:Strings.RestartFailed, $script:AppName, 'OK', 'Error') | Out-Null
 }
 
 function Import-AppStringsCatalog {
@@ -730,6 +904,9 @@ function Get-AppStrings {
     if (-not $english.ContainsKey('LanguageAuto')) {
         $english.LanguageAuto = 'Automatic'
     }
+    if (-not $english.ContainsKey('RestartFailed')) {
+        $english.RestartFailed = 'The device could not be restarted automatically. Save your work and restart it from the Start menu.'
+    }
 
     Write-AppLog -Message ("Language selected: {0}" -f $selected)
     return [pscustomobject]$english
@@ -805,7 +982,7 @@ function Get-EffectiveWindowTitle {
         return [string]$script:Effective.WindowTitle
     }
 
-    $baseTitle = ('{0} v1.0.0' -f $script:Strings.WindowTitle)
+    $baseTitle = ('{0} v{1}' -f $script:Strings.WindowTitle, $script:AppVersion)
     if (-not [string]::IsNullOrWhiteSpace([string]$script:DetectedCompanyName)) {
         return ('{0} - {1}' -f $script:DetectedCompanyName, $baseTitle)
     }
@@ -938,7 +1115,7 @@ function New-RebootManagerWindow {
     [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart Device Reboot Manager v1.0.0"
+        Title="Smart Device Reboot Manager v$($script:AppVersion)"
         Width="800"
         Height="600"
         MinWidth="760"
@@ -1047,7 +1224,7 @@ function New-RebootManagerWindow {
                         <TextBlock x:Name="StatusPillText" Foreground="#005A9E" FontWeight="SemiBold" FontSize="12"/>
                     </Border>
                     <TextBlock x:Name="TitleText" Margin="0,12,0,0" FontSize="28" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
-                    <TextBlock x:Name="ProductVersionText" Text="v1.0.0" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/>
+                    <TextBlock x:Name="ProductVersionText" Text="v$($script:AppVersion)" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/>
                     <TextBlock x:Name="SummaryText" Margin="0,8,0,0" FontSize="14" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                 </StackPanel>
                 <Border Grid.Column="1" Width="116" Height="116" CornerRadius="58" Background="#EAF6FF" Margin="18,0,0,0">
@@ -1205,8 +1382,13 @@ if ($ResetRunState -and (Test-Path -LiteralPath $script:StatePath)) {
 
 Write-AppLog -Message ("Starting. RecommendedRestartAfterDays={0}; RequiredRestartAfterDays={1}; RestartCountdownMinutes={2}; PreviewOnly={3}; NeverForceRestart={4}" -f $script:Effective.RecommendedRestartAfterDays, $script:Effective.RequiredRestartAfterDays, $script:Effective.RestartCountdownMinutes, $script:PreviewOnly, $script:Effective.NeverForceRestart)
 
+$isTestRun = [bool]($script:Effective.TestRequiredRestart -or $script:Effective.TestRecommendedRestart)
 $lastBoot = Get-LastBootTime
-$daysSinceReboot = (New-TimeSpan -Start $lastBoot -End (Get-Date)).Days
+if ($null -eq $lastBoot -and -not $isTestRun) {
+    Write-AppLog -Level WARN -Message 'Last boot time is unavailable. Exiting without reminder or restart.'
+    [Environment]::Exit(0)
+}
+$daysSinceReboot = if ($null -ne $lastBoot) { (New-TimeSpan -Start $lastBoot -End (Get-Date)).Days } else { 0 }
 if ($script:Effective.TestRequiredRestart) {
     $daysSinceReboot = [int]$script:Effective.RequiredRestartAfterDays + 1
     $lastBoot = (Get-Date).AddDays(-$daysSinceReboot)
@@ -1224,8 +1406,9 @@ if ($daysSinceReboot -lt [int]$script:Effective.RecommendedRestartAfterDays) {
     [Environment]::Exit(0)
 }
 
-if (-not $script:ForceMode -and -not ($script:Effective.TestRecommendedRestart -or $script:Effective.TestRequiredRestart)) {
-    $state = Read-ReminderState
+$state = $null
+if (-not $isTestRun) { $state = Read-ReminderState }
+if (-not $script:ForceMode -and -not $isTestRun) {
     if (Test-ReminderCooldown -State $state) {
         Write-AppLog -Message ("Reminder cooldown is still active ({0} hours). Exiting." -f $script:Effective.ReminderCooldownHours)
         [Environment]::Exit(0)
@@ -1258,6 +1441,24 @@ $script:LastBoot = $lastBoot
 $script:PrimaryIPv4Address = Get-PrimaryIPv4Address
 $script:InitialSeconds = [Math]::Max(60, [int]$script:Effective.RestartCountdownMinutes * 60)
 $script:SecondsRemaining = $script:InitialSeconds
+
+if ($script:ForceMode) {
+    # Persist the deadline and postpone count per boot so closing the process or the session
+    # does not grant a fresh countdown. Preview and test runs never persist enforcement state.
+    $script:PersistForcedCountdown = (-not $script:PreviewOnly -and -not $isTestRun)
+    $resumed = $false
+    if ($script:PersistForcedCountdown) {
+        $resumed = Restore-ForcedCountdownState -State $state -LastBoot $lastBoot
+    }
+    if (-not $resumed) {
+        $script:DeadlineUtc = (Get-Date).ToUniversalTime().AddSeconds($script:InitialSeconds)
+    }
+    Update-SecondsRemainingFromDeadline
+    $script:InitialSeconds = [Math]::Max($script:InitialSeconds, $script:SecondsRemaining)
+    if ($script:PersistForcedCountdown) {
+        Save-ReminderState -Reason 'ForcedCountdown' -DaysSinceReboot $daysSinceReboot -LastBoot $lastBoot
+    }
+}
 
 $script:Strings = Get-AppStrings
 $script:Window = New-RebootManagerWindow
@@ -1321,9 +1522,14 @@ $script:Ui.RestartButton.Add_Click({
         }
         if ($script:Timer) { $script:Timer.Stop() }
         Save-ReminderState -Reason 'RestartNow' -DaysSinceReboot $daysSinceReboot -LastBoot $lastBoot
-        $script:AllowClose = $true
-        $script:Window.Close()
-        Invoke-SafeRestart -Reason 'RestartNow'
+        if (Invoke-SafeRestart -Reason 'RestartNow') {
+            $script:AllowClose = $true
+            $script:Window.Close()
+        }
+        elseif ($script:Timer) {
+            # Keep the forced countdown running; it retries the restart when it expires.
+            $script:Timer.Start()
+        }
     }
 })
 
@@ -1333,9 +1539,11 @@ $script:Ui.PostponeButton.Add_Click({
         if ($script:PostponeCount -ge [int]$script:Effective.MaxPostponeCount) { return }
         $selectedText = [string]$script:Ui.PostponeCombo.SelectedItem
         $minutes = [int](([regex]::Match($selectedText, '\d+')).Value)
-        $script:SecondsRemaining += ($minutes * 60)
+        if ($minutes -le 0) { return }
+        $script:DeadlineUtc = $script:DeadlineUtc.AddMinutes($minutes)
         $script:InitialSeconds += ($minutes * 60)
         $script:PostponeCount++
+        Update-SecondsRemainingFromDeadline
         Save-ReminderState -Reason ("Postpone{0}Minutes" -f $minutes) -DaysSinceReboot $daysSinceReboot -LastBoot $lastBoot
         Write-AppLog -Message ("Restart postponed by {0} minutes. Count={1}/{2}" -f $minutes, $script:PostponeCount, $script:Effective.MaxPostponeCount)
         Set-PostponeState
@@ -1371,15 +1579,18 @@ if ($script:ForceMode) {
     $script:Timer.Interval = [TimeSpan]::FromSeconds(1)
     $script:Timer.Add_Tick({
         Invoke-Safely {
-            $script:SecondsRemaining--
+            # Wall-clock deadline: sleep, hibernation or a busy dispatcher cannot stretch the countdown.
+            Update-SecondsRemainingFromDeadline
             if ($script:SecondsRemaining -le 0) {
                 $script:Timer.Stop()
                 Save-ReminderState -Reason 'CountdownExpired' -DaysSinceReboot $daysSinceReboot -LastBoot $lastBoot
                 Write-AppLog -Level WARN -Message 'Countdown expired. Restart will be triggered.'
-                $script:AllowClose = $true
-                $script:Window.Close()
-                Invoke-SafeRestart -Reason 'CountdownExpired'
-                return
+                if (Invoke-SafeRestart -Reason 'CountdownExpired') {
+                    $script:AllowClose = $true
+                    $script:Window.Close()
+                    return
+                }
+                Stop-AppWithError -Message 'Restart failed after countdown expiry. The scheduled task will retry.' -ExitCode 20
             }
 
             if ($script:RestoreTopmostAfterPostpone) {
@@ -1414,8 +1625,8 @@ Write-AppLog -Message $script:Strings.ClosedGui
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCChadRaWjDWrO0B
-# 4V6/9iuEVfhCyAzfQHZ/qSU7FB/nmaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA4S/YYcyLm9m3N
+# PPH6YJKvdi4cfOI0PJMvt7KIljbpJaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1548,31 +1759,31 @@ Write-AppLog -Message $script:Strings.ClosedGui
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIQPIJYyt/Hu2zPBp/t0KLwafcXN8OqjOww8z5ui+G9fMA0GCSqG
-# SIb3DQEBAQUABIIBgAM6UEsvUpN9UZ1OexpWTgz+he8yIZhEZaTT/FZkGH+QVdtk
-# FcYIAOiA8BPCiSo/JHXJ4MEq3Tsc7jTK5lSPxAV3Um+CU5IlvjU18+BlBe+VEZkh
-# urtgSDzAcltPp0BNCQOGKgnvfsqPu3pi6PySFwNGTAwstY/hyBeja2SmN5g8VE+/
-# upCnvBnUX+jHVGCnURCyxHVisCH2O6a27rU3Ms3Y/St8/FD3oyhJw08A0H2Pi33u
-# MiRGgcBwvvzE5fECapPS9a8x70IBBMEtYQypzhIN3G2H4LgZhVeqi1If+mPDwKBi
-# 19BOuT+dLr/W2x8lNNGnUyDghruMlVuIg+MJPJ2sKP7dFG6fmWDaDP0Wrk9UNed8
-# GLWl0LseH/ll3Z3ZA8XFWM46fwk+ruS9wSnuTynaTfaZ4NUHPndGFEQyGWO5Xmwl
-# YwbKIJBVSTXKcC1Hd3vClhAuwn/a+0gc9I0rWsSeaz8aC+LDmTZEPU5igNCHrIlA
-# o6QOkMNZuL2kVuMpraGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII6zIl8M8y2ZgPxnxoq1lHVa7jrkm+k3g+Vl0+iPXNEdMA0GCSqG
+# SIb3DQEBAQUABIIBgKqYZcTu0GzewqiWdm8AMsYx/G7haGFMvuKiYiouI9ZB89y4
+# PBrYU6uj8xhatwgj1FjZ6nMlGH0wj7uuryjUJyJYEZ1XZKrKI9+H9gTxYjkf8mYV
+# lGgJd3rvqTqDQTLeu1EBY0uzrlTdTVObeGjGdiH/u0B4xjw+q3mFrc6dnlmyZPcx
+# qu4jWI7y57qtt/RgVld8YsOktxOuvskDTElFJvPvZIh1MQvqel05vAa3o8AdHMY+
+# pbvx9PXIZ5Op/9N7XD2QdYV7ms+QvzQdUdI7tEJYkL8I7yhXsixcGEaoW1UN1tuB
+# VHgJy5CfQHTPeSUqpWkK/cF5m1NYZjtcOZFGI+9GafXq8Wwhbit9DTWZzcq2dP6j
+# moDGj+e/z9Uo0LuKUbb59operJf8p+oNqRaZtrBoK2r5Q44Bu6wGTnAUQwESg66u
+# qdiaWBYnOAD3hSSm2Lpmap1HDgWoSQYAw4U6p0VUDCMwbOo1DGaJY9fxMKanbASv
+# In46TtSGadAY300gb6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODIy
-# MjlaMC8GCSqGSIb3DQEJBDEiBCCt+YfAWRwD+eYCzWADBvwbOQpg5IAp5tq9rIs5
-# 2vl/HTANBgkqhkiG9w0BAQEFAASCAgAFz1/BuCWsI8O+XuTUoVplEZWO5CIA2UcD
-# DcKwzdLIj4d7HSG6sn2bn70ngmiS9td9BygacKd9dWdQX2cohJT7o9u6k3uWzQ4B
-# cAEM/8abwhWAPGHzE+KdIyIGWMW7VzfoLvT7qbj8Qbs3woNQkkhHJloJ+O7a5oPW
-# doaElY5M+weYk6QaoAJE5FxRugymKyTHZk0U8yIbpMGH99slPXRNa0GPuyecbnvB
-# xzEBEnLDWnkgC4LuBYQH6TqlHXpGs8dlEOt/OG9WcerrlI5WEb7JPHcodCvvgs0t
-# JLy7cDFIIrMQM6FGBC3FkezWE75DEUTSyNSrwJ1PJMwgmMqIawQi+LDmqP4FvrWN
-# B4vbX4pff2jPfos2VZEJ7dWTZ/hkLt5mlbuzTbypWDzVfztfyyarUv0qDLvNdjok
-# IYUqfTVYSZCpPWg+spEsJEjef2YQBuCMJ/bm0Srp7FHckWiWmi/X5YoJuXyl6XEr
-# ePJoKk5GMOJucoSrMI/W/WjsU914t9ODISETFSozBNw/Y6Y53IL94p7IKxfpml4g
-# PHiQjs6Lkh7sLk9vLusKRDGVBwar1IWX+jQMvSg2bmpdVoLcavRHFi36Hz+3ykji
-# bTRfxI0QjVU9ONxb4A7/cfjJh20OTVe5Mwj/3NDhxl7XvjGhBwWuvqlXcIemUw2w
-# hMKA1TbpTA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjNaMC8GCSqGSIb3DQEJBDEiBCCaatKf7A1h5BfIiNxQhHB7P3ajJHoQuySSBCOq
+# nNa75jANBgkqhkiG9w0BAQEFAASCAgCln7KEIBP4F4NFuKcaC+YVCxoiMKAybIBf
+# muVSrv7W2tus5+dKeaIf2CNfFFT8k+su/ONEydKL2nD0RESsxzEwREqfgEy4h4IV
+# x8+FBEHQDNtPmKSsFhWBYbVByDmxz2h5ska8o6yILF3pHU8BGltQqFeL9s/jbrIA
+# IwDvyysD7EVg5p+qP3WJnn/f4u/GPxSd/faafejT/aPaO57TEBj9y7Y0/qScxz6Z
+# wPg15WR+T0AtWOXFcczwYlQvAXbjyid33ljTyvSHcN8cUHZtUGM6cfBORDc85PhU
+# qgsZFSmjHViD62Ny34UwhDP5XDgiE94M8EFgKjpcrh9MNbxTqyf/2EqWm/gDUwOO
+# 7loaI4MUw3SegvJFcCgGF/YLRUQtwA1xMpV+yirBIcPqH2pCWaIQIBHfJlIY28pC
+# cxvjC4QXButFS6G7R9g5LhdQNIy/GGuzWyGHj1rhLfaFMxJKgnkRCkN8HQ+IW+tg
+# Cfe4vKyfTq7coqU83nw5DmsCAxwtfZoxYHxwwu/YAw8B5lG5z4nu2zZoTvGnC+tb
+# WHa3Qb63XdC8VEB/VChKuAWwoFD6uyaXZBsSCK0gCzUUqFqkAUXPz5+pzZyI075z
+# ovG8EzOMEP0SU0ZfrW416KEbJ/65p/9ICz03MXrccvQJfi4fXP9ilVX653RNOXZK
+# GYZhCoFrAA==
 # SIG # End signature block

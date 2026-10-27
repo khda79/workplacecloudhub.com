@@ -1,9 +1,16 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-Validates or packages the complete application runtime, including offline demo dependencies.
+Offline tests for the Device Reboot Manager standalone release builder (preview, ZIP build, IntuneWin validation).
+.DESCRIPTION
+Runs the release builder in preview and local build modes into a temporary
+folder and checks the allow-listed ZIP topology, forward-slash entry names, the
+checksum file, the packaged demo and the existing-artifact guard. Synthetic
+IntuneWin packages (real AES-256-CBC + HMAC-SHA256 layout) verify that a package
+matching the current runtime is accepted and that stale or corrupted packages
+are refused. The expected version is read from the version manifest.
 .VERSION
-1.0.2
+1.1.0
 #>
 
 [CmdletBinding()]
@@ -33,6 +40,99 @@ function Get-RelativeFilePaths {
             ForEach-Object { $_.FullName.Substring($Root.Length).TrimStart('\', '/') } |
             Sort-Object
     )
+}
+
+function New-TestIntuneWin {
+    # Builds an IntuneWin with the IntuneWinAppUtil layout: outer ZIP with
+    # IntuneWinPackage/Metadata/Detection.xml and IntuneWinPackage/Contents/
+    # IntunePackage.intunewin = HMAC-SHA256 | IV | AES-256-CBC(inner ZIP).
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceRoot,
+        [Parameter(Mandatory = $true)][string[]]$RelativePaths,
+        [Parameter(Mandatory = $true)][string]$DestinationPath,
+        [hashtable]$ContentOverrides = @{},
+        [switch]$CorruptCiphertext
+    )
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    $innerStream = New-Object IO.MemoryStream
+    $innerZip = New-Object IO.Compression.ZipArchive($innerStream, [IO.Compression.ZipArchiveMode]::Create, $true)
+    try {
+        foreach ($relativePath in $RelativePaths) {
+            $entry = $innerZip.CreateEntry($relativePath.Replace('\', '/'))
+            $bytes = if ($ContentOverrides.ContainsKey($relativePath)) {
+                [Text.Encoding]::UTF8.GetBytes([string]$ContentOverrides[$relativePath])
+            }
+            else {
+                [IO.File]::ReadAllBytes((Join-Path -Path $SourceRoot -ChildPath $relativePath))
+            }
+            $entryStream = $entry.Open()
+            try { $entryStream.Write($bytes, 0, $bytes.Length) } finally { $entryStream.Dispose() }
+        }
+    }
+    finally {
+        $innerZip.Dispose()
+    }
+    $plain = $innerStream.ToArray()
+
+    $aes = [Security.Cryptography.Aes]::Create()
+    $aes.KeySize = 256
+    $aes.GenerateKey()
+    $aes.GenerateIV()
+    $encryptor = $aes.CreateEncryptor()
+    $cipher = $encryptor.TransformFinalBlock($plain, 0, $plain.Length)
+    $macKey = New-Object byte[] 32
+    $random = [Security.Cryptography.RandomNumberGenerator]::Create()
+    $random.GetBytes($macKey)
+    $ivAndCipher = New-Object byte[] (16 + $cipher.Length)
+    [Array]::Copy($aes.IV, 0, $ivAndCipher, 0, 16)
+    [Array]::Copy($cipher, 0, $ivAndCipher, 16, $cipher.Length)
+    $hmac = New-Object Security.Cryptography.HMACSHA256(,$macKey)
+    $mac = $hmac.ComputeHash($ivAndCipher)
+    $encrypted = New-Object byte[] (32 + $ivAndCipher.Length)
+    [Array]::Copy($mac, 0, $encrypted, 0, 32)
+    [Array]::Copy($ivAndCipher, 0, $encrypted, 32, $ivAndCipher.Length)
+    if ($CorruptCiphertext) {
+        $encrypted[$encrypted.Length - 1] = $encrypted[$encrypted.Length - 1] -bxor 0xFF
+    }
+    $digest = [Security.Cryptography.SHA256]::Create().ComputeHash($plain)
+
+    $detectionXml = @(
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<ApplicationInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ToolVersion="1.8.6.0">'
+        '  <Name>SmartM365-DeviceRebootManager-Install.ps1</Name>'
+        ('  <UnencryptedContentSize>{0}</UnencryptedContentSize>' -f $plain.Length)
+        '  <FileName>IntunePackage.intunewin</FileName>'
+        '  <SetupFile>Deploy\SmartM365-DeviceRebootManager-Install.ps1</SetupFile>'
+        '  <EncryptionInfo>'
+        ('    <EncryptionKey>{0}</EncryptionKey>' -f [Convert]::ToBase64String($aes.Key))
+        ('    <MacKey>{0}</MacKey>' -f [Convert]::ToBase64String($macKey))
+        ('    <InitializationVector>{0}</InitializationVector>' -f [Convert]::ToBase64String($aes.IV))
+        ('    <Mac>{0}</Mac>' -f [Convert]::ToBase64String($mac))
+        '    <ProfileIdentifier>ProfileVersion1</ProfileIdentifier>'
+        ('    <FileDigest>{0}</FileDigest>' -f [Convert]::ToBase64String($digest))
+        '    <FileDigestAlgorithm>SHA256</FileDigestAlgorithm>'
+        '  </EncryptionInfo>'
+        '</ApplicationInfo>'
+    ) -join "`r`n"
+    $aes.Dispose()
+
+    New-Item -ItemType Directory -Path (Split-Path -Path $DestinationPath -Parent) -Force | Out-Null
+    $outer = [IO.Compression.ZipFile]::Open($DestinationPath, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $contentEntry = $outer.CreateEntry('IntuneWinPackage/Contents/IntunePackage.intunewin')
+        $stream = $contentEntry.Open()
+        try { $stream.Write($encrypted, 0, $encrypted.Length) } finally { $stream.Dispose() }
+        $metadataEntry = $outer.CreateEntry('IntuneWinPackage/Metadata/Detection.xml')
+        $metadataBytes = [Text.Encoding]::UTF8.GetBytes($detectionXml)
+        $stream = $metadataEntry.Open()
+        try { $stream.Write($metadataBytes, 0, $metadataBytes.Length) } finally { $stream.Dispose() }
+    }
+    finally {
+        $outer.Dispose()
+    }
 }
 
 function Assert-PackagedDemo {
@@ -77,11 +177,35 @@ $expectedPackagePaths = @(
     'Tests\SmartM365-Test-DeviceRebootManagerGalleryVm.ps1'
     'Tests\SmartM365-Test-DeviceRebootManagerIntunePublisher.ps1'
     'Tests\SmartM365-Test-DeviceRebootManagerPowerShellGallery.ps1'
+    'Tests\SmartM365-Test-DeviceRebootManagerGuiLogic.ps1'
     'WorkplaceCloudHub-lockup-WPF.png'
     'WorkplaceCloudHub.ico'
 ) | Sort-Object
 
+$intuneRuntimePaths = @(
+    'SmartM365-DeviceRebootManager.version.json.txt'
+    'SmartM365-DeviceRebootManager-GUI.ps1'
+    'SmartM365-DeviceRebootManager-Demo.ps1'
+    'Start-SmartM365-DeviceRebootManager-Demo.cmd'
+    'SmartM365-DeviceRebootManager-GUI.strings.psd1'
+    'SmartM365-DeviceRebootManager-GUI.config.json.template'
+    'SmartM365.GuiSplash.ps1'
+    'WorkplaceCloudHub.ico'
+    'WorkplaceCloudHub-lockup-WPF.png'
+    'Start-SmartM365-DeviceRebootManager-GUI.cmd'
+    'Start-SmartM365-DeviceRebootManager-GUI-Test.cmd'
+    'Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1'
+    'Deploy\SmartM365-DeviceRebootManager-Detection.ps1'
+    'Deploy\SmartM365-DeviceRebootManager-Install.ps1'
+    'Deploy\SmartM365-DeviceRebootManager-Uninstall.ps1'
+)
+
+$versionManifest = Get-Content -LiteralPath (Join-Path $productRoot 'SmartM365-DeviceRebootManager.version.json.txt') -Raw | ConvertFrom-Json
+$expectedPackageVersion = [string]$versionManifest.PackageVersion
+$artifactBaseName = "SmartM365-DeviceRebootManager-$expectedPackageVersion"
+
 try {
+    Assert-True (-not [string]::IsNullOrWhiteSpace($expectedPackageVersion)) 'Version manifest has no PackageVersion.'
     $previewRoot = Join-Path -Path $testRoot -ChildPath 'Preview'
     $preview = & $builderPath `
         -OutputRoot $previewRoot `
@@ -90,8 +214,8 @@ try {
     Assert-True ($preview.Mode -eq 'Preview') 'Default mode must be Preview.'
     Assert-True (-not $preview.BuildAttempted) 'Preview unexpectedly attempted a build.'
     Assert-True (-not $preview.PublicationAttempted) 'Preview unexpectedly attempted publication.'
-    Assert-True ($preview.FileCount -eq 28) 'Preview allow-list file count is incorrect.'
-    Assert-True ($preview.PowerShellFileCount -eq 18) 'Preview PowerShell file count is incorrect.'
+    Assert-True ($preview.FileCount -eq 29) 'Preview allow-list file count is incorrect.'
+    Assert-True ($preview.PowerShellFileCount -eq 19) 'Preview PowerShell file count is incorrect.'
     Assert-True $preview.ReadmeValidated 'Preview did not validate README references.'
     Assert-True $preview.DetectionVersionValidated 'Preview did not validate detection version consistency.'
     Assert-True (-not (Test-Path -LiteralPath $previewRoot)) 'Preview created an output directory.'
@@ -105,10 +229,10 @@ try {
     Assert-True ($build.Mode -eq 'LocalBuild') 'Build mode is incorrect.'
     Assert-True $build.BuildAttempted 'Build did not report an attempted local build.'
     Assert-True (-not $build.PublicationAttempted) 'Local build unexpectedly attempted publication.'
-    Assert-True ($build.PackageVersion -eq '1.0.0') 'Unexpected package version.'
-    Assert-True ($build.ExpectedReleaseTag -eq 'device-reboot-manager-v1.0.0') 'Unexpected release tag.'
-    Assert-True ($build.FileCount -eq 28) 'Built package file count is incorrect.'
-    Assert-True ($build.PowerShellFileCount -eq 18) 'Built package PowerShell file count is incorrect.'
+    Assert-True ($build.PackageVersion -eq $expectedPackageVersion) 'Unexpected package version.'
+    Assert-True ($build.ExpectedReleaseTag -eq "device-reboot-manager-v$expectedPackageVersion") 'Unexpected release tag.'
+    Assert-True ($build.FileCount -eq 29) 'Built package file count is incorrect.'
+    Assert-True ($build.PowerShellFileCount -eq 19) 'Built package PowerShell file count is incorrect.'
     Assert-True (-not $build.IntuneWinIncluded) 'Build unexpectedly included an IntuneWin.'
     Assert-True (Test-Path -LiteralPath $build.ZipPath -PathType Leaf) 'ZIP was not created.'
     Assert-True (Test-Path -LiteralPath $build.ChecksumPath -PathType Leaf) 'Checksum file was not created.'
@@ -123,15 +247,27 @@ try {
         'Checksum file does not contain the ZIP hash.'
     Assert-True ($checksumText -notmatch '\.intunewin') 'Checksum file unexpectedly references an IntuneWin.'
 
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zipArchive = [IO.Compression.ZipFile]::OpenRead($build.ZipPath)
+    try {
+        $zipEntryNames = @($zipArchive.Entries | ForEach-Object { $_.FullName })
+    }
+    finally {
+        $zipArchive.Dispose()
+    }
+    Assert-True (@($zipEntryNames | Where-Object { $_.Contains('\') }).Count -eq 0) 'ZIP entry names must use forward slashes.'
+    Assert-True (@($zipEntryNames | Where-Object { -not $_.StartsWith("$artifactBaseName/") }).Count -eq 0) `
+        'Every ZIP entry must be under the versioned root folder.'
+
     $expandedRoot = Join-Path -Path $testRoot -ChildPath 'Expanded'
     Expand-Archive -LiteralPath $build.ZipPath -DestinationPath $expandedRoot
-    $packageRoot = Join-Path -Path $expandedRoot -ChildPath 'SmartM365-DeviceRebootManager-1.0.0'
+    $packageRoot = Join-Path -Path $expandedRoot -ChildPath $artifactBaseName
     Assert-True (Test-Path -LiteralPath $packageRoot -PathType Container) 'Expected ZIP root folder is missing.'
 
     Assert-PackagedDemo -RuntimeRoot $packageRoot
 
     $actualPackagePaths = Get-RelativeFilePaths -Root $packageRoot
-    Assert-True ($actualPackagePaths.Count -eq 28) 'ZIP does not contain exactly 28 files.'
+    Assert-True ($actualPackagePaths.Count -eq 29) 'ZIP does not contain exactly 29 files.'
     Assert-True (@(Compare-Object -ReferenceObject $expectedPackagePaths -DifferenceObject $actualPackagePaths).Count -eq 0) `
         'ZIP paths differ from the independently defined expected package topology.'
 
@@ -143,6 +279,57 @@ try {
     $packagedReadmeText = Get-Content -LiteralPath $packagedReadme -Raw
     Assert-True ($packagedReadmeText -notmatch '\.\\Devices\\DeviceRebootManager\\') `
         'Packaged README contains obsolete repository-relative standalone commands.'
+
+    # IntuneWin validation: a package matching the current runtime is accepted;
+    # stale content and corrupted ciphertext are refused before any output.
+    $intuneWinRoot = Join-Path -Path $testRoot -ChildPath 'IntuneWin'
+    $currentIntuneWin = Join-Path -Path (Join-Path $intuneWinRoot 'Current') -ChildPath "$artifactBaseName.intunewin"
+    New-TestIntuneWin -SourceRoot $productRoot -RelativePaths $intuneRuntimePaths -DestinationPath $currentIntuneWin
+    $intuneBuild = & $builderPath `
+        -OutputRoot (Join-Path $testRoot 'BuildWithIntuneWin') `
+        -Build `
+        -IntuneWinPath $currentIntuneWin `
+        -SkipAuthenticodeValidation:$SkipAuthenticodeValidation
+    Assert-True $intuneBuild.IntuneWinIncluded 'Current IntuneWin was not included.'
+    Assert-True $intuneBuild.IntuneWinContentValidated 'Current IntuneWin content was not validated.'
+    Assert-True ((Get-Content -LiteralPath $intuneBuild.ChecksumPath -Raw) -match [regex]::Escape("$artifactBaseName.intunewin")) `
+        'Checksum file does not reference the validated IntuneWin.'
+
+    $staleIntuneWin = Join-Path -Path (Join-Path $intuneWinRoot 'Stale') -ChildPath "$artifactBaseName.intunewin"
+    New-TestIntuneWin `
+        -SourceRoot $productRoot `
+        -RelativePaths $intuneRuntimePaths `
+        -DestinationPath $staleIntuneWin `
+        -ContentOverrides @{ 'Deploy\SmartM365-DeviceRebootManager-Detection.ps1' = "[string]`$ExpectedVersion = '0.0.1'" }
+    $missingFileIntuneWin = Join-Path -Path (Join-Path $intuneWinRoot 'MissingFile') -ChildPath "$artifactBaseName.intunewin"
+    New-TestIntuneWin `
+        -SourceRoot $productRoot `
+        -RelativePaths @($intuneRuntimePaths | Where-Object { $_ -ne 'WorkplaceCloudHub.ico' }) `
+        -DestinationPath $missingFileIntuneWin
+    $corruptIntuneWin = Join-Path -Path (Join-Path $intuneWinRoot 'Corrupt') -ChildPath "$artifactBaseName.intunewin"
+    New-TestIntuneWin -SourceRoot $productRoot -RelativePaths $intuneRuntimePaths -DestinationPath $corruptIntuneWin -CorruptCiphertext
+
+    $intuneWinRejections = 0
+    foreach ($rejectedCase in @(
+        @{ Path = $staleIntuneWin; Expected = '*does not match the current runtime*changed=Deploy\SmartM365-DeviceRebootManager-Detection.ps1*' }
+        @{ Path = $missingFileIntuneWin; Expected = '*does not match the current runtime*missing=WorkplaceCloudHub.ico*' }
+        @{ Path = $corruptIntuneWin; Expected = '*HMAC does not match*' }
+    )) {
+        $rejected = $false
+        try {
+            & $builderPath `
+                -OutputRoot (Join-Path $testRoot 'RejectedIntuneWin') `
+                -IntuneWinPath $rejectedCase.Path `
+                -SkipAuthenticodeValidation:$SkipAuthenticodeValidation | Out-Null
+        }
+        catch {
+            $rejected = $_.Exception.Message -like $rejectedCase.Expected
+            if (-not $rejected) { throw }
+        }
+        Assert-True $rejected ("Release builder accepted an invalid IntuneWin: {0}" -f $rejectedCase.Path)
+        $intuneWinRejections++
+    }
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $testRoot 'RejectedIntuneWin'))) 'Rejected IntuneWin produced output.'
 
     $secondBuildBlocked = $false
     try {
@@ -174,6 +361,8 @@ try {
         PowerShellFileCount       = $build.PowerShellFileCount
         ReadmeExactMatch          = $true
         ExistingArtifactGuard     = $secondBuildBlocked
+        IntuneWinCurrentAccepted  = $intuneBuild.IntuneWinContentValidated
+        IntuneWinRejectedCases    = $intuneWinRejections
         ForceRebuildReady         = $forceBuild.Ready
         PublicationAttempted      = $forceBuild.PublicationAttempted
         SignaturesValidated       = $forceBuild.SignaturesValidated
@@ -194,8 +383,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCzcFAQlhBb8GAk
-# R1AQJw1fM4eBXNqRoRWbAEGAbH3cFaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBEg0CCOf/9zUl+
+# qexeo1vUiZm13dF7HWy255V0tDsRBKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -328,31 +517,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFZsdsL1lEOKd5+TGhj0k54Q+72ezF8+6XgJhsBtiQzxMA0GCSqG
-# SIb3DQEBAQUABIIBgCvVtQdUzVPC9HYi6nk1Vhz2zJn0tWk1SfbfWAb4egq7D0ES
-# fc0JfmFraifFhHnY8G83ZMLh4Jm17X6IuJkEhMQ380nnQg3ucfmUszOQ8Z2VlobV
-# 73g/M+BDpjzqIeh/r0wUelia6k3MCDu71WetxtXE32QXkPRSiUDA3dJBQC4Zn+Fr
-# WjiAR8dN4wd7impAgTdAyHyYITYtw0dJo4cOAk1BZZTgtwZIshbEe5gw7eOKmM8e
-# 5c1AGvvEB9m0/Yi+bFVfoZ7J0JTTVQ8nK7+hBo3p2gE+Pc7rufx9321spx1H8z7+
-# i5CRt3EFTg1eE8fI3V1hWDTyek2OQeODhuuwaX76mIZpc4HmIZhQRMUYpF/F5jp3
-# hfvb7rjIaPCK/t4L3kAPx4R7M5PyQtEjxWg1/GKZov8buM6GzKCMDZwN79j1Eizg
-# +w0GtJqnd+V6b86oNd9e+ASGMEfHuddzkSGnv0ZsHtsC1ggry7CZOe2TISGbjpXM
-# 9iB4RVr6C5+LXewyT6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMjGRSbRNs86/bO0jgXG/Tobsv0vddQbv6GSavjbgvkEMA0GCSqG
+# SIb3DQEBAQUABIIBgEfiHfUZ98yP/PtSWVG22G+PiNU9l2LFXTOEC5exMG7ouNLS
+# 4skArFsSoj4l2S2vGSEjMmEMDKRmmQaBVL3FeZv7t9D55BLWcXGAUpbwNEfvKVyG
+# GmvysxkyNSkvGjMkAF3liGqxzRuqzJ51Wyi/TqDmjnrmGm1F0aZ26B+lepRz6b/+
+# FCSoS3Q0pYb1mD+nbsFxK9Py7t+AM3xoPbs526uKz+R1JATQYtb+PYlml8+kbJIK
+# LPBFUSUGp4Tj4ZzLcKnfxLC7zi3DgjNt8OXIF4XEVtDXqRzEKwwnoLQeMYYZ0zqz
+# aPGQmtguLKS8mQ3/yEv2h54o+Fo4JsNEz0rYIqxCNT+gD2qL8yH7ybKVJaTcSNRk
+# yswRxF0AxVdn9NwdD6i9Jy+iep3nEoIJcX9Zdm1nBC9t+ni9MGkR2Jy7Hk11yQd+
+# gvlYBVEek0JXHsoPC0Kb2dgN1kMKAowwEJpbzO0ylRgoACiS5nmTtNbN8WFgQ6Sb
+# sPyO9c9IAlqR69/Xz6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODAy
-# MTJaMC8GCSqGSIb3DQEJBDEiBCDC46L/XlAdi/ZDmW1lpH+QHnvdSyEjyMdGf4WZ
-# M2J7WDANBgkqhkiG9w0BAQEFAASCAgCUzmiiXXUo0skzYktB4AIBYHeGvlAsoNxB
-# nskIw2zVXaZn8Bet+VVAoeaX/TBZHYH3+cr/PSzWNwqydQKKyaVFXP5GgZyb6SUc
-# Cu04DvIsZnrViZmhXebnUGmK9+xHg9RpalqDT0uDuHcr+04QcGqsmVhPUTZwVDiG
-# Yo8rflXGlg95/4tTknN7qF7WKKCyxYcfK/YlDkJfR0VsvCh7Hm8IFDKlwD2JlYXq
-# gL/oHeIvqMiYBZ7MAFVwbEGnXKluz0lEnljwe6AKmUmLeZyIwRouATdpViVRn/wC
-# msyYy5owyEOq40VIiPilxKjECeMyaqy8CKvDb2fv16eF1b5ROUU0UAdjhaLyYvqM
-# AqYQoZwZcLjZtSUIfYT0dp8kc746T7SERGzq39DjSwaKne2RXmajtWHklOl/r0c0
-# +zC6FoEQGXm7OUX2o5Ew+wkNJ3fvUhMjU11+mj6woQQhqmXGuTF8EqmXgU1fNFPn
-# WfsMIBb0kd+WlBOIFh8zL1NoIatyPlvzlYgVBKAWhnucjiAUiHDkZdnAeju4+yOZ
-# oa27pnqwkUHxembK5rPAQqDp42Lajw7cB978sj9jSF3tS2DWvYINAg1Yu2en7f7e
-# ftUcFC+yaW7hknTrz6p71YuB0Kl+zrSj9AKQ6rjWqG/M7jtaZ3iu36AkqfAvFCB4
-# FJa6UpTEjw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjRaMC8GCSqGSIb3DQEJBDEiBCCgo91oPEjnQRZY3oEOGuy+MXLEg5j9nts2IQcp
+# +r+ZXTANBgkqhkiG9w0BAQEFAASCAgCpQ295RPoJh4ndtikCT05kErxiq3t3d85E
+# Ltoqv9/GcJeN5yOINN8LbJTlOJMcnBcD01VBv3LgU2HA1ik+Qv6NJrJuJ6oKIrtl
+# msE9FI+ElnTuzqvT4jHDN0QNUd9F/QAoho26+Zd9igqjLJrEyXZfeqB8fmg7+ir5
+# XnlllhNRpCi9dSPEHe9PgJzmWKsdvy0knUlxSxk3TJ9gQsJdqB/QygzflxVrwpVH
+# HGyc+nR5F/tkoI94vvGFFzfjdF7kjPTpVK1EButrcicrlNpvPF+9jLkhVqOGW0Fb
+# nmyXG9shJXNlENsu5ZavaxOLczy/ig0H0KkU0eNzDQe/X9Y2tP9E9cEXXExDm2ds
+# m3NVKSnc+JKklrp3zEOMSEDkhAYJU+rezxFZb9o+zlFvPVnKQd4sq1M/zmJQkP/k
+# y9/Z65s0NzThVMfLK3ZgH+h1MV9ERCH721H7NvUA68LlDHC8CtpbQOOumkvNTFOo
+# LuhsgzaVmT9+K1pa9laKsOjeuO113Qk65IohoITCqDvovHINGAjxYsb0xjEtT/kS
+# 96tcwgRG3C/WqJyA0GkCnQu+hCkAUHJAkz175WnX593/KcNLIxAeC2+3Oh5WKRAn
+# EBDGwZ6ksL1kphjkJKFuSa+E6kGz/NIA4r+EYm5wGnW0ey38Wo6NSbVaA1krqzFv
+# diwI1/1oyA==
 # SIG # End signature block

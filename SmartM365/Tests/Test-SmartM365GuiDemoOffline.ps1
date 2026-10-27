@@ -68,6 +68,7 @@ function Connect-MgGraph {throw 'Forbidden demo authentication'}
 
 $smartRoot=Join-Path $PSScriptRoot '..'
 $rebootFolder=Join-Path $smartRoot 'Devices/DeviceRebootManager'
+$rebootVersion=[string](Get-Content -LiteralPath (Join-Path $rebootFolder 'SmartM365-DeviceRebootManager.version.json.txt') -Raw | ConvertFrom-Json).PackageVersion
 $orchestratorFolder=Join-Path $smartRoot 'SmartInventory/Orchestrator'
 $protected=@(
     (Join-Path $rebootFolder 'SmartM365-DeviceRebootManager-GUI.config.json'),
@@ -81,8 +82,8 @@ $before=Get-DemoProtectedHashes $protected
 try {
     if($Application -eq 'RebootManager'){
         $result=. (Join-Path $rebootFolder 'SmartM365-DeviceRebootManager-GUI.ps1') -Demo -ValidateOnly -ConfigPath 'Z:\DO-NOT-READ\private.json' -ResetRunState
-        Assert-Demo ($script:Ui.ProductVersionText.Text -eq 'v1.0.0') 'Reboot product version is not 1.0.0.'
-        Assert-Demo ($script:Window.Title -like '*1.0.0*') 'Reboot title version is not 1.0.0.'
+        Assert-Demo ($script:Ui.ProductVersionText.Text -eq "v$rebootVersion") "Reboot product version is not $rebootVersion."
+        Assert-Demo ($script:Window.Title -like "*$rebootVersion*") "Reboot title version is not $rebootVersion."
         Assert-Demo ($script:Window.Title -like '*DEMO*') 'Reboot demo identification missing.'
         Assert-Demo ($script:Ui.DeviceIdentityText.Text -like 'CTSO-LAP-*') 'Real device identity leaked.'
         Assert-Demo ($script:Ui.DeviceIdentityText.Text -like '*192.0.2.42*') 'Sample IP missing.'
@@ -251,8 +252,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCWhPxr07xW55kn
-# N7KGuQ0P1PqbmTtDRxcHx+nIU2j50qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCGCqU1gACd+5HX
+# v0ARLzyucoKMbnWmuoQte+gB3GBH/KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -385,31 +386,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKvzpqJ4nFWVVocFgNG/Jrtulva4+FHUrSmaZb4Bb7A0MA0GCSqG
-# SIb3DQEBAQUABIIBgAmORpTFs3BiIwL/mhU+0QNi6xnUuT/Uz97GvjKDCoqprHj8
-# 2a7uMsw7xRUAdsDcZLT4K3KD/ZUTSp6o0AyyqvmRqAYn52hjeC080nyMzKbpc/gJ
-# rLYvIZSU303Iw3dCYCEb8L4NKba871xz+PnCG1Xd4Wldqvm4HogFdD60qAktCJVC
-# STaKZhY8/VOpce/lCAWysUaJAq5/ZDETCU55fDrcRifiv8lgAIzd121WGzU3M0Ad
-# RUTmNnMgCqsWZxoEJFCv6PYzKhFWF26y9jgjP3Q8xaJ+i6rCfN5dqSrMcOg6e2b+
-# pLH3/SS2pqPznwXsyvqF8HpEPaTnMBMcaI7EJ+dPLsxJqjc43Tk1//LH46jIp35a
-# u508IOGL2f43mj2FLFEZOlHlIibw11o7lKRqZzzf54oDFPSbNSkwWZn9j1bEMXZ9
-# rmG0NWs77uLmZehzkGzdcemOpdwovK8a3I9XYmNIxsRR0Pc2L8TAnNj+yva9x1+X
-# gU03YIAPmbSP5uA/ZqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICXx9scW9DwX73txVBDd6AMgcBqHswl7JZC+90I40P8pMA0GCSqG
+# SIb3DQEBAQUABIIBgITWbWwG2opHTciLLzuAGTZQTmxKR6YO2v+EyMaPCy3fRk14
+# J5Qf5EIC43IwYvF42XndgGKepNIXABBxsl5lZuEQ0dp4OrlX+LPgWNbB06FAX18Y
+# s+kTja1gncGydVD1gvXsSQNndtCYedwcnVeXfBmBFZSoRur0TZPEAQKB5MGl9ImZ
+# gqfi4HqkRzRmhc5mBvu5L7s8XgP8DqmnRsaVw9b3Lt+5jVwU8lcPDKjFVQMvwG8Q
+# sbSsCj9yuiBwEfxv+efhLlUlHddVEMQ8OdXIJy8nnkii1ZG2wqzGNXR0UfMlEL1i
+# tc6UOEcHdnOOk7yGYYvDHE0zczEiiz14J1ZX+14/2ZhEPbOh1rVVtn6MP3nTHdDe
+# 3xnfgbNDNRlgRdaOs00Ppt397AOOdui7GFuwadd2hLSvaroVK/CLiK8e2MndjUxR
+# V1ae1xMZo8oBUMJurzz35+aiG6q9u5gfpd1uD0xPmlrbB+1Sjdy4sB02LoDk0boh
+# KWa2SO7sST5Gre9g3aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMjI1
-# NTlaMC8GCSqGSIb3DQEJBDEiBCAXwa6oXEJA9tGHfzw106FgPfE7Tp4BBmftArfe
-# XZejujANBgkqhkiG9w0BAQEFAASCAgCTHxNS0rRhUgh1N7Pii3BYHwhG4sNdPX3L
-# cwuGbeFM67uNTCI4u36IKrQh+4vFRaWJmZiK2dUjKEinlC7dOVdkKAyHDpFLCcp3
-# faV1A+2uyo2iy4PC9I764wJrHThUfaDRrB1+KyOAzjxmD5tvt4w47YOT7NNaJdVg
-# yxoyo48nl6rIx/uvXJHPE2Mk5V6f3zQjfdr+XpjTPQgNsLlS6smwwiizlBzFr9yO
-# Ew00Ge0d8Qs3c7dONJz1BOhYjuB/3lhcfIZ00DwP4/+5L9S7AErPXywMa5WjBYdg
-# dPuOHgfUPRcTyCK7DchbC8LTyM6WnRlu6xdUaDu/15lCn4sJwybRV8Aexq9zpSFl
-# /hdFddBx+v1QaSKQH1pVoISLczO3ap50WALSMPlHRKVMX3BZmNKJjCSAjjF2/nEC
-# XUv3G0rsr0poEcxfhjpuClxXzvUg4QLLyvNz0wAEulYsFcRIdBsdvLWNk4E//9xM
-# 9CZQqLH4i2+1EXSuJ/06RVWJ9mTu5WHLG7WAwWk8qZOBiK6EjEn8pwLDBpWrxdjY
-# ziY5hpK1vVMzVCriOYeQZ/T9yVQeA737yRualRw8CDCFdIpbEnkj5IyeanPUkMBv
-# Z+iY4s6p3jqQG4fZfMlscOeM+N0ATQUx8g9Qlp4p1PyMK7c3snIYHmFaUGUKNnoP
-# Qdbtamt3Cg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjVaMC8GCSqGSIb3DQEJBDEiBCBsEjv4b8v0EzRf0VrVxt1MPPLMaPc7S/YTFt1U
+# 1tOwhjANBgkqhkiG9w0BAQEFAASCAgALKvNJdJT1aiQe1XdcSO86GYCzgHXG2/qw
+# b+zYiXNFf17T1BAeynHymJlxVcs3DMA/MK/1KjdVrc1dOXiHtpl7EQQ0O515fFoX
+# rA1GLwO0y2SFYsIeZvhlD4eiDeMBXYXS0dBMsUGQ9SOJCawTf3tcTrEvpn8vp5/5
+# QEW8BdeIbs8lXhk8TvgHhX456DAlqOrk8+M2SqMg2Fb3TOle5dh1VmiHR4MwrR4r
+# USpdqBa63cO8634emeUqVRtkD+BqidXKocIYE9tRb31ADatpq4dUHMOvUNmiWwXn
+# SCx7JhImNCIsxu6SrzGCktyhclQVu0j4YOSaYH8195T1n+i9slS1KrmGBJaMzBc3
+# SwQEJY6xKJpb+i/uNTqQBGy+q1gw/M2nheEHZiUA5H2vkolxvx7PpUOt6sWB1jq1
+# qEiafOmLHoBIeBMCvIz6JHL14vGoWuQID8u1+18nxV84XH3Ef3a2oAGwWWcTQhJI
+# XWL2ViKUkJMJsrujOXqb5ZssT74CdcWk1bPKtXc0VAiq5vxg3h9I0NjFk7brL5FH
+# v2m1PoN7KTbJgyG14nx405YeDqurckgek4FVTvbuzuWDinyFuJkHvOhHayxSOHB/
+# rkacOauFHu6meK0pQxqJbETUBfPBrlQTEGSjUXkVea2hnHSL6T8k39xQyIPXQuyO
+# dmoy1pXe4A==
 # SIG # End signature block

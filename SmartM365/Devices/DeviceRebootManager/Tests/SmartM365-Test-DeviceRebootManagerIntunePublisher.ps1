@@ -1,9 +1,14 @@
 ﻿#Requires -Version 7.2
 <#
 .SYNOPSIS
-Validates or packages the complete application runtime, including offline demo dependencies.
+Offline tests for the Device Reboot Manager Intune publisher in Preview mode (no Graph connection).
+.DESCRIPTION
+Checks the publisher's safety contract (explicit -Execute, individual
+assignments, supersedence, orphan-app resume, SAS renewal, security-enabled
+pilot group, pinned detection signer) and runs it in Preview mode against the
+supplied .intunewin. The expected version is read from the version manifest.
 .VERSION
-1.0.2
+1.1.0
 #>
 
 [CmdletBinding()]
@@ -51,6 +56,13 @@ Assert-True (-not $publisherText.Contains('mobileApps/${ResumeAppId}?')) 'Resume
 Assert-True ($publisherText -match '\*SmartM365 Device Reboot Manager\*') 'Publisher must accept a renamed Device Reboot Manager preview.'
 Assert-True ($publisherText -match 'PackageVersion=0\.1\.0-preview4') 'Publisher must validate the superseded preview version notes.'
 Assert-True ($publisherText -notmatch 'mobileApps/\$AppId/assign["'']') 'Publisher must not replace the full assignment set.'
+Assert-True ($publisherText -notmatch 'has no committed content version and cannot be resumed') 'Resume must finish an app that has no committed content version.'
+Assert-True ($publisherText -match 'rerun with -ResumeAppId <id>') 'Duplicate-name error must point the operator to -ResumeAppId.'
+Assert-True ($publisherText -match '/renewUpload') 'Publisher must renew the upload SAS URI.'
+Assert-True ($publisherText -match 'azureStorageUriExpirationDateTime') 'Publisher must track the SAS URI expiry.'
+Assert-True ($publisherText -match 'AuthenticationFailed') 'Publisher must renew the SAS URI after an Azure AuthenticationFailed response.'
+Assert-True ($publisherText -match 'Pilot group is not security-enabled') 'An explicit -PilotGroupId must be checked for securityEnabled.'
+Assert-True ($publisherText -match 'DeviceRebootManagerWinTrust') 'Detection signer must use the WinVerifyTrust pinned-signer rule.'
 
 $preview = & $publisherPath `
     -IntuneWinPath $IntuneWinPath `
@@ -70,7 +82,8 @@ Assert-True $preview.SupersedenceRequested 'Stable preview did not report the re
 Assert-True ($preview.SupersedenceType -eq 'update') 'Stable promotion must use in-place update supersedence.'
 Assert-True $preview.ResumeRequested 'Stable preview did not report the requested recovery.'
 Assert-True ($preview.ResumeAppId -eq '22222222-2222-2222-2222-222222222222') 'Stable preview reported the wrong recovery app id.'
-Assert-True ($preview.PackageVersion -eq '1.0.0') 'Unexpected stable package version.'
+$versionManifest = Get-Content -LiteralPath (Join-Path $productRoot 'SmartM365-DeviceRebootManager.version.json.txt') -Raw | ConvertFrom-Json
+Assert-True ($preview.PackageVersion -eq [string]$versionManifest.PackageVersion) 'Unexpected stable package version.'
 Assert-True ($preview.RequiredDelegatedScopes -contains 'DeviceManagementApps.ReadWrite.All') 'Intune scope missing from preview.'
 Assert-True ($preview.RequiredDelegatedScopes -contains 'Group.ReadWrite.All') 'Group scope missing from preview.'
 
@@ -95,8 +108,8 @@ Assert-True ($preview.RequiredDelegatedScopes -contains 'Group.ReadWrite.All') '
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBigtT9voyw/4xu
-# +pHh0XNfg7hhkaggL3gYA4/ulVGxq6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtodi9CDHiC+i1
+# Y67aBybB8y95HjjZDKSQkt6rumBmv6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -229,31 +242,31 @@ Assert-True ($preview.RequiredDelegatedScopes -contains 'Group.ReadWrite.All') '
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICy0HBmpOqjw194FHZ7uXn6Iri0c6uoWFKl0xjI6HxqhMA0GCSqG
-# SIb3DQEBAQUABIIBgDIFYsAYpoQSoO/9I5xF9tEjpFrE3AAsyZfiPcA+6gNh/9jS
-# /xfDolHehxp1L8bLEg6Pm0QusQyjSjMDkrCMcjuUovs41x75AME0uMO3VuLxhPx+
-# yt6QgxY3PjNUIPmfmriNhrRHg0JBJBf9l27zBxtpgJVV5mA+q1W2v5ojpkX9wNSr
-# ZQBESwrWnERZJn0zeMhUf+q3pAt374ayo0zHVOhcukUtmbA98CklUOD4NrRJX97o
-# alMxJeWsXkDjthZ2L6k15K8a6LZsNXnenrr09JQfVr11gUPxFJD1pMKdM6QIX8BL
-# 2hpEutcyqSNUFr+foSQo0Lvf8vVakbM2DlkRfCztS6h7Dg9cbu4d6dQwXGCmf7So
-# 6p1m8SaXPFSIKaiFieeCsb+QnDpN+xxCf+jkNjJQtqjNPtb7MbIXmA9I1WhOhvCv
-# KcPNCaocdLXjTFGQwHtG2UsCcXMDE/OnkHh7nuOTQmHvmJacibuzd9NNgMBveyVS
-# 7sXe+qsieWw/GzLEIKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPv+yy25KQEFnexU6PG3LS54tiAqdWvUc27I07CsVGLtMA0GCSqG
+# SIb3DQEBAQUABIIBgF0CN8MkOZ7WObpdwMl5yfXqX/toot+pZnUnjlHzlbVKod8v
+# RsOF/DWg95AfpjXQ1pvCCQ+jPztGRroshwXgohFTsBKYeRgILNTCT0jx453U/HT+
+# MuiGcij/dfLDjPP0iUfTs4faaJl+iR9zG1Vm3TRne1GEJluLjSZFb12N8YatBy2q
+# syINYPMFH6HMXxEn8CINmig7Nv9N4cvqG+DtURDyB9difgrWwXo6hnBCXmumbDmx
+# MRJ6EjA39VyUajRZkOKRjiTTwLJdEUN+FFZeBI0N6zHSW51xKQod1R5UrEvVWSep
+# hzW8eyO3Dq2eXFn5yK8DqDLK9BTn7my8yAE4eECWjZZmhVxndbBY3oP2UXckruZx
+# FsEQce3snKFZ0cUEj47/wXZvj97Ss4KTvdfcxZ5hzi5X+x2xKRp+BaYEjMQGkXkM
+# fBigf4IjCCzT5lg/G3R9SLkKJEXBPJojuohcTqLBgdpyuZ8puRZL7eoBU+eVON43
+# zLne3LrFYLWQvWxU56GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxODAy
-# MTNaMC8GCSqGSIb3DQEJBDEiBCDaEO9wAYNglY846mTIi404hI70VnjXtrqYup13
-# /3YrjjANBgkqhkiG9w0BAQEFAASCAgBitKvr4Niba9InLvHgVN8jLajNFmAzKZG6
-# 0M8YQpiTXtdQ+pFF1JEQlCyzyPQV/THshZjzTMjCpKb8dObZ6okLpWxfrQ7ceKkF
-# JMQZcNod3/yr0635isVXuj/rtUGK2KnE+TafrFbpUp6L4+1HXbiUucK20nhdFRPo
-# o7q/ecB4lSW4Y3B3GJBDSnJHR6bGC6B4crOOLerv3Re7nPYoRGcoSUTQDBjqRnIk
-# iYRZi1vWP0/yt7QoRbvlTev4fS11n1n3ynF8RcMGQjvL9jljZUIrJGfVR9EZhOlI
-# mCuDtaeq70APJ62JJulYpD7LEPDXSmFzJJFlfuRM7Oc4Ec2LZN7W5JD3maKYKtug
-# UwRd7H6f2U+5MvJazZ9j5//mEXAHJucBm3N4qyyc4OVkznftq8joH1hqugOuCKvn
-# Nd2ZWKPfMd9XS5PEY1AanE8ljyyg7n8yx7dHnCbxO0dcPmiMD2Kab5J3DbNJD0mj
-# 7knRr8tKG7LYQ4mvYE7puz0u4w2zJDQ9GqjRquG3eLlz3iPltroYr9HnPP0VYRju
-# 95QBReQUxZ6PVDyNT9AeGAtIfY4pU59VhzHrsF4B7VYauDuTuAQAz37vVa/bo57p
-# 6JzExvyofN8+xd2xe99LvBnwVdSmjjh3hy0HW5OLmRL9mNcLrxxLZdHr1oMtNJrE
-# S13h5YmhzQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjRaMC8GCSqGSIb3DQEJBDEiBCCUZYpptP4nWqHmyIrfSvRuDXSVhkl8gW1f74gA
+# LJkmKDANBgkqhkiG9w0BAQEFAASCAgCuh1AnCTLbbbgo1kTa1A4/j7E/CFk0Y+eA
+# zKgd/7YmlhYmyPU3LS/nEp8EBEVDYBHG3hbbaiEwlq1w/i010lRBgyh0bgFRErQa
+# zqR5OKELsNnqNi4+rl4h4RUJnm4FNC9o2eVBtEDkmH944b4e/j6QswEkk0QXrgHa
+# j6BN48xIZBc/EIAUxS1doh3I9tGhM6L3EWCl+4iLnXft3rWXTh19CsUJ8zP7xtKq
+# uXFYWl4nDjJ+3519QDCH7ti/TolnbAFFyIT/pnvpQ7yjOOTSX49zvwqzK1iniqyz
+# V1pw+UP1ZlHMkXjdwWK5LWXwbJxYjGLaMJs3mzfcCKRnk4M4Tzru5FuN81uKHWzO
+# K+VtAIbFffBOYVuP1D21y1E0O7tuDtxac5D0e/THvWiQYt6YxAskM7LgN96sEHzS
+# 7NZyr3Yu0lVtaDzSgOBVZXIBEMenqa9Zh4APTYSV+JdoWlItaNj0Y9AP4OVQrQVS
+# EGrsHrm1rJufaDDSunDlgnLPYUR/Z+LiP3YU2umLI8Wgm+/Vs9yObpjPHl0reict
+# 79Lxit5FyfUcqAOYhpJAgVW8AW0k94hpZ3O9d4ZzeENwBdbLKXUTni2a4fm13b2o
+# qvtnaN6lsIx7ksJzpvDCXPOyelP3qmv5sGCBTXeEXdARkC1WIELjl9EDO1cQMwvj
+# K03YSASWwA==
 # SIG # End signature block

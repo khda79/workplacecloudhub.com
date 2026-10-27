@@ -5,11 +5,16 @@
 Validates and optionally builds the standalone Device Reboot Manager release artifacts.
 
 .DESCRIPTION
-Uses an explicit 28-file allow-list, validates version consistency, PowerShell
+Uses an explicit 29-file allow-list, validates version consistency, PowerShell
 syntax, the pinned WorkplaceCloudHub Authenticode signer, and README release
 references. Preview is the default and writes nothing. Use -Build to create the
 ZIP and SHA-256 file locally. An optional existing IntuneWin can be copied and
-included in the checksum file.
+included in the checksum file; it is decrypted in memory first and must contain
+exactly the current Intune runtime files (hash-for-hash), so a stale package is
+refused. The ZIP is written with forward-slash entry names.
+
+Signature rule (WinVerifyTrust): accepted only for result 0, CERT_E_UNTRUSTEDROOT
+or CERT_E_CHAINING with the pinned signer thumbprint; untrusted chains warn.
 
 This script never publishes to GitHub, PowerShell Gallery, or Microsoft Intune.
 
@@ -22,7 +27,7 @@ This script never publishes to GitHub, PowerShell Gallery, or Microsoft Intune.
     -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-0.1.1.intunewin `
     -OutputRoot C:\Temp\DeviceRebootManager-Release
 .VERSION
-1.0.1
+1.1.0
 #>
 
 [CmdletBinding()]
@@ -79,24 +84,315 @@ function Assert-PowerShellSyntax {
     }
 }
 
-function Assert-PinnedSignature {
+function Get-WinVerifyTrustResult {
+    # Direct WinVerifyTrust (WINTRUST_ACTION_GENERIC_VERIFY_V2, no UI, no
+    # revocation check, file choice, VERIFY then CLOSE). Returns the HRESULT.
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not ('SmartM365.DeviceRebootManagerWinTrust' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace SmartM365
+{
+    public static class DeviceRebootManagerWinTrust
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WINTRUST_FILE_INFO
+        {
+            public uint cbStruct;
+            public string pcwszFilePath;
+            public IntPtr hFile;
+            public IntPtr pgKnownSubject;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WINTRUST_DATA
+        {
+            public uint cbStruct;
+            public IntPtr pPolicyCallbackData;
+            public IntPtr pSIPClientData;
+            public uint dwUIChoice;
+            public uint fdwRevocationChecks;
+            public uint dwUnionChoice;
+            public IntPtr pFile;
+            public uint dwStateAction;
+            public IntPtr hWVTStateData;
+            public IntPtr pwszURLReference;
+            public uint dwProvFlags;
+            public uint dwUIContext;
+            public IntPtr pSignatureSettings;
+        }
+
+        [DllImport("wintrust.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
+        private static extern int WinVerifyTrust(IntPtr hwnd, [MarshalAs(UnmanagedType.LPStruct)] Guid pgActionID, IntPtr pWVTData);
+
+        private const uint WTD_UI_NONE = 2;
+        private const uint WTD_REVOKE_NONE = 0;
+        private const uint WTD_CHOICE_FILE = 1;
+        private const uint WTD_STATEACTION_VERIFY = 1;
+        private const uint WTD_STATEACTION_CLOSE = 2;
+        private const uint WTD_REVOCATION_CHECK_NONE = 0x10;
+
+        public static int Verify(string path)
+        {
+            Guid action = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+            WINTRUST_FILE_INFO fileInfo = new WINTRUST_FILE_INFO();
+            fileInfo.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_FILE_INFO));
+            fileInfo.pcwszFilePath = path;
+            IntPtr filePointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WINTRUST_FILE_INFO)));
+            IntPtr dataPointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WINTRUST_DATA)));
+            try
+            {
+                Marshal.StructureToPtr(fileInfo, filePointer, false);
+                WINTRUST_DATA data = new WINTRUST_DATA();
+                data.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_DATA));
+                data.dwUIChoice = WTD_UI_NONE;
+                data.fdwRevocationChecks = WTD_REVOKE_NONE;
+                data.dwUnionChoice = WTD_CHOICE_FILE;
+                data.pFile = filePointer;
+                data.dwStateAction = WTD_STATEACTION_VERIFY;
+                data.dwProvFlags = WTD_REVOCATION_CHECK_NONE;
+                Marshal.StructureToPtr(data, dataPointer, false);
+                int result = WinVerifyTrust(IntPtr.Zero, action, dataPointer);
+
+                data = (WINTRUST_DATA)Marshal.PtrToStructure(dataPointer, typeof(WINTRUST_DATA));
+                data.dwStateAction = WTD_STATEACTION_CLOSE;
+                Marshal.StructureToPtr(data, dataPointer, true);
+                WinVerifyTrust(IntPtr.Zero, action, dataPointer);
+                return result;
+            }
+            finally
+            {
+                Marshal.DestroyStructure(filePointer, typeof(WINTRUST_FILE_INFO));
+                Marshal.FreeHGlobal(filePointer);
+                Marshal.FreeHGlobal(dataPointer);
+            }
+        }
+    }
+}
+'@
+    }
+    return [SmartM365.DeviceRebootManagerWinTrust]::Verify($Path)
+}
+
+function Get-PinnedSignatureState {
+    # Signature rule: WinVerifyTrust must return 0, CERT_E_UNTRUSTEDROOT or
+    # CERT_E_CHAINING (self-signed root not trusted locally) and the signer
+    # thumbprint must equal the pinned one. Any other result, including
+    # TRUST_E_BAD_DIGEST, TRUST_E_NOSIGNATURE or an expired untimestamped
+    # certificate, is rejected.
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$Thumbprint
     )
 
     $signature = Get-AuthenticodeSignature -LiteralPath $Path
-    $actualThumbprint = if ($signature.SignerCertificate) {
-        Get-NormalizedThumbprint $signature.SignerCertificate.Thumbprint
+    $actual = if ($signature.SignerCertificate) {
+        ([string]$signature.SignerCertificate.Thumbprint).Replace(' ', '').ToUpperInvariant()
     }
     else {
         ''
     }
+    $pinnedSignerMatch = ($actual -ne '' -and $actual -eq ([string]$Thumbprint).Replace(' ', '').ToUpperInvariant())
+    $trustResult = Get-WinVerifyTrustResult -Path ([IO.Path]::GetFullPath($Path))
+    # 0x800B0109 CERT_E_UNTRUSTEDROOT, 0x800B010A CERT_E_CHAINING
+    $untrustedChainResults = @([int]-2146762487, [int]-2146762486)
+    $chainTrusted = ($trustResult -eq 0)
 
-    if ($signature.Status -ne 'Valid' -or
-        $actualThumbprint -ne (Get-NormalizedThumbprint $Thumbprint)) {
-        throw ("Authenticode validation failed: file={0}; status={1}; signer={2}" -f
-            $Path,$signature.Status,$actualThumbprint)
+    [pscustomobject]@{
+        Path              = $Path
+        Status            = [string]$signature.Status
+        TrustResult       = ('0x{0:X8}' -f $trustResult)
+        SignerThumbprint  = $actual
+        PinnedSignerMatch = $pinnedSignerMatch
+        ChainTrusted      = $chainTrusted
+        Accepted          = ($pinnedSignerMatch -and ($chainTrusted -or $untrustedChainResults -contains $trustResult))
+    }
+}
+
+function Assert-PinnedSignature {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Thumbprint
+    )
+
+    $state = Get-PinnedSignatureState -Path $Path -Thumbprint $Thumbprint
+    if (-not $state.Accepted) {
+        throw ("Authenticode validation failed: file={0}; status={1}; winVerifyTrust={2}; signer={3}" -f
+            $Path,$state.Status,$state.TrustResult,$state.SignerThumbprint)
+    }
+    if (-not $state.ChainTrusted) {
+        Write-Warning ("Pinned signer accepted but its certificate chain is not trusted locally: file={0}; winVerifyTrust={1}" -f $Path,$state.TrustResult)
+    }
+}
+
+function Get-IntuneWinContentManifest {
+    # Opens an .intunewin, verifies the HMAC, IV, decrypted size and digest
+    # declared in Detection.xml, then returns the SHA-256 of every file in the
+    # decrypted inner ZIP (relative paths with '\'). Nothing is written to disk.
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    $archive = [IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        $detectionEntry = @($archive.Entries | Where-Object { $_.FullName -match '(^|/)Metadata/Detection\.xml$' }) |
+            Select-Object -First 1
+        if (-not $detectionEntry) {
+            throw "Detection.xml was not found inside the IntuneWin: $Path"
+        }
+        $reader = New-Object IO.StreamReader($detectionEntry.Open())
+        try {
+            [xml]$detectionXml = $reader.ReadToEnd()
+        }
+        finally {
+            $reader.Dispose()
+        }
+
+        $values = @{}
+        foreach ($name in @('FileName', 'SetupFile', 'UnencryptedContentSize', 'EncryptionKey', 'MacKey',
+                'InitializationVector', 'Mac', 'FileDigest', 'FileDigestAlgorithm')) {
+            $node = $detectionXml.SelectSingleNode("//*[local-name()='$name']")
+            $values[$name] = if ($node) { [string]$node.InnerText } else { '' }
+            if ([string]::IsNullOrWhiteSpace($values[$name])) {
+                throw "IntuneWin Detection.xml field is missing: $name"
+            }
+        }
+        if ($values.FileDigestAlgorithm -ne 'SHA256') {
+            throw "Unsupported IntuneWin digest algorithm: $($values.FileDigestAlgorithm)"
+        }
+
+        $contentEntry = @($archive.Entries | Where-Object { $_.FullName -match ('(^|/)Contents/{0}$' -f [regex]::Escape($values.FileName)) }) |
+            Select-Object -First 1
+        if (-not $contentEntry) {
+            throw "Encrypted IntuneWin content was not found: $($values.FileName)"
+        }
+        $encryptedStream = New-Object IO.MemoryStream
+        $entryStream = $contentEntry.Open()
+        try {
+            $entryStream.CopyTo($encryptedStream)
+        }
+        finally {
+            $entryStream.Dispose()
+        }
+        $encrypted = $encryptedStream.ToArray()
+    }
+    finally {
+        $archive.Dispose()
+    }
+
+    # Layout: HMAC-SHA256 (32 bytes) | IV (16 bytes) | AES-256-CBC ciphertext.
+    if ($encrypted.Length -le 48) {
+        throw 'Encrypted IntuneWin content is too small.'
+    }
+    $macKey = [Convert]::FromBase64String($values.MacKey)
+    $hmac = New-Object Security.Cryptography.HMACSHA256(,$macKey)
+    try {
+        $computedMac = $hmac.ComputeHash($encrypted, 32, $encrypted.Length - 32)
+    }
+    finally {
+        $hmac.Dispose()
+    }
+    $storedMac = New-Object byte[] 32
+    [Array]::Copy($encrypted, 0, $storedMac, 0, 32)
+    $declaredMac = [Convert]::FromBase64String($values.Mac)
+    if ([Convert]::ToBase64String($computedMac) -ne [Convert]::ToBase64String($storedMac) -or
+        [Convert]::ToBase64String($computedMac) -ne [Convert]::ToBase64String($declaredMac)) {
+        throw 'IntuneWin HMAC does not match its encrypted content or Detection.xml.'
+    }
+    $storedIv = New-Object byte[] 16
+    [Array]::Copy($encrypted, 32, $storedIv, 0, 16)
+    if ([Convert]::ToBase64String($storedIv) -ne $values.InitializationVector) {
+        throw 'IntuneWin initialization vector does not match Detection.xml.'
+    }
+
+    $aes = [Security.Cryptography.Aes]::Create()
+    try {
+        $aes.Mode = [Security.Cryptography.CipherMode]::CBC
+        $aes.Padding = [Security.Cryptography.PaddingMode]::PKCS7
+        $aes.Key = [Convert]::FromBase64String($values.EncryptionKey)
+        $aes.IV = $storedIv
+        $decryptor = $aes.CreateDecryptor()
+        try {
+            $plain = $decryptor.TransformFinalBlock($encrypted, 48, $encrypted.Length - 48)
+        }
+        finally {
+            $decryptor.Dispose()
+        }
+    }
+    finally {
+        $aes.Dispose()
+    }
+
+    if ([int64]$plain.Length -ne [int64]$values.UnencryptedContentSize) {
+        throw ("IntuneWin decrypted size mismatch: declared={0}; actual={1}" -f $values.UnencryptedContentSize,$plain.Length)
+    }
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        if ([Convert]::ToBase64String($sha256.ComputeHash($plain)) -ne $values.FileDigest) {
+            throw 'IntuneWin decrypted content digest does not match Detection.xml.'
+        }
+
+        $files = @{}
+        $innerArchive = New-Object IO.Compression.ZipArchive((New-Object IO.MemoryStream(,$plain)), [IO.Compression.ZipArchiveMode]::Read)
+        try {
+            foreach ($entry in $innerArchive.Entries) {
+                if ([string]::IsNullOrEmpty($entry.Name)) {
+                    continue
+                }
+                $relativePath = $entry.FullName.Replace('/', '\').TrimStart('\')
+                $stream = $entry.Open()
+                try {
+                    $files[$relativePath] = [BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '')
+                }
+                finally {
+                    $stream.Dispose()
+                }
+            }
+        }
+        finally {
+            $innerArchive.Dispose()
+        }
+    }
+    finally {
+        $sha256.Dispose()
+    }
+
+    [pscustomobject]@{
+        SetupFile = $values.SetupFile
+        Files     = $files
+    }
+}
+
+function New-ForwardSlashZip {
+    # Builds the ZIP with '/' entry names under a single root folder.
+    # Compress-Archive on Windows PowerShell 5.1 writes '\' entry names.
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceRoot,
+        [Parameter(Mandatory = $true)][string]$DestinationPath
+    )
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $resolvedSource = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\', '/')
+    $rootName = [IO.Path]::GetFileName($resolvedSource)
+    $zip = [IO.Compression.ZipFile]::Open($DestinationPath, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($file in @(Get-ChildItem -LiteralPath $resolvedSource -Recurse -File | Sort-Object FullName)) {
+            $relativePath = $file.FullName.Substring($resolvedSource.Length).TrimStart('\', '/').Replace('\', '/')
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip,
+                $file.FullName,
+                ('{0}/{1}' -f $rootName,$relativePath),
+                [IO.Compression.CompressionLevel]::Optimal
+            )
+        }
+    }
+    finally {
+        $zip.Dispose()
     }
 }
 
@@ -206,12 +502,13 @@ $releaseFiles = @(
     [pscustomobject]@{ Base = 'Product'; Source = 'PowerShellGallery\Module\SmartM365.DeviceRebootManager.psm1'; Destination = 'PowerShellGallery\Module\SmartM365.DeviceRebootManager.psm1' }
     [pscustomobject]@{ Base = 'Product'; Source = 'PowerShellGallery\Module\Tools\SmartM365-DeviceRebootManager-GalleryUpdate.ps1'; Destination = 'PowerShellGallery\Module\Tools\SmartM365-DeviceRebootManager-GalleryUpdate.ps1' }
     [pscustomobject]@{ Base = 'Product'; Source = 'Tests\SmartM365-Test-DeviceRebootManagerGalleryVm.ps1'; Destination = 'Tests\SmartM365-Test-DeviceRebootManagerGalleryVm.ps1' }
+    [pscustomobject]@{ Base = 'Product'; Source = 'Tests\SmartM365-Test-DeviceRebootManagerGuiLogic.ps1'; Destination = 'Tests\SmartM365-Test-DeviceRebootManagerGuiLogic.ps1' }
     [pscustomobject]@{ Base = 'Product'; Source = 'Tests\SmartM365-Test-DeviceRebootManagerIntunePublisher.ps1'; Destination = 'Tests\SmartM365-Test-DeviceRebootManagerIntunePublisher.ps1' }
     [pscustomobject]@{ Base = 'Product'; Source = 'Tests\SmartM365-Test-DeviceRebootManagerPowerShellGallery.ps1'; Destination = 'Tests\SmartM365-Test-DeviceRebootManagerPowerShellGallery.ps1' }
 )
 
-if ($releaseFiles.Count -ne 28) {
-    throw "Release allow-list must contain exactly 28 files; found $($releaseFiles.Count)."
+if ($releaseFiles.Count -ne 29) {
+    throw "Release allow-list must contain exactly 29 files; found $($releaseFiles.Count)."
 }
 $duplicateDestinations = @(
     $releaseFiles |
@@ -239,8 +536,8 @@ $powerShellFiles = @(
     $resolvedFiles |
         Where-Object { [IO.Path]::GetExtension($_.DestinationPath) -in @('.ps1', '.psm1', '.psd1') }
 )
-if ($powerShellFiles.Count -ne 18) {
-    throw "Release allow-list must contain exactly 18 PowerShell files; found $($powerShellFiles.Count)."
+if ($powerShellFiles.Count -ne 19) {
+    throw "Release allow-list must contain exactly 19 PowerShell files; found $($powerShellFiles.Count)."
 }
 foreach ($file in $powerShellFiles) {
     Assert-PowerShellSyntax -Path $file.SourcePath
@@ -259,6 +556,49 @@ if (-not [string]::IsNullOrWhiteSpace($IntuneWinPath)) {
     if ([IO.Path]::GetFileName($resolvedIntuneWinPath) -ne $expectedIntuneWinName) {
         throw ("Unexpected IntuneWin filename: expected={0}; actual={1}" -f
             $expectedIntuneWinName,[IO.Path]::GetFileName($resolvedIntuneWinPath))
+    }
+
+    # The IntuneWin must contain exactly the current Intune runtime (the Gallery
+    # build Runtime folder): decrypt it in memory and compare every file hash.
+    $intuneRuntimeFiles = @(
+        'SmartM365-DeviceRebootManager.version.json.txt'
+        'SmartM365-DeviceRebootManager-GUI.ps1'
+        'SmartM365-DeviceRebootManager-Demo.ps1'
+        'Start-SmartM365-DeviceRebootManager-Demo.cmd'
+        'SmartM365-DeviceRebootManager-GUI.strings.psd1'
+        'SmartM365-DeviceRebootManager-GUI.config.json.template'
+        'SmartM365.GuiSplash.ps1'
+        'WorkplaceCloudHub.ico'
+        'WorkplaceCloudHub-lockup-WPF.png'
+        'Start-SmartM365-DeviceRebootManager-GUI.cmd'
+        'Start-SmartM365-DeviceRebootManager-GUI-Test.cmd'
+        'Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1'
+        'Deploy\SmartM365-DeviceRebootManager-Detection.ps1'
+        'Deploy\SmartM365-DeviceRebootManager-Install.ps1'
+        'Deploy\SmartM365-DeviceRebootManager-Uninstall.ps1'
+    )
+    $intuneWinContent = Get-IntuneWinContentManifest -Path $resolvedIntuneWinPath
+    if ($intuneWinContent.SetupFile -ne 'Deploy\SmartM365-DeviceRebootManager-Install.ps1') {
+        throw "Unexpected IntuneWin setup file: $($intuneWinContent.SetupFile)"
+    }
+    $intuneWinDifferences = New-Object Collections.Generic.List[string]
+    foreach ($relativePath in $intuneRuntimeFiles) {
+        $sourceHash = (Get-FileHash -LiteralPath (Join-Path -Path $SourceRoot -ChildPath $relativePath) -Algorithm SHA256).Hash
+        if (-not $intuneWinContent.Files.ContainsKey($relativePath)) {
+            $intuneWinDifferences.Add("missing=$relativePath")
+        }
+        elseif ([string]$intuneWinContent.Files[$relativePath] -ne $sourceHash) {
+            $intuneWinDifferences.Add("changed=$relativePath")
+        }
+    }
+    foreach ($relativePath in @($intuneWinContent.Files.Keys)) {
+        if ($intuneRuntimeFiles -notcontains $relativePath) {
+            $intuneWinDifferences.Add("extra=$relativePath")
+        }
+    }
+    if ($intuneWinDifferences.Count -gt 0) {
+        throw ("IntuneWin content does not match the current runtime (stale package?): {0}" -f
+            (@($intuneWinDifferences | Sort-Object) -join ', '))
     }
 }
 
@@ -283,6 +623,7 @@ if (-not $Build) {
         ReadmeValidated            = $true
         DetectionVersionValidated  = $true
         IntuneWinIncluded          = (-not [string]::IsNullOrWhiteSpace($resolvedIntuneWinPath))
+        IntuneWinContentValidated  = (-not [string]::IsNullOrWhiteSpace($resolvedIntuneWinPath))
         OutputRoot                 = [IO.Path]::GetFullPath($OutputRoot)
         ZipPath                    = $zipOutputPath
         ChecksumPath               = $checksumOutputPath
@@ -333,7 +674,18 @@ try {
     }
 
     $candidateZipPath = Join-Path -Path $candidateRoot -ChildPath $zipFileName
-    Compress-Archive -LiteralPath $packageRoot -DestinationPath $candidateZipPath -CompressionLevel Optimal
+    New-ForwardSlashZip -SourceRoot $packageRoot -DestinationPath $candidateZipPath
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zipCheck = [IO.Compression.ZipFile]::OpenRead($candidateZipPath)
+    try {
+        $backslashEntries = @($zipCheck.Entries | Where-Object { $_.FullName.Contains('\') })
+    }
+    finally {
+        $zipCheck.Dispose()
+    }
+    if ($backslashEntries.Count -gt 0) {
+        throw 'ZIP entry names must use forward slashes.'
+    }
     Expand-Archive -LiteralPath $candidateZipPath -DestinationPath $verificationRoot
 
     $verifiedPackageRoot = Join-Path -Path $verificationRoot -ChildPath $artifactBaseName
@@ -353,8 +705,8 @@ try {
         Get-ChildItem -LiteralPath $verifiedPackageRoot -Recurse -File |
             Where-Object { $_.Extension -in @('.ps1', '.psm1', '.psd1') }
     )
-    if ($verifiedPowerShellFiles.Count -ne 18) {
-        throw "ZIP must contain exactly 18 PowerShell files; found $($verifiedPowerShellFiles.Count)."
+    if ($verifiedPowerShellFiles.Count -ne 19) {
+        throw "ZIP must contain exactly 19 PowerShell files; found $($verifiedPowerShellFiles.Count)."
     }
     foreach ($file in $verifiedPowerShellFiles) {
         Assert-PowerShellSyntax -Path $file.FullName
@@ -414,6 +766,7 @@ try {
         ReadmeValidated            = $true
         DetectionVersionValidated  = $true
         IntuneWinIncluded          = [bool]$candidateIntuneWinPath
+        IntuneWinContentValidated  = [bool]$candidateIntuneWinPath
         OutputRoot                 = $outputFullPath
         ZipPath                    = $zipOutputPath
         ZipSHA256                  = $zipHash
@@ -438,8 +791,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDdPLy2drXfg6mW
-# no1RAzzhWL34WUmDBbZjwuNveU46ZaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAjOGJlEo59oo3Z
+# Z3tRmpg+nioj7StdDJErLSaDjm77YqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -572,31 +925,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ0mCGbw8czRwlDPViU04s+7B/tEUg95YhjorbXUXFsLMA0GCSqG
-# SIb3DQEBAQUABIIBgBQzP0dBWqm7nylbrhBiYYmPGel8bLay2Ghn3uhstSrCzSLk
-# dR2d0hb56za0qTeQwe2hepuz0398JKXcbOTCPJWLRZ8hYSpERoTk+Fk0qzanO01Z
-# jklhzuOB/pPrMYalJXq3vf3HX54hplZjC1rsjQnaLd+RjLOy3CNCTCvf6phelfLy
-# uI3Fjmfv2YeCLEp6FVYbWqRmbZOpDPRHw4zWgYAypcUUnNXEmmSTNOzQUlVzrlH/
-# EodfEyHUUdDDu+ea18Sy0AO9lF84upmwsbjNtVzjY9ouXKQQ4Itu88q8Jrgdafoh
-# kfr0pOfwcHU0wePPNQgqOGhh1pJj+SH6dph/RNgOX5/quH078/XKgHmuwesdcDtz
-# XC08ynsGBujSx+SLdCmxAC4qERThTQBnhWAeNWjMt+HIDJdst/uhX6FcETFkDkeK
-# S4/KnEz1BFG3Q5La8GV+BN0bUVkMhVv3NsPTvSsajVsoYk4HIEPS10+3hObKlIou
-# vhRxpLE+Y5KVX2xof6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMiB0dSpwqcyOz4rKbDLIXfjAwtWl4MEtP4a0bdhBQx2MA0GCSqG
+# SIb3DQEBAQUABIIBgDVSe0b1xd0WkXaOe8C55iIIa5TeK1ovj0aAi3OeTGLAblN+
+# SUDSYtGMSKRaIFv8AmfirqXWwucE8laKkUfaVKN0ZVUlUYL0OJkn3oq7WiYIiq+e
+# +V8nGCElz5Yi97rcqANhgUb8Jx/9SAq3xFwTgf1zEusgRU136bhYZi9/nr0DSpIJ
+# xvCDBgyJ9aOUuUxMqvgyRBVKblsPN2rsE/g5QUGE+35jQlKAGIdBjeEcag7R9qXw
+# QATOOAUYPB7H5kKfUsuxIscD5gMz4oNap6NLVEcH996tQnkr7AqxM5lUle0DvB0y
+# SuhXAlVbzczaum5+xJ602oN4r+yiQrk5NngQXobROZH3K7X0C+T2Ee2cI5eO/wWZ
+# qe5ELb2XrRr7ax4x2IIC+8V8OTL5lSlrUcK2EAL9wPxfVx0av6crc/6KzHGvop4c
+# MD2JteGSAwKPohn/MJp+HPdLvLGKhyLfk4AS62olXtJ2w9jRKJDtG1UiCs/PrpwO
+# R/caxVrek6VjGodMeqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMzA5
-# MzVaMC8GCSqGSIb3DQEJBDEiBCBX97Ln8V6x8BbUvRhSTA4+xLYfdYFNrUMbDfBF
-# dCTaBzANBgkqhkiG9w0BAQEFAASCAgAdCyJ89fRVZ+d6EVS4i4XhQCrgNES/L92D
-# qiKkiMU5gxe6bE+t6XUVjLfEneaN8RGF/t/JPcXUUMU4PpzgSoTSvpNWMay0y32f
-# k8wVtoD6A3KH26CJGLdYBYb5AGbrL/ObSbENZoj8HdVME5DnTCuD1AmBSxYEDsFZ
-# gDuNsvMJAI+IoPgJp1o/VYuNC1jkiQ8wl6+dr4tMH6ZXUtPOPfDkwKP+uqjJuFN+
-# en6wBcpzubviK3erfkTgemPQj9V1LghwC11Ff/bbfabzvpO3ENRyBFjAt3KOO5Yp
-# 7QU4e2hJRXaARjH8vBqhCqHb/t9vla/fL2YK/jeGi2kVg5ximBCZV9drhuIAP8bu
-# QjFYy/nlKZ7qux9FU4j+59oZKcJthcPqbFyd1sr9GBCvxr4+8lfjyxytVFY/VhAJ
-# r9RzPv1bGMXkhU6/UCGAFRiKXeXbmiPseIG0WQKBmfZCnS8dXpgCGb7CPYoSC4Es
-# L0zKQ1q0GuViVfjkuekDbiaY6gpKTDQQTTP3V5KKhduy/ftm/mwjrFTMuLQwmIKO
-# qxFMx5mr70rMvK1wnYC8EPNspnKxcZ5ya0lHEX+BQ8nyIytEXruoPUv7szCaew3p
-# mVm3NeYB/lqiNAPsjubC6Qee2nOxQw4efxIxmpqyqEKemxE/V63brr9BQV0WUKxA
-# ZHfze3tvfA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjNaMC8GCSqGSIb3DQEJBDEiBCBeP2HTmEABMwgIVZs6WWxLp5cd9gKU3Mi3joEq
+# 72hVMDANBgkqhkiG9w0BAQEFAASCAgB+5DyRiG/32MWaTxCgTpIAQABxF7BMeLvR
+# zM3Z1Ka1FZxxWgNDnRSLSH1/o7omLdMgxCWl0SHj/OMifHpcw1Sm1zEwPgA3uCms
+# Qti1qANIR2DgiseSHcKHsJzPqLDjgrq9BECanmGGdzZ/G8J/Bi4ixhBRQ5PaVyyi
+# +g3yZV6MBtPZfAfAYdXEsm35qjs/bRqAitQB/H0obQ95EfITwW/xHl/ak/ihD388
+# v9yrTqrpGXwolWVmHCfH2X4qsOzLLNqlnGJ9NJ5skXH/CFT9l+mV7Q5MEhVy3+O8
+# gsvjKmDq6p44hN8I3waRCMSggD4vkOmyrTr5Bj6gP8Q+R+1NMsDGNhz/2RTeZoQ+
+# gjCN6JOxiVweoMrBIok8F9W0iq4NS/hKSHcuwiI1O2ZKbzxCsUGdeWnttuRuoNG/
+# 1WQQhktOzZUcwhlbCCLgTONpd+PCXVVjGVUv7c4fmW91FRDA64ldYFDnp6E2wPPJ
+# 8nqIanWWa5yZI+o+A1HZ6QdACi8d0/SehuwAgeL7rbgj+gc+vjiOujIbQRuw6gAO
+# 8zD/0eBqhABD5GLoVCkEnYZk1alZz5vyYgk2Zt+nXr+BZ4uyqWyOysLpUQ0j77ry
+# wqk8oK06PVaTqnnc47BAOruDGbKB0BLrsDpQ5wUJpaGF8wU4WB24NIUMKEyv9rto
+# 59htPGc7bg==
 # SIG # End signature block

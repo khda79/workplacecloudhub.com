@@ -5,16 +5,20 @@
     Installs SmartM365 Device Reboot Manager for Intune Win32 deployment.
 
 .DESCRIPTION
-    Copies runtime files to ProgramData and creates the scheduled task used to
+    Copies runtime files to Program Files and creates the scheduled task used to
     launch the GUI in the interactive user session. Intune is the default
     deployment channel and removes the optional PowerShell Gallery update task.
+    The pre-1.1.0 ProgramData installation is removed: standard users can
+    create files there, so it must not host code run in other sessions.
 .VERSION
-1.0.1
+1.1.0
 #>
 
 [CmdletBinding()]
 param(
-    [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+    # ProgramW6432 keeps the 64-bit Program Files when Intune starts a 32-bit PowerShell.
+    [string]$InstallPath = (Join-Path -Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) -ChildPath 'WCH\SmartDeviceRebootManager'),
+    [string]$LegacyInstallPath = (Join-Path -Path $env:ProgramData -ChildPath 'SmartM365\DeviceRebootManager'),
     [string]$ConfigSourcePath = '',
     [switch]$ForceConfig,
     [switch]$SkipScheduledTask,
@@ -33,6 +37,58 @@ function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Remove-DirectoryWithoutFollowingLinks {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $item) { return }
+
+    # Explicit walk: links (junctions, symlinks) are removed, never traversed, so a
+    # user-created junction cannot redirect a SYSTEM deletion. Remove-Item -Recurse
+    # follows junctions in PS 5.1 and Directory.Delete(recursive) is not portable here.
+    if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        foreach ($child in $item.GetFileSystemInfos()) {
+            $isLink = [bool]($child.Attributes -band [IO.FileAttributes]::ReparsePoint)
+            if ($child -is [IO.DirectoryInfo] -and -not $isLink) {
+                Remove-DirectoryWithoutFollowingLinks -Path $child.FullName
+            }
+            elseif ($child -is [IO.DirectoryInfo]) {
+                [IO.Directory]::Delete($child.FullName, $false)
+            }
+            else {
+                $child.Attributes = [IO.FileAttributes]::Normal
+                [IO.File]::Delete($child.FullName)
+            }
+        }
+    }
+
+    [IO.Directory]::Delete($item.FullName, $false)
+}
+
+function Add-MissingTemplateProperties {
+    param(
+        [Parameter(Mandatory = $true)][object]$Target,
+        [Parameter(Mandatory = $true)][object]$Template,
+        [string]$Prefix = ''
+    )
+
+    $added = New-Object System.Collections.Generic.List[string]
+    foreach ($templateProperty in $Template.PSObject.Properties) {
+        $existing = $Target.PSObject.Properties[$templateProperty.Name]
+        if ($null -eq $existing) {
+            $Target | Add-Member -NotePropertyName $templateProperty.Name -NotePropertyValue $templateProperty.Value
+            $added.Add($Prefix + $templateProperty.Name)
+        }
+        elseif ($templateProperty.Value -is [System.Management.Automation.PSCustomObject] -and $existing.Value -is [System.Management.Automation.PSCustomObject]) {
+            foreach ($nestedName in (Add-MissingTemplateProperties -Target $existing.Value -Template $templateProperty.Value -Prefix ($Prefix + $templateProperty.Name + '.'))) {
+                $added.Add($nestedName)
+            }
+        }
+    }
+
+    return $added.ToArray()
 }
 
 if (-not (Test-IsAdministrator)) {
@@ -98,6 +154,31 @@ elseif ($ForceConfig -or -not (Test-Path -LiteralPath $runtimeConfigPath)) {
     Copy-Item -LiteralPath $templatePath -Destination $runtimeConfigPath -Force
 }
 
+# Upgrades keep local values and gain the keys introduced by the new template.
+$installedTemplatePath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GUI.config.json.template'
+$runtimeConfig = Get-Content -LiteralPath $runtimeConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$configTemplate = Get-Content -LiteralPath $installedTemplatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+$addedConfigKeys = @(Add-MissingTemplateProperties -Target $runtimeConfig -Template $configTemplate)
+if ($addedConfigKeys.Count -gt 0) {
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($runtimeConfigPath, ($runtimeConfig | ConvertTo-Json -Depth 8), $utf8NoBom)
+    Write-Output ("Configuration keys added from template: {0}" -f ($addedConfigKeys -join ', '))
+}
+
+$normalizedInstallPath = [IO.Path]::GetFullPath($InstallPath).TrimEnd('\')
+$normalizedLegacyPath = if ([string]::IsNullOrWhiteSpace($LegacyInstallPath)) { '' } else { [IO.Path]::GetFullPath($LegacyInstallPath).TrimEnd('\') }
+if ($normalizedLegacyPath -and $normalizedLegacyPath -ne $normalizedInstallPath -and (Test-Path -LiteralPath $normalizedLegacyPath)) {
+    # Its configuration is not migrated: the folder may have been modified by a standard user.
+    # A failed cleanup must not block the install; the scheduled task no longer points there.
+    try {
+        Remove-DirectoryWithoutFollowingLinks -Path $normalizedLegacyPath
+        Write-Output ("Legacy installation removed: {0}" -f $normalizedLegacyPath)
+    }
+    catch {
+        Write-Warning ("Unable to remove legacy installation {0}: {1}" -f $normalizedLegacyPath, $_.Exception.Message)
+    }
+}
+
 if ($PackageSource -eq 'Intune') {
     $galleryUpdateTask = Get-ScheduledTask -TaskPath $UpdateTaskPath -TaskName $UpdateTaskName -ErrorAction SilentlyContinue
     if ($null -ne $galleryUpdateTask) {
@@ -136,8 +217,8 @@ Write-Output ("SmartM365 Device Reboot Manager {0} installed to: {1} (source={2}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCbt2l4N6Lso9Ay
-# tqgRogklM/jcoi9XpT5pZBa+hxokOqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAuWHQJ7xMd/lGR
+# 1ijRGpNSxsyjZU/txYIiNm/KHYgaE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -270,31 +351,31 @@ Write-Output ("SmartM365 Device Reboot Manager {0} installed to: {1} (source={2}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIASGsP/DsL02sAJRpoWmfBydxCVCtaWn3qFPB9WxoFD6MA0GCSqG
-# SIb3DQEBAQUABIIBgFoPPmwDxs337a9wbbCUCFpr3Zf+GfaqBwdUB2hAvWcb6ajV
-# hxy3nYy+Itv8I73RaixGOAl5Yw89NEOLIE2NYg1/OUEOk7h1H2Ca2ZS0mLhwoqq0
-# n+5QxaMFlpSwjlYwOH/mWV2Pq6J6nZC55ukJZ3PfkUuulmhE5V4K2pEsmTTx4jUh
-# ADpGXXsJL71zmep7y5VFkeutmjbROWg/YYDv+nyy/9JhEvwtbX4fKqrvFXX7lGAc
-# M4Mdt9t6YEvMZH4AVzMhlQfh99dV7O7RmDNO5rQTymPJYBA8ZoKm8U334JVSH/TK
-# IPnzLKnaJNp8YiwpJAIBM9xQnDjbihRna5UF2yMHFgqw/VcLPOiLL6KwWP/M3cgH
-# UBrgtpyYkzzfrux5HuLKl+a9Sdix17ujTDKPs+vajjpcWw1D8pGurQKD4WpnYXJX
-# NVJ2pcbpLUIEpvp6jPmaJlELEWbVjp9fi6ltdKfV8b6Hl30YoR4yi+udC8dGCdx/
-# NyX3MKe1RDlv7pF9jKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJcelPtc2XDnk/JPo2JgK0xFfTLP12zGNizh7z+0pXCBMA0GCSqG
+# SIb3DQEBAQUABIIBgAKNE0g2rnVncGsKq4pXS89MfPH4Z+gVZipEBePyayRzLmLN
+# f0TygZn0SAHg1XaqbUBJ7e3k87yPlV++1OcFF7iaTICJet5ZpoyselWx9BORtPF8
+# FdEQ/h1b3winLgzWq6Iflh4rL3crxic7a8nhEItC8h5c+dss6FgO7igvGLuvceY8
+# gcme1NhQYcN9Ye6OrhEVE867PrIpoUPe/6VKpNEDUtDLGOc2MPYe0VV0Rx0MRmer
+# SusurAMKvqoSn16LH8VGYrTIdOfnIBLeWmw6uOMIMxIjQ42rKp3hqd/ImAbiF0JJ
+# +73DTOrHSiqxhBT6Z7XmtTfoOlJcI/mxSfzI6ON1Qi7AMt5WdTCjUjS6tYir/2S1
+# evKxSMw01AixiZSvkp7KsdRu8WLlPzrS1lAeCdJdp+PWxK7E+i247wIFYcHzTATq
+# evCwGg30WA68IUWl8Ixr5NSj1kDzbEdf6lys/ZyW2KnsDza/wqXjv3F+MeuGaOr7
+# EzCfHc+P8er8um7/nqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMzA5
-# MzNaMC8GCSqGSIb3DQEJBDEiBCAuIvHvNln/XtlMLNPWFKS8OJuUqh/M4ywTQigY
-# mZDX+jANBgkqhkiG9w0BAQEFAASCAgAR5/P9laykGbsM88ypNadDU3J/3xzOz8lo
-# aJFZm431+a7x7YuBG+fR9Ys+DedLg4EjYWWMiuII/FlwkLTWHleiZ23Nzfb04RPb
-# WiOAMqI7WyNCbSSvchlcxZGfN2PaeOUxYyFsNdti/y9g82pK+3EQ0DKde/RMkGFn
-# NUaIe6YQy7vnodh5/fCtsYpwzzlXbHGGLylAQNEVBuQYa+C3GTgIRmTqq/CZXaue
-# JwvJUdVE0buF9iIJJU7vcTh8Jx1zK4z2jG7hMvVND+NSLEmgir4Q4ELBhi38DCtA
-# cvmsmzo5/AhplfKK3oKzzhh7mG9uFm2BlqSWa+wu2BG8XMQUzgq3ROrbLJd2YSp0
-# dZCukYI68VR22Y9mG3avfWEFj8CtO4Hl5f7d5QqsBmVLmKpPhVOTs3oZ5kbYc1BL
-# xnueeP0SnNPleF20G3gfc3yopV8jesSddLPOlaQGvOLxFJz9lh1qGarxIOabReQE
-# ehQlvKFHJpNUg6jzyh82yK8h5Ov9k5SISKR61Og6TkO/TkaqEIkslmLIxvcYCn46
-# 3dcfcTuXpJSxSAuvl/dVqpHwE6EbUSInR2UIRiR8CAbYepQGAsvt2n7ruPSp0Q6A
-# p7ooqBNrfovTOtNatF/tuLI+904vMh0Yr5ImmhQw2iEhnimiPAC13ma4Ny+QDtRZ
-# Dgao+cHqbg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjFaMC8GCSqGSIb3DQEJBDEiBCC+MYP069+YQhMA9OhQjHHReI5f1Fz6ZIAufllO
+# rVJ7VDANBgkqhkiG9w0BAQEFAASCAgBCmxb2a/Ylfjo7nAiCUCYQ/TWuM79SJ3eT
+# CXxliDtU4msRiuFD5yCPt7bIHUA570u7a/1gTxxeauzt6yARqBiCgD+S917IvFJ3
+# 9pZDMDpuwin61Y933TRCAZ2ikilAh9SjVYM49z+/AoRpBM8XVrH1vnvfkL+E5kfp
+# WR+pDlC8Ge/3jxInoFj5GRE1oYWSz76CUE8Fa1Gp5DYak2txZTi0Ql0m2z3s+Pzn
+# /fRi8HbnyA5LLBUbvrtyKbBENGmC8CRb8E1ge7svzWuDdtYJIFMfKloZktjvkG2o
+# kFS0fGASnKFM61rOfS7JAYesHTJNyil/wNWFsogwHAmwQtmRBmsZ2SmgWutWvy5G
+# ag4+P6WiZ3np9ffMOgYGwxh6w2gkNkDgVTJ0AlWEkPLVtqS4BitbGN8j+/pOWGfs
+# I098BTeZhH7x38yN5EQWqmBudCvG0pX1WYc7D+MucPo/eB4evQbyTtw+3wUBJeFB
+# WW1mwDgnImrMZdNlf2huLIuRbRvPEak31Cygtr5WogWstN9tGnrHL/NSIyvU9abP
+# 7gbTUMIskr2Ea2NKgEblx61cp9e4WKRKutapYDwOFM64k5iGdj3JEgUfYzsbpFDA
+# JAFDKr1idqQuO2UJaXR2ZlvBfMWLgKUT8J1dsoQsdF5ST/gNKY3sX9gcGb+md4L+
+# xXSDP/Xq7Q==
 # SIG # End signature block

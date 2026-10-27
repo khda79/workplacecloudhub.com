@@ -9,7 +9,7 @@
     Remediation: 0 completed/requested/deferred, 1 unresolved or technical failure.
     Requires the separately deployed signed app and standard limited task. Installs nothing and preserves app policy. Task start does not prove UI display or reboot.
 .VERSION
-    1.0.0
+    1.1.0
 #>
 [CmdletBinding()]
 param([ValidateRange(1,720)][int]$PendingAgeHours = 72, [ValidateRange(1,168)][int]$ReminderCooldownHours = 24)
@@ -90,7 +90,8 @@ function Get-ValidatedRebootManagerTask {
         throw 'Expected a limited interactive Users-group task.'
     }
     if (@($task.Actions).Count -ne 1) { throw 'Unexpected task action count.' }
-    $appRoot = Join-Path $env:ProgramData 'SmartM365\DeviceRebootManager'
+    # Program Files since app 1.1.0; ProgramW6432 keeps the 64-bit path from a 32-bit host.
+    $appRoot = Join-Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) 'WCH\SmartDeviceRebootManager'
     $gui = Join-Path $appRoot 'SmartM365-DeviceRebootManager-GUI.ps1'
     $hostPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $action = $task.Actions[0]
@@ -137,8 +138,8 @@ catch {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAd3ogWxufvKxmf
-# idmOntgvPnW07piyo7gjKLVmUnBUeKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCwiPoR2ZE10pv
+# wv7JEFDB4bCZS9a9/bWfQ1+mrheNcqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -271,31 +272,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIODEJQ8qp8hWFOJpoVySn6NK9Ov1EQJ/pY661/xqATg7MA0GCSqG
-# SIb3DQEBAQUABIIBgJHIzMpNyL2eupXeqtUnTAFyO/72U8f8MVrs/ZjTnaN8Arp7
-# clomv5WtbPPnLjlvoQL/JqMv0O84qsnAb0TOdcGmvVFEYL0Tca80TQ8YFqeG9NFv
-# 6lbGybajZhvYfffaP//IEl1zZ71X8VQleXt3a8KO65MHTVgtUleB6fi2UlzpjD/V
-# NW+71wgEsELD+ZzAvw5OMNmRORpT6yUhgeHK0F9sK1Cz+TjScEM/HvnNMQl4tPNA
-# IAsTUsb9HGBIexSdMaTVdbTxWcXhHeveoQm03bnvwLB5EbcJntBm6RtbJA4Fd9Kg
-# jOly/g45qBoulJqmcZg58+JkBWakSDO1hTP2plXfHd+wOkwNApMWJNCIY44czuP1
-# 7NNIxAPMWCpXvrq0ySmyjKqZlcZUdYxqagL3zbsatSs/MGguT9OeWJvr5Noo2l79
-# Lxdf19ZTNx2br8xUxa7csCLA19MNdFMz3bm662fW8x9SIcAtkjJg6NgpImvd1WL6
-# pD5Hz1WLoW1a64D6naGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDVW5ve6JYkHlsjyQR4kGwHb1bFCxCnrq1iKGfN5NE8RMA0GCSqG
+# SIb3DQEBAQUABIIBgEYYtUlBzrwRHHBWWiNOUy5seFUfr9PZYEYNz5H88o71ysb0
+# hJCIbWs3BlrSKuqXAtMPSo+UONu4o9q2qq1fi+CLL0u+6nH5A08/SqFBJq6RbrJ7
+# 0YAooA6Z1Opq43xOi5EXb7SAZlpOmn+9zPrVwa5dEkV1al5IIy9LgfDRoQiSmbCM
+# GSmvs+ysPHH+24jSy+QDusSniAKn51p4YwQ93XhZ8OeY+odczj4aOXzz+mD2r6nv
+# Rjk83i1WTHIYPN8uJMDAPcl18ABZqDa1ixsngyG1FI35C/kaQODqr8uTPoqmEMGX
+# 0qp5su52lFPF+QKOUiTvH4Y7vNELyeGpLKmoqUi6KwHRTFqC/MF6CZm4hjN2tHzO
+# Oq3K4b+eab3nvHHeSErjVpwIWHvUmxfEScQP42TzB3dvi9+34C6g9JQKYIUoVx/h
+# 1tsJ3B5MnNNRa3335AcdhYFOKClXkux5+cTjwVi+NDe2bEK5WW/oHDozUQNGDIfa
+# zrroQZDl7zZp0dEulKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzQ1
-# MzBaMC8GCSqGSIb3DQEJBDEiBCDs/jxYyfqx3W9VBD7HqB1AsBTJ5097Ai9Rf+b/
-# 71+PPjANBgkqhkiG9w0BAQEFAASCAgCeVSgBgqloj0LgJzImlOOqRy97PiQ/d/Jg
-# HpER1vbWx2QksETne3aFq0g6Z9kW5i5d/kXthKkp1H/XQuJ0sqB3gDGBWDSKt3fo
-# 8ZhSg559dc8oM+qS8Y4OMztwFMNbFvk1+vB61c/BJLLay4EBP2NiZrRcJg62BrjZ
-# x7rkHuETwIjisfoOa8OWYGtZMidww8uHK/be0HdZA12vo8qJUlW6hrCGarn/k2Xd
-# f5nDRyb9UzPl2bxhaXGQarfxsEl1xG+4/HiUQxxI5cTjk4F8JoXT1E5KcBdLMofv
-# Zvul001cTqLVfNkUx++0RyqTO1MVmYwxnXopSQ90z3946lC0ow+/Irib3od+ZGVv
-# 2uVjz/jaH2s5LwY8GHf+26M18A9QLvtjU+Pxx3kcQXm2TkIj6kyRTs92OHrX/U7Z
-# XDJiFrpHePheLzJjnuZrxC++74pIDJD8hGYGFtGeQ8NhQS8wa7AJe7GQkksd96Xa
-# GzvpeH1CePCYkcAu51Q3EDKZ223JYG3ItoL0xvrPV555bxqqSKzxB4GfSEOlhUJh
-# DUb1werWh4d41mHNie/ntihHyMq6igiPXvD46B95roIy87+nhjMY8m43OqxqdnGI
-# ISAftWF1rf8XqTkh9xqxmH3mgJCbn7bWX3CkZtHJUmFcRhvY9L0xhCQye5leGI3a
-# 9F6ge/Bfgg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjRaMC8GCSqGSIb3DQEJBDEiBCD5dAK3ecMwlklOZXUUAJRw4LIEZRyY7MvfXUEe
+# 0f1n/TANBgkqhkiG9w0BAQEFAASCAgBglovlk54rlebxMqKtKuS1aEV/ykM4Xy9c
+# AsCIODPslh4tF+AiL8wxs1qThXGKZCkiuCFxZ9fEL2Zo3VK0wFaeFcTavRrTZPUs
+# bfLx8WTM+mx0LkVRwvGjer1UjqeYrgh1KqHBhSrvPuqbidXtO0r4KMPPwiJ1yItI
+# yGezjeVtXfuNUhl+J/B7zicK0zAQp4t2rMGqNdJf/e/hYCIIBH/PS4Sh14aUoZVD
+# xerpXeWuXGrOmWMi8xdrKI9dpum+YnGOd1HJQTqBUWuGPgWULuqWiGjvzbfLgdR3
+# T/hIlcvX/4DfySmgPiZeIPvOey8lKkrVY5/eiaIl5fYsbRP1LvIoyIPGkNjYR33u
+# wHfIWiu1lqTwvuYuHLuISb2mcdfy6DDGRpVyzbgKKw1Gv+aiGSFMm1Hm6EWKfEn/
+# pLk6A5JNaPygO5tegB6XfvVtysIUXkHtBYr5gnqjYcznX/oimQAIiW9y/kBLgS03
+# ic+8FZkecxdk9rSkY8txGDGzRs+4eAD83yFkA9/+ZK7irW/e0mDupOzypXF3396M
+# M6wZattZNGQ3PmDXhjH2Z/bBZh5RJewrDvzPfyXkLraM4QDxypSxm4vOVkSQdMSh
+# lwxTzUi9Ep153GK2kv+H+atrv/HJVH0+rwnqoks6Y6QhZgryiJczw18WC1tBUIEy
+# xD63iTHjtA==
 # SIG # End signature block

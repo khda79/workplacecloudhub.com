@@ -7,10 +7,18 @@
 .DESCRIPTION
     Preview is the default and performs no Microsoft Graph connection or tenant
     change. With -Execute, the script connects interactively, creates a new
-    Intune Win32 app, uploads and commits the .intunewin content, optionally
-    creates or reuses a pilot security group, and optionally assigns the app as
-    Required to that group. Use -ResumeAppId to safely continue a publication
-    that failed after its app content was committed.
+    Intune Win32 app, uploads and commits the .intunewin content (renewing the
+    upload SAS URI when it nears expiry or Azure returns AuthenticationFailed),
+    optionally creates or reuses a security-enabled pilot group, and optionally
+    assigns the app as Required to that group. Use -ResumeAppId to safely
+    continue a publication that failed after the app was created: an app with
+    committed content resumes supersedence and assignment; an app without
+    committed content (same name, publisher and version notes) gets a new
+    content version uploaded and committed.
+
+    Signature rule (WinVerifyTrust): the detection script is accepted only for
+    result 0, CERT_E_UNTRUSTEDROOT or CERT_E_CHAINING with the pinned signer
+    thumbprint; an untrusted chain produces a warning.
 
     The script never replaces an existing assignment set. It creates the pilot
     assignment individually and preserves all other assignments.
@@ -88,6 +96,134 @@ function Assert-GraphCommand {
         if (-not (Get-Command -Name $commandName -ErrorAction SilentlyContinue)) {
             throw ("Microsoft.Graph.Authentication is required. Missing command: {0}. Install with: Install-Module Microsoft.Graph.Authentication -Scope CurrentUser" -f $commandName)
         }
+    }
+}
+
+function Get-WinVerifyTrustResult {
+    # Direct WinVerifyTrust (WINTRUST_ACTION_GENERIC_VERIFY_V2, no UI, no
+    # revocation check, file choice, VERIFY then CLOSE). Returns the HRESULT.
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not ('SmartM365.DeviceRebootManagerWinTrust' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace SmartM365
+{
+    public static class DeviceRebootManagerWinTrust
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WINTRUST_FILE_INFO
+        {
+            public uint cbStruct;
+            public string pcwszFilePath;
+            public IntPtr hFile;
+            public IntPtr pgKnownSubject;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WINTRUST_DATA
+        {
+            public uint cbStruct;
+            public IntPtr pPolicyCallbackData;
+            public IntPtr pSIPClientData;
+            public uint dwUIChoice;
+            public uint fdwRevocationChecks;
+            public uint dwUnionChoice;
+            public IntPtr pFile;
+            public uint dwStateAction;
+            public IntPtr hWVTStateData;
+            public IntPtr pwszURLReference;
+            public uint dwProvFlags;
+            public uint dwUIContext;
+            public IntPtr pSignatureSettings;
+        }
+
+        [DllImport("wintrust.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
+        private static extern int WinVerifyTrust(IntPtr hwnd, [MarshalAs(UnmanagedType.LPStruct)] Guid pgActionID, IntPtr pWVTData);
+
+        private const uint WTD_UI_NONE = 2;
+        private const uint WTD_REVOKE_NONE = 0;
+        private const uint WTD_CHOICE_FILE = 1;
+        private const uint WTD_STATEACTION_VERIFY = 1;
+        private const uint WTD_STATEACTION_CLOSE = 2;
+        private const uint WTD_REVOCATION_CHECK_NONE = 0x10;
+
+        public static int Verify(string path)
+        {
+            Guid action = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+            WINTRUST_FILE_INFO fileInfo = new WINTRUST_FILE_INFO();
+            fileInfo.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_FILE_INFO));
+            fileInfo.pcwszFilePath = path;
+            IntPtr filePointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WINTRUST_FILE_INFO)));
+            IntPtr dataPointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WINTRUST_DATA)));
+            try
+            {
+                Marshal.StructureToPtr(fileInfo, filePointer, false);
+                WINTRUST_DATA data = new WINTRUST_DATA();
+                data.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_DATA));
+                data.dwUIChoice = WTD_UI_NONE;
+                data.fdwRevocationChecks = WTD_REVOKE_NONE;
+                data.dwUnionChoice = WTD_CHOICE_FILE;
+                data.pFile = filePointer;
+                data.dwStateAction = WTD_STATEACTION_VERIFY;
+                data.dwProvFlags = WTD_REVOCATION_CHECK_NONE;
+                Marshal.StructureToPtr(data, dataPointer, false);
+                int result = WinVerifyTrust(IntPtr.Zero, action, dataPointer);
+
+                data = (WINTRUST_DATA)Marshal.PtrToStructure(dataPointer, typeof(WINTRUST_DATA));
+                data.dwStateAction = WTD_STATEACTION_CLOSE;
+                Marshal.StructureToPtr(data, dataPointer, true);
+                WinVerifyTrust(IntPtr.Zero, action, dataPointer);
+                return result;
+            }
+            finally
+            {
+                Marshal.DestroyStructure(filePointer, typeof(WINTRUST_FILE_INFO));
+                Marshal.FreeHGlobal(filePointer);
+                Marshal.FreeHGlobal(dataPointer);
+            }
+        }
+    }
+}
+'@
+    }
+    return [SmartM365.DeviceRebootManagerWinTrust]::Verify($Path)
+}
+
+function Get-PinnedSignatureState {
+    # Signature rule: WinVerifyTrust must return 0, CERT_E_UNTRUSTEDROOT or
+    # CERT_E_CHAINING (self-signed root not trusted locally) and the signer
+    # thumbprint must equal the pinned one. Any other result, including
+    # TRUST_E_BAD_DIGEST, TRUST_E_NOSIGNATURE or an expired untimestamped
+    # certificate, is rejected.
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Thumbprint
+    )
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    $actual = if ($signature.SignerCertificate) {
+        ([string]$signature.SignerCertificate.Thumbprint).Replace(' ', '').ToUpperInvariant()
+    }
+    else {
+        ''
+    }
+    $pinnedSignerMatch = ($actual -ne '' -and $actual -eq ([string]$Thumbprint).Replace(' ', '').ToUpperInvariant())
+    $trustResult = Get-WinVerifyTrustResult -Path ([IO.Path]::GetFullPath($Path))
+    # 0x800B0109 CERT_E_UNTRUSTEDROOT, 0x800B010A CERT_E_CHAINING
+    $untrustedChainResults = @([int]-2146762487, [int]-2146762486)
+    $chainTrusted = ($trustResult -eq 0)
+
+    [pscustomobject]@{
+        Path              = $Path
+        Status            = [string]$signature.Status
+        TrustResult       = ('0x{0:X8}' -f $trustResult)
+        SignerThumbprint  = $actual
+        PinnedSignerMatch = $pinnedSignerMatch
+        ChainTrusted      = $chainTrusted
+        Accepted          = ($pinnedSignerMatch -and ($chainTrusted -or $untrustedChainResults -contains $trustResult))
     }
 }
 
@@ -266,7 +402,8 @@ function Wait-GraphContentFileState {
         [Parameter(Mandatory = $true)][string[]]$FailureStates,
         [int]$PollIntervalSeconds,
         [int]$TimeoutMinutes,
-        [switch]$RequireAzureStorageUri
+        [switch]$RequireAzureStorageUri,
+        [string]$ExcludeAzureStorageUri = ''
     )
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
@@ -279,8 +416,10 @@ function Wait-GraphContentFileState {
             throw ("Intune content file entered failure state: {0}; Detail={1}" -f
                 $state,(Get-GraphObjectDiagnosticText -Value $file))
         }
+        $currentStorageUri = [string]$file.azureStorageUri
         if (($SuccessStates -contains $state) -and
-            (-not $RequireAzureStorageUri -or -not [string]::IsNullOrWhiteSpace([string]$file.azureStorageUri))) {
+            (-not $RequireAzureStorageUri -or -not [string]::IsNullOrWhiteSpace($currentStorageUri)) -and
+            ([string]::IsNullOrWhiteSpace($ExcludeAzureStorageUri) -or $currentStorageUri -ne $ExcludeAzureStorageUri)) {
             return $file
         }
         Write-Step "Waiting for Intune content state. Current=$state"
@@ -302,17 +441,58 @@ function Join-SasQuery {
     return "$Uri`?$Query"
 }
 
+function Get-SasExpiryUtc {
+    param([object]$File)
+
+    $property = $File.PSObject.Properties['azureStorageUriExpirationDateTime']
+    if (-not $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+        return $null
+    }
+    try {
+        return ([datetime]$property.Value).ToUniversalTime()
+    }
+    catch {
+        return $null
+    }
+}
+
+function Update-IntuneUploadSas {
+    # Calls the renewUpload action and waits for a new SAS URI.
+    param(
+        [Parameter(Mandatory = $true)][string]$FileUri,
+        [Parameter(Mandatory = $true)][object]$SasState,
+        [int]$PollIntervalSeconds,
+        [int]$TimeoutMinutes
+    )
+
+    Write-Step 'Renewing the Intune upload SAS URI.'
+    Invoke-GraphJson -Method POST -Uri "$FileUri/renewUpload" -Body @{} | Out-Null
+    $renewedFile = Wait-GraphContentFileState `
+        -Uri $FileUri `
+        -SuccessStates @('azureStorageUriRenewalSuccess','azureStorageUriRequestSuccess') `
+        -FailureStates @('azureStorageUriRenewalFailed','azureStorageUriRequestFailed') `
+        -PollIntervalSeconds $PollIntervalSeconds `
+        -TimeoutMinutes $TimeoutMinutes `
+        -RequireAzureStorageUri `
+        -ExcludeAzureStorageUri ([string]$SasState.Uri)
+    $SasState.Uri = [string]$renewedFile.azureStorageUri
+    $SasState.ExpiresUtc = Get-SasExpiryUtc -File $renewedFile
+    Write-Step ("Intune upload SAS URI renewed. ExpiresUtc={0}" -f $SasState.ExpiresUtc)
+}
+
 function Send-AzureHttpRequestWithRetry {
     param(
         [Parameter(Mandatory = $true)][Net.Http.HttpClient]$Client,
         [Parameter(Mandatory = $true)][scriptblock]$RequestFactory,
         [Parameter(Mandatory = $true)][string]$Operation,
-        [int]$MaxRetries
+        [int]$MaxRetries,
+        [scriptblock]$OnAuthenticationFailure
     )
 
     for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
         $request = $null
         $response = $null
+        $renewCredential = $false
         try {
             $request = & $RequestFactory
             $response = $Client.SendAsync($request).GetAwaiter().GetResult()
@@ -323,6 +503,10 @@ function Send-AzureHttpRequestWithRetry {
             if ($attempt -ge $MaxRetries) {
                 throw "$Operation failed. Status=$([int]$response.StatusCode); Body=$body"
             }
+            # An expired SAS returns 403 AuthenticationFailed: renew, then retry.
+            $renewCredential = ($null -ne $OnAuthenticationFailure -and
+                [int]$response.StatusCode -eq 403 -and
+                $body -match 'AuthenticationFailed')
             Write-Step ("{0} attempt {1}/{2} failed. Status={3}. Retrying." -f
                 $Operation,$attempt,$MaxRetries,[int]$response.StatusCode)
         }
@@ -342,6 +526,9 @@ function Send-AzureHttpRequestWithRetry {
                 $request.Dispose()
             }
         }
+        if ($renewCredential) {
+            & $OnAuthenticationFailure
+        }
         Start-Sleep -Seconds ([Math]::Min(60,5 * $attempt))
     }
 }
@@ -350,10 +537,27 @@ function Send-AzureBlockBlobFromIntuneWin {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$ContentEntryName,
-        [Parameter(Mandatory = $true)][string]$AzureStorageUri,
+        [Parameter(Mandatory = $true)][object]$SasState,
+        [Parameter(Mandatory = $true)][string]$FileUri,
         [int]$BlockSizeMB,
-        [int]$MaxRetries
+        [int]$MaxRetries,
+        [int]$PollIntervalSeconds,
+        [int]$TimeoutMinutes
     )
+
+    # Renews the SAS before it expires (5-minute margin) and on 403 AuthenticationFailed.
+    $renewSas = {
+        Update-IntuneUploadSas `
+            -FileUri $FileUri `
+            -SasState $SasState `
+            -PollIntervalSeconds $PollIntervalSeconds `
+            -TimeoutMinutes $TimeoutMinutes
+    }
+    $renewSasWhenNearExpiry = {
+        if ($null -ne $SasState.ExpiresUtc -and $SasState.ExpiresUtc -lt [datetime]::UtcNow.AddMinutes(5)) {
+            & $renewSas
+        }
+    }
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     Add-Type -AssemblyName System.Net.Http
@@ -386,15 +590,17 @@ function Send-AzureBlockBlobFromIntuneWin {
                 $blockId = [Convert]::ToBase64String(
                     [Text.Encoding]::ASCII.GetBytes(('block-{0:D8}' -f $index))
                 )
-                $blockUri = Join-SasQuery `
-                    -Uri $AzureStorageUri `
-                    -Query ("comp=block&blockid={0}" -f [Uri]::EscapeDataString($blockId))
+                $blockQuery = "comp=block&blockid={0}" -f [Uri]::EscapeDataString($blockId)
                 $currentIndex = $index
+                & $renewSasWhenNearExpiry
                 Send-AzureHttpRequestWithRetry `
                     -Client $client `
                     -MaxRetries $MaxRetries `
                     -Operation "Azure block upload index=$currentIndex" `
+                    -OnAuthenticationFailure $renewSas `
                     -RequestFactory {
+                        # Built per attempt so a renewed SAS URI is used on retry.
+                        $blockUri = Join-SasQuery -Uri ([string]$SasState.Uri) -Query $blockQuery
                         $request = [Net.Http.HttpRequestMessage]::new(
                             [Net.Http.HttpMethod]::Put,
                             [Uri]$blockUri
@@ -434,13 +640,15 @@ function Send-AzureBlockBlobFromIntuneWin {
     $commitClient = New-Object Net.Http.HttpClient
     $commitClient.Timeout = [TimeSpan]::FromMinutes(30)
     try {
-        $commitUri = Join-SasQuery -Uri $AzureStorageUri -Query 'comp=blocklist'
         $blockList = $xmlBuilder.ToString()
+        & $renewSasWhenNearExpiry
         Send-AzureHttpRequestWithRetry `
             -Client $commitClient `
             -MaxRetries $MaxRetries `
             -Operation 'Azure block list commit' `
+            -OnAuthenticationFailure $renewSas `
             -RequestFactory {
+                $commitUri = Join-SasQuery -Uri ([string]$SasState.Uri) -Query 'comp=blocklist'
                 $request = [Net.Http.HttpRequestMessage]::new(
                     [Net.Http.HttpMethod]::Put,
                     [Uri]$commitUri
@@ -477,9 +685,14 @@ function Resolve-PilotGroup {
     )
 
     if (-not [string]::IsNullOrWhiteSpace($GroupId)) {
-        return Invoke-GraphJson `
+        $explicitGroup = Invoke-GraphJson `
             -Method GET `
             -Uri "https://graph.microsoft.com/v1.0/groups/${GroupId}?`$select=id,displayName,securityEnabled,mailEnabled"
+        if (-not [bool]$explicitGroup.securityEnabled) {
+            throw "Pilot group is not security-enabled: $GroupId"
+        }
+        Write-Step "Using pilot group: $($explicitGroup.displayName) ($($explicitGroup.id))"
+        return $explicitGroup
     }
 
     $literal = ConvertTo-ODataStringLiteral -Value $DisplayName
@@ -661,17 +874,15 @@ $expectedVersionPattern = [regex]::Escape($PackageVersion)
 if ($detectionScriptContent -notmatch "\`$ExpectedVersion\s*=\s*'$expectedVersionPattern'") {
     throw "Detection script does not contain the expected package version: $PackageVersion"
 }
-$detectionSignature = Get-AuthenticodeSignature -LiteralPath $resolvedDetectionScriptPath
-$actualSigner = if ($detectionSignature.SignerCertificate) {
-    Get-NormalizedThumbprint $detectionSignature.SignerCertificate.Thumbprint
+# Same pinned-signer rule as the Gallery build and update helper.
+$detectionSignature = Get-PinnedSignatureState -Path $resolvedDetectionScriptPath -Thumbprint $ExpectedSignerThumbprint
+$actualSigner = $detectionSignature.SignerThumbprint
+if (-not $detectionSignature.Accepted) {
+    throw ("Detection script signer validation failed: status={0}; winVerifyTrust={1}; signer={2}" -f
+        $detectionSignature.Status,$detectionSignature.TrustResult,$actualSigner)
 }
-else {
-    ''
-}
-if ($actualSigner -ne (Get-NormalizedThumbprint $ExpectedSignerThumbprint) -or
-    $detectionSignature.Status -in @('NotSigned','HashMismatch')) {
-    throw ("Detection script signer validation failed: status={0}; signer={1}" -f
-        $detectionSignature.Status,$actualSigner)
+if (-not $detectionSignature.ChainTrusted) {
+    Write-Warning ("Pinned signer accepted but its certificate chain is not trusted locally: winVerifyTrust={0}" -f $detectionSignature.TrustResult)
 }
 
 $metadata = Read-IntuneWinPackage -Path $resolvedIntuneWinPath
@@ -760,37 +971,6 @@ $contentVersionId = ''
 $pilotGroup = $null
 $supersedence = $null
 try {
-    if (-not [string]::IsNullOrWhiteSpace($ResumeAppId)) {
-        $resumeApp = Invoke-GraphJson `
-            -Method GET `
-            -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/${ResumeAppId}"
-        $expectedVersionNote = "PackageVersion=$PackageVersion"
-        if (-not $resumeApp -or [string]$resumeApp.id -ne $ResumeAppId) {
-            throw "Existing Intune app could not be validated for resume: $ResumeAppId"
-        }
-        if ([string]$resumeApp.displayName -ne $AppDisplayName -or
-            [string]$resumeApp.publisher -ne $Publisher -or
-            [string]$resumeApp.notes -notlike "*$expectedVersionNote*") {
-            throw ("Existing Intune app does not match this publication. Id={0}; DisplayName={1}; Publisher={2}; Notes={3}" -f
-                $resumeApp.id,$resumeApp.displayName,$resumeApp.publisher,$resumeApp.notes)
-        }
-        $appId = [string]$resumeApp.id
-        $contentVersionId = [string]$resumeApp.committedContentVersion
-        if ([string]::IsNullOrWhiteSpace($contentVersionId)) {
-            throw "Existing Intune app has no committed content version and cannot be resumed: $ResumeAppId"
-        }
-        Write-Step ("Resuming existing Intune app: {0} ({1}); committed content version={2}" -f
-            $resumeApp.displayName,$appId,$contentVersionId)
-    }
-    else {
-    $existingApps = @(Get-ExistingAppByDisplayName -DisplayName $AppDisplayName)
-    if ($existingApps.Count -gt 0 -and -not $AllowDuplicateDisplayName) {
-        $existingText = $existingApps |
-            ForEach-Object { '{0} ({1})' -f $_.displayName,$_.id }
-        throw ("An Intune app already uses this display name. Choose another version/name or explicitly pass -AllowDuplicateDisplayName. Existing={0}" -f
-            ($existingText -join ', '))
-    }
-
     $appBody = [ordered]@{
         '@odata.type' = '#microsoft.graph.win32LobApp'
         displayName = $AppDisplayName
@@ -835,88 +1015,139 @@ try {
         installCommandLineTimeoutInMinutes = 15
     }
 
-    $app = Invoke-GraphJson `
-        -Method POST `
-        -Uri "$GraphBaseUri/deviceAppManagement/mobileApps" `
-        -Body $appBody
-    $appId = [string]$app.id
-    if ([string]::IsNullOrWhiteSpace($appId)) {
-        throw 'Microsoft Graph did not return a mobile app id.'
-    }
-    Write-Step "Created Intune app: $appId"
-
-    $contentVersion = Invoke-GraphJson `
-        -Method POST `
-        -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$appId/microsoft.graph.win32LobApp/contentVersions" `
-        -Body @{}
-    $contentVersionId = [string]$contentVersion.id
-    if ([string]::IsNullOrWhiteSpace($contentVersionId)) {
-        throw 'Microsoft Graph did not return a content version id.'
-    }
-    Write-Step "Created content version: $contentVersionId"
-
-    $fileBody = [ordered]@{
-        '@odata.type' = '#microsoft.graph.mobileAppContentFile'
-        name = [string]$metadata.FileName
-        size = [int64]$metadata.UnencryptedContentSize
-        sizeEncrypted = [int64]$metadata.SizeEncrypted
-        manifest = $null
-        isDependency = $false
-    }
-    $file = Invoke-GraphJson `
-        -Method POST `
-        -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$appId/microsoft.graph.win32LobApp/contentVersions/$contentVersionId/files" `
-        -Body $fileBody
-    $fileId = [string]$file.id
-    if ([string]::IsNullOrWhiteSpace($fileId)) {
-        throw 'Microsoft Graph did not return a content file id.'
-    }
-    $fileUri = "$GraphBaseUri/deviceAppManagement/mobileApps/$appId/microsoft.graph.win32LobApp/contentVersions/$contentVersionId/files/$fileId"
-
-    $file = Wait-GraphContentFileState `
-        -Uri $fileUri `
-        -SuccessStates @('azureStorageUriRequestSuccess','azureStorageUriRenewalSuccess') `
-        -FailureStates @('azureStorageUriRequestFailed','azureStorageUriRenewalFailed') `
-        -PollIntervalSeconds $PollSeconds `
-        -TimeoutMinutes $PollTimeoutMinutes `
-        -RequireAzureStorageUri
-
-    Write-Step 'Uploading encrypted package content to the Intune staging blob.'
-    Send-AzureBlockBlobFromIntuneWin `
-        -Path $resolvedIntuneWinPath `
-        -ContentEntryName ([string]$metadata.ContentEntryName) `
-        -AzureStorageUri ([string]$file.azureStorageUri) `
-        -BlockSizeMB $UploadBlockSizeMB `
-        -MaxRetries $AzureUploadMaxRetries
-
-    $commitBody = [ordered]@{
-        fileEncryptionInfo = [ordered]@{
-            '@odata.type' = '#microsoft.graph.fileEncryptionInfo'
-            encryptionKey = [string]$metadata.EncryptionKey
-            macKey = [string]$metadata.MacKey
-            initializationVector = [string]$metadata.InitializationVector
-            mac = [string]$metadata.Mac
-            profileIdentifier = [string]$metadata.ProfileIdentifier
-            fileDigest = [string]$metadata.FileDigest
-            fileDigestAlgorithm = [string]$metadata.FileDigestAlgorithm
+    $contentUploadRequired = $true
+    if (-not [string]::IsNullOrWhiteSpace($ResumeAppId)) {
+        $resumeApp = Invoke-GraphJson `
+            -Method GET `
+            -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/${ResumeAppId}"
+        $expectedVersionNote = "PackageVersion=$PackageVersion"
+        if (-not $resumeApp -or [string]$resumeApp.id -ne $ResumeAppId) {
+            throw "Existing Intune app could not be validated for resume: $ResumeAppId"
+        }
+        if ([string]$resumeApp.displayName -ne $AppDisplayName -or
+            [string]$resumeApp.publisher -ne $Publisher -or
+            [string]$resumeApp.notes -notlike "*$expectedVersionNote*") {
+            throw ("Existing Intune app does not match this publication. Id={0}; DisplayName={1}; Publisher={2}; Notes={3}" -f
+                $resumeApp.id,$resumeApp.displayName,$resumeApp.publisher,$resumeApp.notes)
+        }
+        $appId = [string]$resumeApp.id
+        $contentVersionId = ''
+        if ($resumeApp.PSObject.Properties['committedContentVersion']) {
+            $contentVersionId = [string]$resumeApp.committedContentVersion
+        }
+        if ([string]::IsNullOrWhiteSpace($contentVersionId)) {
+            # Orphan app from a failure between app creation and content commit:
+            # name, publisher and version notes match, so create and upload a new
+            # content version for it instead of creating a duplicate app.
+            Write-Step ("Resuming existing Intune app without committed content: {0} ({1}); a new content version will be uploaded." -f
+                $resumeApp.displayName,$appId)
+        }
+        else {
+            $contentUploadRequired = $false
+            Write-Step ("Resuming existing Intune app: {0} ({1}); committed content version={2}" -f
+                $resumeApp.displayName,$appId,$contentVersionId)
         }
     }
-    Invoke-GraphJson -Method POST -Uri "$fileUri/commit" -Body $commitBody | Out-Null
-    Wait-GraphContentFileState `
-        -Uri $fileUri `
-        -SuccessStates @('commitFileSuccess') `
-        -FailureStates @('commitFileFailed') `
-        -PollIntervalSeconds $PollSeconds `
-        -TimeoutMinutes $PollTimeoutMinutes | Out-Null
+    else {
+        $existingApps = @(Get-ExistingAppByDisplayName -DisplayName $AppDisplayName)
+        if ($existingApps.Count -gt 0 -and -not $AllowDuplicateDisplayName) {
+            $existingText = $existingApps |
+                ForEach-Object { '{0} ({1})' -f $_.displayName,$_.id }
+            throw ("An Intune app already uses this display name. If it is an incomplete publication of this package, rerun with -ResumeAppId <id> to finish it; otherwise choose another version/name or explicitly pass -AllowDuplicateDisplayName. Existing={0}" -f
+                ($existingText -join ', '))
+        }
 
-    $finalAppBody = Copy-OrderedHashtable -InputObject $appBody
-    $finalAppBody.Remove('applicableArchitectures')
-    $finalAppBody['committedContentVersion'] = $contentVersionId
-    Invoke-GraphJson `
-        -Method PATCH `
-        -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$appId" `
-        -Body $finalAppBody | Out-Null
-    Write-Step 'App metadata and content version committed.'
+        $app = Invoke-GraphJson `
+            -Method POST `
+            -Uri "$GraphBaseUri/deviceAppManagement/mobileApps" `
+            -Body $appBody
+        $appId = [string]$app.id
+        if ([string]::IsNullOrWhiteSpace($appId)) {
+            throw 'Microsoft Graph did not return a mobile app id.'
+        }
+        Write-Step "Created Intune app: $appId"
+    }
+
+    if ($contentUploadRequired) {
+        $contentVersion = Invoke-GraphJson `
+            -Method POST `
+            -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$appId/microsoft.graph.win32LobApp/contentVersions" `
+            -Body @{}
+        $contentVersionId = [string]$contentVersion.id
+        if ([string]::IsNullOrWhiteSpace($contentVersionId)) {
+            throw 'Microsoft Graph did not return a content version id.'
+        }
+        Write-Step "Created content version: $contentVersionId"
+
+        $fileBody = [ordered]@{
+            '@odata.type' = '#microsoft.graph.mobileAppContentFile'
+            name = [string]$metadata.FileName
+            size = [int64]$metadata.UnencryptedContentSize
+            sizeEncrypted = [int64]$metadata.SizeEncrypted
+            manifest = $null
+            isDependency = $false
+        }
+        $file = Invoke-GraphJson `
+            -Method POST `
+            -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$appId/microsoft.graph.win32LobApp/contentVersions/$contentVersionId/files" `
+            -Body $fileBody
+        $fileId = [string]$file.id
+        if ([string]::IsNullOrWhiteSpace($fileId)) {
+            throw 'Microsoft Graph did not return a content file id.'
+        }
+        $fileUri = "$GraphBaseUri/deviceAppManagement/mobileApps/$appId/microsoft.graph.win32LobApp/contentVersions/$contentVersionId/files/$fileId"
+
+        $file = Wait-GraphContentFileState `
+            -Uri $fileUri `
+            -SuccessStates @('azureStorageUriRequestSuccess','azureStorageUriRenewalSuccess') `
+            -FailureStates @('azureStorageUriRequestFailed','azureStorageUriRenewalFailed') `
+            -PollIntervalSeconds $PollSeconds `
+            -TimeoutMinutes $PollTimeoutMinutes `
+            -RequireAzureStorageUri
+
+        $uploadSas = [pscustomobject]@{
+            Uri        = [string]$file.azureStorageUri
+            ExpiresUtc = Get-SasExpiryUtc -File $file
+        }
+        Write-Step 'Uploading encrypted package content to the Intune staging blob.'
+        Send-AzureBlockBlobFromIntuneWin `
+            -Path $resolvedIntuneWinPath `
+            -ContentEntryName ([string]$metadata.ContentEntryName) `
+            -SasState $uploadSas `
+            -FileUri $fileUri `
+            -BlockSizeMB $UploadBlockSizeMB `
+            -MaxRetries $AzureUploadMaxRetries `
+            -PollIntervalSeconds $PollSeconds `
+            -TimeoutMinutes $PollTimeoutMinutes
+
+        $commitBody = [ordered]@{
+            fileEncryptionInfo = [ordered]@{
+                '@odata.type' = '#microsoft.graph.fileEncryptionInfo'
+                encryptionKey = [string]$metadata.EncryptionKey
+                macKey = [string]$metadata.MacKey
+                initializationVector = [string]$metadata.InitializationVector
+                mac = [string]$metadata.Mac
+                profileIdentifier = [string]$metadata.ProfileIdentifier
+                fileDigest = [string]$metadata.FileDigest
+                fileDigestAlgorithm = [string]$metadata.FileDigestAlgorithm
+            }
+        }
+        Invoke-GraphJson -Method POST -Uri "$fileUri/commit" -Body $commitBody | Out-Null
+        Wait-GraphContentFileState `
+            -Uri $fileUri `
+            -SuccessStates @('commitFileSuccess') `
+            -FailureStates @('commitFileFailed') `
+            -PollIntervalSeconds $PollSeconds `
+            -TimeoutMinutes $PollTimeoutMinutes | Out-Null
+
+        $finalAppBody = Copy-OrderedHashtable -InputObject $appBody
+        $finalAppBody.Remove('applicableArchitectures')
+        $finalAppBody['committedContentVersion'] = $contentVersionId
+        Invoke-GraphJson `
+            -Method PATCH `
+            -Uri "$GraphBaseUri/deviceAppManagement/mobileApps/$appId" `
+            -Body $finalAppBody | Out-Null
+        Write-Step 'App metadata and content version committed.'
     }
 
     if (-not [string]::IsNullOrWhiteSpace($SupersedeAppId)) {
@@ -960,7 +1191,7 @@ try {
 }
 catch {
     if (-not [string]::IsNullOrWhiteSpace($appId)) {
-        Write-Warning ("Publication failed after the Intune app was created. Review incomplete app id: {0}" -f $appId)
+        Write-Warning ("Publication failed after the Intune app was created. Rerun with -ResumeAppId {0} to finish it, or review and remove the incomplete app." -f $appId)
     }
     throw
 }
@@ -974,10 +1205,10 @@ finally {
 }
 
 # SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBjc9VL9qWqkkYP
-# iY5LTYTDiqUYeAKcmEPRa6noJ50/JKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCSbjto71KPZYJf
+# KtHWoJYOqsP2XuQlXO+/PcvNPjiAnaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1002,19 +1233,139 @@ finally {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC/TwnSczN9Im1ku5fKm9ql
-# mXhXTi5Q7iwSHVAWvGP0RjANBgkqhkiG9w0BAQEFAASCAYAIT2mAO+TNPbAlXZrp
-# Ld3R+1EjQLfCmG1l9XD1ZtQItRz1ON+17Td7bjC8C6rXJKuuY/i4ZXT9bl2o5/5p
-# TDXt32ydmwzQcvgrhHQWlBrBHu6AYA3qnQ7rParVlImTH2CIIK85YYXe46Xn90V4
-# SRg3FFf5Kgv6wYs+rvE+bWhJAgePREisP+aXiD/TDYrY/bxi3d8+4kQsCYIioKvM
-# 6aNn6Cj6QH2jOEzjW+fUHRQxwwwdPJC34xsP+iUYS0h2SqrV0gG99p/JydWzR+Lx
-# 33KqwKftNV+jFj+ykGe/fDKy8oil2dJJgdaMkIvtKVYVaAY0PqP+Q8HEz3s1Wa0M
-# x42HlCUGPYXa3q1uL8T/AzW9z7n4DQQMrOBAi/egjLVEma3VUBRQUqvl4H8GySNB
-# EF4Ex55oTrQCJEvPqwqlVEcJ6ssUQU5PuVgPIaPI7Q4adxf56L4GQyh8emYWWZXL
-# KwD+qe0s5KAEA9LGzmm2Q/qIiWqU6E2I6nicLpN14vsSKMw=
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
+# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
+# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
+# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
+# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
+# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
+# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
+# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
+# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
+# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
+# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
+# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
+# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
+# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
+# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
+# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
+# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
+# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
+# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
+# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
+# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
+# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
+# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
+# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
+# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
+# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
+# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
+# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
+# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
+# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
+# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
+# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
+# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
+# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
+# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
+# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
+# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
+# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
+# hvcNAQkEMSIEIIfD3yf2vCYEAc7dUfwNu3ABF2NChamatvk3k1m7TpCLMA0GCSqG
+# SIb3DQEBAQUABIIBgIs2BKz6/+cHm667IRYMHfmQeBAx5vZGl75wa//tzjqKm0A+
+# 93+WXMP22WCBEaF2TjIT96p8yFLpLp1RWjCr62gLegx7KKX35VY51aZrjmud5pBw
+# ahZmKqN3rwdo5fwgSAXh29VMLJ+aUESpmPaxZWfOrrCgAWoIHsUJdTiyB8nva15r
+# C54oOEk+LYi7avhsb+TVGkPJSzsaelHcx584qZ2a61M4+dAS9fIkv/uyz4uLh3yq
+# ozMzIzuqozeF3f5WFZTY5nMxynX2nRqe088N15JyY+T0Gqce0kNl8fQszyRo8/J0
+# IebLVrbvhT/vjmpm6c3iipauqy9HGsKCev58iy6mAWTaECHm44irXRnkQBMYxFxD
+# tkL7DG9w7xJC37K1opdB1JS4kQirfMTsM+C5CmZ01ysyKXTGVjqtRwjr+RkQKhBH
+# DruhfIRgbOAzogF+jELIXLHNrj8oSjE7tHlE5ZfiYLRTPLLQVMbrYX/J7KrCmmHR
+# nwZFpFe1Ucm59rk91KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjFaMC8GCSqGSIb3DQEJBDEiBCCVfPkTJx7rd0h/oHTOXn2DVTNG9f0DMrKwH9rr
+# OZsvYjANBgkqhkiG9w0BAQEFAASCAgAvJbAuZWp7g9HKd/3xZwnQr0dWuRKdJzcI
+# rAUEBD65ybKIL7KFgquul3KQLpf+KviSXv+SiLIW+Usap3NzzKfl2t4tV8liV1a2
+# 8wlbMXH3hkv3c0ToInb41kqJoUJTLC6Q4FW3xU/Bh9k3hZzFdWwEatb6gDhXqY10
+# 2mNsri8dSNckcaWqmtDCYv0X8JQzjjgbLoGcdpnXhHDfrytjG1MgfQJXWNLbjNVt
+# yV/ch7VOcyIrVJyBuDo0BxmWvgr3v283s7KQCq+EwOheubxKXECKtRl9xsd8ZVjO
+# iw5wfMkSdwnYuwpd2e2CU31jPWFZkiqoNLEy2quSsPP1ms7jkFPlHL6QcgcnprDn
+# oMc4pxSoLxiMKSwymYPj3SBzq0l/lsLufZWMHYWYtBPqfTP58NKkw6ZgmH9h97Dw
+# KiQx/FRQSJgLdayRq7awy6BA+8KV6CExCASZlsG2itkcSPwxDlhQS/05YZiZGzh2
+# 8Y52r384TjwjZoMVgQ5l+d1QUNAiS9EjXwjaPC/sBc5FwS1ovKuTebA/OLcdjSw/
+# 7S9RhTsWezyvCKsfEaezbhR5I1guJ6qeMPt6H5b/t00pAaxxT6r4KFROZ+as+KUs
+# vEoNNo5PH4efjfiUVl+ANravbV3jdQIBMUpfzYvfLmBBh1orAtXtIhjR2DxZm+jP
+# ZXJQKXFjwA==
 # SIG # End signature block

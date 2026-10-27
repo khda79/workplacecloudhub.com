@@ -10,15 +10,22 @@ script validates a clean VM installation, confirms that automatic updates are
 disabled by default, tests explicit opt-in, disables the update task again,
 and verifies that the local configuration is preserved.
 
-The current WorkplaceCloudHub signing certificate is self-signed. On an
-isolated test VM, -TrustSignerCertificate explicitly imports the bundled public
-certificate into LocalMachine Root and TrustedPublisher when required.
+Package integrity uses the same rule as the Gallery update helper: the signed
+file catalog must match every packaged file, and every signature must have an
+intact hash and the pinned signer thumbprint. The current WorkplaceCloudHub
+certificate is self-signed, so an untrusted chain is accepted with a warning.
+On an isolated test VM, -TrustSignerCertificate optionally imports the bundled
+public certificate into LocalMachine Root and TrustedPublisher.
+
+After the explicit automatic-update opt-in, the registered task action is
+replayed with its own executable against a stub that carries the helper's exact
+param block, and every parameter must bind to the expected value.
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [string]$PackagePath = '',
-    [string]$InstallPath = "$env:ProgramData\SmartM365\DeviceRebootManager",
+    [string]$InstallPath = (Join-Path -Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) -ChildPath 'WCH\SmartDeviceRebootManager'),
     [string]$TaskPath = '\SmartM365\',
     [string]$TaskName = 'Device Reboot Manager',
     [string]$UpdateTaskPath = '\SmartM365\',
@@ -126,6 +133,133 @@ function Test-ScheduledTaskApiCompatibility {
     }
 }
 
+function Get-WinVerifyTrustResult {
+    # Direct WinVerifyTrust (WINTRUST_ACTION_GENERIC_VERIFY_V2, no UI, no
+    # revocation check, file choice, VERIFY then CLOSE). Returns the HRESULT.
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not ('SmartM365.DeviceRebootManagerWinTrust' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace SmartM365
+{
+    public static class DeviceRebootManagerWinTrust
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WINTRUST_FILE_INFO
+        {
+            public uint cbStruct;
+            public string pcwszFilePath;
+            public IntPtr hFile;
+            public IntPtr pgKnownSubject;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WINTRUST_DATA
+        {
+            public uint cbStruct;
+            public IntPtr pPolicyCallbackData;
+            public IntPtr pSIPClientData;
+            public uint dwUIChoice;
+            public uint fdwRevocationChecks;
+            public uint dwUnionChoice;
+            public IntPtr pFile;
+            public uint dwStateAction;
+            public IntPtr hWVTStateData;
+            public IntPtr pwszURLReference;
+            public uint dwProvFlags;
+            public uint dwUIContext;
+            public IntPtr pSignatureSettings;
+        }
+
+        [DllImport("wintrust.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
+        private static extern int WinVerifyTrust(IntPtr hwnd, [MarshalAs(UnmanagedType.LPStruct)] Guid pgActionID, IntPtr pWVTData);
+
+        private const uint WTD_UI_NONE = 2;
+        private const uint WTD_REVOKE_NONE = 0;
+        private const uint WTD_CHOICE_FILE = 1;
+        private const uint WTD_STATEACTION_VERIFY = 1;
+        private const uint WTD_STATEACTION_CLOSE = 2;
+        private const uint WTD_REVOCATION_CHECK_NONE = 0x10;
+
+        public static int Verify(string path)
+        {
+            Guid action = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+            WINTRUST_FILE_INFO fileInfo = new WINTRUST_FILE_INFO();
+            fileInfo.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_FILE_INFO));
+            fileInfo.pcwszFilePath = path;
+            IntPtr filePointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WINTRUST_FILE_INFO)));
+            IntPtr dataPointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WINTRUST_DATA)));
+            try
+            {
+                Marshal.StructureToPtr(fileInfo, filePointer, false);
+                WINTRUST_DATA data = new WINTRUST_DATA();
+                data.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_DATA));
+                data.dwUIChoice = WTD_UI_NONE;
+                data.fdwRevocationChecks = WTD_REVOKE_NONE;
+                data.dwUnionChoice = WTD_CHOICE_FILE;
+                data.pFile = filePointer;
+                data.dwStateAction = WTD_STATEACTION_VERIFY;
+                data.dwProvFlags = WTD_REVOCATION_CHECK_NONE;
+                Marshal.StructureToPtr(data, dataPointer, false);
+                int result = WinVerifyTrust(IntPtr.Zero, action, dataPointer);
+
+                data = (WINTRUST_DATA)Marshal.PtrToStructure(dataPointer, typeof(WINTRUST_DATA));
+                data.dwStateAction = WTD_STATEACTION_CLOSE;
+                Marshal.StructureToPtr(data, dataPointer, true);
+                WinVerifyTrust(IntPtr.Zero, action, dataPointer);
+                return result;
+            }
+            finally
+            {
+                Marshal.DestroyStructure(filePointer, typeof(WINTRUST_FILE_INFO));
+                Marshal.FreeHGlobal(filePointer);
+                Marshal.FreeHGlobal(dataPointer);
+            }
+        }
+    }
+}
+'@
+    }
+    return [SmartM365.DeviceRebootManagerWinTrust]::Verify($Path)
+}
+
+function Get-PinnedSignatureState {
+    # Signature rule: WinVerifyTrust must return 0, CERT_E_UNTRUSTEDROOT or
+    # CERT_E_CHAINING (self-signed root not trusted locally) and the signer
+    # thumbprint must equal the pinned one. Any other result, including
+    # TRUST_E_BAD_DIGEST, TRUST_E_NOSIGNATURE or an expired untimestamped
+    # certificate, is rejected.
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Thumbprint
+    )
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    $actual = if ($signature.SignerCertificate) {
+        ([string]$signature.SignerCertificate.Thumbprint).Replace(' ', '').ToUpperInvariant()
+    }
+    else {
+        ''
+    }
+    $pinnedSignerMatch = ($actual -ne '' -and $actual -eq ([string]$Thumbprint).Replace(' ', '').ToUpperInvariant())
+    $trustResult = Get-WinVerifyTrustResult -Path ([IO.Path]::GetFullPath($Path))
+    # 0x800B0109 CERT_E_UNTRUSTEDROOT, 0x800B010A CERT_E_CHAINING
+    $untrustedChainResults = @([int]-2146762487, [int]-2146762486)
+    $chainTrusted = ($trustResult -eq 0)
+
+    [pscustomobject]@{
+        Path              = $Path
+        Status            = [string]$signature.Status
+        TrustResult       = ('0x{0:X8}' -f $trustResult)
+        SignerThumbprint  = $actual
+        PinnedSignerMatch = $pinnedSignerMatch
+        ChainTrusted      = $chainTrusted
+        Accepted          = ($pinnedSignerMatch -and ($chainTrusted -or $untrustedChainResults -contains $trustResult))
+    }
+}
 
 function Get-PackageSignatureState {
     param(
@@ -133,33 +267,111 @@ function Get-PackageSignatureState {
         [Parameter(Mandatory = $true)][string]$Thumbprint
     )
 
-    $expected = Get-NormalizedThumbprint $Thumbprint
+    $catalogPath = Join-Path -Path $Root -ChildPath 'SmartM365.DeviceRebootManager.Files.cat'
+    if (-not (Test-Path -LiteralPath $catalogPath -PathType Leaf)) {
+        throw "Package file catalog not found: $catalogPath"
+    }
+    $catalogStatus = [string](Test-FileCatalog -Path $Root -CatalogFilePath $catalogPath -FilesToSkip '*.cat')
+
     $files = @(Get-ChildItem -LiteralPath $Root -Recurse -File |
-        Where-Object { $_.Extension -in @('.ps1', '.psm1', '.psd1') })
-    if ($files.Count -eq 0) {
+        Where-Object { $_.Extension -in @('.ps1', '.psm1', '.psd1', '.cat') })
+    if (@($files | Where-Object { $_.Extension -ne '.cat' }).Count -eq 0) {
         throw "No PowerShell files found in package: $Root"
     }
 
     $rows = @(foreach ($file in $files) {
-        $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
-        $actual = if ($signature.SignerCertificate) {
-            Get-NormalizedThumbprint $signature.SignerCertificate.Thumbprint
+        $state = Get-PinnedSignatureState -Path $file.FullName -Thumbprint $Thumbprint
+        if ($state.Accepted -and -not $state.ChainTrusted) {
+            Write-Warning ("Pinned signer accepted but its certificate chain is not trusted on this VM: file={0}; winVerifyTrust={1}" -f $file.FullName,$state.TrustResult)
         }
-        else { '' }
 
         [pscustomobject]@{
             Path              = $file.FullName
-            Status            = [string]$signature.Status
-            SignerThumbprint  = $actual
-            PinnedSignerMatch = ($actual -eq $expected)
-            Valid             = ($signature.Status -eq 'Valid' -and $actual -eq $expected)
+            Status            = $state.Status
+            TrustResult       = $state.TrustResult
+            SignerThumbprint  = $state.SignerThumbprint
+            PinnedSignerMatch = $state.PinnedSignerMatch
+            Accepted          = $state.Accepted
+            Valid             = ($state.Accepted -and $state.ChainTrusted)
         }
     })
 
     [pscustomobject]@{
         Files                  = $rows
+        CatalogStatus          = $catalogStatus
+        CatalogValid           = ($catalogStatus -eq 'Valid')
         AllPinnedSignerMatches = (-not ($rows.PinnedSignerMatch -contains $false))
+        AllAccepted            = (-not ($rows.Accepted -contains $false))
         AllValid               = (-not ($rows.Valid -contains $false))
+    }
+}
+
+function Test-GalleryUpdateTaskBinding {
+    param(
+        [Parameter(Mandatory = $true)][object]$Task,
+        [Parameter(Mandatory = $true)][string]$HelperPath,
+        [Parameter(Mandatory = $true)][hashtable]$Expected
+    )
+
+    # Replays the registered action with its own executable against a stub that
+    # has the helper's exact param block, so binding errors surface offline.
+    $action = @($Task.Actions)[0]
+    $arguments = [string]$action.Arguments
+    if (-not $arguments.Contains($HelperPath)) {
+        throw "Update task does not run the installed helper: $arguments"
+    }
+
+    $tokens = $null
+    $parseErrors = $null
+    $helperAst = [Management.Automation.Language.Parser]::ParseFile($HelperPath, [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors.Count -gt 0 -or $null -eq $helperAst.ParamBlock) {
+        throw "Installed update helper param block could not be parsed: $HelperPath"
+    }
+    $stubLines = New-Object Collections.Generic.List[string]
+    foreach ($attribute in @($helperAst.ParamBlock.Attributes)) {
+        $stubLines.Add($attribute.Extent.Text)
+    }
+    $stubLines.Add($helperAst.ParamBlock.Extent.Text)
+    $stubLines.Add('$bound = [ordered]@{}')
+    $stubLines.Add('foreach ($key in @($PSBoundParameters.Keys)) {')
+    $stubLines.Add('    $value = $PSBoundParameters[$key]')
+    $stubLines.Add('    if ($value -is [Management.Automation.SwitchParameter]) { $value = $value.IsPresent }')
+    $stubLines.Add('    $bound[$key] = $value')
+    $stubLines.Add('}')
+    $stubLines.Add('''BINDING='' + ($bound | ConvertTo-Json -Compress)')
+
+    $stubRoot = Join-Path -Path ([IO.Path]::GetTempPath()) -ChildPath ("SmartM365 TaskBinding {0}" -f [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $stubRoot -Force | Out-Null
+    try {
+        $stubPath = Join-Path -Path $stubRoot -ChildPath 'Gallery Update Stub.ps1'
+        Set-Content -LiteralPath $stubPath -Value $stubLines.ToArray() -Encoding UTF8
+
+        $startInfo = New-Object Diagnostics.ProcessStartInfo
+        $startInfo.FileName = [string]$action.Execute
+        $startInfo.Arguments = $arguments.Replace($HelperPath, $stubPath)
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $process = [Diagnostics.Process]::Start($startInfo)
+        $standardOutput = $process.StandardOutput.ReadToEnd()
+        $standardError = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        $bindingLine = @($standardOutput -split "`r?`n" | Where-Object { $_ -like 'BINDING=*' }) | Select-Object -First 1
+        if ($process.ExitCode -ne 0 -or -not $bindingLine) {
+            throw ("Update task arguments do not bind: exit={0}; stderr={1}; arguments={2}" -f $process.ExitCode,$standardError.Trim(),$arguments)
+        }
+        $bound = $bindingLine.Substring(8) | ConvertFrom-Json
+        foreach ($name in $Expected.Keys) {
+            $boundProperty = $bound.PSObject.Properties[$name]
+            $actualValue = if ($boundProperty) { $boundProperty.Value } else { $null }
+            if ([string]$actualValue -ne [string]$Expected[$name]) {
+                throw ("Update task parameter {0} bound to '{1}' instead of '{2}'. Arguments={3}" -f $name,$actualValue,$Expected[$name],$arguments)
+            }
+        }
+        return $true
+    }
+    finally {
+        Remove-Item -LiteralPath $stubRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -249,6 +461,9 @@ if (-not $signatureState.AllPinnedSignerMatches) {
     $failedFiles = $signatureState.Files | Where-Object { -not $_.PinnedSignerMatch } | Select-Object -ExpandProperty Path
     throw "Package signer validation failed: $($failedFiles -join ', ')"
 }
+if (-not $signatureState.CatalogValid) {
+    throw "Package file catalog validation failed: status=$($signatureState.CatalogStatus)"
+}
 
 $scheduledTaskApiCompatible = Test-ScheduledTaskApiCompatibility
 $existingGuiTask = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -262,8 +477,10 @@ $preview = [pscustomobject]@{
     Prerelease                = $prerelease
     PackageVersion            = $expectedPackageVersion
     PackagePath               = $resolvedPackagePath
-    PowerShellFileCount       = $signatureState.Files.Count
+    SignedFileCount           = $signatureState.Files.Count
+    CatalogValid              = $signatureState.CatalogValid
     AllPinnedSignerMatches    = $signatureState.AllPinnedSignerMatches
+    AllSignaturesAccepted     = $signatureState.AllAccepted
     AllSignaturesTrusted      = $signatureState.AllValid
     ScheduledTaskApiCompatible = $scheduledTaskApiCompatible
     ExistingInstallation      = $existingInstall
@@ -294,10 +511,11 @@ $originalModulePath = $env:PSModulePath
 $validationResult = $null
 
 try {
-    if (-not $signatureState.AllValid) {
-        if (-not $TrustSignerCertificate) {
-            throw 'The pinned signer is not trusted on this VM. Rerun with -TrustSignerCertificate only on an isolated test VM.'
-        }
+    if (-not $signatureState.AllAccepted) {
+        $failedFiles = $signatureState.Files | Where-Object { -not $_.Accepted } | Select-Object -ExpandProperty Path
+        throw "Package signatures are not accepted by the pinned-signer rule: $($failedFiles -join ', ')"
+    }
+    if ($TrustSignerCertificate -and -not $signatureState.AllValid) {
         $importedCertificateStores = @(Import-TestSignerTrust -CertificatePath $SignerCertificatePath -Thumbprint $ExpectedSignerThumbprint)
         $signatureState = Get-PackageSignatureState -Root $resolvedPackagePath -Thumbprint $ExpectedSignerThumbprint
         if (-not $signatureState.AllValid) {
@@ -355,6 +573,24 @@ try {
         $updateTaskAfterOptIn = Get-ScheduledTask -TaskPath $UpdateTaskPath -TaskName $UpdateTaskName -ErrorAction SilentlyContinue
         if ($null -eq $updateTaskAfterOptIn) { throw 'Automatic update task was not created after explicit opt-in.' }
         $automaticTaskEnabledByThisRun = $true
+
+        $installedHelperPath = Join-Path -Path $InstallPath -ChildPath 'SmartM365-DeviceRebootManager-GalleryUpdate.ps1'
+        $updateTaskArgumentsBind = Test-GalleryUpdateTaskBinding `
+            -Task $updateTaskAfterOptIn `
+            -HelperPath $installedHelperPath `
+            -Expected @{
+                ModuleName               = 'SmartM365.DeviceRebootManager'
+                InstallPath              = $InstallPath
+                TaskPath                 = $TaskPath
+                TaskName                 = $TaskName
+                RepeatIntervalMinutes    = 240
+                EnableAutomaticUpdate    = $true
+                UpdateTaskPath           = $UpdateTaskPath
+                UpdateTaskName           = $UpdateTaskName
+                UpdateIntervalHours      = 24
+                IncludePrerelease        = $null
+                ExpectedSignerThumbprint = Get-NormalizedThumbprint $ExpectedSignerThumbprint
+            }
 
         $updateTaskDriftDetection = Invoke-IntuneDetection `
             -DetectionPath $detectionPath `
@@ -422,6 +658,7 @@ try {
             DefaultInstallCreatedGuiTask   = $true
             DefaultInstallCreatedUpdateTask = $false
             ExplicitOptInCreatedUpdateTask = $true
+            UpdateTaskArgumentsBind        = $updateTaskArgumentsBind
             ExplicitOptOutRemovedUpdateTask = $true
             ConfigurationPreserved         = $true
             GalleryInstallRejectedByIntuneDetection = $true
@@ -470,8 +707,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD+AAhXLFBoEWJz
-# MU2IxhaVlLOhsfeUpS13HMLlxisUtaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJNNI6ZPg1E87C
+# oe9PRLSL87+y6sR4rA6rWKYYoifxgqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -562,25 +799,25 @@ finally {
 # NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
 # ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
 # 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAKgO8YS43xBYLRxHan
-# lXRoMA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
+# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjUwNjA0MDAwMDAwWhcN
-# MzYwOTAzMjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
+# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
 # IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNSAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEA0EasLRLGntDqrmBWsytXum9R/4ZwCgHfyjfMGUIwYzKomd8U1nH7C8Dr0cVM
-# F3BsfAFI54um8+dnxk36+jx0Tb+k+87H9WPxNyFPJIDZHhAqlUPt281mHrBbZHqR
-# K71Em3/hCGC5KyyneqiZ7syvFXJ9A72wzHpkBaMUNg7MOLxI6E9RaUueHTQKWXym
-# OtRwJXcrcTTPPT2V1D/+cFllESviH8YjoPFvZSjKs3SKO1QNUdFd2adw44wDcKgH
-# +JRJE5Qg0NP3yiSyi5MxgU6cehGHr7zou1znOM8odbkqoK+lJ25LCHBSai25CFyD
-# 23DZgPfDrJJJK77epTwMP6eKA0kWa3osAe8fcpK40uhktzUd/Yk0xUvhDU6lvJuk
-# x7jphx40DQt82yepyekl4i0r8OEps/FNO4ahfvAk12hE5FVs9HVVWcO5J4dVmVzi
-# x4A77p3awLbr89A90/nWGjXMGn7FQhmSlIUDy9Z2hSgctaepZTd0ILIUbWuhKuAe
-# NIeWrzHKYueMJtItnj2Q+aTyLLKLM0MheP/9w6CtjuuVHJOVoIJ/DtpJRE7Ce7vM
-# RHoRon4CWIvuiNN1Lk9Y+xZ66lazs2kKFSTnnkrT3pXWETTJkhd76CIDBbTRofOs
-# NyEhzZtCGmnQigpFHti58CSmvEyJcAlDVcKacJ+A9/z7eacCAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFOQ7/PIx7f391/ORcWMZUEPPYYzoMB8G
+# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
+# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
+# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
+# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
+# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
+# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
+# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
+# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
+# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
+# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
+# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
+# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
 # A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
 # BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
 # BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
@@ -588,47 +825,47 @@ finally {
 # YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
 # Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
 # dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAGUqrfEcJwS5rmBB
-# 7NEIRJ5jQHIh+OT2Ik/bNYulCrVvhREafBYF0RkP2AGr181o2YWPoSHz9iZEN/FP
-# sLSTwVQWo2H62yGBvg7ouCODwrx6ULj6hYKqdT8wv2UV+Kbz/3ImZlJ7YXwBD9R0
-# oU62PtgxOao872bOySCILdBghQ/ZLcdC8cbUUO75ZSpbh1oipOhcUT8lD8QAGB9l
-# ctZTTOJM3pHfKBAEcxQFoHlt2s9sXoxFizTeHihsQyfFg5fxUFEp7W42fNBVN4ue
-# LaceRf9Cq9ec1v5iQMWTFQa0xNqItH3CPFTG7aEQJmmrJTV3Qhtfparz+BW60OiM
-# EgV5GWoBy4RVPRwqxv7Mk0Sy4QHs7v9y69NBqycz0BZwhB9WOfOu/CIJnzkQTwtS
-# SpGGhLdjnQ4eBpjtP+XB3pQCtv4E5UCSDag6+iX8MmB10nfldPF9SVD7weCC3yXZ
-# i/uuhqdwkgVxuiMFzGVFwYbQsiGnoa9F5AaAyBjFBtXVLcKtapnMG3VH3EmAp/js
-# J3FVF3+d1SVDTmjFjLbNFZUWMXuZyvgLfgyPehwJVxwC+UpX2MSey2ueIu9THFVk
-# T+um1vshETaWyQo8gmBto/m3acaP9QsuLj3FNwFlTxq25+T4QwX9xa6ILs84ZPvm
-# povq90K8eWyG2N01c4IhSOxqt81nMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
+# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
+# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
+# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
+# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
+# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
+# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
+# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
+# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
+# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
+# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
+# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
 # b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKx4AFSezFZOAnh16Nm4jCm4IwHdcQXbTc3u9USeEDCUMA0GCSqG
-# SIb3DQEBAQUABIIBgIDiZvoM/zOta7v70JrM2AiA2DQKOz1H2hzLymcCJsyOsJUi
-# kCXrDpRvb8eIPnZrJ059hyos7hlJMaaQJpUs/5xM9bmgu+J71BlKgGIS31+ChAVg
-# bLtxly1RK4x8gOLtaiFDtNmwPudb9+6yYbBK3lvJGa5rK09ItpOn1qSLlAsIL/uA
-# TvRs+f+u13xt5ScN3RE3OyTnEjJ5tSpDplnl409pRS35ItL9hszrY3FYv5YVKAqG
-# 2RRHg6sRABJd+5fJB7ctuwuc5Qeka4qrbAGXhCSIIFTq6h46ZC6IXgtMDIA41hCn
-# cQNowASpqsUzViNE8kyn1uUTtX8s4kSrk6lPVvE1NqFiukgFAnQOfHPYZmR4A0/B
-# oWBFXr4AvHqIVJTcRI2YXcbjNbNL4Z/BD/6Md8OxKjegVTCb3LrSd0u9iul6LjB0
-# 2Vk4Gg30/F0RmfxYxS/LmKmbN7SU9Sjp1KEzm08fsOQUAmxPaVuQL9n+jvMbp3OL
-# skjnGHBGAZNsq5FTFKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII7rjEfOdk9/dmq+r8J/q6utNKOI6xPeJXEMTWSA/BCPMA0GCSqG
+# SIb3DQEBAQUABIIBgKRi93JwS0KYmuXL1NeZBjLgrRGDuNlkwkvvTqq3novJZmFZ
+# JpOU8s7xpDv/wMoC8Ru5lT1zM6MN80bHcM1sWh2CNGygaFK/1+wB5DN797TIThSA
+# 0QOM3gDFrzlionsx23zaSeipGFeEdr5Ev+voMp8qzBBTM9HHwwVdLXGyQ2k7QbyO
+# IauQIpYETTCVvTpj1X+lxwEJLgQh2IDicEUBoQA4MqcnuZcw/MZH5qHMGU4HaM1c
+# hcLhd2ATvrLKB9GO1t2xcK+3f9RergkGZC8UD+OtHnoQLWWedl4tfJAPYHjRzUV1
+# OOej4lh6PoObXFNBPc9F9QS8ncmB/t60ViHhhkP0niLwr+OrnNr11PIKJA9FE9eN
+# 6bDd/leMKj8VdFEIFGkGwXv8ASYz5lzb3aMG1GWaDWgFL+Q8dW9sa5LpKsdLC0n4
+# nDgd93JTmTz4RWhmw5E4qLb4Q5cVxv9CS2DcBLNiLTFojDfRhdzeNPWJXUXRMg8D
+# HYva4aPVEBUVxhel36GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MjkwNzU4
-# NDNaMC8GCSqGSIb3DQEJBDEiBCBiNAyjGtxvpx4lrVDL067xbZFDhJ4/0ejZBnsU
-# 7tWFHzANBgkqhkiG9w0BAQEFAASCAgCRR2ekM7pbx7DDuw23UpHQYiPo/KWiOHwc
-# s8DvlgEiehy9dFClA2EQre7rFcI22o6yUt4FUuBngPs9GULhzao/LX5y84rnsB3t
-# 3vUhPSs76MRkIxKy9IwKhy8B5l+ShBCHEsoI1ZtmqaoUYxFJC2jCHgD30n71xMjQ
-# iG1a6yRTpKfpoYwPoI+wAUMvwixneDd38JRdjrt4Mq4DhG98tFNYZ//NQV1NZeoe
-# Hb0c+YPLRMGVEzBLZFd4SA66NSan6IOyjXDPRGSvcMscrtsBfT0hrgXRBuEQ9pw7
-# CfCAnh5kshebvczAUUl4lmI5mt71iWlMkds8I5gcWzw1KvQQUZbSTCKmKdBUFTkR
-# cVvg6Y4E5nUNDIWRrX+UsghUrWT2ezH9EZj6QBw18cKfbT7O7qBy/jombIeUzgzx
-# q3Atwgot16kmYT9wzjvbV/VupaCesWopDzLwpNm7cOdMtiF2cz7hVLNMsX5dykqA
-# 1Mb8vlR69iO8ceA5BADpdPyWyK7gL13br1qa6l2PZG5khL3vp2/kl3r057xNllRp
-# ZG1sA+BrnDJpzPjsVvlF0uMyV/dB/J5Kn/hobRj/FRoWjLNoPj2WoS/vN6RzTOI4
-# Vjb8CH6ABQCsWsfkXNdn7ZoS6sQ4tIGOXuFA/3CpI6a4ldq8CxlC9s26KwAW7PkM
-# xSXychSoNw==
+# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjNaMC8GCSqGSIb3DQEJBDEiBCAAXYCh0/xjydvnO3WrHubbjbgYmk6gu5T72EdP
+# O+v0kjANBgkqhkiG9w0BAQEFAASCAgCAFgRE45JC7p+q9tEBDlfXYd4p5ar2rwnr
+# DXeFQdlCqRzlj8mHan1uoQQ1ZIyfMS55Yrw7MLO+S84fPmx3FQ6yD5TVM86WLM7Y
+# iRg6Io3LPE59G6j/Ezbp8Zq9W7R9aWGTDo4IeNr01PYbawhdP3kJugbwQvVkHEj6
+# n2RxV/gQhQ7onRMWGCZWq2vzF81t5b55qeYMJPOWemAEXB/vsp1XFKYzfaJB170k
+# rujmmB84uAE7bBR95bg+gZ78QDpKzMNnwz+jHEnm+DPMlP3+x4zsxsI3mMICjJNb
+# HiCGVv4mZaRBRbY6fMXbPFtneG6zEJ+dT48nSvwz0uAQpyM6/CpKtVqufuyFx/EI
+# bMB9oDEiXJcI1S3zvyE5KWdoNYtjaA7211ykYiA3Clx5eNEcP3FTNYGHVra7lMJO
+# W1AtLYasWSotxB6GuDRXYCCMs6pTvHfeeYAnAVgzPOa585HCEixT7N8fnG2r1Yct
+# k6sMqWOEF3DgsHgganhZe2fKTCbz+soAgvrGhpVM8sWjXC816E6pcSFP0tbtk2ej
+# PD5XuKvpzp8W7YcDd1Db4liDgdb8a+ciEwbRr1xCAgTkVCx48at5h7RyP+clMUyw
+# IEPKyjBze4CE/jO52OvLDdMbJGFagUarK/0uF31mPLExwa8T8OGP2tXpa6YXqyRf
+# AkvFMVarhQ==
 # SIG # End signature block

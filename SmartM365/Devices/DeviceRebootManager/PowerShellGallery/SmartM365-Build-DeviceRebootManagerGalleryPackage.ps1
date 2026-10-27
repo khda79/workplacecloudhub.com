@@ -2,27 +2,49 @@
 
 <#
 .SYNOPSIS
-Builds the local PowerShell Gallery package for SmartM365 Device Reboot Manager.
+Builds or validates the local PowerShell Gallery package for SmartM365 Device Reboot Manager.
 
 .DESCRIPTION
-Creates a clean module folder from an explicit allow-list, validates PowerShell
-syntax and the pinned WorkplaceCloudHub Authenticode signer, and never copies
-local runtime configuration or LOCAL_MEMORY.md.
+Creates a clean module folder from an explicit allow-list, writes a SHA-256 file
+catalog (SmartM365.DeviceRebootManager.Files.cat) over every packaged file, signs
+the catalog with the pinned WorkplaceCloudHub code-signing certificate, then
+validates PowerShell syntax, manifest/version consistency, the catalog and the
+pinned Authenticode signer. It never copies local runtime configuration or
+LOCAL_MEMORY.md.
+
+With -ValidatePackagePath, nothing is built: the same validation is run against
+an existing package folder. The publish script uses this mode for -PackagePath.
+
+Signature rule (WinVerifyTrust, WINTRUST_ACTION_GENERIC_VERIFY_V2, no revocation
+check): a signature is accepted only when the result is 0, CERT_E_UNTRUSTEDROOT
+or CERT_E_CHAINING (self-signed root not trusted locally, logged as a warning)
+AND the signer thumbprint equals the pinned thumbprint. Any other result, such
+as TRUST_E_BAD_DIGEST, TRUST_E_NOSIGNATURE or an expired untimestamped
+certificate, is rejected.
 .VERSION
-1.0.1
+1.1.0
 #>
 
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Build')]
 param(
     [string]$SourceRoot = (Split-Path -Path $PSScriptRoot -Parent),
+    [Parameter(ParameterSetName = 'Build')]
     [string]$OutputRoot = (Join-Path ([IO.Path]::GetTempPath()) 'SmartM365\PowerShellGallery'),
+    [Parameter(Mandatory = $true, ParameterSetName = 'Validate')]
+    [string]$ValidatePackagePath,
     [string]$ExpectedSignerThumbprint = 'D70ECB7B00377EBFB76B304C08DFC6620584E114',
+    [Parameter(ParameterSetName = 'Build')]
+    [string]$TimestampServer = 'http://timestamp.digicert.com',
+    [Parameter(ParameterSetName = 'Build')]
     [switch]$Force,
     [switch]$SkipAuthenticodeValidation
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$script:ExpectedModuleName = 'SmartM365.DeviceRebootManager'
+$script:PackageCatalogFileName = 'SmartM365.DeviceRebootManager.Files.cat'
 
 function Get-NormalizedThumbprint {
     param([string]$Value)
@@ -57,22 +79,309 @@ function Assert-PowerShellSyntax {
     }
 }
 
-function Assert-PinnedSignature {
+function Get-WinVerifyTrustResult {
+    # Direct WinVerifyTrust (WINTRUST_ACTION_GENERIC_VERIFY_V2, no UI, no
+    # revocation check, file choice, VERIFY then CLOSE). Returns the HRESULT.
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not ('SmartM365.DeviceRebootManagerWinTrust' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace SmartM365
+{
+    public static class DeviceRebootManagerWinTrust
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WINTRUST_FILE_INFO
+        {
+            public uint cbStruct;
+            public string pcwszFilePath;
+            public IntPtr hFile;
+            public IntPtr pgKnownSubject;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WINTRUST_DATA
+        {
+            public uint cbStruct;
+            public IntPtr pPolicyCallbackData;
+            public IntPtr pSIPClientData;
+            public uint dwUIChoice;
+            public uint fdwRevocationChecks;
+            public uint dwUnionChoice;
+            public IntPtr pFile;
+            public uint dwStateAction;
+            public IntPtr hWVTStateData;
+            public IntPtr pwszURLReference;
+            public uint dwProvFlags;
+            public uint dwUIContext;
+            public IntPtr pSignatureSettings;
+        }
+
+        [DllImport("wintrust.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
+        private static extern int WinVerifyTrust(IntPtr hwnd, [MarshalAs(UnmanagedType.LPStruct)] Guid pgActionID, IntPtr pWVTData);
+
+        private const uint WTD_UI_NONE = 2;
+        private const uint WTD_REVOKE_NONE = 0;
+        private const uint WTD_CHOICE_FILE = 1;
+        private const uint WTD_STATEACTION_VERIFY = 1;
+        private const uint WTD_STATEACTION_CLOSE = 2;
+        private const uint WTD_REVOCATION_CHECK_NONE = 0x10;
+
+        public static int Verify(string path)
+        {
+            Guid action = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+            WINTRUST_FILE_INFO fileInfo = new WINTRUST_FILE_INFO();
+            fileInfo.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_FILE_INFO));
+            fileInfo.pcwszFilePath = path;
+            IntPtr filePointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WINTRUST_FILE_INFO)));
+            IntPtr dataPointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WINTRUST_DATA)));
+            try
+            {
+                Marshal.StructureToPtr(fileInfo, filePointer, false);
+                WINTRUST_DATA data = new WINTRUST_DATA();
+                data.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_DATA));
+                data.dwUIChoice = WTD_UI_NONE;
+                data.fdwRevocationChecks = WTD_REVOKE_NONE;
+                data.dwUnionChoice = WTD_CHOICE_FILE;
+                data.pFile = filePointer;
+                data.dwStateAction = WTD_STATEACTION_VERIFY;
+                data.dwProvFlags = WTD_REVOCATION_CHECK_NONE;
+                Marshal.StructureToPtr(data, dataPointer, false);
+                int result = WinVerifyTrust(IntPtr.Zero, action, dataPointer);
+
+                data = (WINTRUST_DATA)Marshal.PtrToStructure(dataPointer, typeof(WINTRUST_DATA));
+                data.dwStateAction = WTD_STATEACTION_CLOSE;
+                Marshal.StructureToPtr(data, dataPointer, true);
+                WinVerifyTrust(IntPtr.Zero, action, dataPointer);
+                return result;
+            }
+            finally
+            {
+                Marshal.DestroyStructure(filePointer, typeof(WINTRUST_FILE_INFO));
+                Marshal.FreeHGlobal(filePointer);
+                Marshal.FreeHGlobal(dataPointer);
+            }
+        }
+    }
+}
+'@
+    }
+    return [SmartM365.DeviceRebootManagerWinTrust]::Verify($Path)
+}
+
+function Get-PinnedSignatureState {
+    # Signature rule: WinVerifyTrust must return 0, CERT_E_UNTRUSTEDROOT or
+    # CERT_E_CHAINING (self-signed root not trusted locally) and the signer
+    # thumbprint must equal the pinned one. Any other result, including
+    # TRUST_E_BAD_DIGEST, TRUST_E_NOSIGNATURE or an expired untimestamped
+    # certificate, is rejected.
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$Thumbprint
     )
 
     $signature = Get-AuthenticodeSignature -LiteralPath $Path
-    $actualThumbprint = if ($signature.SignerCertificate) {
-        Get-NormalizedThumbprint $signature.SignerCertificate.Thumbprint
+    $actual = if ($signature.SignerCertificate) {
+        ([string]$signature.SignerCertificate.Thumbprint).Replace(' ', '').ToUpperInvariant()
     }
     else {
         ''
     }
+    $pinnedSignerMatch = ($actual -ne '' -and $actual -eq ([string]$Thumbprint).Replace(' ', '').ToUpperInvariant())
+    $trustResult = Get-WinVerifyTrustResult -Path ([IO.Path]::GetFullPath($Path))
+    # 0x800B0109 CERT_E_UNTRUSTEDROOT, 0x800B010A CERT_E_CHAINING
+    $untrustedChainResults = @([int]-2146762487, [int]-2146762486)
+    $chainTrusted = ($trustResult -eq 0)
 
-    if ($signature.Status -ne 'Valid' -or $actualThumbprint -ne (Get-NormalizedThumbprint $Thumbprint)) {
-        throw ("Authenticode validation failed: file={0}; status={1}; signer={2}" -f $Path,$signature.Status,$actualThumbprint)
+    [pscustomobject]@{
+        Path              = $Path
+        Status            = [string]$signature.Status
+        TrustResult       = ('0x{0:X8}' -f $trustResult)
+        SignerThumbprint  = $actual
+        PinnedSignerMatch = $pinnedSignerMatch
+        ChainTrusted      = $chainTrusted
+        Accepted          = ($pinnedSignerMatch -and ($chainTrusted -or $untrustedChainResults -contains $trustResult))
+    }
+}
+
+function Assert-PinnedSignature {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Thumbprint
+    )
+
+    $state = Get-PinnedSignatureState -Path $Path -Thumbprint $Thumbprint
+    if (-not $state.Accepted) {
+        throw ("Authenticode validation failed: file={0}; status={1}; winVerifyTrust={2}; signer={3}" -f
+            $Path,$state.Status,$state.TrustResult,$state.SignerThumbprint)
+    }
+    if (-not $state.ChainTrusted) {
+        Write-Warning ("Pinned signer accepted but its certificate chain is not trusted locally: file={0}; winVerifyTrust={1}" -f $Path,$state.TrustResult)
+    }
+}
+
+function Set-PinnedCatalogSignature {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Thumbprint,
+        [string]$Timestamp
+    )
+
+    $normalizedThumbprint = Get-NormalizedThumbprint $Thumbprint
+    $certificate = Get-ChildItem -LiteralPath "Cert:\CurrentUser\My\$normalizedThumbprint" -ErrorAction SilentlyContinue
+    if (-not $certificate -or -not $certificate.HasPrivateKey) {
+        throw "Pinned code-signing certificate with private key not found: Cert:\CurrentUser\My\$normalizedThumbprint"
+    }
+
+    $signingParameters = @{
+        LiteralPath   = $Path
+        Certificate   = $certificate
+        HashAlgorithm = 'SHA256'
+        ErrorAction   = 'Stop'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Timestamp)) {
+        $signingParameters.TimestampServer = $Timestamp
+    }
+    [void](Set-AuthenticodeSignature @signingParameters)
+}
+
+function Get-PackageVersionText {
+    param([Parameter(Mandatory = $true)][object]$Manifest)
+
+    $prereleaseLabel = [string]$Manifest.PrivateData.PSData['Prerelease']
+    if ([string]::IsNullOrWhiteSpace($prereleaseLabel)) {
+        return [string]$Manifest.Version
+    }
+    return ('{0}-{1}' -f $Manifest.Version,$prereleaseLabel)
+}
+
+function Assert-VersionManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ExpectedPackageVersion
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Package version manifest not found: $Path"
+    }
+    $versionManifest = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if ([int]$versionManifest.SchemaVersion -ne 1 -or [string]$versionManifest.PackageVersion -ne $ExpectedPackageVersion) {
+        throw ("Package version mismatch: manifest={0}; module={1}; file={2}" -f $versionManifest.PackageVersion,$ExpectedPackageVersion,$Path)
+    }
+}
+
+function Test-GalleryPackage {
+    # Shared validation for a freshly built package and for -ValidatePackagePath.
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ProductRoot,
+        [Parameter(Mandatory = $true)][string]$Thumbprint,
+        [bool]$SkipSignatures
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "Package folder not found: $Path"
+    }
+    $resolvedPath = (Resolve-Path -LiteralPath $Path).ProviderPath
+
+    $builtManifestPath = Join-Path -Path $resolvedPath -ChildPath "$script:ExpectedModuleName.psd1"
+    if (-not (Test-Path -LiteralPath $builtManifestPath -PathType Leaf)) {
+        throw "Package manifest not found: $builtManifestPath"
+    }
+
+    $packagedFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Recurse -File)
+    $powerShellFiles = @($packagedFiles | Where-Object { $_.Extension -in @('.ps1', '.psm1', '.psd1') })
+    foreach ($file in $powerShellFiles) {
+        Assert-PowerShellSyntax -Path $file.FullName
+    }
+
+    $builtManifest = Test-ModuleManifest -Path $builtManifestPath
+    if ([string]$builtManifest.Name -ne $script:ExpectedModuleName) {
+        throw "Unexpected module name: $($builtManifest.Name)"
+    }
+    $builtPackageVersion = Get-PackageVersionText -Manifest $builtManifest
+    Assert-VersionManifest `
+        -Path (Join-Path -Path $resolvedPath -ChildPath 'Runtime\SmartM365-DeviceRebootManager.version.json.txt') `
+        -ExpectedPackageVersion $builtPackageVersion
+    Assert-VersionManifest `
+        -Path (Join-Path -Path $ProductRoot -ChildPath 'SmartM365-DeviceRebootManager.version.json.txt') `
+        -ExpectedPackageVersion $builtPackageVersion
+
+    $packagedDetectionPath = Join-Path -Path $resolvedPath -ChildPath 'Runtime\Deploy\SmartM365-DeviceRebootManager-Detection.ps1'
+    if (-not (Test-Path -LiteralPath $packagedDetectionPath -PathType Leaf)) {
+        throw "Packaged detection script not found: $packagedDetectionPath"
+    }
+    $detectionVersionMatch = [regex]::Match(
+        (Get-Content -LiteralPath $packagedDetectionPath -Raw),
+        '\[string\]\$ExpectedVersion\s*=\s*''([^'']+)'''
+    )
+    if (-not $detectionVersionMatch.Success -or $detectionVersionMatch.Groups[1].Value -ne $builtPackageVersion) {
+        throw ("Packaged detection version does not match the package version: package={0}; detection={1}" -f
+            $builtPackageVersion,$detectionVersionMatch.Groups[1].Value)
+    }
+
+    $catalogFiles = @($packagedFiles | Where-Object { $_.Extension -eq '.cat' })
+    $catalogPath = Join-Path -Path $resolvedPath -ChildPath $script:PackageCatalogFileName
+    if ($catalogFiles.Count -ne 1 -or $catalogFiles[0].FullName -ne $catalogPath) {
+        throw "The package must contain exactly one file catalog: $catalogPath"
+    }
+    $catalogResult = Test-FileCatalog -Path $resolvedPath -CatalogFilePath $catalogPath -FilesToSkip '*.cat' -Detailed
+    if ([string]$catalogResult.Status -ne 'Valid') {
+        $differences = New-Object Collections.Generic.List[string]
+        foreach ($key in @($catalogResult.CatalogItems.Keys)) {
+            if (-not $catalogResult.PathItems.ContainsKey($key)) { $differences.Add("missing=$key") }
+            elseif ([string]$catalogResult.PathItems[$key] -ne [string]$catalogResult.CatalogItems[$key]) { $differences.Add("changed=$key") }
+        }
+        foreach ($key in @($catalogResult.PathItems.Keys)) {
+            if (-not $catalogResult.CatalogItems.ContainsKey($key)) { $differences.Add("extra=$key") }
+        }
+        throw ("Package file catalog validation failed: status={0}; differences={1}" -f
+            $catalogResult.Status,(@($differences | Sort-Object) -join ', '))
+    }
+
+    if (-not $SkipSignatures) {
+        Assert-PinnedSignature -Path $catalogPath -Thumbprint $Thumbprint
+        foreach ($file in $powerShellFiles) {
+            Assert-PinnedSignature -Path $file.FullName -Thumbprint $Thumbprint
+        }
+    }
+
+    [pscustomobject]@{
+        ModuleName          = [string]$builtManifest.Name
+        Version             = [string]$builtManifest.Version
+        Prerelease          = [string]$builtManifest.PrivateData.PSData['Prerelease']
+        PackageVersion      = $builtPackageVersion
+        PackagePath         = $resolvedPath
+        CatalogPath         = $catalogPath
+        CatalogFileCount    = $catalogResult.CatalogItems.Count
+        FileCount           = $packagedFiles.Count
+        PowerShellFileCount = $powerShellFiles.Count
+    }
+}
+
+if ($PSCmdlet.ParameterSetName -eq 'Validate') {
+    $validation = Test-GalleryPackage `
+        -Path $ValidatePackagePath `
+        -ProductRoot $SourceRoot `
+        -Thumbprint $ExpectedSignerThumbprint `
+        -SkipSignatures ([bool]$SkipAuthenticodeValidation)
+    return [pscustomobject]@{
+        Mode                     = 'Validate'
+        ModuleName               = $validation.ModuleName
+        Version                  = $validation.Version
+        Prerelease               = $validation.Prerelease
+        PackageVersion           = $validation.PackageVersion
+        PackagePath              = $validation.PackagePath
+        IntuneSourcePath         = Join-Path -Path $validation.PackagePath -ChildPath 'Runtime'
+        CatalogPath              = $validation.CatalogPath
+        FileCount                = $validation.FileCount
+        PowerShellFileCount      = $validation.PowerShellFileCount
+        SignaturesValidated      = (-not $SkipAuthenticodeValidation)
+        ExpectedSignerThumbprint = Get-NormalizedThumbprint $ExpectedSignerThumbprint
+        Ready                    = $true
     }
 }
 
@@ -86,21 +395,11 @@ $manifest = Test-ModuleManifest -Path $manifestSourcePath
 $moduleName = [string]$manifest.Name
 $moduleVersion = [string]$manifest.Version
 $prerelease = [string]$manifest.PrivateData.PSData['Prerelease']
-$packageVersion = if ([string]::IsNullOrWhiteSpace($prerelease)) {
-    $moduleVersion
-}
-else {
-    '{0}-{1}' -f $moduleVersion,$prerelease
-}
+$packageVersion = Get-PackageVersionText -Manifest $manifest
 
-$versionManifestSourcePath = Join-Path -Path $SourceRoot -ChildPath 'SmartM365-DeviceRebootManager.version.json.txt'
-if (-not (Test-Path -LiteralPath $versionManifestSourcePath -PathType Leaf)) {
-    throw "Package version manifest not found: $versionManifestSourcePath"
-}
-$versionManifest = Get-Content -LiteralPath $versionManifestSourcePath -Raw | ConvertFrom-Json
-if ([int]$versionManifest.SchemaVersion -ne 1 -or [string]$versionManifest.PackageVersion -ne $packageVersion) {
-    throw ("Package version mismatch: manifest={0}; module={1}" -f $versionManifest.PackageVersion,$packageVersion)
-}
+Assert-VersionManifest `
+    -Path (Join-Path -Path $SourceRoot -ChildPath 'SmartM365-DeviceRebootManager.version.json.txt') `
+    -ExpectedPackageVersion $packageVersion
 
 $packagePath = Join-Path -Path (Join-Path -Path $OutputRoot -ChildPath $moduleName) -ChildPath $moduleVersion
 Assert-SafeChildPath -Root $OutputRoot -Child $packagePath
@@ -171,27 +470,30 @@ foreach ($relativePath in $deployFiles) {
     Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
 }
 
-$packagedFiles = @(Get-ChildItem -LiteralPath $packagePath -Recurse -File)
-$powerShellFiles = @($packagedFiles | Where-Object { $_.Extension -in @('.ps1', '.psm1', '.psd1') })
-foreach ($file in $powerShellFiles) {
-    Assert-PowerShellSyntax -Path $file.FullName
-    if (-not $SkipAuthenticodeValidation) {
-        Assert-PinnedSignature -Path $file.FullName -Thumbprint $ExpectedSignerThumbprint
-    }
+# The catalog covers every packaged file, including non-PowerShell runtime files.
+$catalogPath = Join-Path -Path $packagePath -ChildPath $script:PackageCatalogFileName
+New-FileCatalog -Path $packagePath -CatalogFilePath $catalogPath -CatalogVersion 2.0 | Out-Null
+if (-not $SkipAuthenticodeValidation) {
+    Set-PinnedCatalogSignature -Path $catalogPath -Thumbprint $ExpectedSignerThumbprint -Timestamp $TimestampServer
 }
 
-$builtManifestPath = Join-Path -Path $packagePath -ChildPath 'SmartM365.DeviceRebootManager.psd1'
-[void](Test-ModuleManifest -Path $builtManifestPath)
+$validation = Test-GalleryPackage `
+    -Path $packagePath `
+    -ProductRoot $SourceRoot `
+    -Thumbprint $ExpectedSignerThumbprint `
+    -SkipSignatures ([bool]$SkipAuthenticodeValidation)
 
 [pscustomobject]@{
     ModuleName               = $moduleName
     Version                  = $moduleVersion
     Prerelease               = $prerelease
     PackageVersion           = $packageVersion
-    PackagePath              = $packagePath
-    IntuneSourcePath         = Join-Path -Path $packagePath -ChildPath 'Runtime'
-    FileCount                = $packagedFiles.Count
-    PowerShellFileCount      = $powerShellFiles.Count
+    PackagePath              = $validation.PackagePath
+    IntuneSourcePath         = Join-Path -Path $validation.PackagePath -ChildPath 'Runtime'
+    CatalogPath              = $validation.CatalogPath
+    CatalogSigned            = (-not $SkipAuthenticodeValidation)
+    FileCount                = $validation.FileCount
+    PowerShellFileCount      = $validation.PowerShellFileCount
     SignaturesValidated      = (-not $SkipAuthenticodeValidation)
     ExpectedSignerThumbprint = Get-NormalizedThumbprint $ExpectedSignerThumbprint
     Ready                    = $true
@@ -200,8 +502,8 @@ $builtManifestPath = Join-Path -Path $packagePath -ChildPath 'SmartM365.DeviceRe
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3SwrkvxqNmOYK
-# BwC/wT3n1b9CkmAxMA3OvEcDlD/qIaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQe+cS5TMczEt5
+# vgbTl6it42664OJ1uewZ+fVu3ESVaKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -334,31 +636,31 @@ $builtManifestPath = Join-Path -Path $packagePath -ChildPath 'SmartM365.DeviceRe
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDU0+MxiyrGpTAgDwvgUUa7UXjzmbPGZSYM0YJgs1l7UMA0GCSqG
-# SIb3DQEBAQUABIIBgCmsaYrpde16qPLRxiHDm/nUQhEvrD72u1d8zALZkNkSER1i
-# 8S01+lA4qHw0H2MUlQzZTlRsKJP2il2t8EVeosktBJ1d4LR1L0HLvd/okdsE6f/o
-# 0G+HvunbG9gTsHd5NOjyRquaTwnlBapBmWUgBsdZ7icNoAKog9dDaXppyMS0AJ7f
-# HkQQqeqqCvzPAufs6UwwcJb16ZkJsz/QgDcKC5E15Zc8Je7QJTEBRQxAXTXFZvcj
-# Qp84INl3hXOVKE9z0FfYUPxlOutv1qO1a2t5RD90VnpMeDf2hyH0robD5XJIe/K8
-# xRQlA5r0T7dazeJ/DgvH+GDjJo0THKqt2KV23thniG+dnd3pyQceQIdxzEW5g4W9
-# 6hG65KOR/UDbfHXNeu5Gp364TYcjFlGZGEjiEu9QiAHOdUv98VjEgavIHIizDwzT
-# cwIIngXvtxchYZvbQo1qnIJn68ZU1aho4QCNRnSmYomgmeH7uVUsbQS2+KOcOtlb
-# N2U472QuzqvRKTz4S6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHoHast7CtNFsq6sBiD6QeeCBlFHGLLKaKs8zAAMTYtmMA0GCSqG
+# SIb3DQEBAQUABIIBgHL6BcWUo+t5yoVZAFWFZt14U1iS72lNyKM6ZxKKGXSeoiZ8
+# 9kuzfvpn/Ui3Y0RNztI8s+TdB6anyGC23vXqVebtKMzaeDF6ErsEBogevVZQ1Iai
+# DgSEUQAgXoqWl3eJlbLSlR4uVm1YnX4KvvtX1lUQKnUmaI8OCS5jMr17c1nU5Wlu
+# 9eDEKjBsQPTlR/TeY+/2M8xYmq2Zyz+UqWfrVTZcheVNfFduxZ3IQmY8X9itGDQ8
+# cKjoMYJddHQypd4XSNpdgjLN7+nhMwIhSBEPyqPSL/JVtqNpAYM4TLip8f6RVtX+
+# K9kYHlUbq9bOF9FyPdukvvZJaSgXziLn107K1aDWgtFM3CxXoPS4P7BW8PoO7BMB
+# K+i1bLWkFvaS87Wu71uczUhjCBPteNdXjpfHf0gLYNAOmgWkZg8c6ESDMU6txpI4
+# GGSAAW49JAsTqaaPfhMfRsKEhv9VK2llFw9fAyKhSc0/P7dHtJgKCQRxcjk4DFN7
+# cYrRXqHaIP+w/7DhwqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTgwMzA5
-# MzRaMC8GCSqGSIb3DQEJBDEiBCA0TTEx1bRXp/iPfVm8sWlzUWZUIsmouEyU4Nl1
-# Vv9rmDANBgkqhkiG9w0BAQEFAASCAgCbVjbu6mV05WR6UkLZF47gjD2NNdRUVhfV
-# bbvQad+YTyujKZTeMqBDtvRFdmv7IAx+bvv256kwDGRwVApr8EvLVVMlU2OVS6sR
-# PVuWAPbabZPMqtn05NkzH/wxF6AO58a+uwGhUlkHaByb8JqP2N6m2yMTf/KraLV/
-# C6oZdpcpNBVmNMILkbxkXKgSc4EiAQnYOk1l9xPB1npzAfkFsobTa72b3cujnxrn
-# 02zDDLtR8EDtKTwSfIA7NVbDvYOs5g8ovkRC+BhChmaJnY9IwPJVieTjuAq6jq/D
-# VtKR4hc3Lz9peAwR9UXpGqMYnU67/C2wpfkcTmAb96EGSb4Q/GfsuKJIfs3jSI1B
-# lw/DEitPaqlfqtaTZe5JIAX0dp8f8KM/IMHeUnLUYAAmgBPhMyVuZUY4v+94avHj
-# PFAsEs46+kJMC76bYIC4I63+JtJsBFL9N8bJ4KIribk8r+J7Mu7viI4ubP01A7Zz
-# ynb3RKZaVZ+ea5VpOzJbWZvx9P4zcWRg2Rh8sD2/pYQVBVejIElre2xKvTO0a25v
-# 0mYSOFTfEhd4Wz0DSRPFNOsuuvlxTMbaOlNHfqhwKwMavwBFeoXEYoxx0ZbbWDl+
-# L2Ok6Qi883ewcmDYZbCwTaVMBQyh3fDTcOg6F69O6ZIk2VoOG7jaYhnac0ybOETr
-# LOuyxppJVw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
+# MjJaMC8GCSqGSIb3DQEJBDEiBCB2/9NqVHQZUAwAKBg2HDRjr28JrU9lk4GzI216
+# PGGV0TANBgkqhkiG9w0BAQEFAASCAgBswNOVAV10Gc8rfFZR6ZJICMc5MOl83fw0
+# rvWxTWZ/k790CEHNzuik7TUGEBBEOJkSvkYKH/Is5WnRSKSE5eHkgHWjq2EstD6m
+# C8nc//5HZrzIk5ZWu0amhmUUL2Qcuav/CumU1CixTPs88SctjoGuT8dqyfi7BZjj
+# LQrRd7Vjla2yXuZfFAEz3dhjEnqibVnv+NtQ01jXRq145HtSk0tVucK/+oX/5QFB
+# 5JLWUhASPFakez2LP38gu1rxq5QrgTbR445ZpnOXqXIIVOfp403c6Rc9/3hj0WNd
+# K/7DoJF/UNZkUkwrIz9/7UQd2rbqevJOwJZ/twc8Z/hCyo9I2RUbdm7UcZZVfhCQ
+# f93NjTvIIwYXtv/1Q+u0yR3cByKOxiaESWxmFNwc7gqwT4uRpv5oENIzgOnVT/Hh
+# 4FFrYWFRoy45sN9A55po2cylUgiA1e3clvf0sALv73Jf4r/gDefePY1fKe/Yw1bX
+# p6jPtR4ciwDLepmXMAMG/O22H5zK2LI9VBqcWgOhifEU1U8wq5tPS2jweuY+W1T2
+# SOKVVSGAdZpk0f6gyfookoqHRacEbOKG2mnZOm+PlcWweKOs7o1DOCwh6kuvTHxC
+# 2JTXKILaV9vWcAtkQz7Czu5Cp6ik+uFIjVrjMwkjxB1wAXQ09kJkowL8ueOVevPm
+# Q0v+FONz7g==
 # SIG # End signature block
