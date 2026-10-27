@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.3.1
+1.3.2
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -474,7 +474,7 @@ function Invoke-OrchestratorDemo {
     $c.SharedPathText.Text='Contoso | DEMO - Sample data | All actions are simulated'
     $c.ConnectionText.Text='Offline demo'; $c.LastRefreshText.Text='2026-10-18 09:30 (frozen)'
     $c.FooterText.Text='DEMO - Sample data. Exports use a separate temporary demo folder.'
-    $c.VersionText.Text='v1.6.1 | DEMO'
+    $c.VersionText.Text='v1.6.2 | DEMO'
     $c.AutoRefreshCheck.IsChecked=$false; $c.AutoRefreshCheck.IsEnabled=$false
     # Keep both running sample rows visible at the default capture size.
     $operationsLayout=$c.OperationsServersGrid.Parent

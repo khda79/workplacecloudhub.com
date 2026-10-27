@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.1
+1.6.2
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.1'
+$script:AppVersion = '1.6.2'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -95,6 +95,15 @@ $script:CancellationBusy = $false
 $script:CancellationUiState = @{}
 $script:CancellationContext = [pscustomobject]@{
     Worker = $null; Progress = [hashtable]::Synchronized(@{ Message = '' })
+    Input = $null; Clock = [Diagnostics.Stopwatch]::new()
+}
+$script:RequestSubmitTimer = $null
+$script:RequestSubmitBusy = $false
+$script:RequestSubmitUiState = @{}
+$script:RequestSubmitDialog = $null
+$script:RequestSubmitDialogClosing = $false
+$script:RequestSubmitContext = [pscustomobject]@{
+    Worker = $null; Progress = [hashtable]::Synchronized(@{ Message = ''; Stage = ''; LogError = '' })
     Input = $null; Clock = [Diagnostics.Stopwatch]::new()
 }
 $script:RefreshContext = [pscustomobject]@{
@@ -1402,7 +1411,7 @@ function Update-SelectedPipelineRequest {
     $jobRows = @()
     if ($null -ne $row) { $jobRows = @($row.JobRows) }
     $script:Controls.RequestJobsGrid.ItemsSource = $jobRows
-    $script:Controls.CancelRequestButton.IsEnabled = -not $script:CancellationBusy -and $null -ne $row -and $row.Status -in @('Running', 'Cancelling')
+    $script:Controls.CancelRequestButton.IsEnabled = -not $script:CancellationBusy -and -not $script:RequestSubmitBusy -and $null -ne $row -and $row.Status -in @('Running', 'Cancelling')
 }
 
 function Set-GuiRequestRows {
@@ -1413,12 +1422,12 @@ function Set-GuiRequestRows {
     $selectedRow = @($script:RequestRows | Where-Object { [string]$_.BatchId -eq $selectedBatch })
     if ($selectedRow.Count) { $script:Controls.RequestsGrid.SelectedItem = $selectedRow[0] }
     Update-SelectedPipelineRequest
-    $script:Controls.CancelAllRequestsButton.IsEnabled = -not $script:CancellationBusy -and @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling')).Count -gt 0
+    $script:Controls.CancelAllRequestsButton.IsEnabled = -not $script:CancellationBusy -and -not $script:RequestSubmitBusy -and @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling')).Count -gt 0
 }
 
 function Refresh-RequestsView {
     try {
-        if ($script:CancellationBusy) { return }
+        if ($script:CancellationBusy -or $script:RequestSubmitBusy) { return }
         Set-GuiRequestRows -Rows @(Get-SmartM365OrchestratorRecentPipelineRuns -SharedDataFolderPath $script:SharedDataFolderPath -Count 30)
     }
     catch { Write-GuiException -Context 'Requests refresh failed' -ErrorRecord $_ }
@@ -1503,6 +1512,7 @@ function Set-GuiCancellationBusy {
 function Start-GuiPipelineCancellation {
     param([switch]$All, [string]$BatchId = '')
     if ($script:CancellationBusy) { return }
+    if ($script:RequestSubmitBusy) { throw 'A run request is being submitted. Wait for its result before cancelling.' }
     $reason = $script:Controls.CancellationReasonBox.Text.Trim()
     if (-not $reason) { throw 'Enter a cancellation reason.' }
     $workerFolder = Split-Path $managementModulePath -Parent
@@ -1582,7 +1592,8 @@ function Receive-GuiPipelineCancellation {
 }
 
 function Invoke-AutoRefresh {
-    if ($script:CancellationBusy) { return }
+    # No automatic shared reads while a cancellation or a run request is being published.
+    if ($script:CancellationBusy -or $script:RequestSubmitBusy) { return }
     Start-GuiRefresh -Mode Live
 }
 
@@ -1619,6 +1630,9 @@ function Test-JobDraftChanged {
 function Request-SelectedJobRun {
     param([switch]$SkipConfirmation, [string]$JobName = '', [AllowNull()]$IncludeDependencies = $null)
 
+    # Every GUI entry (Planning and Operations > Jobs) passes here: one submission at a time.
+    if ($script:RequestSubmitBusy) { return $null }
+    if ($script:CancellationBusy) { throw 'A cancellation is being checked or published. Wait for its result before requesting a run.' }
     if ([string]::IsNullOrWhiteSpace($JobName)) {
         $row = $script:Controls.PlanningGrid.SelectedItem
         if ($null -eq $row) { throw 'Select a job first.' }
@@ -1626,26 +1640,253 @@ function Request-SelectedJobRun {
     }
     $jobName = $JobName
     $includeDependencies = if ($null -ne $IncludeDependencies) { [bool]$IncludeDependencies } else { [bool]$script:Controls.IncludeDependenciesCheck.IsChecked }
-    # Fast pre-check; New-SmartM365OrchestratorPipelineRequest repeats it under the submission lock.
-    Refresh-RequestsView
+    if ($SkipConfirmation) {
+        # Non-interactive path (smoke test): synchronous, same API and contract.
+        # Fast pre-check; New-SmartM365OrchestratorPipelineRequest repeats it under the submission lock.
+        Refresh-RequestsView
+        $activeRequest = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling') | Select-Object -First 1)
+        if ($activeRequest.Count) { throw "An active pipeline request already exists: $($activeRequest[0].BatchId) (created $($activeRequest[0].Created), $($activeRequest[0].Pending) job(s) not finished). See the Requests tab." }
+        $request = New-SmartM365OrchestratorJobRunRequest -SharedDataFolderPath $script:SharedDataFolderPath -JobsPath (Get-PublishedJobsPath) -JobName @($jobName) -Tenant $Tenant -IncludeDependencies:$includeDependencies
+        Write-GuiActivity -Message ("Run request recorded. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}" -f $jobName, $includeDependencies, $request.BatchId, $request.TotalCount) -Level SUCCESS
+        $script:Controls.StatusText.Text = "Run request recorded: $($request.BatchId)"
+        Refresh-RequestsView
+        return $request
+    }
+    # Pre-check on the displayed rows only: no shared read on the WPF thread. The submission
+    # API repeats it under the shared submission lock.
     $activeRequest = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling') | Select-Object -First 1)
     if ($activeRequest.Count) { throw "An active pipeline request already exists: $($activeRequest[0].BatchId) (created $($activeRequest[0].Created), $($activeRequest[0].Pending) job(s) not finished). See the Requests tab." }
-    if (-not $SkipConfirmation) {
-        $message = "Ask the orchestrators to run '$jobName' now?"
-        if ($includeDependencies) { $message += "`n`nIts enabled dependencies are included and run first." }
-        else { $message += "`n`nDependencies are not run; the job starts on its elected server when its dependency rule allows it." }
-        if (Test-JobDraftChanged -JobName $jobName) { $message += "`n`nThis job has unpublished draft changes. The request uses the PUBLISHED configuration." }
-        $message += "`n`nOnly one request can be active at a time."
-        if ([System.Windows.MessageBox]::Show($message, 'Request run', 'YesNo', 'Question') -ne 'Yes') { return $null }
+    $message = "Ask the orchestrators to run '$jobName' now?"
+    if ($includeDependencies) { $message += "`n`nIts enabled dependencies are included and run first." }
+    else { $message += "`n`nDependencies are not run; the job starts on its elected server when its dependency rule allows it." }
+    if (Test-JobDraftChanged -JobName $jobName) { $message += "`n`nThis job has unpublished draft changes. The request uses the PUBLISHED configuration." }
+    $message += "`n`nOnly one request can be active at a time."
+    if (-not (Confirm-GuiJobRunRequest -Message $message)) { return $null }
+    [void](Start-GuiJobRunSubmission -JobName $jobName -IncludeDependencies $includeDependencies)
+    return $null
+}
+
+function Confirm-GuiJobRunRequest {
+    param([string]$Message)
+    return [System.Windows.MessageBox]::Show($Message, 'Request run', 'YesNo', 'Question') -eq 'Yes'
+}
+
+function Show-GuiJobRunRequestResult {
+    param([string]$Message, [string]$Title, [ValidateSet('Information', 'Warning', 'Error')][string]$Icon)
+    [System.Windows.MessageBox]::Show($Message, $Title, 'OK', $Icon) | Out-Null
+}
+
+function Get-GuiJobRunSubmissionWork {
+    # Only plain input/progress crosses the runspace boundary; no WPF references.
+    return {
+        param($Progress, $InputData)
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version 2.0
+        function Write-SubmissionLog {
+            param([string]$Message, [string]$Level = 'INFO')
+            if ($InputData.LogPath) {
+                try { $null = Write-SmartM365OrchestratorManagementLog -Path $InputData.LogPath -Message $Message -Level $Level }
+                catch { $Progress.LogError = $_.Exception.Message }
+            }
+        }
+        function Get-BatchFolderNames {
+            $runs = Join-Path $InputData.Root 'PipelineRuns'
+            if (-not (Test-Path -LiteralPath $runs)) { return @() }
+            @(Get-ChildItem -LiteralPath $runs -Directory -ErrorAction Stop | ForEach-Object Name)
+        }
+        $Progress.Stage = 'Preparing'
+        $Progress.Message = 'Loading orchestrator modules...'
+        foreach ($path in $InputData.ModulePaths) { Import-Module $path -ErrorAction Stop }
+        $Progress.Message = 'Reading the published jobs configuration...'
+        $jobsPath = (Get-SmartM365OrchestratorConfigurationPaths -SharedDataFolderPath $InputData.Root).JobsPath
+        $publishedJobsPath = Get-SmartM365JsonReadPath $jobsPath -Optional
+        if (-not $publishedJobsPath) { throw "Published jobs configuration not found: $jobsPath" }
+        $before = @(Get-BatchFolderNames)
+        $Progress.Stage = 'Submitting'
+        $Progress.Message = 'Recording the request in the shared folder...'
+        try {
+            $request = New-SmartM365OrchestratorJobRunRequest -SharedDataFolderPath $InputData.Root -JobsPath $publishedJobsPath -JobName @($InputData.JobName) -Tenant $InputData.Tenant -IncludeDependencies:([bool]$InputData.IncludeDependencies)
+        }
+        catch {
+            $failure = $_.Exception.Message
+            Write-SubmissionLog -Level ERROR -Message ("Run request failed. Job={0}; Error={1}" -f $InputData.JobName, $failure)
+            # Never retried here: report whether a new batch appeared so the operator can decide.
+            $Progress.Message = 'Checking whether a request was recorded...'
+            $newBatchIds = @(); $checkError = ''
+            try { $newBatchIds = @(Get-BatchFolderNames | Where-Object { $_ -notin $before }) }
+            catch { $checkError = $_.Exception.Message }
+            return [pscustomobject]@{ Outcome = 'Failed'; Error = $failure; NewBatchIds = $newBatchIds; CheckError = $checkError }
+        }
+        $Progress.Stage = 'Recorded'
+        Write-SubmissionLog -Level SUCCESS -Message ("Run request recorded. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}" -f $InputData.JobName, [bool]$InputData.IncludeDependencies, $request.BatchId, $request.TotalCount)
+        $Progress.Message = 'Refreshing request states...'
+        $rows = @(); $refreshError = ''
+        try { $rows = @(Get-SmartM365OrchestratorRecentPipelineRuns -SharedDataFolderPath $InputData.Root -Count 30) }
+        catch { $refreshError = $_.Exception.Message; Write-SubmissionLog -Level WARN -Message "Requests refresh failed: $refreshError" }
+        [pscustomobject]@{ Outcome = 'Recorded'; BatchId = [string]$request.BatchId; TotalCount = [int]$request.TotalCount; Rows = $rows; RefreshError = $refreshError }
     }
-    $request = New-SmartM365OrchestratorJobRunRequest -SharedDataFolderPath $script:SharedDataFolderPath -JobsPath (Get-PublishedJobsPath) -JobName @($jobName) -Tenant $Tenant -IncludeDependencies:$includeDependencies
-    Write-GuiActivity -Message ("Run requested. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}" -f $jobName, $includeDependencies, $request.BatchId, $request.TotalCount) -Level SUCCESS
-    $script:Controls.StatusText.Text = "Run requested: $($request.BatchId)"
-    Refresh-RequestsView
-    if (-not $SkipConfirmation) {
-        [System.Windows.MessageBox]::Show("Request submitted.`nBatch: $($request.BatchId)`nJobs: $($request.TotalCount)`n`nFollow it in the Requests tab.", 'Run requested', 'OK', 'Information') | Out-Null
+}
+
+function Show-GuiRequestSubmitDialog {
+    param([string]$JobName)
+    Close-GuiRequestSubmitDialog
+    # Modeless and owned: the WPF thread stays free, so the indeterminate bar keeps moving.
+    $dialogXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Submitting run request" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" SizeToContent="WidthAndHeight" ShowInTaskbar="False" FontFamily="Segoe UI" UseLayoutRounding="True">
+    <Border Margin="18" Background="White" BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="10" Padding="28,20">
+        <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.25"/></Border.Effect>
+        <StackPanel Width="380">
+            <TextBlock Text="Run request" FontSize="16" FontWeight="SemiBold" Foreground="#17324D" HorizontalAlignment="Center"/>
+            <TextBlock x:Name="SubmitMessageText" Margin="0,8,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
+            <Border x:Name="SubmitProgressTrack" Height="6" Margin="0,12,0,8" CornerRadius="3" Background="#E6EDF4" ClipToBounds="True">
+                <Border x:Name="SubmitProgressBar" Width="110" HorizontalAlignment="Left" CornerRadius="3" Background="#0078D4">
+                    <Border.RenderTransform><TranslateTransform X="-110"/></Border.RenderTransform>
+                </Border>
+            </Border>
+            <TextBlock x:Name="SubmitDetailText" Foreground="#5D6B78" FontSize="12" TextWrapping="Wrap" TextAlignment="Center"/>
+        </StackPanel>
+    </Border>
+</Window>
+'@
+    $dialog = ConvertFrom-OrchestratorGuiXaml -Text $dialogXaml
+    $dialog.FindName('SubmitMessageText').Text = 'Submitting request for {0}{1} Please wait.' -f $JobName, [char]0x2026
+    $dialog.FindName('SubmitDetailText').Text = 'Recording the request in the shared folder. The job starts later, on its orchestrator.'
+    # Explicit animation: the theme's indeterminate ProgressBar stays still when Windows
+    # client-area animations are off (common on servers and remote sessions).
+    $sweep = [System.Windows.Media.Animation.DoubleAnimation]::new(-110, 380, [System.Windows.Duration]::new([TimeSpan]::FromMilliseconds(1400)))
+    $sweep.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
+    $dialog.FindName('SubmitProgressBar').RenderTransform.BeginAnimation([System.Windows.Media.TranslateTransform]::XProperty, $sweep)
+    $owner = [System.Windows.Window]::GetWindow($script:Controls.StatusText)
+    if ($null -ne $owner -and $owner.IsVisible) {
+        $dialog.Owner = $owner
+        $dialog.WindowStartupLocation = 'CenterOwner'
+    } else { $dialog.WindowStartupLocation = 'CenterScreen' }
+    # No cancel: a request may already be recorded when the operator would press it.
+    $dialog.Add_Closing({ param($sender, $eventArgs) if (-not $script:RequestSubmitDialogClosing) { $eventArgs.Cancel = $true } })
+    $script:RequestSubmitDialogClosing = $false
+    $script:RequestSubmitDialog = $dialog
+    $dialog.Show()
+}
+
+function Close-GuiRequestSubmitDialog {
+    $dialog = $script:RequestSubmitDialog
+    if ($null -eq $dialog) { return }
+    $script:RequestSubmitDialog = $null
+    $script:RequestSubmitDialogClosing = $true
+    try { $dialog.Close() } finally { $script:RequestSubmitDialogClosing = $false }
+}
+
+function Set-GuiRequestSubmitBusy {
+    param([bool]$Busy, [string]$JobName = '')
+    $script:RequestSubmitBusy = $Busy
+    # Both request entries, plus the actions that would read or change requests concurrently.
+    $names = @('RequestRunButton', 'RequestJobButton', 'RefreshButton', 'CancelRequestButton', 'CancelAllRequestsButton')
+    if ($Busy) {
+        $script:RequestSubmitUiState = @{}
+        foreach ($name in $names) {
+            if ($script:Controls[$name]) {
+                $script:RequestSubmitUiState[$name] = $script:Controls[$name].IsEnabled
+                $script:Controls[$name].IsEnabled = $false
+            }
+        }
+        $script:RequestSubmitContext.Clock.Restart()
+        Show-GuiRequestSubmitDialog -JobName $JobName
+    } else {
+        $script:RequestSubmitContext.Clock.Stop()
+        Close-GuiRequestSubmitDialog
+        foreach ($name in $script:RequestSubmitUiState.Keys) { $script:Controls[$name].IsEnabled = $script:RequestSubmitUiState[$name] }
+        $script:RequestSubmitUiState = @{}
+        if ($script:Controls['LaunchJobsGrid'] -and $script:Controls['RequestJobButton']) {
+            $launchRow = $script:Controls.LaunchJobsGrid.SelectedItem
+            $script:Controls.RequestJobButton.IsEnabled = $null -ne $launchRow -and [bool]$launchRow.InManifest
+        }
+        Update-SelectedPipelineRequest
+        $script:Controls.CancelAllRequestsButton.IsEnabled = -not $script:CancellationBusy -and @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling')).Count -gt 0
     }
-    return $request
+}
+
+function Start-GuiJobRunSubmission {
+    param([Parameter(Mandatory = $true)][string]$JobName, [bool]$IncludeDependencies)
+    if ($script:RequestSubmitBusy) { return $false }
+    $workerFolder = Split-Path $managementModulePath -Parent
+    $context = $script:RequestSubmitContext
+    $context.Input = [pscustomobject]@{
+        JobName = $JobName; IncludeDependencies = $IncludeDependencies
+        Root = $script:SharedDataFolderPath; Tenant = $Tenant; LogPath = $script:GuiLogPath
+        ModulePaths = @($managementModulePath, (Join-Path $workerFolder 'SmartM365.Orchestrator.Pipeline.psm1'),
+            (Join-Path $workerFolder 'SmartM365.Orchestrator.Insights.psm1'))
+    }
+    $context.Progress.Message = 'Starting...'
+    $context.Progress.Stage = 'Starting'
+    $context.Progress.LogError = ''
+    Set-GuiRequestSubmitBusy $true -JobName $JobName
+    $script:Controls.StatusText.Text = "Submitting run request for $JobName..."
+    try {
+        if (-not (Start-SmartM365OrchestratorGuiWorker -Context $context -Work (Get-GuiJobRunSubmissionWork) -InputObject $context.Input)) { throw 'A run request worker is already active.' }
+    }
+    catch {
+        Set-GuiRequestSubmitBusy $false
+        $script:Controls.StatusText.Text = 'Run request not submitted.'
+        throw
+    }
+    return $true
+}
+
+function Receive-GuiJobRunSubmission {
+    if (-not $script:RequestSubmitBusy) { return }
+    $context = $script:RequestSubmitContext
+    if ($null -ne $script:RequestSubmitDialog) {
+        $script:RequestSubmitDialog.FindName('SubmitDetailText').Text = '{0} ({1:N0} s)' -f $context.Progress.Message, $context.Clock.Elapsed.TotalSeconds
+    }
+    $received = Receive-SmartM365OrchestratorGuiWorker -Context $context
+    if ($null -eq $received) { return }
+    $jobName = [string]$context.Input.JobName
+    $stage = [string]$context.Progress.Stage
+    $result = $null
+    if (-not $received.Error -and $received.Output.Count -eq 1) { $result = $received.Output[0] }
+    # Close the wait window and restore the controls before any result dialog.
+    Set-GuiRequestSubmitBusy $false
+    $title = 'Run request failed'; $icon = 'Error'
+    if ($null -ne $result -and [string]$result.Outcome -eq 'Recorded') {
+        if (-not $result.RefreshError) { Set-GuiRequestRows -Rows @($result.Rows) }
+        Write-GuiActivity -Level SUCCESS -DisplayOnly -Message ("Run request recorded. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}" -f $jobName, [bool]$context.Input.IncludeDependencies, $result.BatchId, $result.TotalCount)
+        $script:Controls.StatusText.Text = "Run request recorded: $($result.BatchId) (not started yet)"
+        $message = "Request submitted.`nBatch: $($result.BatchId)`nJobs: $($result.TotalCount)`n`nThe request is recorded; no job has started yet. The orchestrators start it on its elected server when its dependency rule allows it.`n`nFollow it in the Requests tab."
+        if ($result.RefreshError) { $message += "`n`nThe Requests list could not be refreshed ($($result.RefreshError)). Refresh it before relying on it." }
+        $title = 'Run requested'; $icon = 'Information'
+    }
+    elseif ($null -ne $result -and [string]$result.Outcome -eq 'Failed' -and -not @($result.NewBatchIds).Count -and -not $result.CheckError) {
+        $message = "The run request for '$jobName' was not recorded.`n`n$($result.Error)`n`nNo new request appeared in the shared folder. Fix the cause, then request again."
+        Write-GuiActivity -Level ERROR -DisplayOnly -Message "Run request not recorded. Job=$jobName; Error=$($result.Error)"
+        $script:Controls.StatusText.Text = 'Run request not recorded.'
+    }
+    elseif ($null -ne $result -and [string]$result.Outcome -eq 'Failed') {
+        $seen = if (@($result.NewBatchIds).Count) { "New request(s) appeared meanwhile: $(@($result.NewBatchIds) -join ', ')." } else { "The shared folder could not be checked: $($result.CheckError)" }
+        $message = "The run request for '$jobName' reported an error and may still have been recorded.`n`n$($result.Error)`n`n$seen`n`nCheck the Requests tab (Refresh) before requesting again. Nothing is resubmitted automatically."
+        Write-GuiActivity -Level WARN -DisplayOnly -Message "Run request result uncertain. Job=$jobName; Error=$($result.Error); $seen"
+        $script:Controls.StatusText.Text = 'Run request result uncertain: check the Requests tab.'
+        $title = 'Run request uncertain'; $icon = 'Warning'
+    }
+    elseif ($stage -in @('Submitting', 'Recorded')) {
+        $detail = if ($received.Error) { $received.Error } else { 'The submission worker returned an invalid result.' }
+        $message = "The run request for '$jobName' was interrupted while it was being recorded and may have been recorded.`n`n$detail`n`nCheck the Requests tab (Refresh) before requesting again. Nothing is resubmitted automatically."
+        Write-GuiActivity -Level WARN -DisplayOnly -Message "Run request result uncertain. Job=$jobName; Stage=$stage; Error=$detail"
+        $script:Controls.StatusText.Text = 'Run request result uncertain: check the Requests tab.'
+        $title = 'Run request uncertain'; $icon = 'Warning'
+    }
+    else {
+        $detail = if ($received.Error) { $received.Error } else { 'The submission worker returned an invalid result.' }
+        $message = "The run request for '$jobName' was not submitted.`n`n$detail"
+        Write-GuiActivity -Level ERROR -DisplayOnly -Message "Run request not submitted. Job=$jobName; Error=$detail"
+        $script:Controls.StatusText.Text = 'Run request not submitted.'
+    }
+    if ($context.Progress.LogError) { Write-GuiActivity -Level WARN -DisplayOnly -Message "Persistent run request log unavailable: $($context.Progress.LogError)" }
+    # Live refresh first (read-only, background): the grids update while the result is read.
+    Invoke-AutoRefresh
+    Show-GuiJobRunRequestResult -Message $message -Title $title -Icon $icon
 }
 
 function Get-GuiLaunchCatalog {
@@ -1726,7 +1967,7 @@ function Update-SelectedLaunchPreview {
     if ($Kind -eq 'Job') {
         $row = $script:Controls.LaunchJobsGrid.SelectedItem
         $script:Controls.RunJobNowButton.IsEnabled = $null -ne $row
-        $script:Controls.RequestJobButton.IsEnabled = $null -ne $row -and [bool]$row.InManifest
+        $script:Controls.RequestJobButton.IsEnabled = $null -ne $row -and [bool]$row.InManifest -and -not $script:RequestSubmitBusy
         $script:Controls.JobExecutionModeCombo.IsEnabled = $null -ne $row -and [bool]$row.OnPremises -and [bool]$row.InManifest
         $script:Controls.ApplyJobExecutionModeButton.IsEnabled = $script:Controls.JobExecutionModeCombo.IsEnabled
         if ($null -eq $row) { $script:Controls.LaunchJobCommandBox.Text = ''; return }
@@ -2180,7 +2421,7 @@ function Receive-GuiRefresh {
         }
         else {
             Set-GuiOperations -Operations $result.Operations
-            if (-not $script:CancellationBusy) { Set-GuiRequestRows -Rows @($result.Requests) }
+            if (-not $script:CancellationBusy -and -not $script:RequestSubmitBusy) { Set-GuiRequestRows -Rows @($result.Requests) }
             if ([int]$script:RefreshContext.Input.LogEventsHours -gt 0) { Set-GuiLogEvents -Result $result.LogEvents -ErrorMessage ([string]$result.LogEventsError) }
             if ([string]$script:RefreshContext.Input.ConfigurationProfile) { Set-GuiConfiguration -View $result.Configuration -ErrorMessage ([string]$result.ConfigurationError) }
             if ([bool]$script:RefreshContext.Input.IncludeDashboard) { Set-GuiDashboard -Dashboard $result.Dashboard -ErrorMessage ([string]$result.DashboardError) }
@@ -2929,6 +3170,10 @@ $script:CancellationTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:CancellationTimer.Interval = [TimeSpan]::FromMilliseconds(150)
 $script:CancellationTimer.Add_Tick({ Receive-GuiPipelineCancellation })
 $script:CancellationTimer.Start()
+$script:RequestSubmitTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:RequestSubmitTimer.Interval = [TimeSpan]::FromMilliseconds(150)
+$script:RequestSubmitTimer.Add_Tick({ try { Receive-GuiJobRunSubmission } catch { Write-GuiException -Context 'Run request result handling failed' -ErrorRecord $_ } })
+$script:RequestSubmitTimer.Start()
 $script:RefreshTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:RefreshTimer.Interval = [TimeSpan]::FromMilliseconds(150)
 $script:RefreshTimer.Add_Tick({ Receive-GuiRefresh; Update-GuiDashboardLoading })
@@ -2952,6 +3197,7 @@ $window.Add_Closed({
     if ($script:ConfigurationTimer) { $script:ConfigurationTimer.Stop() }
     if ($script:RefreshTimer) { $script:RefreshTimer.Stop() }
     if ($script:CancellationTimer) { $script:CancellationTimer.Stop() }
+    if ($script:RequestSubmitTimer) { $script:RequestSubmitTimer.Stop() }
     Write-GuiActivity -Message 'GUI session closed.'
     if ($script:GuiSplash) { Close-SmartM365GuiSplash -Splash $script:GuiSplash }
 })
@@ -2960,6 +3206,10 @@ $window.Add_Closing({
     if ($script:CancellationBusy) {
         $eventArgs.Cancel = $true
         [System.Windows.MessageBox]::Show('Cancellation is still being checked or published. Wait for the result before closing this window. Running collectors are not stopped.', 'Operation in progress', 'OK', 'Information') | Out-Null
+    }
+    elseif ($script:RequestSubmitBusy) {
+        $eventArgs.Cancel = $true
+        [System.Windows.MessageBox]::Show('A run request is still being submitted. Wait for the result before closing this window.', 'Operation in progress', 'OK', 'Information') | Out-Null
     }
 })
 [void]$window.ShowDialog()
@@ -2971,11 +3221,11 @@ $window.Add_Closing({
 } finally {
     if ($smartM365RunGuard) {
     Complete-SmartM365InventoryRun -State $smartM365RunGuard -Cleanup {
-        foreach($name in @('AutoRefreshTimer','RefreshTimer','CancellationTimer','ConfigurationTimer')){
+        foreach($name in @('AutoRefreshTimer','RefreshTimer','CancellationTimer','RequestSubmitTimer','ConfigurationTimer')){
             $timer=Get-Variable $name -Scope Script -ValueOnly -ErrorAction SilentlyContinue
             if($timer){Invoke-SmartM365RunCleanup $smartM365RunGuard $name { $timer.Stop() }}
         }
-        foreach($name in @('RefreshContext','CancellationContext')){
+        foreach($name in @('RefreshContext','CancellationContext','RequestSubmitContext')){
             $context=Get-Variable $name -Scope Script -ValueOnly -ErrorAction SilentlyContinue
             if($context -and (Get-Command Close-SmartM365OrchestratorGuiWorker -ErrorAction SilentlyContinue)){
                 Invoke-SmartM365RunCleanup $smartM365RunGuard $name { Close-SmartM365OrchestratorGuiWorker -Context $context }

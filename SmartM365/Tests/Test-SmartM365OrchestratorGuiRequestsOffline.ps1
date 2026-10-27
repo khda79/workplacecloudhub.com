@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline WPF selection and asynchronous cancellation tests with synthetic delays.
 .VERSION
-1.1.0
+1.1.1
 #>
 [CmdletBinding()]
 param()
@@ -71,7 +71,7 @@ Export-ModuleMember -Function Get-SmartM365OrchestratorActivePipelineRuns,Get-Sm
 '@
 [IO.File]::WriteAllText($managementModulePath,$mock,[Text.UTF8Encoding]::new($false))
 $script:Cases=0;$script:Failures=@();$script:Activity=@();$script:RecentRows=@();$script:RequestRows=@()
-$script:CancellationBusy=$false;$script:CancellationUiState=@{}
+$script:CancellationBusy=$false;$script:CancellationUiState=@{};$script:RequestSubmitBusy=$false
 $script:CancellationContext=[pscustomobject]@{Worker=$null;Progress=[hashtable]::Synchronized(@{Message='';LogError=''});Input=$null;Clock=[Diagnostics.Stopwatch]::new()}
 $script:SharedDataFolderPath=$root;$Tenant='test';$script:GuiLogPath=Join-Path $root 'activity.log'
 $script:ConfirmResult=$true;$script:ConfirmationCalls=0;$script:AddFuture=$false;$script:ConfirmationMessage='';$script:UseRealProviders=$false
@@ -214,7 +214,7 @@ try{
     $script:Controls.CancellationReasonBox.Text='Synthetic idempotent click'
     $script:Controls.CancelRequestButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));Wait-GuiOperation
     Assert-Case ($script:Failures.Count -eq 0 -and (Get-FileHash $run.RequestPath).Hash -eq $auditHash) 'Selected button rewrote the audit of an already cancelled request.'
-    $closing=$ast.Find({param($node)$node -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $node.Member.Value -eq 'Add_Closing'},$true)
+    $closing=$ast.Find({param($node)$node -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $node.Member.Value -eq 'Add_Closing' -and $node.Expression.Extent.Text -eq '$window'},$true)
     Assert-Case ($null -ne $closing -and $closing.Extent.Text -match 'CancellationBusy' -and $closing.Extent.Text -match '\$eventArgs.Cancel = \$true') 'Active publication does not protect window closure.'
     "[{0}] PASS: {1} offline WPF/async request checks. No collectors, tenant calls or live shared writes." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$script:Cases
 }

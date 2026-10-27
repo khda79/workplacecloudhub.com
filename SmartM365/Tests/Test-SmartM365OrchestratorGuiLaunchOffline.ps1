@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline tests of the Operations launch features of the orchestrator GUI.
 .VERSION
-1.1.0
+1.1.1
 .NOTES
 GUI functions are extracted by AST and bound to the real XAML. The catalog is the committed
 template (read only); the published configuration is a copy of its jobs. No orchestrator, request
@@ -45,6 +45,7 @@ foreach ($name in @('OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo',
 }
 
 $script:Cases = 0
+$script:RequestSubmitBusy = $false; $script:CancellationBusy = $false
 function Assert-Case { param([bool]$Condition, [string]$Message) $script:Cases++; if (-not $Condition) { throw "FAIL: $Message" } }
 $script:Activity = [Collections.Generic.List[string]]::new()
 function Write-GuiActivity { param($Message, $Level = 'INFO', [switch]$DisplayOnly) $script:Activity.Add("$Level|$Message") }
