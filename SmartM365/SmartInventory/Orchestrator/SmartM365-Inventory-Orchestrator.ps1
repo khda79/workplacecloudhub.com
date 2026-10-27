@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.61
+1.5.62
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.61"
+$ScriptVersion = "1.5.62"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1392,10 +1392,13 @@ function Write-OrchestratorTimeoutPolicySummary {
     $jobs = @($script:Manifest.OrderedJobs)
     $dailyOnce = @($jobs | Where-Object { $_.Schedule.Type -eq 'Daily' -and @($_.Schedule.Times).Count -eq 1 })
     $weeklyOnce = @($jobs | Where-Object { $_.Schedule.Type -eq 'Weekly' -and @($_.Schedule.DaysOfWeek).Count -eq 1 -and @($_.Schedule.Times).Count -eq 1 })
-    $dailyMismatches = @($dailyOnce | Where-Object { [int]$_.TimeoutMinutes -ne 1380 })
-    $weeklyMismatches = @($weeklyOnce | Where-Object { [int]$_.TimeoutMinutes -ne 8640 })
+    $exceptions = Get-SmartM365OrchestratorTimeoutPolicyExceptions
+    $dailyMismatches = @($dailyOnce | Where-Object { [int]$_.TimeoutMinutes -ne 1380 -and -not $exceptions.Contains([string]$_.Name) })
+    $weeklyMismatches = @($weeklyOnce | Where-Object { [int]$_.TimeoutMinutes -ne 8640 -and -not $exceptions.Contains([string]$_.Name) })
+    $keptExceptions = @(@($dailyOnce) + @($weeklyOnce) | Where-Object { $exceptions.Contains([string]$_.Name) } | ForEach-Object { '{0}={1}' -f $_.Name, $_.TimeoutMinutes })
     $level = if ($dailyMismatches.Count -eq 0 -and $weeklyMismatches.Count -eq 0) { 'INFO' } else { 'WARN' }
     $details = @()
+    if ($keptExceptions.Count -gt 0) { $details += "intentional exceptions: $($keptExceptions -join ', ')" }
     if ($dailyMismatches.Count -gt 0) { $details += "daily mismatch: $(@($dailyMismatches.Name) -join ', ')" }
     if ($weeklyMismatches.Count -gt 0) { $details += "weekly mismatch: $(@($weeklyMismatches.Name) -join ', ')" }
     $suffix = if ($details.Count -gt 0) { "; $($details -join '; ')" } else { '' }

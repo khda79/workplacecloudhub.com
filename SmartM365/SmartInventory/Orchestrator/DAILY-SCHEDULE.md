@@ -67,8 +67,9 @@ same time anywhere in the cluster. WorkplaceScope normally ends long before AD s
 00:10; its 480-minute timeout bounds how long it can hold AD back (02:00 without a
 retry). AD-Inventory has a 240-minute timeout. A server restart during the evening can
 interrupt WorkplaceScope; its catch-up run then delays AD by the remaining collection
-time. The timeout-policy audit therefore reports AD as an intentional mismatch; do not
-reset it with `Set-SmartM365-OrchestratorTimeoutPolicy.ps1 -Execute`.
+time. AD and WorkplaceScope are therefore intentional exceptions of the timeout policy:
+`Set-SmartM365-OrchestratorTimeoutPolicy.ps1` keeps them unchanged and the audit lists
+them separately.
 
 Endpoint security health passes `-ExportTimeoutSeconds 1200`, the value its manual
 launcher has always used, instead of the 600-second script default. Each of its three

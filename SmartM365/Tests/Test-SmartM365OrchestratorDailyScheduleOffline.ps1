@@ -235,6 +235,20 @@ foreach ($path in $paths) {
     if ($isTemplate) {
         Assert-True (@($document.Jobs | Where-Object Name -eq 'WorkplaceEvidence-Prepare')[0].DependencyMaxAgeHours -eq 48) 'Template workplace preparation freshness window is not 48 hours.'
     }
+    # Every one-time daily or weekly job follows the timeout policy unless it is a declared exception.
+    $timeoutExceptions = Get-SmartM365OrchestratorTimeoutPolicyExceptions
+    Assert-True ((@($timeoutExceptions.Keys) -join ',') -ceq 'AD-Inventory,M365-WorkplaceScope-Inventory,EXO-Mailboxes-Inventory,Exchange2016-FreeBusy-Check') 'Timeout policy exceptions changed.'
+    foreach ($exceptionName in @($timeoutExceptions.Keys)) {
+        Assert-True (@($document.Jobs | Where-Object Name -eq $exceptionName).Count -eq 1) "Timeout policy exception is not a manifest job: $exceptionName"
+    }
+    foreach ($job in @($document.Jobs | Where-Object { -not $timeoutExceptions.Contains([string]$_.Name) })) {
+        if ($job.Schedule.Type -eq 'Daily' -and @($job.Schedule.Times).Count -eq 1) {
+            Assert-True ([int]$job.TimeoutMinutes -eq 1380) "Daily-once job timeout is not 1380 minutes: $($job.Name)"
+        }
+        elseif ($job.Schedule.Type -eq 'Weekly' -and @($job.Schedule.DaysOfWeek).Count -eq 1 -and @($job.Schedule.Times).Count -eq 1) {
+            Assert-True ([int]$job.TimeoutMinutes -eq 8640) "Weekly-once job timeout is not 8640 minutes: $($job.Name)"
+        }
+    }
     $ad = @($document.Jobs | Where-Object Name -eq 'AD-Inventory')[0]
     $scope = @($document.Jobs | Where-Object Name -eq 'M365-WorkplaceScope-Inventory')[0]
     Assert-True ($ad.ConcurrencyKey -eq 'AD-WorkplaceScope' -and $scope.ConcurrencyKey -eq $ad.ConcurrencyKey) 'AD and WorkplaceScope collections can run at the same time.'

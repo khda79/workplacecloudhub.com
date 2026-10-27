@@ -5,6 +5,7 @@ Previews or publishes the standard timeout policy in the shared Orchestrator job
 .DESCRIPTION
 Daily jobs with exactly one scheduled time are set to 1380 minutes (23 hours).
 Weekly jobs with exactly one day and one scheduled time are set to 8640 minutes (6 days).
+Jobs listed by Get-SmartM365OrchestratorTimeoutPolicyExceptions keep their timeout.
 All other jobs and every cluster setting are preserved. Without -Execute, the script is read-only.
 Publication uses the Orchestrator management module's validation, optimistic hash checks,
 configuration lock, before/after version snapshots and audit CSV.
@@ -36,8 +37,18 @@ Import-Module -Name $managementModulePath -Force -ErrorAction Stop
 $snapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $SharedDataFolderPath
 $jobsDocument = $snapshot.Jobs | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
 $changes = [System.Collections.Generic.List[object]]::new()
+$exceptions = Get-SmartM365OrchestratorTimeoutPolicyExceptions
+$keptExceptions = [System.Collections.Generic.List[object]]::new()
 
 foreach ($job in @($jobsDocument.Jobs)) {
+    if ($exceptions.Contains([string]$job.Name)) {
+        $keptExceptions.Add([pscustomobject][ordered]@{
+            Job = [string]$job.Name
+            TimeoutMinutes = [int]$job.TimeoutMinutes
+            Reason = $exceptions[[string]$job.Name]
+        })
+        continue
+    }
     $targetTimeout = $null
     $policy = ''
     $scheduleType = [string]$job.Schedule.Type
@@ -58,6 +69,11 @@ foreach ($job in @($jobsDocument.Jobs)) {
         NewTimeoutMinutes = $targetTimeout
     })
     $job.TimeoutMinutes = $targetTimeout
+}
+
+if ($keptExceptions.Count -gt 0) {
+    Write-Output 'Intentional exceptions kept unchanged:'
+    $keptExceptions | Sort-Object Job | Format-Table -AutoSize -Wrap
 }
 
 if ($changes.Count -eq 0) {

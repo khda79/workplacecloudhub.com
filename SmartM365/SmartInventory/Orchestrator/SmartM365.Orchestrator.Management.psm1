@@ -555,6 +555,18 @@ function Publish-SmartM365OrchestratorConfiguration {
     finally { if ($null -ne $lock) { $lock.Dispose() }; Remove-Item $paths.LockPath -Force -ErrorAction SilentlyContinue }
 }
 
+# Jobs whose timeout intentionally differs from the 1380/8640-minute policy (DAILY-SCHEDULE.md, README.md).
+function Get-SmartM365OrchestratorTimeoutPolicyExceptions {
+    [CmdletBinding()]
+    param()
+    [ordered]@{
+        'AD-Inventory'                  = 'Shares the AD-WorkplaceScope key; 240 minutes bounds how long AD holds WorkplaceScope back.'
+        'M365-WorkplaceScope-Inventory' = 'Shares the AD-WorkplaceScope key; 480 minutes bounds how long WorkplaceScope holds AD back.'
+        'EXO-Mailboxes-Inventory'       = 'Shares the EXOMailboxes key; 2160 minutes bounds how long a full run holds the daily Fast chain back.'
+        'Exchange2016-FreeBusy-Check'   = 'Short weekly check; keeps its own timeout.'
+    }
+}
+
 function Get-SmartM365OrchestratorConfigurationVersions {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$SharedDataFolderPath)
@@ -671,7 +683,8 @@ Export-ModuleMember -Function @(
     'Read-SmartM365OrchestratorJson', 'Write-SmartM365OrchestratorJsonAtomically', 'Write-SmartM365OrchestratorManagementLog', 'Sync-SmartM365OrchestratorJobsManifest', 'Test-SmartM365OrchestratorJobsDocument',
     'Test-SmartM365OrchestratorClusterDocument', 'Test-SmartM365OrchestratorConfigurationConsistency', 'Get-SmartM365OrchestratorConfigurationSnapshot', 'Initialize-SmartM365OrchestratorCentralConfiguration',
     'Publish-SmartM365OrchestratorConfiguration', 'Get-SmartM365OrchestratorConfigurationVersions', 'Restore-SmartM365OrchestratorConfigurationVersion',
-    'Request-SmartM365OrchestratorRebalance', 'Get-SmartM365OrchestratorHistory', 'Get-SmartM365OrchestratorServerStatus'
+    'Request-SmartM365OrchestratorRebalance', 'Get-SmartM365OrchestratorHistory', 'Get-SmartM365OrchestratorServerStatus',
+    'Get-SmartM365OrchestratorTimeoutPolicyExceptions'
 )
 
 # SIG # Begin signature block
