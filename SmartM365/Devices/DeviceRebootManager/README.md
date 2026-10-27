@@ -1,28 +1,27 @@
 # Smart Device Reboot Manager
 
-## Current distribution 1.0.0 — build 2
+## Current distribution 1.1.0
 
-The package and GUI product version are **1.0.0**. **Build 2** aligns the visible interface and report versions. The [1.0.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-reboot-manager-v1.0.0) contains only the current build 2 assets; superseded releases and original build assets have been removed.
+The package and GUI product version are **1.1.0**. The [1.1.0 release](https://github.com/khda79/workplacecloudhub.com/releases/tag/device-reboot-manager-v1.1.0) supersedes 1.0.0 build 2, which stays available on its own release page.
 
 | Download | File |
 | --- | --- |
-| Standalone ZIP | [SmartM365-DeviceRebootManager-1.0.0-build.2.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.0.0/SmartM365-DeviceRebootManager-1.0.0-build.2.zip) |
-| Intune Win32 package | [SmartM365-DeviceRebootManager-1.0.0-build.2.intunewin](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.0.0/SmartM365-DeviceRebootManager-1.0.0-build.2.intunewin) |
-| SHA-256 checksums | [SmartM365-DeviceRebootManager-1.0.0-build.2.sha256](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.0.0/SmartM365-DeviceRebootManager-1.0.0-build.2.sha256) |
-| DemoAssets | [SmartM365-DeviceRebootManager-1.0.0-build.2-DemoAssets.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.0.0/SmartM365-DeviceRebootManager-1.0.0-build.2-DemoAssets.zip) |
-| Release notes | [SmartM365-DeviceRebootManager-1.0.0-build.2-RELEASE-NOTES.md](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.0.0/SmartM365-DeviceRebootManager-1.0.0-build.2-RELEASE-NOTES.md) |
-| Release manifest | [SmartM365-DeviceRebootManager-1.0.0-build.2.manifest.json.txt](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.0.0/SmartM365-DeviceRebootManager-1.0.0-build.2.manifest.json.txt) |
+| Standalone ZIP | [SmartM365-DeviceRebootManager-1.1.0.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.1.0/SmartM365-DeviceRebootManager-1.1.0.zip) |
+| Intune Win32 package | [SmartM365-DeviceRebootManager-1.1.0.intunewin](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.1.0/SmartM365-DeviceRebootManager-1.1.0.intunewin) |
+| SHA-256 checksums | [SmartM365-DeviceRebootManager-1.1.0.sha256](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.1.0/SmartM365-DeviceRebootManager-1.1.0.sha256) |
+| DemoAssets | [SmartM365-DeviceRebootManager-1.1.0-DemoAssets.zip](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.1.0/SmartM365-DeviceRebootManager-1.1.0-DemoAssets.zip) |
+| Release notes | [SmartM365-DeviceRebootManager-1.1.0-RELEASE-NOTES.md](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.1.0/SmartM365-DeviceRebootManager-1.1.0-RELEASE-NOTES.md) |
+| Release manifest | [SmartM365-DeviceRebootManager-1.1.0.manifest.json.txt](https://github.com/khda79/workplacecloudhub.com/releases/download/device-reboot-manager-v1.1.0/SmartM365-DeviceRebootManager-1.1.0.manifest.json.txt) |
 
-Launch `Start-SmartM365-DeviceRebootManager-Demo.cmd` from the root of the extracted standalone release. The separate DemoAssets archive contains the current fictional GUI captures, applicable HTML reports, synthetic exports and website/presentation variants. It performs no tenant or device operation.
+Launch `Start-SmartM365-DeviceRebootManager-Demo.cmd` from the root of the extracted standalone release. The separate DemoAssets archive contains the current fictional GUI captures and website/presentation variants. It performs no tenant or device operation.
 
-The signed runtime source is identified by the [build 2 source tag](https://github.com/khda79/workplacecloudhub.com/tree/device-reboot-manager-v1.0.0-build.2/SmartM365/Devices/DeviceRebootManager). GitHub publication does not publish a version to the PowerShell Gallery service.
-
-## Next release 1.1.0 (source, not yet published)
-
-The repository source is version **1.1.0**. It is not published yet; until then the 1.0.0 build 2 downloads above remain current. When built and published, the release will use the tag `releases/tag/device-reboot-manager-v1.1.0` and the artifacts `SmartM365-DeviceRebootManager-1.1.0.zip`, `SmartM365-DeviceRebootManager-1.1.0.intunewin` and `SmartM365-DeviceRebootManager-1.1.0.sha256`.
+The signed runtime source is identified by the [1.1.0 source tag](https://github.com/khda79/workplacecloudhub.com/tree/device-reboot-manager-v1.1.0/SmartM365/Devices/DeviceRebootManager). GitHub publication does not publish a version to the PowerShell Gallery service.
 
 Changes in 1.1.0:
 
+- Simpler window for standard users: one column, no on-screen activity log, days since the last restart with the allowed or recommended interval, a localized last restart date, an awareness banner on why regular restarts matter, only the actions available in the current mode, and the PC name, language and version in the footer. The title bar shows a localized "PC restart" title without the version.
+- No black console window: the scheduled task and the `.cmd` launchers run PowerShell through `conhost.exe --headless` (Windows 10 2004 and later).
+- Company prefix detection uses device-level sources only; a work account added to a user profile is ignored.
 - Installs to `C:\Program Files\WCH\SmartDeviceRebootManager` (administrator-only) and removes the legacy, user-writable `C:\ProgramData\SmartM365\DeviceRebootManager` installation.
 - Restart enforcement: no forced restart when the boot time is unreadable, forced and verified restart command, wall-clock countdown persisted per boot, locale-independent disconnected-session detection.
 - Gallery channel: working automatic-update task, signed file catalog covering every packaged file, one signature rule, rollback to an installed module version.
@@ -201,7 +200,7 @@ Preview the publication and proposed pilot group:
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass `
     -File .\Deploy\SmartM365-DeviceRebootManager-PublishIntune.ps1 `
-    -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-1.0.0-build.2.intunewin
+    -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-1.1.0.intunewin
 ```
 
 Publish the stable app, supersede the prior preview as an in-place update, reuse
@@ -210,7 +209,7 @@ the assigned security group, and assign the stable app as `Required`:
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass `
     -File .\Deploy\SmartM365-DeviceRebootManager-PublishIntune.ps1 `
-    -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-1.0.0-build.2.intunewin `
+    -IntuneWinPath C:\Temp\SmartM365-DeviceRebootManager-1.1.0.intunewin `
     -TenantId <tenant-id> `
     -PilotGroupId <pilot-group-id> `
     -AssignPilotGroup `
@@ -252,11 +251,11 @@ On Windows 10 2004 (build 19041) and later, the task runs `conhost.exe --headles
 
 ## PowerShell Gallery packaging
 
-The GitHub build 2 runtime uses module version `1.0.0`. Gallery service publication is separate from the GitHub distribution linked above.
+The GitHub 1.1.0 runtime uses module version `1.1.0`. Gallery service publication is separate from the GitHub distribution linked above.
 
 Build and validate the package locally:
 
-Local release builders generate intermediate files named `SmartM365-DeviceRebootManager-1.0.0.zip`, `SmartM365-DeviceRebootManager-1.0.0.intunewin` and `SmartM365-DeviceRebootManager-1.0.0.sha256`. These are local build outputs; use the **build 2 download links above** for published packages.
+Local release builders generate intermediate files named `SmartM365-DeviceRebootManager-1.1.0.zip`, `SmartM365-DeviceRebootManager-1.1.0.intunewin` and `SmartM365-DeviceRebootManager-1.1.0.sha256`. These are local build outputs; use the **download links above** for published packages.
 
 ```powershell
 .\PowerShellGallery\SmartM365-Build-DeviceRebootManagerGalleryPackage.ps1 -Force
@@ -279,7 +278,7 @@ $env:PSGALLERY_API_KEY = '<temporary-api-key>'
     -Execute
 ```
 
-The following optional Gallery-channel commands install the version available on that service; they do not select the GitHub build 2 package. Use the downloads above for this release. An elevated Windows PowerShell session can deploy a Gallery installation:
+The following optional Gallery-channel commands install the version available on that service; they do not select the GitHub 1.1.0 package. Use the downloads above for this release. An elevated Windows PowerShell session can deploy a Gallery installation:
 
 ```powershell
 Install-Module SmartM365.DeviceRebootManager -Repository PSGallery -Scope AllUsers -Force
@@ -394,4 +393,4 @@ Launch the safe test wrapper:
 
 ## Distribution version transition
 
-The 1.0.0 package uses GUI component 1.0.0 and includes the complete signed demo runtime. Only the current build 2 release assets remain published. Git history and source tags preserve earlier source revisions. Local DemoAssets stay Git-ignored; reviewed demo archives are separate GitHub release assets.
+The 1.1.0 package uses GUI component 1.1.0 and includes the complete signed demo runtime. The 1.0.0 build 2 release remains published on its own release page. Git history and source tags preserve earlier source revisions. Local DemoAssets stay Git-ignored; reviewed demo archives are separate GitHub release assets.
