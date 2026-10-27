@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline byte equivalence, validation, atomic-copy and bounded performance tests.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals in an isolated offline test process.')]
@@ -18,6 +18,9 @@ $testRoot=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-CsvParity-'+[guid]::N
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 $results=[Collections.Generic.List[object]]::new()
 $checks=0
+$localStaging=Join-Path ([IO.Path]::GetTempPath()) 'SmartM365-CsvStaging'
+function Get-LocalStagingFiles { if (Test-Path -LiteralPath $localStaging) { @(Get-ChildItem -LiteralPath $localStaging -Filter '~sm*' -File | ForEach-Object FullName) } else { @() } }
+$stagingBefore=@(Get-LocalStagingFiles)
 function Assert-Csv([bool]$Condition,[string]$Message) { if (-not $Condition) { throw $Message }; $script:checks++ }
 function Test-CsvCase([string]$Name,[scriptblock]$Body) {
     try { & $Body; $results.Add([pscustomobject]@{Name=$Name;Passed=$true;Error=''}) }
@@ -101,17 +104,21 @@ try {
                 New-Item -ItemType Directory -Path $folder | Out-Null
                 $old=Join-Path $folder 'old/Synthetic_Members.csv';$oldLast=Join-Path $folder 'old-last/Synthetic_Members.csv'
                 $new=Join-Path $folder 'new/Synthetic_Members.csv';$newLast=Join-Path $folder 'new-last/Synthetic_Members.csv'
+                $local=Join-Path $folder 'local/Synthetic_Members.csv';$localLast=Join-Path $folder 'local-last/Synthetic_Members.csv'
                 $counts=& $module {
-                    param($Data,$Columns,$Old,$OldLast,$New,$NewLast,$Encoding,$Delimiter)
+                    param($Data,$Columns,$Old,$OldLast,$New,$NewLast,$Local,$LocalLast,$Encoding,$Delimiter)
                     $script:Serializations=0
                     Publish-SmartM365Csv -Data $Data -Columns $Columns -TimestampedPath $Old -LatestPath $OldLast -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload -NoWeeklyHistory | Out-Null
                     $legacy=$script:Serializations;$script:Serializations=0
                     Publish-SmartM365Csv -Data $Data -Columns $Columns -TimestampedPath $New -LatestPath $NewLast -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload -NoWeeklyHistory -SingleSerialization | Out-Null
-                    [pscustomobject]@{Legacy=$legacy;Optimized=$script:Serializations}
-                } $rows $columns $old $oldLast $new $newLast $encoding $delimiter
+                    $optimized=$script:Serializations;$script:Serializations=0
+                    Publish-SmartM365Csv -Data $Data -Columns $Columns -TimestampedPath $Local -LatestPath $LocalLast -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload -NoWeeklyHistory -SingleSerialization -LocalSerialization | Out-Null
+                    [pscustomobject]@{Legacy=$legacy;Optimized=$optimized;Local=$script:Serializations}
+                } $rows $columns $old $oldLast $new $newLast $local $localLast $encoding $delimiter
                 $hash=(Get-FileHash -LiteralPath $old -Algorithm SHA256).Hash
-                foreach($path in @($oldLast,$new,$newLast)) { Assert-Csv ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ceq $hash) 'Legacy and optimized bytes differ.' }
-                Assert-Csv ($counts.Legacy -eq 2 -and $counts.Optimized -eq 1) 'Serialization count changed unexpectedly.'
+                foreach($path in @($oldLast,$new,$newLast,$local,$localLast)) { Assert-Csv ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ceq $hash) 'Legacy, optimized and locally serialized bytes differ.' }
+                Assert-Csv ($counts.Legacy -eq 2 -and $counts.Optimized -eq 1 -and $counts.Local -eq 1) 'Serialization count changed unexpectedly.'
+                Assert-Csv (@(Get-ChildItem $folder -Recurse -Filter '~sm*').Count -eq 0) 'Publication retained a temporary file next to the outputs.'
                 $parsed=@(Import-Csv -LiteralPath $newLast -Delimiter $delimiter -Encoding $encoding)
                 Assert-Csv ($parsed.Count -eq 2 -and $parsed[0].MemberId -ceq '001') 'Row count or leading zeros changed.'
                 Assert-Csv ($parsed[0].CollectedAtUtc -ceq $rows[0].CollectedAtUtc -and $parsed[1].Label -ceq $rows[1].Label) 'Native dates or text changed.'
@@ -177,7 +184,7 @@ try {
             Assert-Csv (@(Get-ChildItem $testRoot -Filter '*.tmp').Count -eq 0) 'Verified copy retained temporary files.'
         }
     }
-    foreach($fault in @('Serialization','Copy')) {
+    foreach($fault in @('Serialization','Copy','LocalSerialization','LocalCopy')) {
         Test-CsvCase "Publication failure is blocking and keeps latest: $fault" {
             $folder=Join-Path $testRoot "publisher-$fault";New-Item -ItemType Directory -Path $folder | Out-Null
             $stamp=Join-Path $folder 'Synthetic_Members.csv';$last=Join-Path $folder 'latest/Synthetic_Members.csv'
@@ -185,16 +192,17 @@ try {
             Set-Content $stamp 'OLD HISTORY';Set-Content $last 'OLD LATEST'
             $observed=& $module {param($d,$c,$s,$l,$fault)
                 $script:Uploads.Clear();$script:WeeklyCalls=0;$script:RetentionCalls=0
-                $script:CorruptCopy=$fault -eq 'Copy';$script:FailSerialization=$fault -eq 'Serialization'
+                $script:CorruptCopy=$fault -like '*Copy';$script:FailSerialization=$fault -like '*Serialization'
                 $rejected=$false
-                try {Publish-SmartM365Csv -Data $d -Columns $c -TimestampedPath $s -LatestPath $l -SingleSerialization | Out-Null}
+                try {Publish-SmartM365Csv -Data $d -Columns $c -TimestampedPath $s -LatestPath $l -SingleSerialization -LocalSerialization:($fault -like 'Local*') | Out-Null}
                 catch {$rejected=$true}
                 finally {$script:CorruptCopy=$false;$script:FailSerialization=$false}
                 [pscustomobject]@{Rejected=$rejected;Uploads=$script:Uploads.Count;Weekly=$script:WeeklyCalls;Retention=$script:RetentionCalls}
             } $rows $columns $stamp $last $fault
             Assert-Csv ($observed.Rejected -and $observed.Uploads -eq 0 -and $observed.Weekly -eq 0 -and $observed.Retention -eq 0) 'Failed pair was published or triggered retention.'
             Assert-Csv ((Get-Content $last -Raw).Trim() -ceq 'OLD LATEST') 'Failed pair replaced latest output.'
-            if($fault -eq 'Serialization'){Assert-Csv ((Get-Content $stamp -Raw).Trim() -ceq 'OLD HISTORY') 'Failed serialization replaced timestamped output.'}
+            # A corrupted local-to-share copy is rejected before the timestamped file is replaced.
+            if($fault -ne 'Copy'){Assert-Csv ((Get-Content $stamp -Raw).Trim() -ceq 'OLD HISTORY') 'Failed serialization or copy replaced timestamped output.'}
             else{Assert-Csv (@(Import-Csv $stamp).Count -eq 2) 'Copy failure lost the valid timestamped evidence.'}
             Assert-Csv (@(Get-ChildItem $folder -Recurse -Filter '*.tmp').Count -eq 0 -and @(Get-ChildItem $folder -Filter 'Synthetic_Members.*.csv').Count -eq 0) 'Publication retained a partial temporary file.'
         }
@@ -225,6 +233,27 @@ try {
         & $module {param($d,$c,$p)Publish-SmartM365Csv -Data $d -Columns $c -TimestampedPath $p -LatestPath $p -SingleSerialization -NoSharePointUpload -NoWeeklyHistory -NoTenantKey | Out-Null} $rows $columns $path
         $row=@(Import-Csv $path)[0]
         Assert-Csv (($row.PSObject.Properties.Name -join ',') -ceq ($columns -join ',')) 'Neutral export gained tenant columns.'
+        $localPath=Join-Path $testRoot 'same-local/Synthetic_Members.csv'
+        & $module {param($d,$c,$p)Publish-SmartM365Csv -Data $d -Columns $c -TimestampedPath $p -LatestPath $p -SingleSerialization -LocalSerialization -NoSharePointUpload -NoWeeklyHistory -NoTenantKey | Out-Null} $rows $columns $localPath
+        Assert-Csv ((Get-FileHash $path).Hash -ceq (Get-FileHash $localPath).Hash) 'Local serialization changed same-file neutral bytes.'
+    }
+    Test-CsvCase 'Prepared identity rows equal generic enrichment through local serialization' {
+        $generic=Join-Path $testRoot 'identity-generic/Synthetic_Members.csv';$prepared=Join-Path $testRoot 'identity-prepared/Synthetic_Members.csv'
+        $identityColumns=@('TenantKey','OrganizationKey','EnvironmentKey','TenantId')
+        $preparedRows=@($rows | ForEach-Object {
+            $values=[ordered]@{TenantKey='contoso-test';OrganizationKey='contoso';EnvironmentKey='test';TenantId='00000000-0000-0000-0000-000000000001'}
+            foreach($property in $_.PSObject.Properties){$values[$property.Name]=$property.Value}
+            [pscustomobject]$values
+        })
+        & $module {param($d,$p,$c,$g,$pp,$ic)
+            Publish-SmartM365Csv -Data $d -Columns $c -TimestampedPath $g -SingleSerialization -NoSharePointUpload -NoWeeklyHistory | Out-Null
+            Publish-SmartM365Csv -Data $p -Columns (@($ic)+@($c)) -TimestampedPath $pp -SingleSerialization -LocalSerialization -NoTenantKey -NoSharePointUpload -NoWeeklyHistory | Out-Null
+        } $rows $preparedRows $columns $generic $prepared $identityColumns
+        Assert-Csv ((Get-FileHash $generic).Hash -ceq (Get-FileHash $prepared).Hash) 'Prepared identity rows differ from generic enrichment.'
+    }
+    Test-CsvCase 'Local serialization leaves no local staging file' {
+        $leftover=@(Get-LocalStagingFiles | Where-Object { $stagingBefore -notcontains $_ })
+        Assert-Csv ($leftover.Count -eq 0) ("Local staging files were retained: {0}" -f ($leftover -join ', '))
     }
     Assert-Csv ((ConvertTo-Json -InputObject $rows -Depth 10 -Compress) -ceq $before) 'Source objects were mutated.'
     $collector=Get-Content (Join-Path $root 'SmartInventory/M365Inventory/WorkplaceScope/SmartM365-WorkplaceScope-Inventory.ps1') -Raw

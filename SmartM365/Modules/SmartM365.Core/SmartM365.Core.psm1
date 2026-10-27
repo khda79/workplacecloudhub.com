@@ -6,7 +6,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumV
 . (Join-Path $PSScriptRoot 'SmartM365-ImportExcelHealth.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-InventoryLifecycle.ps1')
 # SmartM365.Core.psm1
-# Version: 1.0.107
+# Version: 1.0.108
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
 function Get-ModuleLocalConfig {
@@ -2187,7 +2187,8 @@ function Write-SmartM365CsvAtomically {
         [string]$Encoding = "UTF8",
         [string]$Delimiter = ",",
         [switch]$NoTypeInformation = $true,
-        [switch]$NoTenantKey
+        [switch]$NoTenantKey,
+        [switch]$LocalSerialization
     )
 
     if (-not $NoTenantKey) {
@@ -2198,7 +2199,7 @@ function Write-SmartM365CsvAtomically {
 
     Assert-SmartM365CsvDataCompleteness -Data $Data -Columns $Columns -TimestampedPath $Path -LatestPath $Path
 
-    Write-SmartM365PreparedCsvAtomically -Data $Data -Path $Path -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTypeInformation:$NoTypeInformation
+    Write-SmartM365PreparedCsvAtomically -Data $Data -Path $Path -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTypeInformation:$NoTypeInformation -LocalSerialization:$LocalSerialization
 }
 
 # Internal serializer: callers must prepare tenant identity and run the complete CSV gate.
@@ -2210,7 +2211,8 @@ function Write-SmartM365PreparedCsvAtomically {
         [string[]]$Columns = @(),
         [string]$Encoding = 'UTF8',
         [string]$Delimiter = ',',
-        [switch]$NoTypeInformation = $true
+        [switch]$NoTypeInformation = $true,
+        [switch]$LocalSerialization
     )
 
     $parent = Split-Path -Path $Path -Parent
@@ -2221,9 +2223,15 @@ function Write-SmartM365PreparedCsvAtomically {
 
     $extension = [System.IO.Path]::GetExtension($Path)
     if ([string]::IsNullOrWhiteSpace($extension)) { $extension = '.tmp' }
-    $tempPath = [IO.Path]::Combine($parent, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + $extension))
+    # Large datasets serialize to local disk; row-by-row writes to a share are much slower than one file copy.
+    $tempFolder = if ($LocalSerialization) { Join-Path ([IO.Path]::GetTempPath()) 'SmartM365-CsvStaging' } else { $parent }
+    if ($LocalSerialization -and -not (Test-Path -LiteralPath $tempFolder)) {
+        New-Item -Path $tempFolder -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+    $tempPath = [IO.Path]::Combine($tempFolder, ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + $extension))
 
     try {
+        $serializationStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $rows = @($Data)
         if ($rows.Count -eq 0 -and $Columns.Count -gt 0) {
             $header = ($Columns | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join $Delimiter
@@ -2247,10 +2255,23 @@ function Write-SmartM365PreparedCsvAtomically {
             if ($NoTypeInformation) { $exportParams.NoTypeInformation = $true }
             $rows | Export-Csv @exportParams -ErrorAction Stop
         }
+        $serializationStopwatch.Stop()
 
-        Start-SmartM365SourcePublication -Path $Path
-        Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
-        Register-SmartM365SourceCsv -Path $Path
+        if ($LocalSerialization) {
+            $localBytes = (Get-Item -LiteralPath $tempPath).Length
+            $workingSetMb = [math]::Round((Get-Process -Id $PID).WorkingSet64 / 1MB, 1)
+            WriteLog -Message ("CSV serialized locally in {0:N1} sec; size={1:N1} MB; working set={2:N1} MB." -f $serializationStopwatch.Elapsed.TotalSeconds, ($localBytes / 1MB), $workingSetMb)
+            $copyStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+            # Same promotion and registration as the direct path, plus a SHA-256 check of the copied bytes.
+            Copy-SmartM365FileAtomically -SourcePath $tempPath -DestinationPath $Path -VerifyHash
+            $copyStopwatch.Stop()
+            WriteLog -Message ("CSV copied and SHA-256 verified in {0:N1} sec: {1}" -f $copyStopwatch.Elapsed.TotalSeconds, $Path)
+        }
+        else {
+            Start-SmartM365SourcePublication -Path $Path
+            Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+            Register-SmartM365SourceCsv -Path $Path
+        }
     }
     finally {
         if (Test-Path -LiteralPath $tempPath) {
@@ -2394,7 +2415,8 @@ function Publish-SmartM365Csv {
         [switch]$NoSharePointUpload,
         [switch]$NoWeeklyHistory,
         [switch]$NoTenantKey,
-        [switch]$SingleSerialization
+        [switch]$SingleSerialization,
+        [switch]$LocalSerialization
     )
 
     $Data = @(Limit-SmartM365RowsForMaxItems -Data $Data)
@@ -2413,10 +2435,10 @@ function Publish-SmartM365Csv {
 
     if ($SingleSerialization) {
         # The identity preparation and full validation above cover these exact rows.
-        Write-SmartM365PreparedCsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter
+        Write-SmartM365PreparedCsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -LocalSerialization:$LocalSerialization
     }
     else {
-        Write-SmartM365CsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
+        Write-SmartM365CsvAtomically -Data $Data -Path $TimestampedPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey -LocalSerialization:$LocalSerialization
     }
     WriteLog -Message ("CSV exported to: {0}" -f $TimestampedPath)
 
@@ -2436,7 +2458,7 @@ function Publish-SmartM365Csv {
             }
         }
         else {
-            Write-SmartM365CsvAtomically -Data $Data -Path $latestWritePath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey
+            Write-SmartM365CsvAtomically -Data $Data -Path $latestWritePath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoTenantKey:$NoTenantKey -LocalSerialization:$LocalSerialization
         }
         if ($latestStaged) { WriteLog -Message ("CSV latest copy staged for {0}: {1}" -f $LatestPath, $latestWritePath) }
         else { WriteLog -Message ("CSV latest copy written to: {0}" -f $LatestPath) }
@@ -2522,7 +2544,8 @@ function Export-SmartM365Csv {
         [switch]$NoSharePointUpload,
         [switch]$NoWeeklyHistory,
         [switch]$NoTenantKey,
-        [switch]$SingleSerialization
+        [switch]$SingleSerialization,
+        [switch]$LocalSerialization
     )
 
     if ($PSCmdlet.ParameterSetName -eq 'ByBaseName') {
@@ -2531,7 +2554,7 @@ function Export-SmartM365Csv {
         $LatestPath = Join-Path $GlobalPath "$BaseFileName.csv"
     }
 
-    Publish-SmartM365Csv -Data $Data -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload:$NoSharePointUpload -NoWeeklyHistory:$NoWeeklyHistory -NoTenantKey:$NoTenantKey -SingleSerialization:$SingleSerialization
+    Publish-SmartM365Csv -Data $Data -TimestampedPath $TimestampedPath -LatestPath $LatestPath -Columns $Columns -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload:$NoSharePointUpload -NoWeeklyHistory:$NoWeeklyHistory -NoTenantKey:$NoTenantKey -SingleSerialization:$SingleSerialization -LocalSerialization:$LocalSerialization
 }
 
 function Export-SmartM365CsvFromConvert {

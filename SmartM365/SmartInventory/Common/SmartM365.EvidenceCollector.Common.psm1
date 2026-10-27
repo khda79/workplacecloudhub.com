@@ -308,12 +308,15 @@ function Invoke-SmartM365EvidenceExportReport {
 }
 
 function Export-SmartM365EvidenceDataset {
-    param([Parameter(Mandatory)]$Runtime,[Parameter(Mandatory)][string]$BaseFileName,[AllowEmptyCollection()][object[]]$Rows,[Parameter(Mandatory)][string[]]$Columns,[switch]$NoWeeklyHistory,[switch]$SingleSerialization)
+    param([Parameter(Mandatory)]$Runtime,[Parameter(Mandatory)][string]$BaseFileName,[AllowEmptyCollection()][object[]]$Rows,[Parameter(Mandatory)][string[]]$Columns,[switch]$NoWeeklyHistory,[switch]$SingleSerialization,[switch]$NoTenantKey,[switch]$LocalSerialization)
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $timestamped = Join-Path $Runtime.OutputPath "${BaseFileName}_${stamp}.csv"
     $latest = Join-Path $Runtime.LatestCsvFolderPath "${BaseFileName}.csv"
     $options = @{}
     if ($SingleSerialization) { $options.SingleSerialization = $true }
+    # Rows that already carry the tenant identity columns skip the generic enrichment.
+    if ($NoTenantKey) { $options.NoTenantKey = $true }
+    if ($LocalSerialization) { $options.LocalSerialization = $true }
     return Export-SmartM365Csv -Data $Rows -TimestampedPath $timestamped -LatestPath $latest -Columns $Columns -NoWeeklyHistory:$NoWeeklyHistory @options
 }
 

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune managed apps, assignments, and reported installation states.
 .VERSION
-1.2.4
+1.3.0
 #>
 [CmdletBinding()]
 param(
@@ -66,6 +66,8 @@ function Get-IntuneManagedAppInstallStates {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Apps,
         [Parameter(Mandatory)][string]$RunId,
         [Parameter(Mandatory)][string]$CollectedAtUtc,
+        # Tenant identity columns, written first so the large dataset skips generic enrichment.
+        [Parameter(Mandatory)]$Identity,
         [int]$ExportTimeoutSeconds=1200,
         [int]$MaxItems=0,
         [ValidateRange(0,60)][int]$PauseSeconds=3,
@@ -76,6 +78,11 @@ function Get-IntuneManagedAppInstallStates {
     $unknownStateRows = 0
     $unknownStateOverflow = 0
     $reportColumns = @('ApplicationId','DeviceId','UserPrincipalName','AppVersion','Platform','InstallState','InstallStateDetail','ErrorCode','LastModifiedDateTime','AppInstallState','AppInstallStateDetails','HexErrorCode')
+    $tenantKey = [string]$Identity.TenantKey; $organizationKey = [string]$Identity.OrganizationKey
+    $environmentKey = [string]$Identity.EnvironmentKey; $tenantId = [string]$Identity.TenantId
+    foreach ($requiredIdentity in @($tenantKey,$organizationKey,$environmentKey)) {
+        if ([string]::IsNullOrWhiteSpace($requiredIdentity)) { throw 'TenantKey, OrganizationKey and EnvironmentKey are required for managed-app device states.' }
+    }
     for ($index=0; $index -lt $Apps.Count; $index++) {
         $appId = [string]$Apps[$index].ApplicationId
         $parsedId = [guid]::Empty
@@ -115,6 +122,7 @@ function Get-IntuneManagedAppInstallStates {
             $errorCode = [string](Get-SmartM365EvidenceProperty $row @('ErrorCode'))
             if ([string]::IsNullOrWhiteSpace($errorCode)) { $errorCode = [string](Get-SmartM365EvidenceProperty $row @('HexErrorCode')) }
             $states.Add([pscustomobject][ordered]@{
+                TenantKey=$tenantKey; OrganizationKey=$organizationKey; EnvironmentKey=$environmentKey; TenantId=$tenantId
                 ApplicationId=$rowAppId; DeviceId=[string](Get-SmartM365EvidenceProperty $row @('DeviceId'))
                 UserPrincipalName=[string](Get-SmartM365EvidenceProperty $row @('UserPrincipalName'))
                 AppVersion=[string](Get-SmartM365EvidenceProperty $row @('AppVersion'))
@@ -142,8 +150,8 @@ try {
     $smartRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.93' -Global -ErrorAction Stop
-    Import-Module (Join-Path $smartRoot 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
+    Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.108' -Global -ErrorAction Stop
+    Import-Module (Join-Path $smartRoot 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.15' -Force
     $script:Runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effective `
         -DefaultOutputRelativePath 'Intune/WorkplaceScope/ManagedApps' -OutputPath $OutputPath `
         -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly `
@@ -203,7 +211,9 @@ try {
     $assignedIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($app in $assignedApps) { [void]$assignedIds.Add([string]$app.ApplicationId) }
     Write-SmartM365EvidenceLog "Managed app catalog collected: apps=$($apps.Count); assignments=$($assignments.Count); assignedApps=$($assignedApps.Count); unassignedApps=$($apps.Count-$assignedApps.Count). Starting installation reports for assigned apps."
-    $deviceStates = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId $script:Runtime.RunId -CollectedAtUtc $script:Runtime.CollectedAtUtc -ExportTimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
+    # Core resolves and checks the tenant identity once, with the same rules as its CSV enrichment.
+    $tenantIdentity = Add-SmartM365TenantKey -InputObject ([pscustomobject]@{})
+    $deviceStates = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId $script:Runtime.RunId -CollectedAtUtc $script:Runtime.CollectedAtUtc -Identity $tenantIdentity -ExportTimeoutSeconds $ExportTimeoutSeconds -MaxItems $MaxItems)
     $statusByApp = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($app in $apps) {
         $statusByApp[$app.ApplicationId] = [ordered]@{ ReportedInstalledRows=0; ReportedFailureRows=0; ReportedNotInstalledRows=0; PendingRows=0; NotApplicableRows=0; UnknownRows=0; ObservedRows=0; InCollectedCatalog=$true }
@@ -256,13 +266,14 @@ try {
         @{Name='Intune_ManagedApps';Rows=$apps.ToArray();Columns=@('ApplicationId','DisplayName','Publisher','AppType','DisplayVersion','CreatedDateTime','LastModifiedDateTime','RunId','CollectedAtUtc')},
         @{Name='Intune_ManagedAppAssignments';Rows=$assignments.ToArray();Columns=@('ApplicationId','AssignmentId','Intent','TargetType','GroupId','AssignmentFilterId','AssignmentFilterType','RunId','CollectedAtUtc')},
         @{Name='Intune_ManagedAppInstallSummary';Rows=$aggregate;Columns=@('ApplicationId','InCollectedCatalog','StatusSource','ObservedRows','ReportedInstalledRows','ReportedFailureRows','ReportedNotInstalledRows','PendingRows','NotApplicableRows','UnknownRows','RunId','CollectedAtUtc')},
-        @{Name='Intune_ManagedAppDeviceStates';Rows=$deviceStates;Columns=@('ApplicationId','DeviceId','UserPrincipalName','AppVersion','Platform','InstallState','ReportedDeploymentState','InstallStateDetail','ErrorCode','LastModifiedDateTime','RunId','CollectedAtUtc')}
+        @{Name='Intune_ManagedAppDeviceStates';Rows=$deviceStates;Options=@{NoTenantKey=$true;LocalSerialization=$true};Columns=@('TenantKey','OrganizationKey','EnvironmentKey','TenantId','ApplicationId','DeviceId','UserPrincipalName','AppVersion','Platform','InstallState','ReportedDeploymentState','InstallStateDetail','ErrorCode','LastModifiedDateTime','RunId','CollectedAtUtc')}
     )
     foreach ($export in $exports) { Assert-SmartM365CsvDataCompleteness -Data $export.Rows -BaseFileName $export.Name -Columns $export.Columns | Out-Null }
     $deviceStateCount = $deviceStates.Count
     $deviceStates = $null
     foreach ($export in $exports) {
-        Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns -SingleSerialization | Out-Null
+        $options = if ($export.ContainsKey('Options')) { $export.Options } else { @{} }
+        Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns -SingleSerialization @options | Out-Null
         $export.Rows = $null
     }
     Write-SmartM365EvidenceLog "Managed apps collected: apps=$($apps.Count); assignments=$($assignments.Count); assignedApps=$($assignedApps.Count); unassignedApps=$($apps.Count-$assignedApps.Count); statusSummary=$($aggregate.Count); deviceStateRows=$deviceStateCount. Summary counts are report rows, not unique devices." -Level SUCCESS

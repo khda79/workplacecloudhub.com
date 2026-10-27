@@ -3,7 +3,7 @@
 .SYNOPSIS
 Verifies managed-app report filters and assigned-app status collection without Graph access.
 .VERSION
-1.1.1
+1.2.0
 #>
 [CmdletBinding()]
 param()
@@ -60,6 +60,7 @@ $collectorModule = New-Module -ScriptBlock ([scriptblock]::Create($definitions -
 & $collectorModule {
     $script:Warnings = [Collections.Generic.List[string]]::new()
     function script:Write-SmartM365EvidenceLog { param($Message,$Level) if ($Level -eq 'WARNING') { $script:Warnings.Add([string]$Message) } }
+    $identity = [pscustomobject]@{ TenantKey='contoso-test'; OrganizationKey='contoso'; EnvironmentKey='test'; TenantId='' }
     $ids = @(
         '11111111-1111-1111-1111-111111111111',
         '22222222-2222-2222-2222-222222222222',
@@ -91,10 +92,19 @@ $collectorModule = New-Module -ScriptBlock ([scriptblock]::Create($definitions -
         $id = $Filter -replace "^\(ApplicationId eq '([0-9a-f-]+)'\)$",'$1'
         return [pscustomobject]@{ ApplicationId=$id; DeviceId='device-1'; InstallState='installed' }
     }
-    $productionRows = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0)
+    $productionRows = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -Identity $identity -PauseSeconds 0)
     if ($productionRows.Count -ne 2 -or $script:ProductionCalls.Count -ne 2 -or
         @($script:ProductionCalls | Where-Object { $_.ReportName -ne 'DeviceInstallStatusByApp' -or $_.ApiVersion -ne 'beta' -or @($_.Select).Count -lt 9 -or @($_.Select) -notcontains 'ApplicationId' -or @($_.Select) -notcontains 'InstallState' }).Count -gt 0) {
         throw 'Production report path did not query every assigned app with the required report and API version.'
+    }
+    $expectedColumns = 'TenantKey,OrganizationKey,EnvironmentKey,TenantId,ApplicationId,DeviceId,UserPrincipalName,AppVersion,Platform,InstallState,ReportedDeploymentState,InstallStateDetail,ErrorCode,LastModifiedDateTime,RunId,CollectedAtUtc'
+    if (($productionRows[0].PSObject.Properties.Name -join ',') -cne $expectedColumns -or $productionRows[0].TenantKey -cne 'contoso-test' -or $productionRows[0].TenantId -cne '') {
+        throw 'Device state rows must carry the tenant identity first, in the published column order.'
+    }
+    foreach ($missing in @('TenantKey','OrganizationKey','EnvironmentKey')) {
+        $partial = $identity.PSObject.Copy(); $partial.$missing = ' '
+        try { Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -Identity $partial -PauseSeconds 0 | Out-Null; throw 'Expected identity failure.' }
+        catch { if ($_.Exception.Message -notlike '*are required for managed-app device states*') { throw } }
     }
     for ($index=0; $index -lt $assignedApps.Count; $index++) {
         if ($script:ProductionCalls[$index].Filter -cne "(ApplicationId eq '$($assignedApps[$index].ApplicationId)')") { throw 'Production report filter does not match the assigned app.' }
@@ -107,26 +117,32 @@ $collectorModule = New-Module -ScriptBlock ([scriptblock]::Create($definitions -
         if ($appId -eq $ids[0]) { return [pscustomobject]@{ ApplicationId=$appId; DeviceId='device-1'; InstallState='3'; AppInstallState='Not installed' } }
         if ($appId -eq $ids[2]) { return [pscustomobject]@{ ApplicationId=$appId; DeviceId='device-3'; AppInstallState='failed'; HexErrorCode='0x1' } }
     }
-    $rows = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $exporter)
+    $rows = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -Identity $identity -PauseSeconds 0 -ExportReport $exporter)
     if ($script:Seen.Count -ne 2 -or (@($script:Seen) -join ',') -cne (@($ids[0],$ids[2]) -join ',')) { throw 'An assigned app was skipped or an unassigned app was queried.' }
     if ($rows.Count -ne 2 -or $rows[0].ReportedDeploymentState -ne 'ReportedNotInstalled' -or $rows[0].InstallState -cne '3' -or $rows[1].ReportedDeploymentState -ne 'ReportedFailure' -or $rows[1].ErrorCode -ne '0x1' -or $script:Warnings.Count -ne 0) {
         throw 'Per-app device status mapping is wrong.'
     }
     $unknownExporter = { param($appId,$filter) [pscustomobject]@{ ApplicationId=$appId; InstallState='99'; AppInstallState='S99' } }
-    $unknownRows = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $unknownExporter)
+    $unknownRows = @(Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -Identity $identity -PauseSeconds 0 -ExportReport $unknownExporter)
     if ($unknownRows.Count -ne 2 -or @($unknownRows | Where-Object { $_.ReportedDeploymentState -ne 'Unknown' }).Count -gt 0 -or
         $script:Warnings.Count -ne 1 -or $script:Warnings[0] -notlike '*rows=2*' -or $script:Warnings[0] -notlike "*AppInstallState='S99', InstallState='99': 2*") {
         throw 'Unmapped source states were not kept Unknown and logged without row identities.'
     }
     $badExporter = { param($appId,$filter) [pscustomobject]@{ ApplicationId='99999999-9999-9999-9999-999999999999'; InstallState='installed' } }
-    try { Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $badExporter | Out-Null; throw 'Expected app identity failure.' }
+    try { Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -Identity $identity -PauseSeconds 0 -ExportReport $badExporter | Out-Null; throw 'Expected app identity failure.' }
     catch { if ($_.Exception.Message -notlike '*mismatched ApplicationId*') { throw } }
     $failedExporter = { param($appId,$filter) if ($appId -eq $ids[2]) { throw 'Synthetic report failure' } }
-    try { Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -PauseSeconds 0 -ExportReport $failedExporter | Out-Null; throw 'Expected report failure.' }
+    try { Get-IntuneManagedAppInstallStates -Apps $assignedApps -RunId 'run-1' -CollectedAtUtc '2026-10-13T00:00:00Z' -Identity $identity -PauseSeconds 0 -ExportReport $failedExporter | Out-Null; throw 'Expected report failure.' }
     catch { if ($_.Exception.Message -ne 'Synthetic report failure') { throw } }
 }
 
-Write-Output 'PASS: assigned app selection, status source, export filter body, state precedence, unknown diagnostics, identity mismatch, and report failure (offline).'
+$collectorText = Get-Content $collectorPath -Raw
+if ($collectorText -notmatch "Name='Intune_ManagedAppDeviceStates';Rows=\`$deviceStates;Options=@\{NoTenantKey=\`$true;LocalSerialization=\`$true\};Columns=@\('TenantKey','OrganizationKey','EnvironmentKey','TenantId','ApplicationId'" -or
+    $collectorText -notmatch "SmartM365\.Core\.psd1'\) -MinimumVersion '1\.0\.108'" -or $collectorText -notmatch "EvidenceCollector\.Common\.psd1'\) -MinimumVersion '1\.0\.15'") {
+    throw 'Device state publication must use prepared identity columns, local serialization and the matching module versions.'
+}
+
+Write-Output 'PASS: assigned app selection, status source, export filter body, state precedence, tenant identity columns, unknown diagnostics, identity mismatch, and report failure (offline).'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
