@@ -1,3 +1,4 @@
+# Version 1.1.0
 # Offline migration projection. Inputs are caller-owned, tenant-qualified snapshots.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -73,6 +74,7 @@ function New-WindowsMigrationProjection {
         $direct = @(Candidates $iid (Key (Value $r 'IntuneDeviceId'))); $names = @(Candidates $iname $nm)
         $reason = ''
         if (-not $gid -or @(Candidates $guids $gid).Count -ne 1) { $reason = 'Missing or duplicate AD GUID' }
+        elseif (@(@($direct)+@($names) | Where-Object {(Value $_ 'Identity Status') -eq 'Identity conflict'}).Count){$reason='Identity conflict; reconciliation indeterminate'}
         elseif ($direct.Count -eq 1 -or $names.Count -eq 1) {
             $m = if ($direct.Count -eq 1) { $direct[0] } else { $names[0] }
             $matched++
@@ -93,9 +95,10 @@ function New-WindowsMigrationProjection {
         $hardware = $eligibility -eq 'Not capable'; $unknown = $eligibility -notin 'Capable','Not capable'
         $legacy = $null -ne $build -and $build -lt 19045
         $risk = if ($hardware) { 'Hardware incompatible' } elseif ($eligibility -eq 'Already upgraded') { 'Conflicting OS evidence' } elseif ($unknown) { 'Eligibility unknown' } elseif ($null -ne $free -and $free -lt 20) { 'Disk remediation required' } elseif ($legacy) { 'Legacy build - update path review' } elseif ((Value $r 'Windows Update State') -eq 'Error') { 'Deployment error' } else { 'Autopatch registration unknown' }
-        $da = @(Candidates $aid $id); $d = if ($da.Count -eq 1) { $da[0] } else { $null }
+        $conflict=(Value (@(Candidates $iid $id)[0]) 'Identity Status') -eq 'Identity conflict'
+        $da = @(if(-not $conflict){Candidates $aid $id}); $d = if ($da.Count -eq 1) { $da[0] } else { $null }
         $qa = @(Candidates $rid $id); $na = @(Candidates $rn $nm)
-        $re = if ($qa.Count -eq 1) { $qa[0] } elseif ($qa.Count -eq 0 -and $na.Count -eq 1) { $na[0] } else { $null }
+        $re = if ($qa.Count -eq 1) { $qa[0] } elseif (-not $conflict -and $qa.Count -eq 0 -and $na.Count -eq 1) { $na[0] } else { $null }
         $out = [ordered]@{
             'Device Source ID'=$id; 'Device Name'=(Value $r 'Device Name'); 'Country'=(Value $r 'Country' 'Unknown'); 'Primary User UPN'=(Value $r 'Primary User UPN')
             'OS Version'=(Value $r 'Operating System Version'); 'Windows Release'=(Value $r 'Windows Release'); 'Intune State'=(Value $r 'Management State')
@@ -125,6 +128,12 @@ function New-WindowsMigrationProjection {
             $out[$prefix+' Blocking Reason']=Value $p 'BlockingReason' $missing
             $out[$prefix+' Alert']=Value $p 'LatestAlertMessage_loc' (Value $p 'LatestAlertMessage' $missing)
             $out[$prefix+' Observation Date']=Value $p 'ExportDateTime' $missing
+        }
+        if($conflict){
+            $out['Country']='Unknown';$out['Country Basis']='Identity conflict; attribution indeterminate'
+            $out['AD Domain']='Unknown';$out['AD Domain Match Status']='Identity conflict; indeterminate'
+            $out['Migration Status']='Identity conflict';$out['Next Action']='Resolve independent Intune identity observations before cross-directory decisions'
+            if($qa.Count -eq 0){$out['Eligibility Match Status']='Identity conflict; name matching excluded'}
         }
         $windows.Add([pscustomobject]$out)
     }
@@ -163,8 +172,8 @@ Export-ModuleMember -Function New-WindowsMigrationProjection
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3zO6EX7goADnd
-# UBqNcj8UvNcI6BthriMVZF/DMBCw2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBa3/HfzQySOyER
+# Y+kC71N2vByjaOrT0GV45TPOFsGCB6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -297,31 +306,31 @@ Export-ModuleMember -Function New-WindowsMigrationProjection
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAcaiWy1FOCbN7s17ZCiIS0m/USFAWyASVRX9lhxv+slMA0GCSqG
-# SIb3DQEBAQUABIIBgE6QreZaxEeL6P4rr0sxPIUMbzkV1aXMP4VED1re1Y1o1Oos
-# f0ZrkY0Yp/JMuvrD5iguLD6WaH6QLcAvve67xaUkHe1kSH0POCdBvxdmZiL/5UyJ
-# Mr+sEyClbYB6Bnnx2cG55s69CD6hnD60BA3Kw8ZPRezhXsrtD1zD6p6V33chRMyh
-# 1G333wBl4dN+PmR+70NELsiRokxprdwJr99cy5SZt/C3lK+QB21ir5pv7TnWloig
-# dJCg926dvYfCx43OtVniiIXT03C9wEspXOq7BghFNQH6M1AGzreU/EZJvhLcua+o
-# whnkunJeUR3sLZi+RX3kA4RqzNiwzBm8D9pwNkup3QsrEq3bFYCC8WmctKyAHUh2
-# 18hCbY12XE5IUwJrDWse4OVBchNFUVIuoU+Oh2su3IbbKgtbaecS8uQC9tMGh85W
-# EqO5KudBaIi70DRyjVnLE0XhJ54ajWqXElJq7vv0fCnqqlGh08n0UCL+r9/BOeHd
-# JR+80A3gVmelbE4tm6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIC2FRuXJ4O13xBcZ/19h5EFeorSfHMFYhOi/qpY/fk99MA0GCSqG
+# SIb3DQEBAQUABIIBgIV5WfBP7Xv0HCYlrNjYcXRxd0A9xvYpqyOOIogUQ4oW7j6O
+# 1wcdp4YgXglH5GBTb4+Ww2lt5CkdkeJ6JNwf8iQFFz0FLb9p31pjM82Lm1JyuNEc
+# CqkIaVMEYVibjRpbx8nV1FznyiKX07ZLjoU8G9mywwydqsuyWJUy/XYHICnm6uev
+# kO6Cln4L+lDXILYKwx8ce/1TSFE1qEVgr/k3caAGeU2s5eQFJ6MESu/LNYc2iDvW
+# U+tldUbrGN/w/NwjoZAoFBc8yTO71c28YZD01Iru/yHKatWyNwpvFRRa37zIRs2w
+# lWn3G2sjSitaj2+H0YMl8kCtLeO9QqdTQB6GqefEIT/rCkw7BM0tGZH5bM1tzWAO
+# Rk11xM1i2ns4Ju9PwjYEZxVvN7A8owb/krMmY2Zm4NfWYW8oz/eagxzLT57exlOP
+# ZG1XXhyPwW2v4TQxL8R1yz4vYGBwe14O6Pg/ttp1w1vxBYXYIREAzY6luOrY3aXK
+# gEvGgGegNMdmG5IAEKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
-# MzFaMC8GCSqGSIb3DQEJBDEiBCDLRO5HCf9ihg/3pXRlKN173pAd3cQCLFD4yyJv
-# pMS0TDANBgkqhkiG9w0BAQEFAASCAgASH7ekvhKEx4GRkBbwX6RW4CKMFOUDiRB/
-# JNxQjExjjilypV54AxmLA+DoH3ykjkW1FZDunZwZMnxkG3qohpe5gqgVZ8PfiybG
-# 9xBXFb3pkRjEk9KcDJmDTTBFMhVNRA+QCSQRJy9bs1ytx8ISfSsosWqk2GxDoFXw
-# lsmUOE0lIoBTolJkJB+u2cN+OmttyVqGe9pGWPSzRUJFbW1HANDPkHiEUlJeSdQU
-# 3Luw7mOIpywrHlAeZEXwq0k71iMpWiTaNwjtQtU545DblxgIwbZ2HU5X7cu3MOl5
-# yXUnkJGroitzxwjiUNTilXlrCDqo38yTsFw5Kv3nQocPKfUMjEMStOv6eBbOobjg
-# /SS0pNiXQ1mgcsolzzyYmAIEIUh684yy9mAU6yavI2KKt+MZ/ivGXW38LGEvpVtb
-# 7Hhwqbx1w6vgD3uhPoKd62i6T72X5v4KdZyYBxp0IrFchmwEwQRwOS1OTkQU+25k
-# ek//zmVa8t8U8Dij2ZJNkQJOcgc52HPNStdOxYVcB3CJYqovNHrxYOneCOiQaGjT
-# 5qLXsvComGtQp5dw4H0toySsIB8vPHSipq7ak3xv4ANvDNfd/n6gbflFfnrBBRG3
-# 7N+OM2w124fcW8ABtrDtvVAY8Ecgxdb/elNhHN996Wzw3hpJAi2pWWwI9QMOThX6
-# RCVY90qSww==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTVaMC8GCSqGSIb3DQEJBDEiBCB6UIJX/Qfudt1ArRy8Z6HR/NTL1ToG86TNwaCM
+# IttBSzANBgkqhkiG9w0BAQEFAASCAgBw8at1JCnldgHQwFy4qElRb7sQNoOkOCRs
+# 5aA/WAgwmwqzKbuq4yMI6/w1o3A4c1OyRMXyJ8Dq4V9Z6SfswnzJGznTvs4luzXP
+# uGk0ph0YO+cRtCZuaTK9SDyR7SknQk+Iz0O/nyjEZzA5ZLh4d1uErgNCyuFBZ54l
+# JVFHSGymZ6Hwf5hDlWyQOUTlrCKIWmt8HVJLM3LxUTV8vUOVHTU5ctygdHTJF6oc
+# 4yJJXkUfPHoK78ra2kiC5SJKTOjcGiUUOJ9fXW5aV5sKw+Xq0ROB6P3bJ1cLcdB2
+# gUeZHrEvxUuvJjyqP9/jmQwE1FbCA/9BXzKwl7hfsWGrwydJ+tFLqYWSnR/HnOhL
+# +/r/be5o+Nqk8815EWK/KMKhj2IB9EDVSCd3mkAY0devSo/V7EKgmXhPxz7Gg5X6
+# Nn7Y0LF6kU6GKs+UzZOCFYNBjKBrZ8aNtgsRKIyfLxGPw2+2jbLX1R/XsJTCf+dp
+# Qi6gvVucIGCTPXom2ljXE2ugkwsmmbybQD14EvHJn1aQY099o11ObxpjwzRq4TK8
+# qmiQMneVmEmKAJNsuhhvgUTm/PQ04S35x9KU/zbE7SvXDnEq+KsdjSnnEIozX/5h
+# Ns7U6iobfqtOtAFoxhzluEvItjtBFjvNLSfglvEKHjZYqqmLm7mJ/yoW3meu+uzw
+# /S0DPQUM5w==
 # SIG # End signature block

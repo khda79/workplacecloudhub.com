@@ -1,3 +1,4 @@
+# Version 1.1.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DataRoot,
@@ -42,7 +43,9 @@ function Read-StrictCsv([string]$Path,[string[]]$Required,[string[]]$Optional=@(
         return ,$rows.ToArray()
     } finally { $parser.Dispose() }
 }
-$inventory=Read-StrictCsv (Join-Path $last 'Intune_Devices_Inventory.csv') @('TenantKey','Device ID','Device name','OS version')
+$inventory=Read-StrictCsv (Join-Path $last 'Intune_Devices_Inventory.csv') @('TenantKey','Device ID','Device name','OS version') @('Identity Status','Identity RunId','Identity Contract')
+Import-Module (Join-Path $PSScriptRoot 'DeviceIdentityEvidence.psm1') -Force -ErrorAction Stop
+$identityQualification=Get-DeviceIdentityQualification -LastRoot $last -IntuneRows $inventory
 $prepared=Read-StrictCsv $PreparedInventoryPath @('Device Source ID','Device Name','Operating System Version','Windows Generation','Windows 11 Upgrade Eligibility','Country','Free Disk Space (GB)','Windows Update State','Windows Update Action Code','Last Sync DateTime') @('Primary User UPN','Windows Release','Management State','Windows 11 Blocking Reasons')
 $ad=Read-StrictCsv (Join-Path $last 'AD_Computers_AllDomains.csv') @('TenantKey','ObjectGUID','Name','Enabled','OperatingSystemShortName','DomainName','IntuneDeviceId','operatingSystemVersion') @('SamAccountName','OperatingSystemDisplayName')
 $readiness=Read-StrictCsv (Join-Path $last 'Intune_Devices_UpgradeEligibility.csv') @('TenantKey','GraphId','DeviceName','NormalizedDeviceName','OSVersion','ExportDateTime')
@@ -82,8 +85,8 @@ $result.Audit | ConvertTo-Json -Depth 6
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZTiL4eAhqMlkS
-# dgUlnuoJWzrFy8YgUk2Yrtu8Oej406CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIQzFLe4+y4CzS
+# RGgVR3jrUh0IM9VMCRWDFlmJmAsW8qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -216,31 +219,31 @@ $result.Audit | ConvertTo-Json -Depth 6
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMhFInH6isTTOkDl5ErBUfOsI4WzE3YN7Rzfd3LmHEuiMA0GCSqG
-# SIb3DQEBAQUABIIBgKwZwWxAVh4HnxOg5N0iT/9BwcsrqYrEYKn9s+uPcv8xUiFJ
-# bmIwsZQmD6ES0aCxSxBvzAhkn8wLgtsI+5GnngSTAUyF08jE2h/qbJkUTZaGDE2k
-# kxVJh+PxLAzpCxEJnj37ITIsR/IZSMYPVu10PSjSf6lKzkbeaa5EkWC0RIoIoCTj
-# 7n9fzDr3KaCkiyqLE/qrKKy/Cy0ziT6Mf2Y4iMSQY/rtYyf7Hzgn36R0geS9b2Z/
-# EB68N1CsWJp9JqtUXOAk4PKBTbKi0cTU95s8UdRo3frCzqI94E8rprP3oM0PABmE
-# KQJPjkgr8LSwrF95Ra3GkyXkqo/aZr+ZLPkWRXj4AXhoA2fesTLxIy2tYaTZx+Jp
-# pG67KJwqq3egZF6ahYH0lbi7pYi+YHkJMqlg4sJCh1gRwbw51DiOT810VdCm5uB9
-# FKAXPRp9VxiDNugdNgS1JoL+NQCDUNMexlbKA1CyfSFzCLXE0RDBBlnKN/owhrob
-# SzV4BCwtTnHWn6VF8qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIRpBdGFiGGA3F3pCbeFnSd9VfOt3tjxbGCnZKZvInJZMA0GCSqG
+# SIb3DQEBAQUABIIBgDTL6n0606dtJlJ83+Brz/8Ggp29Y3X3WwVg7JdaCY2l5w5a
+# bqtlziWpI4CtFfJ8Hejp057jDYM4wzEBQ+pRQPVUSG4VpXwyvY783fCXjqCcuo9k
+# P6kqevMi11Wu7/qmUS/1utO18SWsYOc3vDuMm3eOmonxLbXKsyRv4nJh6R471Qet
+# 8eXbD67YdCZ7jH9Pq+iaVp08G8/g8ntrY2PAE29YX7KKGTF00n0iqKu63FRUdBsn
+# LafXVY3uK4Uy41D9AL29RzElAWg8+y15sCd55mU9Sm+jG5i4BnT2jW9AjZ5UeNKZ
+# ulsPwvATzdYktncyiOg5E7/Ql6owhdBIq17mIvLeEnZrhDUhhf4Duxyp/0zd3f2X
+# nhiAiZvVG0mePbOyHIpPImdOAbBjZvg4uuZRwZULoZiBjSQnNU9Kz6hX7tGHt2xF
+# dBCe5qBnA8ehoRSlQYj2Q0FPWxdrSMSjGiJgcT3OcDbQpS3XMgzjaRLEGg3tiBwz
+# zuBjeAyNdAX8GfWFM6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
-# MzBaMC8GCSqGSIb3DQEJBDEiBCB4jJnzwIBc1/ag7M3rBLWrd05YdAPFK4bMWGVS
-# 71/RGDANBgkqhkiG9w0BAQEFAASCAgArTi28Nhuj3og7sZnbB7Gt7khyie2yTxcq
-# OJLRcLiCX2lE5DP3xR2UzjajcVxVLENPD/WEmZWi8sNBXEr83JwD35Kk1ONPzLIg
-# Uex2i0v87JaHy0IzVsdjvGdQTOhH2pftiUaLcmEebDJ7mtrryGnmw6K+Su4rD3OZ
-# SER4IaNSIEud9ztUvmZfLO8MQ4gGcXW2paFspy8q5evtJ0MJnze7Y2MSPbTqLnLY
-# 6KSv2WcHk8q8Rha5u/LVugNRMa6FDlgmOYS2RfCObCDqDr9Vhx3OGvyMJjjZjMrq
-# wq9ARMAtN39NUO9Nmx0CDiLhRn4PIbyOIHYML4pLREpf3T+jdJrDHisJ7lzwOdry
-# ADCnUObY8WoTpR6uBkBRrgiP6hm5bDLH2bxYe8CYiL9FIUJyW0pslE2a2W/Lpi6v
-# cDW8ntcD8JU5Sun1/dpjmdvnJLyBsbReAXwrgrOHUPwsdJtSnAs1al9r5Tmwg/SS
-# gKGABKSinL/uMKHkqE+ELybBhN2EC8P0MTvcc2ZDg7fgJWbA4HbJoSWtWZST4U0r
-# I54aPjUuhx4JrbBwc1zFppuilr2Ei91tBrRkSzIY2Dn2Ss0wgwhU5RY4uAr066e9
-# Wxf2HWs8N91oDlt6JshdLF1lhDRBEZwSAw5AQELmhyuaGtRaMj538JWv8iSav3sB
-# M/ZAYmr1bA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTRaMC8GCSqGSIb3DQEJBDEiBCBAT13UBMWyvugDJpVF+i6WModITheLLwNzm550
+# Y4Pt2TANBgkqhkiG9w0BAQEFAASCAgCr26Nc7fGLYEbDhQuB3MjQoGsGtBX0RUNS
+# xHwSs26aLKIfv6cxhjyfYN1exA8w+uow2hi8qFzrU+EqEnI+ufyuxVM6Ljk4uCyj
+# PlpGNlPDv04uh/wLdxaNbIUoAGLOZ3BYRu4g7VKXwWQT2EirNIZwj4d+EMJDnyTJ
+# pCEyNznVVaB+khJtjktskvPQh1O/KnUsyVTjkumf0y0koPLeDNmEHzeGzfG6zUpz
+# 9g8AZRORaADYjdNg5QYy+TNamr1oj5T2NoklkszNOHTDjflK7aiedfxeVK6N33+W
+# f98RDed0eYq0NzOFZd3r74dRqQluEebU4UYAbhyBV+DBhKoamQ0wAZswB+tYuH4d
+# blYeRsZRBw9c8D1SjSd/2cjiATITP1vt6AOCXxSoBV/eDjqmbxhJWBb46lNlQxtj
+# TibrD4GvoQVQs8KOb5/MxvhFWVLXrS4W2dWIDIInXAAuekMoluXDyS8zqDTWQ/i9
+# AVzYQZ2VTtrvxQDFBzgJc1Lhc+HiIhweRJ7p4pAmUz8Eh56w6pOBVrBDeIPf3WTe
+# HeHzCXUDvGMIX4lxpyWUoNhZrTOEZq2NNMq0GYAfqqirgecDZjicAVG+SKssOmOC
+# Hvy/fe7mJOEwBxU51+Xr7sM0uKaDFR+cJLczNHaUlxOZMmutOXGV2ZmP+inag2uU
+# zHxC9VRJCQ==
 # SIG # End signature block

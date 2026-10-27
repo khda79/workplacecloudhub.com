@@ -1,4 +1,5 @@
 #Requires -Version 7.0
+# Version 1.1.0
 [CmdletBinding()]
 param()
 # Synthetic source-selection test only; no preparation, collectors or cloud calls.
@@ -24,6 +25,7 @@ try {
     $registry=Get-Content (Join-Path $PSScriptRoot '../../SmartM365/Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt') -Raw | ConvertFrom-Json
     foreach($name in @($base.currentFiles)+@($native.sources.file)+@($artifacts.currentFiles)){Put "DATA-LAST/$name"}
     foreach($producer in $registry.Producers){Put "DATA-LAST/$($producer.Receipt)";Put ('DATA-LAST/'+$producer.Receipt.Replace('.current.json.txt','.run.json.txt'))}
+    [IO.File]::WriteAllText((Join-Path $root 'DATA-LAST/SmartInventory_SmartM365-Devices-Inventory.current.json.txt'),'{}')
     foreach($name in @($base.mappingFiles)+@($base.dailyFiles)){Put $name}
     foreach($spec in $base.history){Put "$($spec.root)/WeeklyHistory/2026-W41/$($spec.file)"}
     foreach($spec in $base.archivedHistory){
@@ -43,6 +45,14 @@ try {
     $base | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $contract -Encoding utf8NoBOM
     $plan=@(Get-PreparedSourcePlan -DataRoot $root -SourceContractPath $contract -MetadataOnly)
     Check ($plan.Count -gt 90) 'Composed source plan unexpectedly small'
+    $deviceReceipt=Join-Path $root 'DATA-LAST/SmartInventory_SmartM365-Devices-Inventory.current.json.txt'
+    [IO.File]::WriteAllText($deviceReceipt,'{"RequiredFiles":["Intune_DeviceIdentityEvidence.csv"]}')
+    Put 'DATA-LAST/Intune_DeviceIdentityEvidence.csv'
+    $modern=@(Get-PreparedSourcePlan -DataRoot $root -SourceContractPath $contract -MetadataOnly)
+    Check (@($modern | Where-Object Relative -CEQ 'DATA-LAST/Intune_DeviceIdentityEvidence.csv').Count -eq 1) 'Declared device semantic evidence is missing or duplicated.'
+    Remove-Item -LiteralPath (Join-Path $root 'DATA-LAST/Intune_DeviceIdentityEvidence.csv')
+    Reject {Get-PreparedSourcePlan -DataRoot $root -SourceContractPath $contract -MetadataOnly} 'does not exist|Cannot find|introuvable|n.existe pas'
+    [IO.File]::WriteAllText($deviceReceipt,'{}')
     Check (@($plan.SourcePath | Sort-Object -Unique).Count -eq $plan.Count) 'Physical source captured more than once'
     Check (@($plan | Where-Object Relative -Match '\\').Count -eq 0) 'Source separator normalization missing'
     foreach($name in @($base.currentFiles)+@($native.sources.file)+@($artifacts.currentFiles)){
@@ -104,8 +114,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZCoV07pbrlL5/
-# Tc+iPFtYzppppcHrMrqAIApZAPKCKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJO+A1lF1YIsVY
+# beMFFqvUtfJJ+GPgDZ75BqerHnsV0qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -238,31 +248,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII8aSyOqFCNx20cXnOIv9XoTIPgYJLKPW8E0lY6jJ+jRMA0GCSqG
-# SIb3DQEBAQUABIIBgI8ThTkwdbvJ4/aGKyWO8fX4NA7sI8HIPxdUuSRWSZjsMS2I
-# OZrZIMJ9AX5JWTDkgkUC8llmOAU/ORiU4jOx8o4VQVZ5Wz7XbRAhpw10+v/2byhc
-# g/27rBonDzcdSPST8RPIzhtViulNTzl0hZctXs8zaosOILZisf/cZwFuNSo+LmDl
-# IibD1uFa8jKSpPX45ES5qyKxDeJ0STA4vwDIWYqQX40KjTaDWBdBiZcx46I7zzK+
-# m0jLz4Jkt36LNHiTColD3KX/TD3Q7E8bY21EXD361olib4py0UL+YBYoXjiWdSWF
-# Fjm09LUXieWpYG8ijaNWO3jvgxooE14NhtSyvePkzoxIjWTD+tpAifHdcQvgG2EV
-# HBhvpFOWWV3hYjhs8YfeJZiKegU0n2Beklw3yXL0pnyHWiVFBYPnk9ICSsUFkmYq
-# WI+6VpXgGr5vmEpxV9ap+4Tx3bJKIIt99bTLUjutha5EumH3CHtd5Fx/EXctfToZ
-# kYvXuSPFUwri9HYqh6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINC7R1QhRllC9mYZBrNGrThk8OG8HhjITPRFSfswiqhvMA0GCSqG
+# SIb3DQEBAQUABIIBgJ/EJkGYQUoHqWEGQcR7clE2U4JuxnzHkR4tA3gYklnarpdt
+# CXw4NKevJjhhDSD98/EsyrNhpaMDgkrBmrzzAe3mX73l7Zfwxu+gk5Th68f58YSC
+# eh2QO3Ft+ORpXFMkiG5WeCQUrneGyWOlJ5mmBUwL3kRtz05K6Emg9WJwFnAzsIeF
+# grJ8+KF9hIA0yogY+k6/7nORppURbaGaUxKZ2ohSZ0Isu3Cfdukz3tCTfXerWTA0
+# fCs+G0VX7Bu87R5q2uaUsJrbCG6gs/N5ZwfKrUoIqhecgCZubP0CkZu2qI9wMlkA
+# GBpAMqHUwyK7AGNnQmfi7gbEBS/YZ5aIijpaxV2tVSuFYJMxwN6Xz0vsmvjzrgol
+# llHPzfdxAxH8tjdG2RsNx5MQB/EiqXbPRuXv8Rkq2Mu/G9qiib5kNRIqiXpL4f4I
+# KzeFBNwrStm8j738+AtARcYQYr/GK1IyE7If9QV3Mn2aAXtU7pqFDlTZa0tnL5y0
+# JTPSD55OJip5YGDkT6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTYwOTQz
-# MTBaMC8GCSqGSIb3DQEJBDEiBCDU+NCHACgF0uJrenB2pH4l+S/l3pyNL8voEacN
-# FppQmTANBgkqhkiG9w0BAQEFAASCAgB5Jl4OcAVHi8EU/C3+shn2m/05IZfkaTVX
-# XZ0UdbB7ZUpz7ubm1I6K5Qo/hPAorlPzNCwD1PbVGGyh/98dB0qHyQ8exy4cw+ej
-# znvvgcwwciSm46gvYafp3/NsZL/5LU5DQvx6oiXWPUeACMhrXJnrBodoncT4dXYI
-# nTWvZr7vOhvBx8UV07k6EY67isf9lwIQNFYetK9RWoxcU+bKpyOyacWfrxSk1En3
-# 8aAgP+wXOnGKbf8Xalp/niAhacTHKlZKabwQIbI9Hf2U0TpiLSXq2EBTzUcKHQhN
-# R1gtj2164NiR8Ocs3vEV5wj+mzXjhCJVjofGm/2wlWuHRPvTbYFuxYBhDMAGpGvH
-# U5WzjWRy1ccYW9u9m8cS0WEk/QWNGjsmyPo4XIxDMNOyIX92rTA8MvW5Kw5bGf9j
-# Y3P/a+DxVdiq0eLwSQILChbVaZqhe8n6qbytqCe8j/SbjkKg3a2FeabUbMv7pDoR
-# jlVNgS0rMg486afVg993XXtPkRRFhn8k/9+taT8oR6jdsTc+U5qRjZO33I6Kj+do
-# DEQrWzzbiL4N6MZxAS2ytVC4PyQqmc7w6Jy+x0Ek4e5+jSrRYrvO/sBptQGTOdTa
-# OBXbPaJ/D1OciaCVBqXG/r6n6SAeBhdIRfm2lzYXlLqWuaNfPA0Qik2ElTXp2ppT
-# WAQ7IF/NpA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTVaMC8GCSqGSIb3DQEJBDEiBCBwCJkI9Jonj/L73SBBm+FgqqKoeDuZwZzMsNk+
+# Dqqg5jANBgkqhkiG9w0BAQEFAASCAgBMxSoQ7qAlSDxiWj+5Dz/CGSV4WXdNRp0G
+# yOhaqt45GO4odJdBzPcOBq6UNZbAGHPUrCVbHX/n5jxH1iRExptAEc6D6l1R556u
+# dKZ1kjuUtA2AH5VG2UzeC5eKt1qpqQMjNPm0nTiRF5FS1/Yyh6bXTrtNlyY5uCCg
+# 4S4MjgLQeBCQ/8kbeZ3G4vKyLeVJrt/gQmrfHukL2+Bvx+IpYeit5CoPydxR8vDm
+# 8MQDrArsOrukPBt7k+/JssyccIHQztqRZ/68zx8RZH5Ap4B4c3Y9rqd+IBLenHD1
+# VyoAnjDZKC/8wU37R0Vp9vdnQy7tJu8ksBy6yEtF1dwrN5HR31lREGtUV+RqrnLF
+# qybtxtX8kWCzHYuX05zZt6szWnXaY7/2+YT5eEtI7CLJUgANtTMQH5UHudqHS6AW
+# rsioA2Gv+yultym7L2UaSj91vbD7L1mwj54Vi1uiudr6Ycjby+i99ZU8w8IqOfLR
+# qIxVM4bEZHgAflfEt6bvkzkSnrit6d2tKXUhNmYg5Qldz1HTGLJmnqFEdsvATqGU
+# NFjeFUNHCiM68MwTu90nAzhWHd+SnpYhLP9lV/NRhc7WDkvuN+hnNA2rxl+kykao
+# blFjAp8C0xzhyT2Uj5X4Vz3EbAbrZtwh47X8gD2Vo3YeJJNFP4qifx0qYa27IUFA
+# GsDXq0y9/Q==
 # SIG # End signature block

@@ -1,4 +1,4 @@
-﻿# Version 1.2.0
+﻿# Version 1.3.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -303,6 +303,10 @@ $hardwareConflictPath = Get-RequiredCsv 'DATA-LAST\M365_Entra_Devices_HardwareId
 $removalCandidatePath = Get-RequiredCsv 'DATA-LAST\M365_Entra_Devices_RemovalCandidates.csv'
 
 $intune = @(Import-Csv -LiteralPath $intunePath)
+Import-Module (Join-Path $PSScriptRoot 'DeviceIdentityEvidence.psm1') -Force -ErrorAction Stop
+$identityQualification=Get-DeviceIdentityQualification -LastRoot (Join-Path $DataRoot 'DATA-LAST') -IntuneRows $intune
+$identityConflictIds=Get-NormalizedValueSet -Values @($identityQualification.ConflictIds)
+$identityConflictNames=Get-NormalizedValueSet -Values @($intune | Where-Object {$identityConflictIds.Contains((Get-NormalizedKey $_.'Device ID'))} | ForEach-Object {$_.'Device name'})
 $users = @(Import-Csv -LiteralPath $usersPath)
 $entra = @(Import-Csv -LiteralPath $entraPath)
 $ad = @(Import-Csv -LiteralPath $adPath)
@@ -330,14 +334,16 @@ $evidence = @(foreach ($device in $intune) {
     $deviceName = Get-NormalizedKey $device.'Device name'
     $entraId = Get-NormalizedKey $device.'Azure AD Device ID'
     if (-not $entraId) { $entraId = Get-NormalizedKey $device.'Entra DeviceId' }
-    $upn = Get-NormalizedKey $device.'Primary user UPN'
+    $identityConflict=$identityConflictIds.Contains($deviceId)
+    if($identityConflict){$entraId=''}
+    $upn = if($identityConflict){''}else{Get-NormalizedKey $device.'Primary user UPN'}
 
     $entraRow = if ($entraId -and $entraIndex.ContainsKey($entraId)) { $entraIndex[$entraId] } else { $null }
-    $adRow = if ($deviceId -and $adIndex.ContainsKey($deviceId)) { $adIndex[$deviceId] } else { $null }
+    $adRow = if (-not $identityConflict -and $deviceId -and $adIndex.ContainsKey($deviceId)) { $adIndex[$deviceId] } else { $null }
     $userRow = if ($upn -and $userIndex.ContainsKey($upn)) { $userIndex[$upn] } else { $null }
     $upgradeRow = if ($deviceId -and $upgradeEligibilityIdIndex.ContainsKey($deviceId)) {
         $upgradeEligibilityIdIndex[$deviceId]
-    } elseif ($deviceName -and $upgradeEligibilityNameIndex.ContainsKey($deviceName)) {
+    } elseif (-not $identityConflict -and $deviceName -and $upgradeEligibilityNameIndex.ContainsKey($deviceName)) {
         $upgradeEligibilityNameIndex[$deviceName]
     } else {
         $null
@@ -408,8 +414,8 @@ $evidence = @(foreach ($device in $intune) {
         'Free Disk Space (GB)' = Convert-ToInvariantDecimalText $freeGiB
         'Free Disk Space (%)' = Convert-ToInvariantDecimalText $freePercent
         'Disk Space State' = $diskState
-        'AD to Intune Match' = if ($null -ne $adRow) { 'Matched' } else { 'Unmatched' }
-        'Entra Match' = if ($null -ne $entraRow) { 'Matched' } else { 'Unmatched' }
+        'AD to Intune Match' = if($identityConflict){'Indeterminate - Identity conflict'}elseif ($null -ne $adRow) { 'Matched' } else { 'Unmatched' }
+        'Entra Match' = if($identityConflict){'Indeterminate - Identity conflict'}elseif ($null -ne $entraRow) { 'Matched' } else { 'Unmatched' }
         'Entra Account State' = if ($null -eq $entraRow) { 'Not observed' } elseif ((Get-NormalizedKey $entraRow.AccountEnabled) -eq 'true') { 'Enabled' } else { 'Disabled' }
         'Intune Encryption State' = switch (Get-NormalizedKey $device.Encrypted) { 'true' { 'Encrypted' } 'false' { 'Not encrypted' } default { 'Not observed' } }
         'Enrollment DateTime' = if ($null -ne $enrollmentDate) { $enrollmentDate.ToString('yyyy-MM-dd HH:mm:ss') } else { $null }
@@ -437,8 +443,8 @@ $evidence = @(foreach ($device in $intune) {
         'Stop Error State' = if ($null -eq $endpointStartupRow -or [string]::IsNullOrWhiteSpace($endpointStartupRow.StopErrorCount)) { 'Not observed' } elseif ([double]$endpointStartupRow.StopErrorCount -gt 0) { 'Stop errors observed' } else { 'No stop errors' }
         'Crash Count' = if ($null -ne $endpointPerformanceRow -and -not [string]::IsNullOrWhiteSpace($endpointPerformanceRow.CrashCount)) { [int][double]$endpointPerformanceRow.CrashCount } else { $null }
         'Crash State' = if ($null -eq $endpointPerformanceRow -or [string]::IsNullOrWhiteSpace($endpointPerformanceRow.CrashCount)) { 'Not observed' } elseif ([double]$endpointPerformanceRow.CrashCount -gt 0) { 'Crashes observed' } else { 'No crashes' }
-        'Entra Hardware ID Conflict' = if ($entraId -and $hardwareConflictDeviceIds.Contains($entraId)) { 'Yes' } else { 'No' }
-        'Removal Candidate' = if ($entraId -and $removalCandidateDeviceIds.Contains($entraId)) { 'Yes' } else { 'No' }
+        'Entra Hardware ID Conflict' = if($identityConflict){'Indeterminate - Identity conflict'}elseif ($entraId -and $hardwareConflictDeviceIds.Contains($entraId)) { 'Yes' } else { 'No' }
+        'Removal Candidate' = if($identityConflict){'Indeterminate - Identity conflict'}elseif ($entraId -and $removalCandidateDeviceIds.Contains($entraId)) { 'Yes' } else { 'No' }
         'Windows 11 Release State' = if ($windowsGeneration -ne 'Windows 11') { 'Not applicable' } elseif ((Get-WindowsRelease $device.'OS version') -in @('Windows 11 21H2', 'Windows 11 22H2', 'Windows 11 23H2')) { 'Older release' } else { 'Current release' }
         'Source Scope' = ($sourceScope -join ' + ')
     }
@@ -487,9 +493,10 @@ $enabledAdWindowsPcs = @($ad | Where-Object {
     ([string]$_.OperatingSystem -notmatch '(?i)server')
 })
 $enabledAdWindowsPcsManaged = @($enabledAdWindowsPcs | Where-Object {
+    -not $identityConflictIds.Contains((Get-NormalizedKey $_.IntuneDeviceId)) -and -not $identityConflictNames.Contains((Get-NormalizedKey $_.Name)) -and (
     (Get-NormalizedKey $_.ExistsInIntune) -eq 'true' -or
     (Get-NormalizedKey $_.IsRegisteredInIntune) -eq 'true' -or
-    -not [string]::IsNullOrWhiteSpace([string]$_.IntuneDeviceId)
+    -not [string]::IsNullOrWhiteSpace([string]$_.IntuneDeviceId))
 })
 # Match AD Windows 10 computers against the current Intune inventory. A unique
 # device name can reconcile a re-enrolled computer; ambiguous names are excluded
@@ -509,6 +516,7 @@ $ambiguousWindows10Matches = 0
 foreach ($computer in $enabledAdWindows10) {
     $idKey = Get-NormalizedKey $computer.IntuneDeviceId
     $nameKey = Get-NormalizedKey $computer.Name
+    if($identityConflictIds.Contains($idKey) -or $identityConflictNames.Contains($nameKey)){$ambiguousWindows10Matches++;continue}
     if ($idKey -and $intuneIds.Contains($idKey)) { continue }
     if ($nameKey -and $intuneNameGroups.ContainsKey($nameKey)) {
         if ($intuneNameGroups[$nameKey] -eq 1) { continue }
@@ -527,8 +535,8 @@ $directorySummary = [pscustomobject][ordered]@{
     'Snapshot Date' = (Get-Item -LiteralPath $adPath).LastWriteTime.Date.ToString('yyyy-MM-dd')
     'Enabled AD Windows PCs' = $enabledAdWindowsPcs.Count
     'Enabled AD Windows PCs Managed by Intune' = $enabledAdWindowsPcsManaged.Count
-    'Enabled AD Windows PCs Unmanaged' = $enabledAdWindowsPcs.Count - $enabledAdWindowsPcsManaged.Count
-    'Enabled AD PCs Managed by Intune (%)' = if ($enabledAdWindowsPcs.Count -gt 0) { ($enabledAdWindowsPcsManaged.Count / [double]$enabledAdWindowsPcs.Count).ToString('0.######', [Globalization.CultureInfo]::InvariantCulture) } else { $null }
+    'Enabled AD Windows PCs Unmanaged' = if($identityQualification.ConflictCount){$null}else{$enabledAdWindowsPcs.Count - $enabledAdWindowsPcsManaged.Count}
+    'Enabled AD PCs Managed by Intune (%)' = if ($identityQualification.ConflictCount -eq 0 -and $enabledAdWindowsPcs.Count -gt 0) { ($enabledAdWindowsPcsManaged.Count / [double]$enabledAdWindowsPcs.Count).ToString('0.######', [Globalization.CultureInfo]::InvariantCulture) } else { $null }
     'Disabled AD Computer Objects' = $disabledAdComputerObjects
     'Disabled Entra Devices' = $disabledEntraDevices
     'Enabled AD Windows 10 PCs' = $enabledAdWindows10.Count
@@ -537,11 +545,12 @@ $directorySummary = [pscustomobject][ordered]@{
     'Intune Windows 10 Eligibility Undetermined' = $intuneWindows10Undetermined
     'Windows 10 Eligibility Undetermined' = $intuneWindows10Undetermined + $adOnlyWindows10
     'Country Definition' = 'Managed-device country uses only the primary user Entra CountryOrRegion; missing or unrecognized country is Unknown, with no UsageLocation fallback. It is not physical device location.'
-    'Evidence Status' = 'Observed'
+    'Evidence Status' = if($identityQualification.ConflictCount){'Identity conflict; reconciliation indeterminate; conflicts='+$identityQualification.ConflictCount}else{'Observed'}
 }
 $directorySummary | Export-Csv -LiteralPath $DirectorySummaryOutputPath -NoTypeInformation -Encoding utf8NoBOM
 
 $managedDevices = $evidence.Count
+$reconciliationDevices=@($evidence | Where-Object 'AD to Intune Match' -NotMatch 'Identity conflict').Count
 $entraCoveredManaged = @($evidence | Where-Object 'Entra Match' -eq 'Matched').Count
 $windows11Covered = @($evidence | Where-Object 'Windows Generation' -eq 'Windows 11').Count
 $signalEvidence = @(
@@ -551,7 +560,7 @@ $signalEvidence = @(
     [pscustomobject][ordered]@{ 'Signal Sort' = 12; 'Signal' = 'Entra hardware ID conflicts'; 'Affected Devices' = $hardwareConflictDeviceIds.Count; 'Covered Devices' = $entra.Count; 'Managed Devices Affected' = @($evidence | Where-Object 'Entra Hardware ID Conflict' -eq 'Yes').Count; 'Managed Devices Covered' = $entraCoveredManaged; 'Source Findings' = $hardwareConflicts.Count }
     [pscustomobject][ordered]@{ 'Signal Sort' = 13; 'Signal' = 'Device removal candidates'; 'Affected Devices' = $removalCandidateDeviceIds.Count; 'Covered Devices' = $entra.Count; 'Managed Devices Affected' = @($evidence | Where-Object 'Removal Candidate' -eq 'Yes').Count; 'Managed Devices Covered' = $entraCoveredManaged; 'Source Findings' = $removalCandidateDeviceIds.Count }
     [pscustomobject][ordered]@{ 'Signal Sort' = 14; 'Signal' = 'Older Windows 11 releases'; 'Affected Devices' = @($evidence | Where-Object 'Windows 11 Release State' -eq 'Older release').Count; 'Covered Devices' = $windows11Covered; 'Managed Devices Affected' = @($evidence | Where-Object 'Windows 11 Release State' -eq 'Older release').Count; 'Managed Devices Covered' = $windows11Covered; 'Source Findings' = @($evidence | Where-Object 'Windows 11 Release State' -eq 'Older release').Count }
-    [pscustomobject][ordered]@{ 'Signal Sort' = 15; 'Signal' = 'AD-to-Intune unmatched devices'; 'Affected Devices' = @($evidence | Where-Object 'AD to Intune Match' -eq 'Unmatched').Count; 'Covered Devices' = $managedDevices; 'Managed Devices Affected' = @($evidence | Where-Object 'AD to Intune Match' -eq 'Unmatched').Count; 'Managed Devices Covered' = $managedDevices; 'Source Findings' = @($evidence | Where-Object 'AD to Intune Match' -eq 'Unmatched').Count }
+    [pscustomobject][ordered]@{ 'Signal Sort' = 15; 'Signal' = 'AD-to-Intune unmatched devices'; 'Affected Devices' = @($evidence | Where-Object 'AD to Intune Match' -eq 'Unmatched').Count; 'Covered Devices' = $reconciliationDevices; 'Managed Devices Affected' = @($evidence | Where-Object 'AD to Intune Match' -eq 'Unmatched').Count; 'Managed Devices Covered' = $reconciliationDevices; 'Source Findings' = @($evidence | Where-Object 'AD to Intune Match' -eq 'Unmatched').Count }
     [pscustomobject][ordered]@{ 'Signal Sort' = 16; 'Signal' = 'Startup score below 50'; 'Affected Devices' = @($endpointStartupIndex.Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_.StartupScore) -and [double]$_.StartupScore -lt 50 }).Count; 'Covered Devices' = @($endpointStartupIndex.Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_.StartupScore) }).Count; 'Managed Devices Affected' = @($evidence | Where-Object 'Startup Score State' -eq 'Below 50').Count; 'Managed Devices Covered' = @($evidence | Where-Object 'Startup Score State' -ne 'Not observed').Count; 'Source Findings' = @($endpointStartupIndex.Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_.StartupScore) -and [double]$_.StartupScore -lt 50 }).Count }
     [pscustomobject][ordered]@{ 'Signal Sort' = 17; 'Signal' = 'Boot time over 60 seconds'; 'Affected Devices' = @($endpointStartupIndex.Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_.CoreBootTime) -and [double]$_.CoreBootTime -gt 60 }).Count; 'Covered Devices' = @($endpointStartupIndex.Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_.CoreBootTime) }).Count; 'Managed Devices Affected' = @($evidence | Where-Object { $_.'Core Boot Time (s)' -and [double]$_.'Core Boot Time (s)' -gt 60 }).Count; 'Managed Devices Covered' = @($evidence | Where-Object { $_.'Core Boot Time (s)' }).Count; 'Source Findings' = @($endpointStartupIndex.Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_.CoreBootTime) -and [double]$_.CoreBootTime -gt 60 }).Count }
     [pscustomobject][ordered]@{ 'Signal Sort' = 18; 'Signal' = 'Sign-in time over 30 seconds'; 'Affected Devices' = @($endpointStartupIndex.Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_.CoreSignInTime) -and [double]$_.CoreSignInTime -gt 30 }).Count; 'Covered Devices' = @($endpointStartupIndex.Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_.CoreSignInTime) }).Count; 'Managed Devices Affected' = @($evidence | Where-Object { $_.'Core Sign-in Time (s)' -and [double]$_.'Core Sign-in Time (s)' -gt 30 }).Count; 'Managed Devices Covered' = @($evidence | Where-Object { $_.'Core Sign-in Time (s)' }).Count; 'Source Findings' = @($endpointStartupIndex.Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_.CoreSignInTime) -and [double]$_.CoreSignInTime -gt 30 }).Count }
@@ -562,11 +571,13 @@ $signalEvidence | Export-Csv -LiteralPath $SignalsOutputPath -NoTypeInformation 
 $summary = [ordered]@{
     OutputPath = $OutputPath
     Rows = $evidence.Count
+    IdentityConflicts = $identityQualification.ConflictCount
+    ReconciliationQualification = if($identityQualification.ConflictCount){'Indeterminate - Identity conflict'}else{'Observed source scope'}
     EntraMatches = @($evidence | Where-Object 'Entra Match' -eq 'Matched').Count
     AdMatches = @($evidence | Where-Object 'AD to Intune Match' -eq 'Matched').Count
     EnabledAdWindowsPcs = $enabledAdWindowsPcs.Count
     EnabledAdWindowsPcsManagedByIntune = $enabledAdWindowsPcsManaged.Count
-    EnabledAdWindowsPcsManagedByIntuneRate = if ($enabledAdWindowsPcs.Count -gt 0) { [math]::Round($enabledAdWindowsPcsManaged.Count / [double]$enabledAdWindowsPcs.Count, 6) } else { $null }
+    EnabledAdWindowsPcsManagedByIntuneRate = if ($identityQualification.ConflictCount -eq 0 -and $enabledAdWindowsPcs.Count -gt 0) { [math]::Round($enabledAdWindowsPcsManaged.Count / [double]$enabledAdWindowsPcs.Count, 6) } else { $null }
     DisabledAdComputerObjects = $disabledAdComputerObjects
     DisabledEntraDevices = $disabledEntraDevices
     UserLocations = @($evidence | Where-Object Country -ne 'Unknown').Count
@@ -590,8 +601,8 @@ $summary = [ordered]@{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhkEnwLt/GaNrc
-# Xlwz0+nbpD/lRCXhlDjIF3abJ52ECqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCALduMLiq/58jRp
+# fW7ZOqSaeJeU0ydYsCdyTkGmn35l7aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -724,31 +735,31 @@ $summary = [ordered]@{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIE22xr/ubkIlL9PsScTVgbF0LY4BrY/HtDSjjWa/xIEsMA0GCSqG
-# SIb3DQEBAQUABIIBgKqijGly1km750ZJyvjEPUpEzGfBZe8GNCGo3d3fyFDglwjg
-# ZUCv/zxqQBG5IT6o+t1mVz/zUxrb1wDHmKtONjEuUvu5iBhP7aHVHc35Q0YImUNF
-# x4uM1+quwdXJYNz8mratU4MJkFwZUvN9pvlO37GZ+1uA+wFC2y/tv8kBSz007YQw
-# nQxDNFi8JiTsksnnJRQawk2bnLzZ4my9RlecGIquuA95k5jvn9zwzO+ND+jN14ub
-# pfXfhZoEk8hB0iQaDzE9E6RUZtG+DIybUPPUwF3yRgLcE7yQjzU+gaxKOscbWtbj
-# u9tQFLLcH8CIG2UXMhx7iCOjNXQgEAiDOQNQYLswxsTLd0wlwsuUfFaCBHH5gywt
-# KB1pdWXsYvwMFC1GEotFyLxzT+eEw4OUpEQshorxOTOgHM1uqhjEZlMNqLqiFxK2
-# 9BO16HDME+SPw8Og3yKhMbszgCXqUBxoGZ2Y5MYZhj9YSnrulOzfpXRchpyRJuXM
-# zWL6lhtEjXE+4Ror+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIwrIVZfKt5alewp6dYxBjikTUB2nIQsi2XlwEfHc2CyMA0GCSqG
+# SIb3DQEBAQUABIIBgJ4K+a/lC3RZLPDztxqZIuFAHyxNaovraNsFpGBIsLi69dqS
+# dbuWNoa+g59IVd1aNutffxGLl7nsrA6PhLNHnj/6qjGHhzYzvLAXcGocJnhA2W1d
+# 5HzcG7Bt/OXV9mqKVl6JXBkMLq06HW/LTJQbmnhtXm0QX/K0uRdaEZ41FU3Jzn4s
+# YJbOpcNrh3GesOjVE/3Oes6ybIfIA8lCVuOqcQWNxPPuVARFVoe4JJnbrdxT/5KA
+# No7VukA5Lh3MOhXCUrcyjVjea3K7yhVqeyDyy+5Pz9P/x+byuZmLGjjIRJg1P+DZ
+# UP/mOr9Z60dAyTrPq762lqct7DCDv6flsoELB45mnOSgmXnUx4JPoUb5DSWhT2Xp
+# m5g4e2/cQVWXWDDrJrEksbe3QEwF7OIPhgxMk8IyVBireIYBesEp49NHTnN7tUv1
+# OWMk9uDMwJpO/YIWdy5Egqrcga0SwffSawxfIWiTxrV5mQcDlI3xR6IeVKi4H6q+
+# 1LndfPThQq/91wZJpKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMzQx
-# MDRaMC8GCSqGSIb3DQEJBDEiBCCr9/3K4EXLpfV5DMdU0WcuuJVw5bXvl0sfvyQv
-# 65NQbDANBgkqhkiG9w0BAQEFAASCAgByxJayEUmM9A4Rw23j4FFbH2m5n0JiTOrw
-# NxCiDwLI01eV+pgj145KcIJVUtKHNYMUnXXRTN+oYlKkR4hwRPUhx10agm2xzWb/
-# KrRTQcRNPRsmFZcg4/BNDmVP5cFk59P0hWi025eZV5598O3LJku7+hhq6/8x8wYQ
-# R2bcKpuqKV3haBvxdy68mS0Z81uk1eHx+/W8XDNoBLLtTEzpfY87Yxl8Ht2ULRWE
-# G3hDbQTqBWqA688ExCGHA13dxM9ZdzndcRSboP41yvW+poZmRMD8l+QWk9NYOVKw
-# iTmLUymYSPu4GmAxEmCYthcrsDmJw7ZyzFxEisDcNHDIac/ut8MoLdYv0Qg8krY2
-# Y7Mmrm9d0kezJ+enWTTQNtazU549yd40VwU9SM5Nc70yCs2YZEwFF6ujyHeqFbjN
-# nGEJhkHoPpjXn+rLNg1oNy2NXDwOQzwJX4UuajpwJNQzuxUl51irvTcU1UQfpPBQ
-# MybC0Ea8PuRNZT7YNWS7xVW2cZSUlBXlW9u3qosfOJSBjd1G6tC2OW+QZ5U2L8/Z
-# 1RcRQHO0o4HUnhhXdQ2hpxxOxk7GL5sqwM6pJG2T6ETEHkZwmP6SosaiUSo+k5Eh
-# GC6yU9qAf7OoidlqBPBxPdSep9cyCZ+RZ8yRWIPQLfcVrdkr+A/b4gI6JLqkZONT
-# tJ1NgUqZyA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTRaMC8GCSqGSIb3DQEJBDEiBCBm8/bEckBoTKuII8Ee2ETU/SZalRtV05G7EKVs
+# y1F28TANBgkqhkiG9w0BAQEFAASCAgBkvf9yK4g16h9M0OdFbqjLwqcsWQw1blRF
+# 9i1Mh1c8bagHDhdMFESYPrEorIdCR9jHYydGGAT4z+Hfjc+e9D9k5zavwu+bPC+U
+# JlrNkKjAGBYqDG+du/rH1oXWTbqyuKHkRzzrtY+LnjlkhNrGcyEApT8tPo16qkw+
+# 6lguschyZHEZ5AfissNoc0LUzZ6dnoMl61v4VD9aW3a7O/vnQW9A08HmaOHz98qL
+# /kc4ABb+DwVBTmpdNwmVF+jwpTB3PDrQ2+e8Qm9DV3XbQqktnA+kksI2uktnOLzz
+# BLZ3DfsB+HTf7zfAn/CsGu9abb7+jHYDoi0vmH2FfvE38w9CoDujT5yciYTmP5ny
+# U4xHMxN+iOlaPvw7olb47eahINQZtdwtL5abVfKkSkWftHm1BH8aYe/wGP1llClf
+# VMSskZjT6bWbx7XbVPInrE5v1DZ2HxwLkaX7X+IZkvRhf5kvHh+ibxkEtX0Z5MsZ
+# IqpQIQeK+xKlQIlEHOwU4BRIA2H1F9MQ2ByK7wf3x9GKFQySKCvCvBsGhlvy4MaH
+# 7aPzFMecRIYZFUXO//DRoWMT2RkgolbXqS37Y4M4bA5SNAgfdNO6a2g6dCWK5Dt9
+# e47w37WereiYk15DfB1ivPObqSNHdWe+E49m8ZIeekRu+tJeM9xMkccX6u3uW1aH
+# xtZIIKdSrQ==
 # SIG # End signature block

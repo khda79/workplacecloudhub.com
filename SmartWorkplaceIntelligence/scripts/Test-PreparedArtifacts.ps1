@@ -1,4 +1,4 @@
-# Version 1.1.0
+# Version 1.2.0
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
@@ -89,6 +89,23 @@ try {
     $dest2=Join-Path $root 'batch2';New-Item -ItemType Directory -Path $dest2|Out-Null
     Reject {Copy-PreparedArtifacts -SnapshotRoot $source -Destination $dest2 -TenantKey 'foreign'} 'Wrong tenant accepted.'
     Check (@(Get-ChildItem $dest2 -File).Count -eq 0) 'Identity failure wrote output.'
+    # New semantic evidence is copied only when required by its current producer receipt.
+    $nativeName='Intune_DeviceIdentityEvidence.csv'
+    $nativePath=Join-Path $source ('DATA-LAST/'+$nativeName)
+    [pscustomobject]@{TenantKey='synthetic';RunId='native-run';ManagedDeviceId='fake-device'} | Export-Csv -LiteralPath $nativePath -NoTypeInformation
+    $nativeReceipt=[ordered]@{Owner='SmartInventory-SourceReceipt';ContractVersion='1.2';Producer='SmartM365-Devices-Inventory.ps1';TenantKey='synthetic';Status='Completed';Errors=0;ConsumerScopeQualified=$true;RunId='native-run';RequiredFiles=@($nativeName);Files=@(@{File=$nativeName;RunId='native-run';SHA256=(Get-FileHash -LiteralPath $nativePath).Hash})}
+    $nativeReceiptPath=Join-Path $source 'DATA-LAST/SmartInventory_SmartM365-Devices-Inventory.current.json.txt'
+    $nativeReceipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $nativeReceiptPath
+    $nativeDest=Join-Path $root 'native-batch';New-Item -ItemType Directory -Path $nativeDest | Out-Null
+    $nativeEntries=@(Copy-PreparedArtifacts -SnapshotRoot $source -Destination $nativeDest -TenantKey synthetic)
+    Assert-PreparedArtifacts -BatchRoot $nativeDest -Entries $nativeEntries -TenantKey synthetic
+    $nativeEntry=@($nativeEntries | Where-Object File -CEQ ('Source-'+$nativeName))
+    Check ($nativeEntry.Count -eq 1 -and $nativeEntry[0].RunId -ceq 'native-run' -and $nativeEntry[0].SemanticVersion -ceq '0.5.0') 'Semantic evidence artifact reference lost its run or version.'
+    Check ((Get-FileHash -LiteralPath (Join-Path $nativeDest ('Source-'+$nativeName))).Hash -ceq $nativeReceipt.Files[0].SHA256) 'Semantic evidence artifact bytes changed.'
+    Add-Content -LiteralPath $nativePath 'altered'
+    $badNative=Join-Path $root 'bad-native';New-Item -ItemType Directory -Path $badNative | Out-Null
+    Reject {Copy-PreparedArtifacts -SnapshotRoot $source -Destination $badNative -TenantKey synthetic} 'Tampered native evidence was promoted.'
+    Check (-not(Test-Path -LiteralPath (Join-Path $badNative ('Source-'+$nativeName)))) 'Tampered native artifact was copied.'
     'Prepared artifact offline checks passed: '+$checks
 } finally {
     $resolved=[IO.Path]::GetFullPath($root)
@@ -101,8 +118,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVEL7qdA4VPnk3
-# 5P54W94UVvX559+aLKG8Cr8uaHwXRKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA0yU+CklioakkT
+# fyhhZ2VIm3HgC43VrUybfeOX2Bhx96CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -235,31 +252,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMQ7y3pUQVF+sTWgV6juqTpylg00QaHHJnve00fVlNOsMA0GCSqG
-# SIb3DQEBAQUABIIBgFzm0UGl/Os4Ab2BVF/0x89UbjSwfuENVrv5WLz0AcbuUEW5
-# g/kGmWhkNzjD9DaokxHBWlYlrFOlnY4REznzJ5jPZjH4GgLElYsdhJ8b37mzrUkt
-# iTaG44dNRbz1JO47e06jzI71UUHm4NKOHVQEcGOzW//BkN84OAPEMe8H1IP+0BtW
-# 4gL7URtvsI/6NvU/HJ8biZR634Ytvstm/sCxe0WbRVnQpRtP2TvbPB9eDzT5aFSK
-# cUltR9D0uVgZZ+Il40TALsvY5PAeEwRhmMGQjKUBG6S4P6p7HLxAmrpaMG2hIDDz
-# WbA+KoVQ+p2ieLRL4tzVPymVlHpZ195U3XeL+rLW3quYsS2c+h9j94aFvYoibUjM
-# D45KuT/yP20I2k71FrVPau2Vcb/uBSiGOgi1lNuJojIOIER+uFfphAdxt4EmWJOc
-# LbP9Rx+ukPk0V26jyCaAg7MTwQrh9zkWb8c5LWzniFd7IDEi4w8lEL4yGVEY3elV
-# CdANq4pDZc/6hSyek6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDGiPBdUm/+AjkDBebbgHF8K7oCRmgCwRCrcnx/rIvlDMA0GCSqG
+# SIb3DQEBAQUABIIBgFC6yso0DXelb8sMgf5Wlpw5cueBSX6+dQHEasCCbY3c6yYX
+# aewEq1IqoiErd2bkYI0BhT+c54HmQNL2WISirOn5J/CIPwcdOzm25CnEV4i1poVk
+# KK8A7oX524iDsSNMIi0hRf+JV3zCybGKi7gTP7yTG5ygFoAZFz06KHmKOnGsMo+A
+# xTESbuMbawP2+JyxFtXiWsJkkQb7n5xDBblw1zermqSmulkCRZH5FfcA3JtAXwoI
+# IL8IPy3r46U4vmGgKImLO8ILduKFXupnXbZJ0X5DG7RtZOFyitl6CMJuuubPvUQd
+# 3sagJGsOGLS21hRmPgjKLXC5FeDqKoy1GekXPFbOGgfhaJhU1MCkzPzOM4YI6uHj
+# m0RBSOEzI8KLCe7QrnQGTWRU3N1RsrrlJus9ZHtdfflHMQPK+ayD6brm7MXTg/64
+# kO1NhIeONIXmlI+ig+CS/n9NXNU5Zz58dxOwYq48poi8RcmR6ViGXO3ZW5NsQiv7
+# KhENyRIOs/VK10j6f6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcwOTQx
-# NTRaMC8GCSqGSIb3DQEJBDEiBCAxhb56PKOTCe6ZOP6LW7yAqsUBjS43VaDbir/t
-# P/bQ1TANBgkqhkiG9w0BAQEFAASCAgBN48OXyTLNp54AVnfqvkPuFnYMRuFmL4eT
-# vxw3tAUELyM+N07AB48u6iCsSglniDLpT/ULOJLYF+2V9NRd5QlYm8swPnjD690f
-# H1LqQ9+ppNOKKDjZeGiDRVc7Js+jQIBFi4KxX108lW10vj+lAOZh+RI6MWuumCjJ
-# FGvhhcut4G8JhvlMqvwPmga894OX6TP8P2QjmXRB8bxP3N2+5Ts/IAqSpYXWcsj+
-# gSuYB6pcVB1MhJc+6bg7y6hq36AvVpw+DsWKJjRgo4TsJ41giwBcSY4JJ17O2a+8
-# iKBCmXv2w6R0msoGZn+biqzHPDLjVjfRbDQa/h/NQwcku0R93H2gS18OSUYFgbnA
-# q0JqbDN4K79P3QBNlWNz1aAXMtf0uhIeBrzceIqgChje0M9MA/E9LkfILHOfgvIK
-# HZS+eK+qCBWzfzsLor9bFu3i0cuQmTgngNL9oTtkV1jyUKa1OaeBsdfgSrrKuZDr
-# C8ESsyGfCQl87cHnntG2ofkwPBGNKrli2sRD3HcTqIciOFr8AMLwkworKz3j/jM5
-# 4vLd6WGXXMCvqwOVjddPe2Ngt2PJ6zQ8vAMtRwmBYCLBIEG3PblUzQ1CP3RML+Ys
-# QJz3eBjCb3W0Nry2JYQ3g/Ug2xYjJHLKrDrB92Rr2Dcx1yeBKoOPFTrWl2BkB1oN
-# qjiqZz+KAA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTVaMC8GCSqGSIb3DQEJBDEiBCCSwN2FwhQiN4bQML5n+zKBoVuND6No6Su7zT/n
+# RzXyBDANBgkqhkiG9w0BAQEFAASCAgA0iUhJSa3X94MHSuue+eTNyKnpqCLemn1p
+# 1AomLb93/8uQOF6zj5jWl98yBwx6qQEPIpwOuWTGNlBp3RatMPlR67DA0HPqDsKi
+# g8NgF2I6DRIxCNh/evOe6pCnNaQx595GpnrJB9jJaMDnItL9qenB7sy9cKVi5wW2
+# PdIl2KWfKvyiSYySkDVC8yT8OW/mRbiIG/cllpBrY1SupYqhhzslBzBhdHQVmKYB
+# B63g65DlIhKciOvMpHA4hptlnBFtQlDCDwBaQe5Ne/a5fUNckDHUdpOtzyhA0zuN
+# 8B0j21vG1mJSa/McO6YOt3FTcYrGv2aPpyVSigsEp5EPFl7inNyvtZ7pfTjKFax0
+# CapNZjYNBO/xORbrd+mFlJR0/Virox4k19P/evHzYpq15MQohQpdqfFOTZM9/4nO
+# Q/HjXMKjHUh2LQGM+JJxFuf9yZLB5YwzE4Omv+O/RzRvYbxp/WX6+BceUmxzInp9
+# BskOFF9+6Re0XW6y2DCyD+qtZCZgSjHqJm4yjh+M0F05YWOFPhk5DSAo2Hi8UJpH
+# PviZooJ7Yzd7vqPKtpIiDfzCyH88gpluTMdOGCtioLStcrIT1+yXM8hY6JQxAYmB
+# XthRE2ASMtL+CtVhgWXGRyiqZSfrSirmq+hhwHen9ChQH97cNWI2L4hERKVxs+9r
+# pr86XgaBBQ==
 # SIG # End signature block

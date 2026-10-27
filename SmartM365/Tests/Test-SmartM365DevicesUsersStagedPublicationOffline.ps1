@@ -5,7 +5,7 @@ Synthetic checks of staged DATA-LAST publication for the Intune devices, Entra d
 users producers: with the previous run's different CSVs in DATA-LAST, a running or failed run neither
 changes, uploads nor historizes them, and a complete run promotes this run's CSVs with the receipt.
 .VERSION
-1.0.0
+1.1.0
 .NOTES
 Each producer is replayed through the same Core publication calls as its export stage. Synthetic TEMP
 data only; SharePoint upload and WeeklyHistory are replaced by recorders. No tenant, Graph, API, mail
@@ -54,11 +54,11 @@ function New-Row([string]$Label, [int]$Index) { [pscustomobject]@{ Id = "$Label-
 $producers = @(
     [pscustomobject]@{
         Name = 'Devices'; Script = 'SmartInventory/M365Inventory/IntuneInventory/Devices/SmartM365-Devices-Inventory.ps1'; Scope = 'CMDB:managed,hardware'
-        Files = @('Intune_ManagedDevices_All.csv', 'Intune_DeviceHardware_All.csv', 'Intune_Devices_Inventory.csv')
+        Files = @('Intune_ManagedDevices_All.csv', 'Intune_DeviceHardware_All.csv', 'Intune_DeviceIdentityEvidence.csv', 'Intune_Devices_Inventory.csv')
         Export = {
             param([string]$Label, [int]$Count)
             $rows = @(1..$Count | ForEach-Object { New-Row $Label $_ })
-            foreach ($base in @('Intune_ManagedDevices_All', 'Intune_DeviceHardware_All')) {
+            foreach ($base in @('Intune_ManagedDevices_All', 'Intune_DeviceHardware_All', 'Intune_DeviceIdentityEvidence')) {
                 Export-SmartM365Csv -Data $rows -Columns @('Id', 'DisplayName', 'CollectedAtUtc') -TimestampedPath (Join-Path $output ('{0}_{1}.csv' -f $base, (New-Stamp))) -LatestPath (Join-Path $latest "$base.csv") -NoWeeklyHistory | Out-Null
             }
             ExportAndCopyCsv -BaseFileName 'Intune_Devices_Inventory' -OutputPath $output -GlobalPath $latest -Data $rows -Encoding 'UTF8' -NoTypeInformation
@@ -177,8 +177,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCF0mngOW5n0YJs
-# jnss5E31FzLD1TigpMgnwI4CzC0CnKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAU43b1tr+aBdxe
+# mhu2aZrDIsRu709DlY6c3NqmYn9SIKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -311,31 +311,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPVjRPFNmd+haEEDd0Gb9tOdzQJVCoWBmfOFP5Ig86lOMA0GCSqG
-# SIb3DQEBAQUABIIBgKIh9UZoxGpDB2dfzBwufaMX8S3W8UJN6Xpq3Mtuu6FH7U9W
-# M+kuwIk2D5AC7H5bxTd+Fewfh3VnMrXdPubweH8BaUm4YD3qVFr4mvH1oWZSx16B
-# T5su2Ouh4WtisMLoV04iNZFQUZYVICFysqoTuIwFHKffRPjQvEZXmHpnb6zVgLew
-# BS4WINtmUnBk4rSzeuUWSR7M0dwZfqXyCEfqp2yLnatPRekyxdKm5KWo+oMstmoD
-# 2GFkXX9XHq+76WU9Pt8kn4WAWc08eYDj7BWHd+rwOJ1wpj8sYqp2Q4fJSsE/ld33
-# 0KnMC/dR7wE7RRhM2dB21oKPrgOh9D5IOYYr/jHszXgxn/FLFYU9FZyQF5DCMdX4
-# GYljMnUD40v9SuaX40C8rX0m0+wXAbRd3l0T3YV+/gW2PDp60NAZSwReJnMFbI8v
-# ZzrJuWZCMdTxFXdBN7CcUfjvEhWW3/27X0fFkqK7JAAqDB+C5m/k84f4Z8Ixx0oz
-# 8+sC2YbSAA4PoS9Y0qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILoaNU9XGS8eg77pyrX6P9ynungzfYndpRtzbnw0qZKtMA0GCSqG
+# SIb3DQEBAQUABIIBgE4/DJNLG7C2DS47HXiHXtrcehilMWx8OwrjG0OZ3BvnDKH4
+# 8/GPmp4UWB9ppjtFvVHRllmdLZyDSrMHFD5lJ4KtzS+0assqPckWVlHty/C7/tnr
+# pgaJHuhBJ95ImUWxB3Y+xGt9Nkg5j6loJlGaebmpvvgKmkapw1QmdnBODVliwPI1
+# EjJB7UnKQ2rL7hZzvrKR9Tr5iNGRowJWgwpVZscYgx4Pm6TPo1RHJOjnNa835aVD
+# +euas6vvghJJ/A1eGt22mJlh4euc5dW1RQJwLhHTDg3mJQwxF0ucr4Erp3qTMI4t
+# St6TiSDuriPzT6xurTb4WAcE4leJcw+qJErXayRz5fDIRyZldXEU8WBQohLXiCc9
+# aomesg4kuyvsfBnpXfqpqxyLCFa+/dvEEIhsyzYrWCZaxkprTG62tNWTpJZOk5M4
+# 9R/gtZEF1eMRQoee7ZFyXMP1fGZGDTYRpQUzFU7+lS7hAIYpB+e2hs7Jw2qFckf+
+# 88ZgCl0ERr4LmFactaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjEwOTIz
-# MTRaMC8GCSqGSIb3DQEJBDEiBCBUUA7H56xUbsfPslN3l4ovHloJQFzQ6XAwLW92
-# uyk/MjANBgkqhkiG9w0BAQEFAASCAgAj2pzvUuwXV4llVT48gQIPDqTRAN7NuB8+
-# 16XcSLkpyg3WllyyP5g6CiGq2fArS4cdmaFu429OBlxvRaylDmlGX+rQUQMXMfuZ
-# xd3+rnsIv/FwhT1CJAHESpM+4doEFdpJyHcEe2CP9ealKd8O4ePuxJNBKDBw3eDP
-# 49CYVSMSsMguRx1WUaqlCU40vvJCU6z/YdRClGMb/JgbwUgpUpiiiSZyD5s4q88G
-# PRrb7DZzlj9+ThP43uvp1PCNOGccC2IC0BKK+OELygtwNEpABcVfm86lGHHhsA0m
-# nsDzQP02A1gEY0Vev+YWLUlMJ9W3gFPYADl156MBPeaOAbBTLGzTmvwHOLN+5RT9
-# Pm01Cx3HZwDY2KgukwnzWnI7ri+l04o0hK1lmdA8PhxoZyQ9weN2hIdyBxtlEbWg
-# dy3NhYOgi/q5c2c12E4z3w0QR3HqcITt5yojLAfOWIUu/Zo2MDBr5GTLCeu/yplh
-# WBowNb5VHRRrt/vcswoQ5ZCWBUBIXVo8od7gvz0drGqnaCGuG3dfsgnX4jnPJPz3
-# EUvrPZAsrUmNJxnvOHwKxkRV2ZDSBSfc7LgQ5ZgPJqjwZGtLF5rTTHj4hMo/ItIM
-# hcHLX9nYOjNg7mYoh4FBLtCe/BrP76vNCoJg2cw/2egfkqzzoSP42EIL10TzaP/F
-# fbxFcksbCA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTJaMC8GCSqGSIb3DQEJBDEiBCA5OpPwGx9vuUwHMUmhcFNXDoy/xo9i0QVQxHfI
+# 98UvSDANBgkqhkiG9w0BAQEFAASCAgA2o3wxnTdQGjRAG7h0vrXI+1UnwtGwSNjh
+# R8hJk43tPheoRDrvpmgXDrjUnZmsU6AUN2OA0GAZLigewZuaG0lIcEVPePATYWlC
+# 22bQWdz3k8dOf8zGGG6/gF4aSWt4zwlsVnW475SyUUU1OMujmoLtkhKuJjrVcnmN
+# MTbMhup1g3rEp8UbRd+bK6hlbztHYGjoG4MQ89no56tXd0Sdq+y+2lTuYVBvTPJN
+# /QUoukpU4SfyfhJNhV2Vt6tFcuUDhM+M/cSspC7yVsdk2NyGUgrIi2GUA5wq2i5q
+# EUuuc7oa1KwPTx/iYnEAJM+etKLp1G+GAFa3EGWkUZtKSRmG96xcF63ipJxNRh3x
+# SEAG920uEomu9dz52vsBcgiGcNTBaWXYIpgkO2rqAXYhWjn4IiYAc8CIgj+wybB7
+# NGHtLnU7lxzzlp/mnickTzjy1chUJ71XHq/oV+UZ/l6vWj7hUCs2SgZgUtSSXJTi
+# 9WQ9KTGf1Ua4AdIWKauPelrVF3DVEyHn/iJ96gmUqkz2RoEgjrbhZtnmQM+GLfU1
+# 4ndx7g++rU/Hi2Jgb2ifOEzpoYnMVcAAz9ui8HEMedTC31OW0YHsz7f596Y4KBqm
+# o7qFwGsjRL1OdNdwDydLp8NG7zxppRSyiCD52L1brd/VAO3on26MMsJqWcnLFHv4
+# BNXvAwRkeQ==
 # SIG # End signature block

@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 import workplace_freshness as cmdb_freshness
 
-VERSION = '0.3.12'
+VERSION = '0.3.13'
 OWNER = 'SmartInventory-CMDB-Prepared'
 CONTRACT = Path(__file__).resolve().parents[1] / 'config/native-evidence-contract.json.txt'
 REGISTRY = Path(__file__).resolve().parents[2] / 'SmartM365/Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt'
@@ -145,8 +145,18 @@ def producer_records(source, identity):
             raise ValueError('Producer completion proof owner or version mismatch: ' + context)
         shared = receipt_kind == ('SmartInventory-SourceReceipt', '1.2')
         coverage = accepted_ad_coverage(proof) if proof.get('DomainCoverage') is not None else None
+        semantic = definition.get('SemanticFiles')
+        version = str(proof.get('ScriptVersion', '')).split('.')
+        modern = bool(semantic and all(p.isdecimal() for p in version) and
+                      tuple(map(int, version)) >= tuple(map(int, semantic['MinimumScriptVersion'].split('.'))))
+        semantic_names = semantic['Files'] if modern else []
+        required = definition['Files'] + semantic_names
+        if modern and (proof.get('ConsumerScopeQualified') is not True or len(proof.get('RequiredFiles', [])) != len(required)):
+            raise ValueError('Unqualified or duplicate device semantic declaration: ' + context)
+        if modern and not shared:
+            raise ValueError('Device identity evidence requires shared completion proof: ' + context)
         if shared and (proof.get('ScopeQualification') != 'ConsumerScope'
-                       or set(proof.get('RequiredFiles', [])) != set(definition['Files'])):
+                       or set(proof.get('RequiredFiles', [])) != set(required)):
             raise ValueError('Producer consumer-scope declaration mismatch: ' + context)
         if any(proof.get(field) != value for field, value in identity.items()):
             raise ValueError('Producer completion proof tenant identity mismatch: ' + context)
@@ -174,7 +184,7 @@ def producer_records(source, identity):
             if not start <= completed <= end:
                 raise ValueError('Invalid acquisition interval inside producer receipt: ' + context)
             local[file] = record
-        if (not set(definition['Files']).issubset(local)
+        if (not set(required).issubset(local)
                 or (not shared and set(local) != set(definition['Files']))):
             raise ValueError('Missing producer completion proof or unexpected source file: ' + context)
         if sha(path) != digest:
@@ -185,7 +195,8 @@ def producer_records(source, identity):
                          'RunId':proof['RunId'], 'ScriptVersion':proof['ScriptVersion'],
                          'Scope':proof['Scope'], 'StartedAtUtc':proof['StartedAtUtc'],
                          'CompletedAtUtc':proof['CompletedAtUtc'],
-                         'Qualifications':proof.get('Qualifications', []), 'DomainCoverage':coverage})
+                         'Qualifications':proof.get('Qualifications', []), 'DomainCoverage':coverage,
+                         'SemanticFiles':[local[file] for file in semantic_names]})
     return records, receipts, registry_hash
 
 
@@ -383,6 +394,15 @@ def validate_sources(source, contract, tenant, now=None, identity=None):
                     {'Producer':r['Producer'], 'Message':'Partial AD coverage accepted; unavailable domains: '
                         + ', '.join(r['DomainCoverage']['UnavailableDomains']) + '; no historical exports substituted.'}
                     for r in receipts if r.get('DomainCoverage')]}
+    semantic_files = [record for receipt in receipts for record in receipt.get('SemanticFiles', [])]
+    for record in semantic_files:
+        if (record.get('Status') != 'Success' or type(record.get('Errors')) is not int or record.get('Errors') != 0
+                or record.get('IsPartialInventory') is not False
+                or type(record.get('Rows')) is not int or record['Rows'] < 0):
+            raise ValueError('Incomplete semantic evidence artifact')
+    evidence['SemanticFiles'] = semantic_files
+    from workplace_device_identity import qualify
+    _, evidence['DeviceIdentity'] = qualify(source, contract, identity, evidence)
     evidence['LicenseCoverage'], evidence['LicenseWarnings'] = assess_license_coverage(source, contract)
     evidence['ApplicationCoverage'], evidence['ApplicationWarnings'] = assess_application_coverage(source, contract)
     recheck_sources(source, evidence, contract)
@@ -396,7 +416,7 @@ def recheck_sources(source, evidence, contract):
         check_publication(source / receipt['File'], load_json(source / receipt['File']))
         if sha(source / receipt['File']) != receipt['SHA256']:
             raise ValueError('Source proof changed during preparation')
-    for record in evidence['Files']:
+    for record in evidence['Files'] + evidence.get('SemanticFiles', []):
         if sha(source / record['File']) != record['SHA256']:
             raise ValueError('Source changed during preparation: ' + record['File'])
 

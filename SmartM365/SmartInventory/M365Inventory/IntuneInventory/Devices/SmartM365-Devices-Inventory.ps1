@@ -18,7 +18,7 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.20
+1.21
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -246,7 +246,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.104' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.109' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -305,6 +305,7 @@ function Get-SafeProperty {
 }
 
 . (Join-Path $PSScriptRoot 'SmartM365-DeviceHardware.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-DeviceIdentity.ps1')
 
 # Helper: Build Entra device map (deviceId GUID -> {Id,DeviceId,DisplayName,ApproximateLastSignInDateTime})
 function Get-EntraDeviceMap {
@@ -347,6 +348,7 @@ function Get-EntraDeviceMap {
 # Returns the fixed inventory schema (column names) in the exact order
 function Get-InventoryColumns {
     [string[]]@(
+        "Identity Status", "Identity RunId", "Identity Contract",
         "Device ID",
         "Device name",
         "Enrollment date",
@@ -402,7 +404,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.20"
+$ScriptVersion = "1.21"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -511,16 +513,18 @@ try {
         $allPlatformDevices = @(Get-MgDeviceManagementManagedDevice -All -ErrorAction Stop)
     }
     $managedDevicesCollectedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
-    $fullManagedColumns = @('ManagedDeviceId','AzureADDeviceId','DeviceName','OperatingSystem','OsVersion','ManagedDeviceOwnerType','ComplianceState','ManagementAgent','DeviceEnrollmentType','EnrolledDateTime','LastSyncDateTime','UserId','UserPrincipalName','Manufacturer','Model','SerialNumber','IsEncrypted','TotalStorageSpaceInBytes','FreeStorageSpaceInBytes','CollectedAtUtc')
-    $fullManagedRows = @($allPlatformDevices | ForEach-Object {
-        $fullRow = [ordered]@{ ManagedDeviceId = Get-SafeProperty $_ 'Id' }
-        foreach ($propertyName in $fullManagedColumns | Where-Object { $_ -notin @('ManagedDeviceId','CollectedAtUtc') }) {
-            $nativeValue = Get-SafeProperty $_ $propertyName
-            $fullRow[$propertyName] = if ($nativeValue -is [datetimeoffset] -or $nativeValue -is [datetime]) { $nativeValue.ToString('o') } else { $nativeValue }
-        }
-        $fullRow['CollectedAtUtc'] = $managedDevicesCollectedAtUtc
-        [pscustomobject]$fullRow
-    })
+    $publication=Get-SmartM365CurrentSourcePublication
+    $identityRunId=if($publication){$publication.RunId}else{'preview-'+[guid]::NewGuid().ToString('N')}
+    $hardwareMap = Get-SmartM365ManagedDeviceHardware -ManagedDeviceIds @($allPlatformDevices | ForEach-Object { Get-SafeProperty $_ 'Id' })
+    $identity=Resolve-SmartM365DeviceIdentity -Devices $allPlatformDevices -Hardware $hardwareMap -CollectedAtUtc $managedDevicesCollectedAtUtc -TenantKey $global:SmartM365TenantKey -RunId $identityRunId
+    $allPlatformDevices=$identity.Devices
+    $fullManagedColumns=Get-SmartM365ManagedColumns
+    $fullManagedRows=$identity.ManagedRows
+    $identityColumns=@('RunId','ManagedDeviceId','ContractVersion','Resolution','EvidenceJson','EvidenceSHA256')
+    $identityBaseName=Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_DeviceIdentityEvidence'
+    Export-SmartM365Csv -Data $identity.EvidenceRows -Columns $identityColumns `
+        -TimestampedPath (Join-Path $OutputPath ("{0}_{1}.csv" -f $identityBaseName,(Get-Date -Format 'yyyyMMdd_HHmmss'))) `
+        -LatestPath (Join-Path $LatestCsvFolderPath "$identityBaseName.csv") -NoWeeklyHistory | Out-Null
     $fullManagedBaseName = Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_ManagedDevices_All'
     Export-SmartM365Csv -Data $fullManagedRows -Columns $fullManagedColumns `
         -TimestampedPath (Join-Path $OutputPath ("{0}_{1}.csv" -f $fullManagedBaseName, (Get-Date -Format 'yyyyMMdd_HHmmss'))) `
@@ -537,9 +541,9 @@ try {
     # ------------------------
     # Build result objects
     # ------------------------
-    $hardwareMap = Get-SmartM365ManagedDeviceHardware -ManagedDeviceIds @($allPlatformDevices | ForEach-Object { Get-SafeProperty $_ 'Id' })
+
     $hardwareColumns=@('ManagedDeviceId','azureADDeviceId','serialNumber','manufacturer','model','totalStorageSpaceInBytes','totalStorageSpaceInBytesStatus','freeStorageSpaceInBytes','freeStorageSpaceInBytesStatus','physicalMemoryInBytes','physicalMemoryInBytesStatus','CollectionStatus','CollectedAtUtc')
-    $hardwareRows=@($hardwareMap.Values | Sort-Object ManagedDeviceId)
+    $hardwareRows=$identity.HardwareRows
     $hardwareBaseName=Add-SmartM365MaxItemsSuffixToBaseName -BaseFileName 'Intune_DeviceHardware_All'
     Export-SmartM365Csv -Data $hardwareRows -Columns $hardwareColumns `
         -TimestampedPath (Join-Path $OutputPath ("{0}_{1}.csv" -f $hardwareBaseName,(Get-Date -Format 'yyyyMMdd_HHmmss'))) `
@@ -560,7 +564,8 @@ try {
         # Entra correlation (AzureADDeviceId == Entra deviceId GUID)
         $entraInfo = $null
         $aadDeviceId = Get-SafeProperty $_ 'AzureADDeviceId'
-        if ($aadDeviceId) {
+        $identityConflict=$identity.ConflictIds.ContainsKey([string]$devId)
+        if ($aadDeviceId -and -not $identityConflict) {
             $key = [string]$aadDeviceId
             if ($entraMap -and $entraMap.ContainsKey($key)) {
                 $entraInfo = $entraMap[$key]
@@ -569,6 +574,9 @@ try {
 
 
         [PSCustomObject]@{
+            "Identity Status"                        = if($identityConflict){'Identity conflict'}else{'Consistent'}
+            "Identity RunId"                         = $identityRunId
+            "Identity Contract"                      = '0.5.0'
             "Device ID"                              = $devId
             "Device name"                            = Get-SafeProperty $_ 'DeviceName'
             "Enrollment date"                        = Get-SafeProperty $_ 'EnrolledDateTime'
@@ -768,8 +776,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAOpc3LtfnNiebo
-# 2+GIPTQMj0oa2BbemnrJd4oKIPAbjKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAw+4byBj7I5csD
+# szF927moYdtDS7JR8PDLvzCGjI/Kl6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -902,31 +910,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPxmA5shCGwvMF82pUTwzGwxV2+qYJZl1f+5gVUdJlR6MA0GCSqG
-# SIb3DQEBAQUABIIBgG9bNVr5nKG0PqUlFikS1tX8kjA1+Y3RDPz4KsXhAIJdjFVl
-# b5FkL2wrsKW+UdoH+fC1khELM28hGk3jmVBkBVilSZRDvtIP8gBXIdf3qgE+50k6
-# SDfjJWpX9cARKK8tM/f5k5bG8vWbphmrGoGeZVkpU5U7EOPRWf7eYcJdmsVfrYhS
-# XXDLI9/aG9P3hZSV/hBbcN70wfNITOTbYjZMxaXJg3QaIcXw1ZAvg4VtqQLD9V52
-# E+r4nKrgWGv9SZrOkLjt5KaQKjrN/cLrnO0XUtK5E3FUQcpjjNKnQlJbJkxU+IjN
-# TVEvoQ3osYFVesWSyy92mxQEZ4yHc/AgiR2D58u7L+BKu9LVtNp+oruUIeDRtsYC
-# LKnZvW+jha0YvOFym9uojIeYAn2bBjdYf1HMow5IVpq528web+t4DV6wE5QQXDjh
-# G5iOyXV1PQv9FCv/qdARxFtdTNVjexB39/OFQkav4HQmFAv0Tv9hyALV3kG0ug3q
-# JHZUQyd4OCA4I2/656GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDg2B/yCRaDTxPDIoUCHbJIDMowd3UUwpQLQcf9Y5ZqmMA0GCSqG
+# SIb3DQEBAQUABIIBgH3vD3il3y0W0ItWSSz/vWcdGMKc6SmY9kygbCchmnPlDZvI
+# lJ4U77AY9Be9Ue6B6oEzD78mQhIhMwv28ui86Cg84WKW3H6w4gmYpVL+K24A83lu
+# QV1u1BCx+oIZJHEC8+OA6kRAnUMNXLMgIjxGYFNNGWCk2NahuA7SAJKn/s/45pJ8
+# 6LI2mD4FCYP6xarigs56ohiM3WcLdxlXwLKMfJsN1Ywo47xjg0PelVsutd2psh+a
+# ccw1l9Jksaum5MkneEM1Ca0mSKuqRmzc46PxdwXZG+DpoISVpEVMzZkfHzj+V0kE
+# 0zOuCCOsEyMstWQgJVR7z4rVvqwMRjxjWkDF0q6w4nhQ4u22xw7V/Th9Fqi3H9rD
+# 1BVL52gTSjGQgKBqxfITj5eooDiOddX5Sg6IeiXMk0fg9jue+WnQuLvQEl/edQpf
+# QMR9KTM7agcfXfKuqTkvgQx2JJMrBOJwuYn5kQmsT8la/l3yAS7bNm4H28scOd7r
+# M5fZmFQykJ0nC/vnQ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
-# MDRaMC8GCSqGSIb3DQEJBDEiBCDyIvffq/8qEEpV8I8jkEKTeDgJMAK0Xs6Y77k1
-# aIsllTANBgkqhkiG9w0BAQEFAASCAgBJwYKHgvBJffSMQ5OLLNaKOLULBoiUbm2v
-# ucxRJs1iiePjxP/w6ISaB2nSiYDDWP5KJTlGXS10gdQBhY23qX39E3JzEI79SBEc
-# dSIsvvEbzGHMmpOE8+0oPMoBor8wmsJrh8S2ROOMjuLzLQY4Xhmsyjqju0lwmuai
-# vQrJ9rXgHOCNaskFMBFnoHcZKy3hIPvSa0P+Lr1hbPOiefzPFYZL31B0SUfC+CeT
-# 9Zf60PgiqSprfpScXZkSQGJ8FkQIoCAJ5GJyrUzLW/iQQglmAssW9Ixo7YDfyiYH
-# uRK4SMqUwikDNSutWO3rayrXNnIOCUdhuni/OrwEltaiGWs2DhOzOTXGEvcL2fnm
-# QCpVetGYHr1oN80O4zPp/jsZGQBDpEfRwutQDI3i49FEH/nRZ9vqhBYyE/sODxyr
-# XYJrdX6Gz0YutuMF/jl10KYq8wbVF6mzeJ6xmmN4OjfglN1UmA6HrZOrvZEbvZUy
-# 4KVmORnK5PssFjzB8fpdr78s2HZrm7xfeRiJ3BKvEte26xWl1nobJ35yJAh5z7e8
-# iEWN75SqhhUOWZvQYWBeJyxjDQOgJbBAz237LFYUVyarKQamYtjHDV5Vgk/PNxUV
-# UT3ynMwFMSRTJGpvtcM6umpLa2KNOsYC6yBJoJwcYN/YRqSGK4r6OHL0kbz9Df5O
-# jUvif6HwBA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTJaMC8GCSqGSIb3DQEJBDEiBCDErS3k7QTk25jOT67nCrD9Sf0UNkSBby1sLCM4
+# Nm49STANBgkqhkiG9w0BAQEFAASCAgCe/6HmjQQsmKmEoK3+7BVkBk89j8pLjlYn
+# duuEfkHaT1JjmIc48GgeOGtLSzB0St8lrhS3VtyPpTZOYpytIDaZBkWrejYWZKOK
+# eBx/4BiKvPdiBkH4SV6p18sYOhFd0aFp04ozte+uqztDaBWXXR8qEfXPLxXVLnN3
+# Hut/FP5F+fBagwTj4KmjRRlCVAixcl8EmGPmK/U+tdIjFEYveUBiGrNJlkjIli+7
+# ZVU9OaJ+QBXCU37vDBOG0AWrSInIBBk4LrPFushD16JM4Rz5o48iwjWsd/z09fSk
+# 8i26RboXgFFvatGpG2gJtRVPkyyNw/RwakLy1W0xBaGdacMBUdCy6fXrNwvXwNem
+# E8W9/0BpSzF+JxfGaNblD4mBdkScQn/DKjm2dE1V2RTK1mJq2W00Wl9DC5o8mWbH
+# VGvFMvdKnUuGH9kqVTvRAbKhiy54zkNRN6cFoX7ll0FIHrl9r5SSnWpmFAetKZZd
+# qS0/6MkGszSHaPF9PpZ4aH9bM2VmCnO83ToqQyLYWAMBBzIzkR5cKWUKPAQuksio
+# ljsv/pd24peHpNCDg9+AkPUq3xd1VhZASWSwSILD/tSRTYQ+hVFB9BgIaus894Bn
+# XpO2eYof6EZLZ9XGRl6g6oq5eeMSmnU8TCY40CwocsckUlOa3qt+QK9AHKCOpWoV
+# VCufGZ10WQ==
 # SIG # End signature block

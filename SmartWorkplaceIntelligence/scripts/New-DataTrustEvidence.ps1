@@ -1,4 +1,4 @@
-# Version 1.1.1: Microsoft 365 Apps activations source with an acquisition-age warning.
+# Version 1.2.0: qualified device identity conflicts remain usable with explicit warnings.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -96,6 +96,9 @@ $sources = @(
 
 $lastRoot = Join-Path $DataRoot 'DATA-LAST'
 $evidence = [System.Collections.Generic.List[object]]::new()
+Import-Module (Join-Path $PSScriptRoot 'DeviceIdentityEvidence.psm1') -Force -ErrorAction Stop
+$deviceRows=if(Test-Path -LiteralPath (Join-Path $lastRoot 'Intune_Devices_Inventory.csv')){@(Import-Csv -LiteralPath (Join-Path $lastRoot 'Intune_Devices_Inventory.csv'))}else{@()}
+$deviceIdentity=Get-DeviceIdentityQualification -LastRoot $lastRoot -IntuneRows $deviceRows
 
 foreach ($source in $sources) {
     $path = Join-Path $lastRoot $source.FileName
@@ -176,6 +179,11 @@ foreach ($source in $sources) {
         $recommendedAction = if ($monitoring.Available) { 'Maintain optional AD monitoring; unmeasured checks are not healthy results.' } else { 'Refresh optional AD monitoring without blocking other evidence. ' + $monitoring.Reason }
     }
 
+    if($source.FileName -eq 'Intune_Devices_Inventory.csv' -and $deviceIdentity.ConflictCount -gt 0){
+        if($decisionReadiness -eq 'Ready'){$decisionReadiness='Review required'}
+        $evidenceStatus='Usable with identity conflicts: '+$deviceIdentity.ConflictCount
+        $recommendedAction='Review '+$deviceIdentity.Artifact.File+' (SHA256 '+$deviceIdentity.Artifact.SHA256+'); disputed Entra/AD links and dependent reconciliation are indeterminate.'
+    }
     $evidence.Add([pscustomobject][ordered]@{
         'Source Key' = "$($source.Domain)|$($source.SourceName)"
         'Evidence Domain' = $source.Domain
@@ -241,8 +249,8 @@ $evidence | Sort-Object 'Evidence Domain', 'Source Name' | Export-Csv -LiteralPa
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBxzqNwu/yi+X7h
-# IuC+DzpE3RySPKo4K3SyoyjGzSPvIqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCxuq/GWu77oq1w
+# GLxGBhBtXGqf2UafQUfBageyaixx/6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -375,31 +383,31 @@ $evidence | Sort-Object 'Evidence Domain', 'Source Name' | Export-Csv -LiteralPa
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDk1K5GnvpK0zUPi9DmxSJGZXUIEhfkCkj4vVNbF7ij0MA0GCSqG
-# SIb3DQEBAQUABIIBgD1ZeMQwL4mVDbjAKdMJhstIZT+9MAXXoLQy/9JQsBLCHdJi
-# dr7Z9omEBqaLoWME88S98LSxCXrezroSE5MktbEPO18dJ0DaA5zy21Sr999yhCMz
-# AlWhtTf/runk+SDEzo22cmnjR5ZiS2HlYBEGvmbVfDaN9yqOrI715KCe8Rg+jX89
-# z7ggj4RspUNue+AXfvu02xzW7ilfDZzc4YYplFre0CxsV1pEgYD2V5rcQpr2Rh+H
-# 2yhpI4tTVyUr+AkG0kd506T+koFrMsem70Wr6Oz9t++0YBUC+3RL4u+g7v+PK9LW
-# /CKcRaOhvNKI8U+YXdUnslo9VKfrjMwZDkrATcP3C8+Taj/fhNK01NG2LZrsxJO5
-# E6JWH0eHy/UOnmLrblLREy6QOgRlAK9uk6eTtiIljch7VSMCxff+/QyRPu1XdCMV
-# GC4iRmAq1dSvUE6Msum3RJCu5lwFLSMiaxY05XGkGohyE9hD5OjJFXCagQHniEmE
-# WSnpSC1hFe2c4q/aHqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKoDhV3Psd+TUV7YxUF1JUGm/WCDjH5F/oJ09L/fC5LNMA0GCSqG
+# SIb3DQEBAQUABIIBgHd8Xv1kxdbso+5a83AEsndX0Az1lp1++tRn5OC1w364czMz
+# 5ifsI6rHZoSQtdzqv4mXmVVhh9iNHCQWFrZgVBAbXT580oVoOGhZUX1V5tDlUmfc
+# ZzR/whHuyIFpxG/pcpUQKsj9bKmikb3tn4Ftkn3gJQUgIVOwcMyhge4TTO9bwxqv
+# R/PLBtcvf8SAgn+qd+2wt77+C3KhbWDieSqopDPEnI9K2arz9wnSRqw44y7pwQHw
+# 8qbEo964jeQ4ney/oEjkEvkkC0GxJimX/a9AO1X7xfXhgjpD1/XtcCx3OTwsNhkQ
+# j1fxllcKMBvCklVPbrvWpMflF0VCWKFT+YRQ+cHD8OqAuPkC1qRajz5e+pdwRLHB
+# qKKjrQFuw3+Jh/ns0jSQueaFlsCa9XSDw0VxWWbMJU/6m5rjDnu8KMe915FDCHz3
+# I4oSV0cgakbrq5k8oalOm+bJN3XzOcpqv8/p6aJAap+CNNQp6/8kf0r9oOM2PsMm
+# MxZ57UKLgbKh7/P/66GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcwOTQx
-# NTNaMC8GCSqGSIb3DQEJBDEiBCD1416y0xwynLb/+4s+yGuIq4T6jWE2++jOMNQf
-# CcWhvjANBgkqhkiG9w0BAQEFAASCAgCoW/6wYSLPQChH+Rgtms69m9JMf0GE8FIm
-# 0GTLOhHSJ5C+ZaxZo7zTgihOkC0lzTX97AoSGlPOqoinN64OLQbGu1hYgHNwEvGd
-# f8WlXYCOK7K+U/0/yHtqH/XyFvk8s9qM4vWUhAIT/G8x9Q7vx+8Weh91akpd4VHo
-# 5Vl+L8l4AskVNwdqq2SLR/FpZqfH7xaEo5z7XHuSaogI0oG6Cu0yFDUR5T5edjok
-# EbGmE1ZOPW0RHOzpEb5cW7xrdyafuhT6Z4Z+8xx3gbT16cb/G9fAjOWMlP2Zb3dT
-# OfrEHK8GwffACtIoqfdRNeGoJ5VXU8ROZwi+2NJ3BAx7FSW8loXKLOZPss8xxIfA
-# /75Pme6VJMH5dr2xeSkT7VCYJTSWSRc84aQuHcYO+PEZxu5AEpzIpjd2Dr9WBs88
-# YwNUuK0/yOqAmVmTDbmADQ1cMxC4dRlCw1wWcSqvdKtmj6H9MAUyJmajtqWo2dA+
-# dDDYXSNR3qFrzhJIVsBrEdR5Y9+4rY52GmMqUBgZnBzBOPT3TGdp8eYh39v49ald
-# t/rnslLDBlEL5jGxooN6FTZdfHN9HsJ2di6Ggt1/rE202ry9pnS+CY70JgS9HljR
-# oA3TpYo09AZOrrgSeHuYS4sQ7OdwEC5pMAiULfgEirA07S6DWeJFHh6rJ+n4YAMm
-# y6yHJ4PONg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTRaMC8GCSqGSIb3DQEJBDEiBCAkeb/l2fQbUh5BKp7qtt1gi3XHAY3qQYoEQPDq
+# SCqGgDANBgkqhkiG9w0BAQEFAASCAgAzO4xb7wgKVJxD52tEpnM/18tHq9UQ1CP5
+# Gr+S/pShJALpGECno2PKCUIyiFJ/e71gyP54ZIOvD9l3DwUSsaSXpgGC2bbb1fqw
+# 0SjoA6IzcB8MdZSBxIwi1N95uvRVPiF13EnwjhfGmiw3URHMLnHuVbQTkCPrHmsO
+# lMZqc0GClU3rwzKZX3wVpZNxYfUSS32Ao4sM4uQTyRBb6tqIQGoths5hCJr3V03q
+# z5Xh5x5lA2nSwr98y5ppVxjRkXioBq57rq7tyZcTE8M37UN8CwXol/AhVmM4DQ88
+# q+TM3czP2z2HGZgnrtsRBs9U40PX0wluaAcjvMbhImqdVU80ggQxJbQjfFGI4L0X
+# ESEI4+ef5gZKgbeUNXmiiYbmXMl3WdzTYT3s7WIx5JPljcF3XmDiOXilwUVSuVHq
+# BoP9Itbh4tBDkMqzJUDf6A3WIxWo4npVcpmHIkPZD5y/4molAS0KyJWudT/VYfwU
+# fqehBXXe48SKrRReC2d3qCc1vlqw0KLirI9FjvBzXe4Ib+37V635dkNR4vGXe5O+
+# BsTFSaSsq9UFfwNbdJyWUZyc+HBKNrSbxqllljBNWjKWpTGJEgcHoz6VxSL2qQdS
+# YeUeQ8an8E8qJjiTSMTdbZnWOKBBK/O5YlsCnDiScf/OcMUOS1XcrUMqCC42N5mt
+# 5SMvibg9UA==
 # SIG # End signature block

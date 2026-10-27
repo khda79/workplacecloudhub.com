@@ -43,7 +43,7 @@ class CountryTests(unittest.TestCase):
 
     def test_native_contract_declares_break_and_exact_legacy_status(self):
         config = json.loads((country.REFERENCE.parent / 'native-evidence-contract.json.txt').read_text(encoding='utf-8-sig'))
-        self.assertEqual(config['version'], '0.4.0')
+        self.assertEqual(config['version'], '0.5.0')
         self.assertEqual(config['countrySemantics']['legacyStatus'], 'Entra country unavailable (legacy batch)')
         self.assertFalse(config['countrySemantics']['usageLocationFallback'])
 

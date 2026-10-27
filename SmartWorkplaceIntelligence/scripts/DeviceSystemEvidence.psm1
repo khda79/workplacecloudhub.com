@@ -1,4 +1,5 @@
 ﻿#Requires -Version 7.0
+# Version 1.1.0
 # Offline Device System preparation. No collection, refresh or publication.
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot 'CountryEvidence.psm1') -Force -ErrorAction Stop
@@ -118,7 +119,9 @@ function New-DeviceSystemEvidence {
         $match=if ($null -ne $inventory) {'Matched'} else {'Unmatched'}
         $country='Unknown'; $countryBasis='No unique primary-user country'
         $upn=if ($null -ne $inventory) {Get-SystemText $inventory 'Primary user UPN'} else {Get-SystemText $row 'UserPrincipalName'}
-        if ($match -eq 'Matched' -and $upn) {
+        $identityConflict=$null -ne $inventory -and (Get-SystemText $inventory 'Identity Status') -eq 'Identity conflict'
+        if($identityConflict){$countryBasis='Identity conflict; attribution indeterminate';$issues.Add('Identity conflict; disputed attribution excluded')}
+        if ($match -eq 'Matched' -and $upn -and -not $identityConflict) {
             $userKey=$tenants[0]+'|'+$upn.ToLowerInvariant(); $user=$userIndex[$userKey]
             if ($null -ne $user) {
                 $primaryCountry=Resolve-DirectoryCountry (Get-SystemText $user 'CountryOrRegion')
@@ -262,8 +265,8 @@ Export-ModuleMember -Function New-DeviceSystemEvidence,Get-DeviceSystemEvidenceC
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBbwJq/35xbwhqY
-# muMDGjmeDRaAWMhgGCGVjdjAvmyzVKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBe8KyDI+dIQEan
+# bWFAWRAaU4EaCdFAvEHtByzyga3F16CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -396,31 +399,31 @@ Export-ModuleMember -Function New-DeviceSystemEvidence,Get-DeviceSystemEvidenceC
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHd/Qge1S5ozHhrykk9UEdJMPUWevBH8Ttgbw9vqAxSIMA0GCSqG
-# SIb3DQEBAQUABIIBgC+yc/NKafn7iRr6rUWW2Q2LMAnLYmS0fw0SHS8AL/VC02ig
-# CoRQiETWC3qBDq2ZlaBVh6/U/pFgqN3+LDEUpYzGQsW9Utn0XNiNcGtyJZJBvSe+
-# EKHEzXv+gYe58hWvBeuNmu7M+F4ZlojdU/0B+slftVOChQsWoAkw2j/6ZzLx15V1
-# vBPfS9G7AT2XZFVGE56rGvX+AQ433/6wRTxNxsTZTCbHhfPPaL8FqRtfockzr6Dv
-# TbeuGC9yF+qVZyRbYOPeuzOQ/BAR2KxmJA4l01OgmPw1OvApemQlVpyV3+eIMldk
-# 8rNgDg88tktC/ONq2Nq88edanOF48v1tBGQIv4m24e8lDy11AE1aPNg/hZM1YqSm
-# lf6+q65eT5I01m/QHP41HG8Mba28DdtUQ8+m9Zyut1a0ziDLKrj1rqgwT7KN45yN
-# VKa9fayzh0aMjnKSBJHVhljFfWolCPoc/IkVegq9DF/i+YrNquSRYv+W/wU7ZFk/
-# 2H2xdIZ96H+h40fTTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOQ8Q9hD8vtqJAPFmdhUa1+auwijIPsp7UUDR9dVQqm5MA0GCSqG
+# SIb3DQEBAQUABIIBgIbrF+F6wlq1ONJPu0mNmPHpTVQ3pSvjY8qCEmVZkadTnz2B
+# HbIxjYVPspOL8Ry8dZa0SuJjg3lJdry694OR0lXyblMYiBWL087gjLyi2QmrZJ5M
+# EsCNczBgYRRkTb8EEspTbI1cudKY/bg2wmqqhD+DFrSPeeWJBH9WVnlRlma9MWll
+# M+vCjJBDW9LGjuUpHdrEyplj0ZrgRUzUS6NHl38CZPYIxqfTO2Bh8X1QFoKHygZM
+# 6z8DG7Ydo+qP5gMquhqYOPRIU6IHSIPgbUPW16hyjCMKfkAcmgabo8aj3vgdRpT9
+# b7FYHIYNxO1hhuPtASHskuHAJ5BVcOaHarkd9mUEf6bOEmytC7ls7VCub238oZ6N
+# RffcDLxQwCt6C7Yle0TDRvGiu7jclEAdjENfu3mLIw3Ol1GZflC7dAq3AN8Gy82Y
+# J/oQpzsYZ4BoZD849itisK1kwZQloII12VGefVA/N2FRR41kSMQxDAz8A/mBR3Fp
+# RdHX2uJnLHNXDo3VnKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMzQx
-# MDNaMC8GCSqGSIb3DQEJBDEiBCAPoGgxItAL95yNjPxNmquKRKZt/zixIFj/dQVh
-# lGCOZDANBgkqhkiG9w0BAQEFAASCAgBUHfFu61bzkJcp0CDQ+GHCs0orhclfzUHN
-# NA2bjZ1KrMqOgnfO9O/x/YZcquaf2x2A2Q8KmBscEv5GcKL2Fzb7w3clSaZVta64
-# g6Qeh/APripcKpV4YbYsiX9nhIV+XXJ024lcPzJfq7NIkzwOL8B8EpXpUBEv9a0E
-# 2QnqDOLqWVl08oHVXiQ3w5llTh83/xJv8dE80xAuqjE8y5qfuDysnvbAcvm9Dnca
-# XkxRFMzXFbfH7kj1YSnVaSZvtpNm21Nskz/nhoJtPx2QSilcPM7+IT3OKVuWqzfL
-# J2ISN/cRdXLL3Rs9oTixKuQxnLejAHvVqYUMQePRWWIDeW1DRlF3O73taW+WDLGm
-# tsK8PCyZ8mYAlo5d90m5aa0W42j77aD/L5L4LaoUNk3CTf1zg6kLbbDH7LtOy7pw
-# 8xn0OIkD4ZmoSHH+7lbhfyeeu02wBzcPcvn/5hXlolIou2J+ZF4nhnwjTotbVchV
-# jTJ5/wSw5wEPlEuybGDoP3FndNywT87JOVyxPH7lEtsjFU0x9Q/3/FJ0aYRmP+S4
-# ouJ0H+71txZCBIXaUe88FF0jhp4mJsMucQGeqB/YEuhvHavPyA/1cwzxJbYAFZ/v
-# SyEqZPDlwIimadSmow3QzKMf70O5zU6o6xOznW0c+1lplWDqZEZK2ZqM5XK3EGXH
-# C2reNIoYiQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTNaMC8GCSqGSIb3DQEJBDEiBCDFcRfPeXuxC/lI5PztrcmtnZPD9N8gazTkPnmZ
+# 03RjDDANBgkqhkiG9w0BAQEFAASCAgCpSnAFfL5ExUZG9sSxumNiLC/3SED5PDWl
+# Tx7PaDLlkbxAWWnRbG6xHH3+sjDNAAZgRonhHxwKzCJdt33nmZBK21KdQ6N0zCUr
+# vVPWGboBc6d/+gxvs0dw+FVayw4v0uG3TuBtG6sUNgS9mx5UYe3TZDZhVYOK/+Hq
+# E9LcPs7H9IldVmrDXiOMuo27P7TLnPdDfywgQfnOXe59g0J9ypyZ+WltUzWxYSVt
+# Sk49/s7g/9mti/Uzh8r0skU/iRnSO9oxDXp02RMf/izW/ILQCDm0ohUPvxcPqUNK
+# clALQPqwZzrLBz/rqCmAkepaySo/07IsMNMfldfUs73HhLzBetqQO6t3Ap0hCQCm
+# rHPNZ1vD4XrzgdZxgY87PSED8u79SKc8j7ABjAOdDpgk8iFxy5DmObDD6Hd8u+pU
+# gy1G/+Zn3OpgSPg/6LGlsWL4AjQ+MadeAX3136Qmba5GsQZYEVg7RH2jE0SsyIeB
+# hOzMj3CCxA90jS5LEW2pzqgoJcfsB8G7+isCBDYZ92QvdpPC2fRyp5QQfndQRukZ
+# yCGQUqRtq/zaHH6YHOirAwcitgcfvIFxCACCG86n+JX8txUlz7zuh+7LbFmcx+d6
+# PK5rEFVYlTSe6/+9B18+Wkm7GZkdD5WlycdsqZL/hPR3IhmGCMzTSv6Gu5ByxGcz
+# mdaPm8A5dQ==
 # SIG # End signature block

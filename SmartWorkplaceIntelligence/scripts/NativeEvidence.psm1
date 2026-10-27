@@ -1,3 +1,4 @@
+# Version 1.1.0
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -11,6 +12,18 @@ function Get-NativeEvidenceSourceItems {
     }
     foreach ($producer in $registry.Producers) {
         if ([IO.Path]::GetFileName($producer.Receipt) -cne $producer.Receipt) { throw 'Unsafe native receipt path.' }
+        if($producer.PSObject.Properties['SemanticFiles']){
+            $receiptPath=Join-Path $DataRoot "DATA-LAST/$($producer.Receipt)"
+            if(Test-Path -LiteralPath $receiptPath -PathType Leaf){
+                $proof=Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+                foreach($file in $producer.SemanticFiles.Files){
+                    if($proof.PSObject.Properties['RequiredFiles'] -and $file -in $proof.RequiredFiles){
+                        if([IO.Path]::GetFileName($file) -cne $file){throw 'Unsafe native semantic artifact path.'}
+                        @{Relative="DATA-LAST/$file";Kind='NativeCurrent'}
+                    }
+                }
+            }
+        }
         @{ Relative = "DATA-LAST/$($producer.Receipt)"; Kind = 'Receipt' }
         $runName = $producer.Receipt.Replace('.current.json.txt','.run.json.txt')
         if (Test-Path -LiteralPath (Join-Path $DataRoot "DATA-LAST/$runName") -PathType Leaf) {
@@ -49,8 +62,8 @@ Export-ModuleMember -Function Get-NativeEvidenceSourceItems, Invoke-NativeEviden
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxKaXg2WQ5WtaR
-# DPCMSjzwV47+ceZdf90Nci3YpvybzKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDlBLtkY8+mue8c
+# eRWXY4v4uXJEpx4cUrHI+56tP3P4o6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -183,31 +196,31 @@ Export-ModuleMember -Function Get-NativeEvidenceSourceItems, Invoke-NativeEviden
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBe8pdoMh0aX3BGfVAaX5DqaKQU+EV+EV4tWuDYq5cOeMA0GCSqG
-# SIb3DQEBAQUABIIBgFFw5e0TUIGliGzlu1+pY3+UxP8rm3MzosgSB7guvFBfGmNw
-# mFFlhuToKVUAcHtbxT73nND/9hJ3W6RIgHgMkjZvDSvwv38nyvnEbGU1iNu42nqH
-# lWzgwgMYOWV2GakwCo9M6vr9ZUf7vBxBSOPrIw+YRJ10PMuViXivvtH57je+gkG8
-# 5bOGKmBFsAAreZPTh9usn6SdkN1oBWTagOPX+9KAUnYY4L3TK5Jptde8kfO/5wAF
-# AO8+Ajd4nD9tkEOq2V1pUtwQMGOfNsngbgY54kYzoe5WCwlKQW+5nAbOzO2JikJ7
-# SwHA38ZMA+9PRc+KL04Km9Orpii38S6OsQBH2g5Lwg4CmsZ2OQ2XYyHTaizaPaD9
-# 5yM2U+hz8TPK68J5ZPgCnr2AgTq3zG192q07yobyXMKlH4koNm3a/hfwh+5Giny4
-# Kpp2gKDDFALYvBWkTnlg+srhGRQ7KyoJsERjNZb1S6tjNqVXG2vJOtqTYOcL6wSE
-# ppTpE5n10wghldwvs6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIbqb/dgqHHH0B9IU4wsgyMki4XJ7WXBLXiPjmyaz6RUMA0GCSqG
+# SIb3DQEBAQUABIIBgAnQ6xHpslrNlOOtm6mAq0JtPw/sjNdfhD1/adGZ7ojld4ff
+# 07VnLkaBhQCYQCaxD+wgaZIWLN8eLATTWGwKIxlfqWG5oh9AQad4UxMW8XbQQdxv
+# LDGTvqHQUYXLaZ5CqsOAN5rnn+RwlqGegJol2jGQ9tusCwxdy20T/8eshdT9cmRV
+# 9WyBYGkdnvbuWvhdxdxemiOKfbq0R3lMwZxBt+MyTx5vB3kjW6s1jsGSPw6obXgf
+# dU3r63y8jRRNCOLl0aG5E6b6WHi5iCVwQ+Qrrgb7YtQwvRpmExtkHMD64F2p/ok8
+# cgJcKq6/EFKATNbWD1c4bTeRjK4kOhy4KQ2eS4UNSt3av+8lpXssDWfXsMG0/Yze
+# cwzPBM7Zu2pbzNXwm6pIl4iHAW2/qV7dKMEUscnqDrldrFVuPyqZth9BO+P/7L3o
+# pbo2/PAIR/cuFElO1TxATbxFR075sjfFZ2nXHMd7rSzBfKLscntmWb10BEGXfoat
+# taDhRD98dwIfb4dvtaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQyMTIy
-# MDJaMC8GCSqGSIb3DQEJBDEiBCAVSwWOcihF3yxM6d0CN80IOKIFSlz7oEnolFbO
-# 0E5HdTANBgkqhkiG9w0BAQEFAASCAgBaHz52MwjX9X4NYG3uykzVOgPQ0WC4AxlP
-# Mb4cypk6OMAhIUkunrKFMRL9NtdhhxXWpt/cXeAptE12y8XGSW4CzXYELBzraDI7
-# P+s8yJl+tRT6AUOOUYAiiLEq9bhdhKAaSaJJF+/lsFKwjcPkwafYHzr/87Y5tHzh
-# IdRPQJQ+E6wKwhSixlDm0XfG7hWRJotpQhK30muRyXGZcTi7fXqH0YPvAqRHxmmS
-# RM+Dt2Ar3ZrjoceZPsTkWewEaUKkM3qoQ6hdibNK21p0J1zq60jxj2FLCIC1LEH5
-# fVBRmwl/UbUH8Q6JImlmNgo2ZacIfeGYvLASp88i3NGo7Pc+DKdGEunCOzWCfoSN
-# NKL8wwVKV1QO0OjNSXjgYx7pS6l79mMqky4cZGV0TFGv9bDySWJAB7tgUZfZIgGT
-# 8lm+OlK/gx2f3J6nTXXyFKb8f0INVbKoGhHPltBOe/2FReNC7m8TOAWxyb81hvG+
-# tWgGGcTXkzDAw7loE3x3rxPRlpEyy+GahJNPymyizkvM9kCudlSnPjqqtWJfFclP
-# 3z3Kunu/+isBEGX3GZJHGpg7oUPc8m3sD2jGX7z0DGkF1C0t5Mz955siy20ElRVO
-# JA4dGxFNfZI/VYFwOBckpBhtI0Nzu5/V8OeV/WbT2gGV55cvYEhe/otQg+c17c4A
-# /yYA+RuJng==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTNaMC8GCSqGSIb3DQEJBDEiBCCoAO70R5YuVH256JUahrkg7mMHQBZQh5Ls/08o
+# YgppXTANBgkqhkiG9w0BAQEFAASCAgB29j8AsAtynt3GLjy4o5se9J1Vm81uBDCl
+# oyhyPx+h3DzPSrZWkk8yS4fOQc971nCoiomfBhdLHtf75sMzxYteRt0BMmdb9YJ8
+# iyRXkbApLwRUdeT+/g1aUL+dtzljeJWEStHJmOQMLCO4SNgIMn23i2VPi79z0MM5
+# WpRB/Dr9fAHN1BOSyNT7KJFRnsQmQF5qWkGvBr5gJmssBcG552UR3ikAD8p4Iojz
+# 0aCjc5tRjYJOx1S2xXKLoGZesutNWE5HnLPSu4vpTl4k7jPFm5566pwxUx/17rtx
+# 5idge0/hBVERY7nJAo+n1mFnbY/Mk0058FECBjrvx0bwVoYp1EjVqVSWc1dmryz1
+# vEZFvWfpNTkKWrq0VkB0puD/x/rekZzf27Ymbip5H88FCJIK578M46jhQq7UfLTO
+# ZoP2VZ9BrOjmEIuUIr4639PZjGPWkdDW+lWgD6lj1ix+lZaRgsGxMbeRSzJo9CjR
+# j6zy+ma2atkyAYcuDw1gP/FDx1Qb7kY77ek9SqeACpCoXmnrwGAC6ui+y1XKwsfm
+# Q2HeG1kWZD4Pqws8q6f9qQEo3fVz9E4efJBytKA2tjqvuat6M98bw5U8TUDj7DXa
+# FGmXtD6ipemA6SXeUrs9258oxFp99CMOIiuVE/xd+1eyVyzBKQRtIztMXn5iMAW6
+# Co4xzjJetA==
 # SIG # End signature block

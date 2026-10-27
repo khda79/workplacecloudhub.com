@@ -18,7 +18,9 @@ from workplace_native_sources import rows, normalized as key, utc, application_c
 from workplace_mailbox_identity import reconcile as reconcile_mailboxes
 from workplace_native_types import count64, source_datetime, validate_value
 from workplace_country import normalize_country
+from workplace_device_identity import qualify as qualify_device_identity
 
+VERSION = '0.5.0'
 UNKNOWN = 'Unknown / unassigned'
 ZERO = '00000000-0000-0000-0000-000000000000'
 
@@ -314,13 +316,17 @@ def build_tables(source, output, contract, identity, evidence, now=None):
 
     entra = index(list(read('entra_devices')), 'ObjectId')
     managed = index(list(read('managed')), 'ManagedDeviceId')
+    identity_conflicts, identity_summary = qualify_device_identity(source, contract, identity, evidence)
+    disputed_correlations = {key(r['AzureADDeviceId']) for mid,r in managed.items() if mid in identity_conflicts}
+    def managed_correlation(row):
+        mid = key(row['ManagedDeviceId'])
+        corr = key(row['AzureADDeviceId'])
+        return 'intune:' + mid if mid in identity_conflicts or not corr or corr == ZERO else corr
     # Multiple Intune records can share a correlation ID. Retain all source rows;
     # choose a deterministic candidate only with qualified acquisition dates.
     candidates = collections.defaultdict(list)
     for mid, row in managed.items():
-        corr = key(row['AzureADDeviceId'])
-        if not corr or corr == ZERO:
-            corr = 'intune:' + mid
+        corr = managed_correlation(row)
         candidates[corr].append(row)
     selected = {}
     for corr, records in candidates.items():
@@ -341,7 +347,8 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     for corr in sorted(set(selected) | set(entra_by_corr)):
         md, ed = selected.get(corr), entra_by_corr.get(corr)
         row = md or ed
-        primary = users_by_native.get(key(get(md or {},'UserId')))
+        conflict = bool(md and key(md['ManagedDeviceId']) in identity_conflicts)
+        primary = users_by_native.get(key(get(md or {},'UserId'))) if not conflict else None
         sync_raw = get(md or {},'LastSyncDateTime')
         sync, sync_status = qualified(sync_raw)
         owner = key(get(md or {},'ManagedDeviceOwnerType'))
@@ -355,17 +362,19 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                 'ManagementState':'Managed' if md else 'Not managed by Intune',
                 'SourceSystems':'Entra;Intune' if md and ed else 'Intune' if md else 'Entra',
                 'AssociatedAccount':primary['UserPrincipalName'] if primary else 'Not resolved',
-                'AssociationStatus':'Resolved' if primary else 'Unresolved' if get(md or {},'UserId') else 'Not provided',
+                'AssociationStatus':'Identity conflict' if conflict else 'Resolved' if primary else 'Unresolved' if get(md or {},'UserId') else 'Not provided',
                 'PrimaryUserSourceId':get(md or {},'UserId'), 'CountryCode':primary['CountryCode'] if primary else '',
                 'CountryLabel':primary['CountryLabel'] if primary else UNKNOWN,
-                'CountryStatus':('Primary user Entra country' if primary['CountryCode'] else 'Primary user Entra country unavailable') if primary else 'No resolved primary user',
+                'CountryStatus':'Identity conflict; attribution indeterminate' if conflict else ('Primary user Entra country' if primary['CountryCode'] else 'Primary user Entra country unavailable') if primary else 'No resolved primary user',
                 'SyncRaw':sync_raw,'SyncUtcDateTime':sync,'SyncStatus':sync_status,
                 **lifecycle_date(ed or {}, 'Creation', 'createdDateTime'),
                 **lifecycle_date(ed or {}, 'Modification', 'lastModifiedDateTime', 'ModifiedDateTime'),
                 'SourceCollectedDateTime':acquired('managed' if md else 'entra_devices')}
         item['DeviceSelection'] = item['DeviceName']+' | '+corr
         devices[corr] = item
-        if md and get(md,'UserId') and not primary:
+        if conflict:
+            finding('Device',item['CmdbDeviceId'],'DeviceIdentityConflict','Independent Intune observations disagree after three bounded attempts; Entra/AD and derived attribution remain indeterminate.', TenantDeviceKey=item['TenantDeviceKey'])
+        if md and get(md,'UserId') and not primary and not conflict:
             finding('Device',item['CmdbDeviceId'],'OrphanPrimaryUserReference','Native Intune user ID is outside the collected Entra user population.')
         elif md and not get(md,'UserId'):
             finding('Device',item['CmdbDeviceId'],'DeviceWithoutPrimaryUser','Native Intune evidence does not provide a primary-user ID.')
@@ -382,7 +391,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     for mid, row in hardware.items():
         if row['CollectionStatus'] != 'Collected':
             raise ValueError('Incomplete detailed hardware acquisition')
-        if key(get(row,'azureADDeviceId')) != key(get(managed[mid],'AzureADDeviceId')):
+        if mid not in identity_conflicts and key(get(row,'azureADDeviceId')) != key(get(managed[mid],'AzureADDeviceId')):
             raise ValueError('Detailed hardware correlation differs from managed inventory')
         collected=utc(row['CollectedAtUtc'])
         receipt=proof[source_defs['hardware']['file']]
@@ -394,8 +403,9 @@ def build_tables(source, output, contract, identity, evidence, now=None):
         for row in records:
             sid = get(row,'ObjectId','ManagedDeviceId')
             corr = key(get(row,'DeviceId','AzureADDeviceId'))
-            if system=='Intune' and (not corr or corr==ZERO):
-                corr='intune:'+key(sid)
+            conflict = system=='Intune' and key(sid) in identity_conflicts
+            if system=='Intune':
+                corr=managed_correlation(row)
             device = devices[corr]
             activity = get(row,'LastSyncDateTime','ApproximateLastSignInDateTime')
             av, ast = qualified(activity); ev, est = qualified(get(row,'EnrolledDateTime'))
@@ -409,7 +419,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                 'ActivityKind':'Intune sync' if system=='Intune' else 'Approximate device sign-in',
                 'ActivityRaw':activity,'ActivityUtcDateTime':av,'ActivityStatus':ast,
                 'SourceCollectedDateTime':acquired('managed' if system=='Intune' else 'entra_devices'),
-                'SelectionStatus':'Selected' if chosen else 'Other candidate','SelectionReason':'Native ID; latest sync/enrollment, then native ID'})
+                'SelectionStatus':'Identity conflict' if conflict else 'Selected' if chosen else 'Other candidate','SelectionReason':'TenantKey + ManagedDeviceId; Entra/AD attribution indeterminate' if conflict else 'Native ID; latest sync/enrollment, then native ID'})
             if system!='Intune':
                 continue
             bridges.append({'TenantIntuneDeviceKey':native_key(tenant,'intune',sid),'TenantDeviceKey':device['TenantDeviceKey'],'ManagedDeviceId':sid})
@@ -423,8 +433,8 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                 'SerialNumber':get(detail,'serialNumber') or 'Not provided','Manufacturer':get(detail,'manufacturer') or 'Not provided',
                 'Model':get(detail,'model') or 'Not provided','Storage':f'{capacity / 1073741824:.2f} GiB' if capacity else 'Unknown (reported 0)' if capacity==0 else 'Not provided',
                 'PhysicalMemoryGiB':memory / 1073741824 if memory else '', 'StorageStatus':storage_status,'MemoryStatus':memory_status,
-                'HardwareCollectedDateTime':get(detail,'CollectedAtUtc'),'InventoryCollectedDateTime':acquired('managed'),
-                'CollectionCoverage':'All native managed-device identities','CollectionMode':'Per-device GET with explicit hardware select'})
+                'HardwareCollectedDateTime':get(detail,'CollectedAtUtc'),'InventoryCollectedDateTime':get(row,'CollectedAtUtc'),
+                'CollectionCoverage':'Identity conflict; direct Intune hardware retained' if conflict else 'All native managed-device identities','CollectionMode':'Per-device GET with explicit hardware select'})
             for field in ('serialNumber','manufacturer','model'):
                 if not get(detail,field):
                     finding('Device',device['CmdbDeviceId'],'HardwareAttributeMissing','Detailed hardware attribute not provided: '+field,discriminator=sid+'|'+field)
@@ -433,7 +443,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
             if storage_status != 'Reported' or memory_status != 'Reported':
                 finding('Device',device['CmdbDeviceId'],'HardwareCapacityUnknown','Missing and reported-zero storage/RAM remain distinct unknown evidence.',discriminator=sid)
             user = users_by_native.get(key(get(row,'UserId')))
-            if chosen and user:
+            if chosen and user and not conflict:
                 relationship = native_key(tenant,'primary-user',sid,user['SourceUserId'])
                 user_devices.append({'TenantRelationshipKey':relationship,'TenantUserKey':user['TenantUserKey'],
                     'TenantDeviceKey':device['TenantDeviceKey'],'CmdbRelationshipId':relationship,
@@ -441,7 +451,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                     'SourceSystem':'Intune','Account':user['UserPrincipalName'],'Device':device['DeviceName'],
                     'DeviceSelection':device['DeviceSelection'],'DeviceCompliance':device['ComplianceState'],'DeviceSyncStatus':device['SyncStatus']})
     emit('DeviceSource',device_sources); emit('DimIntuneManagedDevice',bridges); emit('DeviceHardware',hardware_rows)
-    emit('HardwareCoverage',[{'Status':'Validated','Coverage':'All native managed-device identities',
+    emit('HardwareCoverage',[{'Status':'SuccessWithWarnings' if identity_conflicts else 'Validated','Coverage':'All native managed-device identities',
                              'Mode':'Per-device GET with explicit hardware select','RecordCount':len(hardware_rows)}])
     emit('FactUserDeviceRelationship',user_devices)
     emit('FactDeviceCompliance',({'TenantDeviceKey':d['TenantDeviceKey'],'CmdbDeviceId':d['CmdbDeviceId'],
@@ -761,6 +771,9 @@ def build_tables(source, output, contract, identity, evidence, now=None):
         corr=key(ed['DeviceId']) if ed else ''
         md=selected.get(corr); device=devices.get(corr)
         state='Managed in Intune' if md else 'Entra only' if ed else 'No exact Entra SID match' if match_status=='No exact cloud SID match' else 'Native SID unavailable' if match_status=='Native SID unavailable' else 'Ambiguous Entra match'
+        if corr in disputed_correlations and not md:
+            state='Identity conflict; Intune coverage indeterminate'
+            match_status+='; contested Intune identity excluded'
         ad_device_links[key(r['ObjectGUID'])]=(device,match_status)
         coverage.append({'TenantADComputerKey':native_key(tenant,'ad-computer',r['ObjectGUID']),
             'CmdbAdComputerId':'ad-computer|'+key(r['ObjectGUID']),'DeviceName':get(r,'Name'),
@@ -874,9 +887,9 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     license_counts = {source_defs['license_paths']['file']:evidence['LicenseCoverage']['UnresolvedAssignmentRows'],
                       source_defs['user_plans']['file']:evidence['LicenseCoverage']['UnresolvedServicePlanRows']}
     emit('SourceHealth',({'SourceName':r['File'],'Status':('SuccessWithWarnings' if r.get('DomainCoverage') or
-        license_counts.get(r['File'], 0) or
+        license_counts.get(r['File'], 0) or (identity_conflicts and r['File'] in {source_defs[n]['file'] for n in ('managed','hardware')}) or
         (r['File'] in app_files and (evidence['ApplicationWarnings'] or freshness[r['File']]['State']=='Aging')) else r['Status']),
-        'Coverage':('Partial AD coverage; unavailable domains: ' + ', '.join(r['DomainCoverage']['UnavailableDomains']) if r.get('DomainCoverage') else
+        'Coverage':('Identity conflict; disputed Entra/AD attribution excluded; count=' + str(len(identity_conflicts)) if identity_conflicts and r['File'] in {source_defs[n]['file'] for n in ('managed','hardware')} else 'Partial AD coverage; unavailable domains: ' + ', '.join(r['DomainCoverage']['UnavailableDomains']) if r.get('DomainCoverage') else
                     'Weekly application evidence; unresolved device relations=' + str(app_coverage['UnresolvedDeviceRelationRows'])
                     + '; unresolved application relations=' + str(app_coverage['UnresolvedApplicationRelationRows'])
                     + '; application count mismatches=' + str(app_coverage['CountMismatchApplications'])
@@ -896,7 +909,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     if set(table_counts)!=set(definitions):
         raise ValueError('Builder did not cover every reporting contract table')
     # Qualification plus native mailbox identity lineage; raw rows stay in hashed sources.
-    return {'ApplicationCoverage':app_coverage, 'LicenseCoverage':evidence['LicenseCoverage'],
+    return {'DeviceIdentity':identity_summary, 'ApplicationCoverage':app_coverage, 'LicenseCoverage':evidence['LicenseCoverage'],
         'MailboxIdentity': {'Observations':mailbox_identity_audit,
             'ObservedMailboxEntities':len(mailbox_entities),
             'UnresolvedRemoteRecipients':sum(i['identity'][0]=='remote_mailboxes' and i['target'] is None for i in mailbox_observations.values()),

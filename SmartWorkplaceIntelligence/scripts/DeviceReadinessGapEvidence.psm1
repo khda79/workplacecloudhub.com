@@ -1,3 +1,4 @@
+# Version 1.1.0
 # Device readiness gap facts (docs/HYBRID-IDENTITY-DEVICE-READINESS-FINDINGS.md): raw facts only,
 # no verdict. Thresholds and applicability are evaluated downstream.
 Set-StrictMode -Version Latest
@@ -82,16 +83,20 @@ function New-DeviceReadinessGapEvidence {
     foreach ($device in $IntuneRows) {
         $deviceId = Get-GapKey (Get-GapText $device @('Device ID'))
         $entraId = Get-GapKey (Get-GapText $device @('Azure AD Device ID', 'Entra DeviceId'))
+        $conflict=(Get-GapText $device @('Identity Status')) -eq 'Identity conflict'
+        if($conflict){$entraId=''}
         $entraRow = if ($entraId -and $entraById.ContainsKey($entraId)) { $entraById[$entraId] } else { $null }
-        $adRow = if ($deviceId -and $adByIntuneId.ContainsKey($deviceId)) { $adByIntuneId[$deviceId] } elseif ($entraId -and $adByEntraId.ContainsKey($entraId)) { $adByEntraId[$entraId] } else { $null }
+        $adRow = if (-not $conflict -and $deviceId -and $adByIntuneId.ContainsKey($deviceId)) { $adByIntuneId[$deviceId] } elseif (-not $conflict -and $entraId -and $adByEntraId.ContainsKey($entraId)) { $adByEntraId[$entraId] } else { $null }
         $localRow = if ($entraId -and $localByEntraId.ContainsKey($entraId)) { $localByEntraId[$entraId] } else { $null }
         if ($null -ne $adRow) { [void]$matchedAd.Add($adRow) }
-        $rows.Add((New-GapRow 'Intune device' $device $entraId $entraRow $adRow $localRow $Reference $evidenceDate))
+        $rows.Add((New-GapRow $(if($conflict){'Intune device - Identity conflict'}else{'Intune device'}) $device $entraId $entraRow $adRow $localRow $Reference $evidenceDate))
     }
     # AD computers without an Intune device keep their directory facts (hybrid join pending, reboot).
     foreach ($adRow in $AdRows) {
         if ($matchedAd.Contains($adRow)) { continue }
         $entraId = Get-GapKey (Get-GapText $adRow @('ObjectGuidNormalized', 'EntraDeviceIdNormalized', 'AzureADDeviceId'))
+        $conflict=(Get-GapText $device @('Identity Status')) -eq 'Identity conflict'
+        if($conflict){$entraId=''}
         $entraRow = if ($entraId -and $entraById.ContainsKey($entraId)) { $entraById[$entraId] } else { $null }
         $localRow = if ($entraId -and $localByEntraId.ContainsKey($entraId)) { $localByEntraId[$entraId] } else { $null }
         $rows.Add((New-GapRow 'AD computer only' $null $entraId $entraRow $adRow $localRow $Reference $evidenceDate))
@@ -137,8 +142,8 @@ Export-ModuleMember -Function New-DeviceReadinessGapEvidence, Get-DeviceReadines
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2PjCfx18O+AX3
-# sAtMg7DDm7slJbAniLAvcYCfGsQZfqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJhbsAzMGWkGia
+# bV8ogRyJFLE/In4unH/imIvipa+bB6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -271,31 +276,31 @@ Export-ModuleMember -Function New-DeviceReadinessGapEvidence, Get-DeviceReadines
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGZd3D0urbqINwALWOJuxNpwlOewJQelhFdm5353rMZVMA0GCSqG
-# SIb3DQEBAQUABIIBgB7VeLuS6W236TdrrrHb7aEDZBh9S/OG3t5bl5J5nvSdwgla
-# xrDJtQVG+u6us5GKF6JaEYiCED75HlwA2R+ZPPN25nevnnXJ3gVzyAbqEngyrxVq
-# vHTgohEI0YvaTOvd/q4e4vk9P0d1WKb81YcEpmCST7+8hLO63ms8EdSdPhM2USBE
-# HfAex00BhtNAB8Q/+N+ng4yvupikHh+A9m0wxLkT4M7Q7FMpFx02KbrvZvoaTRli
-# CDQ0VDdi6+Q+nUuT+nMvRGmIASMAyCBpAg+RNCk9OKXYaBST8qnHZZD4eUCWdLAd
-# WgQ3a3HW4rKNYUPcp3/LCYYz6FWV60mSDc8GgTUat+BnZnPVtYwjAIOvY5PxT3GD
-# QMvlc446mbXSmVNtE8RY+KGf9aYfqy01ltBKO6EetiLDfO1EhqDR2lWtXSdP5BEW
-# IGAv3XssmFlCrfdxKSKUM7yZteCfBtm0+TuEMQcCvCuf4CQWo4P5ljLuWC2VBQwV
-# E7DpNgS0vFvCg0vFKKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOsr5R/+/x8/JzbuZ5x7n1wNHz7fjGXmNHmRLr/RoL1uMA0GCSqG
+# SIb3DQEBAQUABIIBgEDz6qg16G9sJOjZJJbno7Eq9qEtgtDu7Dpe2qLaAtvD2rY3
+# XxW3y4aV7JPKbDgUYhWlZkyYRBSeTt/MiqinYByxdWcsqAaVouCYtge3sngoZqMl
+# GTF7Rkdi/gHSG+MS1NK5hWQ72v1fuLbt5vqNik6m3IFRNzUjbEt3b+4Kc55ehbpq
+# WOuPTZXcLEzu69xogH73jADBFUEPaaZxuEQEWamEi+4V3QeZL69W1yLJT7DH5DV6
+# pffptVIRiyS+u/v5FH1iMaQmRqkUcwIij/Np3ntmmVS/HMWcBF+Ne1AsCnURAA7+
+# Iu4beWHAh8tKJLHlX5mIvzX9NPjPPVUgBw2DFkrh09ZMNvXmsHAbbHw8c7t4mwpp
+# Sp+w5Tk7Sss00rkef/BavngE/LA85fV0qCxyPh3VnZq3ZVHbDiUkz/eJqf3hBEuF
+# CanEVum/w1vc9P91XdrQu7ApUILuni+1EdlfplWFYXaFFgNTyKW18VZVk11YKnD1
+# FQHibuLEr/aDYAO/YKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjUxMjU3
-# NTNaMC8GCSqGSIb3DQEJBDEiBCBW/3Clno92PHiJBaWytLTl8HavMUGPXYyxZJpc
-# gkDgEjANBgkqhkiG9w0BAQEFAASCAgA0lXMzQstnkPjULQ9UQqoMuOkVemME8byb
-# Xv6Bx8sSlu6yNAoYHzXSGwn+bVn6xL9o52Y4OY588i+maIzSdP1+GZGzj9Zszx2/
-# gnTF+OTZCrENsIPVDSpK02CbvE54o/K9NOzxZH6ttOqqc0h1ppCuL+VxBWvXwMVq
-# zYYDjSPQF9rQ7/dsBhCfJpZ67KEH6hP4Z03oxORccJu7/DfzpcOeaaxVTH1cM6Av
-# CNpYtc2VDdXgUJaeFmR1wuVag+jcF0H4WmRQ/k761M6i3fo2OY9BkNPxAsHuPR9l
-# +doL3LovXCiYl8SZekcgmcnJR23chYBTDqrzkLkq8IDtZElZnDRwCdZJ5Spu4gTq
-# oLV2TXb7xekLbsWRwq5QaHUMCVksER09C1bekJ5+EpT5i7D51SLQBjOj3LtpNrUB
-# EsIJ+PyjCkW6g/mKv4kFDpHnVMwf/S3YxjVwTOn+YKLvRBQJybMcIpGa7gVMybaR
-# dFNKYdFoXrfXIRPV4zji9ZDrzSvOyVBMTFOnlfQ9ir6aayoUtDLpPP0O9yk6uEJf
-# e2LPUIvkA7/abkN2QUdIA3ftZ37o+lc5DW6UjWWmrZ1n0GuFlxRYE1pp22CFJ+01
-# ZeZv0Dfxr1iFQ771gwuH5ywfddqwZBaf0GBBoz5JxMoAlgaVXuRNn73d2ZX2egSK
-# RZsMBELFOw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTNaMC8GCSqGSIb3DQEJBDEiBCCcj5Xoa5+RmGgy4zKQXIBEAqNH/YgAvWSuAOim
+# WTBrdTANBgkqhkiG9w0BAQEFAASCAgANC2yHkqJezr+e7PtsmifRGEtDVRsQzJNc
+# J0Q7CzylYvu/QoMyoREMAJ9Il4VWRZniGhEqZGwRofBy95kOVHjwKnzsM5ij8Qps
+# UAWdYD8df1rNXD1SXyW9kocG8zzwb9NDuQE4xKCcJ6syiUoVSZB/K6mFd1o7UiuS
+# mJRIk+ywoC1k8v2w961upMC2vRaUBcjWmKcoUkpLF7ax0ED/Px+FEmlY7Htaux0i
+# i1WmHqwizrbrGzEms4DaOIl+ljRA9EzMYZ8CNohuAM/oLoeNS00/uwzOnIlKFkRE
+# Uzm4uqeYejNKBj6tjRMUS+qDvvd9KDXBtA3P5xf+2KBZ/waBu6hXwZWUWlvCNV6v
+# Ts5/cSuDRpAxWc4GDHKmc23DVOxLCgmy9orm1cGsct/ruvhSBSakEhuTUSslDKhj
+# OPZdT+Vt79ZP9Wt+5ZdBzf+/iYYB4XnPYoDWx7wsaLKhB42yKQkWR15BsVG6KFk5
+# Anml9+EsPcKcrXQAcodBsFsxyscNOIr+ysfwLWH74t1nsD2YqQdoocmrL9HGuPxs
+# bfkK1DvDOL5LwJUKt65Be8aATHRS5zAzIPQ2lE6k/ctXKmKxFGxi1E0DhhrUznOQ
+# vNjiCZtfLqCgcY+I350pPFVXNz5QqesMjHgCcDLeuuoVM3uTbd3VbRD8icW+1bdz
+# taMqM3kkjg==
 # SIG # End signature block

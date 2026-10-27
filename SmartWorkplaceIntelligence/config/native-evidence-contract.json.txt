@@ -1,5 +1,5 @@
 {
-  "version": "0.4.0",
+  "version": "0.5.0",
   "tables": [
     {
       "name": "EntraGroupMembership",
@@ -1144,8 +1144,26 @@
     {
       "name": "hardware",
       "file": "Intune_DeviceHardware_All.csv",
-      "columns": ["TenantKey", "ManagedDeviceId", "azureADDeviceId", "serialNumber", "manufacturer", "model", "totalStorageSpaceInBytes", "totalStorageSpaceInBytesStatus", "freeStorageSpaceInBytes", "freeStorageSpaceInBytesStatus", "physicalMemoryInBytes", "physicalMemoryInBytesStatus", "CollectionStatus", "CollectedAtUtc"],
-      "key": ["TenantKey", "ManagedDeviceId"],
+      "columns": [
+        "TenantKey",
+        "ManagedDeviceId",
+        "azureADDeviceId",
+        "serialNumber",
+        "manufacturer",
+        "model",
+        "totalStorageSpaceInBytes",
+        "totalStorageSpaceInBytesStatus",
+        "freeStorageSpaceInBytes",
+        "freeStorageSpaceInBytesStatus",
+        "physicalMemoryInBytes",
+        "physicalMemoryInBytesStatus",
+        "CollectionStatus",
+        "CollectedAtUtc"
+      ],
+      "key": [
+        "TenantKey",
+        "ManagedDeviceId"
+      ],
       "allowEmpty": true
     },
     {
@@ -1717,5 +1735,28 @@
     "legacyStatus": "Entra country unavailable (legacy batch)",
     "introducedIn": "0.4.0",
     "usageLocationFallback": false
+  },
+  "deviceIdentity": {
+    "introducedIn": "0.5.0",
+    "producer": "SmartM365-Devices-Inventory.ps1",
+    "minimumScriptVersion": "1.21",
+    "file": "Intune_DeviceIdentityEvidence.csv",
+    "columns": [
+      "TenantKey",
+      "OrganizationKey",
+      "EnvironmentKey",
+      "TenantId",
+      "RunId",
+      "ManagedDeviceId",
+      "ContractVersion",
+      "Resolution",
+      "EvidenceJson",
+      "EvidenceSHA256"
+    ],
+    "key": [
+      "TenantKey",
+      "ManagedDeviceId"
+    ],
+    "allowEmpty": true
   }
 }

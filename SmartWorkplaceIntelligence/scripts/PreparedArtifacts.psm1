@@ -1,4 +1,4 @@
-# Version 1.1.0: explicit historical artifact cohorts.
+# Version 1.2.0: receipt-bound native semantic artifacts and explicit historical cohorts.
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 
@@ -85,6 +85,7 @@ function Test-PreparedArtifactName {
     param([Parameter(Mandatory)][string]$Name,[string]$ContractSHA256)
     $contract=Get-PreparedArtifactContract
     if ($Name -cin @(Get-PreparedLegacyArtifactNames $ContractSHA256)) { return $true }
+    if($contract.PSObject.Properties['nativeSemanticArtifacts'] -and $Name -cin @($contract.nativeSemanticArtifacts | ForEach-Object {"Source-$($_.file)"})){return $true}
     if($Name -ceq 'PreparedHistoryIndex.json.txt'){return $true}
     if($Name -cin @($contract.currentFiles | ForEach-Object {"Source-$_"})){return $true}
     if($Name -cin @(Get-PreparedOptionalArtifactFiles $contract | ForEach-Object {"Source-$($_.file)"})){return $true}
@@ -141,6 +142,24 @@ function Copy-PreparedArtifacts {
         Assert-PreparedArtifactTenant -Path (Join-Path $SnapshotRoot $relative) -TenantKey $TenantKey -Specification $entry
         Copy-One $relative "Source-$($entry.file)"
     }
+    if($contract.PSObject.Properties['nativeSemanticArtifacts']){
+        foreach($spec in $contract.nativeSemanticArtifacts){
+            $receiptPath=Join-Path $SnapshotRoot ("DATA-LAST/"+$spec.receipt)
+            if(-not(Test-Path -LiteralPath $receiptPath -PathType Leaf)){continue}
+            $proof=Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+            if(-not $proof.PSObject.Properties['RequiredFiles'] -or $spec.file -cnotin $proof.RequiredFiles){continue}
+            if($proof.Producer -cne $spec.producer -or $proof.TenantKey -cne $TenantKey -or $proof.Status -cne 'Completed' -or $proof.Errors -ne 0 -or -not $proof.ConsumerScopeQualified){throw 'Unqualified native semantic artifact receipt.'}
+            $records=@($proof.Files | Where-Object File -CEQ $spec.file)
+            $relative='DATA-LAST/'+$spec.file
+            $source=Join-Path $SnapshotRoot $relative
+            if($records.Count -ne 1 -or $records[0].RunId -cne $proof.RunId -or (Get-FileHash -LiteralPath $source).Hash -cne $records[0].SHA256){throw 'Native semantic artifact changed or belongs to another run.'}
+            Assert-PreparedArtifactTenant -Path $source -TenantKey $TenantKey -Specification $spec
+            Copy-One $relative ("Source-"+$spec.file)
+            $entries[$entries.Count-1] | Add-Member -NotePropertyName RunId -NotePropertyValue $proof.RunId
+            $entries[$entries.Count-1] | Add-Member -NotePropertyName TenantKey -NotePropertyValue $TenantKey
+            $entries[$entries.Count-1] | Add-Member -NotePropertyName SemanticVersion -NotePropertyValue $spec.contractVersion
+        }
+    }
     foreach($spec in $contract.history){
         foreach($week in Get-ChildItem -LiteralPath (Join-Path $SnapshotRoot $spec.root) -Directory | Where-Object Name -Match '^\d{4}-W\d{2}$' | Sort-Object Name){
             $relative="$($spec.root)/$($week.Name)"
@@ -186,6 +205,16 @@ function Assert-PreparedArtifacts {
     foreach($name in $required){$null=$referenced.Add($name)}
     # Optional current files are declared by the contract, not by the history index.
     foreach($entry in @(Get-PreparedOptionalArtifactFiles (Get-PreparedArtifactContract))){if($seen.Contains("Source-$($entry.file)")){$null=$referenced.Add("Source-$($entry.file)")}}
+    $artifactContract=Get-PreparedArtifactContract
+    if($artifactContract.PSObject.Properties['nativeSemanticArtifacts']){foreach($spec in $artifactContract.nativeSemanticArtifacts){
+        $name='Source-'+$spec.file
+        if($seen.Contains($name)){
+            $entry=@($Entries | Where-Object File -CEQ $name)[0]
+            if(-not $entry.PSObject.Properties['RunId'] -or -not $entry.RunId -or $entry.TenantKey -cne $TenantKey -or $entry.SemanticVersion -cne $spec.contractVersion){throw 'Native semantic artifact lineage missing.'}
+            Assert-PreparedArtifactTenant -Path (Join-Path $BatchRoot $name) -TenantKey $TenantKey -Specification $spec
+            $null=$referenced.Add($name)
+        }
+    }}
     $weeks=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach($entry in $index.Entries){
         if($entry.Kind -cnotin @('Mailbox','Windows') -or $entry.Week -notmatch '^\d{4}-W(?:0[1-9]|[1-4][0-9]|5[0-3])$' -or -not $weeks.Add("$($entry.Kind)/$($entry.Week)")){throw 'Invalid or duplicate history index entry.'}
@@ -276,8 +305,8 @@ Export-ModuleMember -Function Get-PreparedArtifactSources,Copy-PreparedArtifacts
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD2qTj/JgOH4qzM
-# q6JcBQCWW2vf5Rhx+BmqSs6YJRZWMqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBqMTgpb37WZjlX
+# /YtJjJZF06VnU5nq6ZLOliGp6PkjfKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -410,31 +439,31 @@ Export-ModuleMember -Function Get-PreparedArtifactSources,Copy-PreparedArtifacts
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKbBnj08U1PXQkC+ZK7NzxxbMDa8zOXdA9+2jcNoMSRqMA0GCSqG
-# SIb3DQEBAQUABIIBgAIuwoeUyxB9LpDpM+oFKy3IAoQEEZ+vCz5CxDx8nZLnbO1Y
-# 0tj/fRyzYhaBol/WHMk0FNaNST4CZnqf+cVGdWP/2n2roQLqi5WopSL/bVmUi+xp
-# ISZs/EW7qVSBpWIf4+FjXyGu0rT9afek4AUkJUO6bg41N0DEA+svheuYfXLKUy/t
-# e6LeaLThiPRx9bEHskp6E05QRpsy0+rtbiLo9K5BjHc9roCHfmh2YSzl9BXRBLE8
-# oU+OEtnxQ4ITBF9JoHfRbzqLv1tMG9+ZlFFQ+qtiXZRniQU1bzIWnZqeMKGYJNCl
-# qUUGAJ3QnOXV0VNGoROkqZ3LXE0HyKCrZ5klU8MA0ACs1eqlWZLA1D9OQMzL5Tal
-# n7rUCjHBmhhYuvRcyNMGbQqNf2aQLIEPyc1lzmmwGLkngRVrBRiaKS9gcD6PhswR
-# wijr/FqmGW0zHSqB6hYOhVCT+AsQU5Puw489Zaok+Q5UiTseSvGapiGqgBI9EjZQ
-# 4z2/38Rr0F87NPEdDaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEII6wjBVMDRJRs1KrP9IoFc7bYpQOyroGp50QDnWvDrlDMA0GCSqG
+# SIb3DQEBAQUABIIBgCRO64VptiXBjWx+5A1fyS5wpjhcSASd5wwXuoZM1iQeugSv
+# HveJkIhzIg2TxAF/BSTv7lXSkQTAWUQXwOK+IQsXVycf2kOP4ifW1KxiEAn/0w9Y
+# A/NQRXH6OoW9alTCximIeFgL4mvCktFUzx6A+uiYNPwy2f2xrEjypV6JqyAzfrxI
+# fLwCoLprd0eQm+P3wSIJk4I3kMyo4R5+Vosj2ZIWMa2+MaGKwi9OyhakriFyPmHd
+# ipV+uLTuDum7EjvHnyHifktb8acCk3r1B3q9vSWrrVr57IbUOtGWDZlj+Ws2lJ2c
+# mUbYHQShc9vXi/sG3Ev3oQQ7SU8NytUGMkT+NMvvUYtvhYqbwgOiZiw4B6oUAPBU
+# Z3orwgzWVm5dQTK+bJVR+y2CWcRjAzcd+iIKpsl+GUCJVGXO/hAcwNWYRzmGzRhT
+# bmx0FU4QcLL7215szudbbZ9rgWn0B9wDdA1gQ9YD0uqgOLpFE31IQN3iIJqWc1eC
+# 9Cjqv9hoAQh1/sD7OaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcwOTQx
-# NTNaMC8GCSqGSIb3DQEJBDEiBCCBA/pyFBWQfrNc8U+tJG85LlEJDbp7ntziWBdM
-# +S0JxjANBgkqhkiG9w0BAQEFAASCAgAjpfZ6ddN0xqQBZnmLAiJXQA+BMj9YPHUz
-# OvLGHUW8+V6J5vsOZBAw6IjXYIq2cASWDD6VHEZzU4SN2dRBmeQp5SECrmv86KY4
-# zjO3idSucRHsP9+33TwJKctKbijKMuGbPYhzZFtUdaYMwHwY4+rgT7eRnkrD8itN
-# 4JNLhHN2P3Yo0iJf7Mm7atgl4R0ZSIkNwhRJAFqQI6f551p6JGu42aPq+24l/a8L
-# OB3wiQ5zOk9KKW3cejrF/wdJZfGy6LEg76s06YYtf35R2CnN5Mt/X7Do9dv6y1XN
-# WnBO8twGvZFo3ZjFoOcbADQ90w29aZ5lIBJ7fOcyymivWEiCsxDwkV6f4B2/2hWj
-# nAkKPSUuqD1J5lIw2Jj+VviJSDIEAftDRmJOBGJ08p0WUAc4qS6hT268TfaKF763
-# qZ9jYjUq8qLXR1TrF8ift/TXxvSNIhFnORuO6WXt+I7S9fN1E2mRgG1LUPY6KJ2U
-# TJEy40bPEnNgpA8oCU4BHUezUTt68ZkRInY/hKImn+bFSXAJOG2kFgOIkhKJJJSI
-# yw1RxKBdzv9PmASZLHrUWHpmHyHXCnH2EZDsa0IauDCpfoi/h9AqpJiZPlIMeE5D
-# xa0Dt2SnCNGYMrASAsWsgDEjtCSJsfMDOneLE9o+R4meaoAdjObbiiJZ/HFn9x1D
-# pCzpDtjIzA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
+# NTRaMC8GCSqGSIb3DQEJBDEiBCAqGxuTGe5PpZkfM1cvQEO1xlm8viHy69QNTliY
+# RdOQ3DANBgkqhkiG9w0BAQEFAASCAgCgny6Ct/F9oofhcfJtGUYRk1w0m4BU90QG
+# YElQFNoGIyAP96sOkoB5ZgzqZhBT52vsAfKOyQyLTJo7EG2PoleSHAVJRdnDhDj0
+# CG7n7BQtpVsXLnjpX81X3HZoePejeFKpDLnfgCegJ4E7wf8C4UTecFXWgPnX4GeF
+# CHul7Mtaz1vXD85G+jNpBtsqfKISy8O6zz8O2rdtPivp67m/I3wvaVINXkkLnshD
+# m+T9ie1ZhMPnNYaq92hzZx38zE40GCK+vRZfwx9wlWKg3CV7FkBIPRnxNYQk0QJg
+# S5sswTFmWX9cBKCcT3I9GHxLZtEZ/5H7ncUSqyu29DnceHGjFA5vbRLVpaeHf+a1
+# v7zEHvvUYmqGzRmgONOAihhZk6JhT20VoQxV+eIasi3XW3Pc+JFTOo1KrW1mCQbn
+# r96t8jevkj+Www8bbUQJOuYVxC9QCGJjqDFnklLL3AoCA0xn0f+MQzhfSmkcK3TO
+# Xj/5b+G2v1/Xm+2vvcy88IUJIY31f0MFMs823XbmPWWh/f6x7nblX2VXhTGS5UYO
+# oFgV1ARRVktWCRK/EpQPHZTnilUc38tARzMtZ2j4qhwHs7ipfq389Hs+HM+mxrqf
+# HugL7ro/DvFp12w4Ow9Q78rJqm/1iaHCUy0+yDVZeXHR3SILyyylcb78r3aSvj7w
+# 6lE5DltayA==
 # SIG # End signature block

@@ -197,7 +197,7 @@ class NativeEvidenceTests(unittest.TestCase):
         hosting = [r for r in self.output_rows('FactMailboxHosting') if r['MailboxHostingKey'] in mailbox_keys]
         self.assertTrue(hosting)
         self.assertTrue(all(r['CountryLabel'] == 'ES' for r in hosting))
-        self.assertEqual(result['NativeContractVersion'], '0.4.0')
+        self.assertEqual(result['NativeContractVersion'], '0.5.0')
         self.assertEqual(source_hashes, {p.name: sources.sha(p) for p in self.fixture.source.glob('*.csv')})
 
     def test_missing_entra_country_never_uses_licensing_or_ad_country(self):

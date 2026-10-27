@@ -48,7 +48,14 @@
       "Files": [
         "Intune_ManagedDevices_All.csv",
         "Intune_DeviceHardware_All.csv"
-      ]
+      ],
+      "SemanticFiles": {
+        "MinimumScriptVersion": "1.21",
+        "ContractVersion": "0.5.0",
+        "Files": [
+          "Intune_DeviceIdentityEvidence.csv"
+        ]
+      }
     },
     {
       "Script": "SmartM365-Intune-DiscoveredApps-Inventory.ps1",
