@@ -2,7 +2,7 @@
 .SYNOPSIS
 Offline tests for the elected RunOnce catch-up guard: a due occurrence already covered by a newer or later-started shared claim is not replayed.
 .VERSION
-1.0
+1.1
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -114,7 +114,7 @@ try {
 
     # A momentarily unreachable share must mean "not covered" with a warning, never a scheduler crash.
     $launchAst=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-LaunchPhase'},$true)
-    $guardIf=$launchAst.Find({param($n) $n -is [Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -match "\`$reason -eq 'due' -and \`$job\.AssignmentMode -eq 'Elected'"},$true)
+    $guardIf=$launchAst.Find({param($n) $n -is [Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -match "\`$reason -eq 'due' -and \`$job\.AssignmentMode -eq 'Elected'" -and $n.Extent.Text.Contains('Get-OrchestratorOccurrenceCoveredByLaterClaim')},$true)
     Check ($null -ne $guardIf) 'Covered-occurrence guard block not found in the launch phase.'
     $harness=New-Module -ScriptBlock ([scriptblock]::Create(($defs -join "`n") + @"
 
@@ -147,8 +147,8 @@ $($guardIf.Extent.Text)
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBWYF9LPPEs4DRT
-# rRShRzNeRKKKhN0Meh5lPfnIFhtNKKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9Fn4wl7vnOmy9
+# Tf4rYJ4zXTkbAyu4ER8qq22obXgaG6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -281,31 +281,31 @@ $($guardIf.Extent.Text)
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIC+QXJAjXkWTKH0tc8ejknAIRI/MfQlFjOYIIDeMgSv/MA0GCSqG
-# SIb3DQEBAQUABIIBgA3ACrcaDUCWf/TVcUKsgEZ9HA1btSn2WqNbA8OSFEpFlech
-# 7n/EaBg2oyL57Rh1UxozxBkwfzNKxhN79KsPH9Czm1R54MAWrERzq6RvxuHTg/es
-# luJ136GrHmjq4bLR+sAhQoA7kuV6FoeCaBgmdSvjmqoDVLd0+gSSFI2llaVcWf+f
-# 62mu5rTU6I8MGXCRkfqsSSpgVfVGKRdHXSJwOvH6SsOPH769i3aswk7V0UO/HN3O
-# gP01cmuubknUspAUFq6W7sTPpAKc8dVWwdIEasIXf9cViQc+ytCWJnQZ1Tyqqv2c
-# 2tzyTP49i8cy4dXTQg/+yO0stRCTzdOfj5NHM/yxBEPnkY0ZG8/SB1496MiGZ25C
-# 9Z0bvrBoPZND+/xqQHywwDiZ2I85AXViROyzkNsBF95WACWuJSBoZBIapvRbvdgj
-# eefo4nSaFkmq/cmjjOXJwH5Hkkz//DT2W3DZN7PH59WnUITo2JKsZFDSazcwpIJL
-# ZcJJserOoZ7XiIyBd6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPk+fPGaMCDUcRVxfSwTfvKJZhiSbCC0rAp4Xgx0qU6lMA0GCSqG
+# SIb3DQEBAQUABIIBgHeZETJn9d2GnIBzV0DPk5VcBaF41eG/vRnxEhO3w9Aj6Tm7
+# 8Gl1c6LN8RKhsrnXyLvwJm5j8dgHI+H/Us+s5WFjkXk9vU6gnHrUDvWqFvqrXTXR
+# PxFawARhwMZ82taHqYMEyDb0aRojF7JdY10uBMr3b7p2O54X7F5fO8TOR2TAq33b
+# snesjk06JxOTQiAcWQdEQzRyPpkNSQVBIOE55cElWcZywJCERfmXDgf3QABgO+jP
+# lk09R5BfJg6MozPtmn9iWqy5VWNDPMIHL4Pdkh3FOtg6UV/Cg/n+qp9RgZzBau0d
+# p9DTFsG0S67S5CY2z88GdDzxGY4Px860pYOK4J3s/nYJos3UtR5kETetsIJ+QoI4
+# dGKw/vEU7QziWD51qV7GMS9pXau+kPWfKyQGTq4yEwDKYdM8XzDlul18Idqv2ojF
+# G0eq6+t0sf8E4PHQ5fRpMj0WiGHMN7K3ls4wKCrjbpgebzKvKqn0IPw8i18yl0UR
+# W7+lJFBOFQpvtyy7oqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjAxMzEx
-# MTNaMC8GCSqGSIb3DQEJBDEiBCBzQOcmQ3ddOY4K61GvjVqryYH3j6b5/3cVxTf/
-# PUAqUzANBgkqhkiG9w0BAQEFAASCAgBrBJn77mw/3IRI6UDPFCegDmxvHk5n8hLo
-# 8MSv4jtYtkPan0adbZ6o+X20aXblvH5JsKTtTWG8HUlHftZwYpOLypDePJRR/7mu
-# dh/gLrI19PSCkqvrPhQxLcyUIYOvSb88y9NT1P6nxQS0ban6NlLKW6cyz2B/ff8z
-# LkHvQ5QPNqMFNwnRzu7jIwmjXIHJzWcIZ4U6lqrfj4/bSdK0HGYxeE5wJMKTyWhJ
-# NkvKsDbS65GOraz9TZTgE6TmHlOZz6RZLXIPGzEah8VXCLrsbAayNQt332PDiWLM
-# 6dOuOyT2APsGaVD4G4k/41C6eush95jNnFsI9TXizZHJ9FVf6ihQHKmKPgmqQdo6
-# h7S6+UQiBp4BBdwQIo3811IZJ3VglN4SK+1+H/lQ0HaWVPzMrTe1JXl0S5sD7ntj
-# GYuOCC62yeA+SbPWn7P2kEatNuNo71xuf71lSEDvNYV4rj85iOImBy/AOFbV+byn
-# 5xsewK4WifSDwTHsDjD9CAvgi8+LZYzG47pPfqZqdsor49P2UFvSkvz9tBdX39Bb
-# rCJq2jTkitPnezRoO5shKlGc87yFXIriVsSvXLI9DRmccbkddQzwL3Qia1HVivFv
-# B1yLGYCW3L4RdtnsGf3AQwdbmI3zxxSfAmYiNzmmQzI38MA8b8BVDemVsbdlaRkW
-# JCXSQhgXAg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMDEz
+# MTFaMC8GCSqGSIb3DQEJBDEiBCAn8WKsTDbhl8RYbc9YAoYFhcYVdJsw0y1X9uN2
+# otRlyjANBgkqhkiG9w0BAQEFAASCAgCLtxUsD3z47LMBcTusCoCbDZC4efkHjlIQ
+# eMEU5tJaKDJfSHTgvum0oDebJRqOLY16lwjxpaXUXVIxs8xZoiXw2CD0pu9Vy4Mf
+# WrsIb15Ui7DUVlfIAdrPwDTumPV3kmcc90XN1DEP/8jSVYWYApVOXtxr/ztLhDoE
+# 8+uR3GgJC6YmXZemXcU8kJKThXIx3BZUuK8G9HPnUYl6AjMILmiTevd1LfhPZMRI
+# JRNOuRX9+O64x2uJghspE8boQFF5jEhFYtB79PmeqR4ZdmDQSOe5jHaczjqMrsWY
+# L0LSYdreYN1gSuT1MyYs5E3dpxKok+aeYsmjAMsmtgHuRAesuPiRO+mGkDr+qqWX
+# xBRMdjga1WhES29h4L323yAGrhv0lmY/w9CHBgoJ4bGAyv4glb4+v10V9m989y9w
+# UkxmSswP1k576J0ML4Vqn0vJvR0nR50zgYlBtzZPxtyu2tQg4NCMcs6fQpQ+PfuS
+# 5K5PN2qKYn6ONV4+yURCTO22tVwXLCflp77sV2bMMgcRLbo9HccQcPUGCY1Oaj6F
+# cZESuSMZnCbYuWp3lyzvORwq8O0yvYBCMvEx1Kd1ESjau6a1UEtRncpvAwUOBmNT
+# /7Lbra+f+QuRFzzR+FJTd9qx2cw1JiCB4290b4aRELTVUhM+ya2e8Ou65G9jOiHJ
+# QxNa/gNyDQ==
 # SIG # End signature block

@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.62
+1.5.63
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.62"
+$ScriptVersion = "1.5.63"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -4960,6 +4960,24 @@ function Get-ElectedJobOwner {
     return [string]$assignment[0].OwnerServer
 }
 
+function Update-OrchestratorElectedOwnership {
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+
+    # A missing plan is not evidence of an ownership change. Retain the previous
+    # boundary through a transient share failure, but never launch without a plan.
+    if ($null -eq $script:ElectionPlan) { return }
+    $owned = @{}
+    foreach ($job in $script:Manifest.OrderedJobs) {
+        if ($job.AssignmentMode -ne 'Elected' -or (Get-ElectedJobOwner -JobName $job.Name) -ne $env:COMPUTERNAME) { continue }
+        $owned[$job.Name] = if ($script:ElectedOwnershipSince.ContainsKey($job.Name)) {
+            $script:ElectedOwnershipSince[$job.Name]
+        } else { $Now }
+    }
+    # An unchanged owner keeps its boundary even when the plan ID changes. Loss
+    # of ownership removes it, so a later reassignment gets a fresh boundary.
+    $script:ElectedOwnershipSince = $owned
+}
+
 function Get-ManualJobMissingCapabilities {
     # A forced Manual job runs only where this server's effective capabilities (after launch
     # prerequisite blocks) cover its RequiredCapabilities; unknown capabilities fail closed.
@@ -5930,6 +5948,19 @@ function Invoke-LaunchPhase {
             }
         }
         if ($null -eq $occurrence) { continue }
+
+        # Skip only scheduled occurrences missed before this ownership interval.
+        # RunOnce, retries, forced/Pipeline requests and explicit maintenance
+        # catch-up retain their admission rules. Queueing under the same owner
+        # must not turn a normally due occurrence into a missed one.
+        if ($reason -eq 'due' -and $job.AssignmentMode -eq 'Elected' -and
+            $job.Schedule.MissedRunPolicy -eq 'Skip' -and $script:ElectedOwnershipSince.ContainsKey($name) -and
+            $occurrence -lt $script:ElectedOwnershipSince[$name]) {
+            Set-OccurrenceSkipped -JobName $name -Occurrence $occurrence -Reason ("missed before ownership acquired at {0}; MissedRunPolicy=Skip" -f $script:ElectedOwnershipSince[$name].ToString('yyyy-MM-dd HH:mm:ss'))
+            Clear-DependencyWaitLog -JobName $name
+            if (-not $script:StatePersistenceHealthy) { break }
+            continue
+        }
 
         # RunOnce catch-up of an elected job: after an ownership or schedule change, the new owner
         # must not replay an occurrence that a newer or later-started cluster run already covered.
@@ -6963,6 +6994,7 @@ $script:PrerequisiteCache = @{}
 $script:PrerequisiteBlockedOccurrences = @{}
 $script:LastCertificateReadiness = $null
 $script:ElectionPlan = $null
+$script:ElectedOwnershipSince = @{}
 $script:LastCapabilityRefreshUtc = [datetime]::MinValue
 $script:LastElectionPlanRefreshUtc = [datetime]::MinValue
 $script:ElectionRebalanceRequested = $false
@@ -7440,6 +7472,7 @@ try {
     Restore-RunningJobs
     Initialize-NewJobStates
     Update-OrchestratorMaintenance -Initialize
+    Update-OrchestratorElectedOwnership -Now (Get-Date)
     Invoke-MissedRunCatchUp
     Update-OrchestratorHeartbeatDuringLongOperation
     Invoke-RetentionCleanup
@@ -7464,6 +7497,7 @@ try {
         Update-JobsManifestIfChanged
         Update-OrchestratorServerCapabilities
         Update-OrchestratorElectionPlan
+        Update-OrchestratorElectedOwnership -Now (Get-Date)
         Update-OrchestratorJobStopRequests
         Update-RunningJobs -Now $now
         Update-OrchestratorMaintenance -Now $now
@@ -7612,8 +7646,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwlX2wO6TqBDzC
-# PnHDwnh8PJpa/3rGyYbsLue8pEvuvqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDil9H4v8lsU5FW
+# 7hpEYzGPEY6QsScauJf5V8HFLiF3UKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -7746,31 +7780,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMvpt+rcZ9Jbu2i27WnxDJ22bVIjC+bQp4PqkEb4t8QlMA0GCSqG
-# SIb3DQEBAQUABIIBgDedr3HL6bKByVyOYyMqyweQtYLi3o8WZloBpi8yfHwzc8/T
-# NsAd7+3wAZj1Ik92Uc6wvrXR7WoElcfxnTdLTlbdaBzTatNpf4NpDy6cO5xT845v
-# mCyStk5w6Bc1BzI6rwWNXA9QtpjeQGsMY5m/QjLwpX/b3zlMJDEtsIfHR3Q4cE6p
-# PXI8t4OnZFgqlBptn7wQt146xi+sRsPSe1yW6pe49zJkvPsT2VwRyn/8hBY2vtd1
-# g1Z7huLkZgU/mOIU83f0bAEpnTgR5eGLry3/LdVVhKMeDKj80t3g8nW/+wC5aNOa
-# 6Tfe09HRyXXl/7I5tFsb9dVGUYC4+VuqVfjBx3INefpi00lvKZx5b7cQO0xlyLe1
-# j5CVaPEgL5JY59B4DAbuxPlLRCAcKQjpnCzCAABUuJCHNnrzZBQb+uk5tqY5c2vM
-# YZ/MQCy5hgLZZ8RVF/M3Qz2IMWEP8NfgKxB+UE1FZTpyVQo51rHxyKAdOsU92/Mt
-# NK703ntd3LH04cA+aqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHuIr7gI0t5UOV7sSOeVVoVOE94ZSFbmrdLlr8AUZAL6MA0GCSqG
+# SIb3DQEBAQUABIIBgIX0sSmCwa/WvRLmb9KRo2znMaKN1Ir5wGcrbgyPdDKhPgBp
+# F6nPr7ss2NeTtOb8O5cyW3yRZvLpf2yxTO1OMIrQap4GqoOelp8AePUASvEz7Axk
+# CF1JIIH0EouFxlXD4wWezk0l54BFVvctdR/odnYwJ2NxTc1ydiTUQv76oonKVQ5f
+# +tlaPmtof8gLEZUdXyBwRqPWAWaCOFxx06EXz2xXM5p1Kx0C8kOfui0d+5lwWeMV
+# Stk7q0XO5gBQH4JphE/BK205U267Tw3hfSU7bAXr0XaJp9+AHI7rySd+xzTO6K3u
+# axfB4xLxU8vnt0EF2dnXbpUCvsmBNZ1es6muwJUc4uJ9yGKrCuWZzqYzyOzw+X24
+# zaDa0KUrVz/zl5Fmd5Z3LukNpBdlE7NZpOUJU2rpYoovxZgzyyckrio12sBQs3KF
+# CU+e61/1HiTI3bSus1JR/PcgWC1OXAqmRp7OLSD/A5mLlkT51cG0wr9yoarlALAK
+# cKZVRG+BvvAbhwensqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcwOTE2
-# MzBaMC8GCSqGSIb3DQEJBDEiBCCIlOmaE/ZRb/WDudIYM1IQIcx+d7Xpy0bXeZ3v
-# ldEP3zANBgkqhkiG9w0BAQEFAASCAgAS1yhOTXoNtaAWQptBJkVr39vREbeoRgnT
-# sMVYq82iGosspqAbFUsrsgj+82aoHhgDrX+rWIC2jTNUiMVeXstZvOG0KrQZsZWm
-# GOGcrBZ42vMuwHUXzfrLB4OpHI0BLTtQRxq91cfn66eQPhlUNfb9Cu9JFDOvX3Q4
-# C5o3eo7eNaDEcAl0X88SpnTLzrRD4oD3JowapYV0EWhLDl6IhCm/6d0c8V/hlsFa
-# CUwr9YWtXnLDDhEE+82bZD0WpWRJAK8F72YOjgZpHDldq81zr3cxmYuAU5K0nqbZ
-# /6XlxbDW5lz9JKbRq6f4YTot6fqeqvUBsfX0Ka6KFQlLi3l6druHHHgLJw/TGiwZ
-# YOfGTHJyI7RUawy9qSWm6z7ImtiZBmo/J7l/khzsUUx09xWTWL49dylG6AbDvfQ7
-# Htq7hm3KGes3d19/3FYte+GNTKb1PuZDp2eNWOYngznhbrfoTCNU40dcdHH9Qa1S
-# jxwtAUoDj2sofghUgIiw9PMj4BN6E7mNp2EUJXkLzIeuXTL/xUC7B2r6LDrd29+D
-# H2/2Xq1W4UsAC5IVsI7l0UaqNdR3/EKhhLenYLhcE5uM96b5YSUR8x8behTvZco9
-# +iyenixFz78HNaVunduhFJpb8mLmrehKOs/cPqHEpE3yw2V6yfFuB0FZUhy6KRxV
-# FyIMjJNA1w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMDEz
+# MTFaMC8GCSqGSIb3DQEJBDEiBCCg0ArERR5am6pz+aXFg3yUFzqU5YWCM/tufa94
+# aVm5ODANBgkqhkiG9w0BAQEFAASCAgA6A4HkZNNZyG5e+xqqqoSASk5zhtgIGMx6
+# mge4FHc2Sl591hJyw0XzraxcWOfVWyiZOmkJRGKcgxWaYnlyJuEjnE1khKHeXs9w
+# QclB8zeHmBTpbTHMLjAxnra1R/e2pjoG6plcHIZWQCNiviY08JL97LvRKwVlWxrd
+# +C/Uy1hvQ2o4fsT1FiVE1RyLcCL2nJ18cIQOgv4j8nbaAdlu12MJrbRqZCLZsWH0
+# Q2QSvz00+/gN9/A3pTBMc5EmS/WfBmiEgmwQnUmJr+TRHgRzlhy2alOEk9oGawHU
+# GfLXl28dY0Z7cHh1vVd0659x7NA9jbX/MEk20GK3RgMQSZdhnJGAQRGrP65X5amW
+# q4LCtIUISm0iJKUfumhqHijoqq/J16W61YUoZoaxdIRnL0jZ3aGSslGtQ4QcTZ9e
+# jTJcUULkIchUIc1kBUm7ruQcphkX3xWXvCJCwADApDZ+NBKO73gnxeGCQmlPXlbN
+# hMjNCOhr/y7ytaYsZr8gOJjG3plVEiNO9KzL8zNAqgeo0RGsXe0M+5dZNXJQ5muS
+# KDrBrwKKqBE8KJIySp+tPlAGepB0OV+GEjgIfLq4oUysqWQZEiNRW1hbEznzcugm
+# 7pvDxhfJA2jyNYNII2pgsQtj0fpJWsCQU3lGfSljb2hYS7kfcZ0F4pblgt6yxtIK
+# jQ0kUH2pRw==
 # SIG # End signature block

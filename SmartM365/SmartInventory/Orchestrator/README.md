@@ -543,6 +543,19 @@ Once the dependency is idle, `FreshSuccess` applies unchanged: a final failure t
 
 Offline regression suite: `Tests/Test-SmartM365OrchestratorDependencyActivityOffline.ps1`.
 
+### Skip policy after an election rebalance (1.5.63)
+
+When an elected job moves to this server, automatic `Skip` occurrences older than
+that ownership acquisition are recorded as `Skipped`, even if the old server's
+local state is not present here. A plan refresh that keeps the same owner does
+not reset this boundary: normally due jobs waiting for dependencies or capacity
+remain eligible. Losing ownership and acquiring it again starts a new interval.
+A temporarily unreadable plan preserves the boundary and still blocks launch.
+
+`RunOnce`, pending retries, manual Force/Pipeline requests and explicitly requested
+maintenance catch-up retain their existing behavior. No running collector is
+stopped. Offline regression: `Tests/Test-SmartM365OrchestratorSkipRebalanceOffline.ps1`.
+
 ### Supervision, timeout, retries
 
 - Each tick checks running children: exit code and duration are captured on exit; `TimeoutMinutes` triggers a full process-tree kill (`taskkill /T /F`). `TimeoutMinutes` may exceed 1440 for jobs longer than 24 hours. The committed production manifest uses 1380 minutes for a daily schedule with one execution time and 8640 minutes for a weekly schedule with exactly one day and one execution time. To migrate an existing shared configuration safely, first run `Set-SmartM365-OrchestratorTimeoutPolicy.ps1 -SharedDataFolderPath <OrchestratorRoot>` for preview, then repeat with `-Execute` to create the audited version. Startup and manifest reload log a `Timeout policy audit` line with counts and mismatches from the active central manifest. Since v1.5.62, `AD-Inventory` (240), `M365-WorkplaceScope-Inventory` (480), `EXO-Mailboxes-Inventory` (2160) and `Exchange2016-FreeBusy-Check` (120) are intentional exceptions (`Get-SmartM365OrchestratorTimeoutPolicyExceptions` in the management module): the policy script keeps them unchanged and the audit lists them separately instead of counting them as mismatches.
