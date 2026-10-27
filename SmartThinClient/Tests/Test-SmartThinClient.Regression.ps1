@@ -1,5 +1,5 @@
 ﻿param([string]$SourcePath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'SmartThinClient-Shell.ps1'))
-# Version: 1.1.2
+# Version: 1.1.4
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 $tokens = $null; $errors = $null
@@ -416,15 +416,118 @@ Check 'Explicit blank URL values remain blank on existing runtime' {
     Assert ([string]::IsNullOrEmpty($urls.Citrix) -and [string]::IsNullOrEmpty($urls.AVD)) 'Explicit blanks were silently replaced at startup'
     Assert ([string]::IsNullOrEmpty($config.WebOnlyUrl)) 'Explicit WebOnly blank replaced'
 }
+Check 'GUI Audit and Preview remain available with disabled mutation gates' {
+    function Test-IsAdministrator { return $false }
+    function Invoke-ThinClientAudit { param($Config,$RequestedProfile,$RequestedAction) [pscustomobject]@{Status=($RequestedAction+'Only');Profile=$RequestedProfile} }
+    foreach($mode in @('Audit','Preview')) {
+        $r=Invoke-ThinClientGuiAction -Config ([ordered]@{AllowApply=$false;AllowRestore=$false}) -RequestedAction $mode -SelectedProfile WebOnly
+        Assert ($r.Status -eq ($mode+'Only') -and $r.Profile -eq 'WebOnly') 'Read-only GUI dispatch failed'
+    }
+}
+Check 'GUI blocks Apply and Restore when JSON gates are false' {
+    function Invoke-ThinClientApply { throw 'Mutation engine must not be reached' }
+    function Invoke-ThinClientRestore { throw 'Mutation engine must not be reached' }
+    foreach($mode in @('Apply','Restore')) {
+        $message='';try {Invoke-ThinClientGuiAction -Config ([ordered]@{AllowApply=$false;AllowRestore=$false}) -RequestedAction $mode -SelectedProfile WebOnly} catch {$message=$_.Exception.Message}
+        Assert ($message -like '*is false in configuration*') 'Gate did not fail before engine dispatch'
+    }
+}
+Check 'GUI requires administrator with enabled JSON gates' {
+    function Test-IsAdministrator { return $false }
+    foreach($mode in @('Apply','Restore')) {
+        $message='';try {Invoke-ThinClientGuiAction -Config ([ordered]@{AllowApply=$true;AllowRestore=$true}) -RequestedAction $mode -SelectedProfile WebOnly} catch {$message=$_.Exception.Message}
+        Assert ($message -like '*elevated administrator*') 'Non-admin dispatch was not blocked'
+    }
+}
+Check 'GUI requires exact typed confirmation even with optional CLI phrases' {
+    function Resolve-EffectiveProfile { param($RequestedProfile,$Config) $RequestedProfile }
+    function Merge-ProfileConfig { param($Config,$EffectiveProfile) $Config }
+    foreach($mode in @('Apply','Restore')) {
+        $message='';try {Invoke-ThinClientGuiAction -Config ([ordered]@{AllowApply=$true;AllowRestore=$true;RequireConfirmationPhrase=$false}) -RequestedAction $mode -SelectedProfile WebOnly -Confirmation 'wrong'} catch {$message=$_.Exception.Message}
+        Assert ($message -like '*exact confirmation phrase*') 'Missing GUI phrase gate'
+    }
+}
+Check 'GUI cannot bypass an effective profile mutation gate' {
+    function Resolve-EffectiveProfile { param($RequestedProfile,$Config) $RequestedProfile }
+    function Merge-ProfileConfig { param($Config,$EffectiveProfile) [ordered]@{AllowApply=$false;AllowRestore=$false} }
+    Reject {Invoke-ThinClientGuiAction -Config ([ordered]@{AllowApply=$true;AllowRestore=$true}) -RequestedAction Apply -SelectedProfile WebOnly -Confirmation 'APPLY SMARTTHINCLIENT'}
+}
+Check 'GUI Apply forwards selected profile phrase and secure password into existing engine' {
+    function Resolve-EffectiveProfile { param($RequestedProfile,$Config) $RequestedProfile }
+    function Merge-ProfileConfig { param($Config,$EffectiveProfile) $Config }
+    function Invoke-ThinClientApply { param($Config) [pscustomobject]@{Selected=$Profile;Phrase=$ConfirmApply;PasswordSet=($DedicatedUserPassword -is [securestring]);Status='MockApplied'} }
+    $secret=ConvertTo-SecureString 'synthetic-fixture-only' -AsPlainText -Force
+    try {
+        $r=Invoke-ThinClientGuiAction -Config ([ordered]@{AllowApply=$true}) -RequestedAction Apply -SelectedProfile AVD -Confirmation 'APPLY SMARTTHINCLIENT' -Password $secret
+        Assert ($r.Selected -eq 'AVD' -and $r.Phrase -eq 'APPLY SMARTTHINCLIENT' -and $r.PasswordSet -and $r.Status -eq 'MockApplied') 'Apply did not reuse engine inputs'
+    } finally {$secret.Dispose()}
+}
+Check 'GUI Restore requires explicit reviewed rollback instead of latest fallback' {
+    function Resolve-EffectiveProfile { param($RequestedProfile,$Config) $RequestedProfile }
+    function Merge-ProfileConfig { param($Config,$EffectiveProfile) $Config }
+    $message='';try {Invoke-ThinClientGuiAction -Config ([ordered]@{AllowRestore=$true}) -RequestedAction Restore -SelectedProfile WebOnly -Confirmation 'RESTORE WINDOWS SHELL'} catch {$message=$_.Exception.Message}
+    Assert ($message -like '*explicit rollback*') 'Restore used implicit latest rollback'
+}
+Check 'GUI Restore refuses a rollback changed after review' {
+    function Resolve-EffectiveProfile { param($RequestedProfile,$Config) $RequestedProfile }
+    function Merge-ProfileConfig { param($Config,$EffectiveProfile) $Config }
+    $file=Join-Path $testRoot 'gui-rollback-changed.json';'{}' | Set-Content $file
+    $message='';try {Invoke-ThinClientGuiAction -Config ([ordered]@{AllowRestore=$true}) -RequestedAction Restore -SelectedProfile WebOnly -Confirmation 'RESTORE WINDOWS SHELL' -SelectedRollbackPath $file -ExpectedRollbackHash ('0'*64)} catch {$message=$_.Exception.Message}
+    Assert ($message -like '*changed after review*') 'Changed rollback was not refused'
+}
+Check 'GUI Restore forwards exact reviewed rollback and phrase into existing engine' {
+    function Resolve-EffectiveProfile { param($RequestedProfile,$Config) $RequestedProfile }
+    function Merge-ProfileConfig { param($Config,$EffectiveProfile) $Config }
+    function Invoke-ThinClientRestore { param($Config) [pscustomobject]@{Path=$RollbackPath;Phrase=$ConfirmRestore;Status='MockRestored'} }
+    $file=Join-Path $testRoot 'gui-rollback-reviewed.json';'{}' | Set-Content $file
+    $r=Invoke-ThinClientGuiAction -Config ([ordered]@{AllowRestore=$true}) -RequestedAction Restore -SelectedProfile WebOnly -Confirmation 'RESTORE WINDOWS SHELL' -SelectedRollbackPath $file -ExpectedRollbackHash (Get-FileHash $file).Hash
+    Assert ($r.Path -eq $file -and $r.Phrase -eq 'RESTORE WINDOWS SHELL' -and $r.Status -eq 'MockRestored') 'Restore engine inputs lost'
+}
+Check 'Preview plan describes intended configuration without generating a launcher' {
+    $plan=Get-ThinClientPreviewPlan -Config ([ordered]@{AutoLaunchMode='None';EnableShellLimitations=$true;ShellRestrictionLevel='Basic';AllowApply=$false}) -Audit ([pscustomobject]@{EffectiveProfile='WebOnly';TargetUserName='SYNTHETIC'})
+    Assert (-not $plan.ChangesApplied -and $plan.AutoLaunchMode -eq 'None' -and $plan.ShellRestrictions -eq 'Basic' -and $plan.EffectiveProfile -eq 'WebOnly' -and -not $plan.ApplyEnabled) 'Incorrect preview plan'
+}
+
+
+Check 'Visual preview accepts HTTP web targets and reports the existing WebOnly fallback' {
+    $cfg=[ordered]@{CitrixWebUrl='';AvdWebUrl='';WebOnlyUrl='https://public.example.invalid/'}
+    $target=Get-ThinClientVisualPreviewTarget -Config $cfg -Provider Citrix
+    Assert ($target.IsValid -and $target.UsesWebOnlyFallback -and $target.Url -eq $cfg.WebOnlyUrl) 'Visual preview fallback disagrees with shell'
+    $target=Get-ThinClientVisualPreviewTarget -Config $cfg -Provider WebOnly
+    Assert ($target.IsValid -and -not $target.UsesWebOnlyFallback) 'WebOnly target incorrectly marked fallback'
+}
+Check 'Visual preview refuses missing URLs and external application schemes' {
+    foreach($url in @('','file:///C:/Windows/System32/cmd.exe','ms-settings:display','javascript:alert(1)','https://user:secret@example.invalid/')) {
+        $target=Get-ThinClientVisualPreviewTarget -Config ([ordered]@{WebOnlyUrl=$url}) -Provider WebOnly
+        Assert (-not $target.IsValid) 'Unsafe/missing preview destination was accepted'
+    }
+}
+Check 'Visual preview preserves Hybrid provider profile URL resolution' {
+    function Get-ProfileConfig { param($ProfileName) if($ProfileName -eq 'Citrix'){[pscustomobject]@{CitrixWebUrl='https://provider.example.invalid/'}} }
+    $target=Get-ThinClientVisualPreviewTarget -Config ([ordered]@{CitrixWebUrl='https://global.example.invalid/'}) -Provider Citrix -EffectiveProfile Hybrid
+    Assert ($target.Url -eq 'https://provider.example.invalid/') 'Hybrid provider override lost in visual preview'
+}
+Check 'Visual preview and generated shell share one layout without a launch or mutation entrypoint' {
+    [xml]$layout=Get-ThinClientShellXaml
+    foreach($name in @('WorkspaceBrowser','CitrixButton','AvdButton','WebOnlyButton','RestartButton','ShutdownButton')) {
+        Assert ($null -ne $layout.SelectSingleNode("//*[@Name='$name']")) 'Shared shell layout control missing'
+    }
+    $fn=$ast.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -eq 'Show-ThinClientVisualPreview'}
+    $commands=@($fn.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst]},$true) | ForEach-Object {$_.GetCommandName()})
+    foreach($name in @('Start-Process','Invoke-ThinClientLaunchOnly','New-LauncherScript','Invoke-ThinClientApply','Invoke-ThinClientRestore','shutdown.exe','Restart-Computer','Stop-Computer')) {
+        Assert ($name -notin $commands) 'Visual preview has an operational entrypoint'
+    }
+}
+
+
 Write-Host "RESULT passed=$script:passed failed=$script:failed"
 if ($script:failed) { exit 1 }
-
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDz7L6Bbi0eWPhX
-# BST0H85m+UAYMgl1eCYZ+TGyLXSTMqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4QAlFOFQ7NBpi
+# 2BiMJepGuZ6PFObvD8sSxK+lqGXnrKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -557,31 +660,31 @@ if ($script:failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKSB0L1ynZE/m1n2XjoG7Rt9QWvSO0++UuE8k/4skdr4MA0GCSqG
-# SIb3DQEBAQUABIIBgBIEVhiRxNM41LtbjhqRiSq20nyF7uHKGcFU9W80M2iwlcT0
-# rBq2nsQKDSwDvzDMFQnosuiP+2WUomIphKdQh1v15NFxU8fVcT4mPU2diqLt3eME
-# mSWjKairyzcMsdaqj+VBHuwJ5O65288JirqDEYUNJFAbR2jABpDuUlesA7GZeRj3
-# XHjiTbIMqeicF6Mr99mKKlEhwRUGZtN3+tf8c2Zj0ZOpKNADXb5P7U9GPCzHESsh
-# f+LLSLFDE5DM88jMSoYnpvjXctv0BgyxkQamD2AHj+AZ7+Dlix9DsnVO2Xp3Vu5b
-# 1f5TVHYFkVUEShrP5xDFhIo6XdtmGKz9wTWKHvnwROYEmPeEN1xEKMA5m00ChpLF
-# hSMP0Tdcr02Ptq1jcLicpHx5XVy1mhvzb03XC/jYxwsSrZw1F41oXBmZ/ZGIKp8v
-# 2g+Djv5K0V8tpdtFOJXL/0UxlsW0kJCUm4os9HVL4NRRYshz1/kKZjD4x0WwBLUb
-# S6DShfU2lFAoRkLqr6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGrywMt8PJ3fEO1HxnTI2esb5S3HoyOvqHu2D3GAKjxkMA0GCSqG
+# SIb3DQEBAQUABIIBgGHwTg1JCnTVZntJz5Itmqd2W47TsSiDvXyzdrqDMp/Da9M5
+# nJeIofLeOJTJIG3xZHPy64v+8SU1aN8lNvSgHp1AMuOyjIK5JxrSNONC/UFf2aUe
+# TqWhzlWH+Pk7fsnEX1dPzfOe3QpBNamrZTT2cPbhLSbyoUZ4tDZ5ypG2gGSBY4Vg
+# umYAeA2AxDFxZBUb1VbfiF4TqHqjMW8kTTYSQ16E8Bp0PtwRF151/yP+TNEUImc4
+# y91+Gf0y4uL7KJQNk3/Z6zS5wfuRInvcXYZvrkFVEWIDlUUH0N7PCWyrjald79uo
+# zay2dUp4WNXGJsVy4MS5JDJJyTsAfSsVLi9UEuv4AkG0Hg93NqdwuWfeumv3VhGV
+# 4q6dL8yVJ8Gv/0WBs3nebMg9vnr+Ugzh63UR1Z4oSPT4lAG0sfNZ9JAsSNQZszTY
+# vs0Un8+5GTMtafL+Y4NYLZD1bbXrInv+zegbSY6wx6bep0jAseqjAtglyMztfnfI
+# zG+qF3O/wFG5+XrZ96GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNjI3
-# MDhaMC8GCSqGSIb3DQEJBDEiBCAcqzt6WAwyewKn1SQ5U9WWK3SRQwGzq8v3w515
-# RQl7eTANBgkqhkiG9w0BAQEFAASCAgBtKPO2/nILTM0mFMzRd0j/C+5S3DMKbKuX
-# y+HdRqg5V0V8kKjfC884TmgL9w9EUWFXdW41mTrwzMTXCUZTS97k7QiAhz94rZ65
-# z7KcFV/foYPVfJdRa5iwokgNUBFNUk+eY4NeZ7eQLz3S4eCK6xHVd7bH2VTmhKwL
-# IGZAKYb7ia9MhgIbx58G1wrxAjaFO1DapuHeYGGvJqpmB4uYbi+505HBsAXGkoqd
-# Fy2Ose2uolQRarxxR7wuwh5OwoUjmwSLgwXdlRFQBSHze5wGNKAgDhrt8gL5Qq1d
-# ReMZOodpfs31h/LPIjLD9lTxQMPbTf1N2JKag5Zg8okcj95wv41d0uWg05axldzy
-# 5dkwDgrffL5VC9mkycw0vDWXVehawArtwJ1jzk3HKmxnKzRFBJHrgph8VNLsGsKr
-# 6RuxfS0uXtlgDPo9KDney7GJgNpy7zzb1VQBsj3WKRqKOOURcR3UnQ2m2hK0N8/5
-# bPuNE2v2o/YhmNS5x1nLOmLVbGzV/JZLCACYdvu5lgts/hSz9sTb2KsW4g2I6Zj6
-# OU0DQQwzuffWA6htCBU6FgTBp0GW6qsIrc7V9szGsmGt/fW5Oc6mWXTPUdowRpMD
-# vkmmXZaXOI3B++wm/1oHVWPp45I9aLAGT8Uhi3w7NXVm9+DOygo1DM1M5mv0jlZO
-# 1HO6xxcgCw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQyMTI3
+# MDZaMC8GCSqGSIb3DQEJBDEiBCAllNzuBqWe8AlC3RoGAzdqdoWKu7mGiyoMdRYK
+# n2/94zANBgkqhkiG9w0BAQEFAASCAgAqWzhlq3u+5aBGRwMgMh1h3gS3/+wVSxup
+# 7U+lowbTLMkxQtfA/RPLDweLyUMRjhS7KduliHHXS/AisPk7SimV+0u9xzHeV3fW
+# hE5cGILhvgYd/KDcO6Db/rlNDCb/KS2wc/oKAeJZQaRNOL3TxwfM5gYakD8SYxMn
+# fCMRQZW0tIinD4Qvd+9h3wINJbiasZbbdpk4zg8kjIL9KcwlJlpOLk9Ug0iNDRyE
+# poVCduhCnN0KGfiTe91qRBNjHeqHmW+ERlzqjnqLQJ4P4Au7YgopBgxtVv5TJA8P
+# Vl83Lv0LSixKh7a3nY24C9BzbTpSApKKoBiFQMXnaRqN8IX3h3s4xzkPa+5rmKRi
+# JZM1G6i7ArCWQl5igP5n8pm354cVPUXny3sQNTDS9v4RK3Z6Tg5zyysXCKls7GRP
+# i8thspSR8TXhLK/Y8eLVwbyumti2O3HFPFacHTU42zap8QZ4W+wpk/5ZS3axoHG0
+# AF/xt2ynNLUstVoxGhde9BikXbDPQwYgNMkUJYSM9CqLC9iYl1kln+KPJmnmn8HO
+# jPXmTYIj/XQQc0enjnvYl5AlB/MNaCE1B7OR2l1MDIZpJCGlgEawJVR0Xq/La+rn
+# NAd8/ERMv35vHojXkVxCNzZSN774RfF0dnMZPrPgTzE9+6SHS0v+O5EamQbNsY9w
+# 22kqLVK04A==
 # SIG # End signature block

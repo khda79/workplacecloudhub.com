@@ -8,7 +8,7 @@ web-only, or hybrid workspace access. Audit and Preview are read-only. Apply and
 Restore are guarded by administrator checks, configuration gates, confirmation
 phrases, rollback files, logs, and JSON/CSV evidence.
 .NOTES
-Version: 1.1.2
+Version: 1.1.4
 #>
 
 [CmdletBinding()]
@@ -708,6 +708,7 @@ function Invoke-ThinClientAudit {
     }
 
     $audit = [pscustomobject]$result
+    if ($RequestedAction -eq 'Preview') { $audit | Add-Member NoteProperty PreviewPlan (Get-ThinClientPreviewPlan -Config $Config -Audit $audit) }
     Export-Evidence -Evidence $audit -Config $Config
     Write-SmartThinClientLog -Message ("Audit completed. Json={0}" -f $script:EvidenceJsonPath)
     return $audit
@@ -732,7 +733,7 @@ function Convert-AuditToText {
         'TargetUserName', 'TargetUserExists', 'CitrixWorkspaceInstalled', 'CitrixWorkspacePath',
         'AvdClientInstalled', 'AvdClassicClientPath', 'WindowsAppPackage', 'BrowserInstalled',
         'PreferredAccessMode', 'UseWebShell', 'CitrixWebUrlConfigured', 'AvdWebUrlConfigured',
-        'BrowserPath', 'AssignedAccessCmdletAvailable', 'ShellLauncherClassAvailable',
+        'BrowserPath', 'WebOnlyUrlConfigured', 'AssignedAccessCmdletAvailable', 'ShellLauncherClassAvailable',
         'AllowApply', 'AllowRestore', 'LogPath', 'EvidenceJsonPath', 'EvidenceCsvPath'
     )) {
         $property = $Audit.PSObject.Properties[$name]
@@ -740,6 +741,7 @@ function Convert-AuditToText {
             $lines.Add(('{0}: {1}' -f $name, $property.Value))
         }
     }
+    if ($Audit.PSObject.Properties['PreviewPlan']) { $lines.Add(''); $lines.Add('Preview plan (no changes applied):'); $lines.Add(($Audit.PreviewPlan | ConvertTo-Json -Depth 5)) }
     return ($lines -join [Environment]::NewLine)
 }
 
@@ -999,6 +1001,48 @@ function ConvertTo-QuotedPowerShellString {
     return "'{0}'" -f ($Value -replace "'", "''")
 }
 
+function Get-ThinClientShellXaml {
+    return @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Smart ThinClient Shell" WindowStartupLocation="CenterScreen"
+        WindowState="Maximized" Background="#F5F8FB">
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="58"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="40"/>
+    </Grid.RowDefinitions>
+    <Border Grid.Row="0" Background="#1F2937" Padding="12,8">
+      <DockPanel LastChildFill="True">
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button Name="BackButton" Content="Back" Width="78" Height="34" Margin="0,0,8,0"/>
+          <Button Name="RefreshButton" Content="Refresh" Width="82" Height="34" Margin="0,0,8,0"/>
+          <Button Name="ExternalButton" Content="Open browser" Width="112" Height="34" Margin="0,0,8,0"/>
+          <Button Name="SettingsButton" Content="Settings" Width="86" Height="34" Margin="0,0,8,0"/>
+          <Button Name="SignOutButton" Content="Sign out" Width="86" Height="34" Margin="0,0,8,0"/>
+          <Button Name="RestartButton" Content="Restart" Width="82" Height="34" Margin="0,0,8,0"/>
+          <Button Name="ShutdownButton" Content="Shutdown" Width="92" Height="34"/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal">
+          <TextBlock Name="TitleText" Text="Smart ThinClient" Foreground="White" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,18,0"/>
+          <Button Name="CitrixButton" Content="Citrix Web" Width="98" Height="34" Margin="0,0,8,0"/>
+          <Button Name="AvdButton" Content="AVD Web" Width="90" Height="34" Margin="0,0,8,0"/>
+          <Button Name="WebOnlyButton" Content="Web" Width="72" Height="34"/>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+    <Border Grid.Row="1" Background="White" BorderBrush="#DDE7F0" BorderThickness="1,0,1,0">
+      <WebBrowser Name="WorkspaceBrowser"/>
+    </Border>
+    <Border Grid.Row="2" Background="#F8FBFE" BorderBrush="#DDE7F0" BorderThickness="1,1,1,0" Padding="10,0">
+      <TextBlock Name="StatusText" Text="Ready" Foreground="#5F6B7A" VerticalAlignment="Center"/>
+    </Border>
+  </Grid>
+</Window>
+'@
+}
+
 function New-LauncherScript {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -1047,6 +1091,7 @@ function New-LauncherScript {
     $hybridDefaultLiteral = ConvertTo-QuotedPowerShellString -Value $hybridDefault
     $settingsPagesLiteral = '@({0})' -f (($settingsPages | ForEach-Object { ConvertTo-QuotedPowerShellString -Value $_ }) -join ', ')
 
+    $shellXaml = Get-ThinClientShellXaml
     $content = @"
 param([ValidateSet('Citrix','AVD','WebOnly','Hybrid')][string]`$Profile = '$EffectiveProfile')
 `$ErrorActionPreference = 'Stop'
@@ -1219,43 +1264,7 @@ function Show-WebShell {
 
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
     [xml]`$xaml = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart ThinClient Shell" WindowStartupLocation="CenterScreen"
-        WindowState="Maximized" Background="#F5F8FB">
-  <Grid>
-    <Grid.RowDefinitions>
-      <RowDefinition Height="58"/>
-      <RowDefinition Height="*"/>
-      <RowDefinition Height="40"/>
-    </Grid.RowDefinitions>
-    <Border Grid.Row="0" Background="#1F2937" Padding="12,8">
-      <DockPanel LastChildFill="True">
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-          <Button Name="BackButton" Content="Back" Width="78" Height="34" Margin="0,0,8,0"/>
-          <Button Name="RefreshButton" Content="Refresh" Width="82" Height="34" Margin="0,0,8,0"/>
-          <Button Name="ExternalButton" Content="Open browser" Width="112" Height="34" Margin="0,0,8,0"/>
-          <Button Name="SettingsButton" Content="Settings" Width="86" Height="34" Margin="0,0,8,0"/>
-          <Button Name="SignOutButton" Content="Sign out" Width="86" Height="34" Margin="0,0,8,0"/>
-          <Button Name="RestartButton" Content="Restart" Width="82" Height="34" Margin="0,0,8,0"/>
-          <Button Name="ShutdownButton" Content="Shutdown" Width="92" Height="34"/>
-        </StackPanel>
-        <StackPanel Orientation="Horizontal">
-          <TextBlock Name="TitleText" Text="Smart ThinClient" Foreground="White" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,18,0"/>
-          <Button Name="CitrixButton" Content="Citrix Web" Width="98" Height="34" Margin="0,0,8,0"/>
-          <Button Name="AvdButton" Content="AVD Web" Width="90" Height="34" Margin="0,0,8,0"/>
-          <Button Name="WebOnlyButton" Content="Web" Width="72" Height="34"/>
-        </StackPanel>
-      </DockPanel>
-    </Border>
-    <Border Grid.Row="1" Background="White" BorderBrush="#DDE7F0" BorderThickness="1,0,1,0">
-      <WebBrowser Name="WorkspaceBrowser"/>
-    </Border>
-    <Border Grid.Row="2" Background="#F8FBFE" BorderBrush="#DDE7F0" BorderThickness="1,1,1,0" Padding="10,0">
-      <TextBlock Name="StatusText" Text="Ready" Foreground="#5F6B7A" VerticalAlignment="Center"/>
-    </Border>
-  </Grid>
-</Window>
+$shellXaml
 '@
 
     `$reader = New-Object System.Xml.XmlNodeReader `$xaml
@@ -1725,6 +1734,195 @@ function Invoke-ThinClientRestore {
     return $result
 }
 
+function Get-ThinClientVisualPreviewTarget {
+    param($Config, [ValidateSet('Citrix','AVD','WebOnly')][string]$Provider, [string]$EffectiveProfile = 'Auto')
+    $urls = Get-WorkspaceWebUrls -Config $Config -EffectiveProfile $EffectiveProfile
+    $url = [string]$urls[$Provider]
+    $fallback = $false
+    if ([string]::IsNullOrWhiteSpace($url) -and $Provider -ne 'WebOnly') {
+        $url = [string]$urls.WebOnly
+        $fallback = -not [string]::IsNullOrWhiteSpace($url)
+    }
+    $uri = $null
+    $valid = -not [string]::IsNullOrWhiteSpace($url) -and [Uri]::TryCreate($url, [UriKind]::Absolute, [ref]$uri) -and $uri.Scheme -in @('http','https') -and [string]::IsNullOrEmpty($uri.UserInfo)
+    return [pscustomobject]@{ Provider = $Provider; Url = $url; IsValid = $valid; UsesWebOnlyFallback = $fallback }
+}
+
+function Show-ThinClientVisualPreview {
+    param([Parameter(Mandatory = $true)]$Config, [Parameter(Mandatory = $true)]$Audit, $Owner)
+    Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
+    $effectiveProfile = [string]$Audit.EffectiveProfile
+    $Config = Merge-ProfileConfig -Config $Config -EffectiveProfile $effectiveProfile
+    [xml]$xaml = Get-ThinClientShellXaml
+    $window = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($xaml))
+    if ($null -ne $Owner) { $window.Owner = $Owner }
+    $window.Title = 'Smart ThinClient - Visual Preview'
+    $window.WindowState = 'Normal'
+    $window.Width = 1220; $window.Height = 800
+    $window.MinWidth = 1000; $window.MinHeight = 600
+    $iconPath = Join-Path $script:ScriptRoot 'Assets\WorkplaceCloudHub.ico'
+    if (Test-Path -LiteralPath $iconPath) { $window.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($iconPath,[UriKind]::Absolute)) }
+    $browser = $window.FindName('WorkspaceBrowser')
+    $statusText = $window.FindName('StatusText')
+    $window.FindName('TitleText').Text = [string](Get-ConfigValue -Config $Config -Name 'WebShellTitle' -Default 'Smart ThinClient')
+    $grid = $window.Content
+    # Let the same shell toolbar wrap on a normal-sized preview window.
+    $toolbar = @($grid.Children | Where-Object { [Windows.Controls.Grid]::GetRow($_) -eq 0 })[0]
+    $panels = @($toolbar.Child.Children)
+    $toolbar.Child.Children.Clear()
+    $wrap = [Windows.Controls.WrapPanel]::new()
+    foreach ($panel in @($panels[1],$panels[0])) { $panel.Margin = '0,2,0,2'; [void]$wrap.Children.Add($panel) }
+    $toolbar.Child = $wrap
+    $grid.RowDefinitions[0].Height = [Windows.GridLength]::Auto
+    $row = [Windows.Controls.RowDefinition]::new(); $row.Height = [Windows.GridLength]::Auto
+    $grid.RowDefinitions.Insert(1,$row)
+    foreach ($child in @($grid.Children)) { $oldRow = [Windows.Controls.Grid]::GetRow($child); if ($oldRow -ge 1) { [Windows.Controls.Grid]::SetRow($child,$oldRow+1) } }
+    $banner = [Windows.Controls.Border]::new(); $banner.Background = '#E6F4FF'; $banner.Padding = '12,8'
+    $label = [Windows.Controls.TextBlock]::new(); $label.TextWrapping = 'Wrap'
+    $label.Text = 'VISUAL PREVIEW - No Windows settings are changed. System actions, native clients and external launches are disabled. Close this window to return to the control panel.'
+    $banner.Child = $label; [Windows.Controls.Grid]::SetRow($banner,1); [void]$grid.Children.Add($banner)
+    $showProviders = [bool](Get-ConfigValue -Config $Config -Name 'WebShellShowProviderButtons' -Default $true)
+    foreach ($name in @('CitrixButton','AvdButton','WebOnlyButton')) { if (-not $showProviders) { $window.FindName($name).Visibility = 'Collapsed' } }
+    $visibility = @{ ExternalButton = 'WebShellAllowExternalBrowser'; SettingsButton = 'WebShellAllowLimitedSettings'; SignOutButton = 'WebShellAllowPowerControls'; RestartButton = 'WebShellAllowPowerControls'; ShutdownButton = 'WebShellAllowPowerControls' }
+    foreach ($name in $visibility.Keys) {
+        $button = $window.FindName($name)
+        $button.IsEnabled = $false
+        $button.ToolTip = 'Unavailable in visual preview.'
+        if (-not (Get-ConfigValue -Config $Config -Name $visibility[$name] -Default $true)) { $button.Visibility = 'Collapsed' }
+        # These controls deliberately have no action handlers in preview.
+    }
+    $navigate = {
+        param([string]$Provider)
+        $target = Get-ThinClientVisualPreviewTarget -Config $Config -Provider $Provider -EffectiveProfile $effectiveProfile
+        if (-not $target.IsValid) {
+            $statusText.Text = 'Preview - no valid HTTP/HTTPS URL configured for ' + $Provider
+            $safeProvider = [Net.WebUtility]::HtmlEncode($Provider)
+            $browser.NavigateToString('<html><body style="font-family:Segoe UI;padding:40px"><h1>'+ $safeProvider +' workspace preview</h1><p>No valid web URL is configured for this profile. The shell layout is shown; no client was started.</p></body></html>')
+            return
+        }
+        $statusText.Text = 'Preview - ' + $Provider + $(if($target.UsesWebOnlyFallback){' (WebOnly fallback)'}else{''}) + ' - ' + $target.Url
+        try { $browser.Navigate([Uri]$target.Url) }
+        catch { $statusText.Text = 'Preview navigation failed: ' + $_.Exception.Message }
+    }
+    $browser.Add_Navigating({
+        param($sender,$eventArgs)
+        if ($null -ne $eventArgs.Uri -and $eventArgs.Uri.Scheme -notin @('http','https','about')) {
+            $eventArgs.Cancel = $true
+            $statusText.Text = 'External application links are disabled in visual preview.'
+        }
+    })
+    $window.FindName('CitrixButton').Add_Click({ & $navigate 'Citrix' })
+    $window.FindName('AvdButton').Add_Click({ & $navigate 'AVD' })
+    $window.FindName('WebOnlyButton').Add_Click({ & $navigate 'WebOnly' })
+    $window.FindName('BackButton').Add_Click({ if ($browser.CanGoBack) { $browser.GoBack() } })
+    $window.FindName('RefreshButton').Add_Click({ if ($null -ne $browser.Source) { $browser.Refresh() } })
+    $initialProvider = $effectiveProfile
+    if ($initialProvider -eq 'Hybrid') { $initialProvider = [string](Get-ConfigValue -Config $Config -Name 'HybridDefaultProvider' -Default 'Citrix') }
+    if ($initialProvider -notin @('Citrix','AVD','WebOnly')) { $initialProvider = 'WebOnly' }
+    $window.Add_ContentRendered({ & $navigate $initialProvider })
+    try { [void]$window.ShowDialog() }
+    finally { $browser.Dispose() }
+}
+
+
+function Get-ThinClientPreviewPlan {
+    param($Config, $Audit)
+    return [pscustomobject][ordered]@{
+        ChangesApplied = $false
+        EffectiveProfile = $Audit.EffectiveProfile
+        TargetUser = $Audit.TargetUserName
+        ShellMode = Get-ConfigValue -Config $Config -Name 'ShellMode' -Default 'Launcher'
+        AutoLaunchMode = Get-ConfigValue -Config $Config -Name 'AutoLaunchMode' -Default 'RunKey'
+        ShellRestrictions = if (Get-ConfigValue -Config $Config -Name 'EnableShellLimitations' -Default $false) { Get-ConfigValue -Config $Config -Name 'ShellRestrictionLevel' -Default 'None' } else { 'None' }
+        AssignedAccess = Get-ConfigValue -Config $Config -Name 'EnableAssignedAccess' -Default $false
+        ShellLauncher = Get-ConfigValue -Config $Config -Name 'EnableShellLauncher' -Default $false
+        CreateDedicatedUser = Get-ConfigValue -Config $Config -Name 'CreateDedicatedLocalUser' -Default $false
+        LauncherPath = Join-Path $script:OutputRoot 'Launcher\SmartThinClient-LaunchWorkspace.ps1'
+        RollbackDirectory = $script:RollbackRoot
+        ApplyEnabled = Get-ConfigValue -Config $Config -Name 'AllowApply' -Default $false
+        Note = 'Plan only. Apply separately checks administrator rights, configuration, confirmation and prerequisites, then saves rollback before changes.'
+    }
+}
+
+function Assert-ThinClientGuiAccess {
+    param($Config, [ValidateSet('Apply','Restore')][string]$RequestedAction)
+    Assert-ConfigValues -Config $Config
+    if (-not (Get-ConfigValue -Config $Config -Name ('Allow' + $RequestedAction) -Default $false)) {
+        throw "$RequestedAction is blocked because Allow$RequestedAction is false in configuration. No changes were made."
+    }
+    if (-not (Test-IsAdministrator)) { throw "$RequestedAction requires an elevated administrator session. Reopen the control panel as administrator; no operation was started." }
+}
+
+function Invoke-ThinClientGuiAction {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [ValidateSet('Audit','Preview','Apply','Restore')][string]$RequestedAction,
+        [ValidateSet('Auto','Citrix','AVD','WebOnly','Hybrid')][string]$SelectedProfile,
+        [string]$Confirmation = '',
+        [string]$SelectedRollbackPath = '',
+        [string]$ExpectedRollbackHash = '',
+        [securestring]$Password
+    )
+    Assert-ConfigValues -Config $Config
+    $Profile = $SelectedProfile
+    $ConfirmApply = $Confirmation
+    $ConfirmRestore = $Confirmation
+    $RollbackPath = $SelectedRollbackPath
+    $DedicatedUserPassword = $Password
+    try {
+        if ($RequestedAction -in @('Audit','Preview')) {
+            return Invoke-ThinClientAudit -Config $Config -RequestedProfile $SelectedProfile -RequestedAction $RequestedAction
+        }
+        Assert-ThinClientGuiAccess -Config $Config -RequestedAction $RequestedAction
+        $effective = Resolve-EffectiveProfile -RequestedProfile $SelectedProfile -Config $Config
+        $effectiveConfig = Merge-ProfileConfig -Config $Config -EffectiveProfile $effective
+        Assert-ThinClientGuiAccess -Config $effectiveConfig -RequestedAction $RequestedAction
+        $defaultPhrase = if ($RequestedAction -eq 'Apply') { 'APPLY SMARTTHINCLIENT' } else { 'RESTORE WINDOWS SHELL' }
+        $phrase = [string](Get-ConfigValue -Config $effectiveConfig -Name ($RequestedAction + 'ConfirmationPhrase') -Default $defaultPhrase)
+        if ([string]::IsNullOrWhiteSpace($phrase) -or $Confirmation -cne $phrase) { throw "$RequestedAction requires the exact confirmation phrase. No changes were made." }
+        if ($RequestedAction -eq 'Apply') { return Invoke-ThinClientApply -Config $Config }
+        if ([string]::IsNullOrWhiteSpace($RollbackPath) -or [string]::IsNullOrWhiteSpace($ExpectedRollbackHash)) { throw 'Select and review an explicit rollback file before Restore.' }
+        if ((Get-FileHash -LiteralPath $RollbackPath -Algorithm SHA256).Hash -ne $ExpectedRollbackHash) { throw 'The rollback file changed after review. Select and review it again.' }
+        return Invoke-ThinClientRestore -Config $effectiveConfig
+    }
+    finally { $DedicatedUserPassword = $null; $Password = $null }
+}
+
+function Show-ThinClientConfirmation {
+    param($Owner, [string]$RequestedAction, [string]$Summary, [string]$Phrase, [bool]$RequestPassword = $false)
+    Add-Type -AssemblyName PresentationFramework
+    [xml]$xaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Title="Confirm workspace change" Width="720" Height="650" MinHeight="540" WindowStartupLocation="CenterOwner" ResizeMode="CanResize" Background="#F5F8FB">
+ <Grid Margin="20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+ <TextBlock Name="WarningText" TextWrapping="Wrap" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,12"/>
+ <TextBox Name="SummaryText" Grid.Row="1" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" Padding="10"/>
+ <StackPanel Grid.Row="2" Margin="0,14,0,0"><TextBlock Name="PhraseLabel" TextWrapping="Wrap"/><TextBox Name="PhraseInput" Height="32" Margin="0,6,0,0"/></StackPanel>
+ <StackPanel Name="PasswordPanel" Grid.Row="3" Margin="0,10,0,0" Visibility="Collapsed"><TextBlock Text="New dedicated local user password (only needed if creating the configured user)" TextWrapping="Wrap"/><PasswordBox Name="UserPassword" Height="32" Margin="0,6,0,0"/></StackPanel>
+ <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0"><Button Name="CancelButton" Content="Cancel" IsCancel="True" MinWidth="100" Height="34" Margin="0,0,10,0"/><Button Name="ConfirmButton" Content="Confirm" IsEnabled="False" MinWidth="100" Height="34"/></StackPanel>
+ </Grid>
+</Window>
+"@
+    $dialog = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($xaml))
+    $dialog.Owner = $Owner
+    $dialog.Icon = $Owner.Icon
+    $dialog.Title = 'Confirm ' + $RequestedAction
+    $dialog.FindName('WarningText').Text = if ($RequestedAction -eq 'Apply') { 'Apply changes local workspace settings. Review this plan; a rollback is saved before changes.' } else { 'Restore changes local workspace settings using the exact reviewed rollback file.' }
+    $dialog.FindName('SummaryText').Text = $Summary
+    $dialog.FindName('PhraseLabel').Text = 'Type exactly: ' + $Phrase
+    $inputBox = $dialog.FindName('PhraseInput')
+    $confirmButton = $dialog.FindName('ConfirmButton')
+    $passwordBox = $dialog.FindName('UserPassword')
+    if ($RequestPassword) { $dialog.FindName('PasswordPanel').Visibility = 'Visible' }
+    $inputBox.Add_TextChanged({ $confirmButton.IsEnabled = -not [string]::IsNullOrWhiteSpace($Phrase) -and $inputBox.Text -ceq $Phrase })
+    $confirmButton.Add_Click({ if ($inputBox.Text -ceq $Phrase) { $dialog.DialogResult = $true } })
+    try {
+        if ($dialog.ShowDialog() -ne $true) { return $null }
+        return [pscustomobject]@{ Phrase = $inputBox.Text; Password = if ($RequestPassword) { $passwordBox.SecurePassword } else { $null } }
+    }
+    finally { $passwordBox.Clear() }
+}
+
+
 function Show-ThinClientGui {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -1743,7 +1941,7 @@ function Show-ThinClientGui {
     [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart ThinClient Shell" Height="760" Width="1120" MinHeight="650" MinWidth="940"
+        Title="Smart ThinClient Control Panel" Height="800" Width="1180" MinHeight="700" MinWidth="1040"
         Background="#F5F8FB" WindowStartupLocation="CenterScreen">
   <Grid Margin="18">
     <Grid.RowDefinitions>
@@ -1762,8 +1960,8 @@ function Show-ThinClientGui {
           <Border Background="#E6F4FF" CornerRadius="8" Padding="10,4" HorizontalAlignment="Left">
             <TextBlock Text="Endpoint workspace" Foreground="#005A9E" FontWeight="SemiBold"/>
           </Border>
-          <TextBlock Text="Smart ThinClient Shell" FontSize="28" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,12,0,0"/>
-          <TextBlock Text="Audit, apply, and restore a controlled Citrix, AVD, or web workspace shell." Foreground="#5F6B7A" FontSize="14" Margin="0,4,0,0"/>
+          <TextBlock Text="Smart ThinClient Control Panel" FontSize="28" FontWeight="SemiBold" Foreground="#1F2937" Margin="0,12,0,0"/>
+          <TextBlock Text="Inspect, preview, apply, and restore Citrix, AVD, or web workspace settings." Foreground="#5F6B7A" FontSize="14" Margin="0,4,0,0"/>
         </StackPanel>
         <Border Grid.Column="1" Background="#F8FBFE" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="12">
           <Image Name="LogoImage" Stretch="Uniform"/>
@@ -1788,7 +1986,8 @@ function Show-ThinClientGui {
           <TextBlock Name="StatusText" Text="Ready" Foreground="#5F6B7A" VerticalAlignment="Center" Margin="18,0,0,0"/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal">
-          <Button Name="AuditButton" Content="Audit / Preview" Height="34" MinWidth="130" Background="#0078D4" Foreground="White" BorderBrush="#0078D4" Padding="16,0" Margin="0,0,8,0"/>
+          <Button Name="AuditButton" Content="Audit" Height="34" MinWidth="90" Background="#0078D4" Foreground="White" BorderBrush="#0078D4" Padding="16,0" Margin="0,0,8,0"/>
+          <Button Name="PreviewButton" Content="Preview" Height="34" MinWidth="90" Padding="16,0" Margin="0,0,8,0"/>
           <Button Name="ApplyButton" Content="Apply" Height="34" MinWidth="90" Padding="16,0" Margin="0,0,8,0"/>
           <Button Name="RestoreButton" Content="Restore" Height="34" MinWidth="90" Padding="16,0" Margin="0,0,8,0"/>
           <Button Name="OpenOutputButton" Content="Open output" Height="34" MinWidth="120" Padding="16,0"/>
@@ -1799,7 +1998,7 @@ function Show-ThinClientGui {
       <TextBox Name="OutputText" FontFamily="Consolas" FontSize="13" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsReadOnly="True" BorderThickness="0"/>
     </Border>
     <Border Grid.Row="3" Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,14,0,0">
-      <TextBlock Text="Apply and Restore require admin rights, config gates, confirmation phrases, and rollback evidence." Foreground="#5F6B7A"/>
+      <TextBlock Text="Preview makes no Windows changes. Apply/Restore require administrator rights, configuration permission, and typed confirmation." Foreground="#5F6B7A"/>
     </Border>
   </Grid>
 </Window>
@@ -1807,13 +2006,15 @@ function Show-ThinClientGui {
 
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $window = [Windows.Markup.XamlReader]::Load($reader)
+    $windowIconPath = Join-Path $script:ScriptRoot 'Assets\WorkplaceCloudHub.ico'
+    if (Test-Path -LiteralPath $windowIconPath) {
+        $window.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($windowIconPath, [UriKind]::Absolute))
+    }
     $logoImage = $window.FindName('LogoImage')
     $profileCombo = $window.FindName('ProfileCombo')
     $statusText = $window.FindName('StatusText')
     $outputText = $window.FindName('OutputText')
     $auditButton = $window.FindName('AuditButton')
-    $applyButton = $window.FindName('ApplyButton')
-    $restoreButton = $window.FindName('RestoreButton')
     $openOutputButton = $window.FindName('OpenOutputButton')
 
     $logoPath = Join-Path $script:ScriptRoot ([string](Get-ConfigValue -Config $Config -Name 'LogoPath' -Default 'Assets\WorkplaceCloudHub-lockup-WPF.png'))
@@ -1826,34 +2027,87 @@ function Show-ThinClientGui {
         $logoImage.Source = $bitmap
     }
 
-    $auditButton.Add_Click({
+    $applyButton = $window.FindName('ApplyButton')
+    $restoreButton = $window.FindName('RestoreButton')
+    $previewButton = $window.FindName('PreviewButton')
+    foreach ($item in $profileCombo.Items) {
+        if ([string]$item.Content -eq $Profile) { $profileCombo.SelectedItem = $item; break }
+    }
+    $actionButtons = @($auditButton, $previewButton, $applyButton, $restoreButton, $openOutputButton)
+    $runAction = {
+        param([string]$RequestedAction)
+        $confirmation = $null
+        foreach ($button in $actionButtons) { $button.IsEnabled = $false }
         try {
             $selectedProfile = [string]$profileCombo.Text
-            $statusText.Text = 'Running preview...'
-            $audit = Invoke-ThinClientAudit -Config $Config -RequestedProfile $selectedProfile -RequestedAction 'Preview'
-            $outputText.Text = Convert-AuditToText -Audit $audit
-            $statusText.Text = 'Preview completed'
+            $statusText.Text = 'Running ' + $RequestedAction.ToLowerInvariant() + '...'
+            $parameters = @{ Config = $Config; RequestedAction = $RequestedAction; SelectedProfile = $selectedProfile }
+            if ($RequestedAction -in @('Apply','Restore')) {
+                Assert-ThinClientGuiAccess -Config $Config -RequestedAction $RequestedAction
+                $effectiveProfile = Resolve-EffectiveProfile -RequestedProfile $selectedProfile -Config $Config
+                $effectiveConfig = Merge-ProfileConfig -Config $Config -EffectiveProfile $effectiveProfile
+                Assert-ThinClientGuiAccess -Config $effectiveConfig -RequestedAction $RequestedAction
+                $defaultPhrase = if ($RequestedAction -eq 'Apply') { 'APPLY SMARTTHINCLIENT' } else { 'RESTORE WINDOWS SHELL' }
+                $phrase = [string](Get-ConfigValue -Config $effectiveConfig -Name ($RequestedAction + 'ConfirmationPhrase') -Default $defaultPhrase)
+                $requestPassword = $false
+                if ($RequestedAction -eq 'Apply') {
+                    $preview = Invoke-ThinClientGuiAction -Config $Config -RequestedAction Preview -SelectedProfile $selectedProfile
+                    $summary = Convert-AuditToText -Audit $preview
+                    $outputText.Text = $summary
+                    $requestPassword = [bool](Get-ConfigValue -Config $effectiveConfig -Name 'CreateDedicatedLocalUser' -Default $false)
+                }
+                else {
+                    $picker = New-Object Microsoft.Win32.OpenFileDialog
+                    $picker.Title = 'Select the rollback file to review and restore'
+                    $picker.Filter = 'Rollback JSON (*.json)|*.json'
+                    $picker.CheckFileExists = $true
+                    $picker.InitialDirectory = $script:RollbackRoot
+                    if ($picker.ShowDialog($window) -ne $true) { $statusText.Text = 'Restore cancelled'; return }
+                    $parameters.SelectedRollbackPath = $picker.FileName
+                    $rollback = Read-JsonFile -Path $picker.FileName
+                    if ($null -eq $rollback) { throw 'The selected rollback is empty or invalid.' }
+                    Assert-RollbackState -State $rollback
+                    $parameters.ExpectedRollbackHash = (Get-FileHash -LiteralPath $picker.FileName -Algorithm SHA256).Hash
+                    $summary = 'Rollback: ' + $picker.FileName + [Environment]::NewLine + 'SHA256: ' + $parameters.ExpectedRollbackHash + [Environment]::NewLine + (($rollback | Select-Object ComputerName, TargetUserSid, OutputRoot, LauncherPath, LauncherExisted, Config, Registry) | ConvertTo-Json -Depth 10)
+                }
+                $confirmation = Show-ThinClientConfirmation -Owner $window -RequestedAction $RequestedAction -Summary $summary -Phrase $phrase -RequestPassword $requestPassword
+                if ($null -eq $confirmation) { $statusText.Text = $RequestedAction + ' cancelled'; return }
+                $parameters.Confirmation = $confirmation.Phrase
+                $parameters.Password = $confirmation.Password
+            }
+            $result = Invoke-ThinClientGuiAction @parameters
+            if ($RequestedAction -eq 'Preview') {
+                $statusText.Text = 'Visual preview open'
+                Show-ThinClientVisualPreview -Config $Config -Audit $result -Owner $window
+                $outputText.Text = 'Visual preview closed. Profile: ' + $result.EffectiveProfile + '. No Windows settings were changed. Audit and the change plan are saved in the output folder.'
+                $statusText.Text = 'Visual preview closed'
+                return
+            }
+            $outputText.Text = if ($RequestedAction -in @('Audit','Preview')) { Convert-AuditToText -Audit $result } else { $result | ConvertTo-Json -Depth 8 }
+            $statusText.Text = $RequestedAction + ' completed'
         }
         catch {
-            $statusText.Text = 'Preview failed'
+            $statusText.Text = $RequestedAction + ' did not complete'
             $outputText.Text = $_.Exception.Message
             Write-SmartThinClientLog -Level 'ERROR' -Message $_.Exception.Message
         }
-    })
+        finally {
+            if ($null -ne $confirmation -and $null -ne $confirmation.Password) { $confirmation.Password.Dispose() }
+            $confirmation = $null
+            foreach ($button in $actionButtons) { $button.IsEnabled = $true }
+        }
+    }
+    foreach ($button in @($auditButton, $previewButton, $applyButton, $restoreButton)) {
+        $button.Tag = [string]$button.Content
+        $button.Add_Click({ & $runAction -RequestedAction ([string]$this.Tag) })
+    }
 
-    $applyButton.Add_Click({
-        $outputText.Text = 'Apply is available from CLI with -Action Apply, configuration gates, and -ConfirmApply. This prevents accidental shell lockdown from the GUI.'
-    })
-
-    $restoreButton.Add_Click({
-        $outputText.Text = 'Restore is available from CLI with -Action Restore, configuration gates, rollback evidence, and -ConfirmRestore.'
-    })
 
     $openOutputButton.Add_Click({
         if (Test-Path -LiteralPath $script:OutputRoot) { Start-Process -FilePath explorer.exe -ArgumentList $script:OutputRoot }
     })
 
-    $outputText.Text = 'Ready. Run Audit / Preview to collect read-only local signals.'
+    $outputText.Text = 'Ready. Audit inspects the device; Preview opens the workspace shell without applying Windows settings.'
     if ($splash) { Close-SmartThinClientGuiSplash -Splash $splash }
     [void]$window.ShowDialog()
 }
@@ -1884,8 +2138,11 @@ try {
             }
         }
         'Preview' {
-            $audit = Invoke-ThinClientAudit -Config $config -RequestedProfile $Profile -RequestedAction 'Preview'
-            Write-ThinClientCliSummary -Result $audit
+            if ($Gui) { Show-ThinClientGui -Config $config }
+            else {
+                $audit = Invoke-ThinClientAudit -Config $config -RequestedProfile $Profile -RequestedAction 'Preview'
+                Write-ThinClientCliSummary -Result $audit
+            }
         }
         'Launch' {
             $result = Invoke-ThinClientLaunchOnly -Config $config
@@ -1915,13 +2172,11 @@ catch {
     exit 1
 }
 
-
-
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3lVTC7YD0/GN/
-# q+xQjGEklUuAgrjye0JsXAyYOTpnWKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuMQAxZfKADGAs
+# Ndsg5sbEm4NMF26+2Nx1ASF1ls1/f6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2054,31 +2309,31 @@ catch {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIA+iMEClPYiP1luMhCElGa5/zlE0Bl3MIWZjiSm0Xl8oMA0GCSqG
-# SIb3DQEBAQUABIIBgAEx/ih1dSKn9fNA+oP9z7edwekA4Xi+uXd/oomUIOsEcCPn
-# TxwKIZAJr+YbNgPnLkHVS62HaveLRBlTCcRbroXlEN4ClzjJrMzYYfsmbpeCujDG
-# ulyiwDAOzhSBXIGCnpVptRMfIW31v054A3TsbT907xrHkXA1NrmFGOP24oo2SX3M
-# B0Rxv/TU9qKMjJI1v6S6rMKoT1eTH9Sfvcn2DQLvAj4RKKXEVgQ3y6VblPk1+U+H
-# HZdF9542PYjaRedybmgrnMfHH7geKJhoXWMBe/1QiyBKfglpDA7JbMVQYyd0ew3D
-# 0GVPYeopuvEnWGpqIm5RFGw0eBpC4Qgz2sk6FzfEfo3YOtDDYyPGhqZeq+sHTNk5
-# Ve9BNu+hYyJD8ernAqmlzvY25rg66hnDUUfbZOQCf2ON11+gdksK7ag6geHZcun0
-# XZAU+YVDjIfjO16+HqbPCt7WEjQsWXdVQt/MeJvF41PJPxd0HnrMOlci727Btmo0
-# HwxeCa/Oi3F02CJd0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPF8JVKmtyHvHOZdPms3ep8mHt9txgJfR4xKpwhvt3tXMA0GCSqG
+# SIb3DQEBAQUABIIBgJjN574VnjsnliSqami7AanNnrKAB/rGjEmJZXUnsRx6FM33
+# NkmYHH8pQgZ35m1hV/ReiZNoeBr3YD2+kSGT8m0s3CAUeMzXK2UxpcluBU7LMAXX
+# RY1R6OqKHKq/Ht/vlicVRxnPldnPpUKPpZfGynHKyaumJ4hvVJYkOBhAGG11q3+h
+# ksqRJ4iBaF4TMOLVrNmMWO++bnTR+II9z+hZhmlcwhj29vV00EJi4TC6lDflgpbB
+# 0OUHcUOOaSQtsFLvjrMhEEhI5nhMS/YqldsCyGhxWaDK3B97xAn2Wt6o/JycvqXQ
+# tTDTKNBFdq9qFuLTEeahsptSGfAva4g32APFShLLFSgiaKbK0YlNxuzhMbuHIqyl
+# wqHBEpkXZ1gQW7rT/f58r+iYt3aC9/aA72oV/lap41Dk/B3C7GPq80ZM+0b6TOK3
+# uU3ODbbugSc5/tyau9MRU4KveCWGnN9Lq8m/kpTB/wa2DxRPthbyF2UlrjHuazvc
+# pOhSR9t1dH3bzeDBcaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNjI3
-# MDdaMC8GCSqGSIb3DQEJBDEiBCBvJTC0AsznVu7b0nCUhTFaGyucJ5MUP2NnX3kr
-# zyY5tjANBgkqhkiG9w0BAQEFAASCAgCzuibY30DBK47vOiEfne4sVPPVY6DCDxqO
-# I/FuV5JVum/25hLDfw8p4zfeowRIhv+Q/2q5x1NBk/YQaZBOh30sCf2HbZJb9/Bm
-# eFRJnYmbaVdhEIj+Ihz1J/+XEwK4gWswzfX2WBoZV9MY03b9GNXZoPb9VNgAyaUK
-# 8+f65dw4Z30UUGQA4p5paTFGPtUHu8q0q0+Ho5iGgdxB3mks5v7X6p5Kblbw9Dkn
-# +Pvin8OTQlY/i+p2jwELDGWr5tfWrojnOYKMGDigv5UD1vsPL1uvfEqoO2XapNYn
-# 26bMWWNqst88czzNVqmFeUAvewE05b5p0GUPuLCxYxYtv18/7bG71I6eEwPmi5X1
-# r1p2C3k4z+LOCgDA197TdEZsSJdtvTzsT8g52WRNdz1RnNXNin45ZRJvpXhYDgw6
-# OXWdqGkvtMQQExkDOxUUJf00Z2gegqbIyjK9fTfKA8Ag+M4/Rlm0MoOLSVlZOAWC
-# IoNJI/R68ijTVLkmlGfKdZuNoYxsAkdvguD6chU9VdQ8TF0RxA/aa98RBzuSn3k5
-# Wu5kJTz0FkyE001P+np3Usdh9Ww60ucu7DDq/EPxjYmduwOiE6AUScElKtIyF77/
-# 56Pv+jfMcK6KHrot8hxGbP7ocS26OwZntIXcIzLojkpXkJpM9VopjzYMuLB5GL2O
-# huC45/I08Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQyMTI3
+# MDZaMC8GCSqGSIb3DQEJBDEiBCDD3g5q1BBItgqcC6JkcV6OWg5WZmRFmemVNLnV
+# Ud0VVTANBgkqhkiG9w0BAQEFAASCAgAj1uh3jQhShzu7rBHQofIqqPLKzfYSW51i
+# wASt7FfuxhEUIuJiNGvzYtfqPqY5nWWvL4HWI34c/b3CqaBFIkhLhWocGav4gN8u
+# rpnRifb6cV0Y9oO5AMdJeJfxMipTwEoVjSyK+dYJqMGGI7NXe3DMHetWR/gpRB/Z
+# ksXYPuco+anvdzh5pW9gVbAw+MDslrotMte1T+cKBIqMBJNs0aEzBGFvfPBG7hCp
+# CHMACsOrwYvvLRKZw4E8fjudT/sf/JMOK8DsuanJnZuqqD1lMC504fHTu9dguZEP
+# 1t7qM4wcq2Xux+4DFJxoeqeCZ3UPVLt9oB5eZCdFYiHFVpOQJiWA3WtVyq9d+7te
+# f3k984hQu3iRu9a8ZAPwEknOQcLwa4BeZjTMSmRZN/evxZOb/1supuGJ1XL16ojC
+# sddIqJI/U6LWk51FymOyQjRnjfeSB/ztbbYZDNMMNeVdit/XNbJRnsDU9p267C61
+# 28uLxJflcO+GpbvTqQLSiiLPpcjOm0WDUwe8NOtBbcuLGMz28jzY3qiwwmRO2tdw
+# JrHZVlDPP970Dr5+B1uL/wsjFqruurDY5OjGAffs6H6D9MkCAuqwJjzgyqFx7eWn
+# 3eUpJhJLAPEzvve6cX88Dy/PIfqvlMo7RCkEGo0B88gbiyiSc3DOfQlmuJIlVEMA
+# 5AfGxogvtg==
 # SIG # End signature block

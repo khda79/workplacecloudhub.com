@@ -29,12 +29,18 @@ For signature verification, use a Git clone/checkout that honors the repository'
 
 For updates, keep a separate backup of local JSON, output and rollback files, compare the new templates, and rerun Preview. There is no automatic migration or update check. Existing local profiles remain explicit overrides: set inherited fields to `"__USE_GLOBAL__"` when adopting the corrected templates. Never overwrite local workspace URLs with a blank template.
 
+The **Smart ThinClient Control Panel** provides Audit, Preview, Apply, Restore and Open output. Audit inspects local signals. The GUI Preview button opens a separate visual shell using the same layout as the workspace launcher. It loads the configured HTTP/HTTPS page, with provider selection and Back/Refresh. System actions, settings, external-browser launches and native clients are disabled in preview. Missing or invalid URLs show an explicit unconfigured state; a configured WebOnly fallback is labelled. The technical change plan remains in Preview JSON evidence and in the Apply review dialog. `-Gui -Action Preview` opens this panel; CLI Preview remains available.
+
+Apply first shows a fresh preview and asks for the exact configured confirmation phrase. Restore requires an explicitly selected rollback JSON, validates it, shows its settings and SHA-256, and asks for the exact restore phrase. A changed file is refused. Cancel performs no configuration change. Both actions reuse the existing CLI engines and preserve their administrator checks, global/profile configuration gates, preflight validation, rollback-before-write ordering and evidence. The GUI always requires a typed phrase, even if CLI phrase confirmation is optional in a local configuration. When a configured dedicated user must be created, the confirmation dialog accepts its password through a PasswordBox; it is passed as a SecureString and is not logged. A non-elevated panel cannot perform Apply/Restore; there is no automatic elevation or automatic gate change.
+
+`AllowApply` and `AllowRestore` default to `false`. The panel reports these blocks when clicked. Visual Preview remains available while they are false, without invoking Apply, Restore or the workspace Launch command, and without creating an installed launcher. Web navigation inside the preview can contact the configured site; it does not establish that authentication or remote sessions work. Start with `Start-SmartThinClient-Shell-GUI.cmd` to run without a console window; this wrapper returns after starting the GUI. Direct PowerShell shortcuts should include `-WindowStyle Hidden`. CLI wrappers keep their consoles.
+
 ## Modes
 
 | Mode | Behavior |
 | --- | --- |
 | Audit (default) | Inspects the local OS, users, clients, browser and kiosk capabilities. Without `-Cli`, opens the audit GUI. |
-| Preview | Same local inspection, with `PreviewOnly` evidence. It does not simulate every Apply operation or certify readiness. |
+| Preview | GUI: opens the visual shell with system/external actions disabled. CLI: local inspection and change plan with `PreviewOnly` evidence. Neither applies Windows settings or certifies kiosk/session readiness. |
 | Launch | Generates a unique file under `LaunchOnly/<id>/Launcher/` and starts a child PowerShell process. It does not change the installed launcher or configure logon. `Launched` means the process was started, not that a remote session succeeded. |
 | Apply | Requires elevation, `AllowApply: true` and the confirmation phrase. Performs preflight, saves rollback before account/configuration writes, writes a persistent launcher, then applies the explicitly configured options. |
 | Restore | Requires elevation, `AllowRestore: true` and the confirmation phrase. Validates the rollback schema/computer/paths before writes, restores recorded values and the previous launcher, and surfaces failures. |
@@ -62,7 +68,7 @@ Main values override built-in defaults; non-empty profile values override the ma
 - `DefaultProfile`: Auto, Citrix, AVD, WebOnly or Hybrid. Auto chooses from detected local clients.
 - `PreferredAccessMode`: Web or Native; `UseWebShell`: embedded WPF or external browser for Web mode.
 - `CitrixWebUrl`, `AvdWebUrl`, `WebOnlyUrl`: local portal URLs. Legacy aliases include WorkspaceUrl/StoreUrl for Citrix, FeedUrl for AVD, and WebShellHomeUrl/FallbackWebUrl for web fallback. A subscription feed URL is not necessarily a browser portal.
-- New WebOnly configurations default to `https://workplacecloudhub.com/`. Existing custom URLs and explicit blanks are preserved; this value does not open a site during Audit/Preview.
+- New WebOnly configurations default to `https://workplacecloudhub.com/`. Existing custom URLs and explicit blanks are preserved; this value does not open a site during Audit or CLI Preview. Clicking GUI Preview loads the configured page in its visual shell.
 - New main configurations default to `https://workplacecloudhub.com/demo/smartthinclient/citrix/` and `https://workplacecloudhub.com/demo/smartthinclient/avd/`. These are demonstration destinations, not tenant sign-in URLs or proof of a working remote session. Their availability must be checked separately. Provider profile URL fields stay empty to inherit the main configuration. Custom primary URLs remain authoritative; existing custom WorkspaceUrl/StoreUrl/FeedUrl aliases take precedence over a demo default. Existing runtime values, including explicit blanks, are retained by the startup template-key merge.
 - `CitrixWorkspacePath`, `AvdClientPath`, `BrowserPath`: explicit paths, otherwise detection searches common installation locations.
 - Native Citrix starts the detected executable without connection arguments. Detection of CDViewer/wfica32 alone does not guarantee a standalone workspace launch.

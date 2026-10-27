@@ -1,5 +1,21 @@
 # Smart ThinClient validation
 
+## Visual Preview correction - 2026-10-24
+
+Version remains 1.1.4. GUI Preview now opens a separate visual shell, sharing XAML with the real workspace launcher; it no longer exposes only the technical JSON plan. The plan remains in CLI/evidence and the Apply confirmation. Preview does not call Launch or create an installed launcher. System actions, native clients, external browser and settings are disabled; navigation accepts HTTP/HTTPS only, reports missing URLs and labels WebOnly fallback.
+
+63/63 offline regressions pass under PS5.1 and PS7, including target/fallback resolution, unsafe destination rejection, Hybrid profile overrides and absence of operational launch/mutation entrypoints in visual preview. WPF construction/event checks verify that the parent Preview button reaches the separate visual window, shared layout/banner, disabled controls, cancellation and Apply/Restore gate refusals. Browser navigation and visible modal interaction are not exercised by these construction checks. No real Apply/Restore was executed.
+
+## Guarded GUI actions and Preview - 2026-10-24
+
+Local 1.1.4 supersedes the earlier local 1.1.3 GUI simplification: Audit and Preview are separate buttons; Apply/Restore now call the existing guarded engines after administrator/configuration checks and a review dialog with exact typed confirmation. Restore requires an explicit validated rollback and rechecks its reviewed SHA256. Preview includes a read-only change plan. Defaults remain false for AllowApply and AllowRestore.
+
+59/59 isolated regressions pass under Windows PowerShell 5.1 and PowerShell 7, including ten new GUI-dispatch/guard/rollback/preview scenarios. WPF construction and event-handler checks pass for all controls, selected profile, read-only Audit/Preview, disabled-gate refusal, exact-phrase enablement and cancellation. Apply/Restore success dispatch uses mocked engines in these tests. No real configuration-changing Apply/Restore, portal navigation, account/kiosk/startup change or interactive GUI validation is claimed.
+
+## GUI clarity - 2026-10-24
+
+Local version 1.1.3 removes GUI Apply/Restore buttons that only displayed CLI instructions, and describes the GUI as an audit/preview interface. The GUI CMD wrapper starts Windows PowerShell asynchronously with WindowStyle Hidden; CLI wrappers are unchanged. Guarded CLI Apply/Restore implementations are unchanged. The window title and heading are Smart ThinClient Control Panel, with the supplied WorkplaceCloudHub icon. 49/49 offline regression scenarios pass under Windows PowerShell 5.1 and 7. WPF construction checks pass for the title, icon and available controls; this is not an interactive GUI test. No operational Apply/Restore or portal connection is part of this change.
+
 ## WebOnly default - 2026-10-24
 
 Version 1.1.2 sets WebOnlyUrl to https://workplacecloudhub.com/ in the template and built-in defaults. Existing custom URLs and explicit blanks remain authoritative. Audit/Preview do not navigate to the URL. 49/49 offline regression scenarios pass under Windows PowerShell 5.1 and PowerShell 7. They verify fresh/runtime-free defaults, existing custom URLs and explicit blanks. No Apply/Restore or portal connection was performed.
