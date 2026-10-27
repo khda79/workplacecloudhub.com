@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "49366909366a5c74d447",
   "position": {
     "x": 32,
-    "y": 379.5,
+    "y": 320,
+    "z": 1000,
+    "height": 96,
     "width": 1856,
-    "height": 80,
-    "z": 11000,
     "tabOrder": 368
   },
   "visual": {
@@ -91,25 +91,6 @@
               "displayName": "Unknown app observations"
             }
           ]
-        },
-        "Tooltips": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Intune Operational Source Evidence"
-                    }
-                  },
-                  "Property": "Intune Source Scope Message"
-                }
-              },
-              "queryRef": "Intune Operational Source Evidence.Intune Source Scope Message",
-              "nativeQueryRef": "Intune Source Scope Message",
-              "displayName": "Intune Source Scope Message"
-            }
-          ]
         }
       }
     },
@@ -166,7 +147,7 @@
             "showBlankAs": {
               "expr": {
                 "Literal": {
-                  "Value": "'\u2014'"
+                  "Value": "'—'"
                 }
               }
             }
@@ -473,6 +454,20 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "''"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
                 }
               }
             }

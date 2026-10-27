@@ -1,0 +1,13 @@
+/// Utility selector shared by the two device pages. Unknown/ambiguous matches are never reported as a confirmed absence.
+table 'Intune Presence Selection'
+	lineageTag: 0e7efaf1-9773-4175-aeff-a267d878ecab
+
+	column 'Intune presence'
+		dataType: string
+		lineageTag: 4151b876-5f9a-40ff-8ef8-331ec39f935c
+		summarizeBy: none
+		sourceColumn: Intune presence
+
+	partition 'Intune Presence Selection' = m
+		mode: import
+		source = #table(type table [#"Intune presence"=text],{{"In Intune"},{"Not found in Intune"},{"Unknown / ambiguous"}})

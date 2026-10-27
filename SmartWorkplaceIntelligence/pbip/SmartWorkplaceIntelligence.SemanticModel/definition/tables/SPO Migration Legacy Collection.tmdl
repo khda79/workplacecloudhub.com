@@ -1,13 +1,13 @@
 /// SPO means SharePoint Online. Grain: Legacy Key; source: one selected immutable prepared batch.
 table 'SPO Migration Legacy Collection'
 	isHidden
-	lineageTag: 3cfb46a5-a243-4331-8302-21a228ddf555
+	lineageTag: 932d38f1-cf6f-4b68-97d0-f0b64bba4b60
 
 	/// Prepared, tenant-qualified migration evidence: TenantKey.
 	column TenantKey
 		dataType: string
 		isHidden
-		lineageTag: 43073508-f010-4c20-b979-3947778b2905
+		lineageTag: 20536d24-2ae2-4158-9cbf-97b8538407e2
 		summarizeBy: none
 		sourceColumn: TenantKey
 
@@ -15,7 +15,7 @@ table 'SPO Migration Legacy Collection'
 	column 'Project Key'
 		dataType: string
 		isHidden
-		lineageTag: 7d2e12e4-6dc4-4f95-9acd-b288496eb969
+		lineageTag: dfd2ae63-0509-4d49-8a94-7aa5fb5c09de
 		summarizeBy: none
 		sourceColumn: Project Key
 
@@ -23,7 +23,7 @@ table 'SPO Migration Legacy Collection'
 	column 'Snapshot ID'
 		dataType: string
 		isHidden
-		lineageTag: 42ae6fa3-bd25-4338-9d36-b47ef38b4211
+		lineageTag: eaf95f13-dc91-4ae9-8332-c40be0967c1d
 		summarizeBy: none
 		sourceColumn: Snapshot ID
 
@@ -31,29 +31,36 @@ table 'SPO Migration Legacy Collection'
 	column 'Snapshot Date'
 		dataType: dateTime
 		formatString: yyyy-MM-dd
-		lineageTag: aa9cebfe-9474-4462-a233-653017ae9e6c
+		lineageTag: 158bf1a7-df04-42e1-8a47-ce710571f44e
 		summarizeBy: none
 		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 7a4fed8e-bb12-4fe8-8402-065f9d4a18ac
+			defaultHierarchy: LocalDateTable_41b13c2b-fe1c-4d4e-abe2-c09e72f23525.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Prepared, tenant-qualified migration evidence: Legacy Key.
 	column 'Legacy Key'
 		dataType: string
 		isHidden
-		lineageTag: 3f94e697-9a8a-49d7-8bf3-19db2188d920
+		lineageTag: 01b04cef-dc13-4cba-a739-61d99261852e
 		summarizeBy: none
 		sourceColumn: Legacy Key
 
 	/// Prepared, tenant-qualified migration evidence: Legacy ID.
 	column 'Legacy ID'
 		dataType: string
-		lineageTag: 0d812889-c42d-4567-a0fd-ec498b0ebba4
+		lineageTag: a68253dc-9504-4231-bd8a-8004771a2b68
 		summarizeBy: none
 		sourceColumn: Legacy ID
 
 	/// Prepared, tenant-qualified migration evidence: Source URL.
 	column 'Source URL'
 		dataType: string
-		lineageTag: 891a4932-10ad-49e9-98b8-90c7a6a6a0c3
+		lineageTag: d0c79db8-e9b2-4b34-a668-462ca7e4b0dd
 		summarizeBy: none
 		sourceColumn: Source URL
 
@@ -61,15 +68,20 @@ table 'SPO Migration Legacy Collection'
 	column 'Reported Size'
 		dataType: decimal
 		isHidden
-		lineageTag: 321af3cf-ded6-460e-958f-4d4d7dee477e
-		summarizeBy: none
+		lineageTag: bcc21c43-741e-4458-87d0-a5772b25c9b9
+		summarizeBy: sum
 		sourceColumn: Reported Size
+
+		annotation SummarizationSetBy = Automatic
 
 	column 'Project Identity'
 		dataType: string
 		isHidden
-		lineageTag: 2868096a-191f-4436-b637-3ba8ff128a5a
+		lineageTag: 64964ec4-5e6d-4e00-8d11-ccdaec269b5c
+		summarizeBy: none
 		sourceColumn: Project Identity
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'

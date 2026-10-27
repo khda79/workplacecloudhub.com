@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "f5d6980753f2c9c2510a",
   "position": {
     "x": 96,
     "y": 16,
-    "width": 1080,
-    "height": 64,
-    "z": 100,
-    "tabOrder": 49
+    "z": 27000,
+    "height": 56,
+    "width": 616,
+    "tabOrder": 16000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Devices & Compliance",
+                    "value": "Devices & Compliance (PC)",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "24px",

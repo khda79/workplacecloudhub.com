@@ -71,6 +71,9 @@ table 'Report Metadata'
 			   IF(COUNTROWS(_ids) = 1, "Loaded batch: " & _majority, "Loaded batch: Not observed"))
 			& " | Empty tables (batch unobservable): " & FORMAT(COALESCE(_empty,0),"0")
 			& IF(_missing > 0, " | Missing provenance: " & FORMAT(_missing,"0"), "")
+			& " | Readiness sources unavailable: " & FORMAT(COALESCE(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Availability]="Not available"),0),"0")
+			& " | Readiness sources valid empty: " & FORMAT(COALESCE(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Availability]="Valid empty"),0),"0")
+		formatString: @
 		lineageTag: da192672-ca2e-42ed-aec6-10f2888f8c89
 
 	/// Single batch ID observed across imported nonempty evidence tables; blank for mixed or unavailable lineage.
@@ -80,7 +83,7 @@ table 'Report Metadata'
 			RETURN IF(COUNTROWS(_ids) = 1, CONCATENATEX(_ids, [Id], ""), BLANK())
 		isHidden
 		displayFolder: Report presentation
-		lineageTag: 17597244-0c1f-4c8f-a4fc-d0a376061422
+		lineageTag: c2ed3b99-0925-440a-8edf-8eb9fa8ba419
 
 	/// Loaded batch UTC timestamp converted to Europe/Paris calendar date; not the age of each underlying collector.
 	measure 'Dataset Batch Date Paris' =
@@ -96,14 +99,28 @@ table 'Report Metadata'
 		formatString: yyyy-MM-dd
 		isHidden
 		displayFolder: Report presentation
-		lineageTag: 241f8225-ab53-40cc-812e-8a22d4e7a6bf
+		lineageTag: 6ee0e66c-51f7-4409-a5f3-05dee7e3bb42
+
+	/// Current Europe/Paris calendar date using UTC and European daylight-saving rules.
+	measure 'Dataset Today Paris' =
+			VAR _utc = UTCNOW()
+			VAR _year = YEAR(_utc)
+			VAR _march = DATE(_year,3,31)
+			VAR _october = DATE(_year,10,31)
+			VAR _start = _march - MOD(WEEKDAY(_march,2),7) + TIME(1,0,0)
+			VAR _end = _october - MOD(WEEKDAY(_october,2),7) + TIME(1,0,0)
+			RETURN INT(_utc + DIVIDE(IF(_utc >= _start && _utc < _end,2,1),24))
+		formatString: yyyy-MM-dd
+		isHidden
+		displayFolder: Report presentation
+		lineageTag: 01735abd-aad6-46db-942b-be4f790017c8
 
 	/// Loaded batch date (Europe/Paris) and ID, independent of page filters. Mixed lineage remains explicit.
 	measure 'Dataset Footer' =
 			VAR _id=[Dataset Loaded Batch ID]
 			RETURN IF(NOT ISBLANK(_id), "Dataset: " & FORMAT([Dataset Batch Date Paris],"dd/MM/yyyy") & " | " & _id, [Loaded Batch Banner])
 		displayFolder: Report presentation
-		lineageTag: b12182b7-b405-4a49-b0f9-ace7c3966d63
+		lineageTag: 30622803-4848-4fed-9cf0-ffc867151cca
 
 	/// Red only when selected batch UTC age exceeds 26 hours. Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
 	measure 'Dataset Footer Color' = VAR _age=[Dataset Batch Age Hours] RETURN IF(ISBLANK(_age), "#805400", IF(_age>26, "#B42318", "#334155"))
@@ -118,7 +135,7 @@ table 'Report Metadata'
 			VAR _at = SEARCH(" (Unknown:",_label,1,0)
 			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
 		displayFolder: Executive display
-		lineageTag: 6130580c-7bfd-4675-8c61-dc6e14031758
+		lineageTag: 4c89d86c-8ad0-444d-9967-c3f8db69877a
 
 	/// Compact executive display only. Full unknown-evidence qualification remains on license detail pages and original measure.
 	measure 'Executive E3 Recovery' =
@@ -126,7 +143,7 @@ table 'Report Metadata'
 			VAR _at = SEARCH(" (Unknown:",_label,1,0)
 			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
 		displayFolder: Executive display
-		lineageTag: 6063328c-5824-4aec-963e-f3b94b76f387
+		lineageTag: d96d12ad-eee7-43fa-9dcf-fa7e4b4d48b0
 
 	/// Compact executive display only. Full unknown-evidence qualification remains on license detail pages and original measure.
 	measure 'Executive E5 Recovery' =
@@ -134,7 +151,7 @@ table 'Report Metadata'
 			VAR _at = SEARCH(" (Unknown:",_label,1,0)
 			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
 		displayFolder: Executive display
-		lineageTag: 599cce71-aa1e-428f-aeff-2ca3cdbc9904
+		lineageTag: 20c2e7de-e559-4a5d-b3c9-e8f6e62a2c55
 
 	/// Compact executive display only. Full unknown-evidence qualification remains on license detail pages and original measure.
 	measure 'Executive E3 to F3 Recovery' =
@@ -142,7 +159,7 @@ table 'Report Metadata'
 			VAR _at = SEARCH(" (Unknown:",_label,1,0)
 			RETURN IF(_label = "Unknown", BLANK(), IF(_at > 0,LEFT(_label,_at-1),_label))
 		displayFolder: Executive display
-		lineageTag: b0308df4-2fe7-453f-9f56-2392c1abcda8
+		lineageTag: 138f1b6e-d861-4ecf-8d00-d216feab9352
 
 	/// Red only when selected batch UTC age exceeds 26 hours. Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
 	measure 'Dataset Batch Timestamp UTC' =
@@ -155,12 +172,14 @@ table 'Report Metadata'
 		formatString: yyyy-MM-dd HH:mm:ss
 		isHidden
 		displayFolder: Dataset freshness
+		lineageTag: bf8019b9-9521-444f-b2db-8b9ade085f2f
 
 	/// Red only when selected batch UTC age exceeds 26 hours. Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
 	measure 'Dataset Batch Age Hours' = VAR _stamp=[Dataset Batch Timestamp UTC] RETURN IF(NOT ISBLANK(_stamp), DIVIDE(ROUND((UTCNOW()-_stamp)*86400000,0),3600000))
 		formatString: 0.00
 		isHidden
 		displayFolder: Dataset freshness
+		lineageTag: 707b7945-aa72-40dc-969b-2aa80ec2ba9f
 
 	/// Business attribute Product Version.
 	column 'Product Version'

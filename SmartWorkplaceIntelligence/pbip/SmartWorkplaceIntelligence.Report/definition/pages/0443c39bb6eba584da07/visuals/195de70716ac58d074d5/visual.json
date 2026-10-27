@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "195de70716ac58d074d5",
   "position": {
     "x": 32,
     "y": 296,
+    "z": 1000,
+    "height": 96,
     "width": 916,
-    "height": 128,
-    "z": 114,
     "tabOrder": 672
   },
   "visual": {
@@ -406,7 +406,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD to Entra Coverage \u00b7 Identity Conflicts'"
+                  "Value": "'AD to Entra Coverage · Identity Conflicts'"
                 }
               }
             },

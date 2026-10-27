@@ -1,14 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "81794e36866607767fc8",
-  "parentGroupName": "56fc29e1fc6aac59e488",
   "position": {
     "x": 32,
-    "y": 593,
-    "z": 150,
-    "height": 401,
-    "width": 1160,
-    "tabOrder": 1340
+    "y": 432,
+    "z": 4000,
+    "height": 342,
+    "width": 920,
+    "tabOrder": 4000
   },
   "visual": {
     "visualType": "barChart",
@@ -21,14 +20,15 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
                   "Property": "Hosting Location"
                 }
               },
-              "queryRef": "Mailbox Evidence.Hosting Location",
-              "nativeQueryRef": "Hosting Location"
+              "queryRef": "Mailbox Exploration Inventory.Hosting Location",
+              "nativeQueryRef": "Hosting Location",
+              "active": true
             }
           ]
         },
@@ -347,5 +347,6 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  }
+  },
+  "parentGroupName": "56fc29e1fc6aac59e488"
 }

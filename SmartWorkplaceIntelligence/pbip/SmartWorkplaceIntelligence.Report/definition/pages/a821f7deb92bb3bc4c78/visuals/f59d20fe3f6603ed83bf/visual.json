@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "f59d20fe3f6603ed83bf",
   "position": {
     "x": 32,
     "y": 521.9,
-    "width": 1856,
+    "z": 4000,
     "height": 314.8,
-    "z": 12000,
-    "tabOrder": 544
+    "width": 1856,
+    "tabOrder": 4000
   },
   "visual": {
     "visualType": "tableEx",
@@ -23,81 +23,12 @@
                       "Entity": "Native Device Application"
                     }
                   },
-                  "Property": "TenantDeviceApplicationKey"
-                }
-              },
-              "queryRef": "Native Device Application.TenantDeviceApplicationKey",
-              "nativeQueryRef": "TenantDeviceApplicationKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Native Device Application"
-                    }
-                  },
-                  "Property": "TenantApplicationKey"
-                }
-              },
-              "queryRef": "Native Device Application.TenantApplicationKey",
-              "nativeQueryRef": "TenantApplicationKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Native Device Application"
-                    }
-                  },
-                  "Property": "ManagedDeviceId"
-                }
-              },
-              "queryRef": "Native Device Application.ManagedDeviceId",
-              "nativeQueryRef": "ManagedDeviceId"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Native Device Application"
-                    }
-                  },
-                  "Property": "AppId"
-                }
-              },
-              "queryRef": "Native Device Application.AppId",
-              "nativeQueryRef": "AppId"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Native Device Application"
-                    }
-                  },
                   "Property": "SourceCollectedDateTime"
                 }
               },
               "queryRef": "Native Device Application.SourceCollectedDateTime",
-              "nativeQueryRef": "SourceCollectedDateTime"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Native Device Application"
-                    }
-                  },
-                  "Property": "Tenant Intune device key"
-                }
-              },
-              "queryRef": "Native Device Application.Tenant Intune device key",
-              "nativeQueryRef": "Tenant Intune device key"
+              "nativeQueryRef": "SourceCollectedDateTime",
+              "active": true
             },
             {
               "field": {
@@ -111,7 +42,8 @@
                 }
               },
               "queryRef": "Native Device Application.ApplicationLinkStatus",
-              "nativeQueryRef": "ApplicationLinkStatus"
+              "nativeQueryRef": "ApplicationLinkStatus",
+              "active": true
             },
             {
               "field": {
@@ -125,7 +57,83 @@
                 }
               },
               "queryRef": "Native Device Application.DeviceLinkStatus",
-              "nativeQueryRef": "DeviceLinkStatus"
+              "nativeQueryRef": "DeviceLinkStatus",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Application"
+                    }
+                  },
+                  "Property": "TenantDeviceApplicationKey"
+                }
+              },
+              "queryRef": "Native Device Application.TenantDeviceApplicationKey",
+              "nativeQueryRef": "TenantDeviceApplicationKey",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Application"
+                    }
+                  },
+                  "Property": "TenantApplicationKey"
+                }
+              },
+              "queryRef": "Native Device Application.TenantApplicationKey",
+              "nativeQueryRef": "TenantApplicationKey",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Application"
+                    }
+                  },
+                  "Property": "ManagedDeviceId"
+                }
+              },
+              "queryRef": "Native Device Application.ManagedDeviceId",
+              "nativeQueryRef": "ManagedDeviceId",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Application"
+                    }
+                  },
+                  "Property": "AppId"
+                }
+              },
+              "queryRef": "Native Device Application.AppId",
+              "nativeQueryRef": "AppId",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Device Application"
+                    }
+                  },
+                  "Property": "Tenant Intune device key"
+                }
+              },
+              "queryRef": "Native Device Application.Tenant Intune device key",
+              "nativeQueryRef": "Tenant Intune device key",
+              "active": true
             },
             {
               "field": {
@@ -139,7 +147,8 @@
                 }
               },
               "queryRef": "Native Device Application.TenantKey",
-              "nativeQueryRef": "TenantKey"
+              "nativeQueryRef": "TenantKey",
+              "active": true
             },
             {
               "field": {
@@ -153,7 +162,8 @@
                 }
               },
               "queryRef": "Native Device Application.OrganizationKey",
-              "nativeQueryRef": "OrganizationKey"
+              "nativeQueryRef": "OrganizationKey",
+              "active": true
             },
             {
               "field": {
@@ -167,7 +177,8 @@
                 }
               },
               "queryRef": "Native Device Application.EnvironmentKey",
-              "nativeQueryRef": "EnvironmentKey"
+              "nativeQueryRef": "EnvironmentKey",
+              "active": true
             },
             {
               "field": {
@@ -181,7 +192,8 @@
                 }
               },
               "queryRef": "Native Device Application.TenantId",
-              "nativeQueryRef": "TenantId"
+              "nativeQueryRef": "TenantId",
+              "active": true
             }
           ]
         }
@@ -191,13 +203,6 @@
       "columnHeaders": [
         {
           "properties": {
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -209,6 +214,20 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -235,9 +254,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -320,7 +346,430 @@
             }
           }
         }
-      ]
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Native Device Application.SourceCollectedDateTime"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Device Application.ApplicationLinkStatus"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Device Application.DeviceLinkStatus"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Device Application.TenantDeviceApplicationKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Device Application.TenantApplicationKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Device Application.ManagedDeviceId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Device Application.AppId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Device Application.Tenant Intune device key"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Device Application.TenantKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Device Application.OrganizationKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Device Application.EnvironmentKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Device Application.TenantId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -329,7 +778,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device Application \u00b7 complete governed fields'"
+                  "Value": "'Device Application · complete governed fields'"
                 }
               }
             }
@@ -349,7 +798,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device Application \u00b7 complete governed fields'"
+                  "Value": "'Device Application · complete governed fields'"
                 }
               }
             },
@@ -438,7 +887,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -520,7 +976,7 @@
                 "Entity": "Native Device Application"
               }
             },
-            "Property": "Native Context Rows \u00b7 Native Device Application"
+            "Property": "Native Context Rows · Native Device Application"
           }
         },
         "type": "Advanced",
@@ -545,7 +1001,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows \u00b7 Native Device Application"
+                      "Property": "Native Context Rows · Native Device Application"
                     }
                   },
                   "Right": {

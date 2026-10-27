@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "7edb9cd296bfab002850",
   "position": {
     "x": 96,
     "y": 80,
-    "width": 1080,
-    "height": 48,
-    "z": 101,
-    "tabOrder": 145
+    "z": 16000,
+    "height": 24,
+    "width": 880,
+    "tabOrder": 11000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Backup & Resilience | private mailbox protection and policy-scope reconciliation \u00b7 SharePoint and OneDrive protected units observed: 0 \u00b7 eligible scope unavailable",
+                    "value": "Backup & Resilience | private mailbox protection and policy-scope reconciliation · SharePoint and OneDrive protected units observed: 0 · eligible scope unavailable",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

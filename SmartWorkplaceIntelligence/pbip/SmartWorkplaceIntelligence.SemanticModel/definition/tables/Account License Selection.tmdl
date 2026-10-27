@@ -1,0 +1,26 @@
+/// Private full-product license selector over already-loaded native SKU catalog. No source refresh. Includes explicit no-license and unknown evidence categories.
+table 'Account License Selection'
+	lineageTag: dc164da0-98e9-4349-882c-12264d16dc1d
+
+	column 'License Product'
+		lineageTag: 8862dfaa-4ef6-4fec-83f5-168c255b3a7a
+		isNameInferred
+		sourceColumn: [License Product]
+
+	column 'Tenant SKU Key'
+		lineageTag: 00589c88-50e2-404a-a120-62d5e534aa7a
+		isNameInferred
+		sourceColumn: [Tenant SKU Key]
+
+	column 'Selection Kind'
+		lineageTag: cd3ce813-34c8-4919-b205-77a8a1ca0cf4
+		isNameInferred
+		sourceColumn: [Selection Kind]
+
+	partition 'Account License Selection' = calculated
+		mode: import
+		source =
+				UNION(
+				 SELECTCOLUMNS('Native License SKU',"License Product",COALESCE('Native License SKU'[SkuPartNumberLabel],'Native License SKU'[SkuPartNumber]),"Tenant SKU Key",'Native License SKU'[TenantSkuKey],"Selection Kind","Product"),
+				 ROW("License Product","No license observed","Tenant SKU Key","__none__","Selection Kind","None"),
+				 ROW("License Product","Unknown license evidence","Tenant SKU Key","__unknown__","Selection Kind","Unknown"))

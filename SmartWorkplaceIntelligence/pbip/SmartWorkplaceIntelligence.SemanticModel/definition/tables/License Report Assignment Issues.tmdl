@@ -2,6 +2,11 @@
 table 'License Report Assignment Issues'
 	lineageTag: 19bc987c-b2fe-4b7c-ba9c-3e3ef47f9eda
 
+	/// SAM display resolved by qualified native identity, same tenant and loaded batch. Empty text when no qualified SAM; preserves unresolved source rows in table projections.
+	measure 'SAM · License Report Assignment Issues' = VAR _display = (VAR _key=SELECTEDVALUE('License Report Assignment Issues'[User ID]) VAR _tenant=SELECTEDVALUE('License Report Assignment Issues'[Tenant Key]) VAR _batch=SELECTEDVALUE('License Report Assignment Issues'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(_key),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],_key,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN IF(COUNTROWS('License Report Assignment Issues') > 0, COALESCE(_display, ""))
+		displayFolder: Private identity display
+		lineageTag: 11e0e319-5a4f-4cff-b8e6-c10a2e5d5c28
+
 	/// Published assignment evidence: Snapshot ID
 	column 'Snapshot ID'
 		dataType: string
@@ -148,6 +153,30 @@ table 'License Report Assignment Issues'
 		lineageTag: 15ad9c6b-c452-4b26-8371-c8a165a10163
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
+
+	/// Private report scope. Exact unique native identity and one loaded batch; no UPN suffix or display-name inference. Blank when missing or ambiguous.
+	column 'AD Domain' =
+			VAR _batch = 'License Report Assignment Issues'[Loaded Batch ID]
+			VAR _id = TRIM('License Report Assignment Issues'[User ID])
+			VAR _tenant = 'License Report Assignment Issues'[Tenant Key]
+			VAR _users = FILTER(ALL('Native User Evidence'), 'Native User Evidence'[SourceUserId] == _id && 'Native User Evidence'[Loaded Batch ID] == _batch && 'Native User Evidence'[TenantKey] == _tenant)
+			RETURN IF(NOT ISBLANK(_batch) && _id <> "" && COUNTROWS(_users) = 1, MAXX(_users, 'Native User Evidence'[AD Domain]))
+		dataType: string
+		displayFolder: Report scope
+		lineageTag: 5d9893b5-e4ba-41e1-8648-f3fdf8bfc5df
+		summarizeBy: none
+
+	/// Private report scope. Exact unique native identity and one loaded batch; no UPN suffix or display-name inference. Blank when missing or ambiguous.
+	column 'Scope Country' =
+			VAR _batch = 'License Report Assignment Issues'[Loaded Batch ID]
+			VAR _id = TRIM('License Report Assignment Issues'[User ID])
+			VAR _tenant = 'License Report Assignment Issues'[Tenant Key]
+			VAR _users = FILTER(ALL('Native User Evidence'), 'Native User Evidence'[SourceUserId] == _id && 'Native User Evidence'[Loaded Batch ID] == _batch && 'Native User Evidence'[TenantKey] == _tenant)
+			RETURN IF(NOT ISBLANK(_batch) && _id <> "" && COUNTROWS(_users) = 1, MAXX(_users, 'Native User Evidence'[CountryCode]))
+		dataType: string
+		displayFolder: Report scope
+		lineageTag: bd72f1df-9abe-4dd3-bfa0-536d8350b35c
+		summarizeBy: none
 
 	partition 'License Report Assignment Issues' = m
 		mode: import

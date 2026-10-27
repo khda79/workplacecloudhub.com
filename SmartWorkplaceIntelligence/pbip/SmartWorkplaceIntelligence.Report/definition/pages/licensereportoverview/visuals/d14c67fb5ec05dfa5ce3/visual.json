@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "d14c67fb5ec05dfa5ce3",
   "position": {
-    "x": 976,
+    "x": 1304,
     "y": 8,
-    "z": 30,
+    "z": 13000,
     "height": 80,
     "width": 224,
-    "tabOrder": 30
+    "tabOrder": 16000
   },
   "visual": {
     "visualType": "slicer",
@@ -265,23 +265,5 @@
       "fieldChanges": true,
       "filterChanges": true
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "12f9189f02e287ddd3d9",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License SKU Capacity"
-              }
-            },
-            "Property": "License Product"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
   }
 }

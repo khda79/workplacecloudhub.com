@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "e9d427fa7a18011efd49",
   "position": {
     "x": 32,
-    "y": 112,
+    "y": 128,
+    "z": 25000,
+    "height": 88,
     "width": 960,
-    "height": 168,
-    "z": 114,
-    "tabOrder": 261
+    "tabOrder": 15000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -27,8 +27,8 @@
                 }
               },
               "queryRef": "User Inventory Evidence.Persona Classification Coverage (%)",
-              "nativeQueryRef": "Persona Classification Coverage (%)",
-              "displayName": "Persona Classification Coverage (%)"
+              "nativeQueryRef": "Persona coverage (%)",
+              "displayName": "Persona coverage (%)"
             },
             {
               "field": {
@@ -42,8 +42,8 @@
                 }
               },
               "queryRef": "User Inventory Evidence.Unclassified Workforce Accounts",
-              "nativeQueryRef": "Unclassified Workforce Accounts",
-              "displayName": "Unclassified Workforce Accounts"
+              "nativeQueryRef": "Unclassified accounts",
+              "displayName": "Unclassified accounts"
             },
             {
               "field": {
@@ -57,8 +57,8 @@
                 }
               },
               "queryRef": "User Inventory Evidence.Workforce Accounts Requiring Persona Review",
-              "nativeQueryRef": "Workforce Accounts Requiring Persona Review",
-              "displayName": "Workforce Accounts Requiring Persona Review"
+              "nativeQueryRef": "Accounts requiring review",
+              "displayName": "Accounts requiring review"
             }
           ]
         }
@@ -78,7 +78,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -246,6 +246,20 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "3L"
                 }
               }
             }
@@ -478,14 +492,14 @@
             "top": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "4D"
                 }
               }
             },
             "bottom": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "4D"
                 }
               }
             },

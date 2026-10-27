@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "6eeaca8411d85c007b26",
   "position": {
     "x": 32,
-    "y": 291.5,
+    "y": 320,
+    "z": 0,
+    "height": 96,
     "width": 1856,
-    "height": 80,
-    "z": 108,
     "tabOrder": 684
   },
   "visual": {
@@ -191,7 +191,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -315,6 +315,13 @@
               }
             },
             "rightMargin": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            },
+            "paddingUniform": {
               "expr": {
                 "Literal": {
                   "Value": "8L"
@@ -474,32 +481,21 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Supporting KPIs'"
+                  "Value": "''"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
+                  "Value": "11D"
                 }
               }
             }
@@ -624,5 +620,5 @@
       ]
     }
   },
-  "parentGroupName": "509da9ee86e35c2c4711"
+  "parentGroupName": "356f38365fae5fd56ff9"
 }

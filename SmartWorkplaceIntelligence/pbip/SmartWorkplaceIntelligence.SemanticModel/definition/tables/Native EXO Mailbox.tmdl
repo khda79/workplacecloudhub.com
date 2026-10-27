@@ -4,40 +4,50 @@ table 'Native EXO Mailbox'
 
 	/// All exported mailboxes, including technical and shared mailboxes. Migrated without changing the source calculation.
 	measure 'Native Mailboxes' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native EXO Mailbox'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (COALESCE(COUNTROWS('Native EXO Mailbox'),0)))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native EXO Mailbox'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (COALESCE(COUNTROWS('Native EXO Mailbox'),0)))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: dc25847e-c2a5-491c-9cc4-5ce6af79575d
 
 	/// Includes technical mailboxes; a missing user link is not always an issue. Migrated without changing the source calculation.
 	measure 'Native Mailboxes without a resolved user' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (CALCULATE([Native Mailboxes], KEEPFILTERS(ISBLANK('Native EXO Mailbox'[TenantUserKey])))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 1151f823-abad-468f-9649-ea1a9e2068bd
 
 	/// Mailboxes without a resolved user divided by all mailboxes. Technical and shared mailboxes can be legitimate. Migrated without changing the source calculation.
 	measure 'Native Mailbox link gap rate' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (DIVIDE([Native Mailboxes without a resolved user], [Native Mailboxes])))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: 0.000%
 		displayFolder: Native evidence
 		lineageTag: f4dbc1d0-1ee1-4b89-b8ac-1f334d979caf
 
 	/// Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
 	measure 'Native User mailbox details' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native EXO Mailbox'))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: b62af5c4-64f3-4d8d-8b02-6355fe50b8d6
 
 	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native EXO Mailbox' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native EXO Mailbox')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (COUNTROWS('Native EXO Mailbox')))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native EXO Mailbox')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native EXO Mailbox'[TenantUserKey]))), (COUNTROWS('Native EXO Mailbox')))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		isHidden
 		lineageTag: bc5ce256-71a2-4d49-99ba-2d420fc1cd88
@@ -185,6 +195,26 @@ table 'Native EXO Mailbox'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	column 'User Principal Name' = RELATED('Native User Evidence'[UserPrincipalName])
+		dataType: string
+		lineageTag: 92db81f3-e061-4031-b302-0b39349a0150
+		summarizeBy: none
+
+	column 'SAM Account Name' = RELATED('Native User Evidence'[SAM Account Name])
+		dataType: string
+		lineageTag: ca3f4087-b04c-427f-ba34-900b4ce0ccaf
+		summarizeBy: none
+
+	column 'M365 Licenses' =
+			VAR _tenant='Native EXO Mailbox'[TenantKey]
+			VAR _batch='Native EXO Mailbox'[Loaded Batch ID]
+			VAR _smtp='Native EXO Mailbox'[PrimarySmtpAddress]
+			VAR _rows=FILTER(ALL('Mailbox Exploration Inventory'),'Mailbox Exploration Inventory'[TenantKey]==_tenant && 'Mailbox Exploration Inventory'[Loaded Batch ID]==_batch && 'Mailbox Exploration Inventory'[Primary SMTP Address]==_smtp && 'Mailbox Exploration Inventory'[Hosting Location]="Exchange Online")
+			RETURN IF(NOT ISBLANK(_smtp) && COUNTROWS(_rows)=1,MAXX(_rows,'Mailbox Exploration Inventory'[M365 Licenses]),"Unavailable / ambiguous")
+		dataType: string
+		lineageTag: a1d85a62-41dc-41c2-a7c1-fff1417c587c
+		summarizeBy: none
+
 	partition 'Native EXO Mailbox' = m
 		mode: import
 		source =
@@ -205,3 +235,5 @@ table 'Native EXO Mailbox'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactMailbox.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantMailboxKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="CmdbMailboxId", dataType="String"], [name="CmdbUserId", dataType="String"], [name="RecipientTypeDetails", dataType="String"], [name="ArchiveStatus", dataType="String"], [name="SourceSystem", dataType="String"], [name="DisplayName", dataType="String"], [name="PrimarySmtpAddress", dataType="String"], [name="LinkStatusLabel", dataType="String"], [name="DisplayNameLabel", dataType="String"], [name="PrimarySmtpAddressLabel", dataType="String"], [name="RecipientTypeDetailsLabel", dataType="String"], [name="ArchiveStatusLabel", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

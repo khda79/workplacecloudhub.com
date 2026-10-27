@@ -1,0 +1,68 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "bdb5dd68728351c6ddbd",
+  "displayName": "Mailbox estate & risks",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "0c39ccc925a4bca479c2",
+      "356f38365fae5fd56ff9",
+      "421d3be4994300ee3abf",
+      "83a542ba0919c174230b",
+      "a8f0c4928330c6a11129",
+      "c7838c18de0011367e56",
+      "fbf8bc9e07159eda95e9",
+      "53081d80a062b975061c"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "71a60a59e0eb52a7a7d0",
+    "sections": {
+      "71a60a59e0eb52a7a7d0": {
+        "visualContainers": {
+          "a8f0c4928330c6a11129": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c7838c18de0011367e56": {
+            "singleVisual": {}
+          },
+          "fbf8bc9e07159eda95e9": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "53081d80a062b975061c": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "0c39ccc925a4bca479c2": {
+            "isHidden": true
+          },
+          "356f38365fae5fd56ff9": {
+            "isHidden": false
+          },
+          "421d3be4994300ee3abf": {
+            "isHidden": true
+          },
+          "83a542ba0919c174230b": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

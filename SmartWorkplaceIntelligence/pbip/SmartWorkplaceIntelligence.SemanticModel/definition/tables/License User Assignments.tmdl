@@ -1,0 +1,192 @@
+/// One observed native user x SKU assignment within one tenant and prepared batch. Country and AD domain are attributed only from exact native identity. No tenant capacity allocation.
+table 'License User Assignments'
+	lineageTag: 46b049ab-8e1c-465c-827e-c2cfba5bce89
+
+	measure 'Selected License Assignments' =
+			VAR _skus = VALUES('License SKU Capacity'[SKU ID])
+			VAR _products = VALUES('License Report Summary'[Product])
+			RETURN COALESCE(CALCULATE(DISTINCTCOUNT('License User Assignments'[Assignment Key]), KEEPFILTERS(TREATAS(_skus,'License User Assignments'[SKU ID])), KEEPFILTERS(TREATAS(_products,'License User Assignments'[Report Product]))),0)
+		formatString: #,0
+		lineageTag: d0b60972-509c-4048-93ec-e0dbcf29b42f
+
+	measure 'Selected Licensed Users' =
+			VAR _skus = VALUES('License SKU Capacity'[SKU ID])
+			VAR _products = VALUES('License Report Summary'[Product])
+			RETURN COALESCE(CALCULATE(DISTINCTCOUNT('License User Assignments'[User Key]), KEEPFILTERS(TREATAS(_skus,'License User Assignments'[SKU ID])), KEEPFILTERS(TREATAS(_products,'License User Assignments'[Report Product]))),0)
+		formatString: #,0
+		lineageTag: 6725b781-818c-4b41-8bb9-edd159f71714
+
+	measure 'License Geographic Scope Active' = IF(ISFILTERED('Country Selection') || ISFILTERED('Daily Domain'),1,0)
+		formatString: 0
+		lineageTag: 45eebe11-9182-40ba-87fb-2c7221ae3117
+
+	measure 'License Scope Explanation' = IF([License Geographic Scope Active]=1, "Country / AD Domain filter observed user assignments and candidates. Enabled / Available / assignment rate remain tenant-wide; no purchased capacity allocation by geography.", "All countries and AD domains. Observed user assignments; enabled / available units and capacity rates are tenant-wide.")
+		lineageTag: 6b42fa1b-44c8-43a3-836f-483cf14d20ab
+
+	measure 'Selected Assignment Count Label' = IF([License Report Snapshot Consistent]<>1,"Unavailable",IF([License Report Inventory Selection Included]<>1,"Not selected",IF([License Geographic Scope Active]=1,FORMAT([Selected License Assignments],"#,0") & " assigned",[License Overview Family Assignment Rate Label])))
+		lineageTag: 30db7eca-52ed-41f9-bef1-03aeb57ec63d
+
+	measure 'Selected Family Assigned Units' = IF([License Report Snapshot Consistent]=1 && [License Report Inventory Selection Included]=1,IF([License Geographic Scope Active]=1,[Selected License Assignments],[License Report Consumed Units]))
+		formatString: #,0
+		lineageTag: 61bfe990-167d-4766-ba4e-95c534b89d56
+
+	measure 'Selected Recovery Candidates Label' =
+			VAR _products = FILTER(ALL('License Report Summary'[Product]),CALCULATE([License Report Inventory Selection Included])=1)
+			VAR _rows = CALCULATE(COUNTROWS('License Report Candidates'),KEEPFILTERS(TREATAS(_products,'License Report Candidates'[Product])),KEEPFILTERS('License Report Candidates'[Candidate Type]="Recovery"))
+			RETURN IF([License Report Snapshot Consistent]<>1,"Unknown",FORMAT(COALESCE(_rows,0),"#,0"))
+		lineageTag: 714df8e3-e396-4607-9db2-df033fc6b90f
+
+	measure 'Selected E3 Review Candidates Label' =
+			VAR _rows = CALCULATE(COUNTROWS('License Report Candidates'),KEEPFILTERS('License Report Candidates'[Candidate Type]="E3 to F3 review"),KEEPFILTERS('License Report Candidates'[Product]="Microsoft 365 E3"))
+			RETURN IF([License Report Snapshot Consistent]<>1,"Unknown",FORMAT(COALESCE(_rows,0),"#,0"))
+		lineageTag: 72c5d340-39ab-4502-b610-011a6372b303
+
+	measure 'Scoped Country M365 Assignments' =
+			VAR _skus=VALUES('License SKU Capacity'[SKU ID])
+			RETURN COALESCE(CALCULATE(DISTINCTCOUNT('License User Assignments'[Assignment Key]),KEEPFILTERS(TREATAS(_skus,'License User Assignments'[SKU ID])),KEEPFILTERS(FILTER(VALUES('License User Assignments'[License Product]),LEFT('License User Assignments'[License Product],14)="Microsoft 365 "))),0)
+		formatString: #,0
+		lineageTag: 90bd4d4f-bd68-485a-a69f-56de9f0142ba
+
+	measure 'Scoped Country M365 Licensed Users' =
+			VAR _skus=VALUES('License SKU Capacity'[SKU ID])
+			RETURN COALESCE(CALCULATE(DISTINCTCOUNT('License User Assignments'[User Key]),KEEPFILTERS(TREATAS(_skus,'License User Assignments'[SKU ID])),KEEPFILTERS(FILTER(VALUES('License User Assignments'[License Product]),LEFT('License User Assignments'[License Product],14)="Microsoft 365 "))),0)
+		formatString: #,0
+		lineageTag: 747a56d9-6fff-471e-96b7-160b270a4eb7
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 8d3fe413-e36f-4ecb-ade3-c0e2205b0ef0
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'User Key'
+		dataType: string
+		isHidden
+		lineageTag: 8b685767-09b5-495d-b818-35bf20c647ab
+		summarizeBy: none
+		sourceColumn: User Key
+
+	column 'Assignment Key'
+		dataType: string
+		isHidden
+		lineageTag: 6c25a63a-926b-48cc-a2dc-75f12e030786
+		summarizeBy: none
+		sourceColumn: Assignment Key
+
+	column 'User ID'
+		dataType: string
+		isHidden
+		lineageTag: 858377ef-99c6-4fcc-b528-cdac258c59bc
+		summarizeBy: none
+		sourceColumn: User ID
+
+	column 'User Principal Name'
+		dataType: string
+		lineageTag: 354a64b4-fe11-43c9-81c4-036d74e9d0f9
+		summarizeBy: none
+		sourceColumn: User Principal Name
+
+	column 'SKU ID'
+		dataType: string
+		isHidden
+		lineageTag: 26937ff1-1ac8-4777-8c98-557bed8bd8fd
+		summarizeBy: none
+		sourceColumn: SKU ID
+
+	column 'License Product'
+		dataType: string
+		lineageTag: ccae2e53-7890-41ff-aabd-36665eb7394b
+		summarizeBy: none
+		sourceColumn: License Product
+
+	column 'Report Product'
+		dataType: string
+		lineageTag: 78ed2edc-0a74-41d4-bc30-bce3af9a3d0b
+		summarizeBy: none
+		sourceColumn: Report Product
+
+	column Country
+		dataType: string
+		lineageTag: 37467788-edec-4924-b49b-fe3996096973
+		summarizeBy: none
+		sourceColumn: Country
+
+	column 'AD Domain'
+		dataType: string
+		lineageTag: 83af65c4-05f0-421f-b494-da1da8e1a483
+		summarizeBy: none
+		sourceColumn: AD Domain
+
+	column 'Identity Qualification'
+		dataType: string
+		lineageTag: 291706f5-ffcd-4d6b-8efd-b712feb7b70b
+		summarizeBy: none
+		sourceColumn: Identity Qualification
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: f4b33cf8-499a-43fc-81f6-bce14e508866
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	column 'Country Name' =
+			VAR _country = 'License User Assignments'[Country]
+			RETURN COALESCE(LOOKUPVALUE('Country Selection'[Country],'Country Selection'[Source Country],_country),IF(ISBLANK(_country)||LEN(TRIM(_country))=2,"Unknown",_country))
+		dataType: string
+		lineageTag: c4b49a25-5447-4d23-b6fa-8dfa49ae3f14
+		dataCategory: Country
+		summarizeBy: none
+
+	column 'M365 Scope' = IF(LEFT('License User Assignments'[License Product],14)="Microsoft 365 ","Yes","No")
+		dataType: string
+		isHidden
+		lineageTag: 55a6622a-6ebb-4782-9e81-423224e13c3d
+		summarizeBy: none
+
+	partition 'License User Assignments' = m
+		mode: import
+		source =
+				let
+				    L = #"Native User License",
+				    U = #"Native User Evidence",
+				    S = Table.RenameColumns(#"License SKU Capacity", {{"TenantKey","Tenant Key"},{"SkuId","SKU ID"},{"ReportProduct","Report Product"}}),
+				    A = #"AD User Evidence",
+				    Qualify=(t as table,keys as list,fields as list) as table=>let
+				        thin=Table.Buffer(Table.SelectColumns(t,keys&fields,MissingField.Ignore)),
+				        g=Table.Group(thin,keys,{{"Count",each Table.RowCount(_),Int64.Type},{"First",each let n=Table.RowCount(_) in if n=1 then Record.SelectFields(Table.First(_),fields,MissingField.UseNull) else Record.FromList(List.Repeat({null},List.Count(fields)),fields),type record}})
+				        in Table.Buffer(Table.ExpandRecordColumn(g,"First",fields,fields)),
+				    JoinFlat=(left as table,leftKeys as list,right as table,rightKeys as list,prefix as text) as table=>let
+				        columns=Table.ColumnNames(right),renamed=Table.RenameColumns(right,List.Transform(columns,each {_,prefix&_}))
+				        in Table.Join(left,leftKeys,renamed,List.Transform(rightKeys,each prefix&_),JoinKind.LeftOuter),
+				    UThin=Qualify(U,{"TenantKey","TenantUserKey","Loaded Batch ID"},{"SourceUserId","UserPrincipalName","CountryCode"}),
+				    SThin=Qualify(S,{"Tenant Key","SKU ID","Loaded Batch ID"},{"License Product","Report Product"}),
+				    AThin=Qualify(Table.SelectRows(A,each [CloudMatchStatus]="Unique native SID"),{"TenantKey","TenantUserKey","Loaded Batch ID"},{"DomainName"}),
+				    Batches = List.Distinct(List.Combine(List.Transform({L,U,S,A}, each Table.Column(_,"Loaded Batch ID")))),
+				    Safe = List.Count(Batches)=1 and Batches{0}<>null and Text.Trim(Batches{0})<>"",
+				    Assignments = Table.Buffer(Table.Distinct(Table.SelectColumns(L,{"TenantKey","TenantUserKey","TenantSkuKey","SkuId","Loaded Batch ID"}))),
+				    Users = JoinFlat(Assignments,{"TenantKey","TenantUserKey","Loaded Batch ID"},UThin,{"TenantKey","TenantUserKey","Loaded Batch ID"},"U."),
+				    Skus = JoinFlat(Users,{"TenantKey","SkuId","Loaded Batch ID"},SThin,{"Tenant Key","SKU ID","Loaded Batch ID"},"S."),
+				    ReferencedSkus=Table.Distinct(Table.SelectColumns(Assignments,{"TenantKey","SkuId","Loaded Batch ID"})),
+				    AmbiguousSkus=Table.SelectRows(SThin,each [Count]>1),
+				    UsedAmbiguousSkus=Table.Join(ReferencedSkus,{"TenantKey","SkuId","Loaded Batch ID"},Table.RenameColumns(AmbiguousSkus,{{"Loaded Batch ID","__skuBatch"}}),{"Tenant Key","SKU ID","__skuBatch"},JoinKind.Inner),
+				    SkuSafe=Table.IsEmpty(UsedAmbiguousSkus),
+				    Directory = Table.Buffer(JoinFlat(Skus,{"TenantKey","TenantUserKey","Loaded Batch ID"},AThin,{"TenantKey","TenantUserKey","Loaded Batch ID"},"A.")),
+				    Records = List.Transform(Table.ToRecords(Directory),each let
+				        row=_,user=if row[#"U.Count"]=1 then [SourceUserId=row[#"U.SourceUserId"],UserPrincipalName=row[#"U.UserPrincipalName"],CountryCode=row[#"U.CountryCode"]] else [],
+				        sku=if row[#"S.Count"]=1 then [#"License Product"=row[#"S.License Product"],#"Report Product"=row[#"S.Report Product"]] else if row[#"S.Count"]<>null and row[#"S.Count"]>1 then error "Ambiguous license SKU identity" else [],
+				        key=(parts as list) as text=>Text.Combine(List.Transform(parts,each Text.From(Text.Length(_)) & ":" & _),"|"),
+				        country=Record.FieldOrDefault(user,"CountryCode",null),
+				        domain=if Record.FieldCount(user)>0 and row[#"A.Count"]=1 then row[#"A.DomainName"] else null
+				    in [TenantKey=row[TenantKey],#"User Key"=key({row[TenantKey],row[TenantUserKey]}),
+				        #"Assignment Key"=key({row[TenantKey],row[TenantUserKey],row[TenantSkuKey]}),
+				        #"User ID"=Record.FieldOrDefault(user,"SourceUserId",null),
+				        #"User Principal Name"=Record.FieldOrDefault(user,"UserPrincipalName",null),
+				        #"SKU ID"=row[SkuId],#"License Product"=Record.FieldOrDefault(sku,"License Product","Unknown SKU"),
+				        #"Report Product"=Record.FieldOrDefault(sku,"Report Product",null),
+				        Country=if country=null or Text.Trim(country)="" then "Unknown" else country,
+				        #"AD Domain"=domain,#"Identity Qualification"=if Record.FieldCount(user)=0 then "Unresolved native user" else if row[#"A.Count"]=1 then "Unique native SID" else "AD domain unavailable",
+				        #"Loaded Batch ID"=row[#"Loaded Batch ID"]]),
+				    Output = if not Safe then error "License scope inputs require one common loaded batch" else if not SkuSafe then error "Ambiguous license SKU identity" else Table.FromRecords(Records,type table [TenantKey=text,#"User Key"=text,#"Assignment Key"=text,#"User ID"=nullable text,#"User Principal Name"=nullable text,#"SKU ID"=text,#"License Product"=text,#"Report Product"=nullable text,Country=text,#"AD Domain"=nullable text,#"Identity Qualification"=text,#"Loaded Batch ID"=text])
+				in Output

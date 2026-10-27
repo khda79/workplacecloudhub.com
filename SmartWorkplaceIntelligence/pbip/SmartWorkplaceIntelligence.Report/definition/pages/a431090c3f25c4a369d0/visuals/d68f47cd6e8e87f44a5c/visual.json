@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "d68f47cd6e8e87f44a5c",
   "position": {
     "x": 32,
-    "y": 584,
-    "width": 1856,
+    "y": 500.5,
+    "z": 10000,
     "height": 264,
-    "z": 12000,
-    "tabOrder": 544
+    "width": 1856,
+    "tabOrder": 11000
   },
   "visual": {
     "visualType": "tableEx",
@@ -23,39 +23,12 @@
                       "Entity": "Native Hardware Evidence"
                     }
                   },
-                  "Property": "TenantDeviceKey"
-                }
-              },
-              "queryRef": "Native Hardware Evidence.TenantDeviceKey",
-              "nativeQueryRef": "TenantDeviceKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Native Hardware Evidence"
-                    }
-                  },
-                  "Property": "ManagedDeviceId"
-                }
-              },
-              "queryRef": "Native Hardware Evidence.ManagedDeviceId",
-              "nativeQueryRef": "ManagedDeviceId"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Native Hardware Evidence"
-                    }
-                  },
                   "Property": "SerialNumber"
                 }
               },
               "queryRef": "Native Hardware Evidence.SerialNumber",
-              "nativeQueryRef": "SerialNumber"
+              "nativeQueryRef": "SerialNumber",
+              "active": true
             },
             {
               "field": {
@@ -69,7 +42,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.Manufacturer",
-              "nativeQueryRef": "Manufacturer"
+              "nativeQueryRef": "Manufacturer",
+              "active": true
             },
             {
               "field": {
@@ -83,7 +57,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.Model",
-              "nativeQueryRef": "Model"
+              "nativeQueryRef": "Model",
+              "active": true
             },
             {
               "field": {
@@ -97,7 +72,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.Storage",
-              "nativeQueryRef": "Storage"
+              "nativeQueryRef": "Storage",
+              "active": true
             },
             {
               "field": {
@@ -111,7 +87,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.HardwareCollectedDateTime",
-              "nativeQueryRef": "HardwareCollectedDateTime"
+              "nativeQueryRef": "HardwareCollectedDateTime",
+              "active": true
             },
             {
               "field": {
@@ -125,7 +102,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.InventoryCollectedDateTime",
-              "nativeQueryRef": "InventoryCollectedDateTime"
+              "nativeQueryRef": "InventoryCollectedDateTime",
+              "active": true
             },
             {
               "field": {
@@ -139,7 +117,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.CollectionCoverage",
-              "nativeQueryRef": "CollectionCoverage"
+              "nativeQueryRef": "CollectionCoverage",
+              "active": true
             },
             {
               "field": {
@@ -153,7 +132,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.CollectionMode",
-              "nativeQueryRef": "CollectionMode"
+              "nativeQueryRef": "CollectionMode",
+              "active": true
             },
             {
               "field": {
@@ -167,7 +147,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.PhysicalMemoryGiB",
-              "nativeQueryRef": "PhysicalMemoryGiB"
+              "nativeQueryRef": "PhysicalMemoryGiB",
+              "active": true
             },
             {
               "field": {
@@ -181,7 +162,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.StorageStatus",
-              "nativeQueryRef": "StorageStatus"
+              "nativeQueryRef": "StorageStatus",
+              "active": true
             },
             {
               "field": {
@@ -195,7 +177,38 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.MemoryStatus",
-              "nativeQueryRef": "MemoryStatus"
+              "nativeQueryRef": "MemoryStatus",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "TenantDeviceKey"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.TenantDeviceKey",
+              "nativeQueryRef": "TenantDeviceKey",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Hardware Evidence"
+                    }
+                  },
+                  "Property": "ManagedDeviceId"
+                }
+              },
+              "queryRef": "Native Hardware Evidence.ManagedDeviceId",
+              "nativeQueryRef": "ManagedDeviceId",
+              "active": true
             },
             {
               "field": {
@@ -209,7 +222,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.TenantKey",
-              "nativeQueryRef": "TenantKey"
+              "nativeQueryRef": "TenantKey",
+              "active": true
             },
             {
               "field": {
@@ -223,7 +237,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.OrganizationKey",
-              "nativeQueryRef": "OrganizationKey"
+              "nativeQueryRef": "OrganizationKey",
+              "active": true
             },
             {
               "field": {
@@ -237,7 +252,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.EnvironmentKey",
-              "nativeQueryRef": "EnvironmentKey"
+              "nativeQueryRef": "EnvironmentKey",
+              "active": true
             },
             {
               "field": {
@@ -251,7 +267,8 @@
                 }
               },
               "queryRef": "Native Hardware Evidence.TenantId",
-              "nativeQueryRef": "TenantId"
+              "nativeQueryRef": "TenantId",
+              "active": true
             }
           ]
         }
@@ -261,13 +278,6 @@
       "columnHeaders": [
         {
           "properties": {
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -279,6 +289,20 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -305,9 +329,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -390,7 +421,605 @@
             }
           }
         }
-      ]
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.SerialNumber"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.Manufacturer"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.Model"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.Storage"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.HardwareCollectedDateTime"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.InventoryCollectedDateTime"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.CollectionCoverage"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.CollectionMode"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.PhysicalMemoryGiB"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.StorageStatus"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.MemoryStatus"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.TenantDeviceKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.ManagedDeviceId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.TenantKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.OrganizationKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.EnvironmentKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Hardware Evidence.TenantId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -399,7 +1028,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Hardware \u00b7 complete governed fields'"
+                  "Value": "'Hardware · complete governed fields'"
                 }
               }
             }
@@ -419,7 +1048,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Hardware \u00b7 complete governed fields'"
+                  "Value": "'Hardware · complete governed fields'"
                 }
               }
             },
@@ -508,7 +1137,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -590,7 +1226,7 @@
                 "Entity": "Native Hardware Evidence"
               }
             },
-            "Property": "Native Context Rows \u00b7 Native Hardware Evidence"
+            "Property": "Native Context Rows · Native Hardware Evidence"
           }
         },
         "type": "Advanced",
@@ -615,7 +1251,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows \u00b7 Native Hardware Evidence"
+                      "Property": "Native Context Rows · Native Hardware Evidence"
                     }
                   },
                   "Right": {

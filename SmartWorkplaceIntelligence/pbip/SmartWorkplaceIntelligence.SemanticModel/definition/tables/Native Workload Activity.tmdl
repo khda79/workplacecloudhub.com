@@ -4,19 +4,28 @@ table 'Native Workload Activity'
 
 	/// Users whose Microsoft 365 workload report row was linked to DimUser by exact normalized UPN. Migrated without changing the source calculation.
 	measure 'Native Users with exact M365 activity evidence' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Workload Activity'[TenantUserKey]))), (CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN"))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Workload Activity'[TenantUserKey]))), (CALCULATE(DISTINCTCOUNT('Native Workload Activity'[TenantUserKey]), KEEPFILTERS('Native Workload Activity'[MatchStatus] = "ExactUPN"))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: cb7adaeb-6c23-4aec-82e0-dd3114fafe90
 
 	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native Workload Activity' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native Workload Activity')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Workload Activity'[TenantUserKey]))), (COUNTROWS('Native Workload Activity')))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native Workload Activity')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Workload Activity'[TenantUserKey]))), (COUNTROWS('Native Workload Activity')))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		isHidden
 		lineageTag: 16aeef3d-f505-4031-a1d7-aceea87e5fb1
+
+	/// SAM display resolved by qualified native identity, same tenant and loaded batch. Empty text when no qualified SAM; preserves unresolved source rows in table projections.
+	measure 'SAM · Native Workload Activity' = VAR _display = (VAR _key=SELECTEDVALUE('Native Workload Activity'[TenantUserKey]) VAR _tenant=SELECTEDVALUE('Native Workload Activity'[TenantKey]) VAR _batch=SELECTEDVALUE('Native Workload Activity'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(_key),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[TenantUserKey],_key,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN IF(COUNTROWS('Native Workload Activity') > 0, COALESCE(_display, ""))
+		displayFolder: Private identity display
+		lineageTag: 7af5256d-3f33-4d03-a19c-0fce63b8bd65
 
 	/// Native FactUserActivity attribute; source qualification is retained.
 	column TenantKey

@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "10908acae0f37344f3bb",
   "position": {
     "x": 32,
-    "y": 440,
+    "y": 320,
+    "z": 1000,
+    "height": 96,
     "width": 1856,
-    "height": 128,
-    "z": 107,
     "tabOrder": 672
   },
   "visual": {
@@ -58,6 +58,66 @@
               "queryRef": "Device Inventory Evidence.Secure Boot Disabled Devices",
               "nativeQueryRef": "Secure Boot disabled devices",
               "displayName": "Secure Boot disabled devices"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Windows 10 Devices Remaining"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Windows 10 Devices Remaining",
+              "nativeQueryRef": "Intune inventory Windows 10",
+              "displayName": "Intune inventory Windows 10"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Windows 10 Devices Not Capable"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Windows 10 Devices Not Capable",
+              "nativeQueryRef": "Windows 10 not capable",
+              "displayName": "Windows 10 not capable"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Older Windows 11 Release Devices"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Older Windows 11 Release Devices",
+              "nativeQueryRef": "Older Windows 11 releases",
+              "displayName": "Older Windows 11 releases"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Directory Summary"
+                    }
+                  },
+                  "Property": "Windows 10 Eligibility Undetermined"
+                }
+              },
+              "queryRef": "Device Directory Summary.Windows 10 Eligibility Undetermined",
+              "nativeQueryRef": "Windows 10 eligibility unknown",
+              "displayName": "Windows 10 eligibility unknown"
             }
           ]
         }
@@ -316,7 +376,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "3L"
+                  "Value": "7L"
                 }
               }
             },
@@ -415,32 +475,21 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Supporting KPIs'"
+                  "Value": "''"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
+                  "Value": "11D"
                 }
               }
             }

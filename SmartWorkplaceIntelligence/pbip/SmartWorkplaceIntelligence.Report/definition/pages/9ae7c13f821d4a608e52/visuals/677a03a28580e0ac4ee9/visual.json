@@ -1,9 +1,9 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "677a03a28580e0ac4ee9",
   "position": {
     "x": 32,
-    "y": 368,
+    "y": 304,
     "z": 111,
     "height": 592,
     "width": 1856,
@@ -200,6 +200,13 @@
                   }
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
             }
           }
         }
@@ -305,6 +312,13 @@
                   "Value": "true"
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
             }
           }
         }
@@ -363,9 +377,6 @@
           }
         },
         {
-          "selector": {
-            "id": "Row"
-          },
           "properties": {
             "rowSubtotals": {
               "expr": {
@@ -388,12 +399,12 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "Row"
           }
         },
         {
-          "selector": {
-            "id": "Column"
-          },
           "properties": {
             "columnSubtotals": {
               "expr": {
@@ -416,6 +427,347 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "Column"
+          }
+        }
+      ],
+      "columnFormatting": [
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Workforce Operational Signals.Workforce Signal Affected Estate"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Workforce Operational Signals.Workforce Signal Covered Population"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Workforce Operational Signals.Workforce Signal Affected Users"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Workforce Operational Signals.Recommended Action"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Workforce Operational Signals.Evidence Status"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Workforce Operational Signals.Risk Category"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Workforce Operational Signals.Signal"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Workforce Operational Signals.Severity Label"
           }
         }
       ]
@@ -427,7 +779,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Classification evidence \u00b7 selected evidence'"
+                  "Value": "'Classification evidence · selected evidence'"
                 }
               }
             }
@@ -447,7 +799,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Classification evidence \u00b7 selected evidence'"
+                  "Value": "'Classification evidence · selected evidence'"
                 }
               }
             },
@@ -604,121 +956,5 @@
     },
     "drillFilterOtherVisuals": true
   },
-  "parentGroupName": "1332cee47b9a1ed7863f",
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "9122946bc9cc34bbc7ee",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Operational Signals"
-              }
-            },
-            "Property": "Severity Label"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "92a9bb979da6fade303a",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Operational Signals"
-              }
-            },
-            "Property": "Signal"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "5366be761731df6b0545",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Operational Signals"
-              }
-            },
-            "Property": "Risk Category"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "07f10fc5c439669b78a4",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Operational Signals"
-              }
-            },
-            "Property": "Workforce Signal Affected Users"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "9eb51c05fd3e540927c4",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Operational Signals"
-              }
-            },
-            "Property": "Workforce Signal Covered Population"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "3d1eb658fa0895ace3fd",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Operational Signals"
-              }
-            },
-            "Property": "Workforce Signal Affected Estate"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "52df223e0b957836df84",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Operational Signals"
-              }
-            },
-            "Property": "Evidence Status"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "0aba89fb7608d3be139e",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Operational Signals"
-              }
-            },
-            "Property": "Recommended Action"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
-  }
+  "parentGroupName": "1332cee47b9a1ed7863f"
 }

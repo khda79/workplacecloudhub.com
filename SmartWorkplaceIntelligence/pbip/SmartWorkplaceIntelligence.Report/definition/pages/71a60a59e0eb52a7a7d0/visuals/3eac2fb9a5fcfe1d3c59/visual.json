@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "3eac2fb9a5fcfe1d3c59",
   "position": {
     "x": 32,
-    "y": 472,
+    "y": 481.16725978647685,
+    "z": 1000,
+    "height": 209.08185053380782,
     "width": 1856,
-    "height": 216,
-    "z": 111,
-    "tabOrder": 677
+    "tabOrder": 3000
   },
   "visual": {
     "visualType": "tableEx",
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.Side",
-              "nativeQueryRef": "Side"
+              "nativeQueryRef": "Side",
+              "active": true
             },
             {
               "field": {
@@ -41,7 +42,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.Auth",
-              "nativeQueryRef": "Auth"
+              "nativeQueryRef": "Auth",
+              "active": true
             },
             {
               "field": {
@@ -55,7 +57,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.Side Status",
-              "nativeQueryRef": "Side Status"
+              "nativeQueryRef": "Side Status",
+              "active": true
             },
             {
               "field": {
@@ -69,7 +72,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.Run Status",
-              "nativeQueryRef": "Run Status"
+              "nativeQueryRef": "Run Status",
+              "active": true
             },
             {
               "field": {
@@ -83,7 +87,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.Error Count",
-              "nativeQueryRef": "Error Count"
+              "nativeQueryRef": "Error Count",
+              "active": true
             },
             {
               "field": {
@@ -97,7 +102,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.Warning Count",
-              "nativeQueryRef": "Warning Count"
+              "nativeQueryRef": "Warning Count",
+              "active": true
             },
             {
               "field": {
@@ -111,7 +117,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.OK Count",
-              "nativeQueryRef": "OK Count"
+              "nativeQueryRef": "OK Count",
+              "active": true
             },
             {
               "field": {
@@ -125,7 +132,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.Not Authorized Count",
-              "nativeQueryRef": "Not Authorized Count"
+              "nativeQueryRef": "Not Authorized Count",
+              "active": true
             },
             {
               "field": {
@@ -139,7 +147,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.Not Authorized Cmdlets",
-              "nativeQueryRef": "Not Authorized Cmdlets"
+              "nativeQueryRef": "Not Authorized Cmdlets",
+              "active": true
             },
             {
               "field": {
@@ -153,7 +162,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.Missing Roles",
-              "nativeQueryRef": "Missing Roles"
+              "nativeQueryRef": "Missing Roles",
+              "active": true
             },
             {
               "field": {
@@ -167,7 +177,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.Server Name",
-              "nativeQueryRef": "Server Name"
+              "nativeQueryRef": "Server Name",
+              "active": true
             },
             {
               "field": {
@@ -181,7 +192,8 @@
                 }
               },
               "queryRef": "Exchange Hybrid Free Busy Summary.Generation Time",
-              "nativeQueryRef": "Generation Time"
+              "nativeQueryRef": "Generation Time",
+              "active": true
             }
           ]
         }
@@ -226,7 +238,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -260,9 +272,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -345,7 +364,430 @@
             }
           }
         }
-      ]
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.Side"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.Auth"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.Side Status"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.Run Status"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.Error Count"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.Warning Count"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.OK Count"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.Not Authorized Count"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.Not Authorized Cmdlets"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.Missing Roles"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.Server Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Hybrid Free Busy Summary.Generation Time"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -474,7 +916,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

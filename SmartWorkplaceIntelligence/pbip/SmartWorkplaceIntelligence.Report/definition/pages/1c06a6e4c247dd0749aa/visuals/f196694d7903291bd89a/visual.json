@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "f196694d7903291bd89a",
   "position": {
     "x": 32,
-    "y": 290.5,
-    "width": 912,
-    "height": 80,
-    "z": 107,
+    "y": 320,
+    "z": 0,
+    "height": 96,
+    "width": 1856,
     "tabOrder": 684
   },
   "visual": {
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Collaboration Object Evidence.At-Risk Collaboration Objects",
-              "nativeQueryRef": "At-Risk Objects"
+              "nativeQueryRef": "At-Risk Objects",
+              "displayName": "At-Risk Resources"
             },
             {
               "field": {
@@ -41,7 +42,8 @@
                 }
               },
               "queryRef": "Collaboration Object Evidence.Inactive Collaboration Objects",
-              "nativeQueryRef": "Inactive Objects"
+              "nativeQueryRef": "Inactive Objects",
+              "displayName": "Inactive Resources"
             },
             {
               "field": {
@@ -55,7 +57,66 @@
                 }
               },
               "queryRef": "Collaboration Object Evidence.Orphaned Collaboration Objects",
-              "nativeQueryRef": "Orphaned Objects"
+              "nativeQueryRef": "Orphaned Objects",
+              "displayName": "Orphaned Resources"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Object Evidence"
+                    }
+                  },
+                  "Property": "Collaboration Objects"
+                }
+              },
+              "queryRef": "Collaboration Object Evidence.Collaboration Objects",
+              "nativeQueryRef": "Objects",
+              "displayName": "Resources"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Object Evidence"
+                    }
+                  },
+                  "Property": "Active Collaboration Objects 30D"
+                }
+              },
+              "queryRef": "Collaboration Object Evidence.Active Collaboration Objects 30D",
+              "nativeQueryRef": "Active Objects 30D",
+              "displayName": "Active Resources 30D"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Object Evidence"
+                    }
+                  },
+                  "Property": "Collaboration Objects with External Access"
+                }
+              },
+              "queryRef": "Collaboration Object Evidence.Collaboration Objects with External Access",
+              "nativeQueryRef": "External Access"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Object Evidence"
+                    }
+                  },
+                  "Property": "Collaboration Storage Used (GB)"
+                }
+              },
+              "queryRef": "Collaboration Object Evidence.Collaboration Storage Used (GB)",
+              "nativeQueryRef": "Storage Used (GB)"
             }
           ]
         }
@@ -314,7 +375,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "3L"
+                  "Value": "7L"
                 }
               }
             },
@@ -413,32 +474,21 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Priority KPIs'"
+                  "Value": "''"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
+                  "Value": "11D"
                 }
               }
             }

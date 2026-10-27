@@ -4,8 +4,10 @@ table 'Native Compliance Evidence'
 
 	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native Compliance Evidence' =
-			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native Compliance Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Compliance Evidence'[TenantDeviceKey]))), (COUNTROWS('Native Compliance Evidence')))
+			VAR _privateDomainScope = FILTER(ALL('Native Device Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native Device Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native Device Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native Device Evidence'[CountryCode]) || TRIM('Native Device Evidence'[CountryCode])="", "Unknown", 'Native Device Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native Compliance Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Compliance Evidence'[TenantDeviceKey]))), (COUNTROWS('Native Compliance Evidence')))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		isHidden
 		lineageTag: b571d1d1-8ba2-4416-922c-f426bbcb25ce

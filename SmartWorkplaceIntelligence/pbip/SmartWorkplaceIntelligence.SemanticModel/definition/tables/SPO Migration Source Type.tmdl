@@ -1,10 +1,10 @@
 /// Migration reporting dimension; current and historical members retained.
 table 'SPO Migration Source Type'
-	lineageTag: c5779a60-7600-481f-a524-1c44f82698da
+	lineageTag: 4d86b29f-1704-4517-9c16-f3e0918ff1c8
 
 	column 'Source Type'
 		dataType: string
-		lineageTag: 1de9ad3c-cee9-4389-b44f-5c8178304bcc
+		lineageTag: 88a00063-1f8d-4bc1-bebf-52b787654ffa
 		summarizeBy: none
 		sourceColumn: Source Type
 

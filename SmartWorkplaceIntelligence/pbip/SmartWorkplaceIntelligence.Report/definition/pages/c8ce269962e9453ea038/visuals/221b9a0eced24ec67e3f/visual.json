@@ -3,11 +3,11 @@
   "name": "221b9a0eced24ec67e3f",
   "position": {
     "x": 976,
-    "y": 379.5,
-    "z": 109,
-    "height": 284.8,
+    "y": 320,
+    "z": 0,
+    "height": 278.25287356321843,
     "width": 912,
-    "tabOrder": 1333
+    "tabOrder": 5000
   },
   "visual": {
     "visualType": "azureMap",

@@ -1,19 +1,19 @@
 /// Device-to-suite bridge from a unique exact observed primary-user UPN in the same imported batch. Unmatched or ambiguous users remain Unknown. This describes the primary user, not a device license.
 table 'M365 Device License Membership'
 	isHidden
-	lineageTag: f60c0e31-b9a5-4879-8ba3-131cb767d5f3
+	lineageTag: 76384897-484c-4a70-b45f-3e3b70a182c1
 
 	column 'Device Source ID'
 		dataType: string
 		isHidden
-		lineageTag: d6a76230-2a0b-423d-8f40-3902a86aa78d
+		lineageTag: 5fa20bd9-19ae-4bba-891e-26fcac7184eb
 		summarizeBy: none
 		sourceColumn: [Device Source ID]
 
 	column 'License Product'
 		dataType: string
 		isHidden
-		lineageTag: 0f959f48-e580-45ee-b957-672e791b72d6
+		lineageTag: 27d47f87-baca-4fbe-af3e-5e500ec74a3e
 		summarizeBy: none
 		sourceColumn: [License Product]
 

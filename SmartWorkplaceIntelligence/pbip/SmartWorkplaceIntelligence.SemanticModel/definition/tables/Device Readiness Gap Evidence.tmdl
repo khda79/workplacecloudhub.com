@@ -1,0 +1,1379 @@
+/// Observed readiness facts at tenant, inventory scope and native device identity grain. Disconnected backlog fact. Left lookup to same-batch DeviceInventoryEvidence by TenantKey and normalized Device Source ID; unmatched or ambiguous joins remain Indeterminate. Condition states reproduce Compare-ReadinessFindings filters; missing required inputs take precedence over Not applicable.
+table 'Device Readiness Gap Evidence'
+	lineageTag: 81a3406e-771d-43ed-83c0-59262cbca544
+
+	/// All source identities, including AD-only and unclassified joins.
+	measure 'Readiness Observed Devices' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(COUNTROWS('Device Readiness Gap Evidence'),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 5ff6aa4e-9f13-4461-869f-3079088e21c1
+
+	/// Comparator scope: distinct nonblank AD GUIDs.
+	measure 'Readiness ISSUE-032 Reference Devices (AD GUID)' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-032 State] = "Triggered"), KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID] <> BLANK())),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 3f489f35-cbc0-463b-955b-8fe72f5f4b96
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-032 All Devices' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-032 State] = "Triggered")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: d5fa8e07-6255-4cea-b304-75a556064958
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-032 Indeterminate' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-032 State] = "Indeterminate")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 6e7fca76-2af8-4038-9b90-1034a49ad88b
+
+	/// Comparator scope: distinct nonblank AD GUIDs.
+	measure 'Readiness ISSUE-018 Reference Devices (AD GUID)' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State] = "Triggered"), KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID] <> BLANK())),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: c69762eb-5ea0-4cd3-8b33-238da3f35993
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-018 All Devices' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State] = "Triggered")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 885f79ea-5c16-4481-9777-f0340650081e
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-018 Indeterminate' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State] = "Indeterminate")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: c6058e46-dbef-4ef7-966b-3c971d585f41
+
+	/// Comparator scope: distinct nonblank AD GUIDs.
+	measure 'Readiness ISSUE-054 Reference Devices (AD GUID)' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-054 State] = "Triggered"), KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID] <> BLANK())),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 2f611e87-5785-4237-bd11-3ccd9c049226
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-054 All Devices' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-054 State] = "Triggered")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 1ae73098-3dcb-4a40-8d01-edc0b81b9d36
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-054 Indeterminate' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-054 State] = "Indeterminate")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: a836cfbc-2684-436e-b72d-fc5ef5139fee
+
+	/// Comparator scope: distinct nonblank AD GUIDs.
+	measure 'Readiness ISSUE-055 Reference Devices (AD GUID)' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-055 State] = "Triggered"), KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID] <> BLANK())),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 3701d710-b564-4ab9-8866-3f869552f83f
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-055 All Devices' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-055 State] = "Triggered")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: ff0e12a7-46de-4aa7-b278-506b40119a13
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-055 Indeterminate' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-055 State] = "Indeterminate")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: abffd9a4-1d27-4771-90ad-393ac57b1ac5
+
+	/// Comparator scope: distinct nonblank AD GUIDs.
+	measure 'Readiness ISSUE-070 Reference Devices (AD GUID)' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-070 State] = "Triggered"), KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID] <> BLANK())),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 63c27bc4-0671-43a3-b0bf-d234f7a4b97d
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-070 All Devices' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-070 State] = "Triggered")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: c3e73f96-7733-420d-aec6-29c4dfd17f6d
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-070 Indeterminate' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-070 State] = "Indeterminate")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: cbab0f94-92cb-4fa8-8dfd-250092f2ac6e
+
+	/// Comparator scope: distinct nonblank AD GUIDs.
+	measure 'Readiness ISSUE-070B Reference Devices (AD GUID)' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-070B State] = "Triggered"), KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID] <> BLANK())),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 23802e90-16d2-412f-8db5-91ae4bd00eb2
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-070B All Devices' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-070B State] = "Triggered")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: d6f0f1b7-015c-4038-94a7-14811bf9d71c
+
+	/// Full preserved source-identity population. Conditions overlap and must not be added.
+	measure 'Readiness ISSUE-070B Indeterminate' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Device Readiness Gap Evidence", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Device Readiness Gap Evidence'), KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-070B State] = "Indeterminate")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: e129347d-39ca-45b9-a204-9b264b8efdd0
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily 032 Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 032 State]="Triggered"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 032 State]="Triggered"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: eaf77a3b-d11c-5010-8215-552ee6fb2b00
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily 032 AD GUID' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 032 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 032 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 01494793-3517-55f3-af98-269f7f0895a9
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily 018 Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 5377566d-5564-5fe8-8368-77a67ca76a6a
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily 018 AD GUID' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 00bafad2-0431-5415-9b81-2f4f85dece90
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily 054 Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 054 State]="Triggered"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 054 State]="Triggered"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 50adb492-d642-5d9e-a09b-a6655db5b02d
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily 054 AD GUID' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 054 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 054 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 1557357c-b9d7-5962-8d1c-06c470f5a75f
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily 055 Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 055 State]="Triggered"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 055 State]="Triggered"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: fc801a57-8b09-50ce-adbd-97649cc06e23
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily 055 AD GUID' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 055 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 055 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 36282a7d-7214-513b-ac4b-1c1cd3399149
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily Firmware Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily Firmware State]="Triggered"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily Firmware State]="Triggered"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: de1024c6-811e-5432-8b2c-303f739501be
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily Firmware AD GUID' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily Firmware State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily Firmware State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 4be864ad-af7a-5bc8-983d-95bdc812b8db
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily Disabled Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily Disabled State]="Triggered"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily Disabled State]="Triggered"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 76347de5-2630-542b-9775-c4996e4db08a
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily Disabled AD GUID' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily Disabled State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Daily Disabled State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 85504d68-c679-5b8c-a346-b8d9b507dd5b
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily RAM Already upgraded' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Already upgraded"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Already upgraded"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: b439a350-6154-5af3-8be6-b802149a8864
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily RAM Excluding Already upgraded' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]<>"Already upgraded"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]<>"Already upgraded"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: fa859c65-866d-54d7-8104-d655f4109771
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily RAM Not assessed' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Not assessed"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Not assessed"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 36561727-aa61-5c44-93af-62d179477893
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Daily RAM Unknown' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Unknown"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Daily 018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Unknown"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 37b33b18-49de-57a9-8335-63590c9a2ba2
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration 032 Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-032 State]="Triggered"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-032 State]="Triggered"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 5662cfee-3f85-5fff-87f5-1fe0bf47902a
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration 032 AD GUID' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-032 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-032 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: b1d8c658-4658-5052-b3b0-ddf2d1b4b6c7
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration 018 Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: af052a85-fa00-5230-b176-fc36ffc12bc6
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration 018 AD GUID' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 43a50f53-253b-5367-9550-881dd6b684d0
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration 054 Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-054 State]="Triggered"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-054 State]="Triggered"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: c1b2390d-6329-54bd-9d3b-0b684713cbaf
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration 054 AD GUID' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-054 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-054 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: a3403b58-4a38-5f46-9b19-729741823f6b
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration 055 Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-055 State]="Triggered"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-055 State]="Triggered"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: a7841b0e-41fe-5826-ab9d-5c1529d92262
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration 055 AD GUID' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-055 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-055 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 9bf53841-1873-587f-8c01-12544ac08241
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration Firmware Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Migration Firmware State]="Triggered"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),KEEPFILTERS('Device Readiness Gap Evidence'[Migration Firmware State]="Triggered"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 2db1e727-fe9c-58db-94fe-1cb38663a962
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration Firmware AD GUID' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Migration Firmware State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[Migration Firmware State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 32d573cf-36bd-5f96-89ab-905eb0789ecf
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration RAM Already upgraded' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Already upgraded"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Already upgraded"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: efe2b41a-f1bb-5a5c-a7ca-7697009068b1
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration RAM Excluding Already upgraded' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]<>"Already upgraded"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]<>"Already upgraded"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: c33b41a0-b0b9-56ab-b008-d5037d420423
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration RAM Not assessed' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Not assessed"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Not assessed"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 1088baf4-d868-534d-85ff-b3677f4beacf
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Migration RAM Unknown' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Unknown"))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS('Device Readiness Gap Evidence'[ISSUE-018 State]="Triggered"),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK()),KEEPFILTERS('Device Readiness Gap Evidence'[Windows 11 Upgrade Eligibility]="Unknown"))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: f543c090-fb98-5e42-a933-25b204bebc7f
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Device Unattributable Rows' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((COUNTROWS('Device Readiness Gap Evidence')),0),BLANK())),KEEPFILTERS(_missing))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 3554ed58-a755-51be-ac59-57585ea0a0fb
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Device Scope Row' =
+			VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(COUNTROWS('Device Readiness Gap Evidence')>0,1,0)),KEEPFILTERS(_missing)),CALCULATE((IF(COUNTROWS('Device Readiness Gap Evidence')>0,1,0)),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 42420b2a-8763-5e22-9cd4-d89b0a3cc73e
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Entra Pending' = IF(SELECTEDVALUE('Readiness Reading'[Reading],"Daily operations")="Daily operations",[Backlog Daily 032 Rows],[Backlog Migration 032 AD GUID])
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: e4978fc5-63e0-5533-b791-d604f96ce6c0
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog RAM Under 8' = IF(SELECTEDVALUE('Readiness Reading'[Reading],"Daily operations")="Daily operations",[Backlog Daily 018 Rows],[Backlog Migration 018 AD GUID])
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: a8e55925-f6fd-554d-84b9-6df99ad0e18a
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Third KPI' = IF(SELECTEDVALUE('Readiness Reading'[Reading],"Daily operations")="Daily operations",[Backlog Daily 055 Rows],[Backlog Migration RAM Excluding Already upgraded])
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: f72e4603-ef22-5914-be07-888b4bec9586
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Third KPI Caption' = IF(SELECTEDVALUE('Readiness Reading'[Reading],"Daily operations")="Daily operations","No reboot >= 30 days | all rows","RAM < 8 GB excluding Already upgraded | AD GUID")
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 7f74c7a4-a94c-5cb1-bd2e-51a0d090ff74
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Device Unit Text' = IF(SELECTEDVALUE('Readiness Reading'[Reading],"Daily operations")="Daily operations","Daily operations | all device rows | no Windows 10 or eligibility filter","Windows 11 migration | reference counts use distinct AD GUID")
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: bb5a6265-05f5-518f-b06e-04224b72cc66
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Device RAM Note' =
+			VAR _daily=SELECTEDVALUE('Readiness Reading'[Reading],"Daily operations")="Daily operations"
+			VAR _up=IF(_daily,[Backlog Daily RAM Already upgraded],[Backlog Migration RAM Already upgraded])
+			VAR _na=IF(_daily,[Backlog Daily RAM Not assessed],[Backlog Migration RAM Not assessed])
+			RETURN FORMAT(_up,"#,##0")&" Already upgraded included | "&FORMAT(_na,"#,##0")&" Not assessed | eligibility is contextual; missing evidence remains visible"
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 1c42174e-936a-5132-9fa0-08f7b9e289d5
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Device Condition State' =
+			VAR _code=SELECTEDVALUE('Readiness Condition'[Condition Code],"018")
+			RETURN IF(SELECTEDVALUE('Readiness Reading'[Reading],"Daily operations")="Daily operations",SWITCH(_code,"032",SELECTEDVALUE('Device Readiness Gap Evidence'[Daily 032 State]),
+			"018",SELECTEDVALUE('Device Readiness Gap Evidence'[Daily 018 State]),
+			"054",SELECTEDVALUE('Device Readiness Gap Evidence'[Daily 054 State]),
+			"055",SELECTEDVALUE('Device Readiness Gap Evidence'[Daily 055 State]),
+			"Firmware",SELECTEDVALUE('Device Readiness Gap Evidence'[Daily Firmware State]),
+			"Disabled",SELECTEDVALUE('Device Readiness Gap Evidence'[Daily Disabled State]),BLANK()),SWITCH(_code,"032",SELECTEDVALUE('Device Readiness Gap Evidence'[ISSUE-032 State]),
+			"018",SELECTEDVALUE('Device Readiness Gap Evidence'[ISSUE-018 State]),
+			"054",SELECTEDVALUE('Device Readiness Gap Evidence'[ISSUE-054 State]),
+			"055",SELECTEDVALUE('Device Readiness Gap Evidence'[ISSUE-055 State]),
+			"Firmware",SELECTEDVALUE('Device Readiness Gap Evidence'[Migration Firmware State]),BLANK()))
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 7bdb5f48-8a32-5b49-b202-0ed7c531ca5f
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Condition Count' =
+			VAR _reading=SELECTEDVALUE('Readiness Reading'[Reading],"Daily operations")
+			VAR _code=SELECTEDVALUE('Readiness Condition'[Condition Code])
+			VAR _state=SELECTEDVALUE('Readiness Matrix Metric'[State])
+			RETURN IF(ISBLANK(_code)||ISBLANK(_state)||(_reading="Windows 11 migration"&&_code="Disabled")||(_reading="Daily operations"&&_state="Not applicable"),BLANK(),
+			(VAR _pf=ISFILTERED('Primary User Selection')
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _pk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Primary user]),NOT _pf || 'Device Readiness Gap Evidence'[Backlog Primary user] IN _users)
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog Country]),NOT _cf || 'Device Readiness Gap Evidence'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Device Readiness Gap Evidence'[Backlog AD Domain]),NOT _df || 'Device Readiness Gap Evidence'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Device Readiness Gap Evidence',(_cf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Country]) || 'Device Readiness Gap Evidence'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Device Readiness Gap Evidence'[Backlog AD Domain]) || 'Device Readiness Gap Evidence'[Backlog AD Domain]="Unknown")) || (_pf && (ISBLANK('Device Readiness Gap Evidence'[Backlog Primary user]) || 'Device Readiness Gap Evidence'[Backlog Primary user]="Not resolved")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((VAR _reading=SELECTEDVALUE('Readiness Reading'[Reading],"Daily operations")
+			VAR _code=SELECTEDVALUE('Readiness Condition'[Condition Code])
+			VAR _state=SELECTEDVALUE('Readiness Matrix Metric'[State])
+			VAR _grain=SELECTEDVALUE('Readiness Matrix Metric'[Grain])
+			VAR _rows=FILTER('Device Readiness Gap Evidence',[Backlog Device Condition State]=_state)
+			RETURN IF(ISBLANK(_code)||ISBLANK(_state)||(_reading="Windows 11 migration" && _code="Disabled")||(_reading="Daily operations" && _state="Not applicable"),BLANK(),
+			IF(_grain="AD GUID",CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS(_rows),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK())),COUNTROWS(_rows)))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((VAR _reading=SELECTEDVALUE('Readiness Reading'[Reading],"Daily operations")
+			VAR _code=SELECTEDVALUE('Readiness Condition'[Condition Code])
+			VAR _state=SELECTEDVALUE('Readiness Matrix Metric'[State])
+			VAR _grain=SELECTEDVALUE('Readiness Matrix Metric'[Grain])
+			VAR _rows=FILTER('Device Readiness Gap Evidence',[Backlog Device Condition State]=_state)
+			RETURN IF(ISBLANK(_code)||ISBLANK(_state)||(_reading="Windows 11 migration" && _code="Disabled")||(_reading="Daily operations" && _state="Not applicable"),BLANK(),
+			IF(_grain="AD GUID",CALCULATE(DISTINCTCOUNT('Device Readiness Gap Evidence'[AD Object GUID]),KEEPFILTERS(_rows),KEEPFILTERS('Device Readiness Gap Evidence'[AD Object GUID]<>BLANK())),COUNTROWS(_rows)))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Device Readiness Gap Evidence'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Device Readiness Gap Evidence'[Backlog AD Domain])),KEEPFILTERS(TREATAS(_pk,'Device Readiness Gap Evidence'[Backlog Primary user]))))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 6a8b0d4f-3a43-5829-a253-863d6106c68b
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Device Row In Scope' =
+			VAR _selectedState=SELECTEDVALUE('Readiness Matrix Metric'[State],"Triggered")
+			VAR _actual=[Backlog Device Condition State]
+			RETURN IF([Backlog Device Scope Row]=1 && _actual=_selectedState,1,0)
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: ae98308f-10fb-52c6-a142-bc8ef5b9f63b
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Device Action' =
+			VAR _s=[Backlog Device Condition State]
+			VAR _c=SELECTEDVALUE('Readiness Condition'[Condition Code],"018")
+			RETURN SWITCH(TRUE(),_s="Indeterminate","Qualify missing or unusable evidence",_s="Not applicable","Review applicability conditions",_s="Not triggered","No condition observed",
+			SWITCH(_c,"032","Review Entra registration","018","Review RAM capacity and operational needs","054","Plan restart according to operational context","055","Plan restart according to operational context","Firmware","Review firmware and Secure Boot support","Disabled","Review disabled Secure Boot; no automatic change","Review evidence"))
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 643d090c-b4be-50f8-889e-fc3c8ad6040b
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Reboot Basis Note' =
+			VAR _basis=SELECTEDVALUE('Device Readiness Gap Evidence'[Reboot Age Basis])
+			RETURN IF(CONTAINSSTRING(_basis,"+/-1"),"Prepared reboot age; +/-1 day according to source basis","Prepared reboot age; do not recalculate")
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 57cf9d87-91f5-5d65-9e46-2b9d281242fa
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Device Coverage Text' =
+			IF(NOT(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1),"Device evidence unavailable",
+			FORMAT([Backlog Device Unattributable Rows],"#,##0")&" rows not attributable to active scope - select Unassigned evidence. AD computer only: missing RAM/reboot/firmware telemetry remains Indeterminate; Entra uses its own evidence. Unknown/Error are Indeterminate in Daily operations.")
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 398beabf-10c8-5d3b-b817-634715b6205c
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Reboot Overlap Text' =
+			VAR _daily=SELECTEDVALUE('Readiness Reading'[Reading],"Daily operations")="Daily operations"
+			RETURN IF(_daily,"Daily >=30 days is included in >=10 days. Never add thresholds or firmware conditions.","Migration >=10 and >=30 days overlap but their applicability differs. Never add conditions.")
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 5b8799be-d8c3-553a-95de-1014932d9beb
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog PC Condition Count' =
+			VAR _devices=SELECTCOLUMNS('Device Exploration Inventory',
+			"__ID",LOWER(TRIM('Device Exploration Inventory'[Device Source ID])),
+			"__I",LOWER(TRIM('Device Exploration Inventory'[Inventory Key])),
+			"__T",'Device Exploration Inventory'[TenantKey]&"",
+			"__B",'Device Exploration Inventory'[Loaded Batch ID]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD Computer Evidence'),
+			"__N",LOWER(TRIM('AD Computer Evidence'[TenantADComputerKey])),
+			"__G",LOWER(TRIM('AD Computer Evidence'[ObjectGUID])),
+			"__T",'AD Computer Evidence'[TenantKey]&"",
+			"__B",'AD Computer Evidence'[Loaded Batch ID]&"")
+			VAR _unique=FILTER(GROUPBY(_ad,[__N],[__T],[__B],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _adDevices=SELECTCOLUMNS(FILTER(_devices,LEN([__ID])=0 && LEFT([__I],3)="ad:"),
+			"__N",MID([__I],4,500),"__T",[__T],"__B",[__B])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(_devices,LEN([__ID])>0),"K","intune:"&[__ID],"T",[__T],"B",[__B]),
+			SELECTCOLUMNS(NATURALINNERJOIN(_adDevices,_unique),"K","ad:"&[__G],"T",[__T],"B",[__B]))
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Condition Count],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Backlog Device Key],'Device Readiness Gap Evidence'[TenantKey],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Daily operations" },'Readiness Reading'[Reading])))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: c060776d-a167-5345-bf46-783d96aadb33
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog PC Row In Scope' =
+			VAR _devices=SELECTCOLUMNS('Device Exploration Inventory',
+			"__ID",LOWER(TRIM('Device Exploration Inventory'[Device Source ID])),
+			"__I",LOWER(TRIM('Device Exploration Inventory'[Inventory Key])),
+			"__T",'Device Exploration Inventory'[TenantKey]&"",
+			"__B",'Device Exploration Inventory'[Loaded Batch ID]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD Computer Evidence'),
+			"__N",LOWER(TRIM('AD Computer Evidence'[TenantADComputerKey])),
+			"__G",LOWER(TRIM('AD Computer Evidence'[ObjectGUID])),
+			"__T",'AD Computer Evidence'[TenantKey]&"",
+			"__B",'AD Computer Evidence'[Loaded Batch ID]&"")
+			VAR _unique=FILTER(GROUPBY(_ad,[__N],[__T],[__B],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _adDevices=SELECTCOLUMNS(FILTER(_devices,LEN([__ID])=0 && LEFT([__I],3)="ad:"),
+			"__N",MID([__I],4,500),"__T",[__T],"__B",[__B])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(_devices,LEN([__ID])>0),"K","intune:"&[__ID],"T",[__T],"B",[__B]),
+			SELECTCOLUMNS(NATURALINNERJOIN(_adDevices,_unique),"K","ad:"&[__G],"T",[__T],"B",[__B]))
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Device Row In Scope],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Backlog Device Key],'Device Readiness Gap Evidence'[TenantKey],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Daily operations" },'Readiness Reading'[Reading])))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: a7bd01a6-e87c-5c4e-a958-1139a256da34
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog PC Entra Pending' =
+			VAR _devices=SELECTCOLUMNS('Device Exploration Inventory',
+			"__ID",LOWER(TRIM('Device Exploration Inventory'[Device Source ID])),
+			"__I",LOWER(TRIM('Device Exploration Inventory'[Inventory Key])),
+			"__T",'Device Exploration Inventory'[TenantKey]&"",
+			"__B",'Device Exploration Inventory'[Loaded Batch ID]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD Computer Evidence'),
+			"__N",LOWER(TRIM('AD Computer Evidence'[TenantADComputerKey])),
+			"__G",LOWER(TRIM('AD Computer Evidence'[ObjectGUID])),
+			"__T",'AD Computer Evidence'[TenantKey]&"",
+			"__B",'AD Computer Evidence'[Loaded Batch ID]&"")
+			VAR _unique=FILTER(GROUPBY(_ad,[__N],[__T],[__B],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _adDevices=SELECTCOLUMNS(FILTER(_devices,LEN([__ID])=0 && LEFT([__I],3)="ad:"),
+			"__N",MID([__I],4,500),"__T",[__T],"__B",[__B])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(_devices,LEN([__ID])>0),"K","intune:"&[__ID],"T",[__T],"B",[__B]),
+			SELECTCOLUMNS(NATURALINNERJOIN(_adDevices,_unique),"K","ad:"&[__G],"T",[__T],"B",[__B]))
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Entra Pending],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Backlog Device Key],'Device Readiness Gap Evidence'[TenantKey],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Daily operations" },'Readiness Reading'[Reading])))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: ddaad50e-7c25-5da4-9f97-d20e8f2f740f
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog PC RAM Under 8' =
+			VAR _devices=SELECTCOLUMNS('Device Exploration Inventory',
+			"__ID",LOWER(TRIM('Device Exploration Inventory'[Device Source ID])),
+			"__I",LOWER(TRIM('Device Exploration Inventory'[Inventory Key])),
+			"__T",'Device Exploration Inventory'[TenantKey]&"",
+			"__B",'Device Exploration Inventory'[Loaded Batch ID]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD Computer Evidence'),
+			"__N",LOWER(TRIM('AD Computer Evidence'[TenantADComputerKey])),
+			"__G",LOWER(TRIM('AD Computer Evidence'[ObjectGUID])),
+			"__T",'AD Computer Evidence'[TenantKey]&"",
+			"__B",'AD Computer Evidence'[Loaded Batch ID]&"")
+			VAR _unique=FILTER(GROUPBY(_ad,[__N],[__T],[__B],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _adDevices=SELECTCOLUMNS(FILTER(_devices,LEN([__ID])=0 && LEFT([__I],3)="ad:"),
+			"__N",MID([__I],4,500),"__T",[__T],"__B",[__B])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(_devices,LEN([__ID])>0),"K","intune:"&[__ID],"T",[__T],"B",[__B]),
+			SELECTCOLUMNS(NATURALINNERJOIN(_adDevices,_unique),"K","ad:"&[__G],"T",[__T],"B",[__B]))
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog RAM Under 8],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Backlog Device Key],'Device Readiness Gap Evidence'[TenantKey],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Daily operations" },'Readiness Reading'[Reading])))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: fb5cdae7-4f9c-5c6c-85f6-966916cc3316
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog PC Third KPI' =
+			VAR _devices=SELECTCOLUMNS('Device Exploration Inventory',
+			"__ID",LOWER(TRIM('Device Exploration Inventory'[Device Source ID])),
+			"__I",LOWER(TRIM('Device Exploration Inventory'[Inventory Key])),
+			"__T",'Device Exploration Inventory'[TenantKey]&"",
+			"__B",'Device Exploration Inventory'[Loaded Batch ID]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD Computer Evidence'),
+			"__N",LOWER(TRIM('AD Computer Evidence'[TenantADComputerKey])),
+			"__G",LOWER(TRIM('AD Computer Evidence'[ObjectGUID])),
+			"__T",'AD Computer Evidence'[TenantKey]&"",
+			"__B",'AD Computer Evidence'[Loaded Batch ID]&"")
+			VAR _unique=FILTER(GROUPBY(_ad,[__N],[__T],[__B],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _adDevices=SELECTCOLUMNS(FILTER(_devices,LEN([__ID])=0 && LEFT([__I],3)="ad:"),
+			"__N",MID([__I],4,500),"__T",[__T],"__B",[__B])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(_devices,LEN([__ID])>0),"K","intune:"&[__ID],"T",[__T],"B",[__B]),
+			SELECTCOLUMNS(NATURALINNERJOIN(_adDevices,_unique),"K","ad:"&[__G],"T",[__T],"B",[__B]))
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Third KPI],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Backlog Device Key],'Device Readiness Gap Evidence'[TenantKey],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Daily operations" },'Readiness Reading'[Reading])))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 78bb3914-a4c4-5eb0-9534-9f1e9310b5e9
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog PC Condition State' =
+			VAR _devices=SELECTCOLUMNS('Device Exploration Inventory',
+			"__ID",LOWER(TRIM('Device Exploration Inventory'[Device Source ID])),
+			"__I",LOWER(TRIM('Device Exploration Inventory'[Inventory Key])),
+			"__T",'Device Exploration Inventory'[TenantKey]&"",
+			"__B",'Device Exploration Inventory'[Loaded Batch ID]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD Computer Evidence'),
+			"__N",LOWER(TRIM('AD Computer Evidence'[TenantADComputerKey])),
+			"__G",LOWER(TRIM('AD Computer Evidence'[ObjectGUID])),
+			"__T",'AD Computer Evidence'[TenantKey]&"",
+			"__B",'AD Computer Evidence'[Loaded Batch ID]&"")
+			VAR _unique=FILTER(GROUPBY(_ad,[__N],[__T],[__B],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _adDevices=SELECTCOLUMNS(FILTER(_devices,LEN([__ID])=0 && LEFT([__I],3)="ad:"),
+			"__N",MID([__I],4,500),"__T",[__T],"__B",[__B])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(_devices,LEN([__ID])>0),"K","intune:"&[__ID],"T",[__T],"B",[__B]),
+			SELECTCOLUMNS(NATURALINNERJOIN(_adDevices,_unique),"K","ad:"&[__G],"T",[__T],"B",[__B]))
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Device Condition State],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Backlog Device Key],'Device Readiness Gap Evidence'[TenantKey],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Daily operations" },'Readiness Reading'[Reading])))
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: c5d6a977-3983-570f-9ac0-4553b7e14a64
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog PC Action' =
+			VAR _devices=SELECTCOLUMNS('Device Exploration Inventory',
+			"__ID",LOWER(TRIM('Device Exploration Inventory'[Device Source ID])),
+			"__I",LOWER(TRIM('Device Exploration Inventory'[Inventory Key])),
+			"__T",'Device Exploration Inventory'[TenantKey]&"",
+			"__B",'Device Exploration Inventory'[Loaded Batch ID]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD Computer Evidence'),
+			"__N",LOWER(TRIM('AD Computer Evidence'[TenantADComputerKey])),
+			"__G",LOWER(TRIM('AD Computer Evidence'[ObjectGUID])),
+			"__T",'AD Computer Evidence'[TenantKey]&"",
+			"__B",'AD Computer Evidence'[Loaded Batch ID]&"")
+			VAR _unique=FILTER(GROUPBY(_ad,[__N],[__T],[__B],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _adDevices=SELECTCOLUMNS(FILTER(_devices,LEN([__ID])=0 && LEFT([__I],3)="ad:"),
+			"__N",MID([__I],4,500),"__T",[__T],"__B",[__B])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(_devices,LEN([__ID])>0),"K","intune:"&[__ID],"T",[__T],"B",[__B]),
+			SELECTCOLUMNS(NATURALINNERJOIN(_adDevices,_unique),"K","ad:"&[__G],"T",[__T],"B",[__B]))
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Device Action],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Backlog Device Key],'Device Readiness Gap Evidence'[TenantKey],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Daily operations" },'Readiness Reading'[Reading])))
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 483a1abb-4490-5ae5-aa04-bb406bd708ad
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog PC Evidence Note' =
+			VAR _devices=SELECTCOLUMNS('Device Exploration Inventory',
+			"__ID",LOWER(TRIM('Device Exploration Inventory'[Device Source ID])),
+			"__I",LOWER(TRIM('Device Exploration Inventory'[Inventory Key])),
+			"__T",'Device Exploration Inventory'[TenantKey]&"",
+			"__B",'Device Exploration Inventory'[Loaded Batch ID]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD Computer Evidence'),
+			"__N",LOWER(TRIM('AD Computer Evidence'[TenantADComputerKey])),
+			"__G",LOWER(TRIM('AD Computer Evidence'[ObjectGUID])),
+			"__T",'AD Computer Evidence'[TenantKey]&"",
+			"__B",'AD Computer Evidence'[Loaded Batch ID]&"")
+			VAR _unique=FILTER(GROUPBY(_ad,[__N],[__T],[__B],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _adDevices=SELECTCOLUMNS(FILTER(_devices,LEN([__ID])=0 && LEFT([__I],3)="ad:"),
+			"__N",MID([__I],4,500),"__T",[__T],"__B",[__B])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(_devices,LEN([__ID])>0),"K","intune:"&[__ID],"T",[__T],"B",[__B]),
+			SELECTCOLUMNS(NATURALINNERJOIN(_adDevices,_unique),"K","ad:"&[__G],"T",[__T],"B",[__B]))
+			VAR _matched=CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),TREATAS(_keys,'Device Readiness Gap Evidence'[Backlog Device Key],'Device Readiness Gap Evidence'[TenantKey],'Device Readiness Gap Evidence'[Loaded Batch ID]))
+			RETURN IF(NOT(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1),"Device evidence unavailable",IF(_matched=0,"Native device link unresolved or no readiness evidence; no healthy-state claim","Daily operations | native device context | prepared reboot days"))
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: c0a9f724-843c-5115-9b4d-519428088d02
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Windows Condition Count' =
+			VAR _keys=SELECTCOLUMNS('Windows Migration Evidence',"K",'Windows Migration Evidence'[Device Source ID],"B",'Windows Migration Evidence'[Loaded Batch ID])
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Condition Count],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Device Source ID],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Windows 11 migration" },'Readiness Reading'[Reading])))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 1543f198-8524-53ce-854e-af10139b7944
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Windows Row In Scope' =
+			VAR _keys=SELECTCOLUMNS('Windows Migration Evidence',"K",'Windows Migration Evidence'[Device Source ID],"B",'Windows Migration Evidence'[Loaded Batch ID])
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Device Row In Scope],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Device Source ID],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Windows 11 migration" },'Readiness Reading'[Reading])))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: aa22c618-bc84-59b9-8489-6840609cd8a9
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Windows Entra Pending' =
+			VAR _keys=SELECTCOLUMNS('Windows Migration Evidence',"K",'Windows Migration Evidence'[Device Source ID],"B",'Windows Migration Evidence'[Loaded Batch ID])
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Entra Pending],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Device Source ID],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Windows 11 migration" },'Readiness Reading'[Reading])))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 66ccc571-48b6-54f7-aedc-b8a9b290de41
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Windows RAM Under 8' =
+			VAR _keys=SELECTCOLUMNS('Windows Migration Evidence',"K",'Windows Migration Evidence'[Device Source ID],"B",'Windows Migration Evidence'[Loaded Batch ID])
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog RAM Under 8],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Device Source ID],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Windows 11 migration" },'Readiness Reading'[Reading])))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 7a169a43-4f31-574b-8b48-7e6d682d5a88
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Windows Third KPI' =
+			VAR _keys=SELECTCOLUMNS('Windows Migration Evidence',"K",'Windows Migration Evidence'[Device Source ID],"B",'Windows Migration Evidence'[Loaded Batch ID])
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Third KPI],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Device Source ID],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Windows 11 migration" },'Readiness Reading'[Reading])))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 91b51ef8-dd71-5c57-90b2-b484987db227
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Windows Condition State' =
+			VAR _keys=SELECTCOLUMNS('Windows Migration Evidence',"K",'Windows Migration Evidence'[Device Source ID],"B",'Windows Migration Evidence'[Loaded Batch ID])
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Device Condition State],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Device Source ID],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Windows 11 migration" },'Readiness Reading'[Reading])))
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: e233370d-4263-545d-bba1-b105faf691d0
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Windows Action' =
+			VAR _keys=SELECTCOLUMNS('Windows Migration Evidence',"K",'Windows Migration Evidence'[Device Source ID],"B",'Windows Migration Evidence'[Loaded Batch ID])
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Device Action],KEEPFILTERS(TREATAS(_keys,'Device Readiness Gap Evidence'[Device Source ID],'Device Readiness Gap Evidence'[Loaded Batch ID])),REMOVEFILTERS('Readiness Reading'),TREATAS({"Windows 11 migration" },'Readiness Reading'[Reading])))
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 3c377d25-146b-56e0-b6a1-5cfb37040153
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Windows Evidence Note' =
+			VAR _keys=SELECTCOLUMNS('Windows Migration Evidence',"K",'Windows Migration Evidence'[Device Source ID],"B",'Windows Migration Evidence'[Loaded Batch ID])
+			VAR _matched=CALCULATE(COUNTROWS('Device Readiness Gap Evidence'),TREATAS(_keys,'Device Readiness Gap Evidence'[Device Source ID],'Device Readiness Gap Evidence'[Loaded Batch ID]))
+			RETURN IF(NOT(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Device Readiness Gap Evidence",'Readiness Source Status'[Source Available]=TRUE())=1),"Device evidence unavailable",IF(_matched=0,"Native device link unresolved or no readiness evidence; no healthy-state claim","Windows 11 migration | native device context | prepared reboot days"))
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 9fd56127-70bd-514f-9f8e-96cc8ff5bafd
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Device Scope Text' = [Backlog Identity Scope Text]&" | "&IF(ISFILTERED('Primary User Selection'),"Primary user selected","All primary users")
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 0627359d-7795-5673-9a78-ae1b75e1eb33
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: fdb3eb9c-56a1-499f-b58d-28746005a9ef
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'Inventory Scope'
+		dataType: string
+		lineageTag: 29cb1a9f-96b3-41a3-bc6a-8db898e8473f
+		summarizeBy: none
+		sourceColumn: Inventory Scope
+
+	column 'Device Source ID'
+		dataType: string
+		isHidden
+		lineageTag: 89932175-9590-46ae-b388-9d8e492a2ebe
+		summarizeBy: none
+		sourceColumn: Device Source ID
+
+	column 'Device Name'
+		dataType: string
+		lineageTag: 82480bec-43ce-4e32-b5b6-bcee2e457b38
+		summarizeBy: none
+		sourceColumn: Device Name
+
+	column 'Azure AD Device ID'
+		dataType: string
+		isHidden
+		lineageTag: 7d89acba-e9a9-411c-9cd5-c7abaefa6f0d
+		summarizeBy: none
+		sourceColumn: Azure AD Device ID
+
+	column 'AD Object GUID'
+		dataType: string
+		isHidden
+		lineageTag: a15ff094-ae82-44d1-ad43-fa81f711ac11
+		summarizeBy: none
+		sourceColumn: AD Object GUID
+
+	column 'Entra Registration Pending'
+		dataType: boolean
+		lineageTag: 6ed2e2b5-87c5-450b-b9e6-f1bcf21d45cf
+		summarizeBy: none
+		sourceColumn: Entra Registration Pending
+
+	column 'Physical Memory (GB)'
+		dataType: double
+		lineageTag: e8c51627-73a6-410d-aad3-68b7d212f26c
+		summarizeBy: none
+		sourceColumn: Physical Memory (GB)
+
+	column 'Firmware Type (source)'
+		dataType: string
+		lineageTag: f3ed74da-c4a6-4a00-bdea-b8d9384873ce
+		summarizeBy: none
+		sourceColumn: Firmware Type (source)
+
+	column 'Secure Boot Status (source)'
+		dataType: string
+		lineageTag: 28603099-9f77-4462-96cd-431f1b422275
+		summarizeBy: none
+		sourceColumn: Secure Boot Status (source)
+
+	column 'Last Reboot (source)'
+		dataType: string
+		lineageTag: 8a5b490b-3cb6-4c23-8ed2-09606fdbe59f
+		summarizeBy: none
+		sourceColumn: Last Reboot (source)
+
+	column 'Last Reboot Source'
+		dataType: string
+		lineageTag: c792f0e6-0af8-4a57-922d-a2bc249187ac
+		summarizeBy: none
+		sourceColumn: Last Reboot Source
+
+	column 'Last Reboot Time Basis'
+		dataType: string
+		lineageTag: b8ad83e4-140b-4caa-b3c1-27e8ef0a0771
+		summarizeBy: none
+		sourceColumn: Last Reboot Time Basis
+
+	column 'Last Reboot UTC'
+		dataType: dateTime
+		lineageTag: de59c6f1-a7c1-4ac8-ab85-90f4c4a3041f
+		summarizeBy: none
+		sourceColumn: Last Reboot UTC
+
+	column 'Days Since Last Reboot'
+		dataType: int64
+		lineageTag: 05a0e320-9fd1-4afc-b14a-58a570e26a94
+		summarizeBy: none
+		sourceColumn: Days Since Last Reboot
+
+	column 'Reboot Age Basis'
+		dataType: string
+		lineageTag: 2d4f65d4-4ac3-42e4-83ca-484ac5a2e95a
+		summarizeBy: none
+		sourceColumn: Reboot Age Basis
+
+	column 'Evidence Date'
+		dataType: dateTime
+		lineageTag: aecddb56-382e-406a-a6fb-4f2aa2a4cb35
+		summarizeBy: none
+		sourceColumn: Evidence Date
+
+	column 'Inventory Match State'
+		dataType: string
+		lineageTag: 120b6262-5330-462b-a0fe-7d8b2e6e9c3a
+		sourceColumn: Inventory Match State
+
+	column 'Windows 11 Upgrade Eligibility'
+		dataType: string
+		lineageTag: 1246ba85-460a-4ad7-958d-a744f2edc39b
+		sourceColumn: Windows 11 Upgrade Eligibility
+
+	column 'Windows Generation'
+		dataType: string
+		lineageTag: fd08d2ea-a34b-49ec-ba0c-be9dcbb685ab
+		sourceColumn: Windows Generation
+
+	column 'ISSUE-032 State'
+		dataType: string
+		lineageTag: 0c432177-9039-4cd5-b010-e48eb4200040
+		sourceColumn: ISSUE-032 State
+
+	column 'ISSUE-018 State'
+		dataType: string
+		lineageTag: e37974cf-1c67-4f76-b88d-ee178d220265
+		sourceColumn: ISSUE-018 State
+
+	column 'ISSUE-054 State'
+		dataType: string
+		lineageTag: e7264fe7-d6b7-46e9-900b-5bc717ea1be5
+		sourceColumn: ISSUE-054 State
+
+	column 'ISSUE-055 State'
+		dataType: string
+		lineageTag: 114e7b4a-ceed-41f2-a5fa-9a23a594de08
+		sourceColumn: ISSUE-055 State
+
+	column 'ISSUE-070 State'
+		dataType: string
+		lineageTag: 3a8b11e9-74ae-4ab6-b430-3de03cbdd2cd
+		sourceColumn: ISSUE-070 State
+
+	column 'ISSUE-070B State'
+		dataType: string
+		lineageTag: 5a903c64-b1d2-4910-b9d8-577177e69beb
+		sourceColumn: ISSUE-070B State
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 12fb625c-69dc-41b1-bbc2-a67f9e2175f0
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Backlog Country'
+		dataType: string
+		lineageTag: 344b7009-64ed-5650-b2bf-7d095c0ac072
+		summarizeBy: none
+		sourceColumn: Backlog Country
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Backlog AD Domain'
+		dataType: string
+		lineageTag: 2c6b90cb-404e-5d49-9d96-446562aa13f4
+		summarizeBy: none
+		sourceColumn: Backlog AD Domain
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Country Match State'
+		dataType: string
+		lineageTag: ea31249f-b046-5824-a6c3-39ed6f64e997
+		summarizeBy: none
+		sourceColumn: Country Match State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Domain Match State'
+		dataType: string
+		lineageTag: 2ab51134-9ab9-5d35-92cf-6bfb7f70303e
+		summarizeBy: none
+		sourceColumn: Domain Match State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Backlog Device Key'
+		dataType: string
+		isHidden
+		lineageTag: 3e43f2bb-55f5-5f27-875c-87d351daea96
+		summarizeBy: none
+		sourceColumn: Backlog Device Key
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Migration Firmware State'
+		dataType: string
+		lineageTag: 6ebdda03-934f-5fe2-b27b-078fdcd5bd73
+		summarizeBy: none
+		sourceColumn: Migration Firmware State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Daily 032 State'
+		dataType: string
+		lineageTag: c1747141-387b-5754-bd16-4e7110e8bdd7
+		summarizeBy: none
+		sourceColumn: Daily 032 State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Daily 018 State'
+		dataType: string
+		lineageTag: 3e0b46d5-b813-586f-9f8b-8ef2ce25f82e
+		summarizeBy: none
+		sourceColumn: Daily 018 State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Daily 054 State'
+		dataType: string
+		lineageTag: 5bae992a-3c6b-58d8-82d9-e842a4528cb5
+		summarizeBy: none
+		sourceColumn: Daily 054 State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Daily 055 State'
+		dataType: string
+		lineageTag: 48de5bfc-ef19-5f10-b7e2-0fe392d95692
+		summarizeBy: none
+		sourceColumn: Daily 055 State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Daily BIOS State'
+		dataType: string
+		lineageTag: 98b9843a-9383-5cf7-997e-2a69f58d122d
+		summarizeBy: none
+		sourceColumn: Daily BIOS State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Daily NotSupported State'
+		dataType: string
+		lineageTag: de9ef3ef-4cc3-59bf-875f-82e143b8ce0d
+		summarizeBy: none
+		sourceColumn: Daily NotSupported State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Daily Firmware State'
+		dataType: string
+		lineageTag: 61784add-fa84-5594-bce5-8420693f7123
+		summarizeBy: none
+		sourceColumn: Daily Firmware State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Daily Disabled State'
+		dataType: string
+		lineageTag: 5247745c-b5c4-5d3a-99d4-542477e9549d
+		summarizeBy: none
+		sourceColumn: Daily Disabled State
+
+	/// Exact native device ID, tenant and batch lookup of existing Primary User (report); never a UPN/name join.
+	column 'Backlog Primary user' =
+			VAR _id='Device Readiness Gap Evidence'[Device Source ID]
+			VAR _t='Device Readiness Gap Evidence'[TenantKey]
+			VAR _b='Device Readiness Gap Evidence'[Loaded Batch ID]
+			VAR _matches=FILTER(ALL('Device Inventory Evidence'),'Device Inventory Evidence'[Device Source ID]=_id && 'Device Inventory Evidence'[TenantKey]=_t && 'Device Inventory Evidence'[Loaded Batch ID]=_b)
+			RETURN IF(NOT ISBLANK(_id) && COUNTROWS(_matches)=1,COALESCE(MAXX(_matches,'Device Inventory Evidence'[Primary User (report)]),"Not resolved"),"Not resolved")
+		dataType: string
+		lineageTag: 2be7f2f8-7d4c-5366-9aeb-5f872797f39b
+
+	partition 'Device Readiness Gap Evidence' = m
+		mode: import
+		source =
+				let
+				 Base=(let
+				    R=CreatePreparedReaders(),
+				    S=R[GetReadinessSource]("DeviceReadinessGapEvidence.csv"),
+				    Key=(v as any) as text => if v=null then "" else Text.Lower(Text.Trim(Text.From(v))),
+				    Known=(v as any) as logical => v<>null and Text.Trim(Text.From(v))<>"",
+				    Columns={"TenantKey","Device Source ID","Windows 11 Upgrade Eligibility","Windows Generation"},
+				    InventoryRaw=if S[Available] then R[ReadMailboxMigrationCsv](R[GetPreparedEvidenceFile]("DeviceInventoryEvidence.csv"),Columns,{}) else #table(Columns,{}),
+				    Inventory=if List.AllTrue(List.Transform(InventoryRaw[TenantKey], each _=R[GetPreparedBatchManifest]()[TenantKey])) then InventoryRaw else error "Foreign inventory tenant",
+				    Indexed=Table.AddColumn(Inventory,"__join",each Key([TenantKey]) & "|" & Key([Device Source ID]),type text),
+				    Nonblank=Table.SelectRows(Indexed,each Key([Device Source ID])<>""),
+				    Groups=Table.Group(Nonblank,{"__join"},{{"Matches",each Table.RowCount(_),Int64.Type},{"Rows",each Table.ToRecords(_),type list}}),
+				    Lookup=Record.FromList(Table.ToRecords(Groups),Groups[__join]),
+				    Enrich=(r as record) as record =>
+				      let
+				        G=if not Known(r[Device Source ID]) then null else Record.FieldOrDefault(Lookup,Key(r[TenantKey]) & "|" & Key(r[Device Source ID]),null),
+				        I=if G<>null and G[Matches]=1 then G[Rows]{0} else null,
+				        E=if I=null then null else I[Windows 11 Upgrade Eligibility],
+				        W=if I=null then null else I[Windows Generation],
+				        M=r[#"Physical Memory (GB)"], D=r[Days Since Last Reboot], F=r[#"Firmware Type (source)"], B=r[#"Secure Boot Status (source)"],
+				        State=(required as list,na as logical,trigger as logical) as text => if not List.AllTrue(List.Transform(required,Known)) then "Indeterminate" else if na then "Not applicable" else if trigger then "Triggered" else "Not triggered",
+				        NoCap=Key(E)="not capable", NotW10=Key(W)<>"windows 10"
+				      in [
+				        #"Inventory Match State"=if G=null then "No match" else if G[Matches]<>1 then "Ambiguous" else "Matched",
+				        #"Windows 11 Upgrade Eligibility"=E, #"Windows Generation"=W,
+				        #"ISSUE-032 State"=State({r[Entra Registration Pending]},false,r[Entra Registration Pending]=true),
+				        #"ISSUE-018 State"=State({E,M},NoCap,if M=null then false else M<8),
+				        #"ISSUE-054 State"=State({E,W,D},NoCap or NotW10,if D=null then false else D>=10),
+				        #"ISSUE-055 State"=State({E,D},NoCap,if D=null then false else D>=30),
+				        #"ISSUE-070 State"=State({E,W,F,B},NoCap or NotW10,Key(F)="bios"),
+				        #"ISSUE-070B State"=State({E,W,B},NoCap or NotW10,Key(B)="notsupported")
+				      ],
+				    Added=Table.AddColumn(S[Rows],"__assessment",Enrich,type record),
+				    Expanded=Table.ExpandRecordColumn(Added,"__assessment",{"Inventory Match State","Windows 11 Upgrade Eligibility","Windows Generation","ISSUE-032 State","ISSUE-018 State","ISSUE-054 State","ISSUE-055 State","ISSUE-070 State","ISSUE-070B State"})
+				in R[Finish](Expanded)),
+				 K=CreateBacklogTools(CreatePreparedReaders()),
+				 A=K[Index](K[Read]("ADComputerSource.csv",{"TenantKey","ObjectGUID","DomainName"}),"ObjectGUID"),
+				 C=K[Index](K[Read]("AllDevicesEvidence.csv",{"TenantKey","Device Key","Country"}),"Device Key"),
+				 I=K[Index](K[Read]("DeviceInventoryEvidence.csv",{"TenantKey","Device Source ID","Country"}),"Device Source ID"),
+				 DailyAdded=Table.AddColumn(Base,"__daily",each AssessDailyReadiness(_),type record),
+				 Daily=Table.ExpandRecordColumn(DailyAdded,"__daily",{"Daily 032 State","Daily 018 State","Daily 054 State","Daily 055 State","Daily BIOS State","Daily NotSupported State","Daily Firmware State","Daily Disabled State"}),
+				 Added=Table.AddColumn(Daily,"__context",each
+				  let AD=K[Match](A,[TenantKey],[AD Object GUID],[Loaded Batch ID]), Co=K[Match](C,[TenantKey],"ad:"&K[Key]([AD Object GUID]),[Loaded Batch ID]),
+				      Inv=K[Match](I,[TenantKey],[Device Source ID],[Loaded Batch ID]), IsAD=[Inventory Scope]="AD computer only"
+				  in [#"Backlog Country"=if IsAD then K[Field](Co,"Country") else K[Field](Inv,"Country"),
+				      #"Backlog AD Domain"=K[Field](AD,"DomainName"),#"Country Match State"=if IsAD then Co[State] else Inv[State],#"Domain Match State"=AD[State],
+				      #"Backlog Device Key"=if K[Key]([Device Source ID])<>"" then "intune:"&K[Key]([Device Source ID]) else if K[Key]([AD Object GUID])<>"" then "ad:"&K[Key]([AD Object GUID]) else "unresolved",
+				      #"Migration Firmware State"=K[OrState]([#"ISSUE-070 State"],[#"ISSUE-070B State"])],type record),
+				 Expanded=Table.ExpandRecordColumn(Added,"__context",{"Backlog Country","Backlog AD Domain","Country Match State","Domain Match State","Backlog Device Key","Migration Firmware State"})
+				in Expanded

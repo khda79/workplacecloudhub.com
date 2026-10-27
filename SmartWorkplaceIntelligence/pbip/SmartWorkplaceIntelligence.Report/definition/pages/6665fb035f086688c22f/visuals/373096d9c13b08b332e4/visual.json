@@ -3,7 +3,7 @@
   "name": "373096d9c13b08b332e4",
   "position": {
     "x": 32,
-    "y": 357.0,
+    "y": 357,
     "width": 1856,
     "height": 22.5,
     "z": 119,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Qualification context",
+                    "value": "Selected view: Source readiness",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12pt",

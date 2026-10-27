@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "dce541feecdd7e9b3468",
   "position": {
-    "x": 1280.0,
-    "y": 120,
-    "width": 608.0,
+    "x": 1280,
+    "y": 224,
+    "z": 0,
     "height": 80,
-    "z": 102,
-    "tabOrder": 64
+    "width": 608,
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "slicer",
@@ -61,7 +61,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Security domain'"
+                  "Value": "'Control domain'"
                 }
               }
             },
@@ -270,6 +270,7 @@
       ]
     }
   },
+  "parentGroupName": "2a7753a9127d00987ec0",
   "filterConfig": {
     "filters": [
       {

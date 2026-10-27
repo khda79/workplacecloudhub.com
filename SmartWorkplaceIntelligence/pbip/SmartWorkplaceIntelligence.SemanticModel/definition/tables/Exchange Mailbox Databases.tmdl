@@ -5,26 +5,32 @@ table 'Exchange Mailbox Databases'
 	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
 	measure 'Exchange Observed Databases' = VAR _available=CALCULATE(COUNTROWS('Exchange Mailbox Databases'),'Exchange Mailbox Databases'[Database Source Available]=TRUE()) RETURN IF(_available>0,COALESCE(CALCULATE(COUNTROWS('Exchange Mailbox Databases'),KEEPFILTERS('Exchange Mailbox Databases'[Is Database]=TRUE()),KEEPFILTERS('Exchange Mailbox Databases'[Infrastructure Observed]=TRUE())),0))
 		formatString: #,0
+		lineageTag: d8b1cc31-efdb-445b-a1f0-11dba115505c
 
 	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
 	measure 'Exchange Database Observed Mailboxes' = SUM('Exchange Mailbox Databases'[Observed Mailboxes])
 		formatString: #,0
+		lineageTag: 4bd5127a-700c-41de-bb11-166d484030c8
 
 	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
 	measure 'Exchange Database Size GB' = SUM('Exchange Mailbox Databases'[Database Size GB])
 		formatString: #,0.00
+		lineageTag: 38296acf-44d2-49fe-9e6f-6032f86f1501
 
 	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
 	measure 'Exchange Database Reusable Space GB' = SUM('Exchange Mailbox Databases'[Reusable Internal Space GB])
 		formatString: #,0.00
+		lineageTag: dfd9f505-7a4b-461d-bb48-30f1558423ae
 
 	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
 	measure 'Exchange Database Count' = VAR _available=CALCULATE(COUNTROWS('Exchange Mailbox Databases'),'Exchange Mailbox Databases'[Database Source Available]=TRUE()) RETURN IF(_available>0,COALESCE(CALCULATE(COUNTROWS('Exchange Mailbox Databases'),KEEPFILTERS('Exchange Mailbox Databases'[Is Database]=TRUE()),KEEPFILTERS('Exchange Mailbox Databases'[Infrastructure Observed]=TRUE())),0))
 		formatString: #,0
+		lineageTag: cc2ae923-20c2-4640-98fc-5ec65184a68d
 
 	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
 	measure 'Exchange Database Unassigned Mailboxes' = CALCULATE(SUM('Exchange Mailbox Databases'[Observed Mailboxes]),'Exchange Mailbox Databases'[Is Database]=FALSE())
 		formatString: #,0
+		lineageTag: ce592d04-066c-4f16-8479-933adc059b6f
 
 	/// Selected immutable batch only. Observed counts are not completeness or DAG health certification.
 	measure 'Exchange Database Evidence Note' =
@@ -34,6 +40,7 @@ table 'Exchange Mailbox Databases'
 			IF(NOT ISBLANK(_missing) && _missing>0,FORMAT(_missing,"0") & " mailboxes have no database name. ","") &
 			"Zero observed mailboxes is not proof of an empty database. DAG copy health is not captured."
 		formatString: @
+		lineageTag: 435b972c-091b-4393-9000-3164822a6d07
 
 	column Database
 		dataType: string
@@ -54,11 +61,15 @@ table 'Exchange Mailbox Databases'
 		sourceColumn: Database Status
 
 	column 'Observed Mailboxes'
-		dataType: int64
+		dataType: double
 		isHidden
 		lineageTag: f62c6af3-ac10-5ef5-bf00-f8e5d3c95bf0
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: Observed Mailboxes
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column 'Database Size'
 		dataType: string

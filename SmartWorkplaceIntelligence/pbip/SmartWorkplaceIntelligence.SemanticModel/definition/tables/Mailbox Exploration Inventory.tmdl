@@ -1,0 +1,502 @@
+/// Observed EXO and local mailboxes enriched only from same prepared batch and unique native identities. Remote AD recipient stubs excluded. Missing optional artifacts remain Not collected; explicit stats timestamp only.
+table 'Mailbox Exploration Inventory'
+	lineageTag: e8cccd72-e29d-42a1-ab4e-fe5ca953649e
+
+	/// Distinct observed native mailbox identities (EXO + local on-prem), all recipient types. Remote AD recipient stubs excluded; filters apply. Unresolved native identities retain their distinct source inventory key and are qualified.
+	measure 'All Mailboxes' = [Mailboxes]
+		formatString: #,0
+		lineageTag: 910e6df2-aa8b-48cf-b989-e7c9636f2c1d
+
+	measure 'Mailbox Selection For Delegates' = IF(HASONEVALUE('Mailbox Exploration Inventory'[Mailbox Key]),1,0)
+		formatString: 0
+		lineageTag: 3b39c0cb-67c9-4f40-aeb2-ce356c74b7b6
+
+	measure 'Mailbox Scope Explanation' = "Observed EXO + local mailbox inventory. Remote recipient stubs are excluded. Country and AD Domain use native identities in one prepared batch; missing or ambiguous identity remains unattributed. Stats collection time is shown only if explicitly supplied; export time is separate. Select one mailbox for readable delegation rows."
+		lineageTag: 925e9279-975c-4d99-9025-0b45db065144
+
+	measure 'Selected Mailbox Statistics Collection' = IF(NOT HASONEVALUE('Mailbox Exploration Inventory'[Mailbox Key]),"Select one mailbox to read delegation details and statistics provenance", "Statistics collection UTC: " & COALESCE(SELECTEDVALUE('Mailbox Exploration Inventory'[Stats Collected UTC]),"Not supplied by source") & UNICHAR(10) & "Source: " & COALESCE(SELECTEDVALUE('Mailbox Exploration Inventory'[Stats Source]),"Unknown") & " | Export UTC (separate): " & COALESCE(SELECTEDVALUE('Mailbox Exploration Inventory'[Export Collected UTC]),"Not supplied"))
+		lineageTag: aec5ce55-3e70-4a5f-b926-16fc8506d93a
+
+	column 'Mailbox Key'
+		dataType: string
+		lineageTag: 8e986681-5c15-45a6-af08-4fa98665d0bf
+		summarizeBy: none
+		sourceColumn: Mailbox Key
+
+	column 'Primary SMTP Address'
+		dataType: string
+		lineageTag: f9bbcf49-bc44-4a5b-b6ef-c3b939718d09
+		summarizeBy: none
+		sourceColumn: Primary SMTP Address
+
+	column 'Display Name'
+		dataType: string
+		lineageTag: 93fdfa3e-fc19-48fc-8f18-d20b394c59cc
+		summarizeBy: none
+		sourceColumn: Display Name
+
+	column Country
+		dataType: string
+		lineageTag: 209b4547-bf53-474f-9599-bbd022470e62
+		summarizeBy: none
+		sourceColumn: Country
+
+	column 'Hosting Location'
+		dataType: string
+		lineageTag: 6bc6b779-59e5-4be6-b171-99ada639d9d3
+		summarizeBy: none
+		sourceColumn: Hosting Location
+
+	column 'Exchange Version'
+		dataType: string
+		lineageTag: a3ffc9fc-03fa-4297-a3e9-074da063bade
+		summarizeBy: none
+		sourceColumn: Exchange Version
+
+	column 'Mailbox Type'
+		dataType: string
+		lineageTag: 99ec3993-b588-4e54-b342-472effa2f33f
+		summarizeBy: none
+		sourceColumn: Mailbox Type
+
+	column 'Recipient Type'
+		dataType: string
+		lineageTag: 7d4dcb75-5122-4a98-8cd1-70da402780f1
+		summarizeBy: none
+		sourceColumn: Recipient Type
+
+	column 'Operational State'
+		dataType: string
+		lineageTag: c1ac0975-2431-48a9-bcc4-a4441e2b2344
+		summarizeBy: none
+		sourceColumn: Operational State
+
+	column 'Mailbox Size GB'
+		dataType: double
+		lineageTag: 340f18e0-3a13-43c0-8960-d8b5138f015a
+		summarizeBy: none
+		sourceColumn: Mailbox Size GB
+
+	column 'Archive State'
+		dataType: string
+		lineageTag: 00113269-62cc-40cb-9299-c8fbac697d3c
+		summarizeBy: none
+		sourceColumn: Archive State
+
+	column 'Archive Size GB'
+		dataType: double
+		lineageTag: 5f6475e5-23cf-4918-880d-19da2bd35a58
+		summarizeBy: none
+		sourceColumn: Archive Size GB
+
+	column 'Delegation Count'
+		dataType: int64
+		lineageTag: cc170f91-c8ea-46b5-b00c-78bb6308eb96
+		summarizeBy: none
+		sourceColumn: Delegation Count
+
+	column 'Delegation Types'
+		dataType: string
+		lineageTag: f373fccd-5a16-4abb-a3c5-d801e0fc840c
+		summarizeBy: none
+		sourceColumn: Delegation Types
+
+	column 'Forwarding State'
+		dataType: string
+		lineageTag: fcc1ee7e-8ef1-414d-9357-e618fa02fb7b
+		summarizeBy: none
+		sourceColumn: Forwarding State
+
+	column 'Last Activity Date'
+		dataType: dateTime
+		lineageTag: 354ed69b-0e70-4448-851b-3c1568ebe0c6
+		summarizeBy: none
+		sourceColumn: Last Activity Date
+
+	column 'Hosting State'
+		dataType: string
+		lineageTag: ef0c0951-074a-45b3-8774-f2803da765b8
+		summarizeBy: none
+		sourceColumn: Hosting State
+
+	column 'Risk Priority'
+		dataType: string
+		lineageTag: b7383297-060d-46df-8832-be4584b628ee
+		summarizeBy: none
+		sourceColumn: Risk Priority
+
+	column 'Risk Signal'
+		dataType: string
+		lineageTag: 19150857-0661-46b3-9ff3-63b77ca44261
+		summarizeBy: none
+		sourceColumn: Risk Signal
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 6385689c-5049-416b-ba24-5716a9d8f44b
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: ea8dc0b1-b63e-49fe-b969-623e9df9b778
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Total Storage GB'
+		dataType: double
+		lineageTag: f6605410-9717-4401-b04d-44c99f290227
+		summarizeBy: none
+		sourceColumn: Total Storage GB
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: a5aef240-7c15-44c7-83a7-e516835911e7
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: e3d9c85b-145d-4990-8349-a1a209344135
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'Mailbox Identity'
+		dataType: string
+		isHidden
+		lineageTag: 2fa53df4-1a98-431e-9b5b-e4516a15d5c8
+		summarizeBy: none
+		sourceColumn: Mailbox Identity
+
+	column 'User Principal Name'
+		dataType: string
+		lineageTag: f1149622-bc07-43b0-9769-dd3570d4eae2
+		summarizeBy: none
+		sourceColumn: User Principal Name
+
+	column 'SAM Account Name'
+		dataType: string
+		lineageTag: e6ce7ca6-0165-42a4-a573-6065ceb5a80e
+		summarizeBy: none
+		sourceColumn: SAM Account Name
+
+	column 'AD Domain'
+		dataType: string
+		lineageTag: 21b6fead-5194-4866-b7ae-8efaf5eeb02d
+		summarizeBy: none
+		sourceColumn: AD Domain
+
+	column 'Country Qualification'
+		dataType: string
+		lineageTag: 5b9b0553-3d7e-47bd-abb4-aa30e4da978e
+		summarizeBy: none
+		sourceColumn: Country Qualification
+
+	column 'AD Account State'
+		dataType: string
+		lineageTag: 8ce5b03d-bc7c-4f92-ba5c-2d9c7c1ad4f5
+		summarizeBy: none
+		sourceColumn: AD Account State
+
+	column 'Entra Account State'
+		dataType: string
+		lineageTag: 7e346dfa-fba0-4863-8b42-b4f81fb4388e
+		summarizeBy: none
+		sourceColumn: Entra Account State
+
+	column 'M365 Licenses'
+		dataType: string
+		lineageTag: 97b71b22-fadd-494a-aa78-d288defc85d1
+		summarizeBy: none
+		sourceColumn: M365 Licenses
+
+	column 'Workforce Persona'
+		dataType: string
+		lineageTag: a17c00ff-dd17-4143-968b-3f92fb273edb
+		summarizeBy: none
+		sourceColumn: Workforce Persona
+
+	column 'Size Band'
+		dataType: string
+		lineageTag: 1dbd98d4-09c0-48ee-9c05-b4b9ab9da005
+		summarizeBy: none
+		sourceColumn: Size Band
+
+	column 'Delegation State'
+		dataType: string
+		lineageTag: 8f3ebd16-d014-4e0c-ba8e-01279ce29928
+		summarizeBy: none
+		sourceColumn: Delegation State
+
+	column FullAccess
+		dataType: string
+		lineageTag: c0d46a7e-4ab9-43f9-9271-35dd03c15bd9
+		summarizeBy: none
+		sourceColumn: FullAccess
+
+	column SendAs
+		dataType: string
+		lineageTag: cfe84c5a-ef78-4b0b-90c5-c06461c07548
+		summarizeBy: none
+		sourceColumn: SendAs
+
+	column GrantSendOnBehalfTo
+		dataType: string
+		lineageTag: eb19324f-f187-4818-87d6-2ce4387c644d
+		summarizeBy: none
+		sourceColumn: GrantSendOnBehalfTo
+
+	column 'Stats Collected UTC'
+		dataType: string
+		lineageTag: 4d071fdb-799a-49ed-b5a7-c5d86f44bfcb
+		summarizeBy: none
+		sourceColumn: Stats Collected UTC
+
+	column 'Stats Collection Qualification'
+		dataType: string
+		lineageTag: ff80a155-9a87-41ab-b992-d3881fc4a88d
+		summarizeBy: none
+		sourceColumn: Stats Collection Qualification
+
+	column 'Stats Source'
+		dataType: string
+		lineageTag: bc13f8b6-d1e9-4183-b717-8563e4fea41e
+		summarizeBy: none
+		sourceColumn: Stats Source
+
+	column 'Export Collected UTC'
+		dataType: string
+		lineageTag: a8eb8206-b4e0-436f-892a-bc5cf4da0482
+		summarizeBy: none
+		sourceColumn: Export Collected UTC
+
+	column 'Server Name'
+		dataType: string
+		lineageTag: 65c28a71-e116-4faa-b338-7a799651095b
+		summarizeBy: none
+		sourceColumn: Server Name
+
+	column Database
+		dataType: string
+		lineageTag: dd58cd0a-6a6d-4d79-87b8-d512c617b6b9
+		summarizeBy: none
+		sourceColumn: Database
+
+	column 'Forwarding Target'
+		dataType: string
+		lineageTag: d93bcd30-5d58-41b7-a02d-e40b1642d94a
+		summarizeBy: none
+		sourceColumn: Forwarding Target
+
+	column 'Mailbox Type Group'
+		dataType: string
+		lineageTag: 956d03e1-d90c-4f27-94f0-677e7b120d1f
+		summarizeBy: none
+		sourceColumn: Mailbox Type Group
+
+	column 'Identity Qualification'
+		dataType: string
+		lineageTag: 09589bba-efa4-45b7-90dc-669ebba61a08
+		summarizeBy: none
+		sourceColumn: Identity Qualification
+
+	column 'Raw Detail State'
+		dataType: string
+		lineageTag: c3c10179-1b91-4113-b494-c8f6d3c29f2f
+		summarizeBy: none
+		sourceColumn: Raw Detail State
+
+	column 'Remote Recipient'
+		dataType: boolean
+		isHidden
+		lineageTag: d6c616d7-fcc1-4a23-a85a-5f8c2afc55af
+		summarizeBy: none
+		sourceColumn: Remote Recipient
+
+	column 'Country Name' =
+			VAR _c='Mailbox Exploration Inventory'[Country]
+			RETURN COALESCE(LOOKUPVALUE('Country Selection'[Country],'Country Selection'[Source Country],_c),IF(ISBLANK(_c)||LEN(TRIM(_c))=2,"Unknown",_c))
+		dataType: string
+		lineageTag: 60f756cf-5fa9-4ffa-8c3c-58919e3e65aa
+		dataCategory: Country
+		summarizeBy: none
+
+	/// Searchable source label combining name, UPN and SMTP; never used as an identity join.
+	column 'Mailbox Search' = COALESCE('Mailbox Exploration Inventory'[Display Name],"") & " | " & COALESCE('Mailbox Exploration Inventory'[User Principal Name],"") & " | " & COALESCE('Mailbox Exploration Inventory'[Primary SMTP Address],"")
+		dataType: string
+		lineageTag: b2d156da-95a2-4046-860d-9fe81daf8234
+		summarizeBy: none
+
+	/// Both account states remain explicit in one compact selector. Conflicting AD/Entra states are not collapsed to one enabled flag.
+	column 'Account State (AD / Entra)' = "AD " & 'Mailbox Exploration Inventory'[AD Account State] & " | Entra " & 'Mailbox Exploration Inventory'[Entra Account State]
+		dataType: string
+		lineageTag: b5bfde7e-c869-4a27-839e-0c030bb0fa25
+		summarizeBy: none
+
+	/// Raw prepared lists take precedence. The existing governed per-user permissions report is used only when raw mailbox details are unavailable; target hosting and SMTP must match exactly.
+	column 'Delegation Evidence'
+		dataType: string
+		lineageTag: a9d15174-27f8-458a-bda6-403441337c7e
+		summarizeBy: none
+		sourceColumn: Delegation Evidence
+
+	/// Exact mailbox GUID component of the existing tenant-qualified identity, for same-batch enrichment only.
+	column 'Report Mailbox GUID' = VAR k=LOWER('Mailbox Exploration Inventory'[Mailbox Identity]) VAR m="|7:mailbox|" VAR p=SEARCH(m,k,1,0) VAR tail=IF(p>0,MID(k,p+LEN(m),LEN(k))) VAR c=SEARCH(":",tail,1,0) RETURN IF(p>0&&c>0,SUBSTITUTE(SUBSTITUTE(MID(tail,c+1,LEN(tail)),"{",""),"}",""))
+		dataType: string
+		isHidden
+		lineageTag: e83e2b82-71db-4e27-b6ad-c10e5d7076a5
+
+	partition 'Mailbox Exploration Inventory' = m
+		mode: import
+		source =
+				let Mode="Inventory", Result=(let
+				    NeedInventory=Mode="Inventory", NeedLicenses=NeedInventory or Mode="Licenses", NeedRights=NeedInventory or Mode="Delegation",
+				    Readers = CreatePreparedReaders(),
+				    Manifest = Readers[GetPreparedBatchManifest](),
+				    Batch = Manifest[BatchId],
+				    Tenant = PreparedExpectedTenantKey,
+				    Names = List.Transform(Manifest[Files] & Record.FieldOrDefault(Manifest,"Artifacts",{}),each [File]),
+				    TextValue = (v as any) as text => if v=null then "" else Text.Trim(Text.From(v)),
+				    Normal = (v as any) as text => Text.Lower(TextValue(v)),
+				    Get = (r as record,names as list) as nullable text => let
+				        values=List.Transform(names,each TextValue(Record.FieldOrDefault(r,_,null))),
+				        present=List.Select(values,each _<>"") in if List.IsEmpty(present) then null else present{0},
+				    Key = (parts as list) as text => Text.Combine(List.Transform(parts,each let t=Normal(_) in Text.From(Text.Length(t)) & ":" & t),"|"),
+				    JoinFlat=(left as table,leftKeys as list,right as table,rightKeys as list,prefix as text) as table=>let
+				        columns=Table.ColumnNames(right),renamed=Table.RenameColumns(right,List.Transform(columns,each {_,prefix&_}))
+				        in Table.Join(left,leftKeys,renamed,List.Transform(rightKeys,each prefix&_),JoinKind.LeftOuter),
+				    Index=(t as table,fn as function) as table=>let
+				        fields=Table.ColumnNames(t),keyed=Table.AddColumn(t,"__lookupKey",each fn(_),type text),
+				        valid=Table.SelectRows(keyed,each [__lookupKey]<>""),
+				        grouped=Table.Group(valid,{"__lookupKey"},{{"__present",each Table.RowCount(_)=1,type logical},{"__first",each if Table.RowCount(_)=1 then Record.SelectFields(Table.First(_),fields) else Record.FromList(List.Repeat({null},List.Count(fields)),fields),type record}})
+				        in Table.Buffer(Table.ExpandRecordColumn(grouped,"__first",fields,fields)),
+				    Unique=(idx as table,key as text) as record=>let t=Table.SelectRows(idx,each [__lookupKey]=key) in if Table.RowCount(t)=1 and t{0}[__present] then Record.RemoveFields(t{0},{"__lookupKey","__present"}) else [],
+				    Attach=(left as table,idx as table,keyFn as function,prefix as text,fields as list) as table=>let
+				        right=Table.SelectColumns(idx,{"__lookupKey","__present"}&fields,MissingField.UseNull),
+				        keyed=Table.AddColumn(left,prefix&"joinKey",each keyFn(_),type nullable text),
+				        joined=JoinFlat(keyed,{prefix&"joinKey"},right,{"__lookupKey"},prefix)
+				        in Table.RemoveColumns(joined,{prefix&"joinKey",prefix&"__lookupKey"}),
+				    Pick=(r as record,prefix as text,fields as list) as record=>if Record.FieldOrDefault(r,prefix&"__present",false)=true then Record.FromList(List.Transform(fields,each Record.FieldOrDefault(r,prefix&_,null)),fields) else [],
+				    OptionalColumns = {"PrimarySmtpAddress","PrimarySMTPaddress","UserPrincipalName","SamAccountName","ObjectGUID","MailboxGuid","ExchangeGuid","ExternalDirectoryObjectId","RecipientType","RecipientTypeDetails","FullAccess","SendAs","GrantSendOnBehalfTo","StatsSource","StatsCollectedAtUtc","StatisticsCollectedAtUtc","CollectedAtUtc","ServerName","Database","AccountDisabled","AccountEnabled","ForwardingSmtpAddress","ForwardingAddress","ResolvedUser","DistinguishedName","FullAccessOn","SendAsOn","SendOnBehalfOn"},
+				    RawFields={"ObjectGUID","UserPrincipalName","SamAccountName","MailboxGuid","ExchangeGuid","RecipientTypeDetails","RecipientType","FullAccess","SendAs","GrantSendOnBehalfTo","CollectedAtUtc","ServerName","Database","ForwardingSmtpAddress","ForwardingAddress"}, StatsFields={"StatsSource","StatsCollectedAtUtc","StatisticsCollectedAtUtc"}, PermissionFields={"FullAccess","SendAs","GrantSendOnBehalfTo"},
+				    Read = (file as text, optional fields as nullable list) as record => let
+				        name="Source-" & file,
+				        present=List.Contains(Names,name),
+				        raw=if present then Readers[ReadMailboxMigrationCsv](Readers[GetPreparedEvidenceFile](name),{"TenantKey"},OptionalColumns) else #table({"TenantKey"}&OptionalColumns,{}),
+				        checked=if List.AllTrue(List.Transform(raw[TenantKey],each _=Tenant)) then raw else error "Mailbox detail source tenant mismatch",
+				        indexedRows=if fields=null then checked else Table.SelectColumns(checked,List.Distinct({"TenantKey","PrimarySmtpAddress","PrimarySMTPaddress"}&fields),MissingField.UseNull),
+				        idx=Index(indexedRows,each let s=Get(_,{"PrimarySmtpAddress","PrimarySMTPaddress"}) in if s=null then "" else Normal(s))
+				        in [Available=present,Rows=checked,Index=idx],
+				    Exo=Read("Exchange_EXO_Mailboxes_AllDomains.csv",RawFields),
+				    Local=Read("Exchange_OnPrem_Mailboxes_AllDomains.csv",RawFields),
+				    Stats=Read("Exchange_EXO_Mailboxes_AllDomains_Stats.csv",StatsFields),
+				    Permissions=Read("Exchange_EXO_Mailboxes_AllDomains_Permissions.csv",PermissionFields),
+				    Archives=Read("Exchange_EXO_Mailboxes_AllDomains_Archive.csv"),
+				    CombinedPermissions=Read("Exchange_Mailboxes_AllSources_PermissionsByUser.csv"),
+				    SourcesValid=List.AllTrue(List.Transform({Exo,Local,Stats,Permissions,Archives,CombinedPermissions},each Table.RowCount(_[Rows])>=0)),
+				    B=#"Mailbox Evidence",U=#"Native User Evidence",A=#"AD User Evidence",N=#"Native EXO Mailbox",W=#"User Inventory Evidence",L=#"Native User License",S=#"Native License SKU",C=Table.RenameColumns(#"License SKU Capacity", {{"TenantKey","Tenant Key"},{"SkuId","SKU ID"},{"ReportProduct","Report Product"}}),
+				    UThin=Table.Buffer(Table.SelectColumns(U,{"TenantKey","TenantUserKey","Loaded Batch ID","SourceUserId","UserPrincipalName","CountryCode","AccountEnabled"},MissingField.Ignore)),
+				    AThin=Table.Buffer(Table.SelectColumns(A,{"TenantKey","TenantUserKey","Loaded Batch ID","ObjectGUID","DistinguishedName","CloudMatchStatus","UserPrincipalName","SamAccountName","DomainName","Enabled","Country"},MissingField.Ignore)),
+				    NThin=Table.Buffer(Table.SelectColumns(N,{"TenantKey","TenantUserKey","Loaded Batch ID","PrimarySmtpAddress","TenantMailboxKey"},MissingField.Ignore)),
+				    WThin=Table.Buffer(Table.SelectColumns(W,{"User Source ID","Loaded Batch ID","Workforce Persona"},MissingField.Ignore)),
+				    LThin=Table.Buffer(Table.SelectColumns(L,{"TenantKey","TenantUserKey","SkuId","Loaded Batch ID"},MissingField.Ignore)),
+				    SThin=Table.Buffer(Table.SelectColumns(S,{"TenantKey","SkuId","Loaded Batch ID","SkuPartNumberLabel","SkuPartNumber"},MissingField.Ignore)),
+				    CThin=Table.Buffer(Table.SelectColumns(C,{"Tenant Key","SKU ID","Loaded Batch ID","License Product"},MissingField.Ignore)),
+				    Batches=List.Distinct(List.Combine(List.Transform({B,UThin,AThin,NThin,WThin,LThin,SThin,CThin},each Table.Column(_,"Loaded Batch ID")))),
+				    BatchSafe=List.Count(Batches)=1 and Batches{0}=Batch,
+				    UserIndex=Index(UThin,each Key({[TenantKey],[TenantUserKey],[#"Loaded Batch ID"]})),
+				    UserSourceIndex=Index(UThin,each Key({[TenantKey],[SourceUserId],[#"Loaded Batch ID"]})),
+				    AdCloudIndex=Index(Table.SelectRows(AThin,each [CloudMatchStatus]="Unique native SID"),each Key({[TenantKey],[TenantUserKey],[#"Loaded Batch ID"]})),
+				    AdObjectIndex=Index(AThin,each Key({[TenantKey],[ObjectGUID],[#"Loaded Batch ID"]})),
+				    AdDnIndex=Index(AThin,each Key({[TenantKey],Record.FieldOrDefault(_,"DistinguishedName",null),[#"Loaded Batch ID"]})),
+				    NativeMailboxIndex=Index(NThin,each Key({[TenantKey],[PrimarySmtpAddress],[#"Loaded Batch ID"]})),
+				    WorkforceIndex=Index(WThin,each Key({[#"User Source ID"],[#"Loaded Batch ID"]})),
+				    CapacityIndex=Index(CThin,each Key({[#"Tenant Key"],[#"SKU ID"],[#"Loaded Batch ID"]})),
+				    SkuIndex=Index(SThin,each Key({[TenantKey],[SkuId],[#"Loaded Batch ID"]})),
+				    LicenseCapacity=Attach(LThin,CapacityIndex,each Key({[TenantKey],[SkuId],[#"Loaded Batch ID"]}),"__cap.",{"License Product"}),
+				    LicenseNative=Attach(LicenseCapacity,SkuIndex,each Key({[TenantKey],[SkuId],[#"Loaded Batch ID"]}),"__sku.",{"SkuPartNumberLabel","SkuPartNumber"}),
+				    LicenseRows=Table.AddColumn(LicenseNative,"Product",each Get(Pick(_,"__cap.",{"License Product"}),{"License Product"}) ?? Get(Pick(_,"__sku.",{"SkuPartNumberLabel","SkuPartNumber"}),{"SkuPartNumberLabel","SkuPartNumber"}) ?? "Unknown SKU",type text),
+				    LicenseIndex=Index(Table.Group(LicenseRows,{"TenantKey","TenantUserKey","Loaded Batch ID"},{{"Products",each Text.Combine(List.Sort(List.Distinct([Product])),"; "),type text}}),each Key({[TenantKey],[TenantUserKey],[#"Loaded Batch ID"]})),
+				    GrantsNative=Attach(CombinedPermissions[Rows],UserSourceIndex,each let id=Get(_,{"ExternalDirectoryObjectId"}) in if id=null then null else Key({Tenant,id,Batch}),"__grantUser.",{"UserPrincipalName"}),
+				    Grants=Attach(GrantsNative,AdDnIndex,each let dn=Get(_,{"DistinguishedName"}) in if dn=null then null else Key({Tenant,dn,Batch}),"__grantAd.",{"UserPrincipalName"}),
+				    CombinedGrants=List.Combine(List.Transform(Table.ToRecords(Grants),(grant)=>let
+				        native=Pick(grant,"__grantUser.",{"UserPrincipalName"}),
+				        directory=Pick(grant,"__grantAd.",{"UserPrincipalName"}),
+				        delegate=Get(native,{"UserPrincipalName"}) ?? Get(directory,{"UserPrincipalName"}) ?? Get(grant,{"PrimarySMTPaddress","PrimarySmtpAddress","ResolvedUser"}),
+				        rights={{"FullAccessOn","FullAccess"},{"SendAsOn","SendAs"},{"SendOnBehalfOn","GrantSendOnBehalfTo"}}
+				        in if delegate=null then {} else List.Combine(List.Transform(rights,(right)=>List.RemoveNulls(List.Transform(Text.Split(TextValue(Get(grant,{right{0}})),";"),(target)=>let
+				            token=Text.Trim(target),hosting=if Text.StartsWith(token,"[EXO] ") then "Exchange Online" else if Text.StartsWith(token,"[Local] ") then "On-premises" else null,
+				            smtp=if hosting=null then null else Text.Trim(Text.AfterDelimiter(token,"] "))
+				            in if hosting=null or smtp=null or not Text.Contains(smtp,"@") then null else [#"Hosting Location"=hosting,SMTP=Normal(smtp),Right=right{1},Delegate=delegate])))))),
+				    CombinedTable=Table.FromRecords(CombinedGrants,type table [#"Hosting Location"=text,SMTP=text,Right=text,Delegate=text]),
+				    CombinedIndex=Index(Table.Group(CombinedTable,{"Hosting Location","SMTP","Right"},{{"Delegates",each Text.Combine(List.Sort(List.Distinct([Delegate],Comparer.OrdinalIgnoreCase)),"; "),type text}}),each Key({[#"Hosting Location"],[SMTP],[Right]})),
+				    nativeFields={"TenantUserKey","TenantMailboxKey"},
+				    adFields={"TenantUserKey","ObjectGUID","UserPrincipalName","SamAccountName","DomainName","Enabled","Country"},
+				    userFields={"SourceUserId","UserPrincipalName","CountryCode","AccountEnabled"},
+				    workFields={"Workforce Persona"},
+				    licFields={"Products"},
+				    Cloud=(r as record) as logical=>r[#"Hosting Location"]="Exchange Online",
+				    Smtp=(r as record) as text=>Normal(r[#"Primary SMTP Address"]),
+				    RawFor=(r as record) as record=>Pick(r,if Cloud(r) then "__exo." else "__local.",RawFields),
+				    NativeFor=(r as record) as record=>Pick(r,"__native.",nativeFields),
+				    AdFor=(r as record) as record=>Pick(r,if Cloud(r) then "__adcloud." else "__adobject.",adFields),
+				    UserKeyFor=(r as record) as nullable text=>if Cloud(r) then Get(NativeFor(r),{"TenantUserKey"}) else Get(AdFor(r),{"TenantUserKey"}),
+				    UserFor=(r as record) as record=>Pick(r,"__user.",userFields),
+				    WithExo=Attach(B,Exo[Index],each if Cloud(_) then Smtp(_) else null,"__exo.",RawFields),
+				    WithLocal=Attach(WithExo,Local[Index],each if not Cloud(_) then Smtp(_) else null,"__local.",RawFields),
+				    WithStats=if NeedInventory then Attach(WithLocal,Stats[Index],each if Cloud(_) then Smtp(_) else null,"__stat.",StatsFields) else WithLocal,
+				    WithPerms=if NeedRights then Attach(WithStats,Permissions[Index],each if Cloud(_) then Smtp(_) else null,"__perm.",PermissionFields) else WithStats,
+				    WithNative=if NeedLicenses then Attach(WithPerms,NativeMailboxIndex,each Key({Tenant,Smtp(_),Batch}),"__native.",nativeFields) else WithPerms,
+				    WithCloudAd=if NeedLicenses then Attach(WithNative,AdCloudIndex,each let u=Get(NativeFor(_),{"TenantUserKey"}) in if not Cloud(_) or u=null then null else Key({Tenant,u,Batch}),"__adcloud.",adFields) else WithNative,
+				    WithObjectAd=if NeedLicenses then Attach(WithCloudAd,AdObjectIndex,each let guid=Get(RawFor(_),{"ObjectGUID"}) in if Cloud(_) or guid=null then null else Key({Tenant,guid,Batch}),"__adobject.",adFields) else WithCloudAd,
+				    WithUser=if NeedLicenses then Attach(WithObjectAd,UserIndex,each let u=UserKeyFor(_) in if u=null then null else Key({Tenant,u,Batch}),"__user.",userFields) else WithObjectAd,
+				    WithWorkforce=if NeedInventory then Attach(WithUser,WorkforceIndex,each let id=Get(UserFor(_),{"SourceUserId"}) in if id=null then null else Key({id,Batch}),"__work.",workFields) else WithUser,
+				    WithLicenses=if NeedLicenses then Attach(WithWorkforce,LicenseIndex,each let u=UserKeyFor(_) in if u=null then null else Key({Tenant,u,Batch}),"__lic.",licFields) else WithWorkforce,
+				    WithFull=if NeedRights then Attach(WithLicenses,CombinedIndex,each Key({[#"Hosting Location"],Smtp(_),"FullAccess"}),"__full.",{"Delegates"}) else WithLicenses,
+				    WithSend=if NeedRights then Attach(WithFull,CombinedIndex,each Key({[#"Hosting Location"],Smtp(_),"SendAs"}),"__send.",{"Delegates"}) else WithFull,
+				    Ready=if NeedRights then Attach(WithSend,CombinedIndex,each Key({[#"Hosting Location"],Smtp(_),"GrantSendOnBehalfTo"}),"__behalf.",{"Delegates"}) else WithSend,
+				    Enriched=Table.AddColumn(Ready,"__detail",each let
+				        base=_,smtp=Normal(base[#"Primary SMTP Address"]),cloud=base[#"Hosting Location"]="Exchange Online",
+				        source=if cloud then Exo else Local,
+				        raw=RawFor(base),stat=Pick(base,"__stat.",StatsFields),perm=Pick(base,"__perm.",PermissionFields),native=NativeFor(base),ad=AdFor(base),userKey=UserKeyFor(base),
+				        user=UserFor(base),workforce=Pick(base,"__work.",workFields),licenses=Pick(base,"__lic.",licFields),
+				        recipient=Get(raw,{"RecipientTypeDetails","RecipientType"}) ?? base[#"Recipient Type"],
+				        upn=Get(user,{"UserPrincipalName"}) ?? Get(raw,{"UserPrincipalName"}) ?? Get(ad,{"UserPrincipalName"}),
+				        sam=Get(ad,{"SamAccountName"}) ?? Get(raw,{"SamAccountName"}),
+				        guid=Get(raw,{"MailboxGuid","ExchangeGuid"}),
+				        identity=if guid<>null then Key({Tenant,"mailbox",guid}) else if cloud and Get(native,{"TenantMailboxKey"})<>null then Key({Tenant,"native",native[TenantMailboxKey]}) else if Get(raw,{"ObjectGUID"})<>null then Key({Tenant,"ad",raw[ObjectGUID]}) else Key({Tenant,"unresolved",base[#"Mailbox Key"]}),
+				        size=base[#"Mailbox Size GB"],count=base[#"Delegation Count"],
+				        statsUtc=Get(stat,{"StatsCollectedAtUtc","StatisticsCollectedAtUtc"}),
+				        adEnabled=Record.FieldOrDefault(ad,"Enabled",null),entraEnabled=Record.FieldOrDefault(user,"AccountEnabled",null),
+				        fallback=(right as text) as nullable text=>Get(Pick(base,if right="FullAccess" then "__full." else if right="SendAs" then "__send." else "__behalf.",{"Delegates"}),{"Delegates"}),
+				        permission=(right as text) as nullable text=>if Record.FieldCount(perm)>0 then Get(perm,{right}) else if Record.FieldCount(raw)>0 then Get(raw,{right}) else fallback(right),
+				        full=permission("FullAccess"),send=permission("SendAs"),behalf=permission("GrantSendOnBehalfTo"),
+				        mailboxType=Text.Lower(TextValue(recipient)&" "&TextValue(base[#"Mailbox Type"])),
+				        country=Get(user,{"CountryCode"}) ?? Get(ad,{"Country"}) ?? "Unknown"
+				    in [TenantKey=Tenant,#"Mailbox Identity"=identity,#"User Principal Name"=upn,#"SAM Account Name"=sam,
+				        #"AD Domain"=Get(ad,{"DomainName"}),#"Scoped Country"=country,#"Country Qualification"=if Get(user,{"CountryCode"})<>null then "Native user country attribute" else if Get(ad,{"Country"})<>null then "Native AD country attribute" else "Unattributed",
+				        #"AD Account State"=if adEnabled=true then "Enabled" else if adEnabled=false then "Disabled" else "Unknown",
+				        #"Entra Account State"=if entraEnabled=true then "Enabled" else if entraEnabled=false then "Disabled" else "Unknown",
+				        #"M365 Licenses"=Get(licenses,{"Products"}) ?? (if Record.FieldCount(user)>0 then "No observed assignment" else "Unknown identity"),
+				        #"Workforce Persona"=Get(workforce,{"Workforce Persona"}) ?? "No workforce attribution",
+				        #"Size Band"=if size=null then "Unknown" else if size<2 then "< 2 GB" else if size<50 then "2 - < 50 GB" else if size<=100 then "50 - 100 GB" else "> 100 GB",
+				        #"Delegation State"=if count=null then "Unknown" else if count>0 then "With delegation" else "Without observed delegation",
+				        FullAccess=full,SendAs=send,GrantSendOnBehalfTo=behalf,
+				        #"Delegation Evidence"=if Record.FieldCount(perm)>0 or Record.FieldCount(raw)>0 then "Raw prepared mailbox / permissions export" else if CombinedPermissions[Available] then "Prepared permissions-by-user export; exact target hosting / SMTP; resolved principals supplied by producer" else "Not collected in prepared batch",
+				        #"Stats Collected UTC"=statsUtc,#"Stats Collection Qualification"=if statsUtc=null then "Not supplied by source; export time is not stats collection time" else "Explicit statistics collection UTC field",
+				        #"Stats Source"=Get(stat,{"StatsSource"}) ?? (if cloud then "Not collected in prepared batch" else "On-prem mailbox inventory; stats timestamp not supplied"),
+				        #"Export Collected UTC"=Get(raw,{"CollectedAtUtc"}),#"Server Name"=Get(raw,{"ServerName"}),Database=Get(raw,{"Database"}),
+				        #"Forwarding Target"=Get(raw,{"ForwardingSmtpAddress","ForwardingAddress"}),
+				        #"Mailbox Type Group"=if Text.Contains(mailboxType,"shared") then "Shared" else if Text.Contains(mailboxType,"room") then "Room" else if Text.Contains(mailboxType,"equipment") then "Equipment" else if Text.Contains(mailboxType,"user") then "User" else "Other",
+				        #"Identity Qualification"=if Get(ad,{"DomainName"})<>null then "Native object / unique SID" else if Record.FieldCount(user)>0 then "Native cloud identity; AD domain unavailable" else "Unavailable / ambiguous native identity",
+				        #"Raw Detail State"=if Record.FieldCount(raw)>0 then "Unique prepared source row" else if source[Available] then "Missing / ambiguous source SMTP locator" else "Not collected in prepared batch",
+				        #"Remote Recipient"=not cloud and Text.StartsWith(Normal(recipient),"remote")]),
+				    Fields=if NeedInventory then {"TenantKey","Mailbox Identity","User Principal Name","SAM Account Name","AD Domain","Scoped Country","Country Qualification","AD Account State","Entra Account State","M365 Licenses","Workforce Persona","Size Band","Delegation State","FullAccess","SendAs","GrantSendOnBehalfTo","Delegation Evidence","Stats Collected UTC","Stats Collection Qualification","Stats Source","Export Collected UTC","Server Name","Database","Forwarding Target","Mailbox Type Group","Identity Qualification","Raw Detail State","Remote Recipient"} else if Mode="Licenses" then {"TenantKey","M365 Licenses","Remote Recipient"} else {"TenantKey","FullAccess","SendAs","GrantSendOnBehalfTo","Remote Recipient"},
+				    Expanded=Table.ExpandRecordColumn(Table.SelectColumns(Enriched,Table.ColumnNames(B)&{"__detail"}),"__detail",Fields,Fields),
+				    Output=if not BatchSafe then error "Mailbox exploration requires one common prepared batch" else if not SourcesValid then error "Mailbox detail artifact validation failed" else Table.SelectRows(Expanded,each not [Remote Recipient]),
+				    Typed=Table.TransformColumnTypes(Output,List.Transform(List.RemoveItems(Fields,{"Remote Recipient"}),each {_,type text})&{{"Remote Recipient",type logical}}),
+				    Country=Table.RenameColumns(Table.RemoveColumns(Typed,{"Country"}),{{"Scoped Country","Country"}})
+				in if NeedInventory then Country else if Mode="Licenses" then Table.SelectColumns(Typed,{"Mailbox Key","M365 Licenses","Loaded Batch ID"}) else Table.SelectColumns(Typed,{"TenantKey","Mailbox Key","Loaded Batch ID","FullAccess","SendAs","GrantSendOnBehalfTo"})) in Result

@@ -1,16 +1,57 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "cc84f5542bf9c28d2585",
   "position": {
     "x": 656,
-    "y": 336,
+    "y": 320,
+    "z": 1000,
+    "height": 397.40259740259739,
     "width": 616,
-    "height": 360,
-    "z": 109,
-    "tabOrder": 672
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "barChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Source Domain"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Source Domain",
+              "nativeQueryRef": "Source Domain",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Local Business Mailboxes Remaining"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Local Business Mailboxes Remaining",
+              "nativeQueryRef": "Local Business Mailboxes Remaining"
+            }
+          ]
+        }
+      }
+    },
     "objects": {
       "legend": [
         {
@@ -65,47 +106,6 @@
           }
         }
       ]
-    },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Category": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Source Domain"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Source Domain",
-              "nativeQueryRef": "Source Domain"
-            }
-          ]
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Local Business Mailboxes Remaining"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Local Business Mailboxes Remaining",
-              "nativeQueryRef": "Local Business Mailboxes Remaining"
-            }
-          ]
-        }
-      }
     },
     "visualContainerObjects": {
       "title": [
@@ -275,7 +275,8 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "parentGroupName": "de282d5a0762f9248225"
 }

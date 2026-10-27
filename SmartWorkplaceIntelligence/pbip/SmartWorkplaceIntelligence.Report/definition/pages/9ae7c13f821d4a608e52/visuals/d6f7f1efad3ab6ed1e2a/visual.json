@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "d6f7f1efad3ab6ed1e2a",
   "position": {
     "x": 32,
-    "y": 368,
-    "width": 1856,
-    "height": 264,
+    "y": 304,
     "z": 14000,
+    "height": 440,
+    "width": 1856,
     "tabOrder": 14000
   },
   "visual": {
@@ -28,6 +28,7 @@
               },
               "queryRef": "User Inventory Evidence.Workforce Persona",
               "nativeQueryRef": "Workforce Persona",
+              "active": true,
               "displayName": "Workforce Persona"
             }
           ]

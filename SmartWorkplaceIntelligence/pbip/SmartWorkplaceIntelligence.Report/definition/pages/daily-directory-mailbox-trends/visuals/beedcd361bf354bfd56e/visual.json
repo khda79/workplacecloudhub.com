@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "beedcd361bf354bfd56e",
   "position": {
     "x": 32,
     "y": 120,
-    "width": 1856,
+    "z": 11000,
     "height": 48,
-    "z": 100,
-    "tabOrder": 100
+    "width": 1856,
+    "tabOrder": 14000
   },
   "visual": {
     "visualType": "bookmarkNavigator",
@@ -32,7 +32,7 @@
             "selectedBookmark": {
               "expr": {
                 "Literal": {
-                  "Value": "'bf6e5721270ee694da00'"
+                  "Value": "'43c8933b8732cd98740b'"
                 }
               }
             }
@@ -95,9 +95,6 @@
       ],
       "fill": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -124,44 +121,44 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         },
         {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fillColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#004578'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          },
           "selector": {
             "id": "hover"
-          },
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fillColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#004578'"
-                    }
-                  }
-                }
-              }
-            },
-            "transparency": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            }
           }
         },
         {
-          "selector": {
-            "id": "selected"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -175,7 +172,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#004578'"
+                      "Value": "'#006B70'"
                     }
                   }
                 }
@@ -188,14 +185,60 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "selected"
           }
         }
       ],
       "text": [
         {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontFamily": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Segoe UI'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "selector": {
             "id": "default"
-          },
+          }
+        },
+        {
           "properties": {
             "show": {
               "expr": {
@@ -236,58 +279,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "id": "hover"
-          },
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontFamily": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Segoe UI'"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            }
           }
         },
         {
-          "selector": {
-            "id": "selected"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -328,14 +325,28 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "selected"
           }
         }
       ],
       "outline": [
         {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          },
           "selector": {
             "id": "default"
-          },
+          }
+        },
+        {
           "properties": {
             "show": {
               "expr": {
@@ -344,26 +355,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "id": "hover"
-          },
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            }
           }
         },
         {
-          "selector": {
-            "id": "selected"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -372,6 +369,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "selected"
           }
         }
       ]

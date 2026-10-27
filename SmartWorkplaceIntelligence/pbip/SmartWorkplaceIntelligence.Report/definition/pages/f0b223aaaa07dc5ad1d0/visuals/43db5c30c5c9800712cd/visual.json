@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "43db5c30c5c9800712cd",
   "position": {
     "x": 628,
     "y": 578,
-    "z": 123,
+    "z": 23000,
     "height": 138,
     "width": 744,
-    "tabOrder": 123
+    "tabOrder": 25000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -109,7 +109,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -496,65 +496,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "2e7b86a17ba191570916",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Content Storage Evidence"
-              }
-            },
-            "Property": "Messaging and Collaboration Storage (TB)"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "454be2ce12f801a60f43",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Content Storage Evidence"
-              }
-            },
-            "Property": "Messaging and Collaboration Storage per Workforce Account (GB)"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "dea2d9907d09990f77e4",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Mailbox Evidence"
-              }
-            },
-            "Property": "Total Mailbox Storage (TB)"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "4b17f0f3f226c1353a84",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Content Storage Evidence"
-              }
-            },
-            "Property": "Messaging and Collaboration Storage per Workforce Account Scope"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
   }
 }

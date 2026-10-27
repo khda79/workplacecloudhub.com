@@ -1,146 +1,31 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "9293426c19e792e1500b",
   "position": {
     "x": 617,
     "y": 113,
-    "z": 111,
-    "height": 140,
+    "z": 8000,
+    "height": 184,
     "width": 766,
-    "tabOrder": 111
+    "tabOrder": 10000
   },
   "visual": {
-    "visualType": "cardVisual",
-    "query": {
-      "queryState": {
-        "Data": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "All Devices Evidence"
-                    }
-                  },
-                  "Property": "All Enabled Devices"
-                }
-              },
-              "queryRef": "All Devices Evidence.All Enabled Devices",
-              "nativeQueryRef": "All Enabled Devices",
-              "displayName": "All enabled devices"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Managed Devices"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Managed Devices",
-              "nativeQueryRef": "Managed Devices"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Directory Summary"
-                    }
-                  },
-                  "Property": "Enabled AD PCs Managed by Intune (%)"
-                }
-              },
-              "queryRef": "Device Directory Summary.Enabled AD PCs Managed by Intune (%)",
-              "nativeQueryRef": "Enabled AD PCs Managed by Intune (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Current Endpoint Analytics Score"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Current Endpoint Analytics Score",
-              "nativeQueryRef": "Endpoint Analytics Score"
-            }
-          ]
-        },
-        "Tooltips": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "All Devices Evidence"
-                    }
-                  },
-                  "Property": "All Devices Scope"
-                }
-              },
-              "queryRef": "All Devices Evidence.All Devices Scope",
-              "nativeQueryRef": "All devices scope"
-            }
-          ]
-        }
-      }
-    },
+    "visualType": "shape",
     "objects": {
-      "value": [
+      "shape": [
         {
           "properties": {
-            "show": {
+            "tileShape": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "'rectangle'"
                 }
               }
             },
-            "fontSize": {
+            "roundEdge": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#005A9E'"
-                    }
-                  }
-                }
-              }
-            },
-            "labelDisplayUnits": {
-              "expr": {
-                "Literal": {
-                  "Value": "1D"
-                }
-              }
-            },
-            "textWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
+                  "Value": "12L"
                 }
               }
             }
@@ -150,38 +35,24 @@
           }
         }
       ],
-      "label": [
+      "fill": [
         {
           "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "fontColor": {
+            "fillColor": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#52606D'"
+                      "Value": "'#FFFFFF'"
                     }
                   }
                 }
               }
             },
-            "textWrap": {
+            "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "0D"
                 }
               }
             }
@@ -200,155 +71,28 @@
                   "Value": "false"
                 }
               }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "accentBar": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
             },
-            "position": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Left'"
-                }
-              }
-            },
-            "width": {
-              "expr": {
-                "Literal": {
-                  "Value": "4D"
-                }
-              }
-            },
-            "color": {
+            "lineColor": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
+                }
+              }
+            },
+            "weight": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
                 }
               }
             },
             "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "padding": [
-        {
-          "properties": {
-            "paddingIndividual": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "topMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "bottomMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "leftMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            },
-            "rightMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "layout": [
-        {
-          "properties": {
-            "topOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "bottomOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "leftOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "rightOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "spacing": [
-        {
-          "properties": {
-            "verticalSpacing": {
-              "expr": {
-                "Literal": {
                   "Value": "0D"
                 }
               }
@@ -356,51 +100,6 @@
           },
           "selector": {
             "id": "default"
-          }
-        }
-      ],
-      "cardCalloutArea": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            },
-            "rectangleRoundedCurve": {
-              "expr": {
-                "Literal": {
-                  "Value": "6L"
-                }
-              }
-            },
-            "backgroundFillColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#F7FAFC'"
-                    }
-                  }
-                }
-              }
-            },
-            "backgroundTransparency": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            }
           }
         }
       ]
@@ -445,7 +144,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Only confirmed enabled identities. Unknown and contradictory states are excluded; inspect the evidence tables for their scope.'"
+                  "Value": "'Enabled AD Windows PCs confirmed not found in Intune within the same prepared batch. Unknown or ambiguous identity matches are excluded and shown separately in the tooltip. Country and AD Domain filter attributable records.'"
                 }
               }
             }
@@ -634,79 +333,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "1609b760119862751105",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "All Devices Evidence"
-              }
-            },
-            "Property": "All Devices"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "9cde7e6caf467721b2b0",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Managed Devices"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "c8fcf7d5de2c9cad6635",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Directory Summary"
-              }
-            },
-            "Property": "Enabled AD PCs Managed by Intune (%)"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "31e64abc9333f013006d",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Current Endpoint Analytics Score"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "7257ef2e4498feb0569a",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "All Devices Evidence"
-              }
-            },
-            "Property": "All Devices Scope"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
   }
 }

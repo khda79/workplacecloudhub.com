@@ -1,0 +1,20 @@
+/// Disconnected selection utility for scoped operational evidence; no physical relationships.
+table 'Readiness Reading'
+	lineageTag: d4fd9526-6200-5631-8142-58d138e129ba
+
+	column Reading
+		dataType: string
+		lineageTag: 3c44ee0c-12d7-5539-b8c1-4a4a89d14841
+		summarizeBy: none
+		sourceColumn: Reading
+		sortByColumn: Order
+
+	column Order
+		dataType: int64
+		lineageTag: d852d156-0d74-5b16-9531-3a0a4b074dba
+		summarizeBy: none
+		sourceColumn: Order
+
+	partition 'Readiness Reading' = m
+		mode: import
+		source = #table(type table [#"Reading" = text, #"Order" = Int64.Type],{{"Daily operations",0},{"Windows 11 migration",1}})

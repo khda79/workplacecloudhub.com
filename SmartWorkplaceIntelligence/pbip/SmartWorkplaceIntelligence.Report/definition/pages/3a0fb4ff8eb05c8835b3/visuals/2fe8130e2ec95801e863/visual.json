@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "2fe8130e2ec95801e863",
   "position": {
     "x": 32,
-    "y": 357.0,
-    "width": 1856,
+    "y": 269,
+    "z": 0,
     "height": 22.5,
-    "z": 11000,
+    "width": 1856,
     "tabOrder": 344
   },
   "visual": {
@@ -19,16 +19,15 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Activity evidence",
+                    "value": "Selected view: Activity sources & dates",
                     "textStyle": {
+                      "fontWeight": "bold",
                       "fontFamily": "Segoe UI",
                       "fontSize": "13pt",
-                      "color": "#215E9E",
-                      "fontWeight": "bold"
+                      "color": "#215e9e"
                     }
                   }
-                ],
-                "horizontalTextAlignment": "left"
+                ]
               }
             ]
           }

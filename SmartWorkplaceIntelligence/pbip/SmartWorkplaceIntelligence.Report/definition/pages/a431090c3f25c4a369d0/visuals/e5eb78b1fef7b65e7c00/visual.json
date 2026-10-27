@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "e5eb78b1fef7b65e7c00",
   "position": {
     "x": 32,
-    "y": 384,
+    "y": 320,
+    "z": 0,
+    "height": 161.05263157894737,
     "width": 912,
-    "height": 168,
-    "z": 108,
-    "tabOrder": 684
+    "tabOrder": 3000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -49,13 +49,13 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Directory Summary"
+                      "Entity": "Device Exploration Inventory"
                     }
                   },
-                  "Property": "Enabled AD PCs Managed by Intune (%)"
+                  "Property": "Exploration Enabled AD PCs Managed (%)"
                 }
               },
-              "queryRef": "Device Directory Summary.Enabled AD PCs Managed by Intune (%)",
+              "queryRef": "Device Exploration Inventory.Exploration Enabled AD PCs Managed (%)",
               "nativeQueryRef": "Enabled AD PCs managed (%)",
               "displayName": "Enabled AD PCs managed (%)"
             },
@@ -353,14 +353,14 @@
             "rowCount": {
               "expr": {
                 "Literal": {
-                  "Value": "2L"
+                  "Value": "1L"
                 }
               }
             },
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "3L"
+                  "Value": "6L"
                 }
               }
             },

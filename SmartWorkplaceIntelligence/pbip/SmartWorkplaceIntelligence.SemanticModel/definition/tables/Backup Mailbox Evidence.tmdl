@@ -103,6 +103,22 @@ table 'Backup Mailbox Evidence'
 		displayFolder: Report footer
 		lineageTag: 2dfd0df2-647b-4739-aa86-a2307546443f
 
+	/// Any expected mailbox absent from protection evidence is red; zero retains existing color; no evidence is unknown. No amber state. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level Expected Mailboxes Not Protected' =
+			VAR _n=[Expected Mailboxes Not Protected]
+			VAR _scope=COUNTROWS('Backup Mailbox Evidence')
+			RETURN SWITCH(TRUE(),ISBLANK(_scope)||_scope=0||ISBLANK(_n),3,_n>0,2,0)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 7a008fa3-19b4-441e-a73f-8c3727816e09
+
+	/// User-visible threshold explanation for Expected Mailboxes Not Protected
+	measure 'KPI Alert Details Expected Mailboxes Not Protected' = VAR _s=[KPI Alert Level Expected Mailboxes Not Protected] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Any expected mailbox absent from protection evidence is red; zero retains existing color; no evidence is unknown. No amber state."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 14711e89-e7ce-4cba-bf58-f5df142f5e21
+
 	column 'Backup Entity Key'
 		dataType: string
 		isHidden

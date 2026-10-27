@@ -1,24 +1,24 @@
 /// Migration reporting dimension; current and historical members retained.
 table 'SPO Migration Operation'
 	isHidden
-	lineageTag: 994d6972-b125-47a0-9310-45d92367d9cf
+	lineageTag: 9bd6d3bc-7cbc-461f-bde4-8b0debec58bd
 
 	column 'Operation Key'
 		dataType: string
 		isHidden
-		lineageTag: e777cd6c-8f50-47d2-bdc2-235924ccb022
+		lineageTag: 62a87079-258e-4136-adf2-cf268b2fe617
 		summarizeBy: none
 		sourceColumn: Operation Key
 
 	column 'Migration ID'
 		dataType: string
-		lineageTag: b6e13faf-ecce-4789-88d3-b8f096bd4412
+		lineageTag: 40158ae5-a83f-4447-b86c-67659f335a7c
 		summarizeBy: none
 		sourceColumn: Migration ID
 
 	column 'Source Type'
 		dataType: string
-		lineageTag: bf968fad-fb3f-4800-87fc-e22b0ac162ac
+		lineageTag: f1fece71-5f06-438e-bc2f-d271b95679d1
 		summarizeBy: none
 		sourceColumn: Source Type
 

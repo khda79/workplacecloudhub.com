@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "f43e693c667c396d5c93",
   "position": {
     "x": 520,
     "y": 1040,
-    "width": 880,
+    "z": 41000,
     "height": 32,
-    "z": 26000,
-    "tabOrder": 26000
+    "width": 880,
+    "tabOrder": 42000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -37,9 +37,6 @@
     "objects": {
       "value": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "fontSize": {
               "expr": {
@@ -85,14 +82,14 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ],
       "label": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -101,14 +98,14 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ],
       "layout": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "paddingUniform": {
               "expr": {
@@ -158,7 +155,31 @@
                   "Value": "0L"
                 }
               }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]

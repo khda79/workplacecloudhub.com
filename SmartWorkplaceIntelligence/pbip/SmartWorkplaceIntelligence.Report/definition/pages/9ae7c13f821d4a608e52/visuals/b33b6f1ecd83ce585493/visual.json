@@ -3,7 +3,7 @@
   "name": "b33b6f1ecd83ce585493",
   "position": {
     "x": 32,
-    "y": 344,
+    "y": 280,
     "z": 119,
     "height": 24,
     "width": 1856,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Classification detail",
+                    "value": "Selected view: Classification details",
                     "textStyle": {
                       "fontWeight": "bold",
                       "fontFamily": "Segoe UI",

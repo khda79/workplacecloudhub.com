@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "f044f17faeb123024d0a",
   "position": {
     "x": 56,
-    "y": 587.4,
-    "z": 150,
-    "height": 400.8,
+    "y": 431.28618889416236,
+    "z": 0,
+    "height": 568.71381110583764,
     "width": 1808,
-    "tabOrder": 150
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "tableEx",
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "SharePoint On-prem Collection Coverage.Coverage Status",
-              "nativeQueryRef": "Coverage Status"
+              "nativeQueryRef": "Coverage Status",
+              "active": true
             },
             {
               "field": {
@@ -41,7 +42,8 @@
                 }
               },
               "queryRef": "SharePoint On-prem Content Databases.Content Database",
-              "nativeQueryRef": "Content Database"
+              "nativeQueryRef": "Content Database",
+              "active": true
             },
             {
               "field": {
@@ -55,7 +57,8 @@
                 }
               },
               "queryRef": "SharePoint On-prem Collection Coverage.Error Message",
-              "nativeQueryRef": "Error Message"
+              "nativeQueryRef": "Error Message",
+              "active": true
             },
             {
               "field": {
@@ -69,7 +72,8 @@
                 }
               },
               "queryRef": "SharePoint On-prem Collection Coverage.Coverage URL",
-              "nativeQueryRef": "Coverage URL"
+              "nativeQueryRef": "Coverage URL",
+              "active": true
             }
           ]
         }
@@ -79,14 +83,28 @@
       "columnHeaders": [
         {
           "properties": {
-            "columnAdjustment": {
+            "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
-                  "Value": "'fitToContent'"
+                  "Value": "true"
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -116,30 +134,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
                 }
               }
             },
-            "bold": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "defaultColumnWidth": {
-              "expr": {
-                "Literal": {
-                  "Value": "90D"
+                  "Value": "'Center'"
                 }
               }
             }
@@ -230,61 +234,146 @@
           }
         }
       ],
-      "columnWidth": [
+      "columnWidth": [],
+      "columnFormatting": [
         {
-          "properties": {
-            "value": {
-              "expr": {
-                "Literal": {
-                  "Value": "290D"
-                }
-              }
-            }
-          },
           "selector": {
             "metadata": "SharePoint On-prem Collection Coverage.Coverage Status"
-          }
-        },
-        {
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "280D"
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
-            "metadata": "SharePoint On-prem Collection Coverage.Content Database"
-          }
-        },
-        {
+            "metadata": "SharePoint On-prem Content Databases.Content Database"
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "650D"
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
             "metadata": "SharePoint On-prem Collection Coverage.Error Message"
-          }
-        },
-        {
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "550D"
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
             "metadata": "SharePoint On-prem Collection Coverage.Coverage URL"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
           }
         }
       ]
@@ -423,7 +512,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

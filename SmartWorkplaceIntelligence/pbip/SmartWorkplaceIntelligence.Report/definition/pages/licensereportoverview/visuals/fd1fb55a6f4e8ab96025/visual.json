@@ -1,106 +1,31 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "fd1fb55a6f4e8ab96025",
   "position": {
     "x": 32,
-    "y": 616,
+    "y": 536,
+    "z": 0,
+    "height": 128,
     "width": 1856,
-    "height": 120,
-    "z": 43,
-    "tabOrder": 43
+    "tabOrder": 5000
   },
   "visual": {
-    "visualType": "cardVisual",
-    "query": {
-      "queryState": {
-        "Data": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License SKU Capacity"
-                    }
-                  },
-                  "Property": "Microsoft 365 Utilization (%)"
-                }
-              },
-              "queryRef": "License SKU Capacity.Microsoft 365 Utilization (%)",
-              "nativeQueryRef": "M365 Utilization (%)",
-              "displayName": "M365 Utilization (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License SKU Capacity"
-                    }
-                  },
-                  "Property": "Microsoft 365 Enabled Units"
-                }
-              },
-              "queryRef": "License SKU Capacity.Microsoft 365 Enabled Units",
-              "nativeQueryRef": "M365 Enabled Units",
-              "displayName": "M365 Enabled Units"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License SKU Capacity"
-                    }
-                  },
-                  "Property": "Microsoft 365 Consumed Units"
-                }
-              },
-              "queryRef": "License SKU Capacity.Microsoft 365 Consumed Units",
-              "nativeQueryRef": "M365 Consumed Units",
-              "displayName": "M365 Consumed Units"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License SKU Capacity"
-                    }
-                  },
-                  "Property": "Immediate Reclaimable Assignments"
-                }
-              },
-              "queryRef": "License SKU Capacity.Immediate Reclaimable Assignments",
-              "nativeQueryRef": "Immediate Reclaim",
-              "displayName": "Immediate Reclaim"
-            }
-          ]
-        }
-      }
-    },
+    "visualType": "shape",
     "objects": {
-      "value": [
+      "shape": [
         {
           "properties": {
-            "fontSize": {
+            "tileShape": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "'rectangle'"
                 }
               }
             },
-            "textWrap": {
+            "roundEdge": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "labelDisplayUnits": {
-              "expr": {
-                "Literal": {
-                  "Value": "1D"
+                  "Value": "12L"
                 }
               }
             }
@@ -110,20 +35,24 @@
           }
         }
       ],
-      "label": [
+      "fill": [
         {
           "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
+            "fillColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
                 }
               }
             },
-            "fontSize": {
+            "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "0D"
                 }
               }
             }
@@ -142,155 +71,28 @@
                   "Value": "false"
                 }
               }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "accentBar": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
             },
-            "position": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Left'"
-                }
-              }
-            },
-            "width": {
-              "expr": {
-                "Literal": {
-                  "Value": "4D"
-                }
-              }
-            },
-            "color": {
+            "lineColor": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
+                }
+              }
+            },
+            "weight": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
                 }
               }
             },
             "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "padding": [
-        {
-          "properties": {
-            "paddingIndividual": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "topMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "bottomMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "leftMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            },
-            "rightMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "layout": [
-        {
-          "properties": {
-            "topOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "bottomOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "leftOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "rightOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "spacing": [
-        {
-          "properties": {
-            "verticalSpacing": {
-              "expr": {
-                "Literal": {
                   "Value": "0D"
                 }
               }
@@ -298,51 +100,6 @@
           },
           "selector": {
             "id": "default"
-          }
-        }
-      ],
-      "cardCalloutArea": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            },
-            "rectangleRoundedCurve": {
-              "expr": {
-                "Literal": {
-                  "Value": "6L"
-                }
-              }
-            },
-            "backgroundFillColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#F7FAFC'"
-                    }
-                  }
-                }
-              }
-            },
-            "backgroundTransparency": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            }
           }
         }
       ]
@@ -354,7 +111,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Selected published M365 suite KPIs \u00b7 partial families excluded'"
+                  "Value": "'Selected published M365 suite KPIs · partial families excluded'"
                 }
               }
             }
@@ -374,7 +131,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Selected published M365 suite KPIs \u00b7 partial families excluded'"
+                  "Value": "'Selected published M365 suite KPIs · partial families excluded'"
                 }
               }
             },

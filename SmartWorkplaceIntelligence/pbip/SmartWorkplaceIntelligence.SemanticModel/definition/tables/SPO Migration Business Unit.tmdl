@@ -1,10 +1,10 @@
 /// Migration reporting dimension; current and historical members retained.
 table 'SPO Migration Business Unit'
-	lineageTag: c938403b-ba3c-402f-b155-d8c72258ab03
+	lineageTag: b3cb373a-7522-4f7e-9eb0-d21dff2c011e
 
 	column 'Business Unit'
 		dataType: string
-		lineageTag: 8d2c5beb-9058-49ce-a3c8-a1be0ea6ecba
+		lineageTag: a2bd0aa9-1e52-449d-80a6-727ec322142d
 		summarizeBy: none
 		sourceColumn: Business Unit
 

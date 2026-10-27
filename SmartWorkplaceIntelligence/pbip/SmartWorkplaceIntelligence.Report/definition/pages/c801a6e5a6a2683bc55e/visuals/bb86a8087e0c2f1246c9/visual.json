@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "bb86a8087e0c2f1246c9",
   "position": {
     "x": 32,
-    "y": 208.0,
-    "z": 106,
-    "width": 400,
+    "y": 208,
+    "z": 5000,
     "height": 114.5,
-    "tabOrder": 106
+    "width": 400,
+    "tabOrder": 8000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -47,7 +47,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -86,7 +86,7 @@
             "showBlankAs": {
               "expr": {
                 "Literal": {
-                  "Value": "'\u2014'"
+                  "Value": "'—'"
                 }
               }
             }
@@ -578,7 +578,6 @@
           }
         },
         "type": "Categorical",
-        "howCreated": "User",
         "filter": {
           "Version": 2,
           "From": [
@@ -617,7 +616,8 @@
               }
             }
           ]
-        }
+        },
+        "howCreated": "User"
       },
       {
         "name": "Filter624c0c5600b257b1b1fe2a5b",

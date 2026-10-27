@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "69bef9ec141465e4e792",
   "position": {
     "x": 1148,
-    "y": 437.1,
+    "y": 316,
+    "z": 9000,
+    "height": 80,
     "width": 176,
-    "height": 114.5,
-    "z": 21,
-    "tabOrder": 21
+    "tabOrder": 8000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -37,9 +37,6 @@
     "objects": {
       "value": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "fontSize": {
               "expr": {
@@ -78,14 +75,14 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ],
       "label": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -101,6 +98,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]
@@ -112,7 +112,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'By suite \u00b7 counts can overlap'"
+                  "Value": "'By suite · counts can overlap'"
                 }
               }
             }
@@ -338,6 +338,7 @@
       ]
     }
   },
+  "parentGroupName": "403082f4ddd7359804c4",
   "filterConfig": {
     "filters": [
       {

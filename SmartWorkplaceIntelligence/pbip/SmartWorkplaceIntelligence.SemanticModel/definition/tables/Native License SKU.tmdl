@@ -173,3 +173,5 @@ table 'Native License SKU'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimLicenseSku.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantSkuKey", dataType="String"], [name="SkuId", dataType="String"], [name="SkuPartNumber", dataType="String"], [name="ConsumedUnits", dataType="Int64"], [name="EnabledUnits", dataType="Int64"], [name="SkuPartNumberLabel", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

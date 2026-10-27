@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "1aa6829ab71ed56b0754",
   "position": {
     "x": 32,
-    "y": 292,
-    "width": 1320,
-    "height": 128,
-    "z": 107,
-    "tabOrder": 677
+    "y": 320,
+    "z": 0,
+    "height": 96,
+    "width": 1856,
+    "tabOrder": 1000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -56,6 +56,90 @@
               },
               "queryRef": "Mailbox Evidence.Large Mailboxes Without Archive",
               "nativeQueryRef": "Mailboxes >=45 GB Without Archive"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "On-premises Mailboxes"
+                }
+              },
+              "queryRef": "Mailbox Evidence.On-premises Mailboxes",
+              "nativeQueryRef": "On-premises Mailboxes"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Observed Exchange Online Adoption (%)"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Observed Exchange Online Adoption (%)",
+              "nativeQueryRef": "Exchange Online Adoption"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Mailboxes with Archive"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Mailboxes with Archive",
+              "nativeQueryRef": "Mailboxes with Archive"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Mailboxes with Delegations"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Mailboxes with Delegations",
+              "nativeQueryRef": "Mailboxes with Delegations"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Total Mailbox Storage (TB)"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Total Mailbox Storage (TB)",
+              "nativeQueryRef": "Total Mailbox Storage (TB)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Mailboxes With Extensive Delegation"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Mailboxes With Extensive Delegation",
+              "nativeQueryRef": "Extensive Delegation"
             }
           ]
         }
@@ -314,7 +398,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "3L"
+                  "Value": "9L"
                 }
               }
             },
@@ -413,32 +497,21 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Priority KPIs'"
+                  "Value": "''"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
+                  "Value": "11D"
                 }
               }
             }

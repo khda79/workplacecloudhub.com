@@ -1,16 +1,39 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "3dda54a99121e97fe130",
   "position": {
-    "x": 1248.0,
-    "y": 128,
-    "width": 312.0,
+    "x": 848,
+    "y": 8,
+    "z": 23000,
     "height": 80,
-    "z": 104,
-    "tabOrder": 59
+    "width": 216,
+    "tabOrder": 12000
   },
   "visual": {
     "visualType": "slicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Migration Status"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Migration Status",
+              "nativeQueryRef": "Migration Status",
+              "active": true
+            }
+          ]
+        }
+      }
+    },
     "objects": {
       "data": [
         {
@@ -76,29 +99,6 @@
           }
         }
       ]
-    },
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Migration Status"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Migration Status",
-              "nativeQueryRef": "Migration Status",
-              "active": true
-            }
-          ]
-        }
-      }
     },
     "visualContainerObjects": {
       "title": [

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "6af8384200d57ee43589",
   "position": {
     "x": 32,
-    "y": 357.0,
-    "width": 1856,
+    "y": 269,
+    "z": 6000,
     "height": 22.5,
-    "z": 119,
-    "tabOrder": 629
+    "width": 1856,
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "textbox",
@@ -19,12 +19,12 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Evidence context",
+                    "value": "Selected view: Data quality & coverage",
                     "textStyle": {
+                      "fontWeight": "bold",
                       "fontFamily": "Segoe UI",
                       "fontSize": "12pt",
-                      "color": "#215E9E",
-                      "fontWeight": "bold"
+                      "color": "#215e9e"
                     }
                   }
                 ]

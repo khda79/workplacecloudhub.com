@@ -1,113 +1,31 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "f3a06c62d8c73b86969b",
   "position": {
-    "x": 968,
-    "y": 544.3,
-    "width": 920,
-    "height": 128,
-    "z": 107,
-    "tabOrder": 1340
+    "x": 32,
+    "y": 429.42528735632186,
+    "z": 0,
+    "height": 93.793103448275872,
+    "width": 1856,
+    "tabOrder": 11000
   },
   "visual": {
-    "visualType": "cardVisual",
-    "query": {
-      "queryState": {
-        "Data": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Managed Devices"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Managed Devices",
-              "nativeQueryRef": "# Managed Devices"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Device Compliance Rate"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Device Compliance Rate",
-              "nativeQueryRef": "Device Compliance Rate"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Noncompliant Devices"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Noncompliant Devices",
-              "nativeQueryRef": "# Noncompliant Devices"
-            }
-          ]
-        }
-      }
-    },
+    "visualType": "shape",
     "objects": {
-      "value": [
+      "shape": [
         {
           "properties": {
-            "show": {
+            "tileShape": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "'rectangle'"
                 }
               }
             },
-            "fontSize": {
+            "roundEdge": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#005A9E'"
-                    }
-                  }
-                }
-              }
-            },
-            "labelDisplayUnits": {
-              "expr": {
-                "Literal": {
-                  "Value": "1D"
-                }
-              }
-            },
-            "textWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
+                  "Value": "12L"
                 }
               }
             }
@@ -117,38 +35,24 @@
           }
         }
       ],
-      "label": [
+      "fill": [
         {
           "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "fontColor": {
+            "fillColor": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#52606D'"
+                      "Value": "'#FFFFFF'"
                     }
                   }
                 }
               }
             },
-            "textWrap": {
+            "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "0D"
                 }
               }
             }
@@ -167,176 +71,28 @@
                   "Value": "false"
                 }
               }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "accentBar": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
             },
-            "position": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Left'"
-                }
-              }
-            },
-            "width": {
-              "expr": {
-                "Literal": {
-                  "Value": "4D"
-                }
-              }
-            },
-            "color": {
+            "lineColor": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
+                }
+              }
+            },
+            "weight": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
                 }
               }
             },
             "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "padding": [
-        {
-          "properties": {
-            "paddingIndividual": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "topMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "bottomMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "leftMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            },
-            "rightMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "layout": [
-        {
-          "properties": {
-            "topOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "bottomOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "leftOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "rightOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "rowCount": {
-              "expr": {
-                "Literal": {
-                  "Value": "1L"
-                }
-              }
-            },
-            "columnCount": {
-              "expr": {
-                "Literal": {
-                  "Value": "3L"
-                }
-              }
-            },
-            "autoGrid": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "spacing": [
-        {
-          "properties": {
-            "verticalSpacing": {
-              "expr": {
-                "Literal": {
                   "Value": "0D"
                 }
               }
@@ -344,51 +100,6 @@
           },
           "selector": {
             "id": "default"
-          }
-        }
-      ],
-      "cardCalloutArea": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "rectangleRoundedCurve": {
-              "expr": {
-                "Literal": {
-                  "Value": "6L"
-                }
-              }
-            },
-            "backgroundFillColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#F7FAFC'"
-                    }
-                  }
-                }
-              }
-            },
-            "backgroundTransparency": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            }
           }
         }
       ]

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "179371460dfd1cee8be8",
   "position": {
     "x": 96,
-    "y": 88,
-    "width": 1080,
-    "height": 32,
-    "z": 101,
-    "tabOrder": 145
+    "y": 80,
+    "z": 16000,
+    "height": 24,
+    "width": 936,
+    "tabOrder": 17000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Security Posture \u00b7 reported controls \u00b7 policy-based endpoint assessment \u00b7 unknown is not healthy",
+                    "value": "Security Posture · reported controls · policy-based endpoint assessment · unknown is not healthy",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",
@@ -121,7 +121,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Security Posture \u00b7 reported controls \u00b7 endpoint policy and health evidence shown separately'"
+                  "Value": "'Security Posture · reported controls · endpoint policy and health evidence shown separately'"
                 }
               }
             }

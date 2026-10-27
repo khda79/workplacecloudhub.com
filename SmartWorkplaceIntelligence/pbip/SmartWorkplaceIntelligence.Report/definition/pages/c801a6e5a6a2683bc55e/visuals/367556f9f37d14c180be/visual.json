@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "367556f9f37d14c180be",
   "position": {
     "x": 1480,
     "y": 365.5,
-    "z": 107,
-    "height": 207.6,
+    "z": 6000,
+    "height": 192,
     "width": 408,
-    "tabOrder": 107
+    "tabOrder": 9000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -136,7 +136,7 @@
             "showBlankAs": {
               "expr": {
                 "Literal": {
-                  "Value": "'\u2014'"
+                  "Value": "'—'"
                 }
               }
             }
@@ -648,37 +648,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "3e992491702ce60b55b0",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License SKU Capacity"
-              }
-            },
-            "Property": "Observed Potentially Reclaimable Assignments"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "485257018c7414162e05",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Mailbox Evidence"
-              }
-            },
-            "Property": "Large Mailboxes Without Archive"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
   }
 }

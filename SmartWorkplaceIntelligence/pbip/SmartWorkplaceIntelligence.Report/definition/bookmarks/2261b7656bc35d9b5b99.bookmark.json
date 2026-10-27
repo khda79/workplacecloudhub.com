@@ -12,7 +12,15 @@
       "185cdb21b5904ce2099a",
       "b79464116be0acf4e2b3",
       "6b6763c84777e6ef2d7d",
-      "b86010eb69c14ed24d9a"
+      "b86010eb69c14ed24d9a",
+      "82a0359dc2548d0aafb8",
+      "f3193842855d634677ed",
+      "be5201e31ddf3e78513d",
+      "11c266a25992f9d9660e",
+      "631826ba36230ae4c2e1",
+      "76bbd187ff03d544ac3c",
+      "32ab9a9003d50f16ed5c",
+      "d6e330ec2f7c447b274d"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -22,7 +30,60 @@
     "activeSection": "6e8276acf6fa00f4aa6f",
     "sections": {
       "6e8276acf6fa00f4aa6f": {
-        "visualContainers": {},
+        "visualContainers": {
+          "82a0359dc2548d0aafb8": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "f3193842855d634677ed": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "be5201e31ddf3e78513d": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "11c266a25992f9d9660e": {
+            "singleVisual": {}
+          },
+          "631826ba36230ae4c2e1": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "76bbd187ff03d544ac3c": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "32ab9a9003d50f16ed5c": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "d6e330ec2f7c447b274d": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
         "visualContainerGroups": {
           "8290cb245bbf49ba9206": {
             "isHidden": false

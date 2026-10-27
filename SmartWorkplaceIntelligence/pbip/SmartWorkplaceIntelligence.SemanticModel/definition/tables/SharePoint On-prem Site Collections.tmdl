@@ -80,6 +80,11 @@ table 'SharePoint On-prem Site Collections'
 		formatString: @
 		lineageTag: 443a96b7-71fc-4859-8c64-e8b319b09359
 
+	/// Observed distinct site collections with exact ReadOnly lock state; excludes NoAdditions and unknown.
+	measure 'Read-only site collections' = CALCULATE(DISTINCTCOUNT('SharePoint On-prem Site Collections'[Site Collection ID]),KEEPFILTERS('SharePoint On-prem Site Collections'[Lock State]="ReadOnly"))
+		formatString: #,0
+		lineageTag: fe9aecdc-0533-463f-8627-b0246f9022a2
+
 	column 'Tenant Key'
 		dataType: string
 		isHidden
@@ -134,9 +139,14 @@ table 'SharePoint On-prem Site Collections'
 		sourceColumn: Quota Limit Bytes
 
 	column 'Quota Usage Percent'
-		dataType: decimal
+		dataType: double
 		lineageTag: dca30f33-41a6-4174-8a7e-c6dc398cb758
+		summarizeBy: sum
 		sourceColumn: Quota Usage Percent
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column 'Quota Usage Status'
 		dataType: string

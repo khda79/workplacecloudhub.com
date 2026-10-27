@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "232fda7fbd083e5409c3",
   "position": {
-    "x": 1216,
-    "y": 91,
-    "width": 672,
-    "height": 25,
-    "z": 26000,
-    "tabOrder": 12
+    "x": 1072,
+    "y": 80,
+    "z": 35000,
+    "height": 24,
+    "width": 816,
+    "tabOrder": 10000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Scope: attributable records only; tenant totals remain global.",
+                    "value": "Device evidence follows scope; tenant aggregates remain explicitly marked.",
                     "textStyle": {
                       "fontSize": "12px",
                       "color": "#52606D",

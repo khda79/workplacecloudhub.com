@@ -51,18 +51,6 @@ expression PreparedBatchId = "Latest" meta [IsParameterQuery=true, Type="Text", 
 	annotation PBI_ResultType = Text
 
 /// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
-expression GetPreparedBatchManifest = () as record => CreatePreparedReaders()[GetPreparedBatchManifest]()
-	lineageTag: 3ee1d505-902a-4038-bff9-aeae20a42f30
-
-/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
-expression GetLicenseReportQualification = () as record => CreatePreparedReaders()[GetLicenseReportQualification]()
-	lineageTag: 2e82bd1a-e1ce-4971-947d-1042052a1d19
-
-/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
-expression LicenseReportFileUsable = (fileName as text) as logical => CreatePreparedReaders()[LicenseReportFileUsable](fileName)
-	lineageTag: 3b6414b6-c0b8-483a-a9b4-e14a292e84b8
-
-/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
 expression GetLicenseReportSnapshot = () as record => CreatePreparedReaders()[GetLicenseReportSnapshot]()
 	lineageTag: 62c7ccc9-3b11-4ab8-aeda-9be8e172c2d3
 
@@ -73,12 +61,6 @@ expression GetLicenseReportCsv = (fileName as text, expectedColumns as list) as 
 /// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
 expression ReadMigrationCsv = (content as binary, required as list) as table => CreatePreparedReaders()[ReadMigrationCsv](content, required)
 	lineageTag: 25ff69f8-08ac-4896-ae1f-f3eb16c544da
-
-/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
-expression CreateMailboxMigrationReader = () as function => CreatePreparedReaders()[CreateMailboxMigrationReader]()
-
-/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
-expression ReadMailboxMigrationCsv = (content as binary, required as list, optionalColumns as list) as table => CreatePreparedReaders()[ReadMailboxMigrationCsv](content, required, optionalColumns)
 
 /// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
 expression ReadMigrationWeeklyHistory = (kind as text, fileName as text, required as list, tenant as text) as list => CreatePreparedReaders()[ReadMigrationWeeklyHistory](kind, fileName, required, tenant)
@@ -171,24 +153,35 @@ expression NativeEvidenceTypes =
 		    Converted
 	lineageTag: 5fef8535-2f69-4d1c-866a-d915494c40a3
 
-/// Native SourceHealth status mapped to a health state. Exhaustive generator vocabulary; any other value stays Unknown, never OK.
-expression NativeSourceHealthState =
-		// Exact, case-sensitive match: SourceHealth.csv writes Success or SuccessWithWarnings; Failed/Cancelled are run outcomes.
-		// Receipt-level Completed/CompletedWithWarnings are not SourceHealth values and are deliberately Unknown.
-		(Status as nullable text) as text =>
-		let
-		    States = [Success = "OK", SuccessWithWarnings = "Warning", Failed = "Failed", Cancelled = "Failed"]
-		in
-		    if Status = null or Status = "" then "Unknown" else Record.FieldOrDefault(States, Status, "Unknown")
-	lineageTag: fd169cb9-e9b2-48d3-af57-ae1e6b8035e0
-
 /// Expected private reporting tenant. Replace with deployment identity before any refresh; never infer identity from the downloaded pointer.
 expression PreparedExpectedTenantKey = "" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: fd94c8fb-7f6c-48b7-ac89-42afd49db4fe
 
+	annotation PBI_ResultType = Text
+
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression GetPreparedBatchManifest = () as record => CreatePreparedReaders()[GetPreparedBatchManifest]()
+	lineageTag: 3ee1d505-902a-4038-bff9-aeae20a42f30
+
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression GetLicenseReportQualification = () as record => CreatePreparedReaders()[GetLicenseReportQualification]()
+	lineageTag: 2e82bd1a-e1ce-4971-947d-1042052a1d19
+
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression LicenseReportFileUsable = (fileName as text) as logical => CreatePreparedReaders()[LicenseReportFileUsable](fileName)
+	lineageTag: 3b6414b6-c0b8-483a-a9b4-e14a292e84b8
+
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression CreateMailboxMigrationReader = () as function => CreatePreparedReaders()[CreateMailboxMigrationReader]()
+	lineageTag: 5874da3e-95df-4eb7-a575-968a66137e08
+
+/// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
+expression ReadMailboxMigrationCsv = (content as binary, required as list, optionalColumns as list) as table => CreatePreparedReaders()[ReadMailboxMigrationCsv](content, required, optionalColumns)
+	lineageTag: 209dbbbc-27fb-45e4-b97b-cef3aba55b47
+
 /// Read from one selected batch with existing schema and identity checks. Latest verifies pointer stability per read; loaded provenance detects cross-table mixtures.
 expression GetSharePointMigrationEvidence = (FileName as text, Schema as list) as table => CreatePreparedReaders()[GetSharePointMigrationEvidence](FileName, Schema)
-	lineageTag: bb3c6976-2636-49d6-8cd5-2c7646e6be4a
+	lineageTag: 3eafdf7a-5bca-4307-8e74-e0782e847c81
 
 /// Prepared storage navigation. Private Service deployment must use its SharePoint-only adapter.
 expression PreparedReadFolder =
@@ -622,14 +615,48 @@ expression CreatePreparedReaders =
 		    ForcedRows = Table.RowCount(Buffered)
 		in
 		    if ForcedRows >= 0 and CheckStable("verify-freebusy") then Buffered else error "Unstable Exchange hybrid free/busy batch",
+
+		    GetReadinessSource = (fileName as text) as record =>
+		    let
+		        Specs = {[Name="HybridIdentityFindings.csv",Columns={"TenantKey","Finding Key","AD Object GUID","Entra Object ID","Exchange GUID","User Principal Name","Primary SMTP Address","Recipient Type","Mailbox Hosting","Rule ID","Legacy Issue Number","Rule Family","Severity","Is Blocker","Observed Value","Recommended Action","Account Population","Account Population Source","Account Classification Rule Version","Rule Version","Evidence Date"},Types={{"TenantKey",type text},{"Finding Key",type text},{"AD Object GUID",type text},{"Entra Object ID",type text},{"Exchange GUID",type text},{"User Principal Name",type text},{"Primary SMTP Address",type text},{"Recipient Type",type text},{"Mailbox Hosting",type text},{"Rule ID",type text},{"Legacy Issue Number",Int64.Type},{"Rule Family",type text},{"Severity",type text},{"Is Blocker",type logical},{"Observed Value",type text},{"Recommended Action",type text},{"Account Population",type text},{"Account Population Source",type text},{"Account Classification Rule Version",type text},{"Rule Version",type text},{"Evidence Date",type datetime}},TypedColumns={"Legacy Issue Number","Is Blocker","Evidence Date"}],[Name="DeviceReadinessGapEvidence.csv",Columns={"TenantKey","Inventory Scope","Device Source ID","Device Name","Azure AD Device ID","AD Object GUID","Entra Registration Pending","Physical Memory (GB)","Firmware Type (source)","Secure Boot Status (source)","Last Reboot (source)","Last Reboot Source","Last Reboot Time Basis","Last Reboot UTC","Days Since Last Reboot","Reboot Age Basis","Evidence Date"},Types={{"TenantKey",type text},{"Inventory Scope",type text},{"Device Source ID",type text},{"Device Name",type text},{"Azure AD Device ID",type text},{"AD Object GUID",type text},{"Entra Registration Pending",type logical},{"Physical Memory (GB)",type number},{"Firmware Type (source)",type text},{"Secure Boot Status (source)",type text},{"Last Reboot (source)",type text},{"Last Reboot Source",type text},{"Last Reboot Time Basis",type text},{"Last Reboot UTC",type datetime},{"Days Since Last Reboot",Int64.Type},{"Reboot Age Basis",type text},{"Evidence Date",type datetime}},TypedColumns={"Entra Registration Pending","Physical Memory (GB)","Last Reboot UTC","Days Since Last Reboot","Evidence Date"}]},
+		        Selected = List.Select(Specs, each [Name] = fileName),
+		        Spec = if List.Count(Selected) = 1 then Selected{0} else error "Unknown readiness source",
+		        Manifest = GetPreparedBatchManifest(),
+		        Entries = Manifest[Files] & Record.FieldOrDefault(Manifest, "Artifacts", {}),
+		        Counts = List.Transform(Specs, (s) => List.Count(List.Select(Entries, each [File]=s[Name]))),
+		        Present = if Counts = {0,0} then false else if Counts = {1,1} then true else error "Partial or duplicate hybrid/readiness source declarations",
+		        Raw = if Present then Csv.Document(GetPreparedEvidenceFile(fileName), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]) else null,
+		        Header = if not Present then {} else if Table.IsEmpty(Raw) then error "Readiness CSV requires a schema header" else Record.FieldValues(Raw{0}),
+		        Checked = if not Present then #table(Spec[Columns], {}) else if Header <> Spec[Columns] then error Error.Record("Readiness schema", "Unexpected columns or order", fileName) else Table.PromoteHeaders(Raw,[PromoteAllScalars=true]),
+		        Nulls = Table.ReplaceValue(Checked, "", null, Replacer.ReplaceValue, Spec[TypedColumns]),
+		        Typed = Table.Buffer(Table.TransformColumnTypes(Nulls, Spec[Types], "en-US")),
+		        ValidTypes = if Table.RowCount(Table.SelectRowsWithErrors(Typed)) = 0 then Typed else error "Readiness values do not match declared types",
+		        Scoped = if List.AllTrue(List.Transform(ValidTypes[TenantKey], each _ = ExpectedTenant)) then ValidTypes else error "Foreign or missing readiness tenant",
+		        Key = (v as any) as text => if v=null then "" else Text.Lower(Text.Trim(Text.From(v))),
+		        Keys = if fileName="HybridIdentityFindings.csv" then List.Transform(Scoped[Finding Key],Key)
+		               else List.Transform(Table.ToRecords(Scoped), each Key([TenantKey]) & "|" & Key([Inventory Scope]) & "|" & (if Key([Device Source ID])<>"" then Key([Device Source ID]) else Key([AD Object GUID]))),
+		        IdentityOK = if fileName="HybridIdentityFindings.csv" then not List.Contains(Keys,"") and List.AllTrue(List.Transform(Scoped[Rule ID], each Key(_)<>""))
+		                     else List.AllTrue(List.Transform(Table.ToRecords(Scoped), each Key([Inventory Scope])<>"" and (Key([Device Source ID])<>"" or Key([AD Object GUID])<>""))),
+		        Unique = if IdentityOK and List.Count(Keys)=List.Count(List.Distinct(Keys)) then Scoped else error "Missing or duplicate readiness identity",
+		        Consistent = if fileName<>"HybridIdentityFindings.csv" then Unique else if List.AllTrue(List.Transform(Table.ToRecords(Unique), each [Is Blocker]<>null and [Is Blocker]=([Severity]="Blocker") and List.Contains({"Blocker","High","Medium","Info","Review"},[Severity]))) then Unique else error "Hybrid Severity and Is Blocker disagree",
+		        Rows = Table.Buffer(Consistent),
+		        Count = Table.RowCount(Rows),
+		        Dates = List.RemoveNulls(Rows[Evidence Date]),
+		        State = if not Present then "Not available" else if Count=0 then "Valid empty" else "Loaded",
+		        Result = [Rows=Rows, State=State, Available=Present, RowCount=if Present then Count else null, ColumnCount=List.Count(Spec[Columns]),
+		                  BatchId=Manifest[BatchId], EvidenceDate=if List.IsEmpty(Dates) or List.Count(Dates)<>Count then null else List.Min(Dates),
+		                  LatestEvidenceDate=if List.IsEmpty(Dates) then null else List.Max(Dates),
+		                  DateBasis=if List.IsEmpty(Dates) then "Not observed" else if List.Count(Dates)<>Count then "Evidence Date incomplete" else "Evidence Date (oldest row; not collector timestamp)",
+		                  File=fileName]
+		    in if Count>=0 and CheckStable("verify-readiness") then Result else error "Unstable readiness batch",
 		    Finish = (Rows as table) as table =>
 		        if GetPreparedBatchManifest()[BatchId] <> BatchId then error "Prepared batch identity mismatch"
 		        else Table.AddColumn(Rows, "Loaded Batch ID", each BatchId, type text)
 		in
-		    [BatchId=BatchId, Finish=Finish, GetExchangeOnPremInfrastructure=GetExchangeOnPremInfrastructure, GetExchangeHybridFreeBusy=GetExchangeHybridFreeBusy, GetPreparedEvidenceFile=GetPreparedEvidenceFile, GetPreparedBatchManifest=GetPreparedBatchManifest, GetLicenseReportQualification=GetLicenseReportQualification, LicenseReportFileUsable=LicenseReportFileUsable, GetLicenseReportSnapshot=GetLicenseReportSnapshot, GetLicenseReportCsv=GetLicenseReportCsv, ReadMigrationCsv=ReadMigrationCsv, CreateMailboxMigrationReader=CreateMailboxMigrationReader, ReadMailboxMigrationCsv=ReadMailboxMigrationCsv, ReadMigrationWeeklyHistory=ReadMigrationWeeklyHistory, GetSharePointOnPremCsv=GetSharePointOnPremCsv, GetSharePointMigrationEvidence=GetSharePointMigrationEvidence]
+		    [BatchId=BatchId, Finish=Finish, GetReadinessSource=GetReadinessSource, GetExchangeOnPremInfrastructure=GetExchangeOnPremInfrastructure, GetExchangeHybridFreeBusy=GetExchangeHybridFreeBusy, GetPreparedEvidenceFile=GetPreparedEvidenceFile, GetPreparedBatchManifest=GetPreparedBatchManifest, GetLicenseReportQualification=GetLicenseReportQualification, LicenseReportFileUsable=LicenseReportFileUsable, GetLicenseReportSnapshot=GetLicenseReportSnapshot, GetLicenseReportCsv=GetLicenseReportCsv, ReadMigrationCsv=ReadMigrationCsv, CreateMailboxMigrationReader=CreateMailboxMigrationReader, ReadMailboxMigrationCsv=ReadMailboxMigrationCsv, ReadMigrationWeeklyHistory=ReadMigrationWeeklyHistory, GetSharePointOnPremCsv=GetSharePointOnPremCsv, GetSharePointMigrationEvidence=GetSharePointMigrationEvidence]
 	lineageTag: 26f34f0c-24ee-421f-94a6-123ea48fb2ec
 
-/// Every governed AD account type, including disabled/non-human accounts. Historical missing classification remains unknown. Prepared without materializing a new imported facet.
+/// All governed AD account types, including disabled and non-human accounts. Optional historical classification; guarded same-batch native keys, tenant and byte checks. Reader prepared without materializing new data.
 expression ReadPreparedADAccountClassification =
 		() as table =>
 		let
@@ -660,3 +687,71 @@ expression ReadPreparedADAccountClassification =
 		        else "Unknown classification", type text)
 		in
 		    Readers[Finish](Service)
+	lineageTag: 59a35eb0-67fb-4b52-8b41-9e428c919986
+
+/// Native SourceHealth status mapped to a health state. Exhaustive generator vocabulary; any other value stays Unknown, never OK.
+expression NativeSourceHealthState =
+		// Exact, case-sensitive match: SourceHealth.csv writes Success or SuccessWithWarnings; Failed/Cancelled are run outcomes.
+		// Receipt-level Completed/CompletedWithWarnings are not SourceHealth values and are deliberately Unknown.
+		(Status as nullable text) as text =>
+		let
+		    States = [Success = "OK", SuccessWithWarnings = "Warning", Failed = "Failed", Cancelled = "Failed"]
+		in
+		    if Status = null or Status = "" then "Unknown" else Record.FieldOrDefault(States, Status, "Unknown")
+	lineageTag: fd169cb9-e9b2-48d3-af57-ae1e6b8035e0
+
+/// Daily operational predicates; missing, Unknown, Error and invalid values remain indeterminate. No migration applicability filters.
+expression AssessDailyReadiness =
+		(r as record) as record =>
+		let
+		 K=(v as any) as text => if v=null then "" else Text.Lower(Text.Trim(Text.From(v))),
+		 Known=(v as any) as logical => not List.Contains({"","unknown","error","n/a","not available","unavailable"},K(v)),
+		 Num=(v as any) as nullable number => if not Known(v) then null else try Number.From(v,"en-US") otherwise null,
+		 Test=(valid as logical,trigger as logical) as text => if not valid then "Indeterminate" else if trigger then "Triggered" else "Not triggered",
+		 P=Record.FieldOrDefault(r,"Entra Registration Pending",null),
+		 M=Num(Record.FieldOrDefault(r,"Physical Memory (GB)",null)),
+		 D=Num(Record.FieldOrDefault(r,"Days Since Last Reboot",null)),
+		 F=K(Record.FieldOrDefault(r,"Firmware Type (source)",null)),
+		 B=K(Record.FieldOrDefault(r,"Secure Boot Status (source)",null)),
+		 BF=Test(List.Contains({"bios","uefi"},F),F="bios"),
+		 SB=Test(List.Contains({"enabled","disabled","notsupported"},B),B="notsupported"),
+		 Combined=if BF="Triggered" or SB="Triggered" then "Triggered" else if BF="Indeterminate" or SB="Indeterminate" then "Indeterminate" else "Not triggered"
+		in [
+		 #"Daily 032 State"=Test(Value.Is(P,type logical),P=true),
+		 #"Daily 018 State"=Test(M<>null and M>=0,if M=null then false else M<8),
+		 #"Daily 054 State"=Test(D<>null and D>=0,if D=null then false else D>=10),
+		 #"Daily 055 State"=Test(D<>null and D>=0,if D=null then false else D>=30),
+		 #"Daily BIOS State"=BF, #"Daily NotSupported State"=SB,
+		 #"Daily Firmware State"=Combined,
+		 #"Daily Disabled State"=Test(List.Contains({"enabled","disabled","notsupported"},B),B="disabled")
+		]
+	lineageTag: 5290331b-2119-5cff-80b4-810061b4fb9a
+
+/// Same-tenant/same-batch native-key lookup; ambiguous matches never multiply evidence rows.
+expression CreateBacklogTools =
+		(R as record) as record =>
+		let
+		 Manifest=R[GetPreparedBatchManifest](), Tenant=Text.Lower(Text.Trim(Manifest[TenantKey])), Batch=Manifest[BatchId],
+		 K=(v as any) as text => if v=null then "" else Text.Lower(Text.Trim(Text.From(v))),
+		 Names=List.Transform(Manifest[Files] & Record.FieldOrDefault(Manifest,"Artifacts",{}),each [File]),
+		 Validate=(rows as table) as table =>
+		  if Table.HasColumns(rows,"TenantKey") and not List.AllTrue(List.Transform(Table.Column(rows,"TenantKey"),each K(_)=Tenant)) then error "Backlog foreign tenant"
+		  else if Table.HasColumns(rows,"Loaded Batch ID") and not List.AllTrue(List.Transform(Table.Column(rows,"Loaded Batch ID"),each _=Batch)) then error "Backlog foreign batch"
+		  else rows,
+		 Read=(file as text,cols as list) as table =>
+		  if not List.Contains(Names,file) then #table(cols,{})
+		  else Validate(R[ReadMailboxMigrationCsv](R[GetPreparedEvidenceFile](file),cols,{"Loaded Batch ID"})),
+		 Index=(rows as table,col as text) as record =>
+		  let Checked=Validate(rows), Added=Table.AddColumn(Checked,"__backlogKey",each K([TenantKey])&"|"&K(Record.Field(_,col)),type text),
+		      Keep=Table.SelectRows(Added,each K(Record.Field(_,col))<>""),
+		      Groups=Table.Group(Keep,{"__backlogKey"},{{"Count",each Table.RowCount(_),Int64.Type},{"Row",each if Table.RowCount(_)=1 then Table.First(_) else null,type nullable record}})
+		  in Record.FromList(Table.ToRecords(Groups),Groups[__backlogKey]),
+		 Match=(index as record,tenant as any,key as any,batch as any) as record =>
+		  if K(tenant)<>Tenant then error "Backlog foreign tenant"
+		  else if batch<>Batch then error "Backlog foreign batch"
+		  else let G=if K(key)="" then null else Record.FieldOrDefault(index,K(tenant)&"|"&K(key),null)
+		  in if G=null then [Row=null,State="No match"] else if G[Count]<>1 then [Row=null,State="Ambiguous"] else [Row=G[Row],State="Matched"],
+		 Field=(match as record,name as text) as nullable text => if match[Row]=null then null else let V=Record.FieldOrDefault(match[Row],name,null) in if K(V)="" then null else Text.Trim(Text.From(V)),
+		 OrState=(a as text,b as text) as text => if a="Triggered" or b="Triggered" then "Triggered" else if a="Indeterminate" or b="Indeterminate" then "Indeterminate" else if a="Not applicable" and b="Not applicable" then "Not applicable" else "Not triggered"
+		in [Key=K,Read=Read,Index=Index,Match=Match,Field=Field,Validate=Validate,OrState=OrState,Tenant=Tenant,Batch=Batch]
+	lineageTag: e3d8f43e-b8a9-5447-a30d-fe051a066a87

@@ -4,10 +4,10 @@
   "position": {
     "x": 32,
     "y": 432,
-    "z": 12,
+    "z": 6000,
     "height": 232,
     "width": 1856,
-    "tabOrder": 12
+    "tabOrder": 6000
   },
   "visual": {
     "visualType": "pivotTable",
@@ -276,6 +276,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
             }
           }
         }
@@ -307,7 +314,7 @@
             "columnAdjustment": {
               "expr": {
                 "Literal": {
-                  "Value": "'fitToContent'"
+                  "Value": "'growToFit'"
                 }
               }
             },
@@ -315,6 +322,13 @@
               "expr": {
                 "Literal": {
                   "Value": "132D"
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -577,7 +591,14 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -589,6 +610,55 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Daily Domain.Domain"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -605,7 +675,7 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
                 }
               }
             },
@@ -617,6 +687,20 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -633,7 +717,7 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
                 }
               }
             },
@@ -645,6 +729,20 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -661,7 +759,7 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
                 }
               }
             },
@@ -673,6 +771,20 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -689,7 +801,7 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
                 }
               }
             },
@@ -701,6 +813,20 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -717,7 +843,7 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
                 }
               }
             },
@@ -729,6 +855,20 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -745,7 +885,7 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
                 }
               }
             },
@@ -757,6 +897,20 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -773,7 +927,7 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
                 }
               }
             },
@@ -785,6 +939,20 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -801,7 +969,7 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
                 }
               }
             },
@@ -813,6 +981,20 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -829,7 +1011,7 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
                 }
               }
             },
@@ -841,6 +1023,20 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -857,7 +1053,7 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
                 }
               }
             },
@@ -869,6 +1065,20 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -885,7 +1095,7 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
                 }
               }
             },
@@ -897,6 +1107,20 @@
               }
             },
             "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
               "expr": {
                 "Literal": {
                   "Value": "true"

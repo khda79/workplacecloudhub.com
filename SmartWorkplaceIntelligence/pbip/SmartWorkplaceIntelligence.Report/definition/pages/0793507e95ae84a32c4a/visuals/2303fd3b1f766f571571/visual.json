@@ -3,9 +3,9 @@
   "name": "2303fd3b1f766f571571",
   "position": {
     "x": 32,
-    "y": 296,
+    "y": 320,
     "width": 1856,
-    "height": 296,
+    "height": 289.19540229885058,
     "z": 11500,
     "tabOrder": 1450
   },
@@ -23,11 +23,11 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 11 Blocking Reasons"
+                  "Property": "Reported blocker combination"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 11 Blocking Reasons",
-              "nativeQueryRef": "Windows 11 Blocking Reasons",
+              "queryRef": "Device Inventory Evidence.Reported blocker combination",
+              "nativeQueryRef": "Reported blocker combination",
               "active": true
             }
           ]
@@ -233,25 +233,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 devices by reported blocker combination'"
+                  "Value": "'Windows 10 devices by reported blocker combination · unreported detail is retained'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
+                  "Value": "11D"
                 }
               }
             }

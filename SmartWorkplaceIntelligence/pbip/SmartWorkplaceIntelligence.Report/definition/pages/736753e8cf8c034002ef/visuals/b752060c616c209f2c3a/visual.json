@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "b752060c616c209f2c3a",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 90065,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 90065
+  },
+  "visualGroup": {
+    "displayName": "Licensing review",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

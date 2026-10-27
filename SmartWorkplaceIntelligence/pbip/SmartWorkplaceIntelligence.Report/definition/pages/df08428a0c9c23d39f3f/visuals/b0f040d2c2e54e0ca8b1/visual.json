@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "b0f040d2c2e54e0ca8b1",
   "position": {
-    "x": 32.0,
-    "y": 120,
-    "z": 200,
+    "x": 1008,
+    "y": 8,
+    "z": 28000,
     "height": 80,
-    "width": 452.0,
-    "tabOrder": 200
+    "width": 208,
+    "tabOrder": 27000
   },
   "visual": {
     "visualType": "slicer",
@@ -269,23 +269,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "2e9cf07ec3c384865f4e",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "SharePoint On-prem Web Applications"
-              }
-            },
-            "Property": "Web Application"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
   }
 }

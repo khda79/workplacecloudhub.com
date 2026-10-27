@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "8a7db0cd5ce469115ff2",
   "position": {
-    "x": 968.0,
-    "y": 120,
-    "width": 920.0,
+    "x": 1328,
+    "y": 8,
+    "z": 8000,
     "height": 80,
-    "z": 15,
-    "tabOrder": 15
+    "width": 200,
+    "tabOrder": 11000
   },
   "visual": {
     "visualType": "slicer",
@@ -28,7 +28,8 @@
               },
               "queryRef": "License SKU Capacity.Capacity Class",
               "nativeQueryRef": "Capacity Class",
-              "active": true
+              "active": true,
+              "displayName": "Capacity scope"
             }
           ]
         }
@@ -61,7 +62,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Capacity class'"
+                  "Value": "'Capacity scope'"
                 }
               }
             },
@@ -107,7 +108,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Filter by Capacity class.'"
+                  "Value": "'Capacity scope: Governed = capacity reporting scope. Excluded = free, trial or environment-capacity SKUs. This is not a utilization threshold.'"
                 }
               }
             }

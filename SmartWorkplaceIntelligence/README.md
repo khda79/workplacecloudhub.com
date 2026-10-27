@@ -6,6 +6,14 @@ collaboration, messaging, and source quality. Native details retain their source
 identity and grain; reported configuration and status are qualified evidence,
 not proof of effective on-device behavior.
 
+The public master now contains 33 pages, including Remediation Backlog, and uses
+prepared Hybrid Identity Findings and Device Readiness Gap Evidence. The public
+storage adapter retains Local/SharePoint selection and neutral parameters. See
+[legacy readiness retirement](docs/LEGACY-READINESS-RETIREMENT.md) before deployment.
+The existing thematic profiles below cover 30 and 32 pages. No thematic reports
+were regenerated for this port; the 33-page master requires a reviewed manifest
+that assigns Remediation Backlog before thematic generation (coverage stays strict).
+
 ## Data flow
 
 The optional [Migration to SharePoint Online](docs/SPO-MIGRATION.md) feature

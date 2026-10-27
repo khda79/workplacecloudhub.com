@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "eppendinggaps20261012",
   "position": {
-    "x": 648,
-    "y": 222.3,
-    "width": 616,
-    "height": 107.4,
-    "z": 120,
-    "tabOrder": 648
+    "x": 32,
+    "y": 392,
+    "z": 4000,
+    "height": 80,
+    "width": 916,
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -28,7 +28,7 @@
               },
               "queryRef": "Endpoint Protection Evidence.Endpoint Protection Gap Display",
               "nativeQueryRef": "Endpoint Protection Gap Display",
-              "displayName": "Protection gaps \u2014 confirmed devices"
+              "displayName": "Protection gaps — confirmed devices"
             }
           ]
         },
@@ -147,7 +147,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Protection gaps \u2014 confirmed devices'"
+                  "Value": "'Protection gaps — confirmed devices'"
                 }
               }
             }
@@ -522,7 +522,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Protection gaps \u2014 confirmed devices: not assessed. Policy availability and qualified AV / EDR health are separate; absence of health evidence is not zero. Not zero.'"
+                  "Value": "'Protection gaps — confirmed devices: not assessed. Policy availability and qualified AV / EDR health are separate; absence of health evidence is not zero. Not zero.'"
                 }
               }
             }
@@ -531,5 +531,5 @@
       ]
     }
   },
-  "parentGroupName": "5c048ea3af19e711756c"
+  "parentGroupName": "498f0691cab15403f175"
 }

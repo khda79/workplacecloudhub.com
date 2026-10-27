@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "5bbdb72859bb7beb9bb7",
   "position": {
-    "x": 1664,
-    "y": 216,
-    "width": 224,
+    "x": 1136,
+    "y": 8,
+    "z": 61000,
     "height": 80,
-    "z": 31000,
-    "tabOrder": 31
+    "width": 192,
+    "tabOrder": 21000
   },
   "visual": {
     "visualType": "slicer",
@@ -20,14 +20,15 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "M365 License Selection"
+                      "Entity": "Account License Selection"
                     }
                   },
                   "Property": "License Product"
                 }
               },
-              "queryRef": "M365 License Selection.License Product",
+              "queryRef": "Account License Selection.License Product",
               "nativeQueryRef": "Licences M365",
+              "active": true,
               "displayName": "Licences M365"
             }
           ]
@@ -61,7 +62,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Licences M365'"
+                  "Value": "'Licences'"
                 }
               }
             },
@@ -82,6 +83,33 @@
               "expr": {
                 "Literal": {
                   "Value": "11D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "selection": [
+        {
+          "properties": {
+            "strictSingleSelect": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "singleSelect": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "selectAllCheckboxEnabled": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

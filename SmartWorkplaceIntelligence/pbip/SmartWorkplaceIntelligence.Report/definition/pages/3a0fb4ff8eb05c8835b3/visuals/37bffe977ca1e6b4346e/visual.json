@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "37bffe977ca1e6b4346e",
   "position": {
     "x": 32,
-    "y": 566.8,
+    "y": 478.79999999999995,
+    "z": 4000,
+    "height": 513.2,
     "width": 1856,
-    "height": 427.2,
-    "z": 12000,
-    "tabOrder": 544
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "tableEx",
@@ -15,34 +15,6 @@
       "queryState": {
         "Values": {
           "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "AD Object Evidence"
-                    }
-                  },
-                  "Property": "TenantADObjectKey"
-                }
-              },
-              "queryRef": "AD Object Evidence.TenantADObjectKey",
-              "nativeQueryRef": "TenantADObjectKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "AD Object Evidence"
-                    }
-                  },
-                  "Property": "ObjectSID"
-                }
-              },
-              "queryRef": "AD Object Evidence.ObjectSID",
-              "nativeQueryRef": "ObjectSID"
-            },
             {
               "field": {
                 "Column": {
@@ -93,11 +65,11 @@
                       "Entity": "AD Object Evidence"
                     }
                   },
-                  "Property": "PrimaryGroupID"
+                  "Property": "SourceCollectedDateTime"
                 }
               },
-              "queryRef": "AD Object Evidence.PrimaryGroupID",
-              "nativeQueryRef": "PrimaryGroupID"
+              "queryRef": "AD Object Evidence.SourceCollectedDateTime",
+              "nativeQueryRef": "SourceCollectedDateTime"
             },
             {
               "field": {
@@ -107,11 +79,39 @@
                       "Entity": "AD Object Evidence"
                     }
                   },
-                  "Property": "SourceCollectedDateTime"
+                  "Property": "TenantADObjectKey"
                 }
               },
-              "queryRef": "AD Object Evidence.SourceCollectedDateTime",
-              "nativeQueryRef": "SourceCollectedDateTime"
+              "queryRef": "AD Object Evidence.TenantADObjectKey",
+              "nativeQueryRef": "TenantADObjectKey"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Object Evidence"
+                    }
+                  },
+                  "Property": "ObjectSID"
+                }
+              },
+              "queryRef": "AD Object Evidence.ObjectSID",
+              "nativeQueryRef": "ObjectSID"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Object Evidence"
+                    }
+                  },
+                  "Property": "PrimaryGroupID"
+                }
+              },
+              "queryRef": "AD Object Evidence.PrimaryGroupID",
+              "nativeQueryRef": "PrimaryGroupID"
             },
             {
               "field": {
@@ -240,6 +240,13 @@
                   }
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
             }
           }
         }
@@ -320,6 +327,428 @@
             }
           }
         }
+      ],
+      "columnFormatting": [
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.ObjectGUID"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.TenantId"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.EnvironmentKey"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.OrganizationKey"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.TenantKey"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.PrimaryGroupID"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.ObjectSID"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.TenantADObjectKey"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.SourceCollectedDateTime"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.ObjectClass"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.DistinguishedName"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "AD Object Evidence.DomainName"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -329,7 +758,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD objects \u00b7 complete governed fields'"
+                  "Value": "'AD objects · complete governed fields'"
                 }
               }
             }
@@ -349,7 +778,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD objects \u00b7 complete governed fields'"
+                  "Value": "'AD objects · complete governed fields'"
                 }
               }
             },
@@ -438,7 +867,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -520,7 +956,7 @@
                 "Entity": "AD Object Evidence"
               }
             },
-            "Property": "Native Context Rows \u00b7 AD Object Evidence"
+            "Property": "Native Context Rows · AD Object Evidence"
           }
         },
         "type": "Advanced",
@@ -545,7 +981,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows \u00b7 AD Object Evidence"
+                      "Property": "Native Context Rows · AD Object Evidence"
                     }
                   },
                   "Right": {

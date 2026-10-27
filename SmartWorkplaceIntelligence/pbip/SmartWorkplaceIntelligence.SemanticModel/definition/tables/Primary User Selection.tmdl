@@ -1,0 +1,12 @@
+/// Disconnected report utility for primary-user search on the four approved device pages. Applied through scoped measures and row filters; not a source or inferred identity.
+table 'Primary User Selection'
+	lineageTag: 16ae7f00-39b3-4043-961a-77af98e8ce28
+
+	column 'Primary user'
+		lineageTag: 3c00d454-c228-4675-9303-354cd438ba74
+		isNameInferred
+		sourceColumn: [Primary user]
+
+	partition 'Primary User Selection' = calculated
+		mode: import
+		source = DISTINCT(UNION(SELECTCOLUMNS('Global Device Inventory',"Primary user",[Primary User (report)]),SELECTCOLUMNS('Device Inventory Evidence',"Primary user",[Primary User (report)]),SELECTCOLUMNS('Device System Evidence',"Primary user",[Primary User (report)])))

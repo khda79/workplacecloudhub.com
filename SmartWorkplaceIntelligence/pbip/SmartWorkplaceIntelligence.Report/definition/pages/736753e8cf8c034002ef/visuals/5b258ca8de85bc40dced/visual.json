@@ -1,16 +1,414 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "5b258ca8de85bc40dced",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 320,
+    "z": 0,
+    "height": 680,
     "width": 1856,
-    "height": 616,
-    "z": 110,
     "tabOrder": 672
   },
   "visual": {
     "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Primary SMTP Address"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Primary SMTP Address",
+              "nativeQueryRef": "Primary SMTP Address",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Display Name"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Display Name",
+              "nativeQueryRef": "Display Name",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Country",
+              "nativeQueryRef": "Country",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Country Basis"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Country Basis",
+              "nativeQueryRef": "Country Basis",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Source Domain"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Source Domain",
+              "nativeQueryRef": "Source Domain",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Exchange Version"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Exchange Version",
+              "nativeQueryRef": "Exchange Version",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Mailbox Type"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Mailbox Type",
+              "nativeQueryRef": "Mailbox Type",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Mailbox Size GB"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Mailbox Size GB",
+              "nativeQueryRef": "Mailbox Size GB",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Archive Size GB"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Archive Size GB",
+              "nativeQueryRef": "Archive Size GB",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Archive State"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Archive State",
+              "nativeQueryRef": "Archive State",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Full Access Count"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Full Access Count",
+              "nativeQueryRef": "Full Access Count",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Send As Count"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Send As Count",
+              "nativeQueryRef": "Send As Count",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Send On Behalf"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Send On Behalf",
+              "nativeQueryRef": "Send On Behalf",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Cross-premises Permissions"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Cross-premises Permissions",
+              "nativeQueryRef": "Cross-premises Permissions",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Hold and Retention"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Hold and Retention",
+              "nativeQueryRef": "Hold and Retention",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Large Item Count"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Large Item Count",
+              "nativeQueryRef": "Large Item Count",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Large Item Evidence"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Large Item Evidence",
+              "nativeQueryRef": "Large Item Evidence",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Identity Issues"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Identity Issues",
+              "nativeQueryRef": "Identity Issues",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Batch Name"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Batch Name",
+              "nativeQueryRef": "Batch Name",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Migration User Status"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Migration User Status",
+              "nativeQueryRef": "Migration User Status",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Risk Reasons"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Risk Reasons",
+              "nativeQueryRef": "Risk Reasons",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Migration Status"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Migration Status",
+              "nativeQueryRef": "Migration Status",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Next Action"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Next Action",
+              "nativeQueryRef": "Next Action",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Evidence Date"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Evidence Date",
+              "nativeQueryRef": "Evidence Date",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Mailbox GUID"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Mailbox GUID",
+              "nativeQueryRef": "Mailbox GUID",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Object GUID"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Object GUID",
+              "nativeQueryRef": "Object GUID",
+              "active": true
+            }
+          ]
+        }
+      }
+    },
     "objects": {
       "columnHeaders": [
         {
@@ -32,7 +430,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -66,9 +464,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -88,7 +493,7 @@
             "wordWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
@@ -142,20 +547,370 @@
       "columnFormatting": [
         {
           "selector": {
-            "metadata": "Mailbox Migration Inventory.Full Access Count"
+            "metadata": "Mailbox Migration Inventory.Primary SMTP Address"
           },
           "properties": {
-            "labelPrecision": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "'Left'"
                 }
               }
             },
-            "labelDisplayUnits": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
-                  "Value": "1D"
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Display Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Country"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Country Basis"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Source Domain"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Exchange Version"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Mailbox Type"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Mailbox Size GB"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Archive Size GB"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Archive State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Full Access Count"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -180,17 +935,122 @@
             "metadata": "Mailbox Migration Inventory.Send As Count"
           },
           "properties": {
-            "labelPrecision": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "'Center'"
                 }
               }
             },
-            "labelDisplayUnits": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
-                  "Value": "1D"
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Send On Behalf"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Cross-premises Permissions"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Hold and Retention"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -215,17 +1075,367 @@
             "metadata": "Mailbox Migration Inventory.Large Item Count"
           },
           "properties": {
-            "labelPrecision": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "'Center'"
                 }
               }
             },
-            "labelDisplayUnits": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
-                  "Value": "1D"
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Large Item Evidence"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Identity Issues"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Batch Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Migration User Status"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Risk Reasons"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Migration Status"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Next Action"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Evidence Date"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Mailbox GUID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Inventory.Object GUID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -245,380 +1455,8 @@
             }
           }
         }
-      ]
-    },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Primary SMTP Address"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Primary SMTP Address",
-              "nativeQueryRef": "Primary SMTP Address"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Display Name"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Display Name",
-              "nativeQueryRef": "Display Name"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Country"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Country",
-              "nativeQueryRef": "Country"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Country Basis"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Country Basis",
-              "nativeQueryRef": "Country Basis"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Source Domain"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Source Domain",
-              "nativeQueryRef": "Source Domain"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Exchange Version"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Exchange Version",
-              "nativeQueryRef": "Exchange Version"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Mailbox Type"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Mailbox Type",
-              "nativeQueryRef": "Mailbox Type"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Mailbox Size GB"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Mailbox Size GB",
-              "nativeQueryRef": "Mailbox Size GB"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Archive Size GB"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Archive Size GB",
-              "nativeQueryRef": "Archive Size GB"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Archive State"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Archive State",
-              "nativeQueryRef": "Archive State"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Full Access Count"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Full Access Count",
-              "nativeQueryRef": "Full Access Count"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Send As Count"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Send As Count",
-              "nativeQueryRef": "Send As Count"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Send On Behalf"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Send On Behalf",
-              "nativeQueryRef": "Send On Behalf"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Cross-premises Permissions"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Cross-premises Permissions",
-              "nativeQueryRef": "Cross-premises Permissions"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Hold and Retention"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Hold and Retention",
-              "nativeQueryRef": "Hold and Retention"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Large Item Count"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Large Item Count",
-              "nativeQueryRef": "Large Item Count"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Large Item Evidence"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Large Item Evidence",
-              "nativeQueryRef": "Large Item Evidence"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Identity Issues"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Identity Issues",
-              "nativeQueryRef": "Identity Issues"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Batch Name"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Batch Name",
-              "nativeQueryRef": "Batch Name"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Migration User Status"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Migration User Status",
-              "nativeQueryRef": "Migration User Status"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Risk Reasons"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Risk Reasons",
-              "nativeQueryRef": "Risk Reasons"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Migration Status"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Migration Status",
-              "nativeQueryRef": "Migration Status"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Next Action"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Next Action",
-              "nativeQueryRef": "Next Action"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Evidence Date"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Evidence Date",
-              "nativeQueryRef": "Evidence Date"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Mailbox GUID"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Mailbox GUID",
-              "nativeQueryRef": "Mailbox GUID"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Object GUID"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Object GUID",
-              "nativeQueryRef": "Object GUID"
-            }
-          ]
-        }
-      }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "title": [
@@ -634,7 +1472,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full local mailbox inventory \u00b7 all source-backed migration fields'"
+                  "Value": "'Full local mailbox inventory · all source-backed migration fields'"
                 }
               }
             },
@@ -734,7 +1572,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -781,7 +1626,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full local mailbox inventory \u00b7 all source-backed migration fields'"
+                  "Value": "'Full local mailbox inventory · all source-backed migration fields'"
                 }
               }
             }
@@ -801,7 +1646,8 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "parentGroupName": "b95d141b0fea39fdff6b"
 }

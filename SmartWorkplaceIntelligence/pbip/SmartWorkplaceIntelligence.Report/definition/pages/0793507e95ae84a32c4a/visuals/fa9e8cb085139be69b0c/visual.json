@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "fa9e8cb085139be69b0c",
   "position": {
     "x": 968,
-    "y": 584,
+    "y": 432,
+    "z": 4000,
+    "height": 568,
     "width": 920,
-    "height": 408,
-    "z": 10001,
     "tabOrder": 1400
   },
   "visual": {
@@ -345,7 +345,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Observed snapshots \u00b7 2026-07-08 to 2026-10-05'"
+                  "Value": "'Observed snapshots · 2026-07-08 to 2026-10-05'"
                 }
               }
             },

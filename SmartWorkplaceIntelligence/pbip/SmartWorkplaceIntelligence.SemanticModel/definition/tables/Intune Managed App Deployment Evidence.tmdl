@@ -50,6 +50,17 @@ table 'Intune Managed App Deployment Evidence'
 		displayFolder: Intune | Reported scope
 		lineageTag: f1092249-fa9a-43d0-b24b-09cb4e153ee0
 
+	/// SAM display resolved by qualified native identity, same tenant and loaded batch. Empty text when no qualified SAM; preserves unresolved source rows in table projections.
+	measure 'SAM · Intune Managed App Deployment Evidence' = VAR _one = HASONEVALUE('Intune Managed App Deployment Evidence'[Device ID]) && HASONEVALUE('Intune Managed App Deployment Evidence'[Tenant Key]) && HASONEVALUE('Intune Managed App Deployment Evidence'[Loaded Batch ID]) && HASONEVALUE('Intune Managed App Deployment Evidence'[User Principal Name]) RETURN IF(COUNTROWS('Intune Managed App Deployment Evidence') > 0, IF(_one, COALESCE(SELECTEDVALUE('Intune Managed App Deployment Evidence'[Report Deployment User SAM]), ""), ""))
+		displayFolder: Private identity display
+		lineageTag: f5afc8d5-a414-461c-91f0-946b800adc4c
+
+	/// Read-only report utility applying the disconnected primary-user selector to source-qualified device rows.
+	measure 'Primary user row match · Intune Managed App Deployment Evidence' = VAR PresentRows = IF(ISFILTERED('Primary User Selection'[Primary user]), CALCULATE(COUNTROWS('Intune Managed App Deployment Evidence'), KEEPFILTERS(TREATAS(VALUES('Primary User Selection'[Primary user]), 'Intune Managed App Deployment Evidence'[Primary User (report)]))), COUNTROWS('Intune Managed App Deployment Evidence')) RETURN IF(PresentRows>0,1,BLANK())
+		formatString: 0
+		isHidden
+		lineageTag: ae7c4969-f576-4cc2-8f7c-cb6bc2610e7e
+
 	/// Prepared IntuneManagedAppDeploymentEvidence.csv: TenantKey. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Tenant Key'
 		dataType: string
@@ -100,11 +111,15 @@ table 'Intune Managed App Deployment Evidence'
 
 	/// Prepared IntuneManagedAppDeploymentEvidence.csv: SourceRecord. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Source Record'
-		dataType: int64
+		dataType: double
 		isHidden
 		lineageTag: 53ea0aec-20f6-4af3-a815-cd841cc100ae
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: SourceRecord
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneManagedAppDeploymentEvidence.csv: CollectionUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Collection UTC'
@@ -242,6 +257,84 @@ table 'Intune Managed App Deployment Evidence'
 		lineageTag: 70a0a104-c327-4993-8793-daa4fe55acf5
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
+
+	/// Observed primary user, exact source ID and tenant/batch matching only; used by the report search.
+	column 'Primary User (report)' =
+			VAR _t='Intune Managed App Deployment Evidence'[Tenant Key]
+			VAR _b='Intune Managed App Deployment Evidence'[Loaded Batch ID]
+			VAR _gkey='Intune Managed App Deployment Evidence'[Device ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Intune Managed App Deployment Evidence'[Device ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Intune Managed App Deployment Evidence'[Device ID]))
+			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: a6258a38-8341-4883-8240-445c510cf0e6
+
+	/// Qualified SAM of the primary user; never inferred from UPN text.
+	column 'Primary User SAM (report)' =
+			VAR _t='Intune Managed App Deployment Evidence'[Tenant Key]
+			VAR _b='Intune Managed App Deployment Evidence'[Loaded Batch ID]
+			VAR _gkey='Intune Managed App Deployment Evidence'[Device ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Intune Managed App Deployment Evidence'[Device ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Intune Managed App Deployment Evidence'[Device ID]))
+			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 7fdbb1a3-6cd3-439e-8437-c430a2f2b8f2
+
+	/// Last Windows console user observed at collection. Does not mean current user or last RDP session.
+	column 'Last Console User (report)' =
+			VAR _t='Intune Managed App Deployment Evidence'[Tenant Key]
+			VAR _b='Intune Managed App Deployment Evidence'[Loaded Batch ID]
+			VAR _gkey='Intune Managed App Deployment Evidence'[Device ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Intune Managed App Deployment Evidence'[Device ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Intune Managed App Deployment Evidence'[Device ID]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 0ed95f24-5e97-4669-b102-37b41c9c6ecb
+
+	/// Source-qualified time of last observed console logon; unknown remains blank.
+	column 'Last Console Logon UTC (report)' =
+			VAR _t='Intune Managed App Deployment Evidence'[Tenant Key]
+			VAR _b='Intune Managed App Deployment Evidence'[Loaded Batch ID]
+			VAR _gkey='Intune Managed App Deployment Evidence'[Device ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Intune Managed App Deployment Evidence'[Device ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Intune Managed App Deployment Evidence'[Device ID]))
+			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm
+		displayFolder: Report identity context
+		lineageTag: 55123f62-3090-4a56-aec7-29d02f37e1b3
+
+	/// Preserves source status and timestamp qualification, including stale/missing/error evidence.
+	column 'Console Logon Qualification (report)' =
+			VAR _t='Intune Managed App Deployment Evidence'[Tenant Key]
+			VAR _b='Intune Managed App Deployment Evidence'[Loaded Batch ID]
+			VAR _gkey='Intune Managed App Deployment Evidence'[Device ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Intune Managed App Deployment Evidence'[Device ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Intune Managed App Deployment Evidence'[Device ID]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _quality=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Quality],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(ISBLANK(_status),"No matched system observation",_status&" · "&_quality)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: e31cbd17-e1b3-4002-8252-d1128cd8b18b
+
+	/// Cached equivalent of the qualified deployment-user SAM display: exact device-native-user links, same tenant/batch, and UPN equality; no guessed SAM.
+	column 'Report Deployment User SAM' =
+			VAR _display = (VAR _id='Intune Managed App Deployment Evidence'[Device ID] VAR _tenant='Intune Managed App Deployment Evidence'[Tenant Key] VAR _batch='Intune Managed App Deployment Evidence'[Loaded Batch ID]
+			 VAR _dk=IF(NOT ISBLANK(_id),LOOKUPVALUE('Native Managed Device Evidence'[TenantDeviceKey],'Native Managed Device Evidence'[ManagedDeviceId],_id,'Native Managed Device Evidence'[TenantKey],_tenant,'Native Managed Device Evidence'[Loaded Batch ID],_batch))
+			 VAR _uid=IF(NOT ISBLANK(_dk),LOOKUPVALUE('Native Device Evidence'[PrimaryUserSourceId],'Native Device Evidence'[TenantDeviceKey],_dk,'Native Device Evidence'[TenantKey],_tenant,'Native Device Evidence'[Loaded Batch ID],_batch))
+			 VAR _upn=IF(NOT ISBLANK(_uid),LOOKUPVALUE('Native User Evidence'[UserPrincipalName],'Native User Evidence'[SourceUserId],_uid,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))
+			 RETURN IF(NOT ISBLANK(_uid) && _upn='Intune Managed App Deployment Evidence'[User Principal Name],LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],_uid,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN _display
+		dataType: string
+		isHidden
+		lineageTag: 03c4ef94-7d10-424c-bd60-f73f856799e1
 
 	partition 'Intune Managed App Deployment Evidence' = m
 		mode: import

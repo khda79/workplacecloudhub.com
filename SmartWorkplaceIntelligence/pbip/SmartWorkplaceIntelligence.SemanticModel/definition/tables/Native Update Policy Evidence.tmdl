@@ -150,3 +150,5 @@ table 'Native Update Policy Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimWindowsUpdatePolicy.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUpdatePolicyKey", dataType="String"], [name="PolicyType", dataType="String"], [name="PolicyId", dataType="String"], [name="DisplayName", dataType="String"], [name="TargetVersion", dataType="String"], [name="ReleaseDateTime", dataType="DateTime"], [name="DaysUntilForcedReboot", dataType="String"], [name="CreatedDateTime", dataType="DateTime", allowSourceWallClock=true], [name="LastModifiedDateTime", dataType="DateTime", allowSourceWallClock=true], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

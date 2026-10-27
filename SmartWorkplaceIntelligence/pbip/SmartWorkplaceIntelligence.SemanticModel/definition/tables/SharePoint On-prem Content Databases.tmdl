@@ -136,6 +136,15 @@ table 'SharePoint On-prem Content Databases'
 		lineageTag: 7d0e45ce-1365-4a44-b6cb-82f2d76365fb
 		sourceColumn: Content Database Key
 
+	column 'Optional Schema Ready'
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: bc7889db-d0b2-4302-a086-a55932d066ec
+		summarizeBy: none
+		sourceColumn: Optional Schema Ready
+
+		annotation SummarizationSetBy = Automatic
+
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'
 		dataType: string

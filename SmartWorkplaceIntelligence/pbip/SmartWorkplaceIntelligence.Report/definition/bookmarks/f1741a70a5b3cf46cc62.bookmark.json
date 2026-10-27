@@ -1,0 +1,128 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "f1741a70a5b3cf46cc62",
+  "displayName": "Inventory",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "020a68837ab1e4142264",
+      "05cdff5da39da0ea86eb",
+      "2126a4b3c4fb6811be92",
+      "3eddc2307a90af5dd252",
+      "6c76b3c17fa0a5b5af97",
+      "85c78b4558cc2a14ed5c",
+      "875c1fb0e4922aea38b8",
+      "b0b0ebdc53fa0b467e8f",
+      "db5072c5edbfdb9dd9a6",
+      "fa97920737bd2e1c8531",
+      "fb4afc01f98a718de907",
+      "80833e19638ec7f26dce",
+      "fa4692ca7c6fb08bcb46",
+      "c52cefb219c2fa901110",
+      "1fc855e92aca9f9f93ed",
+      "16f9b72f0d09d57b56e8",
+      "83aee12380d4434ffb36",
+      "0aa0b8129f6eee74dc49",
+      "cccc89e29ddf36681dc2"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "c8ce269962e9453ea038",
+    "sections": {
+      "c8ce269962e9453ea038": {
+        "visualContainers": {
+          "80833e19638ec7f26dce": {
+            "singleVisual": {}
+          },
+          "fa4692ca7c6fb08bcb46": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c52cefb219c2fa901110": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "1fc855e92aca9f9f93ed": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "16f9b72f0d09d57b56e8": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "83aee12380d4434ffb36": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "0aa0b8129f6eee74dc49": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "cccc89e29ddf36681dc2": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "020a68837ab1e4142264": {
+            "isHidden": true
+          },
+          "05cdff5da39da0ea86eb": {
+            "isHidden": true
+          },
+          "2126a4b3c4fb6811be92": {
+            "isHidden": true
+          },
+          "3eddc2307a90af5dd252": {
+            "isHidden": true
+          },
+          "6c76b3c17fa0a5b5af97": {
+            "isHidden": true
+          },
+          "85c78b4558cc2a14ed5c": {
+            "isHidden": true
+          },
+          "875c1fb0e4922aea38b8": {
+            "isHidden": true
+          },
+          "b0b0ebdc53fa0b467e8f": {
+            "isHidden": true
+          },
+          "db5072c5edbfdb9dd9a6": {
+            "isHidden": true
+          },
+          "fa97920737bd2e1c8531": {
+            "isHidden": true
+          },
+          "fb4afc01f98a718de907": {
+            "isHidden": false
+          }
+        }
+      }
+    }
+  }
+}

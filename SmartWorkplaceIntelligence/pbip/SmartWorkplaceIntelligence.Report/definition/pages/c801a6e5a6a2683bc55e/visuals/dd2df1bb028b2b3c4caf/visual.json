@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "dd2df1bb028b2b3c4caf",
   "position": {
     "x": 880,
-    "y": 208.0,
-    "z": 141,
-    "width": 400,
+    "y": 208,
+    "z": 12000,
     "height": 114.5,
-    "tabOrder": 141
+    "width": 400,
+    "tabOrder": 15000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -30,6 +30,25 @@
               "nativeQueryRef": "Noncompliant Devices"
             }
           ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "KPI Alert Details Noncompliant Devices"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.KPI Alert Details Noncompliant Devices",
+              "nativeQueryRef": "Noncompliant Devices · thresholds",
+              "displayName": "Noncompliant Devices · thresholds"
+            }
+          ]
         }
       }
     },
@@ -47,7 +66,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -62,8 +81,95 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#005A9E'"
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Noncompliant Devices"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Noncompliant Devices"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Noncompliant Devices"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#005A9E'"
+                        }
+                      }
                     }
                   }
                 }
@@ -86,7 +192,7 @@
             "showBlankAs": {
               "expr": {
                 "Literal": {
-                  "Value": "'\u2014'"
+                  "Value": "'—'"
                 }
               }
             }
@@ -195,8 +301,95 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#005A9E'"
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Noncompliant Devices"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Noncompliant Devices"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Noncompliant Devices"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#005A9E'"
+                        }
+                      }
                     }
                   }
                 }

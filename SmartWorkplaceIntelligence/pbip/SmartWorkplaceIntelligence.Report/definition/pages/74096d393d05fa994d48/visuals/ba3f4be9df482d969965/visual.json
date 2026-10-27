@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "ba3f4be9df482d969965",
   "position": {
     "x": 1274.6666666666667,
     "y": 376,
-    "width": 302.6666666666667,
-    "height": 128,
-    "z": 205,
-    "tabOrder": 206
+    "z": 5000,
+    "height": 96,
+    "width": 302.66666666666669,
+    "tabOrder": 5000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -78,6 +78,21 @@
               "queryRef": "License Report Summary.License Overview Family Over-assigned Units",
               "nativeQueryRef": "License Overview Family Over-assigned Units",
               "displayName": "Over-assigned units"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Summary"
+                    }
+                  },
+                  "Property": "KPI Alert Details License Report Recovery Candidates"
+                }
+              },
+              "queryRef": "License Report Summary.KPI Alert Details License Report Recovery Candidates",
+              "nativeQueryRef": "License Report Recovery Candidates · thresholds",
+              "displayName": "License Report Recovery Candidates · thresholds"
             }
           ]
         }
@@ -112,8 +127,95 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Recovery Candidates"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Recovery Candidates"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Recovery Candidates"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#215E9E'"
+                        }
+                      }
                     }
                   }
                 }
@@ -231,8 +333,95 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Recovery Candidates"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Recovery Candidates"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Recovery Candidates"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#215E9E'"
+                        }
+                      }
                     }
                   }
                 }
@@ -667,6 +856,7 @@
       ]
     }
   },
+  "parentGroupName": "4221326348240b21e4d6",
   "filterConfig": {
     "filters": [
       {
@@ -745,6 +935,5 @@
         "howCreated": "User"
       }
     ]
-  },
-  "parentGroupName": "4221326348240b21e4d6"
+  }
 }

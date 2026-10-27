@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "d10d39e425d192b96a5f",
   "position": {
     "x": 32,
-    "y": 673.3,
+    "y": 464,
+    "z": 12000,
+    "height": 390,
     "width": 1208,
-    "height": 214.7,
-    "z": 23,
-    "tabOrder": 1216
+    "tabOrder": 13000
   },
   "visual": {
     "visualType": "tableEx",
@@ -28,6 +28,7 @@
               },
               "queryRef": "License Report Summary.Product",
               "nativeQueryRef": "License",
+              "active": true,
               "displayName": "License"
             },
             {
@@ -42,8 +43,9 @@
                 }
               },
               "queryRef": "License Report Summary.Enabled Units",
-              "nativeQueryRef": "Enabled",
-              "displayName": "Enabled"
+              "nativeQueryRef": "Tenant enabled",
+              "active": true,
+              "displayName": "Tenant enabled"
             },
             {
               "field": {
@@ -57,8 +59,9 @@
                 }
               },
               "queryRef": "License Report Summary.Consumed Units",
-              "nativeQueryRef": "Used",
-              "displayName": "Used"
+              "nativeQueryRef": "Tenant assigned",
+              "active": true,
+              "displayName": "Tenant assigned"
             },
             {
               "field": {
@@ -73,7 +76,8 @@
               },
               "queryRef": "License Report Summary.License Report Used (%)",
               "nativeQueryRef": "Used %",
-              "displayName": "Used %"
+              "active": true,
+              "displayName": "Tenant used (%)"
             },
             {
               "field": {
@@ -88,7 +92,8 @@
               },
               "queryRef": "License Report Summary.License Report Available Label",
               "nativeQueryRef": "License Report Available Label",
-              "displayName": "Available"
+              "active": true,
+              "displayName": "Tenant available"
             },
             {
               "field": {
@@ -103,7 +108,8 @@
               },
               "queryRef": "License Report Summary.License Report Over-assigned Units",
               "nativeQueryRef": "License Report Over-assigned Units",
-              "displayName": "Over-assigned Units"
+              "active": true,
+              "displayName": "Tenant over-assigned"
             },
             {
               "field": {
@@ -118,22 +124,24 @@
               },
               "queryRef": "License Report Summary.License Report Available (%)",
               "nativeQueryRef": "Free %",
-              "displayName": "Free %"
+              "active": true,
+              "displayName": "Tenant free (%)"
             },
             {
               "field": {
-                "Column": {
+                "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Report Summary"
+                      "Entity": "License User Assignments"
                     }
                   },
-                  "Property": "Assigned Users"
+                  "Property": "Selected Licensed Users"
                 }
               },
-              "queryRef": "License Report Summary.Assigned Users",
-              "nativeQueryRef": "Assigned users",
-              "displayName": "Assigned users"
+              "queryRef": "License User Assignments.Selected Licensed Users",
+              "nativeQueryRef": "Selected licensed users",
+              "active": true,
+              "displayName": "Selected licensed users"
             },
             {
               "field": {
@@ -148,7 +156,24 @@
               },
               "queryRef": "License Report Summary.License Report Subscription Status",
               "nativeQueryRef": "Status",
-              "displayName": "Status"
+              "active": true,
+              "displayName": "Tenant status"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License User Assignments"
+                    }
+                  },
+                  "Property": "Selected License Assignments"
+                }
+              },
+              "queryRef": "License User Assignments.Selected License Assignments",
+              "nativeQueryRef": "Selected assignments",
+              "active": true,
+              "displayName": "Selected assignments"
             }
           ]
         }
@@ -212,6 +237,13 @@
                       "Value": "'#215E9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -301,6 +333,358 @@
             }
           }
         }
+      ],
+      "columnFormatting": [
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License User Assignments.Selected License Assignments"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.License Report Subscription Status"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License User Assignments.Selected Licensed Users"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.License Report Available (%)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.License Report Over-assigned Units"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.License Report Available Label"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.License Report Used (%)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.Consumed Units"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.Enabled Units"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.Product"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -310,7 +694,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'License family capacity \u00b7 complete selected families'"
+                  "Value": "'License family capacity · complete selected families'"
                 }
               }
             }
@@ -330,7 +714,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'License family capacity \u00b7 complete selected families'"
+                  "Value": "'License family capacity · complete selected families'"
                 }
               }
             },
@@ -530,6 +914,7 @@
     },
     "drillFilterOtherVisuals": true
   },
+  "parentGroupName": "403082f4ddd7359804c4",
   "filterConfig": {
     "filters": [
       {
@@ -584,6 +969,5 @@
         "isLockedInViewMode": true
       }
     ]
-  },
-  "parentGroupName": "403082f4ddd7359804c4"
+  }
 }

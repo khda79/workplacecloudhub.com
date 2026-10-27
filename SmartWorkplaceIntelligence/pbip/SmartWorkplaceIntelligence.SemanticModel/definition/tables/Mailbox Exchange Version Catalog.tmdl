@@ -9,7 +9,7 @@ table 'Mailbox Exchange Version Catalog'
 			        COALESCE(
 			            CALCULATE(
 			                [Mailboxes],
-			                TREATAS({ SelectedVersion }, 'Mailbox Evidence'[Exchange Version])
+			                TREATAS({ SelectedVersion }, 'Mailbox Exploration Inventory'[Exchange Version])
 			            ),
 			            0
 			        )
@@ -34,4 +34,3 @@ table 'Mailbox Exchange Version Catalog'
 				        { "Exchange Server SE" }
 				    }
 				)
-

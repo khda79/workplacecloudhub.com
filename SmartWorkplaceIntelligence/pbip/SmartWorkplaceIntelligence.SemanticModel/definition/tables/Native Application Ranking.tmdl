@@ -62,6 +62,14 @@ table 'Native Application Ranking'
 		summarizeBy: none
 		sourceColumn: ReportedDeviceCount
 
+	column TenantKey
+		dataType: string
+		lineageTag: 747c6458-faf3-4e1e-838a-79b01217fea0
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+		annotation SummarizationSetBy = Automatic
+
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'
 		dataType: string

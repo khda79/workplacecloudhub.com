@@ -1,16 +1,296 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "7506bd1c00b74d2a375e",
   "position": {
     "x": 32,
-    "y": 581.8,
+    "y": 558.41247833622174,
+    "z": 5000,
+    "height": 441.58752166377815,
     "width": 1856,
-    "height": 374.7,
-    "z": 110,
-    "tabOrder": 1104
+    "tabOrder": 7000
   },
   "visual": {
     "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Device Name"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Device Name",
+              "nativeQueryRef": "Device Name",
+              "displayName": "Device Name",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Primary User (report)"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Primary User (report)",
+              "nativeQueryRef": "Primary User (report)",
+              "active": true,
+              "displayName": "Primary User UPN"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Primary User SAM (report)"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Primary User SAM (report)",
+              "nativeQueryRef": "Primary User SAM (report)",
+              "active": true,
+              "displayName": "Primary User SAM"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Last Console User (report)"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Last Console User (report)",
+              "nativeQueryRef": "Last Console User (report)",
+              "active": true,
+              "displayName": "Last console user"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Last Console Logon UTC (report)"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Last Console Logon UTC (report)",
+              "nativeQueryRef": "Last Console Logon UTC (report)",
+              "active": true,
+              "displayName": "Last console logon UTC"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "AD Domain"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.AD Domain",
+              "nativeQueryRef": "AD Domain",
+              "displayName": "AD Domain",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Autopatch Policy State"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Autopatch Policy State",
+              "nativeQueryRef": "Anchor state",
+              "displayName": "Anchor state",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Autopatch Device Status"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Autopatch Device Status",
+              "nativeQueryRef": "Anchor device status",
+              "displayName": "Anchor device status",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Windows 11 Policy State"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Windows 11 Policy State",
+              "nativeQueryRef": "Windows 11 24H2 state",
+              "displayName": "Windows 11 24H2 state",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Windows 11 Device Status"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Windows 11 Device Status",
+              "nativeQueryRef": "Windows 11 device status",
+              "displayName": "Windows 11 device status",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Windows 11 Blocking Reason"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Windows 11 Blocking Reason",
+              "nativeQueryRef": "Windows 11 blocking reason",
+              "displayName": "Windows 11 blocking reason",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Autopatch Observation Date"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Autopatch Observation Date",
+              "nativeQueryRef": "Anchor observation date",
+              "displayName": "Anchor observation date",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Windows 11 Observation Date"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Windows 11 Observation Date",
+              "nativeQueryRef": "Windows 11 observation date",
+              "displayName": "Windows 11 observation date",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Autopatch Blocking Reason"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Autopatch Blocking Reason",
+              "nativeQueryRef": "Anchor blocking reason",
+              "displayName": "Anchor blocking reason",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Autopatch Alert"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Autopatch Alert",
+              "nativeQueryRef": "Anchor alert",
+              "displayName": "Anchor alert",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Windows 11 Alert"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Windows 11 Alert",
+              "nativeQueryRef": "Windows 11 alert",
+              "displayName": "Windows 11 alert",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Console Logon Qualification (report)"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Console Logon Qualification (report)",
+              "nativeQueryRef": "Console Logon Qualification (report)",
+              "active": true,
+              "displayName": "Console logon qualification"
+            }
+          ]
+        }
+      }
+    },
     "objects": {
       "columnHeaders": [
         {
@@ -32,7 +312,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -66,9 +346,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -138,196 +425,605 @@
             }
           }
         }
-      ]
-    },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Device Name"
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Device Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
                 }
-              },
-              "queryRef": "Windows Migration Evidence.Device Name",
-              "nativeQueryRef": "Device Name",
-              "displayName": "Device Name"
+              }
             },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "AD Domain"
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
-              },
-              "queryRef": "Windows Migration Evidence.AD Domain",
-              "nativeQueryRef": "AD Domain",
-              "displayName": "AD Domain"
+              }
             },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Autopatch Policy State"
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
-              },
-              "queryRef": "Windows Migration Evidence.Autopatch Policy State",
-              "nativeQueryRef": "Anchor state",
-              "displayName": "Anchor state"
+              }
             },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Autopatch Device Status"
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
-              },
-              "queryRef": "Windows Migration Evidence.Autopatch Device Status",
-              "nativeQueryRef": "Anchor device status",
-              "displayName": "Anchor device status"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Windows 11 Policy State"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Windows 11 Policy State",
-              "nativeQueryRef": "Windows 11 24H2 state",
-              "displayName": "Windows 11 24H2 state"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Windows 11 Device Status"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Windows 11 Device Status",
-              "nativeQueryRef": "Windows 11 device status",
-              "displayName": "Windows 11 device status"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Windows 11 Blocking Reason"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Windows 11 Blocking Reason",
-              "nativeQueryRef": "Windows 11 blocking reason",
-              "displayName": "Windows 11 blocking reason"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Autopatch Observation Date"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Autopatch Observation Date",
-              "nativeQueryRef": "Anchor observation date",
-              "displayName": "Anchor observation date"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Windows 11 Observation Date"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Windows 11 Observation Date",
-              "nativeQueryRef": "Windows 11 observation date",
-              "displayName": "Windows 11 observation date"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Autopatch Blocking Reason"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Autopatch Blocking Reason",
-              "nativeQueryRef": "Anchor blocking reason",
-              "displayName": "Anchor blocking reason"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Autopatch Alert"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Autopatch Alert",
-              "nativeQueryRef": "Anchor alert",
-              "displayName": "Anchor alert"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Windows 11 Alert"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Windows 11 Alert",
-              "nativeQueryRef": "Windows 11 alert",
-              "displayName": "Windows 11 alert"
+              }
             }
-          ]
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Primary User (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Primary User SAM (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Last Console User (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Last Console Logon UTC (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.AD Domain"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Autopatch Policy State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Autopatch Device Status"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Windows 11 Policy State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Windows 11 Device Status"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Windows 11 Blocking Reason"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Autopatch Observation Date"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Windows 11 Observation Date"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Autopatch Blocking Reason"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Autopatch Alert"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Windows 11 Alert"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Console Logon Qualification (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
         }
-      }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "title": [
@@ -443,7 +1139,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -490,7 +1193,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Feature-update policy observations \u00b7 unique tenant / policy / Intune device ID'"
+                  "Value": "'Feature-update policy observations · unique tenant / policy / Intune device ID'"
                 }
               }
             }
@@ -510,7 +1213,8 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "parentGroupName": "231d4d0eaf859e71b6e1",
   "filterConfig": {
@@ -528,7 +1232,6 @@
           }
         },
         "type": "Categorical",
-        "howCreated": "User",
         "filter": {
           "Version": 2,
           "From": [
@@ -567,7 +1270,8 @@
               }
             }
           ]
-        }
+        },
+        "howCreated": "User"
       }
     ]
   }

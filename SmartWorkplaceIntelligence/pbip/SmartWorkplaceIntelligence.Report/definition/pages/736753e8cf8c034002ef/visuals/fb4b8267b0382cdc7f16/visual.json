@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "fb4b8267b0382cdc7f16",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 320,
+    "z": 1000,
+    "height": 105.97402597402598,
     "width": 1856,
-    "height": 104,
-    "z": 114,
     "tabOrder": 672
   },
   "visual": {
@@ -27,8 +27,8 @@
                 }
               },
               "queryRef": "Mailbox Migration Inventory.Large Mailboxes For Review",
-              "nativeQueryRef": "At least 45 GB \u00b7 target quota review",
-              "displayName": "At least 45 GB \u00b7 target quota review"
+              "nativeQueryRef": "At least 45 GB · target quota review",
+              "displayName": "At least 45 GB · target quota review"
             },
             {
               "field": {
@@ -231,6 +231,27 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "2L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }

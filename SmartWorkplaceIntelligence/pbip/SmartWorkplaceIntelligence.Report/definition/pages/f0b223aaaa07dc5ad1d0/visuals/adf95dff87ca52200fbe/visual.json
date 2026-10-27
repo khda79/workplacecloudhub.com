@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "adf95dff87ca52200fbe",
   "position": {
-    "x": 1409,
-    "y": 425,
-    "z": 125,
-    "width": 478,
-    "height": 140,
-    "tabOrder": 125
+    "x": 1420,
+    "y": 464,
+    "z": 25000,
+    "height": 96,
+    "width": 222,
+    "tabOrder": 27000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -30,6 +30,25 @@
               "nativeQueryRef": "Microsoft Secure Score (%)"
             }
           ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Security Control Evidence"
+                    }
+                  },
+                  "Property": "KPI Alert Details Microsoft Secure Score (%)"
+                }
+              },
+              "queryRef": "Security Control Evidence.KPI Alert Details Microsoft Secure Score (%)",
+              "nativeQueryRef": "Microsoft Secure Score (%) · thresholds",
+              "displayName": "Microsoft Secure Score (%) · thresholds"
+            }
+          ]
         }
       }
     },
@@ -47,7 +66,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -62,8 +81,95 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#2F6B9A'"
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Security Control Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Microsoft Secure Score (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Security Control Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Microsoft Secure Score (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Security Control Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Microsoft Secure Score (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#2F6B9A'"
+                        }
+                      }
                     }
                   }
                 }
@@ -95,7 +201,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
@@ -174,8 +280,95 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#2F6B9A'"
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Security Control Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Microsoft Secure Score (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Security Control Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Microsoft Secure Score (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Security Control Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Microsoft Secure Score (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#2F6B9A'"
+                        }
+                      }
                     }
                   }
                 }
@@ -392,14 +585,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Security posture'"
+                  "Value": "'Microsoft Secure Score (%)'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "13D"
+                  "Value": "10D"
                 }
               }
             },

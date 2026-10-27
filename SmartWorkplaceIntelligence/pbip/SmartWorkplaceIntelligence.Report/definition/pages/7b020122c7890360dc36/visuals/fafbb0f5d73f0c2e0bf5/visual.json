@@ -1,16 +1,232 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "fafbb0f5d73f0c2e0bf5",
   "position": {
     "x": 32,
-    "y": 379.5,
+    "y": 432,
+    "z": 0,
+    "height": 568,
     "width": 1856,
-    "height": 512,
-    "z": 110,
     "tabOrder": 672
   },
   "visual": {
     "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Device Name"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Device Name",
+              "nativeQueryRef": "Device Name",
+              "displayName": "Device Name",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Primary User (report)"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Primary User (report)",
+              "nativeQueryRef": "Primary User (report)",
+              "active": true,
+              "displayName": "Primary User UPN"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Primary User SAM (report)"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Primary User SAM (report)",
+              "nativeQueryRef": "Primary User SAM (report)",
+              "active": true,
+              "displayName": "Primary User SAM"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Last Console User (report)"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Last Console User (report)",
+              "nativeQueryRef": "Last Console User (report)",
+              "active": true,
+              "displayName": "Last console user"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Last Console Logon UTC (report)"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Last Console Logon UTC (report)",
+              "nativeQueryRef": "Last Console Logon UTC (report)",
+              "active": true,
+              "displayName": "Last console logon UTC"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "AD Domain"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.AD Domain",
+              "nativeQueryRef": "AD Domain",
+              "displayName": "AD Domain",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "OS Version"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.OS Version",
+              "nativeQueryRef": "OS Version",
+              "displayName": "OS Version",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Intune State"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Intune State",
+              "nativeQueryRef": "Intune State",
+              "displayName": "Intune State",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Upgrade Eligibility"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Upgrade Eligibility",
+              "nativeQueryRef": "Upgrade Eligibility",
+              "displayName": "Upgrade Eligibility",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Inventory Observation Date"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Inventory Observation Date",
+              "nativeQueryRef": "Inventory Observation Date",
+              "displayName": "Inventory Observation Date",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Next Action"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Next Action",
+              "nativeQueryRef": "Next Action",
+              "displayName": "Next Action",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Console Logon Qualification (report)"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Console Logon Qualification (report)",
+              "nativeQueryRef": "Console Logon Qualification (report)",
+              "active": true,
+              "displayName": "Console logon qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Device Source ID"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Device Source ID",
+              "nativeQueryRef": "Device Source ID",
+              "displayName": "Device Source ID",
+              "active": true
+            }
+          ]
+        }
+      }
+    },
     "objects": {
       "columnHeaders": [
         {
@@ -32,7 +248,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -66,9 +282,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -138,136 +361,465 @@
             }
           }
         }
-      ]
-    },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Device Name"
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Device Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
                 }
-              },
-              "queryRef": "Windows Migration Evidence.Device Name",
-              "nativeQueryRef": "Device Name",
-              "displayName": "Device Name"
+              }
             },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "AD Domain"
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
-              },
-              "queryRef": "Windows Migration Evidence.AD Domain",
-              "nativeQueryRef": "AD Domain",
-              "displayName": "AD Domain"
+              }
             },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "OS Version"
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
-              },
-              "queryRef": "Windows Migration Evidence.OS Version",
-              "nativeQueryRef": "OS Version",
-              "displayName": "OS Version"
+              }
             },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Intune State"
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
-              },
-              "queryRef": "Windows Migration Evidence.Intune State",
-              "nativeQueryRef": "Intune State",
-              "displayName": "Intune State"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Upgrade Eligibility"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Upgrade Eligibility",
-              "nativeQueryRef": "Upgrade Eligibility",
-              "displayName": "Upgrade Eligibility"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Inventory Observation Date"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Inventory Observation Date",
-              "nativeQueryRef": "Inventory Observation Date",
-              "displayName": "Inventory Observation Date"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Next Action"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Next Action",
-              "nativeQueryRef": "Next Action",
-              "displayName": "Next Action"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Device Source ID"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Device Source ID",
-              "nativeQueryRef": "Device Source ID",
-              "displayName": "Device Source ID"
+              }
             }
-          ]
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Primary User (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Primary User SAM (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Last Console User (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Last Console Logon UTC (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.AD Domain"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.OS Version"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Intune State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Upgrade Eligibility"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Inventory Observation Date"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Next Action"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Console Logon Qualification (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Device Source ID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
         }
-      }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "title": [
@@ -383,7 +935,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -430,7 +989,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD Windows 10 records without Intune ID \u00b7 observed, not a qualified unmanaged-device total'"
+                  "Value": "'AD Windows 10 records without Intune ID · observed, not a qualified unmanaged-device total'"
                 }
               }
             }
@@ -450,7 +1009,8 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "parentGroupName": "e70765ebbaf86c5f4192",
   "filterConfig": {
@@ -468,7 +1028,6 @@
           }
         },
         "type": "Categorical",
-        "howCreated": "User",
         "filter": {
           "Version": 2,
           "From": [
@@ -507,7 +1066,8 @@
               }
             }
           ]
-        }
+        },
+        "howCreated": "User"
       }
     ]
   }

@@ -1,0 +1,176 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "99c1ec3b75a896c83013",
+  "displayName": "Mailbox account coverage",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "295e5fe6ebd860a63e0a",
+      "2e0e38071010aadde6c5",
+      "2f0bec9f812f4bf98e8a",
+      "5b16b9433a9e31c23b55",
+      "642d582e2c0a83676964",
+      "69ed577c44615e9c9723",
+      "90ee4da2ad044ee08d00",
+      "91ab1ca1101fcb82eb6f",
+      "9c3c536b349f93cf6320",
+      "ec3aac9702b5e1a75aa3",
+      "ddaa33dd04781416c577",
+      "15db15efede0014314cb",
+      "4577c91f56f22c79c1b0",
+      "7acdee1bbc1967a00c2d",
+      "1672a53db05a21fe09b9",
+      "79f76091098bdc11a583",
+      "e55f6476a83df9491974",
+      "2e5242a6586ab8605f9a",
+      "56f9557ce036425646d4",
+      "5e78458a8d21aa2d2f95",
+      "a469aeda522717bfd4f1",
+      "ac7dec5a8c92433aaf44",
+      "ef4950b36265561256ab",
+      "f5d164303d61b4667406",
+      "77309128895b57b4f38d"
+    ],
+    "suppressData": true,
+    "suppressActiveSection": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "licensereportoverview",
+    "sections": {
+      "licensereportoverview": {
+        "visualContainerGroups": {
+          "295e5fe6ebd860a63e0a": {
+            "isHidden": true
+          },
+          "2e0e38071010aadde6c5": {
+            "isHidden": true
+          },
+          "2f0bec9f812f4bf98e8a": {
+            "isHidden": true
+          },
+          "5b16b9433a9e31c23b55": {
+            "isHidden": true
+          },
+          "642d582e2c0a83676964": {
+            "isHidden": true
+          },
+          "69ed577c44615e9c9723": {
+            "isHidden": true
+          },
+          "90ee4da2ad044ee08d00": {
+            "isHidden": true
+          },
+          "91ab1ca1101fcb82eb6f": {
+            "isHidden": true
+          },
+          "9c3c536b349f93cf6320": {
+            "isHidden": true
+          },
+          "ec3aac9702b5e1a75aa3": {
+            "isHidden": true
+          },
+          "ddaa33dd04781416c577": {
+            "isHidden": false
+          }
+        },
+        "visualContainers": {
+          "15db15efede0014314cb": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "4577c91f56f22c79c1b0": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "7acdee1bbc1967a00c2d": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "1672a53db05a21fe09b9": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "79f76091098bdc11a583": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "e55f6476a83df9491974": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "2e5242a6586ab8605f9a": {
+            "singleVisual": {}
+          },
+          "56f9557ce036425646d4": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "5e78458a8d21aa2d2f95": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "a469aeda522717bfd4f1": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "ac7dec5a8c92433aaf44": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "ef4950b36265561256ab": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "f5d164303d61b4667406": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "77309128895b57b4f38d": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

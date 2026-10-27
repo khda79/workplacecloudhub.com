@@ -1,16 +1,39 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "00048cbd3c6af007b764",
   "position": {
-    "x": 1576.0,
-    "y": 128,
-    "width": 312.0,
+    "x": 1080,
+    "y": 8,
+    "z": 21000,
     "height": 80,
-    "z": 104,
-    "tabOrder": 61
+    "width": 216,
+    "tabOrder": 13000
   },
   "visual": {
     "visualType": "slicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Upgrade Eligibility"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Upgrade Eligibility",
+              "nativeQueryRef": "Upgrade Eligibility",
+              "active": true
+            }
+          ]
+        }
+      }
+    },
     "objects": {
       "data": [
         {
@@ -76,29 +99,6 @@
           }
         }
       ]
-    },
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Upgrade Eligibility"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Upgrade Eligibility",
-              "nativeQueryRef": "Upgrade Eligibility",
-              "active": true
-            }
-          ]
-        }
-      }
     },
     "visualContainerObjects": {
       "title": [

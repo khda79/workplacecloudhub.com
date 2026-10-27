@@ -1,24 +1,24 @@
 /// SPO means SharePoint Online. Grain: TenantKey, Project Key, Snapshot ID, Source; source: one selected immutable prepared batch.
 table 'SPO Migration Source Summary'
-	lineageTag: 526bdd67-a876-47b4-9184-17c657f26272
+	lineageTag: 95183e7b-19b2-413c-9b4c-f475719c8e46
 
 	/// Source Qualification Context. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Source Qualification Context' = CONCATENATEX(VALUES('SPO Migration Source Summary'[Qualification]), 'SPO Migration Source Summary'[Qualification], ", ")
 		formatString: General
 		displayFolder: Migration\Quality
-		lineageTag: d2f9617b-55be-4d42-85bb-f6a131e475c8
+		lineageTag: 88638422-e955-4faf-a3af-b2f74c0074db
 
 	/// Source Age Hours. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Source Age Hours' = MAX('SPO Migration Source Summary'[Age Hours])
 		formatString: 0.0
 		displayFolder: Migration\Quality
-		lineageTag: 78585de5-25df-4276-89b9-28ce6c6129cf
+		lineageTag: 12db985f-aea8-4845-be1b-6f80606991cb
 
 	/// Prepared, tenant-qualified migration evidence: TenantKey.
 	column TenantKey
 		dataType: string
 		isHidden
-		lineageTag: baf942b6-bdac-462b-b846-76df686d35dd
+		lineageTag: 90f33ea1-578f-4674-b1a8-86e72a671374
 		summarizeBy: none
 		sourceColumn: TenantKey
 
@@ -26,7 +26,7 @@ table 'SPO Migration Source Summary'
 	column 'Project Key'
 		dataType: string
 		isHidden
-		lineageTag: f4b4435c-7b37-44db-9cb8-14bb07be7316
+		lineageTag: 83671e52-1127-42c5-9a80-88361d0f605e
 		summarizeBy: none
 		sourceColumn: Project Key
 
@@ -34,7 +34,7 @@ table 'SPO Migration Source Summary'
 	column 'Snapshot ID'
 		dataType: string
 		isHidden
-		lineageTag: a2fb5613-5c65-44ef-96bb-ae4ae16943c5
+		lineageTag: 00186656-8f04-4937-a745-9ef262209602
 		summarizeBy: none
 		sourceColumn: Snapshot ID
 
@@ -42,14 +42,21 @@ table 'SPO Migration Source Summary'
 	column 'Snapshot Date'
 		dataType: dateTime
 		formatString: yyyy-MM-dd
-		lineageTag: b76fb044-f2fc-4e5e-b89e-3b18a343e2f5
+		lineageTag: 7ac06a7b-b289-4f90-a40e-255770e088cc
 		summarizeBy: none
 		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 1b886297-16e3-468a-ab89-405b13280c23
+			defaultHierarchy: LocalDateTable_2a1736ef-f358-4c1d-a66f-352e2a360979.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Prepared, tenant-qualified migration evidence: Source.
 	column Source
 		dataType: string
-		lineageTag: 78b78839-0fc6-4803-840d-da2466e1ba4f
+		lineageTag: b00e49be-ea11-415b-af1b-c97a20f87c98
 		summarizeBy: none
 		sourceColumn: Source
 
@@ -57,7 +64,7 @@ table 'SPO Migration Source Summary'
 	column 'Source SHA256'
 		dataType: string
 		isHidden
-		lineageTag: 3a188e09-763a-4ec0-9339-1fbc6cbf6fdc
+		lineageTag: 5c0047e9-8015-4e43-9a5b-2c3a304e7668
 		summarizeBy: none
 		sourceColumn: Source SHA256
 
@@ -65,7 +72,7 @@ table 'SPO Migration Source Summary'
 	column 'Binding SHA256'
 		dataType: string
 		isHidden
-		lineageTag: 5b2b8fdb-cd89-4704-afbd-85ebb959a84f
+		lineageTag: eaedfdfc-0aeb-4540-bdf6-9e09b634bba0
 		summarizeBy: none
 		sourceColumn: Binding SHA256
 
@@ -74,28 +81,30 @@ table 'SPO Migration Source Summary'
 		dataType: dateTime
 		isHidden
 		formatString: yyyy-MM-dd HH:mm
-		lineageTag: c8d39ae2-2a99-4cba-a8f6-7571f93b7497
+		lineageTag: 725ce75f-efe9-4219-ab74-8a167398da44
 		summarizeBy: none
 		sourceColumn: Captured UTC
 
 	/// Prepared, tenant-qualified migration evidence: Age Hours.
 	column 'Age Hours'
 		dataType: decimal
-		lineageTag: 14799e06-73c4-4a08-8237-643ac7b17b06
-		summarizeBy: none
+		lineageTag: bdfc1ffc-4637-4f35-8776-ac1d159ac228
+		summarizeBy: sum
 		sourceColumn: Age Hours
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Prepared, tenant-qualified migration evidence: Qualification.
 	column Qualification
 		dataType: string
-		lineageTag: 7ffb5931-e7bb-4c0b-a07f-52c62cb284fe
+		lineageTag: b68017a2-4e4f-4c32-b95a-8d4b47b8e9a9
 		summarizeBy: none
 		sourceColumn: Qualification
 
 	/// Prepared, tenant-qualified migration evidence: Coverage State.
 	column 'Coverage State'
 		dataType: string
-		lineageTag: 5d531bed-8080-49d9-8cfa-c88a80368f14
+		lineageTag: 80e65953-5533-4b17-817e-25fd240ff387
 		summarizeBy: none
 		sourceColumn: Coverage State
 
@@ -103,7 +112,7 @@ table 'SPO Migration Source Summary'
 	column 'Run ID'
 		dataType: string
 		isHidden
-		lineageTag: 80675477-4939-43a3-a161-d91ea443a05d
+		lineageTag: 5a8d073e-43ea-4a6a-bdf0-f71194a269e5
 		summarizeBy: none
 		sourceColumn: Run ID
 
@@ -111,22 +120,32 @@ table 'SPO Migration Source Summary'
 	column 'Review Date'
 		dataType: dateTime
 		formatString: yyyy-MM-dd
-		lineageTag: ddd11ad8-3887-4bc2-bb42-ddfab958ac87
+		lineageTag: 5bfb004c-2503-4819-98ba-4ded0515ab4e
 		summarizeBy: none
 		sourceColumn: Review Date
+
+		variation Variation
+			isDefault
+			relationship: 2e47bbca-d23f-4eec-9eeb-7bb21eb4da6d
+			defaultHierarchy: LocalDateTable_caef29d4-4061-4742-a804-43aaa04f73d2.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Prepared, tenant-qualified migration evidence: Review State.
 	column 'Review State'
 		dataType: string
-		lineageTag: 206921ab-3d05-45d6-a5c9-8f6e15787abc
+		lineageTag: 4a815fbb-4b3c-4599-b6c4-308b3ba72955
 		summarizeBy: none
 		sourceColumn: Review State
 
 	column 'Project Identity'
 		dataType: string
 		isHidden
-		lineageTag: 9cb8ab87-566a-4318-9592-e134212dd5b1
+		lineageTag: 0098e1ba-9c7d-4449-bc42-476b59b8d7a9
+		summarizeBy: none
 		sourceColumn: Project Identity
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'
@@ -161,3 +180,5 @@ table 'SPO Migration Source Summary'
 				in Categories)
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

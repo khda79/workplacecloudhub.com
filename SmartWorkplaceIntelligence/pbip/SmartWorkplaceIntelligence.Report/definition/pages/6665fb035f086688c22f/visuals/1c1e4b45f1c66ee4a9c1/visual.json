@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "1c1e4b45f1c66ee4a9c1",
   "position": {
     "x": 32,
     "y": 379.5,
+    "z": 0,
+    "height": 96,
     "width": 320,
-    "height": 104.9,
-    "z": 11000,
     "tabOrder": 368
   },
   "visual": {
@@ -106,7 +106,7 @@
             "showBlankAs": {
               "expr": {
                 "Literal": {
-                  "Value": "'\u2014'"
+                  "Value": "'—'"
                 }
               }
             }

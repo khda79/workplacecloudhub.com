@@ -1,0 +1,80 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "48e42432f67a529f90bd",
+  "displayName": "Identity & enrollment",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "314b266b9ae5048be1b2",
+      "d03f6eaf7207c376d6dc",
+      "9fee77c1908f7f4a6f52",
+      "e4aa47ca3913895d38d7",
+      "4c695410171e92badf86",
+      "0826fa70b9ba920559ed",
+      "0e3b403118315392588d",
+      "1f28752aa2f8ae3abcc6",
+      "901fdf0106be9d0c3a81",
+      "11d3b984bd77b0d15670"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "8e495ef8942de9cd3b1b",
+    "sections": {
+      "8e495ef8942de9cd3b1b": {
+        "visualContainers": {
+          "0826fa70b9ba920559ed": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "0e3b403118315392588d": {
+            "singleVisual": {}
+          },
+          "1f28752aa2f8ae3abcc6": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "901fdf0106be9d0c3a81": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "11d3b984bd77b0d15670": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "314b266b9ae5048be1b2": {
+            "isHidden": true
+          },
+          "d03f6eaf7207c376d6dc": {
+            "isHidden": false
+          },
+          "9fee77c1908f7f4a6f52": {
+            "isHidden": true
+          },
+          "e4aa47ca3913895d38d7": {
+            "isHidden": true
+          },
+          "4c695410171e92badf86": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

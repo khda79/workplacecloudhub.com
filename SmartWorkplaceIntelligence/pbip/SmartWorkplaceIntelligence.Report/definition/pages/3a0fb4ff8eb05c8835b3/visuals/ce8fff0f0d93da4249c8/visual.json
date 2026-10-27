@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "ce8fff0f0d93da4249c8",
   "position": {
-    "x": 1184,
-    "y": 216,
-    "width": 224,
-    "height": 80,
-    "z": 102,
-    "tabOrder": 880
+    "x": 1544,
+    "y": 128,
+    "z": 36000,
+    "height": 88,
+    "width": 344,
+    "tabOrder": 41000
   },
   "visual": {
     "visualType": "slicer",
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "User Principal Name"
                 }
               },
-              "queryRef": "User Inventory Evidence.User Principal Name",
+              "queryRef": "Account Explorer Inventory.User Principal Name",
               "nativeQueryRef": "User Principal Name",
               "active": true
             }
@@ -284,6 +284,11 @@
           }
         }
       ]
+    },
+    "syncGroup": {
+      "groupName": "Lot1bUserSelection",
+      "fieldChanges": true,
+      "filterChanges": true
     }
   }
 }

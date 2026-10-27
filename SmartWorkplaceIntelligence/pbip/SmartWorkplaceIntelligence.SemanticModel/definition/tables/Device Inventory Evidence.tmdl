@@ -3,348 +3,611 @@ table 'Device Inventory Evidence'
 	lineageTag: 7172354c-9d28-4805-8c11-47658af15753
 
 	/// Current number of real Intune device rows in the active filter context.
-	measure 'Managed Devices' = COUNTROWS('Device Inventory Evidence')
+	measure 'Managed Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((COUNTROWS('Device Inventory Evidence')),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(COUNTROWS('Device Inventory Evidence')))
 		formatString: #,##0
 		displayFolder: Core KPIs
 		lineageTag: 6c7daae1-5c36-41f4-8824-08a7b644dab6
 
 	/// Distinct known hardware manufacturers in the current real device scope.
-	measure 'Device Manufacturers' = CALCULATE(DISTINCTCOUNT('Device Inventory Evidence'[Manufacturer]), KEEPFILTERS('Device Inventory Evidence'[Manufacturer] <> "Unknown"))
+	measure 'Device Manufacturers' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE(DISTINCTCOUNT('Device Inventory Evidence'[Manufacturer]), KEEPFILTERS('Device Inventory Evidence'[Manufacturer] <> "Unknown"))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE(DISTINCTCOUNT('Device Inventory Evidence'[Manufacturer]), KEEPFILTERS('Device Inventory Evidence'[Manufacturer] <> "Unknown"))))
 		formatString: #,##0
 		displayFolder: Core KPIs
 		lineageTag: 26c88e19-6d76-4690-ae94-0afefda8f799
 
 	/// Distinct known hardware models in the current real device scope.
-	measure 'Device Models' = CALCULATE(DISTINCTCOUNT('Device Inventory Evidence'[Model]), KEEPFILTERS('Device Inventory Evidence'[Model] <> "Unknown"))
+	measure 'Device Models' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE(DISTINCTCOUNT('Device Inventory Evidence'[Model]), KEEPFILTERS('Device Inventory Evidence'[Model] <> "Unknown"))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE(DISTINCTCOUNT('Device Inventory Evidence'[Model]), KEEPFILTERS('Device Inventory Evidence'[Model] <> "Unknown"))))
 		formatString: #,##0
 		displayFolder: Core KPIs
 		lineageTag: 96a864aa-1caa-4752-a3c1-737400f4b088
 
 	/// Share of devices with a known compliance state that are currently compliant.
 	measure 'Device Compliance Rate' =
-			VAR _knownDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Compliance State] <> "Unknown"))
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _knownDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Compliance State] <> "Unknown"))
 			VAR _compliantDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Compliance State] = "Compliant"))
-			RETURN DIVIDE(_compliantDevices, _knownDevices)
+			RETURN DIVIDE(_compliantDevices, _knownDevices)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR _knownDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Compliance State] <> "Unknown"))
+			VAR _compliantDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Compliance State] = "Compliant"))
+			RETURN DIVIDE(_compliantDevices, _knownDevices)))
 		formatString: 0.0%
 		displayFolder: Core KPIs
 		lineageTag: ace20702-b204-49c3-a762-7d75cb3472c1
 
 	/// Current number of real Intune devices reported as noncompliant.
-	measure 'Noncompliant Devices' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Compliance State] = "Noncompliant"))
+	measure 'Noncompliant Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Compliance State] = "Noncompliant"))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Compliance State] = "Noncompliant"))))
 		formatString: #,##0
 		displayFolder: Core KPIs
 		lineageTag: 1f1bdd6b-21fc-4bd9-bd85-579e32e6cf62
 
 	/// Share of current Intune devices with one unique Active Directory computer match.
 	measure 'AD to Intune Match Rate' =
-			VAR _matchedDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[AD to Intune Match] = "Matched"))
-			RETURN DIVIDE(_matchedDevices, [Managed Devices])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _matchedDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[AD to Intune Match] = "Matched"))
+			RETURN DIVIDE(_matchedDevices, [Managed Devices])),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR _matchedDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[AD to Intune Match] = "Matched"))
+			RETURN DIVIDE(_matchedDevices, [Managed Devices])))
 		formatString: 0.0%
 		displayFolder: Coverage
 		lineageTag: 3ee17ca5-94a1-45e8-b05a-3774f0e216a3
 
 	/// Share of current Intune devices with one unique Entra device match.
 	measure 'Entra Match Rate' =
-			VAR _matchedDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Entra Match] = "Matched"))
-			RETURN DIVIDE(_matchedDevices, [Managed Devices])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _matchedDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Entra Match] = "Matched"))
+			RETURN DIVIDE(_matchedDevices, [Managed Devices])),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR _matchedDevices = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Entra Match] = "Matched"))
+			RETURN DIVIDE(_matchedDevices, [Managed Devices])))
 		formatString: 0.0%
 		displayFolder: Coverage
 		lineageTag: 842e4b93-dad4-45dc-b154-0a42be5d5a04
 
 	/// Devices below 20 GiB free or below 15 percent free system-drive capacity.
-	measure 'Devices Low on Disk' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Disk Space State] = "Low"))
+	measure 'Devices Low on Disk' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Disk Space State] = "Low"))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Disk Space State] = "Low"))))
 		formatString: #,##0
 		displayFolder: Operational Attention
 		lineageTag: 10af3fd1-de67-4019-8b6a-f3806c357562
 
 	/// Share of real managed devices attributed to the current manufacturer while preserving other filters.
-	measure 'Device Share by Manufacturer' = DIVIDE([Managed Devices], CALCULATE([Managed Devices], REMOVEFILTERS('Device Inventory Evidence'[Manufacturer])))
+	measure 'Device Share by Manufacturer' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE([Managed Devices], CALCULATE([Managed Devices], REMOVEFILTERS('Device Inventory Evidence'[Manufacturer])))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(DIVIDE([Managed Devices], CALCULATE([Managed Devices], REMOVEFILTERS('Device Inventory Evidence'[Manufacturer])))))
 		formatString: 0.0%
 		displayFolder: Distribution
 		lineageTag: 5fc51857-d260-4850-8347-ec75117a4ab4
 
 	/// Share of Windows 11 devices for each short Windows release label while preserving other real-estate filters.
 	measure 'Windows 11 Device Share by Release' =
-			VAR _devicesForRelease = CALCULATE([Managed Devices], KEEPFILTERS(FILTER('Device Inventory Evidence', LEFT('Device Inventory Evidence'[Windows Release], 10) = "Windows 11")))
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _devicesForRelease = CALCULATE([Managed Devices], KEEPFILTERS(FILTER('Device Inventory Evidence', LEFT('Device Inventory Evidence'[Windows Release], 10) = "Windows 11")))
 			VAR _allWindows11Devices = CALCULATE([Managed Devices], REMOVEFILTERS('Device Inventory Evidence'[Windows Release Short]), REMOVEFILTERS('Device Inventory Evidence'[Windows Release]), FILTER(ALL('Device Inventory Evidence'[Windows Release]), LEFT('Device Inventory Evidence'[Windows Release], 10) = "Windows 11"))
-			RETURN IF(_devicesForRelease > 0, DIVIDE(_devicesForRelease, _allWindows11Devices))
+			RETURN IF(_devicesForRelease > 0, DIVIDE(_devicesForRelease, _allWindows11Devices))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR _devicesForRelease = CALCULATE([Managed Devices], KEEPFILTERS(FILTER('Device Inventory Evidence', LEFT('Device Inventory Evidence'[Windows Release], 10) = "Windows 11")))
+			VAR _allWindows11Devices = CALCULATE([Managed Devices], REMOVEFILTERS('Device Inventory Evidence'[Windows Release Short]), REMOVEFILTERS('Device Inventory Evidence'[Windows Release]), FILTER(ALL('Device Inventory Evidence'[Windows Release]), LEFT('Device Inventory Evidence'[Windows Release], 10) = "Windows 11"))
+			RETURN IF(_devicesForRelease > 0, DIVIDE(_devicesForRelease, _allWindows11Devices))))
 		formatString: 0.0%
 		displayFolder: Distribution
 		lineageTag: 8edb38e7-ca64-4080-9aed-2c86c588bf32
 
 	/// Average observed management tenure. This is not physical or purchase age.
-	measure 'Average Observed Tenure (Years)' = AVERAGE('Device Inventory Evidence'[Managed Tenure (Years)])
+	measure 'Average Observed Tenure (Years)' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((AVERAGE('Device Inventory Evidence'[Managed Tenure (Years)])),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(AVERAGE('Device Inventory Evidence'[Managed Tenure (Years)])))
 		formatString: 0.0
 		displayFolder: Lifecycle Proxy
 		lineageTag: d495bc32-4d36-4d43-823f-60fe0395e6d2
 
 	/// Devices whose earliest observed Intune, Entra, or AD date is at least four years old; not a hardware-age measure.
-	measure 'Devices Observed 4+ Years' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Tenure Bucket] = "4+ years"))
+	measure 'Devices Observed 4+ Years' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Tenure Bucket] = "4+ years"))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Tenure Bucket] = "4+ years"))))
 		formatString: #,##0
 		displayFolder: Lifecycle Proxy
 		lineageTag: 2ab7ae8d-af9a-49a6-bf89-e3f42801a616
 
 	/// Count of managed devices still running Windows 10 based on the collected operating system build.
-	measure 'Windows 10 Devices Remaining' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"))
+	measure 'Windows 10 Devices Remaining' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"))))
 		formatString: #,0
 		displayFolder: Real Device Estate
 		lineageTag: 52b097b1-e54a-4fd5-8848-950653788719
 
 	/// Count of Windows 10 devices explicitly assessed as not capable of upgrading to Windows 11. Unknown and unassessed devices are excluded.
-	measure 'Windows 10 Devices Not Capable' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"), KEEPFILTERS('Device Inventory Evidence'[Windows 11 Upgrade Eligibility] = "Not capable"))
+	measure 'Windows 10 Devices Not Capable' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"), KEEPFILTERS('Device Inventory Evidence'[Windows 11 Upgrade Eligibility] = "Not capable"))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"), KEEPFILTERS('Device Inventory Evidence'[Windows 11 Upgrade Eligibility] = "Not capable"))))
 		formatString: #,0
 		displayFolder: Real Device Estate
 		lineageTag: 5f9cd5f8-8ea7-45db-843d-c1e1bf259b5f
 
 	/// Managed devices not yet Low whose reported free system-drive space is below 40 GiB.
 	measure 'Devices Approaching Low Disk' =
-			CALCULATE(
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE(
 			    [Managed Devices],
 			    KEEPFILTERS('Device Inventory Evidence'[Disk Space State] = "Approaching Low")
-			)
+			)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE(
+			    [Managed Devices],
+			    KEEPFILTERS('Device Inventory Evidence'[Disk Space State] = "Approaching Low")
+			)))
 		formatString: #,##0
 		displayFolder: Operational Attention
 		lineageTag: e202dbee-0432-47e1-9a1e-26c92a4f082c
 
 	/// Managed devices with a known Intune last-sync timestamp older than 30 days.
 	measure 'Devices Not Synced 30+ Days' =
-			CALCULATE(
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE(
 			    [Managed Devices],
 			    KEEPFILTERS(
 			        NOT ISBLANK('Device Inventory Evidence'[Last Sync DateTime])
 			            && 'Device Inventory Evidence'[Last Sync DateTime] < TODAY() - 30
 			    )
-			)
+			)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE(
+			    [Managed Devices],
+			    KEEPFILTERS(
+			        NOT ISBLANK('Device Inventory Evidence'[Last Sync DateTime])
+			            && 'Device Inventory Evidence'[Last Sync DateTime] < TODAY() - 30
+			    )
+			)))
 		formatString: #,##0
 		displayFolder: Operational Attention
 		lineageTag: dbb598e0-8560-4103-9db8-8207ca257983
 
 	/// Managed devices whose selected current Windows Update aggregate state is Error or Rollback.
 	measure 'Windows Update Hard Failures' =
-			CALCULATE(
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE(
 			    [Managed Devices],
 			    KEEPFILTERS('Device Inventory Evidence'[Windows Update State] IN {"Error", "Rollback"})
-			)
+			)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE(
+			    [Managed Devices],
+			    KEEPFILTERS('Device Inventory Evidence'[Windows Update State] IN {"Error", "Rollback"})
+			)))
 		formatString: #,##0
 		displayFolder: Operational Attention
 		lineageTag: 953872a4-59bd-498d-9619-f347add70e15
 
 	/// Windows 10 devices assessed as capable of upgrading to Windows 11.
 	measure 'Windows 10 Devices Capable' =
-			CALCULATE(
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE(
 			    [Managed Devices],
 			    KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"),
 			    KEEPFILTERS('Device Inventory Evidence'[Windows 11 Upgrade Eligibility] = "Capable")
-			)
+			)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE(
+			    [Managed Devices],
+			    KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"),
+			    KEEPFILTERS('Device Inventory Evidence'[Windows 11 Upgrade Eligibility] = "Capable")
+			)))
 		formatString: #,##0
 		displayFolder: Windows 11 Readiness
 		lineageTag: 67f99dbf-adec-4be8-a3bb-d2049009632d
 
 	/// Windows 10 devices whose Windows 11 eligibility is not assessed or remains unknown.
 	measure 'Windows 10 Eligibility Not Assessed' =
-			CALCULATE(
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE(
 			    [Managed Devices],
 			    KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"),
 			    KEEPFILTERS('Device Inventory Evidence'[Windows 11 Upgrade Eligibility] IN {"Not assessed", "Unknown"})
-			)
+			)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE(
+			    [Managed Devices],
+			    KEEPFILTERS('Device Inventory Evidence'[Windows Generation] = "Windows 10"),
+			    KEEPFILTERS('Device Inventory Evidence'[Windows 11 Upgrade Eligibility] IN {"Not assessed", "Unknown"})
+			)))
 		formatString: #,##0
 		displayFolder: Windows 11 Readiness
 		lineageTag: 20c1f654-ad44-4355-9762-f7626de6cf51
 
 	/// Managed devices with source-backed Secure Boot disabled evidence.
-	measure 'Secure Boot Disabled Devices' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Secure Boot State] = "Disabled")
+	measure 'Secure Boot Disabled Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], 'Device Inventory Evidence'[Secure Boot State] = "Disabled")),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], 'Device Inventory Evidence'[Secure Boot State] = "Disabled")))
 		formatString: #,##0
 		lineageTag: 699006a1-6964-4496-a6fb-13a8eaf745e3
 
 	/// Managed devices whose latest available Endpoint Analytics score is below 50.
-	measure 'Endpoint Analytics Below 50 Devices' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Endpoint Analytics State] = "Below 50")
+	measure 'Endpoint Analytics Below 50 Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], 'Device Inventory Evidence'[Endpoint Analytics State] = "Below 50")),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], 'Device Inventory Evidence'[Endpoint Analytics State] = "Below 50")))
 		formatString: #,##0
 		lineageTag: 59754e8f-431b-457b-b009-41ec99877967
 
 	/// Managed devices with one or more current Endpoint Analytics stop errors.
-	measure 'Devices with Stop Errors' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Stop Error State] = "Stop errors observed")
+	measure 'Devices with Stop Errors' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], 'Device Inventory Evidence'[Stop Error State] = "Stop errors observed")),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], 'Device Inventory Evidence'[Stop Error State] = "Stop errors observed")))
 		formatString: #,##0
 		lineageTag: 72f6a682-2fe2-403f-8bae-a87ee53ecc3d
 
 	/// Managed devices implicated in an Entra hardware-ID conflict group.
-	measure 'Managed Devices with Hardware ID Conflict' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Entra Hardware ID Conflict] = "Yes")
+	measure 'Managed Devices with Hardware ID Conflict' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], 'Device Inventory Evidence'[Entra Hardware ID Conflict] = "Yes")),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], 'Device Inventory Evidence'[Entra Hardware ID Conflict] = "Yes")))
 		formatString: #,##0
 		lineageTag: 8fdc56a2-ef11-41a8-9b4f-d359998d95fa
 
 	/// Managed devices also listed as Entra device-removal candidates.
-	measure 'Managed Device Removal Candidates' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Removal Candidate] = "Yes")
+	measure 'Managed Device Removal Candidates' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], 'Device Inventory Evidence'[Removal Candidate] = "Yes")),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], 'Device Inventory Evidence'[Removal Candidate] = "Yes")))
 		formatString: #,##0
 		lineageTag: 3740acd8-b1ea-4559-9c69-0bcfefcd438c
 
 	/// Managed Windows 11 devices on 21H2, 22H2, or 23H2.
-	measure 'Older Windows 11 Release Devices' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[Windows 11 Release State] = "Older release")
+	measure 'Older Windows 11 Release Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], 'Device Inventory Evidence'[Windows 11 Release State] = "Older release")),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], 'Device Inventory Evidence'[Windows 11 Release State] = "Older release")))
 		formatString: #,##0
 		lineageTag: 70de76e9-af63-4274-8eb0-8c1a55cbd744
 
 	/// Current managed devices without a unique Active Directory computer match.
-	measure 'AD-to-Intune Unmatched Devices' = CALCULATE([Managed Devices], 'Device Inventory Evidence'[AD to Intune Match] = "Unmatched")
+	measure 'AD-to-Intune Unmatched Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], 'Device Inventory Evidence'[AD to Intune Match] = "Unmatched")),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], 'Device Inventory Evidence'[AD to Intune Match] = "Unmatched")))
 		formatString: #,##0
 		lineageTag: eb1c76da-0b92-40f1-8e38-868688601ec9
 
 	/// Share of current managed devices identified as Windows 11.
 	measure 'Current Windows 11 Adoption (%)' =
-			DIVIDE(
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE(
 			    CALCULATE(
 			        [Managed Devices],
 			        'Device Inventory Evidence'[Windows Generation] = "Windows 11"
 			    ),
 			    [Managed Devices]
-			)
+			)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(DIVIDE(
+			    CALCULATE(
+			        [Managed Devices],
+			        'Device Inventory Evidence'[Windows Generation] = "Windows 11"
+			    ),
+			    [Managed Devices]
+			)))
 		formatString: 0.0%
 		lineageTag: 6922ca2e-12b3-4e25-9025-025a594506c9
 
 	/// Share of remaining Windows 10 devices with a recorded Windows 11 capability assessment.
 	measure 'Windows 10 Readiness Assessed (%)' =
-			DIVIDE(
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE(
 			    [Windows 10 Devices Not Capable] + [Windows 10 Devices Capable],
 			    [Windows 10 Devices Remaining]
-			)
+			)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(DIVIDE(
+			    [Windows 10 Devices Not Capable] + [Windows 10 Devices Capable],
+			    [Windows 10 Devices Remaining]
+			)))
 		formatString: 0.0%
 		lineageTag: 583edf7a-86eb-4f39-85f2-de6745a93f50
 
 	/// Share of current managed devices covered by Endpoint Analytics evidence.
 	measure 'Endpoint Analytics Managed Coverage (%)' =
-			VAR Covered =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR Covered =
 			    CALCULATE(
 			        MAX('Device Risk Evidence Summary'[Managed Devices Covered]),
 			        'Device Risk Evidence Summary'[Signal] = "Endpoint Analytics score below 50"
 			    )
 			RETURN
-			    DIVIDE(Covered, [Managed Devices])
+			    DIVIDE(Covered, [Managed Devices])),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR Covered =
+			    CALCULATE(
+			        MAX('Device Risk Evidence Summary'[Managed Devices Covered]),
+			        'Device Risk Evidence Summary'[Signal] = "Endpoint Analytics score below 50"
+			    )
+			RETURN
+			    DIVIDE(Covered, [Managed Devices])))
 		formatString: 0.0%
 		lineageTag: ffdeb9a6-2dba-413a-930c-9ff95015e1e0
 
 	/// Share of current managed devices without an observed Entra hardware ID conflict.
 	measure 'Devices without Hardware ID Conflict (%)' =
-			DIVIDE(
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE(
 			    [Managed Devices] - [Managed Devices with Hardware ID Conflict],
 			    [Managed Devices]
-			)
+			)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(DIVIDE(
+			    [Managed Devices] - [Managed Devices with Hardware ID Conflict],
+			    [Managed Devices]
+			)))
 		formatString: 0.0%
 		lineageTag: db1851cb-87ba-4621-8be1-805ce6d40f03
 
 	/// Share of current managed devices identified as removal candidates.
 	measure 'Managed Device Removal Candidate Rate (%)' =
-			DIVIDE(
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE(
 			    [Managed Device Removal Candidates],
 			    [Managed Devices]
-			)
+			)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(DIVIDE(
+			    [Managed Device Removal Candidates],
+			    [Managed Devices]
+			)))
 		formatString: 0.0%
 		lineageTag: 3c066eba-a914-4ecb-8836-caf3063c2b79
 
 	/// Average current Endpoint Analytics score among covered managed devices.
-	measure 'Current Endpoint Analytics Score' = AVERAGE('Device Inventory Evidence'[Endpoint Analytics Score])
+	measure 'Current Endpoint Analytics Score' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((AVERAGE('Device Inventory Evidence'[Endpoint Analytics Score])),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(AVERAGE('Device Inventory Evidence'[Endpoint Analytics Score])))
 		formatString: 0.0
 		displayFolder: Endpoint Experience
 		lineageTag: 83c5a228-d319-46bd-8043-e329bb5fc23c
 
 	/// Average current Endpoint Analytics startup score among covered managed devices.
-	measure 'Current Startup Score' = AVERAGE('Device Inventory Evidence'[Startup Score])
+	measure 'Current Startup Score' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((AVERAGE('Device Inventory Evidence'[Startup Score])),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(AVERAGE('Device Inventory Evidence'[Startup Score])))
 		formatString: 0.0
 		displayFolder: Endpoint Experience
 		lineageTag: bcdec1cf-cee2-4e8d-9c31-68bb23558b13
 
 	/// Managed devices whose latest available startup score is below 50.
-	measure 'Startup Score Below 50 Devices' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Startup Score State] = "Below 50"))
+	measure 'Startup Score Below 50 Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Startup Score State] = "Below 50"))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Startup Score State] = "Below 50"))))
 		formatString: #,0
 		displayFolder: Endpoint Experience
 		lineageTag: e0ad4639-ea3d-4b3a-ba11-4536c185976c
 
 	/// Average current application reliability score among covered managed devices.
-	measure 'Current App Reliability Score' = AVERAGE('Device Inventory Evidence'[App Reliability Score])
+	measure 'Current App Reliability Score' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((AVERAGE('Device Inventory Evidence'[App Reliability Score])),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(AVERAGE('Device Inventory Evidence'[App Reliability Score])))
 		formatString: 0.0
 		displayFolder: Endpoint Experience
 		lineageTag: 022465d1-e628-4b9d-816b-6cf0ab5f2992
 
 	/// Managed devices whose latest application reliability score is below 50.
-	measure 'App Reliability Below 50 Devices' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[App Reliability State] = "Below 50"))
+	measure 'App Reliability Below 50 Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[App Reliability State] = "Below 50"))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[App Reliability State] = "Below 50"))))
 		formatString: #,0
 		displayFolder: Endpoint Experience
 		lineageTag: 479cd524-9746-4350-b290-c27ffd953f70
 
 	/// Managed devices with an observed core boot time above 60 seconds.
-	measure 'Devices with Boot Time over 60s' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Core Boot Time (s)] > 60))
+	measure 'Devices with Boot Time over 60s' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Core Boot Time (s)] > 60))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Core Boot Time (s)] > 60))))
 		formatString: #,0
 		displayFolder: Endpoint Experience
 		lineageTag: e88a9bb5-4f01-49e4-a238-bae91720b4f5
 
 	/// Managed devices with an observed core sign-in time above 30 seconds.
-	measure 'Devices with Sign-in Time over 30s' = CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Core Sign-in Time (s)] > 30))
+	measure 'Devices with Sign-in Time over 30s' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Core Sign-in Time (s)] > 30))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Core Sign-in Time (s)] > 30))))
 		formatString: #,0
 		displayFolder: Endpoint Experience
 		lineageTag: 37b794c4-0762-44fc-a87b-afb193eef45b
 
 	/// Share of current managed devices covered by Endpoint Analytics startup evidence.
-	measure 'Startup Score Managed Coverage (%)' = DIVIDE(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Startup Score State] <> "Not observed")), [Managed Devices])
+	measure 'Startup Score Managed Coverage (%)' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Startup Score State] <> "Not observed")), [Managed Devices])),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(DIVIDE(CALCULATE([Managed Devices], KEEPFILTERS('Device Inventory Evidence'[Startup Score State] <> "Not observed")), [Managed Devices])))
 		formatString: 0.0%
 		displayFolder: Endpoint Experience
 		lineageTag: 762f0fd0-a38c-40e0-9e9e-75b94f35e25c
 
 	/// Stable Intune device identifier retained only for row identity and technical troubleshooting.
-	measure 'Intune Devices Not Synced 30+ Days' = [Devices Not Synced 30+ Days]
+	measure 'Intune Devices Not Synced 30+ Days' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE(([Devices Not Synced 30+ Days]),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),([Devices Not Synced 30+ Days]))
 		formatString: #,0
 		displayFolder: Device | Risk
 		lineageTag: 8f33b37a-cf6b-45b2-bdef-6aaf0bd412ba
 
-	measure 'Disabled Entra Managed Devices' = CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Entra Account State] = "Disabled" )
+	measure 'Disabled Entra Managed Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Entra Account State] = "Disabled" )),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Entra Account State] = "Disabled" )))
 		formatString: #,0
 		displayFolder: Device | Risk
 		lineageTag: fa5267f6-75de-4460-ba1d-c60d02b3277a
 
 	/// Devices with Encrypted=True in the current Intune managed-device export. This does not prove BitLocker recovery-key escrow.
-	measure 'Devices Encrypted According to Intune' = CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] = "Encrypted" )
+	measure 'Devices Encrypted According to Intune' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] = "Encrypted" )),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] = "Encrypted" )))
 		formatString: #,0
 		displayFolder: Device | Security
 		lineageTag: 2e9e5873-ab3d-49ee-b7ce-42dcb0454490
 
 	/// Share of managed Intune devices with a known encryption state that are marked Encrypted. This does not prove BitLocker key escrow.
-	measure 'Encrypted Devices Among Known Intune State (%)' = DIVIDE ( [Devices Encrypted According to Intune], CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" } ) )
+	measure 'Encrypted Devices Among Known Intune State (%)' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE ( [Devices Encrypted According to Intune], CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" } ) )),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(DIVIDE ( [Devices Encrypted According to Intune], CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" } ) )))
 		formatString: 0.0%
 		displayFolder: Device | Security
 		lineageTag: dd59f585-70ce-4023-b2ff-bc0b997ce1e9
 
-	measure 'Known Intune Encryption State Coverage (%)' = DIVIDE ( CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" } ), [Managed Devices] )
+	measure 'Known Intune Encryption State Coverage (%)' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE ( CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" } ), [Managed Devices] )),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(DIVIDE ( CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" } ), [Managed Devices] )))
 		formatString: 0.0%
 		displayFolder: Device | Security
 		lineageTag: 9162bc4e-28cf-4185-af0e-a58211d3e811
 
 	/// Share of managed Intune devices for which the collected encryption state is known.
 	/// Intune devices with a known encryption state and a last sync within the trailing 30 calendar days.
-	measure 'Devices With Recent Intune Encryption Evidence' = CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" }, 'Device Inventory Evidence'[Last Sync DateTime] >= TODAY() - 30, 'Device Inventory Evidence'[Last Sync DateTime] < TODAY() + 1 )
+	measure 'Devices With Recent Intune Encryption Evidence' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" }, 'Device Inventory Evidence'[Last Sync DateTime] >= TODAY() - 30, 'Device Inventory Evidence'[Last Sync DateTime] < TODAY() + 1 )),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] IN { "Encrypted", "Not encrypted" }, 'Device Inventory Evidence'[Last Sync DateTime] >= TODAY() - 30, 'Device Inventory Evidence'[Last Sync DateTime] < TODAY() + 1 )))
 		formatString: #,0
 		displayFolder: Device | Security
 		lineageTag: b1e29c49-4dc1-4fae-9ba7-e87450967802
 
 	/// Recently synced Intune devices marked Encrypted; not proof of BitLocker recovery-key escrow.
-	measure 'Recently Synced Devices Encrypted According to Intune' = CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] = "Encrypted", 'Device Inventory Evidence'[Last Sync DateTime] >= TODAY() - 30, 'Device Inventory Evidence'[Last Sync DateTime] < TODAY() + 1 )
+	measure 'Recently Synced Devices Encrypted According to Intune' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] = "Encrypted", 'Device Inventory Evidence'[Last Sync DateTime] >= TODAY() - 30, 'Device Inventory Evidence'[Last Sync DateTime] < TODAY() + 1 )),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(CALCULATE ( [Managed Devices], 'Device Inventory Evidence'[Intune Encryption State] = "Encrypted", 'Device Inventory Evidence'[Last Sync DateTime] >= TODAY() - 30, 'Device Inventory Evidence'[Last Sync DateTime] < TODAY() + 1 )))
 		formatString: #,0
 		displayFolder: Device | Security
 		lineageTag: 274be0e1-10a0-4664-ae18-2d663254f01e
 
 	/// Share of all Intune devices with a known encryption state updated within the trailing 30 calendar days.
-	measure 'Recent Intune Encryption Evidence Coverage (%)' = DIVIDE ( [Devices With Recent Intune Encryption Evidence], [Managed Devices] )
+	measure 'Recent Intune Encryption Evidence Coverage (%)' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE ( [Devices With Recent Intune Encryption Evidence], [Managed Devices] )),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(DIVIDE ( [Devices With Recent Intune Encryption Evidence], [Managed Devices] )))
 		formatString: 0.0%
 		displayFolder: Device | Security
 		lineageTag: 02b8344a-5208-452d-815d-12f9af116f60
 
 	/// Share encrypted among Intune devices with a known encryption state updated within the trailing 30 calendar days.
-	measure 'Encrypted Recently Synced Intune Devices (%)' = DIVIDE ( [Recently Synced Devices Encrypted According to Intune], [Devices With Recent Intune Encryption Evidence] )
+	measure 'Encrypted Recently Synced Intune Devices (%)' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE ( [Recently Synced Devices Encrypted According to Intune], [Devices With Recent Intune Encryption Evidence] )),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(DIVIDE ( [Recently Synced Devices Encrypted According to Intune], [Devices With Recent Intune Encryption Evidence] )))
 		formatString: 0.0%
 		displayFolder: Device | Security
 		lineageTag: 82b838ba-7ed5-43df-b2bf-93b20a5685c2
 
 	/// Share of the currently filtered Intune inventory with a nonblank, uniquely prepared Endpoint Analytics score. Numerator and denominator use the same inventory and country scope; not a freshness guarantee.
 	measure 'Endpoint Analytics Matched Inventory Coverage (%)' =
-			VAR _covered = CALCULATE(COUNTROWS('Device Inventory Evidence'), KEEPFILTERS(NOT(ISBLANK('Device Inventory Evidence'[Endpoint Analytics Score]))))
-			RETURN DIVIDE(_covered, [Managed Devices])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _covered = CALCULATE(COUNTROWS('Device Inventory Evidence'), KEEPFILTERS(NOT(ISBLANK('Device Inventory Evidence'[Endpoint Analytics Score]))))
+			RETURN DIVIDE(_covered, [Managed Devices])),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR _covered = CALCULATE(COUNTROWS('Device Inventory Evidence'), KEEPFILTERS(NOT(ISBLANK('Device Inventory Evidence'[Endpoint Analytics Score]))))
+			RETURN DIVIDE(_covered, [Managed Devices])))
 		formatString: 0.0%
 		displayFolder: Evidence coverage
 		lineageTag: 68a88111-fcc5-44e6-8690-fae193b283f4
+
+	/// Same compliance assessment and known-state denominator as Device Compliance Rate; the displayed device count is unchanged. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level Noncompliant Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE(([KPI Alert Level Device Compliance Rate]),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),([KPI Alert Level Device Compliance Rate]))
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 158adedc-d04e-4fcb-8323-b71e4d169cae
+
+	/// User-visible threshold explanation for Noncompliant Devices
+	measure 'KPI Alert Details Noncompliant Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _s=[KPI Alert Level Noncompliant Devices] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Same compliance assessment and known-state denominator as Device Compliance Rate; the displayed device count is unchanged."),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR _s=[KPI Alert Level Noncompliant Devices] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Same compliance assessment and known-state denominator as Device Compliance Rate; the displayed device count is unchanged."))
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: ca242db8-0baf-4065-a51f-2d65db23af7b
+
+	/// Red < 90%; amber < 95%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level Device Compliance Rate' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _v = [Device Compliance Rate]
+			RETURN SWITCH(TRUE(), ISBLANK(_v) || _v < 0 || _v > 1, 3, _v < 0.9, 2, _v < 0.95, 1, 0)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR _v = [Device Compliance Rate]
+			RETURN SWITCH(TRUE(), ISBLANK(_v) || _v < 0 || _v > 1, 3, _v < 0.9, 2, _v < 0.95, 1, 0)))
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 76ea8caf-2bc0-434e-80c6-93646d23d1bf
+
+	/// User-visible threshold explanation for Device Compliance Rate
+	measure 'KPI Alert Details Device Compliance Rate' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _s=[KPI Alert Level Device Compliance Rate] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Red < 90%; amber < 95%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure."),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR _s=[KPI Alert Level Device Compliance Rate] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Red < 90%; amber < 95%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure."))
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 9676285c-aad7-41e3-88ac-249cff3ca3d7
+
+	/// Red < 95%; amber < 98%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level Encrypted Recently Synced Intune Devices (%)' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _v = [Encrypted Recently Synced Intune Devices (%)]
+			RETURN SWITCH(TRUE(), ISBLANK(_v) || _v < 0 || _v > 1, 3, _v < 0.95, 2, _v < 0.98, 1, 0)),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR _v = [Encrypted Recently Synced Intune Devices (%)]
+			RETURN SWITCH(TRUE(), ISBLANK(_v) || _v < 0 || _v > 1, 3, _v < 0.95, 2, _v < 0.98, 1, 0)))
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: c5db4d84-e3f0-49bd-950e-d7ce9b6986ee
+
+	/// User-visible threshold explanation for Encrypted Recently Synced Intune Devices (%)
+	measure 'KPI Alert Details Encrypted Recently Synced Intune Devices (%)' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _s=[KPI Alert Level Encrypted Recently Synced Intune Devices (%)] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Red < 95%; amber < 98%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure."),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR _s=[KPI Alert Level Encrypted Recently Synced Intune Devices (%)] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Red < 95%; amber < 98%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure."))
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: e7b1c288-948f-472d-8f61-2cab8551a460
+
+	/// SAM display resolved by qualified native identity, same tenant and loaded batch. Empty text when no qualified SAM; preserves unresolved source rows in table projections.
+	measure 'SAM · Device Inventory Evidence' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _display = (VAR _id=SELECTEDVALUE('Device Inventory Evidence'[Device Source ID]) VAR _tenant=SELECTEDVALUE('Device Inventory Evidence'[TenantKey]) VAR _batch=SELECTEDVALUE('Device Inventory Evidence'[Loaded Batch ID])
+			 VAR _dk=IF(NOT ISBLANK(_id),LOOKUPVALUE('Native Managed Device Evidence'[TenantDeviceKey],'Native Managed Device Evidence'[ManagedDeviceId],_id,'Native Managed Device Evidence'[TenantKey],_tenant,'Native Managed Device Evidence'[Loaded Batch ID],_batch))
+			 VAR _uid=IF(NOT ISBLANK(_dk),LOOKUPVALUE('Native Device Evidence'[PrimaryUserSourceId],'Native Device Evidence'[TenantDeviceKey],_dk,'Native Device Evidence'[TenantKey],_tenant,'Native Device Evidence'[Loaded Batch ID],_batch))
+			 VAR _upn=IF(NOT ISBLANK(_uid),LOOKUPVALUE('Native User Evidence'[UserPrincipalName],'Native User Evidence'[SourceUserId],_uid,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))
+			 RETURN IF(NOT ISBLANK(_uid) && _upn=SELECTEDVALUE('Device Inventory Evidence'[Primary User UPN]),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],_uid,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN IF(COUNTROWS('Device Inventory Evidence') > 0, COALESCE(_display, ""))),KEEPFILTERS(TREATAS(_pu,'Device Inventory Evidence'[Primary User (report)]))),(VAR _display = (VAR _id=SELECTEDVALUE('Device Inventory Evidence'[Device Source ID]) VAR _tenant=SELECTEDVALUE('Device Inventory Evidence'[TenantKey]) VAR _batch=SELECTEDVALUE('Device Inventory Evidence'[Loaded Batch ID])
+			 VAR _dk=IF(NOT ISBLANK(_id),LOOKUPVALUE('Native Managed Device Evidence'[TenantDeviceKey],'Native Managed Device Evidence'[ManagedDeviceId],_id,'Native Managed Device Evidence'[TenantKey],_tenant,'Native Managed Device Evidence'[Loaded Batch ID],_batch))
+			 VAR _uid=IF(NOT ISBLANK(_dk),LOOKUPVALUE('Native Device Evidence'[PrimaryUserSourceId],'Native Device Evidence'[TenantDeviceKey],_dk,'Native Device Evidence'[TenantKey],_tenant,'Native Device Evidence'[Loaded Batch ID],_batch))
+			 VAR _upn=IF(NOT ISBLANK(_uid),LOOKUPVALUE('Native User Evidence'[UserPrincipalName],'Native User Evidence'[SourceUserId],_uid,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))
+			 RETURN IF(NOT ISBLANK(_uid) && _upn=SELECTEDVALUE('Device Inventory Evidence'[Primary User UPN]),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],_uid,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN IF(COUNTROWS('Device Inventory Evidence') > 0, COALESCE(_display, ""))))
+		displayFolder: Private identity display
+		lineageTag: e43d6834-c703-477a-97c5-e3cc5a901e8a
+
+	/// Read-only report utility applying the disconnected primary-user selector to source-qualified device rows.
+	measure 'Primary user row match · Device Inventory Evidence' = VAR PresentRows = IF(ISFILTERED('Primary User Selection'[Primary user]), CALCULATE(COUNTROWS('Device Inventory Evidence'), KEEPFILTERS(TREATAS(VALUES('Primary User Selection'[Primary user]), 'Device Inventory Evidence'[Primary User (report)]))), COUNTROWS('Device Inventory Evidence')) RETURN IF(PresentRows>0,1,BLANK())
+		formatString: 0
+		isHidden
+		lineageTag: a00d0e50-28d9-4a89-9bfb-f567c2efc328
 
 	column 'Device Source ID'
 		dataType: string
@@ -779,7 +1042,7 @@ table 'Device Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, MAXX ( _adRows, 'AD Computer Evidence'[CreationRaw] ), BLANK () )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: c12dd166-f980-4aeb-9cb9-bf1dd6ac6641
+		lineageTag: b5c6795d-21d5-4a73-8acb-93a0b06785fc
 		summarizeBy: none
 
 	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
@@ -798,7 +1061,7 @@ table 'Device Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD Computer Evidence'[CreationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: 2b492b72-4b7c-4177-87f9-c7b111a29704
+		lineageTag: 892e3d90-cc8a-45a2-80a1-bdb76cd76870
 		summarizeBy: none
 
 	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
@@ -819,7 +1082,7 @@ table 'Device Inventory Evidence'
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
 		displayFolder: Account lifecycle
-		lineageTag: 531185dc-4da1-41ae-b9b5-d586b6f2ea2b
+		lineageTag: 96a5d8bc-be45-4d4d-b432-9afe33652251
 		summarizeBy: none
 
 	/// Observed AD modification value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
@@ -838,7 +1101,7 @@ table 'Device Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, MAXX ( _adRows, 'AD Computer Evidence'[ModificationRaw] ), BLANK () )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: 3f9c9495-8239-49a5-b58a-9b0b2b5234b9
+		lineageTag: 4e8ed1fd-3e41-4f4e-a64d-bbfd782b46cf
 		summarizeBy: none
 
 	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
@@ -857,7 +1120,7 @@ table 'Device Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD Computer Evidence'[ModificationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: 66e31fec-1845-4c00-8535-f74a61fb9b17
+		lineageTag: 55046e30-2e1e-451f-a08b-367ad65eb632
 		summarizeBy: none
 
 	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
@@ -878,7 +1141,7 @@ table 'Device Inventory Evidence'
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
 		displayFolder: Account lifecycle
-		lineageTag: ad76ead5-7a62-4688-98eb-a011f6619087
+		lineageTag: 875ac7a1-8f23-4223-bae7-e988edb8600d
 		summarizeBy: none
 
 	/// Observed Entra creation value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
@@ -895,7 +1158,7 @@ table 'Device Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1, MAXX ( _nativeRows, 'Native Device Evidence'[CreationRaw] ), BLANK () )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: cc1ce2f5-f1ac-4911-9964-b34969c66fad
+		lineageTag: fe58cbdb-aaef-4bc7-90f4-441c9f81f53e
 		summarizeBy: none
 
 	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
@@ -912,7 +1175,7 @@ table 'Device Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1, COALESCE ( MAXX ( _nativeRows, 'Native Device Evidence'[CreationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: 1d368164-f76f-4bbc-912a-ecd90a540a18
+		lineageTag: 8f6bf71f-476b-4f56-bb06-369e0f57ce98
 		summarizeBy: none
 
 	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
@@ -931,7 +1194,7 @@ table 'Device Inventory Evidence'
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
 		displayFolder: Account lifecycle
-		lineageTag: cb98c90e-a550-40cb-9d7b-867cc1348c24
+		lineageTag: 41cf7975-7c4e-493d-b69f-2565c55c2f92
 		summarizeBy: none
 
 	/// Observed Entra modification value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
@@ -948,7 +1211,7 @@ table 'Device Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1, MAXX ( _nativeRows, 'Native Device Evidence'[ModificationRaw] ), BLANK () )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: afab8725-c686-4955-8793-273b51afe61e
+		lineageTag: 201722f6-3f15-4af3-9353-1624dbc0f7a9
 		summarizeBy: none
 
 	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
@@ -965,7 +1228,7 @@ table 'Device Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1, COALESCE ( MAXX ( _nativeRows, 'Native Device Evidence'[ModificationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: 11399f6e-edb6-44fe-9e6f-08490878af45
+		lineageTag: 5ede2d8a-a79f-4ff4-86a1-9e866df174fb
 		summarizeBy: none
 
 	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
@@ -984,7 +1247,7 @@ table 'Device Inventory Evidence'
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
 		displayFolder: Account lifecycle
-		lineageTag: fd50dc1a-08fe-4b9b-9142-7c47276f9ae0
+		lineageTag: 20b60fb3-4875-4248-af7a-7d7f189acf4f
 		summarizeBy: none
 
 	/// Display true/false only when the source explicitly marks PasswordExpiryStatus Observed. Unknown remains Unknown; nullable Boolean storage is never used as proof of false.
@@ -1004,7 +1267,7 @@ table 'Device Inventory Evidence'
 			RETURN IF ( _nativeCount=1 && _sourceId<>"" && NOT ISBLANK(_nativeKey) && _managedCount=1 && NOT ISBLANK(_managedKey) && _status = "Observed" && COUNTROWS(_adRows)=1 && NOT ISBLANK(_batch), IF(_observed=1,"true","false"),"Unknown")
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: d69f29fc-05c0-48dd-9b98-bf1301d4dbeb
+		lineageTag: cdd39236-9416-4eb5-9eeb-ddece79acd28
 		summarizeBy: none
 
 	/// Observed/Not collected from the explicit PasswordExpired field, or identity resolution limitation.
@@ -1023,8 +1286,80 @@ table 'Device Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _managedCount = 1 && NOT ISBLANK ( _managedKey ) && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD Computer Evidence'[PasswordExpiryStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: e3f30f15-0382-4ee5-905e-716f06139e74
+		lineageTag: b9e9c18d-3ddd-461d-9230-ddda4880d725
 		summarizeBy: none
+
+	/// Observed primary user, exact source ID and tenant/batch matching only; used by the report search.
+	column 'Primary User (report)' =
+			VAR _t='Device Inventory Evidence'[TenantKey]
+			VAR _b='Device Inventory Evidence'[Loaded Batch ID]
+			VAR _gkey='Device Inventory Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Inventory Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Inventory Evidence'[Device Source ID]))
+			VAR _upn=COALESCE('Device Inventory Evidence'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 70fe4fd5-8c31-40b6-aed9-91335941670d
+
+	/// Qualified SAM of the primary user; never inferred from UPN text.
+	column 'Primary User SAM (report)' =
+			VAR _t='Device Inventory Evidence'[TenantKey]
+			VAR _b='Device Inventory Evidence'[Loaded Batch ID]
+			VAR _gkey='Device Inventory Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Inventory Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Inventory Evidence'[Device Source ID]))
+			VAR _upn=COALESCE('Device Inventory Evidence'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 8307459f-9bbe-4504-a497-11b31efa530b
+
+	/// Last Windows console user observed at collection. Does not mean current user or last RDP session.
+	column 'Last Console User (report)' =
+			VAR _t='Device Inventory Evidence'[TenantKey]
+			VAR _b='Device Inventory Evidence'[Loaded Batch ID]
+			VAR _gkey='Device Inventory Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Inventory Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Inventory Evidence'[Device Source ID]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 49a8f3c7-3614-4a05-8ed4-d9567ad19bba
+
+	/// Source-qualified time of last observed console logon; unknown remains blank.
+	column 'Last Console Logon UTC (report)' =
+			VAR _t='Device Inventory Evidence'[TenantKey]
+			VAR _b='Device Inventory Evidence'[Loaded Batch ID]
+			VAR _gkey='Device Inventory Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Inventory Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Inventory Evidence'[Device Source ID]))
+			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm
+		displayFolder: Report identity context
+		lineageTag: e08f620f-5ee0-4c46-b2a2-0db7ee59dfb6
+
+	/// Preserves source status and timestamp qualification, including stale/missing/error evidence.
+	column 'Console Logon Qualification (report)' =
+			VAR _t='Device Inventory Evidence'[TenantKey]
+			VAR _b='Device Inventory Evidence'[Loaded Batch ID]
+			VAR _gkey='Device Inventory Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Inventory Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Inventory Evidence'[Device Source ID]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _quality=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Quality],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(ISBLANK(_status),"No matched system observation",_status&" · "&_quality)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 47ab20f1-32f4-4196-8c09-0aea0f57dae6
+
+	/// Unreported blocker detail is not evidence of Windows 11 compatibility.
+	column 'Reported blocker combination' = VAR r=TRIM(COALESCE('Device Inventory Evidence'[Windows 11 Blocking Reasons],"")) RETURN IF(r=""||r="Not reported","No blocker details reported",r)
+		dataType: string
+		lineageTag: 55ca2c7c-4255-47e6-936b-8d3bcc5be03c
 
 	/// Imports the pre-consolidated private device evidence cache to avoid repeated multi-source joins in Power Query.
 	partition 'Device Inventory Evidence Import' = m
@@ -1054,3 +1389,5 @@ table 'Device Inventory Evidence'
 				    WithDeviceKey)
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

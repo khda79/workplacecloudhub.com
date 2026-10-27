@@ -1,17 +1,16 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "6a395e2d27c705d81a9e",
   "position": {
     "x": 0,
     "y": 0,
-    "width": 1920,
+    "z": 5000,
     "height": 1080,
-    "z": 3,
-    "tabOrder": 3
+    "width": 1920,
+    "tabOrder": 5000
   },
   "visualGroup": {
     "displayName": "Mailboxes",
     "groupMode": "ScaleMode"
-  },
-  "isHidden": true
+  }
 }

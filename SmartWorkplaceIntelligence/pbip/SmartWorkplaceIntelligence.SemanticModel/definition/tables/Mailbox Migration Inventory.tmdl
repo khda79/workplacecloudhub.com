@@ -52,13 +52,13 @@ table 'Mailbox Migration Inventory'
 	measure 'Local Mailboxes (2016)' = CALCULATE([Local Mailbox Inventory Records], KEEPFILTERS('Mailbox Migration Inventory'[Exchange Version] = "Exchange Server 2016"))
 		formatString: #,0
 		displayFolder: Report refinement
-		lineageTag: e5c5e74a-bbac-495e-8b39-53cab23b5c99
+		lineageTag: 0f8f9fd0-e597-4b38-9965-974d794e2196
 
 	/// All local inventory records explicitly attributed to Exchange Server 2019 or SE. Unknown versions are excluded.
 	measure 'Local Mailboxes (2019/SE)' = CALCULATE([Local Mailbox Inventory Records], KEEPFILTERS('Mailbox Migration Inventory'[Exchange Version] IN {"Exchange Server 2019", "Exchange Server SE"}))
 		formatString: #,0
 		displayFolder: Report refinement
-		lineageTag: 792e0720-c066-4e3e-a1f1-bb5bdc745d69
+		lineageTag: c26eebf9-6e71-445e-8306-618d214d5da5
 
 	/// Mailbox GUID from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Mailbox GUID'
@@ -225,6 +225,72 @@ table 'Mailbox Migration Inventory'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Exact mailbox GUID + loaded batch; blank if missing or ambiguous. Existing canonical mailbox key preserves tenant qualification.
+	column 'Report Linked Mailbox Key' = VAR g=LOWER(SUBSTITUTE(SUBSTITUTE('Mailbox Migration Inventory'[Mailbox GUID],"{",""),"}","")) VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(g),LOOKUPVALUE('Mailbox Exploration Inventory'[Mailbox Key],'Mailbox Exploration Inventory'[Report Mailbox GUID],g,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: string
+		isHidden
+		lineageTag: 722dbddb-acd5-40be-950e-8a5f9896985b
+
+	/// Existing loaded mailbox detail, matched uniquely by GUID + batch to a tenant-qualified mailbox identity. Unknown remains blank.
+	column 'Report UPN' = VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[User Principal Name],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: string
+		displayFolder: Migration queue identity
+		lineageTag: 39edbead-ef18-440b-a2c5-81d01652a8bd
+
+	/// Existing loaded mailbox detail, matched uniquely by GUID + batch to a tenant-qualified mailbox identity. Unknown remains blank.
+	column 'Report SAM' = VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[SAM Account Name],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: string
+		displayFolder: Migration queue identity
+		lineageTag: 8aaffbd7-06bd-4413-8d6e-319d2be3a396
+
+	/// Existing loaded mailbox detail, matched uniquely by GUID + batch to a tenant-qualified mailbox identity. Unknown remains blank.
+	column 'Report Server' = VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[Server Name],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: string
+		displayFolder: Migration queue identity
+		lineageTag: f5ccc1f2-7ccf-4376-8fa8-2140d47a22bb
+
+	/// Existing loaded mailbox detail, matched uniquely by GUID + batch to a tenant-qualified mailbox identity. Unknown remains blank.
+	column 'Report Database' = VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[Database],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: string
+		displayFolder: Migration queue identity
+		lineageTag: 0ea6f9ba-4d5c-4e6d-b78f-45640cb2fc20
+
+	/// Existing loaded mailbox detail, matched uniquely by GUID + batch to a tenant-qualified mailbox identity. Unknown remains blank.
+	column 'Report AD Account State' = VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[AD Account State],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: string
+		displayFolder: Migration queue identity
+		lineageTag: da98bcf4-5faa-48ab-9fc5-f392ad3fe467
+
+	/// Existing loaded mailbox detail, matched uniquely by GUID + batch to a tenant-qualified mailbox identity. Unknown remains blank.
+	column 'Report Entra Account State' = VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[Entra Account State],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: string
+		displayFolder: Migration queue identity
+		lineageTag: 345e9f3a-2c54-4bcd-afc4-505422b4276f
+
+	/// Existing loaded mailbox detail, matched uniquely by GUID + batch to a tenant-qualified mailbox identity. Unknown remains blank.
+	column 'Report M365 Licences' = VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[M365 Licenses],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: string
+		displayFolder: Migration queue identity
+		lineageTag: 4cfeba4d-da6b-4446-a737-13fea14d2887
+
+	/// Existing loaded mailbox detail, matched uniquely by GUID + batch to a tenant-qualified mailbox identity. Unknown remains blank.
+	column 'Report Account State' = VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[Account State (AD / Entra)],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: string
+		displayFolder: Migration queue identity
+		lineageTag: f8c8d53c-b33b-4bfb-83be-1cf5668ddd5c
+
+	/// Existing loaded mailbox detail, matched uniquely by GUID + batch to a tenant-qualified mailbox identity. Unknown remains blank.
+	column 'Report Size Band' = VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[Size Band],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: string
+		displayFolder: Migration queue identity
+		lineageTag: f34230a6-ab0c-4797-80cd-7e374faef2d7
+
+	/// Existing loaded mailbox detail, matched uniquely by GUID + batch to a tenant-qualified mailbox identity. Unknown remains blank.
+	column 'Report Stats Collected UTC' = VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[Stats Collected UTC],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: dateTime
+		displayFolder: Migration queue identity
+		lineageTag: cebc3fab-f271-4b3e-8160-1e23124b3c4e
+
 	/// Same governed batch as all Workplace evidence; original migration qualification retained.
 	partition 'Mailbox Migration Evidence Rebuilt' = m
 		mode: import
@@ -264,12 +330,13 @@ table 'Mailbox Migration Inventory'
 				            Values = List.Buffer(List.Transform(Pairs, each if unique then (if List.Count([Rows]) = 1 then [Rows]{0} else null) else [Rows]))
 				        in Record.FromList(Values, List.Transform(Pairs, each [__key])),
 				    Mail = Read("Exchange_OnPrem_Mailboxes_AllDomains.csv", {"ExchangeGuid", "ObjectGUID", "RecipientType", "PrimarySMTPaddress", "DisplayName", "TotalItemSize-In-MB", "ArchiveTotalItemSize-In-MB", "FullAccessCount", "SendAsCount", "DomainName"}, {"LitigationHoldEnabled", "RetentionHoldEnabled", "InPlaceHolds", "LargeItemCount-Over-35MB", "GrantSendOnBehalfTo", "CollectedAtUtc", "ArchiveStatus", "ArchiveState", "LargeItemCollectionStatus"}),
-				    Identity = Read("Exchange_HybridIdentity_Issues.csv", {"ObjectGUID", "Potential_Issue", "IssueCategory"}),
+				    IdentitySource = Readers[GetReadinessSource]("HybridIdentityFindings.csv"),
+				    Identity = IdentitySource[Rows],
 				    Permissions = Read("Exchange_Mailboxes_AllSources_PermissionsByUser.csv", {"PrimarySMTPaddress", "HasCrossPremisesPermissions"}),
 				    Jobs = Read("Exchange_EXO_MigrationJobs.csv", {"EmailAddress", "MigrationUser", "BatchName", "BatchStatus", "UserStatus"}),
 				    JobKeys = Table.AddColumn(Jobs, "__user", each if Key([EmailAddress]) <> "" then [EmailAddress] else [MigrationUser], type text),
 				    PreparedIndex = GroupIndex(Prepared, "Primary SMTP Address", true),
-				    IdentityIndex = GroupIndex(Identity, "ObjectGUID", false),
+				    IdentityIndex = GroupIndex(Identity, "AD Object GUID", false),
 				    PermissionIndex = GroupIndex(Permissions, "PrimarySMTPaddress", true),
 				    JobIndex = GroupIndex(JobKeys, "__user", false),
 				    Local = Table.SelectRows(Mail, each not Text.StartsWith(Key([RecipientType]), "remote")),
@@ -289,14 +356,14 @@ table 'Mailbox Migration Inventory'
 				            Holds = Key(Field(r, "InPlaceHolds")),
 				            Hold = Yes(Field(r, "LitigationHoldEnabled")) or Yes(Field(r, "RetentionHoldEnabled")) or not List.Contains({"", "[]", "false", "none"}, Holds),
 				            Large = Num(Field(r, "LargeItemCount-Over-35MB")),
-				            Critical = List.AnyTrue(List.Transform(I, each Has(Field(_, "IssueCategory"), {"critical"}))),
+				            Critical = List.AnyTrue(List.Transform(I, each Field(_, "Severity") = "Blocker")),
 				            Failed = Job <> null and (Has(Field(Job, "UserStatus"), {"failed", "error"}) or Has(Field(Job, "BatchStatus"), {"failed", "error"})),
-				            Risk = List.RemoveNulls({if Critical then "Identity issue" else null, if Size = null then "Size unknown" else null, if Size <> null and Size / 1024 >= 45 then "Large mailbox - target quota review" else null, if Hold then "Hold or retention dependency" else null, if (FA <> null and FA <> 0) or (SA <> null and SA <> 0) or Key(Field(r, "GrantSendOnBehalfTo")) <> "" then "Delegation dependency" else null, if Large <> null and Large > 0 then "Large items - investigate" else null, if List.Count(J) > 1 then "Ambiguous batch association" else null, if Failed then "Migration failure" else null}),
+				            Risk = List.RemoveNulls({if not IdentitySource[Available] then "Identity evidence unavailable" else null, if Critical then "Identity issue" else null, if Size = null then "Size unknown" else null, if Size <> null and Size / 1024 >= 45 then "Large mailbox - target quota review" else null, if Hold then "Hold or retention dependency" else null, if (FA <> null and FA <> 0) or (SA <> null and SA <> 0) or Key(Field(r, "GrantSendOnBehalfTo")) <> "" then "Delegation dependency" else null, if Large <> null and Large > 0 then "Large items - investigate" else null, if List.Count(J) > 1 then "Ambiguous batch association" else null, if Failed then "Migration failure" else null}),
 				            Blocker = Critical or Failed,
 				            Nonempty = (v as any, fallback as text) as text => if v = null or Text.Trim(Text.From(v)) = "" then fallback else Text.From(v),
-				            Issues = Text.Combine(List.Transform(I, each Nonempty(Field(_, "Potential_Issue"), "")), "; "),
+				            Issues = if not IdentitySource[Available] then "Hybrid identity evidence unavailable in selected batch" else Text.Combine(List.Sort(List.Distinct(List.Transform(I, each [Rule ID] & (if Nonempty([Observed Value], "") = "" then "" else " - " & Text.From([Observed Value]))))), "; "),
 				            Collected = Nonempty(Field(r, "CollectedAtUtc"), "Unknown")
-				        in [#"Mailbox GUID"=Nonempty(r[ExchangeGuid], Text.From(r[ObjectGUID])), #"Object GUID"=r[ObjectGUID], #"Primary SMTP Address"=Smtp, #"Display Name"=r[DisplayName], Country=if P = null then "Unknown" else Nonempty(Field(P, "Country"), "Unknown"), #"Country Basis"="Prepared identity-country match; no inference from email suffix", #"Exchange Version"=if P = null then "Not observed" else Nonempty(Field(P, "Exchange Version"), "Not observed"), #"Mailbox Type"=r[RecipientType], #"Mailbox Size GB"=if Size = null then null else Size / 1024, #"Archive Size GB"=if Archive = null then null else Archive / 1024, #"Archive State"=Nonempty(Field(r, "ArchiveStatus"), Nonempty(Field(r, "ArchiveState"), "Unknown")), #"Full Access Count"=FA, #"Send As Count"=SA, #"Send On Behalf"=Nonempty(Field(r, "GrantSendOnBehalfTo"), ""), #"Cross-premises Permissions"=if Q = null then "Unknown" else if Yes(Field(Q, "HasCrossPremisesPermissions")) then "Observed" else "None observed", #"Hold and Retention"=if Hold then "Review - preserve settings" else "None observed", #"Large Item Count"=if Large = null then null else Text.From(Large, "en-US"), #"Large Item Evidence"=Nonempty(Field(r, "LargeItemCollectionStatus"), "Unknown"), #"Identity Issues"=if Issues = "" then "None in issue export - not identity readiness proof" else Issues, #"Batch Name"=if List.Count(J) > 1 then "Multiple - review" else if Job = null then "Not observed" else Nonempty(Field(Job, "BatchName"), "Not observed"), #"Migration User Status"=if Job = null then "Not observed" else Nonempty(Field(Job, "UserStatus"), "Not observed"), #"Risk Reasons"=if List.IsEmpty(Risk) then "Readiness evidence incomplete" else Text.Combine(Risk, "; "), #"Migration Status"=if Blocker then "Observed blocker" else if not List.IsEmpty(Risk) then "Risk review required" else "Readiness unknown", #"Next Action"=if Blocker then "Resolve identity or migration errors before scheduling" else "Validate quota, archives, permission migration and user readiness; schedule dependency-aware waves", #"Evidence Date"=if Collected = "Unknown" then Collected else Text.Start(Collected, 10), #"Source Domain"=r[DomainName]],
+				        in [#"Mailbox GUID"=Nonempty(r[ExchangeGuid], Text.From(r[ObjectGUID])), #"Object GUID"=r[ObjectGUID], #"Primary SMTP Address"=Smtp, #"Display Name"=r[DisplayName], Country=if P = null then "Unknown" else Nonempty(Field(P, "Country"), "Unknown"), #"Country Basis"="Prepared identity-country match; no inference from email suffix", #"Exchange Version"=if P = null then "Not observed" else Nonempty(Field(P, "Exchange Version"), "Not observed"), #"Mailbox Type"=r[RecipientType], #"Mailbox Size GB"=if Size = null then null else Size / 1024, #"Archive Size GB"=if Archive = null then null else Archive / 1024, #"Archive State"=Nonempty(Field(r, "ArchiveStatus"), Nonempty(Field(r, "ArchiveState"), "Unknown")), #"Full Access Count"=FA, #"Send As Count"=SA, #"Send On Behalf"=Nonempty(Field(r, "GrantSendOnBehalfTo"), ""), #"Cross-premises Permissions"=if Q = null then "Unknown" else if Yes(Field(Q, "HasCrossPremisesPermissions")) then "Observed" else "None observed", #"Hold and Retention"=if Hold then "Review - preserve settings" else "None observed", #"Large Item Count"=if Large = null then null else Text.From(Large, "en-US"), #"Large Item Evidence"=Nonempty(Field(r, "LargeItemCollectionStatus"), "Unknown"), #"Identity Issues"=if Issues = "" then "None in issue export - not identity readiness proof" else Issues, #"Batch Name"=if List.Count(J) > 1 then "Multiple - review" else if Job = null then "Not observed" else Nonempty(Field(Job, "BatchName"), "Not observed"), #"Migration User Status"=if Job = null then "Not observed" else Nonempty(Field(Job, "UserStatus"), "Not observed"), #"Risk Reasons"=if List.IsEmpty(Risk) then "Readiness evidence incomplete" else Text.Combine(Risk, "; "), #"Migration Status"=if Blocker then "Observed blocker" else if not List.IsEmpty(Risk) then "Risk review required" else "Readiness unknown", #"Next Action"=(if Blocker then "Resolve identity or migration errors before scheduling" else "Validate quota, archives, permission migration and user readiness; schedule dependency-aware waves") & (if not IdentitySource[Available] then "; obtain hybrid identity evidence from a qualified batch before scheduling" else ""), #"Evidence Date"=if Collected = "Unknown" then Collected else Text.Start(Collected, 10), #"Source Domain"=r[DomainName]],
 				    Rows = Table.FromRecords(List.Transform(Table.ToRecords(Checked), Project), {"Mailbox GUID", "Object GUID", "Primary SMTP Address", "Display Name", "Country", "Country Basis", "Exchange Version", "Mailbox Type", "Mailbox Size GB", "Archive Size GB", "Archive State", "Full Access Count", "Send As Count", "Send On Behalf", "Cross-premises Permissions", "Hold and Retention", "Large Item Count", "Large Item Evidence", "Identity Issues", "Batch Name", "Migration User Status", "Risk Reasons", "Migration Status", "Next Action", "Evidence Date", "Source Domain"}, MissingField.Error),
 				    Typed = Table.TransformColumnTypes(Rows, {{"Mailbox Size GB", type number}, {"Archive Size GB", type number}, {"Full Access Count", type number}, {"Send As Count", type number}}, "en-US")
 				in

@@ -5,7 +5,6 @@
   "options": {
     "applyOnlyToTargetVisuals": true,
     "targetVisualNames": [
-      "0494a34823b0fb981f15",
       "112e44cbf3144092ed4b",
       "145ad159a5c3ed106b1d",
       "776b3989c78d678a6ad3",
@@ -14,7 +13,11 @@
       "dc957f9aaa1a00cd5ac6",
       "eaa4fe1c0e36d833b4c6",
       "06e8e79be24fb907920f",
-      "fb4bac758b2a5747441b"
+      "fb4bac758b2a5747441b",
+      "1e617f380e84c52143d6",
+      "76daa86de282771d986a",
+      "7bc2a9b9cb0feb8f57df",
+      "cc8747ad68950ad75ed0"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -24,11 +27,29 @@
     "activeSection": "a821f7deb92bb3bc4c78",
     "sections": {
       "a821f7deb92bb3bc4c78": {
-        "visualContainers": {},
-        "visualContainerGroups": {
-          "0494a34823b0fb981f15": {
-            "isHidden": true
+        "visualContainers": {
+          "1e617f380e84c52143d6": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
           },
+          "76daa86de282771d986a": {
+            "singleVisual": {}
+          },
+          "7bc2a9b9cb0feb8f57df": {
+            "singleVisual": {}
+          },
+          "cc8747ad68950ad75ed0": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
           "112e44cbf3144092ed4b": {
             "isHidden": true
           },

@@ -70,11 +70,15 @@ table 'Intune Enrollment Failure Evidence'
 
 	/// Prepared IntuneEnrollmentFailureEvidence.csv: SourceRecord. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Source Record'
-		dataType: int64
+		dataType: double
 		isHidden
 		lineageTag: 66b69c04-e594-4fe4-b414-a22fe3043160
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: SourceRecord
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneEnrollmentFailureEvidence.csv: CollectionUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Collection UTC'

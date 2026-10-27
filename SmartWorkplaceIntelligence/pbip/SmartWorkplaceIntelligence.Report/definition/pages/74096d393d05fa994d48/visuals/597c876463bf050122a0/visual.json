@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "597c876463bf050122a0",
   "position": {
-    "x": 32.0,
+    "x": 32,
     "y": 128,
-    "width": 225.0,
+    "z": 11000,
     "height": 128,
-    "z": 202,
-    "tabOrder": 203
+    "width": 152.88888888888889,
+    "tabOrder": 14000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -20,34 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Report Summary"
+                      "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "License Report Awaiting Capacity Label"
+                  "Property": "Current Windows 11 Adoption (%)"
                 }
               },
-              "queryRef": "License Report Summary.License Report Awaiting Capacity Label",
-              "nativeQueryRef": "Users awaiting license capacity",
-              "displayName": "Users awaiting license capacity"
-            }
-          ]
-        },
-        "Tooltips": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Summary"
-                    }
-                  },
-                  "Property": "License Overview Family Over-assigned Units"
-                }
-              },
-              "queryRef": "License Report Summary.License Overview Family Over-assigned Units",
-              "nativeQueryRef": "License Overview Family Over-assigned Units",
-              "displayName": "Over-assigned units"
+              "queryRef": "Device Inventory Evidence.Current Windows 11 Adoption (%)",
+              "nativeQueryRef": "Current Windows 11 Adoption (%)",
+              "displayName": "Windows 11 adoption (%)"
             }
           ]
         }
@@ -67,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -82,13 +63,8 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Measure": {
-                      "Expression": {
-                        "SourceRef": {
-                          "Entity": "License Report Summary"
-                        }
-                      },
-                      "Property": "License Report Awaiting Capacity Color"
+                    "Literal": {
+                      "Value": "'#215E9E'"
                     }
                   }
                 }
@@ -350,7 +326,7 @@
             "rightMargin": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "4D"
                 }
               }
             }
@@ -373,7 +349,7 @@
             "paddingUniform": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "0D"
                 }
               }
             },
@@ -517,7 +493,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Global snapshot. Remaining M365 capacity is shown by suite in Licensing. Endpoint Analytics is an average among covered managed devices.'"
+                  "Value": "'Workforce inactive >30D'"
                 }
               }
             }
@@ -641,144 +617,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "Filteraabe7210633bef044778f52e",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Report Summary"
-              }
-            },
-            "Property": "Product"
-          }
-        },
-        "type": "Categorical",
-        "filter": {
-          "Version": 2,
-          "From": [
-            {
-              "Name": "s",
-              "Entity": "License Report Summary",
-              "Type": 0
-            }
-          ],
-          "Where": [
-            {
-              "Condition": {
-                "In": {
-                  "Expressions": [
-                    {
-                      "Column": {
-                        "Expression": {
-                          "SourceRef": {
-                            "Source": "s"
-                          }
-                        },
-                        "Property": "Product"
-                      }
-                    }
-                  ],
-                  "Values": [
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Microsoft 365 F1'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Microsoft 365 F3'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Microsoft 365 E3'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Microsoft 365 E5'"
-                        }
-                      }
-                    ]
-                  ]
-                }
-              }
-            }
-          ]
-        },
-        "howCreated": "User"
-      },
-      {
-        "name": "Filter5970cf03d284acacc0fbbee1",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Security Control Evidence"
-              }
-            },
-            "Property": "Control Name"
-          }
-        },
-        "type": "Categorical",
-        "filter": {
-          "Version": 2,
-          "From": [
-            {
-              "Name": "ep",
-              "Entity": "Security Control Evidence",
-              "Type": 0
-            }
-          ],
-          "Where": [
-            {
-              "Condition": {
-                "Not": {
-                  "Expression": {
-                    "In": {
-                      "Expressions": [
-                        {
-                          "Column": {
-                            "Expression": {
-                              "SourceRef": {
-                                "Source": "ep"
-                              }
-                            },
-                            "Property": "Control Name"
-                          }
-                        }
-                      ],
-                      "Values": [
-                        [
-                          {
-                            "Literal": {
-                              "Value": "'Defender protection active'"
-                            }
-                          }
-                        ]
-                      ]
-                    }
-                  }
-                }
-              }
-            }
-          ]
-        },
-        "howCreated": "User",
-        "isHiddenInViewMode": true,
-        "isLockedInViewMode": true
-      }
-    ]
   }
 }

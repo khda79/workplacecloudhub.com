@@ -6,31 +6,37 @@ table 'Exchange Health Checker Servers'
 	measure 'Exchange Health Checker Servers Total' = VAR _n=CALCULATE(COUNTROWS('Exchange Health Checker Servers'),KEEPFILTERS('Exchange Health Checker Servers'[Is Server]=TRUE())) RETURN IF(_n>0,_n)
 		formatString: #,0
 		displayFolder: Health Checker
+		lineageTag: 92475d27-6dd9-4b7f-bf2f-8efe68161ad7
 
 	/// Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection.
 	measure 'Exchange Health Checker Servers Processed' = IF(NOT ISBLANK([Exchange Health Checker Servers Total]),COALESCE(CALCULATE(COUNTROWS('Exchange Health Checker Servers'),KEEPFILTERS('Exchange Health Checker Servers'[Is Server]=TRUE()),KEEPFILTERS('Exchange Health Checker Servers'[Run Status]="Completed")),0))
 		formatString: #,0
 		displayFolder: Health Checker
+		lineageTag: 8fa5aff6-987b-48ca-bac4-91fcb5dd2fad
 
 	/// Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection.
 	measure 'Exchange Health Checker Vulnerabilities' = IF([Exchange Health Checker Servers Processed]>0,CALCULATE(SUM('Exchange Health Checker Servers'[Vulnerability Count]),KEEPFILTERS('Exchange Health Checker Servers'[Is Server]=TRUE()),KEEPFILTERS('Exchange Health Checker Servers'[Run Status]="Completed")))
 		formatString: #,0
 		displayFolder: Health Checker
+		lineageTag: 8e945ad3-39e4-452d-bbb3-3b764218a311
 
 	/// Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection.
 	measure 'Exchange Health Checker Errors' = IF([Exchange Health Checker Servers Processed]>0,CALCULATE(SUM('Exchange Health Checker Servers'[Error Count]),KEEPFILTERS('Exchange Health Checker Servers'[Is Server]=TRUE()),KEEPFILTERS('Exchange Health Checker Servers'[Run Status]="Completed")))
 		formatString: #,0
 		displayFolder: Health Checker
+		lineageTag: 72eb5ff2-becf-48d8-927e-72e6906bd747
 
 	/// Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection.
 	measure 'Exchange Health Checker Warnings' = IF([Exchange Health Checker Servers Processed]>0,CALCULATE(SUM('Exchange Health Checker Servers'[Warning Count]),KEEPFILTERS('Exchange Health Checker Servers'[Is Server]=TRUE()),KEEPFILTERS('Exchange Health Checker Servers'[Run Status]="Completed")))
 		formatString: #,0
 		displayFolder: Health Checker
+		lineageTag: 2717b5d7-f0a8-4c2e-8447-e7f288dc21c6
 
 	/// Selected immutable batch only. Health Checker results describe the servers it processed; a server that did not complete is unmeasured, never healthy. Values that can reveal host names, addresses, certificates or domains are masked at collection.
 	measure 'Exchange Health Checker Status' = VAR _total=[Exchange Health Checker Servers Total] VAR _done=[Exchange Health Checker Servers Processed] RETURN IF(ISBLANK(_total),"Not captured in selected batch | Health Checker results require a run with -IncludeHealthChecker; unknown is not healthy.",FORMAT(_done,"0") & "/" & FORMAT(_total,"0") & " servers processed | Unprocessed servers are unmeasured, not healthy.")
 		formatString: @
 		displayFolder: Health Checker
+		lineageTag: 4359c304-4866-4671-8401-265c8826740e
 
 	column 'Server Name'
 		dataType: string

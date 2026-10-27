@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "470305dc0ed6a174133c",
   "position": {
     "x": 32,
-    "y": 544.2,
+    "y": 320,
+    "z": 1000,
+    "height": 96,
     "width": 1856,
-    "height": 123.8,
-    "z": 108,
-    "tabOrder": 684
+    "tabOrder": 3000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -84,6 +84,48 @@
               },
               "queryRef": "Content Storage Evidence.OneDrive Accounts Without Activity Evidence",
               "nativeQueryRef": "OneDrive Without Activity"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Content Storage Used (TB)"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Content Storage Used (TB)",
+              "nativeQueryRef": "Storage Used (TB)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Containers at 80%+ Quota"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Containers at 80%+ Quota",
+              "nativeQueryRef": "At 80%+ Quota"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
+                  "Property": "Inactive Content Storage (TB)"
+                }
+              },
+              "queryRef": "Content Storage Evidence.Inactive Content Storage (TB)",
+              "nativeQueryRef": "Inactive Storage (TB)"
             }
           ]
         }
@@ -331,6 +373,27 @@
                   "Value": "0L"
                 }
               }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
             }
           },
           "selector": {
@@ -420,32 +483,21 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Supporting KPIs'"
+                  "Value": "''"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
+                  "Value": "11D"
                 }
               }
             }

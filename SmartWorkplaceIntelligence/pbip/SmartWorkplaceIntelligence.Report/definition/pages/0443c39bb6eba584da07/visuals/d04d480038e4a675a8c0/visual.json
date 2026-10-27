@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "d04d480038e4a675a8c0",
   "position": {
     "x": 32,
     "y": 272,
-    "z": 119,
+    "z": 7000,
     "height": 24,
     "width": 1856,
-    "tabOrder": 624
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Workforce metrics",
+                    "value": "Selected view: Risk signal details",
                     "textStyle": {
                       "fontWeight": "bold",
                       "fontFamily": "Segoe UI",

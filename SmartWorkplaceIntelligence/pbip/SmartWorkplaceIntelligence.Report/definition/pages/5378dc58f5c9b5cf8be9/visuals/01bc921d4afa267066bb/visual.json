@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "01bc921d4afa267066bb",
   "position": {
     "x": 32,
-    "y": 684,
+    "y": 713.90243902439033,
+    "z": 0,
+    "height": 286.09756097560978,
     "width": 1856,
-    "height": 276,
-    "z": 11000,
     "tabOrder": 804
   },
   "visual": {
@@ -28,7 +28,8 @@
               },
               "queryRef": "Intune Managed App Evidence.Display Name",
               "nativeQueryRef": "Display Name",
-              "displayName": "Application"
+              "displayName": "Application",
+              "active": true
             },
             {
               "field": {
@@ -43,7 +44,8 @@
               },
               "queryRef": "Intune Managed App Assignment Evidence.Intent",
               "nativeQueryRef": "Intent",
-              "displayName": "Intent"
+              "displayName": "Intent",
+              "active": true
             },
             {
               "field": {
@@ -58,7 +60,8 @@
               },
               "queryRef": "Intune Managed App Assignment Evidence.Target Type",
               "nativeQueryRef": "Target Type",
-              "displayName": "Target Type"
+              "displayName": "Target Type",
+              "active": true
             },
             {
               "field": {
@@ -73,7 +76,8 @@
               },
               "queryRef": "Intune Managed App Assignment Evidence.Assignment Filter Type",
               "nativeQueryRef": "Assignment Filter Type",
-              "displayName": "Assignment Filter Type"
+              "displayName": "Assignment Filter Type",
+              "active": true
             },
             {
               "field": {
@@ -88,7 +92,8 @@
               },
               "queryRef": "Intune Managed App Assignment Evidence.Catalog Match",
               "nativeQueryRef": "Catalog Match",
-              "displayName": "Catalog Match"
+              "displayName": "Catalog Match",
+              "active": true
             },
             {
               "field": {
@@ -103,7 +108,8 @@
               },
               "queryRef": "Intune Managed App Assignment Evidence.Application ID",
               "nativeQueryRef": "Application ID",
-              "displayName": "Application ID"
+              "displayName": "Application ID",
+              "active": true
             },
             {
               "field": {
@@ -118,7 +124,8 @@
               },
               "queryRef": "Intune Managed App Assignment Evidence.Group ID",
               "nativeQueryRef": "Group ID",
-              "displayName": "Group ID"
+              "displayName": "Group ID",
+              "active": true
             }
           ]
         }
@@ -128,13 +135,6 @@
       "columnHeaders": [
         {
           "properties": {
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -146,6 +146,20 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -172,9 +186,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -258,19 +279,251 @@
           }
         }
       ],
-      "columnWidth": [
+      "columnWidth": [],
+      "columnFormatting": [
         {
+          "selector": {
+            "metadata": "Intune Managed App Evidence.Display Name"
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "320D"
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
-            "metadata": "Intune Managed App Evidence.Display Name"
+            "metadata": "Intune Managed App Assignment Evidence.Intent"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Managed App Assignment Evidence.Target Type"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Managed App Assignment Evidence.Assignment Filter Type"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Managed App Assignment Evidence.Catalog Match"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Managed App Assignment Evidence.Application ID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Managed App Assignment Evidence.Group ID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
           }
         }
       ]
@@ -282,7 +535,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography \u00b7 selected evidence'"
+                  "Value": "'Geography · selected evidence'"
                 }
               }
             }
@@ -302,7 +555,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Collected assignments \u00b7 includes exclusions, not effective required-install targeting'"
+                  "Value": "'Collected assignments · includes exclusions, not effective required-install targeting'"
                 }
               }
             },
@@ -391,7 +644,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

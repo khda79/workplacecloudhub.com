@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "5642e87d45c143c62c0d",
   "position": {
-    "x": 1008,
+    "x": 1248,
     "y": 128,
-    "width": 208,
-    "height": 80,
-    "z": 103,
-    "tabOrder": 256
+    "z": 28000,
+    "height": 104,
+    "width": 154,
+    "tabOrder": 21000
   },
   "visual": {
     "visualType": "slicer",
@@ -28,7 +28,8 @@
               },
               "queryRef": "Collaboration Object Evidence.Object Type",
               "nativeQueryRef": "Object Type",
-              "active": true
+              "active": true,
+              "displayName": "Resource Type"
             }
           ]
         }

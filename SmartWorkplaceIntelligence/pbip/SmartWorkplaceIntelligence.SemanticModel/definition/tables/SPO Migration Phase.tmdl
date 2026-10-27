@@ -1,10 +1,10 @@
 /// Migration reporting dimension; current and historical members retained.
 table 'SPO Migration Phase'
-	lineageTag: 9fef8144-d006-42ec-bfd2-9d255ca86f2d
+	lineageTag: 9acadc5e-d9fb-463c-9d90-c0bede67503a
 
 	column Phase
 		dataType: string
-		lineageTag: 66e5d7d5-61fc-474d-be01-37dd5fe90df1
+		lineageTag: 27047a41-818b-451b-9b5b-a1cedc39032d
 		summarizeBy: none
 		sourceColumn: Phase
 

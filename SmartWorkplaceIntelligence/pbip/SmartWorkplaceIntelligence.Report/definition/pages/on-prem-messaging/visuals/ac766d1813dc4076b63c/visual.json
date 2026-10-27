@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "ac766d1813dc4076b63c",
   "position": {
     "x": 1412,
     "y": 1044,
-    "z": 12000,
-    "width": 440,
+    "z": 18000,
     "height": 24,
-    "tabOrder": 12000
+    "width": 440,
+    "tabOrder": 18000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Copyright \u00a9 2026 \u2014 https://workplacecloudhub.com/ \u2014 All rights reserved.",
+                    "value": "Copyright © 2026 — https://workplacecloudhub.com/ — All rights reserved.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "9pt",

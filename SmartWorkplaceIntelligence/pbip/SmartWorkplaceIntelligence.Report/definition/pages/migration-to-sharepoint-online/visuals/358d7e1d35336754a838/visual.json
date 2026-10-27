@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "358d7e1d35336754a838",
   "position": {
-    "x": 56,
-    "y": 868,
-    "z": 7000,
-    "height": 320,
-    "width": 1808,
-    "tabOrder": 36
+    "x": 32,
+    "y": 767.81975736568461,
+    "z": 9000,
+    "height": 432.18024263431539,
+    "width": 1856,
+    "tabOrder": 9000
   },
   "visual": {
     "visualType": "tableEx",
@@ -23,27 +23,13 @@
                       "Entity": "SPO Migration Plan"
                     }
                   },
-                  "Property": "Migration ID"
-                }
-              },
-              "queryRef": "SPO Migration Plan.Migration ID",
-              "nativeQueryRef": "Migration ID",
-              "displayName": "Migration ID"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "SPO Migration Plan"
-                    }
-                  },
                   "Property": "Source Type"
                 }
               },
               "queryRef": "SPO Migration Plan.Source Type",
               "nativeQueryRef": "Source Type",
-              "displayName": "Source Type"
+              "displayName": "Source Type",
+              "active": true
             },
             {
               "field": {
@@ -58,7 +44,8 @@
               },
               "queryRef": "SPO Migration Plan.Source Name",
               "nativeQueryRef": "Source Name",
-              "displayName": "Source Name"
+              "displayName": "Source Name",
+              "active": true
             },
             {
               "field": {
@@ -73,7 +60,8 @@
               },
               "queryRef": "SPO Migration Plan.Planned Date",
               "nativeQueryRef": "Planned Date",
-              "displayName": "Planned Date"
+              "displayName": "Planned Date",
+              "active": true
             },
             {
               "field": {
@@ -88,7 +76,8 @@
               },
               "queryRef": "SPO Migration Plan.Actual Date",
               "nativeQueryRef": "Actual Date",
-              "displayName": "Actual Date"
+              "displayName": "Actual Date",
+              "active": true
             },
             {
               "field": {
@@ -103,7 +92,8 @@
               },
               "queryRef": "SPO Migration Plan.Schedule Variance Days",
               "nativeQueryRef": "Schedule Variance Days",
-              "displayName": "Schedule Variance Days"
+              "displayName": "Schedule Variance Days",
+              "active": true
             },
             {
               "field": {
@@ -118,7 +108,8 @@
               },
               "queryRef": "SPO Migration Plan.Execution Status",
               "nativeQueryRef": "Execution Status",
-              "displayName": "Execution Status"
+              "displayName": "Execution Status",
+              "active": true
             },
             {
               "field": {
@@ -133,7 +124,8 @@
               },
               "queryRef": "SPO Migration Plan.Business Contact",
               "nativeQueryRef": "Business Contact",
-              "displayName": "Business Contact"
+              "displayName": "Business Contact",
+              "active": true
             },
             {
               "field": {
@@ -148,7 +140,24 @@
               },
               "queryRef": "SPO Migration Plan.Next Action",
               "nativeQueryRef": "Next Action",
-              "displayName": "Next Action"
+              "displayName": "Next Action",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "SPO Migration Plan"
+                    }
+                  },
+                  "Property": "Migration ID"
+                }
+              },
+              "queryRef": "SPO Migration Plan.Migration ID",
+              "nativeQueryRef": "Migration ID",
+              "displayName": "Migration ID",
+              "active": true
             }
           ]
         }
@@ -158,6 +167,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -165,7 +181,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -176,13 +199,6 @@
               "expr": {
                 "Literal": {
                   "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
                 }
               }
             },
@@ -202,16 +218,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
                 }
               }
             },
-            "bold": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "'Center'"
                 }
               }
             }
@@ -301,7 +317,325 @@
             }
           }
         }
-      ]
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "SPO Migration Plan.Source Type"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Plan.Source Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Plan.Planned Date"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Plan.Actual Date"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Plan.Schedule Variance Days"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Plan.Execution Status"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Plan.Business Contact"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Plan.Next Action"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Plan.Migration ID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "title": [
@@ -317,7 +651,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Schedule and ownership \u2014 variance against the latest known planned date'"
+                  "Value": "'Schedule and ownership — variance against the latest known planned date'"
                 }
               }
             },
@@ -458,7 +792,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -471,7 +812,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Schedule and ownership \u2014 variance against the latest known planned date'"
+                  "Value": "'Schedule and ownership — variance against the latest known planned date'"
                 }
               }
             }

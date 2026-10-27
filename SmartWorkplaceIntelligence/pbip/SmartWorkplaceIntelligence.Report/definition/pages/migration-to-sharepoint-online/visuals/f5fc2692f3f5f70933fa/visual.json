@@ -7,10 +7,11 @@
     "z": 4000,
     "height": 1280,
     "width": 1920,
-    "tabOrder": 1
+    "tabOrder": 3000
   },
   "visualGroup": {
     "displayName": "Progress",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

@@ -3,109 +3,162 @@ table 'Windows Migration Evidence'
 	lineageTag: 380dd445-f2b5-44b5-b6e7-f10ba35587d8
 
 	/// Qualified Intune Windows 10 source identities in the current frozen union; excludes AD-only records. Distinct source IDs, not proof that every identity is a separate active physical PC.
-	measure 'Remaining Managed Windows 10' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+	measure 'Remaining Managed Windows 10' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())))
 		formatString: #,0
 		displayFolder: Migration planning
 		lineageTag: cd275713-ce09-416f-9584-e521c5b6a9ad
 
 	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
-	measure 'Hardware Incompatible Windows 10' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'),KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] = "Not capable")),0), BLANK())
+	measure 'Hardware Incompatible Windows 10' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'),KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] = "Not capable")),0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'),KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] = "Not capable")),0), BLANK())))
 		formatString: #,0
 		displayFolder: Migration planning
 		lineageTag: e22efc27-5f6a-4a92-9a7c-8f7a4f093e8e
 
 	/// Legacy combined unknown/conflict count retained for compatibility. Use the separate Migration Windows 10 Eligibility Unknown and Conflicting measures for the new KPI row.
-	measure 'Windows 10 Eligibility Unknown' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',NOT('Windows Migration Evidence'[Upgrade Eligibility] IN {"Capable","Not capable"}))),0), BLANK())
+	measure 'Windows 10 Eligibility Unknown' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',NOT('Windows Migration Evidence'[Upgrade Eligibility] IN {"Capable","Not capable"}))),0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',NOT('Windows Migration Evidence'[Upgrade Eligibility] IN {"Capable","Not capable"}))),0), BLANK())))
 		formatString: #,0
 		isHidden
 		displayFolder: Migration planning
 		lineageTag: 85cacbfd-a76a-4a55-8c21-27b1a88a50e9
 
 	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views.
-	measure 'Confirmed Autopatch Readiness' = "Unknown"
+	measure 'Confirmed Autopatch Readiness' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE(("Unknown"),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),("Unknown"))
 		displayFolder: Migration planning
 		lineageTag: 0243c63f-1a78-443c-9652-8c235401bbfa
 
 	/// Local source-file modification timestamps, not individual device event timestamps.
-	measure 'Windows Migration Source Date' = "Frozen local exports: Intune 2026-10-08 22:47 UTC; AD 2026-10-09 00:39 UTC; history remains Intune-only"
+	measure 'Windows Migration Source Date' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE(("Frozen local exports: Intune 2026-10-08 22:47 UTC; AD 2026-10-09 00:39 UTC; history remains Intune-only"),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),("Frozen local exports: Intune 2026-10-08 22:47 UTC; AD 2026-10-09 00:39 UTC; history remains Intune-only"))
 		displayFolder: Migration planning
 		lineageTag: f9a94ad8-c625-4fea-b4e9-87c35dcba5c8
 
 	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
-	measure 'Windows 10 Disk Review' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',NOT ISBLANK('Windows Migration Evidence'[Free Disk GB]) && 'Windows Migration Evidence'[Free Disk GB] < 20)),0), BLANK())
+	measure 'Windows 10 Disk Review' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',NOT ISBLANK('Windows Migration Evidence'[Free Disk GB]) && 'Windows Migration Evidence'[Free Disk GB] < 20)),0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',NOT ISBLANK('Windows Migration Evidence'[Free Disk GB]) && 'Windows Migration Evidence'[Free Disk GB] < 20)),0), BLANK())))
 		formatString: #,0
 		displayFolder: Migration planning
 		lineageTag: adc5fd5a-5862-484c-ac10-86085a9867f0
 
 	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
-	measure 'Windows 10 Legacy Build Review' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',LEFT('Windows Migration Evidence'[Legacy Build Review],8)="Pre-22H2")),0), BLANK())
+	measure 'Windows 10 Legacy Build Review' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',LEFT('Windows Migration Evidence'[Legacy Build Review],8)="Pre-22H2")),0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(COUNTROWS(FILTER('Windows Migration Evidence',LEFT('Windows Migration Evidence'[Legacy Build Review],8)="Pre-22H2")),0), BLANK())))
 		formatString: #,0
 		displayFolder: Migration planning
 		lineageTag: 18e7aa5c-f4dc-4aea-96b5-55a7fc7932f2
 
 	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
-	measure 'Windows 10 Deployment Errors' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'),KEEPFILTERS('Windows Migration Evidence'[Update State]="Error")),0), BLANK())
+	measure 'Windows 10 Deployment Errors' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'),KEEPFILTERS('Windows Migration Evidence'[Update State]="Error")),0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'),KEEPFILTERS('Windows Migration Evidence'[Update State]="Error")),0), BLANK())))
 		formatString: #,0
 		displayFolder: Migration planning
 		lineageTag: a1ad2e8f-5967-4138-b4f3-5e0d15b9caaa
 
 	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
-	measure 'Windows 10 Autopatch Policy Observed' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Success","InProgress","Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+	measure 'Windows 10 Autopatch Policy Observed' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Success","InProgress","Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Success","InProgress","Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())))
 		formatString: #,##0
 		displayFolder: Migration policy context
 		lineageTag: 8b5a1bc2-89f1-40b9-a5f5-6128f33b7c3f
 
 	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
-	measure 'Windows 10 Autopatch Policy Success' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Success"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+	measure 'Windows 10 Autopatch Policy Success' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Success"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Success"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())))
 		formatString: #,##0
 		displayFolder: Migration policy context
 		lineageTag: bbeb751c-0dbd-424d-bc74-6033fae7fa0a
 
 	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
-	measure 'Windows 10 Autopatch Policy In Progress' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"InProgress"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+	measure 'Windows 10 Autopatch Policy In Progress' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"InProgress"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"InProgress"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())))
 		formatString: #,##0
 		displayFolder: Migration policy context
 		lineageTag: 781dd729-db4b-4df3-9949-b84399ce0957
 
 	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
-	measure 'Windows 10 Autopatch Policy Errors' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+	measure 'Windows 10 Autopatch Policy Errors' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())))
 		formatString: #,##0
 		displayFolder: Migration policy context
 		lineageTag: f8be2857-36c7-4d1c-ab73-d8e0b9e1f125
 
 	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
-	measure 'Windows 10 Autopatch Policy Unobserved' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Not observed"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+	measure 'Windows 10 Autopatch Policy Unobserved' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Not observed"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Autopatch Policy State] IN {"Not observed"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())))
 		formatString: #,##0
 		displayFolder: Migration policy context
 		lineageTag: 023f79c1-581f-42fb-a99d-580a2713fede
 
 	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
-	measure 'Windows 10 Target Policy Observed' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Windows 11 Policy State] IN {"Success","InProgress","Error","Cancelled"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+	measure 'Windows 10 Target Policy Observed' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Windows 11 Policy State] IN {"Success","InProgress","Error","Cancelled"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Windows 11 Policy State] IN {"Success","InProgress","Error","Cancelled"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())))
 		formatString: #,##0
 		displayFolder: Migration policy context
 		lineageTag: b269160b-6581-4714-87e5-99e72535bba2
 
 	/// Count of frozen Intune Windows 10 source identities with the specified observed feature-update policy state. Excludes AD-only records. Unique tenant/policy/device-ID attribution. Success is not Windows 11 migration proof; absence is not proof of non-enrollment.
-	measure 'Windows 10 Target Policy Errors' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Windows 11 Policy State] IN {"Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())
+	measure 'Windows 10 Target Policy Errors' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Windows 11 Policy State] IN {"Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Windows 11 Policy State] IN {"Error"})), 0), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "Intune")), 0), BLANK())))
 		formatString: #,##0
 		displayFolder: Migration policy context
 		lineageTag: cb3d54a9-f17d-4a1d-a00c-936de8556632
 
 	/// Windows 10 union records without a usable readiness assessment (Not assessed or Unknown), including AD-only records. Disjoint from Already upgraded source conflicts.
-	measure 'Migration Windows 10 Eligibility Unknown' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] IN {"Not assessed", "Unknown"})), 0), BLANK())
+	measure 'Migration Windows 10 Eligibility Unknown' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] IN {"Not assessed", "Unknown"})), 0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] IN {"Not assessed", "Unknown"})), 0), BLANK())))
 		formatString: #,0
 		displayFolder: Migration planning
 		lineageTag: 0a9b83a8-fbf0-400e-80c1-6a95f2d0d948
 
 	/// Inventory OS is Windows 10 while prepared readiness reports Already upgraded. Current 28 cases use name-only readiness attribution with ambiguous Intune identities. Source reconciliation flags, not proven contradictory OS on a uniquely identified physical PC.
-	measure 'Migration Windows 10 Eligibility Conflicting' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] = "Already upgraded")), 0), BLANK())
+	measure 'Migration Windows 10 Eligibility Conflicting' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] = "Already upgraded")), 0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Upgrade Eligibility] = "Already upgraded")), 0), BLANK())))
 		formatString: #,0
 		displayFolder: Migration planning
 		lineageTag: 8dac260d-02fe-4d20-ba59-abe601942a90
 
 	/// Current qualified union of Intune Windows 10 and enabled AD Windows 10 without a qualified Intune match. Source identities, not verified physical-PC uniqueness. Intersects the shared Country Selection with current task filters. Country is primary-user CountryOrRegion with UsageLocation fallback for Intune; configured domain/prefix attribution for AD-only.
 	measure 'Remaining Observed Windows 10' =
-			VAR _countries = VALUES('Country Selection'[Country])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _countries = VALUES('Country Selection'[Country])
 			VAR _filtered = ISCROSSFILTERED('Country Selection'[Country])
 			RETURN
 			IF(
@@ -116,16 +169,72 @@ table 'Windows Migration Evidence'
 			                KEEPFILTERS(TREATAS(_countries, 'Windows Migration Evidence'[Country Name]))),
 			            COUNTROWS('Windows Migration Evidence')),
 			        0),
-			    BLANK())
+			    BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(VAR _countries = VALUES('Country Selection'[Country])
+			VAR _filtered = ISCROSSFILTERED('Country Selection'[Country])
+			RETURN
+			IF(
+			    COUNTROWS(ALL('Windows Migration Evidence')) > 0,
+			    COALESCE(
+			        IF(_filtered,
+			            CALCULATE(COUNTROWS('Windows Migration Evidence'),
+			                KEEPFILTERS(TREATAS(_countries, 'Windows Migration Evidence'[Country Name]))),
+			            COUNTROWS('Windows Migration Evidence')),
+			        0),
+			    BLANK())))
 		formatString: #,##0
 		displayFolder: Migration planning
 		lineageTag: ca387993-93a9-4818-9706-07283df9a954
 
 	/// Enabled AD Windows 10 records with unique GUID/name and no qualified ID or unique-name match in the frozen local Intune export. Not proof of device activity or non-enrollment. Respects filters.
-	measure 'Migration AD Windows 10 Without Intune Match' = IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "AD only")), 0), BLANK())
+	measure 'Migration AD Windows 10 Without Intune Match' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "AD only")), 0), BLANK())),KEEPFILTERS(TREATAS(_pu,'Windows Migration Evidence'[Primary User (report)]))),(IF(COUNTROWS(ALL('Windows Migration Evidence')) > 0, COALESCE(CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS('Windows Migration Evidence'[Inventory Source] = "AD only")), 0), BLANK())))
 		formatString: #,##0
 		displayFolder: Migration planning
 		lineageTag: 257eee2d-685b-4263-a9b2-bdac9e9112e1
+
+	/// Read-only report utility applying the disconnected primary-user selector to source-qualified device rows.
+	measure 'Primary user row match · Windows Migration Evidence' = VAR PresentRows = IF(ISFILTERED('Primary User Selection'[Primary user]), CALCULATE(COUNTROWS('Windows Migration Evidence'), KEEPFILTERS(TREATAS(VALUES('Primary User Selection'[Primary user]), 'Windows Migration Evidence'[Primary User (report)]))), COUNTROWS('Windows Migration Evidence')) RETURN IF(PresentRows>0,1,BLANK())
+		formatString: 0
+		isHidden
+		lineageTag: 486f44ae-861c-46af-88cf-332aec0c2af3
+
+	/// Current Windows 10 inventory restricted to a qualified AD replicated lastLogonTimestamp or Entra approximate device sign-in > UTCNOW()-30 and <= UTCNOW(). Exact GUID/native key + tenant + batch. Intune sync alone is not activity. Missing/future/unqualified activity is excluded. Country, AD Domain and Primary user respected.
+	measure 'Windows 10 remaining active <30D' =
+			VAR _now=UTCNOW()
+			VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _users=VALUES('Primary User Selection'[Primary user])
+			VAR _cf=ISFILTERED('Country Selection') VAR _df=ISFILTERED('Daily Domain') VAR _uf=ISFILTERED('Primary User Selection')
+			VAR _gf=ISCROSSFILTERED('Global Device Inventory')
+			VAR _gids=VALUES('Global Device Inventory'[Device Source ID]) VAR _gkeys=VALUES('Global Device Inventory'[Canonical Device Key])
+			VAR _base=SELECTCOLUMNS(FILTER('Windows Migration Evidence',(NOT _cf||[Country Name] IN _countries)&&(NOT _df||[AD Domain] IN _domains)&&(NOT _uf||[Primary User (report)] IN _users)&&(NOT _gf||IF([Inventory Source]="AD only","ad:"&RIGHT([Device Source ID],36) IN _gkeys,[Device Source ID] IN _gids))),"__Source",[Inventory Source],"__ID",[Device Source ID],"__Batch",[Loaded Batch ID])
+			VAR _tenants=ADDCOLUMNS(_base,"__Tenant",
+			 VAR _id=[__ID] VAR _batch=[__Batch]
+			 RETURN IF([__Source]="AD only",
+			 LOOKUPVALUE('AD Computer Evidence'[TenantKey],'AD Computer Evidence'[ObjectGUID],RIGHT(_id,36),'AD Computer Evidence'[Loaded Batch ID],_batch,'AD Computer Evidence'[TenantKey],MID(_id,4,MAX(0,LEN(_id)-40)),BLANK()),
+			 LOOKUPVALUE('Native Managed Device Evidence'[TenantKey],'Native Managed Device Evidence'[ManagedDeviceId],_id,'Native Managed Device Evidence'[Loaded Batch ID],_batch,BLANK())))
+			VAR _keys=ADDCOLUMNS(_tenants,"__Native",
+			 VAR _id=[__ID] VAR _batch=[__Batch] VAR _tenant=[__Tenant]
+			 RETURN IF([__Source]="AD only",
+			 LOOKUPVALUE('AD Computer Evidence'[TenantDeviceKey],'AD Computer Evidence'[ObjectGUID],RIGHT(_id,36),'AD Computer Evidence'[Loaded Batch ID],_batch,'AD Computer Evidence'[TenantKey],_tenant,BLANK()),
+			 LOOKUPVALUE('Native Managed Device Evidence'[TenantDeviceKey],'Native Managed Device Evidence'[ManagedDeviceId],_id,'Native Managed Device Evidence'[Loaded Batch ID],_batch,'Native Managed Device Evidence'[TenantKey],_tenant,BLANK())))
+			VAR _dates=ADDCOLUMNS(_keys,
+			 "__AD",VAR _id=[__ID] VAR _batch=[__Batch] VAR _tenant=[__Tenant] VAR _native=[__Native]
+			 VAR _d=IF([__Source]="AD only",
+			 LOOKUPVALUE('AD Computer Evidence'[LastLogonUtcDateTime],'AD Computer Evidence'[TenantKey],_tenant,'AD Computer Evidence'[Loaded Batch ID],_batch,'AD Computer Evidence'[ObjectGUID],RIGHT(_id,36),'AD Computer Evidence'[LastLogonStatus],"UTC from replicated AD FILETIME; approximate logon",BLANK()),
+			 IF(NOT ISBLANK(_native) && _native<>"",LOOKUPVALUE('AD Computer Evidence'[LastLogonUtcDateTime],'AD Computer Evidence'[TenantKey],_tenant,'AD Computer Evidence'[Loaded Batch ID],_batch,'AD Computer Evidence'[TenantDeviceKey],_native,'AD Computer Evidence'[CloudMatchStatus],"Unique native SID",'AD Computer Evidence'[LastLogonStatus],"UTC from replicated AD FILETIME; approximate logon",BLANK())))
+			 RETURN IF(_d<=_now,_d),
+			 "__Entra",VAR _batch=[__Batch] VAR _tenant=[__Tenant] VAR _native=[__Native]
+			 RETURN IF(NOT ISBLANK(_native) && _native<>"",
+			 CALCULATE(MAX('Device Source Evidence'[ActivityUtcDateTime]),REMOVEFILTERS('Device Source Evidence'),TREATAS({_tenant},'Device Source Evidence'[TenantKey]),TREATAS({_batch},'Device Source Evidence'[Loaded Batch ID]),TREATAS({_native},'Device Source Evidence'[TenantDeviceKey]),'Device Source Evidence'[SourceSystem]="Entra",'Device Source Evidence'[ActivityStatus]="UTC qualified",'Device Source Evidence'[ActivityUtcDateTime]<=_now)))
+			VAR _dated=ADDCOLUMNS(_dates,"__Latest",MAX([__AD],[__Entra]))
+			VAR _recent=FILTER(_dated,NOT ISBLANK([__Latest]) && [__Latest]>_now-30 && [__Latest]<=_now)
+			RETURN COALESCE(COUNTROWS(_recent),0)
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 6ce8c9d7-83ca-4da0-aa06-f6b4f31d58ba
 
 	/// Device Source ID from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Device Source ID'
@@ -416,6 +525,73 @@ table 'Windows Migration Evidence'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Observed primary user, exact source ID and tenant/batch matching only; used by the report search.
+	column 'Primary User (report)' =
+			VAR _t=LOOKUPVALUE('Global Device Inventory'[TenantKey],'Global Device Inventory'[Device Source ID],'Windows Migration Evidence'[Device Source ID],'Global Device Inventory'[Loaded Batch ID],'Windows Migration Evidence'[Loaded Batch ID],BLANK())
+			VAR _b='Windows Migration Evidence'[Loaded Batch ID]
+			VAR _gkey='Windows Migration Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Windows Migration Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Windows Migration Evidence'[Device Source ID]))
+			VAR _upn=COALESCE('Windows Migration Evidence'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 73879afe-62f9-4592-980d-fbff8eeb04e0
+
+	/// Qualified SAM of the primary user; never inferred from UPN text.
+	column 'Primary User SAM (report)' =
+			VAR _t=LOOKUPVALUE('Global Device Inventory'[TenantKey],'Global Device Inventory'[Device Source ID],'Windows Migration Evidence'[Device Source ID],'Global Device Inventory'[Loaded Batch ID],'Windows Migration Evidence'[Loaded Batch ID],BLANK())
+			VAR _b='Windows Migration Evidence'[Loaded Batch ID]
+			VAR _gkey='Windows Migration Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Windows Migration Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Windows Migration Evidence'[Device Source ID]))
+			VAR _upn=COALESCE('Windows Migration Evidence'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 8fb3b2d4-e76e-449d-b24b-9e310df54476
+
+	/// Last Windows console user observed at collection. Does not mean current user or last RDP session.
+	column 'Last Console User (report)' =
+			VAR _t=LOOKUPVALUE('Global Device Inventory'[TenantKey],'Global Device Inventory'[Device Source ID],'Windows Migration Evidence'[Device Source ID],'Global Device Inventory'[Loaded Batch ID],'Windows Migration Evidence'[Loaded Batch ID],BLANK())
+			VAR _b='Windows Migration Evidence'[Loaded Batch ID]
+			VAR _gkey='Windows Migration Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Windows Migration Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Windows Migration Evidence'[Device Source ID]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: fb06706a-a85f-4b35-ab94-cc0e49908775
+
+	/// Source-qualified time of last observed console logon; unknown remains blank.
+	column 'Last Console Logon UTC (report)' =
+			VAR _t=LOOKUPVALUE('Global Device Inventory'[TenantKey],'Global Device Inventory'[Device Source ID],'Windows Migration Evidence'[Device Source ID],'Global Device Inventory'[Loaded Batch ID],'Windows Migration Evidence'[Loaded Batch ID],BLANK())
+			VAR _b='Windows Migration Evidence'[Loaded Batch ID]
+			VAR _gkey='Windows Migration Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Windows Migration Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Windows Migration Evidence'[Device Source ID]))
+			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm
+		displayFolder: Report identity context
+		lineageTag: aceedde3-bb47-42b1-8aea-6ae4b8ef309e
+
+	/// Preserves source status and timestamp qualification, including stale/missing/error evidence.
+	column 'Console Logon Qualification (report)' =
+			VAR _t=LOOKUPVALUE('Global Device Inventory'[TenantKey],'Global Device Inventory'[Device Source ID],'Windows Migration Evidence'[Device Source ID],'Global Device Inventory'[Loaded Batch ID],'Windows Migration Evidence'[Loaded Batch ID],BLANK())
+			VAR _b='Windows Migration Evidence'[Loaded Batch ID]
+			VAR _gkey='Windows Migration Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Windows Migration Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Windows Migration Evidence'[Device Source ID]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _quality=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Quality],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(ISBLANK(_status),"No matched system observation",_status&" · "&_quality)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 7497f670-aabb-4a01-98b5-2e2b635b8b0f
+
 	/// Rebuilt from tenant-qualified local source snapshots by the prepared evidence pipeline. Versioned batch reader; missing/incomplete outputs fail, never fall back to frozen recovery JSON. No live collection; AD absence is not proof of non-enrollment.
 	partition 'Windows Migration Evidence' = m
 		mode: import
@@ -449,3 +625,5 @@ table 'Windows Migration Evidence'
 				    PreservedObservationUtc)
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

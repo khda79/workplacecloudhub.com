@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "9d1235a05ad623a09e0c",
   "position": {
     "x": 32,
     "y": 859.1,
-    "width": 1856,
+    "z": 5000,
     "height": 134.9,
-    "z": 12000,
-    "tabOrder": 544
+    "width": 1856,
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "tableEx",
@@ -100,6 +100,13 @@
                   }
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
             }
           }
         }
@@ -180,6 +187,78 @@
             }
           }
         }
+      ],
+      "columnFormatting": [
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Native Relationship Summary.Native Relationship type rate"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Native Relationship Summary.Native Relationship edges"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -189,7 +268,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native metrics \u00b7 qualified source population, not workforce totals'"
+                  "Value": "'Native metrics · qualified source population, not workforce totals'"
                 }
               }
             }
@@ -209,7 +288,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native metrics \u00b7 qualified source population, not workforce totals'"
+                  "Value": "'Native metrics · qualified source population, not workforce totals'"
                 }
               }
             },

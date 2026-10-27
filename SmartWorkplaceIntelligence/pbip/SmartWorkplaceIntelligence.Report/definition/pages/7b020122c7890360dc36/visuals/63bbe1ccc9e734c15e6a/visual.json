@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "63bbe1ccc9e734c15e6a",
   "position": {
     "x": 32,
     "y": 128,
-    "z": 114,
-    "height": 120,
-    "width": 1200,
-    "tabOrder": 256
+    "z": 24000,
+    "height": 104,
+    "width": 1856,
+    "tabOrder": 16000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -28,7 +28,24 @@
               },
               "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
               "nativeQueryRef": "Windows 10 remaining",
+              "active": false,
               "displayName": "Windows 10 remaining"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Windows 10 remaining active <30D"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Windows 10 remaining active <30D",
+              "nativeQueryRef": "Windows 10 remaining · active <30D",
+              "active": false,
+              "displayName": "Windows 10 remaining · active <30D"
             },
             {
               "field": {
@@ -43,6 +60,7 @@
               },
               "queryRef": "Windows Migration Evidence.Remaining Managed Windows 10",
               "nativeQueryRef": "Intune-managed Windows 10",
+              "active": false,
               "displayName": "Intune-managed Windows 10"
             },
             {
@@ -58,6 +76,7 @@
               },
               "queryRef": "Windows Migration Evidence.Migration AD Windows 10 Without Intune Match",
               "nativeQueryRef": "AD only - no Intune match",
+              "active": false,
               "displayName": "AD only - no Intune match"
             },
             {
@@ -73,6 +92,7 @@
               },
               "queryRef": "Windows Migration Evidence.Hardware Incompatible Windows 10",
               "nativeQueryRef": "Hardware incompatible",
+              "active": false,
               "displayName": "Hardware incompatible"
             },
             {
@@ -88,6 +108,7 @@
               },
               "queryRef": "Windows Migration Evidence.Migration Windows 10 Eligibility Unknown",
               "nativeQueryRef": "Eligibility unknown",
+              "active": false,
               "displayName": "Eligibility unknown"
             },
             {
@@ -103,6 +124,7 @@
               },
               "queryRef": "Windows Migration Evidence.Migration Windows 10 Eligibility Conflicting",
               "nativeQueryRef": "Eligibility conflicting",
+              "active": false,
               "displayName": "Eligibility conflicting"
             },
             {
@@ -118,7 +140,24 @@
               },
               "queryRef": "Windows Migration Evidence.Windows 10 Autopatch Policy Observed",
               "nativeQueryRef": "Autopatch anchor observed",
+              "active": false,
               "displayName": "Autopatch anchor observed"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Windows 10 Legacy Build Review"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Windows 10 Legacy Build Review",
+              "nativeQueryRef": "Windows 10 Legacy Build Review",
+              "active": true,
+              "displayName": "Legacy build · update-path review"
             }
           ]
         }
@@ -138,7 +177,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -319,11 +358,18 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "7L"
+                  "Value": "9D"
                 }
               }
             },
             "paddingIndividual": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "autoGrid": {
               "expr": {
                 "Literal": {
                   "Value": "false"

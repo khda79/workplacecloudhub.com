@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "7d368bc584f4b4947a1e",
   "position": {
     "x": 32,
     "y": 771.1,
-    "width": 1856,
+    "z": 6000,
     "height": 222.9,
-    "z": 12000,
-    "tabOrder": 544
+    "width": 1856,
+    "tabOrder": 6000
   },
   "visual": {
     "visualType": "tableEx",
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native Hosted mailboxes",
-              "nativeQueryRef": "Native Hosted mailboxes"
+              "nativeQueryRef": "Native Hosted mailboxes",
+              "active": true
             },
             {
               "field": {
@@ -41,7 +42,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native Exchange Online mailboxes",
-              "nativeQueryRef": "Native Exchange Online mailboxes"
+              "nativeQueryRef": "Native Exchange Online mailboxes",
+              "active": true
             },
             {
               "field": {
@@ -55,7 +57,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native Exchange On-premises mailboxes",
-              "nativeQueryRef": "Native Exchange On-premises mailboxes"
+              "nativeQueryRef": "Native Exchange On-premises mailboxes",
+              "active": true
             },
             {
               "field": {
@@ -69,7 +72,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native Exchange Online share",
-              "nativeQueryRef": "Native Exchange Online share"
+              "nativeQueryRef": "Native Exchange Online share",
+              "active": true
             },
             {
               "field": {
@@ -83,7 +87,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native Exchange On-premises share",
-              "nativeQueryRef": "Native Exchange On-premises share"
+              "nativeQueryRef": "Native Exchange On-premises share",
+              "active": true
             },
             {
               "field": {
@@ -97,7 +102,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native User mailboxes",
-              "nativeQueryRef": "Native User mailboxes"
+              "nativeQueryRef": "Native User mailboxes",
+              "active": true
             },
             {
               "field": {
@@ -111,7 +117,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native Shared mailboxes",
-              "nativeQueryRef": "Native Shared mailboxes"
+              "nativeQueryRef": "Native Shared mailboxes",
+              "active": true
             },
             {
               "field": {
@@ -125,7 +132,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native Other mailbox types",
-              "nativeQueryRef": "Native Other mailbox types"
+              "nativeQueryRef": "Native Other mailbox types",
+              "active": true
             },
             {
               "field": {
@@ -139,7 +147,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native User mailbox share",
-              "nativeQueryRef": "Native User mailbox share"
+              "nativeQueryRef": "Native User mailbox share",
+              "active": true
             },
             {
               "field": {
@@ -153,7 +162,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native Shared mailbox share",
-              "nativeQueryRef": "Native Shared mailbox share"
+              "nativeQueryRef": "Native Shared mailbox share",
+              "active": true
             },
             {
               "field": {
@@ -167,7 +177,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native Other mailbox type share",
-              "nativeQueryRef": "Native Other mailbox type share"
+              "nativeQueryRef": "Native Other mailbox type share",
+              "active": true
             },
             {
               "field": {
@@ -181,7 +192,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native Mailbox type share",
-              "nativeQueryRef": "Native Mailbox type share"
+              "nativeQueryRef": "Native Mailbox type share",
+              "active": true
             },
             {
               "field": {
@@ -195,7 +207,8 @@
                 }
               },
               "queryRef": "Native Mailbox Hosting.Native Mailbox hosting rate",
-              "nativeQueryRef": "Native Mailbox hosting rate"
+              "nativeQueryRef": "Native Mailbox hosting rate",
+              "active": true
             }
           ]
         }
@@ -205,13 +218,6 @@
       "columnHeaders": [
         {
           "properties": {
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -223,6 +229,20 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -249,9 +269,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -334,7 +361,465 @@
             }
           }
         }
-      ]
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native Hosted mailboxes"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native Exchange Online mailboxes"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native Exchange On-premises mailboxes"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native Exchange Online share"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native Exchange On-premises share"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native User mailboxes"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native Shared mailboxes"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native Other mailbox types"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native User mailbox share"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native Shared mailbox share"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native Other mailbox type share"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native Mailbox type share"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Mailbox Hosting.Native Mailbox hosting rate"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -343,7 +828,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native metrics \u00b7 qualified source population, not workforce totals'"
+                  "Value": "'Native metrics · qualified source population, not workforce totals'"
                 }
               }
             }
@@ -363,7 +848,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native metrics \u00b7 qualified source population, not workforce totals'"
+                  "Value": "'Native metrics · qualified source population, not workforce totals'"
                 }
               }
             },

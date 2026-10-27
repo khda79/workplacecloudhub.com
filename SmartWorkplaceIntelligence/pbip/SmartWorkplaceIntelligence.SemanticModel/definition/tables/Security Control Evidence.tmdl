@@ -127,6 +127,96 @@ table 'Security Control Evidence'
 		displayFolder: Security | Access
 		lineageTag: fb3a4c9e-1039-41c3-932d-80249eaf4f18
 
+	/// Red < 60%; amber < 80%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level Microsoft Secure Score (%)' =
+			VAR _v = [Microsoft Secure Score (%)]
+			RETURN SWITCH(TRUE(), ISBLANK(_v) || _v < 0 || _v > 1, 3, _v < 0.6, 2, _v < 0.8, 1, 0)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 2ac08382-f311-4c8a-b89f-c984fe896ea3
+
+	/// User-visible threshold explanation for Microsoft Secure Score (%)
+	measure 'KPI Alert Details Microsoft Secure Score (%)' = VAR _s=[KPI Alert Level Microsoft Secure Score (%)] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Red < 60%; amber < 80%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 4cae1d66-bcc5-4104-ae9e-322cd9dd1436
+
+	/// Red < 95%; amber < 98%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level Firewall Enabled (%)' =
+			VAR _v = [Firewall Enabled (%)]
+			RETURN SWITCH(TRUE(), ISBLANK(_v) || _v < 0 || _v > 1, 3, _v < 0.95, 2, _v < 0.98, 1, 0)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 1a310827-1862-4df5-9bc1-abb8454c78e4
+
+	/// User-visible threshold explanation for Firewall Enabled (%)
+	measure 'KPI Alert Details Firewall Enabled (%)' = VAR _s=[KPI Alert Level Firewall Enabled (%)] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Red < 95%; amber < 98%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 0df40891-38e2-4186-8868-4c1b2d3b03c2
+
+	/// Red < 95%; amber < 98%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level Disk Encryption Healthy (%)' =
+			VAR _v = [Disk Encryption Healthy (%)]
+			RETURN SWITCH(TRUE(), ISBLANK(_v) || _v < 0 || _v > 1, 3, _v < 0.95, 2, _v < 0.98, 1, 0)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: c64d5676-e848-42d2-a45c-a35b5b12f0c2
+
+	/// User-visible threshold explanation for Disk Encryption Healthy (%)
+	measure 'KPI Alert Details Disk Encryption Healthy (%)' = VAR _s=[KPI Alert Level Disk Encryption Healthy (%)] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Red < 95%; amber < 98%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: db853f71-151e-46d8-a0ec-ff35c537fb1d
+
+	/// Red < 95%; amber < 98%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level Secure Boot Healthy (%)' =
+			VAR _v = [Secure Boot Healthy (%)]
+			RETURN SWITCH(TRUE(), ISBLANK(_v) || _v < 0 || _v > 1, 3, _v < 0.95, 2, _v < 0.98, 1, 0)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 13ae9742-5fe5-44c0-8c19-0bb1b7094fc3
+
+	/// User-visible threshold explanation for Secure Boot Healthy (%)
+	measure 'KPI Alert Details Secure Boot Healthy (%)' = VAR _s=[KPI Alert Level Secure Boot Healthy (%)] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Red < 95%; amber < 98%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: a6f1dec4-1648-49a2-8346-cef2047c0505
+
+	/// Red < 90%; amber < 95%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level Device Compliance Healthy (%)' =
+			VAR _v = [Device Compliance Healthy (%)]
+			RETURN SWITCH(TRUE(), ISBLANK(_v) || _v < 0 || _v > 1, 3, _v < 0.9, 2, _v < 0.95, 1, 0)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 8007fa5e-1fd8-4ace-a7c3-fb43805197af
+
+	/// User-visible threshold explanation for Device Compliance Healthy (%)
+	measure 'KPI Alert Details Device Compliance Healthy (%)' = VAR _s=[KPI Alert Level Device Compliance Healthy (%)] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Red < 90%; amber < 95%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 6c840735-8583-45f2-8fcf-0fa41e55d938
+
+	/// Red < 95%; amber < 98%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level Code Integrity Healthy (%)' =
+			VAR _v = [Code Integrity Healthy (%)]
+			RETURN SWITCH(TRUE(), ISBLANK(_v) || _v < 0 || _v > 1, 3, _v < 0.95, 2, _v < 0.98, 1, 0)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 56bd2f52-ced0-47db-aa31-0fd030bf0bc0
+
+	/// User-visible threshold explanation for Code Integrity Healthy (%)
+	measure 'KPI Alert Details Code Integrity Healthy (%)' = VAR _s=[KPI Alert Level Code Integrity Healthy (%)] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Red < 95%; amber < 98%; otherwise existing color. Blank or invalid rate is unknown. Source population remains that of the displayed measure."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: d6ee119f-4416-46aa-b4cc-d2908ae190ce
+
 	column 'Control Sort'
 		dataType: int64
 		formatString: #,0

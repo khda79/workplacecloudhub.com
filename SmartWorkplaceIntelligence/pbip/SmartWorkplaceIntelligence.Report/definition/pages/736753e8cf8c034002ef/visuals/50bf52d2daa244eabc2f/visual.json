@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "50bf52d2daa244eabc2f",
   "position": {
-    "x": 32,
-    "y": 632,
+    "x": 1280,
+    "y": 320,
+    "z": 8000,
+    "height": 80,
     "width": 608,
-    "height": 76,
-    "z": 3000,
-    "tabOrder": 3000
+    "tabOrder": 8000
   },
   "visual": {
     "visualType": "slicer",
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Exchange Mailbox Reconciliation.Mailbox Type",
-              "nativeQueryRef": "Mailbox Type"
+              "nativeQueryRef": "Mailbox Type",
+              "active": true
             }
           ]
         }
@@ -282,5 +283,5 @@
       ]
     }
   },
-  "parentGroupName": "7cb4aca7881a67d51ce5"
+  "parentGroupName": "b752060c616c209f2c3a"
 }

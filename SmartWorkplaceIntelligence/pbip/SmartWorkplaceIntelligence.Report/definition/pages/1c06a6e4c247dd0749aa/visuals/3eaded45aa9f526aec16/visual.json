@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "3eaded45aa9f526aec16",
   "position": {
     "x": 32,
-    "y": 269.0,
-    "width": 1856,
+    "y": 269,
+    "z": 1000,
     "height": 22,
-    "z": 12000,
-    "tabOrder": 145
+    "width": 1856,
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native \u00b7 SharePoint Site",
+                    "value": "Selected view: Native · SharePoint Site",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "21e720e86e6bc1c585f3",
   "position": {
     "x": 0,
     "y": 0,
-    "z": 1,
+    "z": 3000,
     "height": 1080,
     "width": 1920,
-    "tabOrder": 1
+    "tabOrder": 3000
   },
   "visualGroup": {
     "displayName": "Native · Verified Domain",

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "9dead798b5367a10653f",
   "position": {
     "x": 96,
     "y": 88,
-    "width": 1080,
+    "z": 19000,
     "height": 32,
-    "z": 101,
-    "tabOrder": 145
+    "width": 824,
+    "tabOrder": 13000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Workforce Personas \u00b7 F3/E3/E5 share: of all assigned \u00b7 no use: review only \u00b7 Office: PC app use \u00b7 30-day covered accounts",
+                    "value": "Workforce Personas · F3/E3/E5 share: of all assigned · no use: review only · Office: PC app use · 30-day covered accounts",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

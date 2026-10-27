@@ -4,10 +4,10 @@
   "position": {
     "x": 96,
     "y": 16,
-    "z": 100,
-    "height": 64,
-    "width": 864,
-    "tabOrder": 49
+    "z": 38000,
+    "height": 56,
+    "width": 616,
+    "tabOrder": 22000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Device Explorer",
+                    "value": "Device Explorer (PC)",
                     "textStyle": {
                       "fontWeight": "bold",
                       "fontFamily": "Segoe UI Semibold",

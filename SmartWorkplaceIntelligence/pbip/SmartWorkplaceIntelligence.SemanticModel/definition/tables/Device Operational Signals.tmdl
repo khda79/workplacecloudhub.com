@@ -131,17 +131,17 @@ table 'Device Operational Signals'
 		lineageTag: f2723e89-a1a8-4584-bc9c-f05b10ca2c8a
 
 	/// Managed devices affected by the current operational signal; short display measure for page-level risk tables.
-	measure Affected = [Managed Devices Affected]
+	measure Affected = IF(SELECTEDVALUE('Device Operational Signals'[Signal Sort]) = 20, [Enabled AD Windows PCs Not Found in Intune], [Managed Devices Affected])
 		formatString: #,0
 		lineageTag: a5463c19-7773-4a91-885b-0a9c96ae6121
 
 	/// Managed devices covered by the current operational signal; short display measure for page-level risk tables.
-	measure Covered = [Managed Devices Covered]
+	measure Covered = IF(SELECTEDVALUE('Device Operational Signals'[Signal Sort]) = 20, [Exploration AD Coverage Denominator], [Managed Devices Covered])
 		formatString: #,0
 		lineageTag: 2fd47c66-01c4-43b3-bde4-9da5a5596cc4
 
 	/// Share of covered managed devices affected by the current operational signal; short display measure for page-level risk tables.
-	measure 'Affected (%)' = [Managed Affected Among Covered (%)]
+	measure 'Affected (%)' = DIVIDE([Affected], [Covered])
 		formatString: 0.0%
 		lineageTag: d4ccbead-eda5-4e7e-adc3-bfda8706a5ee
 
@@ -213,7 +213,7 @@ table 'Device Operational Signals'
 				        {16, "High", "Startup score below 50", "Experience", "Investigate boot and sign-in drivers and prioritize the lowest-scoring devices.", "Endpoint Analytics startup devices"},
 				        {17, "High", "Boot time over 60 seconds", "Experience", "Investigate firmware, drivers, startup services, and storage on slow-boot devices.", "Endpoint Analytics startup devices"},
 				        {18, "Medium", "Sign-in time over 30 seconds", "Experience", "Review sign-in policies, profiles, scripts, and network dependencies.", "Endpoint Analytics startup devices"},
-				        {19, "Medium", "App reliability score below 50", "Reliability", "Identify unstable applications and versions, then target remediation or standardization.", "Endpoint Analytics device performance"}
+				        {19, "Medium", "App reliability score below 50", "Reliability", "Identify unstable applications and versions, then target remediation or standardization.", "Endpoint Analytics device performance"},
+				        {20, "High", "Enabled AD Windows PCs not found in Intune", "Management coverage", "Verify native AD/Entra identity and enroll the workstation, or review its lifecycle. Unknown/ambiguous identities are excluded.", "Same-batch AD native identity + Intune inventory"}
 				    }
 				)
-

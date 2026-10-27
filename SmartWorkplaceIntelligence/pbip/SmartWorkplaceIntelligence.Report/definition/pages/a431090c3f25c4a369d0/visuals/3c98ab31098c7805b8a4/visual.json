@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "3c98ab31098c7805b8a4",
   "position": {
-    "x": 976,
-    "y": 216,
-    "width": 288,
-    "height": 80,
-    "z": 130,
-    "tabOrder": 700
+    "x": 1280,
+    "y": 320,
+    "z": 58000,
+    "height": 76.781933662667612,
+    "width": 608,
+    "tabOrder": 55000
   },
   "visual": {
     "visualType": "slicer",
@@ -20,16 +20,16 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device System Evidence"
+                      "Entity": "Device Exploration Inventory"
                     }
                   },
                   "Property": "Expected AV State"
                 }
               },
-              "queryRef": "Device System Evidence.Expected AV State",
+              "queryRef": "Device Exploration Inventory.Expected AV State",
               "nativeQueryRef": "Expected AV registration",
-              "displayName": "Expected AV registration",
-              "active": true
+              "active": true,
+              "displayName": "Expected AV registration"
             }
           ]
         }
@@ -297,5 +297,6 @@
         }
       ]
     }
-  }
+  },
+  "parentGroupName": "ba587067c2277d4df717"
 }

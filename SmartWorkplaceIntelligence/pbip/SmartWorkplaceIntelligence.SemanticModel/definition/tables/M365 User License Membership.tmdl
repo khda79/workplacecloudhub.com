@@ -1,19 +1,19 @@
 /// User-to-suite bridge over the existing governed workforce flags. Multiple suite assignments are preserved; unknown is distinct from no observed F3/E3/E5.
 table 'M365 User License Membership'
 	isHidden
-	lineageTag: 58094652-933b-40ee-9c32-c914bd15940c
+	lineageTag: f3814323-6bf1-4aac-97b0-e4398c8c60be
 
 	column 'User Source ID'
 		dataType: string
 		isHidden
-		lineageTag: 29a05a88-61db-4f3c-9f45-8f77cc1124d3
+		lineageTag: feb471a9-4eb2-4f5b-b4f9-482ede812284
 		summarizeBy: none
 		sourceColumn: [User Source ID]
 
 	column 'License Product'
 		dataType: string
 		isHidden
-		lineageTag: 1500e32d-f186-480c-8796-b80f77747c26
+		lineageTag: 3b65aa96-8eaa-4f5c-bf1c-f6a08e1ce66f
 		summarizeBy: none
 		sourceColumn: [License Product]
 

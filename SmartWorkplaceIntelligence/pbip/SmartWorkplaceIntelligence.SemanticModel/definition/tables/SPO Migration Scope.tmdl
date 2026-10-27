@@ -1,13 +1,13 @@
 /// SPO means SharePoint Online. Grain: Scope Key; source: one selected immutable prepared batch.
 table 'SPO Migration Scope'
 	isHidden
-	lineageTag: 0840edef-d22c-466f-9051-4c37e6488d29
+	lineageTag: f0f0617f-63db-4f95-9d5f-3294c3220d9f
 
 	/// Prepared, tenant-qualified migration evidence: TenantKey.
 	column TenantKey
 		dataType: string
 		isHidden
-		lineageTag: 9863471d-de46-4e6d-9220-7cea2ca0b8b4
+		lineageTag: b7a194ab-4cc9-4c18-9e57-3e59a00c43cc
 		summarizeBy: none
 		sourceColumn: TenantKey
 
@@ -15,7 +15,7 @@ table 'SPO Migration Scope'
 	column 'Project Key'
 		dataType: string
 		isHidden
-		lineageTag: 201dfb19-62af-4575-b669-31bb5a7ccdc6
+		lineageTag: 27d9fd93-caf7-4378-8adf-791f163ac130
 		summarizeBy: none
 		sourceColumn: Project Key
 
@@ -23,7 +23,7 @@ table 'SPO Migration Scope'
 	column 'Snapshot ID'
 		dataType: string
 		isHidden
-		lineageTag: 49346d66-3b22-447a-831d-0c2dedd8f206
+		lineageTag: bd3e27e5-2e2c-483a-97f9-6e95a9c110f0
 		summarizeBy: none
 		sourceColumn: Snapshot ID
 
@@ -31,15 +31,22 @@ table 'SPO Migration Scope'
 	column 'Snapshot Date'
 		dataType: dateTime
 		formatString: yyyy-MM-dd
-		lineageTag: ed85ea05-c19d-411f-b1e9-a56b1f1fdfaa
+		lineageTag: e71116e6-c694-4b36-9fc5-5d50e252dea4
 		summarizeBy: none
 		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 34b20d78-9e75-458a-be34-8a3b2c6a9608
+			defaultHierarchy: LocalDateTable_a0cc9fe0-d3b1-4526-8fee-f1c3ed7fdc06.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Prepared, tenant-qualified migration evidence: Scope Key.
 	column 'Scope Key'
 		dataType: string
 		isHidden
-		lineageTag: 8f271fe0-70be-4be9-ac2e-8e4374d8caf0
+		lineageTag: 3357de48-a845-4f31-9550-8fad39357e62
 		summarizeBy: none
 		sourceColumn: Scope Key
 
@@ -47,7 +54,7 @@ table 'SPO Migration Scope'
 	column 'Operation Key'
 		dataType: string
 		isHidden
-		lineageTag: 4ddd86b1-9cbb-411d-96c6-3a7e2503b114
+		lineageTag: 90f309e4-da85-4fb6-9d76-5aa3c2b3fa8b
 		summarizeBy: none
 		sourceColumn: Operation Key
 
@@ -55,7 +62,7 @@ table 'SPO Migration Scope'
 	column 'Web Key'
 		dataType: string
 		isHidden
-		lineageTag: 5e51c86f-8ec8-4f54-971b-eb7b2ce97b25
+		lineageTag: c79b2af8-9b6a-4455-b288-d88e3484cfd9
 		summarizeBy: none
 		sourceColumn: Web Key
 
@@ -63,50 +70,53 @@ table 'SPO Migration Scope'
 	column 'Collection Key'
 		dataType: string
 		isHidden
-		lineageTag: 151748fe-b202-4bb1-b834-81296913c8fe
+		lineageTag: fbaf0585-a5fa-4a41-9815-3de3f86cdbc8
 		summarizeBy: none
 		sourceColumn: Collection Key
 
 	/// Prepared, tenant-qualified migration evidence: Coverage Kind.
 	column 'Coverage Kind'
 		dataType: string
-		lineageTag: d0a5310b-3fec-44f1-abb2-90350b038a77
+		lineageTag: 5462b41f-b85c-4f3f-925a-cc347a427ca0
 		summarizeBy: none
 		sourceColumn: Coverage Kind
 
 	/// Prepared, tenant-qualified migration evidence: Is Effective.
 	column 'Is Effective'
 		dataType: boolean
-		lineageTag: b68f9537-c8b5-44a8-8eb6-f6c24e831002
+		lineageTag: b8a44104-d92a-4005-89e9-a12e5a786540
 		summarizeBy: none
 		sourceColumn: Is Effective
 
 	/// Prepared, tenant-qualified migration evidence: Is Direct.
 	column 'Is Direct'
 		dataType: boolean
-		lineageTag: 46d4f52f-d60c-4cac-9932-fed3055fd853
+		lineageTag: 960a8fde-7106-4b03-880d-2fe258bca4e1
 		summarizeBy: none
 		sourceColumn: Is Direct
 
 	/// Prepared, tenant-qualified migration evidence: Effective Disposition.
 	column 'Effective Disposition'
 		dataType: string
-		lineageTag: b549a0d1-3e47-43fe-bd41-e1092839222b
+		lineageTag: 8f8588fe-1a06-4216-8e4b-b9110ea43a51
 		summarizeBy: none
 		sourceColumn: Effective Disposition
 
 	/// Prepared, tenant-qualified migration evidence: Has Conflict.
 	column 'Has Conflict'
 		dataType: boolean
-		lineageTag: 834e32ab-1a0c-48fa-8146-d1a3581afde1
+		lineageTag: a42811d6-0ddc-46ca-857f-ce64abe49f24
 		summarizeBy: none
 		sourceColumn: Has Conflict
 
 	column 'Project Identity'
 		dataType: string
 		isHidden
-		lineageTag: 0ce7c99c-01a0-487d-97ee-0bd74699b53c
+		lineageTag: d0dbfba0-b777-41ee-92d2-0e33cf58255f
+		summarizeBy: none
 		sourceColumn: Project Identity
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'

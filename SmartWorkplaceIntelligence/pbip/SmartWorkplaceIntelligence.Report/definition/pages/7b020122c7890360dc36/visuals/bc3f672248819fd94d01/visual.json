@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "bc3f672248819fd94d01",
   "position": {
     "x": 32,
-    "y": 904,
+    "y": 320,
+    "z": 2000,
+    "height": 96,
     "width": 1856,
-    "height": 90,
-    "z": 119,
     "tabOrder": 1600
   },
   "visual": {
@@ -22,7 +22,7 @@
                     "value": "AD-only scope: enabled AD Windows 10 records with unique AD GUID/name and no qualified ID or unique-name match in the current local Intune export. These records are included in the Windows 10 total, not in the Intune-managed KPI.\nAbsence from an export does not prove non-enrollment; an enabled AD account does not prove the PC is active. Country, disk, hardware eligibility and Autopatch state remain unknown when not available. Historical charts remain Intune-only.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "14pt",
+                      "fontSize": "12px",
                       "color": "#183153"
                     }
                   }

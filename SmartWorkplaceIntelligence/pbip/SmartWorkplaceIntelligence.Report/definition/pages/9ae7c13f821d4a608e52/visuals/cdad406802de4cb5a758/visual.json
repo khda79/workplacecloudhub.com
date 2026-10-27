@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "cdad406802de4cb5a758",
   "position": {
     "x": 32,
-    "y": 656,
-    "z": 181,
-    "height": 336,
+    "y": 592,
+    "z": 2000,
+    "height": 424,
     "width": 1856,
-    "tabOrder": 678
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "pivotTable",
@@ -155,6 +155,13 @@
                   "Value": "false"
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
             }
           }
         }
@@ -209,6 +216,13 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
                 }
               }
             }
@@ -274,14 +288,11 @@
       ],
       "columnFormatting": [
         {
-          "selector": {
-            "metadata": "User Inventory Evidence.Job Title"
-          },
           "properties": {
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Center'"
+                  "Value": "'Left'"
                 }
               }
             },
@@ -305,13 +316,20 @@
                   "Value": "true"
                 }
               }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
             }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.Job Title"
           }
         },
         {
-          "selector": {
-            "metadata": "User Inventory Evidence.Enabled Workforce Accounts"
-          },
           "properties": {
             "alignment": {
               "expr": {
@@ -340,7 +358,17 @@
                   "Value": "true"
                 }
               }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
             }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.Enabled Workforce Accounts"
           }
         }
       ]
@@ -352,7 +380,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Job titles requiring review \u00b7 enabled accounts by classification status. Account populations are disjoint; a job title may occur in both tables.'"
+                  "Value": "'Job titles requiring review · enabled accounts by classification status. Account populations are disjoint; a job title may occur in both tables.'"
                 }
               }
             }
@@ -372,7 +400,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Job titles requiring review \u00b7 enabled accounts by classification status'"
+                  "Value": "'Job titles requiring review · enabled accounts by classification status'"
                 }
               }
             },

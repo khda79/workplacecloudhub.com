@@ -1,0 +1,76 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "e830a250e50b2e7c591e",
+  "displayName": "Risks by service",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "1509fa6c653aef6f2878",
+      "21e720e86e6bc1c585f3",
+      "22b160e0ebbb603bf705",
+      "251cf9340d2ff05fbd02",
+      "390477e54ebd61612a45",
+      "a27a0e1c0615db00369b",
+      "ecef3b57cf9414288eea",
+      "edc33c2bd8508a0363e3",
+      "d2f68c89372fae37b31b",
+      "080973300a2f336f581f",
+      "dedb8a52b2e2ad19b9b5"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "1c06a6e4c247dd0749aa",
+    "sections": {
+      "1c06a6e4c247dd0749aa": {
+        "visualContainers": {
+          "d2f68c89372fae37b31b": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "080973300a2f336f581f": {
+            "singleVisual": {}
+          },
+          "dedb8a52b2e2ad19b9b5": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "1509fa6c653aef6f2878": {
+            "isHidden": true
+          },
+          "21e720e86e6bc1c585f3": {
+            "isHidden": true
+          },
+          "22b160e0ebbb603bf705": {
+            "isHidden": true
+          },
+          "251cf9340d2ff05fbd02": {
+            "isHidden": true
+          },
+          "390477e54ebd61612a45": {
+            "isHidden": true
+          },
+          "a27a0e1c0615db00369b": {
+            "isHidden": true
+          },
+          "ecef3b57cf9414288eea": {
+            "isHidden": false
+          },
+          "edc33c2bd8508a0363e3": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

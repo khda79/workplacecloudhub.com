@@ -239,6 +239,30 @@ table 'License SKU Candidates'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Private report scope. Exact unique native identity and one loaded batch; no UPN suffix or display-name inference. Blank when missing or ambiguous.
+	column 'AD Domain' =
+			VAR _batch = 'License SKU Candidates'[Loaded Batch ID]
+			VAR _id = TRIM('License SKU Candidates'[User ID])
+			VAR _tenant = 'License SKU Candidates'[Tenant Key]
+			VAR _users = FILTER(ALL('Native User Evidence'), 'Native User Evidence'[SourceUserId] == _id && 'Native User Evidence'[Loaded Batch ID] == _batch && 'Native User Evidence'[TenantKey] == _tenant)
+			RETURN IF(NOT ISBLANK(_batch) && _id <> "" && COUNTROWS(_users) = 1, MAXX(_users, 'Native User Evidence'[AD Domain]))
+		dataType: string
+		displayFolder: Report scope
+		lineageTag: 5dc469bc-d236-4bda-bd59-286bc55ad56f
+		summarizeBy: none
+
+	/// Private report scope. Exact unique native identity and one loaded batch; no UPN suffix or display-name inference. Blank when missing or ambiguous.
+	column 'Scope Country' =
+			VAR _batch = 'License SKU Candidates'[Loaded Batch ID]
+			VAR _id = TRIM('License SKU Candidates'[User ID])
+			VAR _tenant = 'License SKU Candidates'[Tenant Key]
+			VAR _users = FILTER(ALL('Native User Evidence'), 'Native User Evidence'[SourceUserId] == _id && 'Native User Evidence'[Loaded Batch ID] == _batch && 'Native User Evidence'[TenantKey] == _tenant)
+			RETURN IF(NOT ISBLANK(_batch) && _id <> "" && COUNTROWS(_users) = 1, MAXX(_users, 'Native User Evidence'[CountryCode]))
+		dataType: string
+		displayFolder: Report scope
+		lineageTag: 56f4347e-e279-4e1a-9fee-88985ccb1571
+		summarizeBy: none
+
 	partition 'License SKU Candidates' = m
 		mode: import
 		source =

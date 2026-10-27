@@ -58,11 +58,15 @@ table 'Intune Managed App Assignment Evidence'
 
 	/// Prepared IntuneManagedAppAssignmentEvidence.csv: SourceRecord. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Source Record'
-		dataType: int64
+		dataType: double
 		isHidden
 		lineageTag: 4c31f54f-017c-4c4e-a1b8-af3b52d1f724
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: SourceRecord
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneManagedAppAssignmentEvidence.csv: CollectionUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Collection UTC'

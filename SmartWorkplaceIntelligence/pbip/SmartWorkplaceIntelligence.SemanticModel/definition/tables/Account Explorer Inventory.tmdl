@@ -1,0 +1,706 @@
+/// All AD/Entra account identities from the existing loaded batch; includes disabled and guests. Canonical identity uses existing estate GUID/SID reconciliation, never UPN/name merging. Original Workforce measures remain on their original table.
+table 'Account Explorer Inventory'
+	lineageTag: c7fcef7d-bea8-4ebd-af58-b3a951abc888
+
+	/// Private approved account/device lot; existing loaded batch only.
+	measure 'Account Inventory Accounts' =
+
+			VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[TenantUserKey]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _rows=FILTER('Account Explorer Inventory',
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _lf || [Native User Key] IN _withLicense || (_none && NOT ISBLANK([Native User Key]) && [License Count]=0) || (_unknown && ISBLANK([Native User Key]))))
+			RETURN COALESCE(COUNTROWS(_rows),0)
+		formatString: #,0
+		displayFolder: Private account and device explorer
+		lineageTag: 4e56b5ff-7a75-4ecb-86e0-93db9e0ded7e
+
+	/// Private approved account/device lot; existing loaded batch only.
+	measure 'Disabled Accounts AD/Entra' =
+
+			VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[TenantUserKey]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _rows=FILTER('Account Explorer Inventory',
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _lf || [Native User Key] IN _withLicense || (_none && NOT ISBLANK([Native User Key]) && [License Count]=0) || (_unknown && ISBLANK([Native User Key]))))
+			RETURN COALESCE(COUNTROWS(FILTER(_rows,[AD Account State]="Disabled" || [Entra Account State]="Disabled")),0)
+		formatString: #,0
+		displayFolder: Private account and device explorer
+		lineageTag: 0a1539ef-001a-439b-bc65-d5d2ad8abb4e
+
+	/// Private approved account/device lot; existing loaded batch only.
+	measure 'Account Inventory Row In Scope' =
+
+			VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[TenantUserKey]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _rows=FILTER('Account Explorer Inventory',
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _lf || [Native User Key] IN _withLicense || (_none && NOT ISBLANK([Native User Key]) && [License Count]=0) || (_unknown && ISBLANK([Native User Key]))))
+			RETURN IF(COUNTROWS(_rows)>0,1,0)
+		formatString: #,0
+		displayFolder: Private account and device explorer
+		lineageTag: 7d092a47-f647-4b8e-be6c-06ef695f9510
+
+	/// Private approved account/device lot; existing loaded batch only.
+	measure 'Account Inventory Active <=30D' =
+
+			VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[TenantUserKey]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _rows=FILTER('Account Explorer Inventory',
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _lf || [Native User Key] IN _withLicense || (_none && NOT ISBLANK([Native User Key]) && [License Count]=0) || (_unknown && ISBLANK([Native User Key]))))
+			RETURN COALESCE(COUNTROWS(FILTER(_rows,[Activity State]="Active <=30D")),0)
+		formatString: #,0
+		displayFolder: Private account and device explorer
+		lineageTag: e603e382-c38b-42a6-8329-35c08e547ab7
+
+	/// Private approved account/device lot; existing loaded batch only.
+	measure 'Account Inventory Dormant 31-90D' =
+
+			VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[TenantUserKey]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _rows=FILTER('Account Explorer Inventory',
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _lf || [Native User Key] IN _withLicense || (_none && NOT ISBLANK([Native User Key]) && [License Count]=0) || (_unknown && ISBLANK([Native User Key]))))
+			RETURN COALESCE(COUNTROWS(FILTER(_rows,[Activity State]="Dormant 31-90D")),0)
+		formatString: #,0
+		displayFolder: Private account and device explorer
+		lineageTag: 823ec95b-2b82-4ace-a014-a5196cdb9a66
+
+	/// Private approved account/device lot; existing loaded batch only.
+	measure 'Account Inventory Stale >90D' =
+
+			VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[TenantUserKey]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _rows=FILTER('Account Explorer Inventory',
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _lf || [Native User Key] IN _withLicense || (_none && NOT ISBLANK([Native User Key]) && [License Count]=0) || (_unknown && ISBLANK([Native User Key]))))
+			RETURN COALESCE(COUNTROWS(FILTER(_rows,[Activity State]="Stale >90D")),0)
+		formatString: #,0
+		displayFolder: Private account and device explorer
+		lineageTag: fceea578-f1bb-4da6-bdcb-b53143e0f7ce
+
+	/// Private approved account/device lot; existing loaded batch only.
+	measure 'Account Inventory Missing Activity' =
+
+			VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[TenantUserKey]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _rows=FILTER('Account Explorer Inventory',
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _lf || [Native User Key] IN _withLicense || (_none && NOT ISBLANK([Native User Key]) && [License Count]=0) || (_unknown && ISBLANK([Native User Key]))))
+			RETURN COALESCE(COUNTROWS(FILTER(_rows,ISBLANK([Last Activity Date]))),0)
+		formatString: #,0
+		displayFolder: Private account and device explorer
+		lineageTag: 38eaae9e-9f4d-4b65-beb3-7aa5a31f2666
+
+	/// Private approved account/device lot; existing loaded batch only.
+	measure 'Account Inventory Activity Coverage (%)' = DIVIDE([Account Inventory Accounts]-[Account Inventory Missing Activity],[Account Inventory Accounts])
+		formatString: 0.0%
+		displayFolder: Private account and device explorer
+		lineageTag: bf7d737b-c168-4074-92da-0fb6ab5115fa
+
+	/// Private approved account/device lot; existing loaded batch only.
+	measure 'Account Inventory Missing Manager' =
+
+			VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[TenantUserKey]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _rows=FILTER('Account Explorer Inventory',
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _lf || [Native User Key] IN _withLicense || (_none && NOT ISBLANK([Native User Key]) && [License Count]=0) || (_unknown && ISBLANK([Native User Key]))))
+			RETURN COALESCE(COUNTROWS(FILTER(_rows,ISBLANK([Manager]) || [Manager]="Unknown")),0)
+		formatString: #,0
+		displayFolder: Private account and device explorer
+		lineageTag: 1b02ec59-4e90-442e-9cca-d1301f57ace6
+
+	/// Private approved account/device lot; existing loaded batch only.
+	measure 'Account Inventory Department Completeness (%)' =
+
+			VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[TenantUserKey]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _rows=FILTER('Account Explorer Inventory',
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _lf || [Native User Key] IN _withLicense || (_none && NOT ISBLANK([Native User Key]) && [License Count]=0) || (_unknown && ISBLANK([Native User Key]))))
+			RETURN DIVIDE(COUNTROWS(FILTER(_rows,NOT ISBLANK([Department]) && [Department]<>"Unknown")),COUNTROWS(_rows))
+		formatString: 0.0%
+		displayFolder: Private account and device explorer
+		lineageTag: 97190c12-a8cb-4ab6-84b1-eef6c3e6d8f2
+
+	/// Top five job titles in current external selection, compared by country. Full job-title distribution remains in matrix.
+	measure 'Job Title Country Top 5 Accounts' =
+			VAR _ranked=TOPN(5,ADDCOLUMNS(ALLSELECTED('Account Explorer Inventory'[Job Title]),"__count",CALCULATE([Account Inventory Accounts],ALLSELECTED('Account Explorer Inventory'[Country Name]))),[__count],DESC,'Account Explorer Inventory'[Job Title],ASC)
+			RETURN IF(SELECTEDVALUE('Account Explorer Inventory'[Job Title]) IN SELECTCOLUMNS(_ranked,"Title",'Account Explorer Inventory'[Job Title]),[Account Inventory Accounts])
+		formatString: #,0
+		displayFolder: Private account and device explorer
+		lineageTag: ab5c234d-0bf8-421d-8e3a-b0830f0f0f65
+
+	column 'User Source ID'
+		lineageTag: c67c6306-05ff-40e9-838e-fdffee00b306
+		isNameInferred
+		sourceColumn: [User Source ID]
+
+	column 'User Principal Name'
+		lineageTag: 7c9d0ff4-776b-428a-be37-4c8435bc4eea
+		isNameInferred
+		sourceColumn: [User Principal Name]
+
+	column 'Display Name'
+		lineageTag: d758eed6-6800-454d-973f-d1840b9ada70
+		isNameInferred
+		sourceColumn: [Display Name]
+
+	column Country
+		lineageTag: f7f65527-a846-42af-ba09-db59cfb74e39
+		isNameInferred
+		sourceColumn: [Country]
+
+	column Department
+		lineageTag: 24936533-4346-4d33-8731-970282a0b7e9
+		isNameInferred
+		sourceColumn: [Department]
+
+	column 'Department Evidence State'
+		lineageTag: 679fa69e-e28f-40c7-917d-b62189e0e3ad
+		isNameInferred
+		sourceColumn: [Department Evidence State]
+
+	column Manager
+		lineageTag: e3d74646-22fd-4b83-b2d9-2e356c09d426
+		isNameInferred
+		sourceColumn: [Manager]
+
+	column 'Manager Evidence State'
+		lineageTag: 10e8319f-d651-4943-97a8-1c1f823cddae
+		isNameInferred
+		sourceColumn: [Manager Evidence State]
+
+	column 'Account State'
+		lineageTag: 36c402fe-4450-4df0-846d-32081b979281
+		isNameInferred
+		sourceColumn: [Account State]
+
+	column 'User Type'
+		lineageTag: 5e6249a3-23e1-4784-8d9f-1d0fb120c517
+		isNameInferred
+		sourceColumn: [User Type]
+
+	column 'Workforce Status'
+		lineageTag: aaad47c9-d9e6-455c-a193-27165c68a9e2
+		isNameInferred
+		sourceColumn: [Workforce Status]
+
+	column 'Activity State'
+		lineageTag: 4dc138f1-c768-4c03-951b-b7a3bd18ed1b
+		isNameInferred
+		sourceColumn: [Activity State]
+
+	column 'Activity Evidence Status'
+		lineageTag: 9ad9c37f-336b-4090-9e86-f9d2bf5d8f87
+		isNameInferred
+		sourceColumn: [Activity Evidence Status]
+
+	column 'Days Since Last Activity'
+		lineageTag: e633f9ac-14ac-4a6b-8a95-136acbfa11ce
+		isNameInferred
+		sourceColumn: [Days Since Last Activity]
+
+	column 'Last Activity Date'
+		lineageTag: 6c741d34-61f6-414d-b5ca-9ba97fb499db
+		isNameInferred
+		sourceColumn: [Last Activity Date]
+
+	column 'Last Activity Workload'
+		lineageTag: 5f668e4e-64cc-4a88-999c-daad69684088
+		isNameInferred
+		sourceColumn: [Last Activity Workload]
+
+	column 'Identity Match Status'
+		lineageTag: 4fc0e26b-282a-46c8-9a51-be1e2f6ca229
+		isNameInferred
+		sourceColumn: [Identity Match Status]
+
+	column 'Identity Match Method'
+		lineageTag: 4a66e8f1-ba38-44af-89b1-2c93ced85c6f
+		isNameInferred
+		sourceColumn: [Identity Match Method]
+
+	column 'M365 License Count'
+		lineageTag: 27dccf0c-8792-4231-a569-45dfb06350f3
+		isNameInferred
+		sourceColumn: [M365 License Count]
+
+	column 'Has M365 License'
+		lineageTag: c20b0b8b-9fa2-4de0-850a-d720a91e4fbb
+		isNameInferred
+		sourceColumn: [Has M365 License]
+
+	column 'Duplicate UPN State'
+		lineageTag: 3d93ce3b-c81f-4056-a291-13befd755205
+		isNameInferred
+		sourceColumn: [Duplicate UPN State]
+
+	column 'Attention Priority'
+		lineageTag: b809b901-d61d-4564-93e3-503c99a0f1cc
+		isNameInferred
+		sourceColumn: [Attention Priority]
+
+	column 'Evidence Date'
+		lineageTag: ab376937-5a92-4819-a092-24f1d8699406
+		isNameInferred
+		sourceColumn: [Evidence Date]
+
+	column 'Account Type'
+		lineageTag: 0ef95475-30b2-4118-a36c-6afa7fcfd74c
+		isNameInferred
+		sourceColumn: [Account Type]
+
+	column 'Account Population'
+		lineageTag: e1f7e955-a7ba-4ee3-88c6-287b02b7f89d
+		isNameInferred
+		sourceColumn: [Account Population]
+
+	column 'Account Classification Rule Version'
+		lineageTag: 26b8d544-b897-4bbb-93a5-9d7b469723e9
+		isNameInferred
+		sourceColumn: [Account Classification Rule Version]
+
+	column 'Job Title'
+		lineageTag: 056309f3-a9be-400a-8420-4b41e2ea027d
+		isNameInferred
+		sourceColumn: [Job Title]
+
+	column 'Job Title Evidence State'
+		lineageTag: fded46ed-5ec7-4653-bd42-7a44655cdf5f
+		isNameInferred
+		sourceColumn: [Job Title Evidence State]
+
+	column 'AD Last Activity Date'
+		lineageTag: 08cbc139-5f82-415b-b364-d35a057f53af
+		isNameInferred
+		sourceColumn: [AD Last Activity Date]
+
+	column 'M365 Last Activity Date'
+		lineageTag: 5ef9550e-45be-4a6b-aeab-c4a830a5d3b1
+		isNameInferred
+		sourceColumn: [M365 Last Activity Date]
+
+	column 'Activity Source'
+		lineageTag: 539039e8-cb00-425b-9f62-d74482cf333d
+		isNameInferred
+		sourceColumn: [Activity Source]
+
+	column 'Workforce Persona'
+		lineageTag: 56c9b9d6-5499-4662-ac82-fac25ca28e5b
+		isNameInferred
+		sourceColumn: [Workforce Persona]
+
+	column 'Persona Match State'
+		lineageTag: fed672ee-9049-43b0-bde4-84b55f42879b
+		isNameInferred
+		sourceColumn: [Persona Match State]
+
+	column 'Persona Matched Keywords'
+		lineageTag: 1c8375df-f5a3-4e22-9173-01a5cf725a11
+		isNameInferred
+		sourceColumn: [Persona Matched Keywords]
+
+	column 'MFA Registration State'
+		lineageTag: a63e9394-2e6f-4484-bd10-79edc1a0eb3e
+		isNameInferred
+		sourceColumn: [MFA Registration State]
+
+	column 'Has Microsoft 365 F3'
+		lineageTag: a8f39918-7dd2-4f91-980a-d8528be4404b
+		isNameInferred
+		sourceColumn: [Has Microsoft 365 F3]
+
+	column 'Has Microsoft 365 E3'
+		lineageTag: 738bc8dd-05c6-4d25-a553-a5efc82582d4
+		isNameInferred
+		sourceColumn: [Has Microsoft 365 E3]
+
+	column 'Has Microsoft 365 E5'
+		lineageTag: db8382ad-b542-4b2a-af23-a0ad37c28618
+		isNameInferred
+		sourceColumn: [Has Microsoft 365 E5]
+
+	column 'Exchange Usage State (30D)'
+		lineageTag: 3aee153a-8633-4d4a-b96d-1c4ebc4de097
+		isNameInferred
+		sourceColumn: [Exchange Usage State (30D)]
+
+	column 'Teams Usage State (30D)'
+		lineageTag: 9342f8fe-5e89-4604-bc23-d1704d62ea2f
+		isNameInferred
+		sourceColumn: [Teams Usage State (30D)]
+
+	column 'SharePoint Usage State (30D)'
+		lineageTag: b7a56110-2ba7-4592-b9f9-454df6f7f692
+		isNameInferred
+		sourceColumn: [SharePoint Usage State (30D)]
+
+	column 'OneDrive Usage State (30D)'
+		lineageTag: 55cca620-7dea-4d08-9c9d-b25b523eb520
+		isNameInferred
+		sourceColumn: [OneDrive Usage State (30D)]
+
+	column 'M365 Usage Report Date'
+		lineageTag: 598800f5-1632-404a-81bf-80359507dfa5
+		isNameInferred
+		sourceColumn: [M365 Usage Report Date]
+
+	column 'Office Desktop Activation State (30D)'
+		lineageTag: 31625908-4c65-42bb-a79b-a1731a127655
+		isNameInferred
+		sourceColumn: [Office Desktop Activation State (30D)]
+
+	column 'Office Desktop Usage State (30D)'
+		lineageTag: d29edea5-6d03-421f-8d2b-7d657c254ee9
+		isNameInferred
+		sourceColumn: [Office Desktop Usage State (30D)]
+
+	column 'Office Desktop Usage Report Date'
+		lineageTag: 2c8286e5-35fc-4a29-89a1-c7568672b3e9
+		isNameInferred
+		sourceColumn: [Office Desktop Usage Report Date]
+
+	column 'Directory Site Code'
+		lineageTag: 701683d4-64a9-4a30-b10d-a016e0c4614e
+		isNameInferred
+		sourceColumn: [Directory Site Code]
+
+	column 'Site Type'
+		lineageTag: 4457733f-fcfb-4c49-b63f-bfb7c27d7236
+		isNameInferred
+		sourceColumn: [Site Type]
+
+	column 'Site Match State'
+		lineageTag: 132fa079-5af1-40f4-bc98-b3dda91d26b0
+		isNameInferred
+		sourceColumn: [Site Match State]
+
+	column 'Persona Classification Source'
+		lineageTag: 8d7c2102-13e3-4a52-ab97-751b39b2e3fb
+		isNameInferred
+		sourceColumn: [Persona Classification Source]
+
+	column 'Console Last Activity UTC'
+		lineageTag: 763c45cf-e9ab-46d5-9ba8-8fc00ce41fd0
+		isNameInferred
+		sourceColumn: [Console Last Activity UTC]
+
+	column 'Console Activity Evidence State'
+		lineageTag: b95d68b3-897a-449f-a209-5859af5eaa52
+		isNameInferred
+		sourceColumn: [Console Activity Evidence State]
+
+	column 'Console Activity Device Count'
+		lineageTag: a260d062-5b9d-48ec-bed1-f01e74a3d9a8
+		isNameInferred
+		sourceColumn: [Console Activity Device Count]
+
+	column 'Console Activity Match Method'
+		lineageTag: 242329bd-4329-4b8c-82b9-c64d411c3fa4
+		isNameInferred
+		sourceColumn: [Console Activity Match Method]
+
+	column 'Loaded Batch ID'
+		lineageTag: 97808a18-1174-4a6a-b1fd-069cc0bf7ca9
+		isNameInferred
+		sourceColumn: [Loaded Batch ID]
+
+	column 'AD Created (source)'
+		lineageTag: 2c90d0ab-cdce-425a-84b7-1ca7e5627a0e
+		isNameInferred
+		sourceColumn: [AD Created (source)]
+
+	column 'AD Creation Qualification'
+		lineageTag: 5526f0ef-4fb3-4cd8-b733-9ed8ba71b8a7
+		isNameInferred
+		sourceColumn: [AD Creation Qualification]
+
+	column 'AD Created UTC'
+		lineageTag: 27a59774-a5fd-4727-92a5-25aa2af5cb60
+		isNameInferred
+		sourceColumn: [AD Created UTC]
+
+	column 'AD Modified (source)'
+		lineageTag: c6b88f3f-c1b0-4b79-88f1-23a461cb1ee9
+		isNameInferred
+		sourceColumn: [AD Modified (source)]
+
+	column 'AD Modification Qualification'
+		lineageTag: d80cb9f8-0a86-424a-a315-ec96248ebc9c
+		isNameInferred
+		sourceColumn: [AD Modification Qualification]
+
+	column 'AD Modified UTC'
+		lineageTag: 66288bd2-20a9-4cd3-8473-f189dba9d706
+		isNameInferred
+		sourceColumn: [AD Modified UTC]
+
+	column 'Entra Created (source)'
+		lineageTag: 6d566c90-f811-4fc7-a410-464c80cdceb7
+		isNameInferred
+		sourceColumn: [Entra Created (source)]
+
+	column 'Entra Creation Qualification'
+		lineageTag: 53084ae9-7eca-4dd6-86c3-c0495bebed7e
+		isNameInferred
+		sourceColumn: [Entra Creation Qualification]
+
+	column 'Entra Created UTC'
+		lineageTag: 9ab6a74b-bb12-4ac6-81fc-2ac876f6903e
+		isNameInferred
+		sourceColumn: [Entra Created UTC]
+
+	column 'Entra Modified (source)'
+		lineageTag: 1f770435-57f9-4095-9d7b-6147fc1cb9e8
+		isNameInferred
+		sourceColumn: [Entra Modified (source)]
+
+	column 'Entra Modification Qualification'
+		lineageTag: 31c0df9f-3d71-4f53-ae4c-0e229a410c63
+		isNameInferred
+		sourceColumn: [Entra Modification Qualification]
+
+	column 'Entra Modified UTC'
+		lineageTag: c28fc790-ed9e-4a86-b48c-f5fb92a4acc6
+		isNameInferred
+		sourceColumn: [Entra Modified UTC]
+
+	column 'AD Password Expired'
+		lineageTag: bae07875-303e-49b6-b3d2-83d251501e97
+		isNameInferred
+		sourceColumn: [AD Password Expired]
+
+	column 'AD Password Expiry Status'
+		lineageTag: c49033c1-6c87-4217-a622-6a86dd21f33d
+		isNameInferred
+		sourceColumn: [AD Password Expiry Status]
+
+	column 'AD Domain'
+		lineageTag: 2115594a-2163-4fd9-912e-db46a34917d1
+		isNameInferred
+		sourceColumn: [AD Domain]
+
+	column TenantKey
+		lineageTag: e3c17007-1d6e-4f8c-bf8e-c4484cf5b60e
+		isNameInferred
+		sourceColumn: [TenantKey]
+
+	column 'Country Name'
+		lineageTag: a59bcd31-550f-46e4-abd0-c94c6f93c760
+		isNameInferred
+		sourceColumn: [Country Name]
+
+	column 'Account Key'
+		lineageTag: 2168b90f-d8b4-41dd-b48c-b1fb59dadcc5
+		isNameInferred
+		sourceColumn: [Account Key]
+
+	column 'Native User Key'
+		lineageTag: 0c20d6e2-eca6-492e-9b32-c0ffd6fbdf5b
+		isNameInferred
+		sourceColumn: [Native User Key]
+
+	column 'SAM Account Name'
+		lineageTag: 717c4d77-1684-428e-aa86-caa34efe99c8
+		isNameInferred
+		sourceColumn: [SAM Account Name]
+
+	column 'AD Account State'
+		lineageTag: 1c82d1d0-2848-44cb-9879-6190aab636eb
+		isNameInferred
+		sourceColumn: [AD Account State]
+
+	column 'Entra Account State'
+		lineageTag: f02a48a4-0e8e-4d17-bab3-e9cec6f42acb
+		isNameInferred
+		sourceColumn: [Entra Account State]
+
+	column 'Inventory Source'
+		lineageTag: c9d536b7-e3b7-40b6-83cc-19d378485f95
+		isNameInferred
+		sourceColumn: [Inventory Source]
+
+	column 'Account Kind'
+		lineageTag: 931fe196-5af9-4b93-8d5e-527a7fbae0ff
+		isNameInferred
+		sourceColumn: [Account Kind]
+
+	column 'AD/Entra State Conflict'
+		lineageTag: 24d7d5b6-8394-4108-ab31-88c124296dc0
+		isNameInferred
+		sourceColumn: [AD/Entra State Conflict]
+
+	column 'License Count'
+		lineageTag: 5e1c0f5c-7c4d-435b-84bc-88a8e7440322
+		isNameInferred
+		sourceColumn: [License Count]
+
+	column 'License Products'
+		lineageTag: 52240dba-fdb5-410a-9ef1-4cdaab1f485a
+		isNameInferred
+		sourceColumn: [License Products]
+
+	partition 'Account Explorer Inventory' = calculated
+		mode: import
+		source =
+				VAR _base = ADDCOLUMNS('All Accounts Evidence',
+				 "__ADGuid", IF(LEFT([Account Key],3)="ad:",MID([Account Key],4,500)),
+				 "__EntraGuid",IF(LEFT([Account Key],6)="entra:",MID([Account Key],7,500)))
+				VAR _links = ADDCOLUMNS(_base,
+				 "__NativeUserKey",IF(LEFT([Account Key],3)="ad:",LOOKUPVALUE('AD User Evidence'[TenantUserKey], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				 LOOKUPVALUE('Native User Evidence'[TenantUserKey],'Native User Evidence'[SourceUserId],[__EntraGuid],'Native User Evidence'[TenantKey],[TenantKey],'Native User Evidence'[Loaded Batch ID],[Loaded Batch ID])))
+				VAR _users=ADDCOLUMNS(_links,
+				 "__SourceID",LOOKUPVALUE('Native User Evidence'[SourceUserId], 'Native User Evidence'[TenantUserKey], [__NativeUserKey], 'Native User Evidence'[TenantKey], [TenantKey], 'Native User Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				 "__Domain",COALESCE(LOOKUPVALUE('AD User Evidence'[DomainName], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('Native User Evidence'[AD Domain], 'Native User Evidence'[TenantUserKey], [__NativeUserKey], 'Native User Evidence'[TenantKey], [TenantKey], 'Native User Evidence'[Loaded Batch ID], [Loaded Batch ID]),"Unknown"))
+				RETURN SELECTCOLUMNS(_users,
+				"User Source ID",COALESCE([__SourceID],[Account Key]),
+				"User Principal Name",COALESCE(LOOKUPVALUE('Native User Evidence'[UserPrincipalName], 'Native User Evidence'[TenantUserKey], [__NativeUserKey], 'Native User Evidence'[TenantKey], [TenantKey], 'Native User Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('AD User Evidence'[UserPrincipalName], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID])),
+				"Display Name",COALESCE(LOOKUPVALUE('Native User Evidence'[DisplayName], 'Native User Evidence'[TenantUserKey], [__NativeUserKey], 'Native User Evidence'[TenantKey], [TenantKey], 'Native User Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('AD User Evidence'[DisplayName], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID]),[Account Kind]),
+				"Country",[Country],
+				"Department",COALESCE(LOOKUPVALUE('User Inventory Evidence'[Department], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('Native User Evidence'[Department], 'Native User Evidence'[TenantUserKey], [__NativeUserKey], 'Native User Evidence'[TenantKey], [TenantKey], 'Native User Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('AD User Evidence'[Department], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID]),"Unknown"),
+				"Department Evidence State",LOOKUPVALUE('User Inventory Evidence'[Department Evidence State], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Manager",COALESCE(LOOKUPVALUE('User Inventory Evidence'[Manager], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('AD User Evidence'[ManagerDistinguishedName], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID]),"Unknown"),
+				"Manager Evidence State",LOOKUPVALUE('User Inventory Evidence'[Manager Evidence State], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Account State",SWITCH(TRUE(),[AD State]="Disabled" || [Entra State]="Disabled","Disabled",[AD State]="Enabled" || [Entra State]="Enabled","Enabled","Unknown"),
+				"User Type",IF([Inventory Source]="AD only","AD only / not applicable",COALESCE([Entra User Type],"Unknown")),
+				"Workforce Status",LOOKUPVALUE('User Inventory Evidence'[Workforce Status], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Activity State",COALESCE(LOOKUPVALUE('User Inventory Evidence'[Activity State], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('Native User Evidence'[ActivityState], 'Native User Evidence'[TenantUserKey], [__NativeUserKey], 'Native User Evidence'[TenantKey], [TenantKey], 'Native User Evidence'[Loaded Batch ID], [Loaded Batch ID]),"Unknown"),
+				"Activity Evidence Status",LOOKUPVALUE('User Inventory Evidence'[Activity Evidence Status], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Days Since Last Activity",LOOKUPVALUE('User Inventory Evidence'[Days Since Last Activity], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Last Activity Date",COALESCE(LOOKUPVALUE('User Inventory Evidence'[Last Activity Date], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('Native User Evidence'[LastSuccessfulSignInDateTime], 'Native User Evidence'[TenantUserKey], [__NativeUserKey], 'Native User Evidence'[TenantKey], [TenantKey], 'Native User Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('AD User Evidence'[LastLogonUtcDateTime], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID])),
+				"Last Activity Workload",LOOKUPVALUE('User Inventory Evidence'[Last Activity Workload], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Identity Match Status",LOOKUPVALUE('User Inventory Evidence'[Identity Match Status], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Identity Match Method",LOOKUPVALUE('User Inventory Evidence'[Identity Match Method], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"M365 License Count",LOOKUPVALUE('User Inventory Evidence'[M365 License Count], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Has M365 License",LOOKUPVALUE('User Inventory Evidence'[Has M365 License], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Duplicate UPN State",LOOKUPVALUE('User Inventory Evidence'[Duplicate UPN State], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Attention Priority",LOOKUPVALUE('User Inventory Evidence'[Attention Priority], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Evidence Date",LOOKUPVALUE('User Inventory Evidence'[Evidence Date], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Account Type",COALESCE(LOOKUPVALUE('User Inventory Evidence'[Account Type], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('AD User Evidence'[AccountType], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID]),"Unclassified Account"),
+				"Account Population",LOOKUPVALUE('User Inventory Evidence'[Account Population], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Account Classification Rule Version",LOOKUPVALUE('User Inventory Evidence'[Account Classification Rule Version], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Job Title",COALESCE(LOOKUPVALUE('User Inventory Evidence'[Job Title], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('Native User Evidence'[JobTitle], 'Native User Evidence'[TenantUserKey], [__NativeUserKey], 'Native User Evidence'[TenantKey], [TenantKey], 'Native User Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('AD User Evidence'[Title], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID]),"Unknown"),
+				"Job Title Evidence State",LOOKUPVALUE('User Inventory Evidence'[Job Title Evidence State], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"AD Last Activity Date",COALESCE(LOOKUPVALUE('User Inventory Evidence'[AD Last Activity Date], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('AD User Evidence'[LastLogonUtcDateTime], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID])),
+				"M365 Last Activity Date",LOOKUPVALUE('User Inventory Evidence'[M365 Last Activity Date], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Activity Source",LOOKUPVALUE('User Inventory Evidence'[Activity Source], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Workforce Persona",LOOKUPVALUE('User Inventory Evidence'[Workforce Persona], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Persona Match State",LOOKUPVALUE('User Inventory Evidence'[Persona Match State], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Persona Matched Keywords",LOOKUPVALUE('User Inventory Evidence'[Persona Matched Keywords], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"MFA Registration State",LOOKUPVALUE('User Inventory Evidence'[MFA Registration State], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Has Microsoft 365 F3",LOOKUPVALUE('User Inventory Evidence'[Has Microsoft 365 F3], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Has Microsoft 365 E3",LOOKUPVALUE('User Inventory Evidence'[Has Microsoft 365 E3], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Has Microsoft 365 E5",LOOKUPVALUE('User Inventory Evidence'[Has Microsoft 365 E5], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Exchange Usage State (30D)",LOOKUPVALUE('User Inventory Evidence'[Exchange Usage State (30D)], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Teams Usage State (30D)",LOOKUPVALUE('User Inventory Evidence'[Teams Usage State (30D)], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"SharePoint Usage State (30D)",LOOKUPVALUE('User Inventory Evidence'[SharePoint Usage State (30D)], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"OneDrive Usage State (30D)",LOOKUPVALUE('User Inventory Evidence'[OneDrive Usage State (30D)], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"M365 Usage Report Date",LOOKUPVALUE('User Inventory Evidence'[M365 Usage Report Date], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Office Desktop Activation State (30D)",LOOKUPVALUE('User Inventory Evidence'[Office Desktop Activation State (30D)], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Office Desktop Usage State (30D)",LOOKUPVALUE('User Inventory Evidence'[Office Desktop Usage State (30D)], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Office Desktop Usage Report Date",LOOKUPVALUE('User Inventory Evidence'[Office Desktop Usage Report Date], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Directory Site Code",LOOKUPVALUE('User Inventory Evidence'[Directory Site Code], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Site Type",LOOKUPVALUE('User Inventory Evidence'[Site Type], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Site Match State",LOOKUPVALUE('User Inventory Evidence'[Site Match State], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Persona Classification Source",LOOKUPVALUE('User Inventory Evidence'[Persona Classification Source], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Console Last Activity UTC",LOOKUPVALUE('User Inventory Evidence'[Console Last Activity UTC], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Console Activity Evidence State",LOOKUPVALUE('User Inventory Evidence'[Console Activity Evidence State], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Console Activity Device Count",LOOKUPVALUE('User Inventory Evidence'[Console Activity Device Count], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Console Activity Match Method",LOOKUPVALUE('User Inventory Evidence'[Console Activity Match Method], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Loaded Batch ID",[Loaded Batch ID],
+				"AD Created (source)",COALESCE(LOOKUPVALUE('User Inventory Evidence'[AD Created (source)], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('AD User Evidence'[CreationRaw], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID])),
+				"AD Creation Qualification",LOOKUPVALUE('User Inventory Evidence'[AD Creation Qualification], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"AD Created UTC",LOOKUPVALUE('User Inventory Evidence'[AD Created UTC], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"AD Modified (source)",COALESCE(LOOKUPVALUE('User Inventory Evidence'[AD Modified (source)], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('AD User Evidence'[ModificationRaw], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID])),
+				"AD Modification Qualification",LOOKUPVALUE('User Inventory Evidence'[AD Modification Qualification], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"AD Modified UTC",LOOKUPVALUE('User Inventory Evidence'[AD Modified UTC], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Entra Created (source)",COALESCE(LOOKUPVALUE('User Inventory Evidence'[Entra Created (source)], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('Native User Evidence'[CreationRaw], 'Native User Evidence'[TenantUserKey], [__NativeUserKey], 'Native User Evidence'[TenantKey], [TenantKey], 'Native User Evidence'[Loaded Batch ID], [Loaded Batch ID])),
+				"Entra Creation Qualification",LOOKUPVALUE('User Inventory Evidence'[Entra Creation Qualification], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Entra Created UTC",LOOKUPVALUE('User Inventory Evidence'[Entra Created UTC], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Entra Modified (source)",COALESCE(LOOKUPVALUE('User Inventory Evidence'[Entra Modified (source)], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('Native User Evidence'[ModificationRaw], 'Native User Evidence'[TenantUserKey], [__NativeUserKey], 'Native User Evidence'[TenantKey], [TenantKey], 'Native User Evidence'[Loaded Batch ID], [Loaded Batch ID])),
+				"Entra Modification Qualification",LOOKUPVALUE('User Inventory Evidence'[Entra Modification Qualification], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"Entra Modified UTC",LOOKUPVALUE('User Inventory Evidence'[Entra Modified UTC], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"AD Password Expired",LOOKUPVALUE('User Inventory Evidence'[AD Password Expired], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"AD Password Expiry Status",LOOKUPVALUE('User Inventory Evidence'[AD Password Expiry Status], 'User Inventory Evidence'[User Source ID], [__SourceID], 'User Inventory Evidence'[TenantKey], [TenantKey], 'User Inventory Evidence'[Loaded Batch ID], [Loaded Batch ID]),
+				"AD Domain",[__Domain],
+				"TenantKey",[TenantKey],
+				"Country Name",[Country Name],
+				"Account Key",[Account Key],
+				"Native User Key",[__NativeUserKey],
+				"SAM Account Name",COALESCE(LOOKUPVALUE('Native User Evidence'[SAM Account Name], 'Native User Evidence'[TenantUserKey], [__NativeUserKey], 'Native User Evidence'[TenantKey], [TenantKey], 'Native User Evidence'[Loaded Batch ID], [Loaded Batch ID]),LOOKUPVALUE('AD User Evidence'[SamAccountName], 'AD User Evidence'[ObjectGUID], [__ADGuid], 'AD User Evidence'[TenantKey], [TenantKey], 'AD User Evidence'[Loaded Batch ID], [Loaded Batch ID])),
+				"AD Account State",[AD State],
+				"Entra Account State",[Entra State],
+				"Inventory Source",[Inventory Source],
+				"Account Kind",[Account Kind],
+				"AD/Entra State Conflict",IF([AD State] IN {"Enabled","Disabled"} && [Entra State] IN {"Enabled","Disabled"} && [AD State]<>[Entra State],"Yes","No"),
+				"License Count",VAR _key=[__NativeUserKey] VAR _tenant=[TenantKey] VAR _batch=[Loaded Batch ID] RETURN IF(NOT ISBLANK(_key),COUNTROWS(FILTER('Native User License',[TenantUserKey]=_key && [TenantKey]=_tenant && [Loaded Batch ID]=_batch))),
+				"License Products",VAR _key=[__NativeUserKey] VAR _tenant=[TenantKey] VAR _batch=[Loaded Batch ID]
+				 VAR _skus=SELECTCOLUMNS(FILTER('Native User License',[TenantUserKey]=_key && [TenantKey]=_tenant && [Loaded Batch ID]=_batch),"K",[TenantSkuKey])
+				 RETURN IF(NOT ISBLANK(_key),CONCATENATEX(FILTER('Native License SKU',[TenantKey]=_tenant && [TenantSkuKey] IN _skus),[SkuPartNumberLabel],", ",[SkuPartNumberLabel],ASC))
+				)

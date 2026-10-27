@@ -6,36 +6,43 @@ table 'Exchange Mailbox Reconciliation'
 	measure 'Exchange Reconciled Mailboxes' = COUNTROWS('Exchange Mailbox Reconciliation')
 		formatString: #,0
 		displayFolder: Reconciliation
+		lineageTag: d2044ff8-7a9b-47bf-adf0-1b4d86022620
 
 	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
 	measure 'Exchange Cloud Linked Mailboxes' = CALCULATE(COUNTROWS('Exchange Mailbox Reconciliation'),KEEPFILTERS('Exchange Mailbox Reconciliation'[Account Link]="Unique AD GUID + native SID"))
 		formatString: #,0
 		displayFolder: Reconciliation
+		lineageTag: 31afcc3c-dc02-4cda-839a-82ef594a06f9
 
 	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
 	measure 'Exchange Observed Plan Mailboxes' = CALCULATE(COUNTROWS('Exchange Mailbox Reconciliation'),KEEPFILTERS('Exchange Mailbox Reconciliation'[Mailbox Plan Observation] IN {"Plan 1 observed","Plan 2 observed","Kiosk observed"}))
 		formatString: #,0
 		displayFolder: Reconciliation
+		lineageTag: 6d35415a-7ec5-4ba0-a8b4-e99109e2f047
 
 	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
 	measure 'Exchange Retained Decision Mailboxes' = CALCULATE(COUNTROWS('Exchange Mailbox Reconciliation'),KEEPFILTERS('Exchange Mailbox Reconciliation'[Retained On-premises]="Matched retained decision"))
 		formatString: #,0
 		displayFolder: Reconciliation
+		lineageTag: 6965aa7a-3f89-4105-a337-c93d529611c8
 
 	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
 	measure 'Exchange Referenced Servers' = CALCULATE(DISTINCTCOUNT('Exchange Mailbox Reconciliation'[Server Name]),KEEPFILTERS('Exchange Mailbox Reconciliation'[Server Name]<>""),KEEPFILTERS('Exchange Mailbox Reconciliation'[Server Name]<>"Not observed"))
 		formatString: #,0
 		displayFolder: Reconciliation
+		lineageTag: e0a851a5-c44f-479c-87fe-09ca1bc1156f
 
 	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
 	measure 'Exchange Kiosk Size Reviews' = CALCULATE(COUNTROWS('Exchange Mailbox Reconciliation'),KEEPFILTERS('Exchange Mailbox Reconciliation'[Mailbox Type]="UserMailbox"),KEEPFILTERS('Exchange Mailbox Reconciliation'[Mailbox Plan Observation]="Kiosk observed"),KEEPFILTERS('Exchange Mailbox Reconciliation'[Mailbox Size GB]>2))
 		formatString: #,0
 		displayFolder: Reconciliation
+		lineageTag: 634018d0-199c-4061-b0e2-a2ffd8809e4f
 
 	/// Same-batch mailbox grain. Not distinct licensed users, accessors, required CALs or purchase quantities.
 	measure 'Exchange Licensing Review Note' = "Mailbox observations, not purchase quantities | F3 eligibility and contracts unverified | Server names are mailbox references, not a complete active-server inventory."
 		formatString: @
 		displayFolder: Reconciliation
+		lineageTag: 88884490-37e8-4a7d-9ec2-ce86c762d042
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario E3 Need' =
@@ -116,6 +123,7 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(COUNTROWS(_selected),0))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: bcdc7f28-85bb-43e5-8e18-6cca9c2a804b
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario E3 Covered' =
@@ -196,11 +204,13 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_selected,[Covered]),0))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: 41628ac4-4758-4136-b183-21a2efe55ad9
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario E3 Gap' = VAR _need=[Exchange Scenario E3 Need] VAR _covered=[Exchange Scenario E3 Covered] RETURN IF(NOT ISBLANK(_need),MAX(0,_need-_covered))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: 1a73980b-2a7b-49d7-8853-b3359de981f3
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario E3 Available' =
@@ -221,16 +231,19 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF(_valid,SUMX(_rows,'License SKU Capacity'[Available Units]))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: 93747010-39c3-4332-951b-31dcf5365502
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario E3 Buy' = VAR _gap=[Exchange Scenario E3 Gap] VAR _free=[Exchange Scenario E3 Available] RETURN IF(NOT ISBLANK(_gap) && NOT ISBLANK(_free),MAX(0,_gap-_free))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: de549532-1df8-4029-8b83-5fa30debb39d
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario E3 Buy Label' = VAR _n=[Exchange Scenario E3 Buy] RETURN IF(ISBLANK(_n),"To qualify",FORMAT(_n,"#,0"))
 		formatString: @
 		displayFolder: Migration licensing scenario
+		lineageTag: 3e2542d3-d481-41cb-9549-463951b486da
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario F3 Need' =
@@ -311,6 +324,7 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(COUNTROWS(_selected),0))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: 9f255d3c-c946-4694-9d12-9548c640d69b
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario F3 Covered' =
@@ -391,11 +405,13 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_selected,[Covered]),0))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: 7405a159-1284-4dea-9ae7-4b4c13fed139
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario F3 Gap' = VAR _need=[Exchange Scenario F3 Need] VAR _covered=[Exchange Scenario F3 Covered] RETURN IF(NOT ISBLANK(_need),MAX(0,_need-_covered))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: d444149b-ea2c-4a4f-9e0d-1dbbe2939ee5
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario F3 Available' =
@@ -416,16 +432,19 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF(_valid,SUMX(_rows,'License SKU Capacity'[Available Units]))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: 83b3843b-cd09-4385-ac75-e39851e38e50
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario F3 Buy' = VAR _gap=[Exchange Scenario F3 Gap] VAR _free=[Exchange Scenario F3 Available] RETURN IF(NOT ISBLANK(_gap) && NOT ISBLANK(_free),MAX(0,_gap-_free))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: f66064d4-c994-4b2f-ac19-d10c3530b68a
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario F3 Buy Label' = VAR _n=[Exchange Scenario F3 Buy] RETURN IF(ISBLANK(_n),"To qualify",FORMAT(_n,"#,0"))
 		formatString: @
 		displayFolder: Migration licensing scenario
+		lineageTag: 00b0781e-c69c-4182-8879-861fb0a25e90
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario SE Need' =
@@ -506,6 +525,7 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(COUNTROWS(_selected),0))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: bfe918f3-f596-4a62-b4ad-f7d492a5a437
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario SE Covered' =
@@ -586,16 +606,19 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_selected,[Covered]),0))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: 8e9eb42c-6ed2-4841-9bb9-7faa428ff0da
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario SE Gap' = VAR _need=[Exchange Scenario SE Need] VAR _covered=[Exchange Scenario SE Covered] RETURN IF(NOT ISBLANK(_need),MAX(0,_need-_covered))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: 72910a5e-a380-441c-9327-40e5a8312f79
 
 	/// Existing CAL stock, active SA, accessors and base/additive rights are not inventoried. Gap is exposure before those rights; never a net purchase quantity.
 	measure 'Exchange Scenario SE Buy Label' = "To qualify"
 		formatString: @
 		displayFolder: Migration licensing scenario
+		lineageTag: 553cd6f5-b083-4324-8257-78d4136d0bdb
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario Review People' =
@@ -675,90 +698,13 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(COUNTROWS(FILTER(_people,[Product] IN {"Register review","Identity review","Technical review","Assignment review"})),0))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
-
-	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
-	measure 'Exchange Scenario Plan Remediation' =
-			VAR _people=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
-			    "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
-			        IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
-			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
-			    "Cloud",'Exchange Mailbox Reconciliation'[Cloud Account Key],
-			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
-			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
-			    "Kind",'Exchange Mailbox Reconciliation'[Mailbox Type],
-			    "Size",'Exchange Mailbox Reconciliation'[Mailbox Size GB],
-			    "Archive",'Exchange Mailbox Reconciliation'[Archive State],
-			    "Hold",'Exchange Mailbox Reconciliation'[Hold and Retention],
-			    "Access",'Exchange Mailbox Reconciliation'[Full Access Count],
-			    "Send",'Exchange Mailbox Reconciliation'[Send As Count],
-			    "Behalf",'Exchange Mailbox Reconciliation'[Send On Behalf],
-			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises],
-			    "Link",'Exchange Mailbox Reconciliation'[Account Link])
-			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
-			    'Mailbox Migration Exceptions'[Requires Review]=1),
-			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
-			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
-			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
-			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
-			VAR _users=DISTINCT(SELECTCOLUMNS(FILTER(_scope,[Cloud]<>""),"User",[Cloud]))
-			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
-			VAR _plans=CALCULATETABLE(SELECTCOLUMNS(FILTER('Native User Service Plan',
-			    LOWER('Native User Service Plan'[IsEnabled] & "")="true" && 'Native User Service Plan'[AssignmentState]="Success" &&
-			    'Native User Service Plan'[ServicePlanName] IN {"EXCHANGE_S_STANDARD","EXCHANGE_S_ENTERPRISE","EXCHANGE_S_DESKLESS"}),
-			    "PlanUser",'Native User Service Plan'[TenantUserKey],"PlanBatch",'Native User Service Plan'[Loaded Batch ID],"Plan",'Native User Service Plan'[ServicePlanName]),
-			    TREATAS(_users,'Native User Service Plan'[TenantUserKey]),TREATAS(_batches,'Native User Service Plan'[Loaded Batch ID]))
-			VAR _allLicenses=CALCULATETABLE(SELECTCOLUMNS('Native User License',
-			    "LicenseUser",'Native User License'[TenantUserKey],"LicenseBatch",'Native User License'[Loaded Batch ID],
-			    "LicenseSku",'Native User License'[TenantSkuKey],"LicenseState",'Native User License'[AssignmentState]),
-			    TREATAS(_users,'Native User License'[TenantUserKey]),TREATAS(_batches,'Native User License'[Loaded Batch ID]))
-			VAR _licenses=FILTER(_allLicenses,[LicenseState] IN {"Active","Success"})
-			VAR _skus=SELECTCOLUMNS('Native License SKU',"SkuKey",'Native License SKU'[TenantSkuKey],
-			    "SkuBatch",'Native License SKU'[Loaded Batch ID],"SkuPart",'Native License SKU'[SkuPartNumber])
-			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Person",[Person],"Batch",[Batch]))
-			RETURN GENERATE(_keys,
-			    VAR _person=[Person] VAR _batch=[Batch]
-			    VAR _rows=FILTER(_scope,[Person]=_person && [Batch]=_batch)
-			    VAR _user=MAXX(_rows,[Cloud])
-			    VAR _local=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
-			    VAR _remote=COUNTROWS(FILTER(_rows,[Retained]<>"Matched retained decision"))>0
-			    VAR _special=COUNTROWS(FILTER(_rows,[Kind]<>"UserMailbox"))>0
-			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
-			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
-			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
-			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
-			    VAR _unknown=COUNTROWS(FILTER(_rows,ISBLANK([Size]) || [Size]<0 || [Size]>100 ||
-			        NOT([Archive] IN {"None","Disabled","Local","Active","HostedProvisioned","HostedPending"}) ||
-			        NOT([Hold] IN {"None observed","Review - preserve settings"}) || ISBLANK([Access]) || ISBLANK([Send])))>0
-			    VAR _large=COUNTROWS(FILTER(_rows,[Size]>2 || NOT([Archive] IN {"None","Disabled"}) ||
-			        [Hold]="Review - preserve settings" || [Access]>0 || [Send]>0 || [Behalf]<>""))>0
-			    VAR _review=_batch="" || _user="" || COUNTROWS(FILTER(_rows,[Link]<>"Unique AD GUID + native SID"))>0 || (_local && _remote)
-			    VAR _bucket=SWITCH(TRUE(),_special,"Special",_local && NOT(_remote),"SE",_pending,"Register review",_review,"Identity review",
-			        _unknown,"Technical review",_large,"E3","F3")
-			    VAR _userPlans=FILTER(_plans,[PlanUser]=_user && [PlanBatch]=_batch && _user<>"")
-			    VAR _p2=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_ENTERPRISE"))>0
-			    VAR _p1=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_STANDARD"))>0
-			    VAR _kiosk=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_DESKLESS"))>0
-			    VAR _assigned=SELECTCOLUMNS(FILTER(_licenses,[LicenseUser]=_user && [LicenseBatch]=_batch && _user<>""),"Key",[LicenseSku])
-			    VAR _suite=FILTER(_skus,[SkuKey] IN _assigned && [SkuBatch]=_batch)
-			    VAR _e3=COUNTROWS(FILTER(_suite,[SkuPart] IN {"SPE_E3","SPE_E5"}))>0
-			    VAR _f3=COUNTROWS(FILTER(_suite,[SkuPart]="SPE_F1"))>0
-			    VAR _covered=SWITCH(_bucket,"SE",IF(_e3 || _p1 || _p2,1,0),"E3",IF(_e3,1,0),
-			        "F3",IF(_f3 || _e3,1,0),0)
-			    VAR _failed=SELECTCOLUMNS(FILTER(_allLicenses,[LicenseUser]=_user && [LicenseBatch]=_batch &&
-			        NOT([LicenseState] IN {"Active","Success"})),"Key",[LicenseSku])
-			    VAR _failedTarget=COUNTROWS(FILTER(_skus,[SkuKey] IN _failed && [SkuBatch]=_batch &&
-			        ([SkuPart] IN {"SPE_E3","SPE_E5"} || (_bucket="F3" && [SkuPart]="SPE_F1"))))>0
-			    VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
-			    VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
-			    RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0))))
-			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_people,[Plan Review]),0))
-		formatString: #,0
-		displayFolder: Migration licensing scenario
+		lineageTag: d7ebe22a-9afd-4023-9b1a-0ab2e168fa6f
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario Register Review Rows' = VAR _batch=[Dataset Loaded Batch ID] RETURN IF(_batch<>"",CALCULATE(COUNTROWS('Mailbox Migration Exceptions'),REMOVEFILTERS('Mailbox Migration Exceptions'),'Mailbox Migration Exceptions'[Loaded Batch ID]=_batch,'Mailbox Migration Exceptions'[Requires Review]=1))
 		formatString: #,0
 		displayFolder: Migration licensing scenario
+		lineageTag: 43a651f3-e978-4c18-a7fc-3bf1232e4e26
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario Row Target' =
@@ -838,11 +784,93 @@ table 'Exchange Mailbox Reconciliation'
 			VAR _products=DISTINCT(SELECTCOLUMNS(_people,"Target",[Product])) RETURN IF(COUNTROWS(_products)=1,CONCATENATEX(_products,[Target],""),"Multiple targets / review")
 		formatString: @
 		displayFolder: Migration licensing scenario
+		lineageTag: ad23605e-4a4e-4fc9-bc60-507aae182037
 
 	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
 	measure 'Exchange Scenario Note' = "ESTIMATE: F3 <=2 GB, no archive/hold/delegation; frontline eligibility assumed. E3 for other known user cases <=100 GB. Assigned suites deducted even if a service plan needs repair; tenant stock assumed allocatable, shared across countries, not reserved. SE = confirmed retained users; CAL stock/SA and other accessors unknown. Unpriced people: " & FORMAT([Exchange Scenario Review People],"0") & " | Register rows to reconcile: " & FORMAT([Exchange Scenario Register Review Rows],"0") & " | Plan repairs (not purchases): " & FORMAT([Exchange Scenario Plan Remediation],"0")
 		formatString: @
 		displayFolder: Migration licensing scenario
+		lineageTag: c28c95c5-769b-4910-bfa0-1aca444e99d2
+
+	/// Estimate under approved mailbox sizing assumptions. Not a contractual order. Distinct same-batch people; retained and unresolved exception identities never migrate automatically.
+	measure 'Exchange Scenario Plan Remediation' =
+			VAR _people=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			    "Person",IF('Exchange Mailbox Reconciliation'[Cloud Account Key]<>"","cloud|" & 'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			        IF('Exchange Mailbox Reconciliation'[AD Account Key]<>"","ad|" & 'Exchange Mailbox Reconciliation'[AD Account Key],"mailbox|" & 'Exchange Mailbox Reconciliation'[Mailbox GUID])),
+			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
+			    "Cloud",'Exchange Mailbox Reconciliation'[Cloud Account Key],
+			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
+			    "Address",LOWER(TRIM('Exchange Mailbox Reconciliation'[Primary SMTP Address])),
+			    "Kind",'Exchange Mailbox Reconciliation'[Mailbox Type],
+			    "Size",'Exchange Mailbox Reconciliation'[Mailbox Size GB],
+			    "Archive",'Exchange Mailbox Reconciliation'[Archive State],
+			    "Hold",'Exchange Mailbox Reconciliation'[Hold and Retention],
+			    "Access",'Exchange Mailbox Reconciliation'[Full Access Count],
+			    "Send",'Exchange Mailbox Reconciliation'[Send As Count],
+			    "Behalf",'Exchange Mailbox Reconciliation'[Send On Behalf],
+			    "Retained",'Exchange Mailbox Reconciliation'[Retained On-premises],
+			    "Link",'Exchange Mailbox Reconciliation'[Account Link])
+			VAR _exceptions=SELECTCOLUMNS(FILTER('Mailbox Migration Exceptions',
+			    'Mailbox Migration Exceptions'[Requires Review]=1),
+			    "ExceptionBatch",'Mailbox Migration Exceptions'[Loaded Batch ID],
+			    "Identity",LOWER(TRIM('Mailbox Migration Exceptions'[Mailbox Identity])),
+			    "Candidate",LOWER(TRIM('Mailbox Migration Exceptions'[Candidate Identity])),
+			    "ExceptionAddress",LOWER(TRIM('Mailbox Migration Exceptions'[Primary SMTP Address])))
+			VAR _users=DISTINCT(SELECTCOLUMNS(FILTER(_scope,[Cloud]<>""),"User",[Cloud]))
+			VAR _batches=DISTINCT(SELECTCOLUMNS(_scope,"Batch",[Batch]))
+			VAR _plans=CALCULATETABLE(SELECTCOLUMNS(FILTER('Native User Service Plan',
+			    LOWER('Native User Service Plan'[IsEnabled] & "")="true" && 'Native User Service Plan'[AssignmentState]="Success" &&
+			    'Native User Service Plan'[ServicePlanName] IN {"EXCHANGE_S_STANDARD","EXCHANGE_S_ENTERPRISE","EXCHANGE_S_DESKLESS"}),
+			    "PlanUser",'Native User Service Plan'[TenantUserKey],"PlanBatch",'Native User Service Plan'[Loaded Batch ID],"Plan",'Native User Service Plan'[ServicePlanName]),
+			    TREATAS(_users,'Native User Service Plan'[TenantUserKey]),TREATAS(_batches,'Native User Service Plan'[Loaded Batch ID]))
+			VAR _allLicenses=CALCULATETABLE(SELECTCOLUMNS('Native User License',
+			    "LicenseUser",'Native User License'[TenantUserKey],"LicenseBatch",'Native User License'[Loaded Batch ID],
+			    "LicenseSku",'Native User License'[TenantSkuKey],"LicenseState",'Native User License'[AssignmentState]),
+			    TREATAS(_users,'Native User License'[TenantUserKey]),TREATAS(_batches,'Native User License'[Loaded Batch ID]))
+			VAR _licenses=FILTER(_allLicenses,[LicenseState] IN {"Active","Success"})
+			VAR _skus=SELECTCOLUMNS('Native License SKU',"SkuKey",'Native License SKU'[TenantSkuKey],
+			    "SkuBatch",'Native License SKU'[Loaded Batch ID],"SkuPart",'Native License SKU'[SkuPartNumber])
+			VAR _keys=DISTINCT(SELECTCOLUMNS(_scope,"Person",[Person],"Batch",[Batch]))
+			RETURN GENERATE(_keys,
+			    VAR _person=[Person] VAR _batch=[Batch]
+			    VAR _rows=FILTER(_scope,[Person]=_person && [Batch]=_batch)
+			    VAR _user=MAXX(_rows,[Cloud])
+			    VAR _local=COUNTROWS(FILTER(_rows,[Retained]="Matched retained decision"))>0
+			    VAR _remote=COUNTROWS(FILTER(_rows,[Retained]<>"Matched retained decision"))>0
+			    VAR _special=COUNTROWS(FILTER(_rows,[Kind]<>"UserMailbox"))>0
+			    VAR _pending=SUMX(_rows,VAR _object=[Object] VAR _address=[Address]
+			        RETURN IF(COUNTROWS(FILTER(_exceptions,[ExceptionBatch]=_batch &&
+			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
+			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
+			    VAR _unknown=COUNTROWS(FILTER(_rows,ISBLANK([Size]) || [Size]<0 || [Size]>100 ||
+			        NOT([Archive] IN {"None","Disabled","Local","Active","HostedProvisioned","HostedPending"}) ||
+			        NOT([Hold] IN {"None observed","Review - preserve settings"}) || ISBLANK([Access]) || ISBLANK([Send])))>0
+			    VAR _large=COUNTROWS(FILTER(_rows,[Size]>2 || NOT([Archive] IN {"None","Disabled"}) ||
+			        [Hold]="Review - preserve settings" || [Access]>0 || [Send]>0 || [Behalf]<>""))>0
+			    VAR _review=_batch="" || _user="" || COUNTROWS(FILTER(_rows,[Link]<>"Unique AD GUID + native SID"))>0 || (_local && _remote)
+			    VAR _bucket=SWITCH(TRUE(),_special,"Special",_local && NOT(_remote),"SE",_pending,"Register review",_review,"Identity review",
+			        _unknown,"Technical review",_large,"E3","F3")
+			    VAR _userPlans=FILTER(_plans,[PlanUser]=_user && [PlanBatch]=_batch && _user<>"")
+			    VAR _p2=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_ENTERPRISE"))>0
+			    VAR _p1=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_STANDARD"))>0
+			    VAR _kiosk=COUNTROWS(FILTER(_userPlans,[Plan]="EXCHANGE_S_DESKLESS"))>0
+			    VAR _assigned=SELECTCOLUMNS(FILTER(_licenses,[LicenseUser]=_user && [LicenseBatch]=_batch && _user<>""),"Key",[LicenseSku])
+			    VAR _suite=FILTER(_skus,[SkuKey] IN _assigned && [SkuBatch]=_batch)
+			    VAR _e3=COUNTROWS(FILTER(_suite,[SkuPart] IN {"SPE_E3","SPE_E5"}))>0
+			    VAR _f3=COUNTROWS(FILTER(_suite,[SkuPart]="SPE_F1"))>0
+			    VAR _covered=SWITCH(_bucket,"SE",IF(_e3 || _p1 || _p2,1,0),"E3",IF(_e3,1,0),
+			        "F3",IF(_f3 || _e3,1,0),0)
+			    VAR _failed=SELECTCOLUMNS(FILTER(_allLicenses,[LicenseUser]=_user && [LicenseBatch]=_batch &&
+			        NOT([LicenseState] IN {"Active","Success"})),"Key",[LicenseSku])
+			    VAR _failedTarget=COUNTROWS(FILTER(_skus,[SkuKey] IN _failed && [SkuBatch]=_batch &&
+			        ([SkuPart] IN {"SPE_E3","SPE_E5"} || (_bucket="F3" && [SkuPart]="SPE_F1"))))>0
+			    VAR _target=IF(_bucket IN {"E3","F3"} && _covered=0 && _failedTarget,"Assignment review",_bucket)
+			    VAR _planReview=_covered=1 && SWITCH(_bucket,"E3",NOT(_p2),"F3",NOT(_p2 || _p1 || _kiosk),FALSE())
+			    RETURN ROW("Product",_target,"Covered",_covered,"Plan Review",IF(_planReview,1,0))))
+			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_people,[Plan Review]),0))
+		formatString: #,0
+		displayFolder: Migration licensing scenario
+		lineageTag: 04f0da5d-bc3b-4202-b119-daf3a2e81c31
 
 	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
 	measure 'Exchange Population Total' =
@@ -873,6 +901,7 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,TRUE())),0))
 		formatString: #,0
 		displayFolder: Migration mailbox populations
+		lineageTag: db3d924f-c0b7-41b3-8bcf-1f57bfda543c
 
 	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
 	measure 'Exchange Population Register Retained' =
@@ -903,6 +932,7 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Register retained")),0))
 		formatString: #,0
 		displayFolder: Migration mailbox populations
+		lineageTag: c0689a8e-3b33-4884-aa97-c2133590646d
 
 	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
 	measure 'Exchange Population Register Review' =
@@ -933,6 +963,7 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Register review")),0))
 		formatString: #,0
 		displayFolder: Migration mailbox populations
+		lineageTag: d6e0e437-04e2-4282-8111-280b334ffa3a
 
 	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
 	measure 'Exchange Population Potential Before Service Review' =
@@ -963,11 +994,13 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Potential before service review")),0))
 		formatString: #,0
 		displayFolder: Migration mailbox populations
+		lineageTag: aa9edc53-1973-4924-b4dc-af23bc6e6139
 
 	/// The prepared AD user source lacks governed AccountType; Workforce excludes non-human service accounts. Generic accounts and managed-service object classes are not substitutes. No service count or complete retained union can be inferred.
 	measure 'Exchange Population Service Label' = "Not captured"
 		formatString: @
 		displayFolder: Migration mailbox populations
+		lineageTag: cbd9414c-3366-4a18-90ce-24158e0e1663
 
 	/// Upper bound for the currently unquarantined mailbox pool, before service-account exclusion and technical checks. Excludes confirmed retained mailboxes and pending exact native-ID/SMTP hints, deduplicated. Not an EXO licence requirement.
 	measure 'Exchange Population Potential Label' =
@@ -975,6 +1008,7 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF(ISBLANK(_n),"Unknown", "At most " & FORMAT(_n,"#,0"))
 		formatString: @
 		displayFolder: Migration mailbox populations
+		lineageTag: fb84b72b-7c20-40e8-8556-60b7b7cfd227
 
 	/// Known minimum estimated SE user-licence scope: distinct confirmed retained user identities. Service-account scope, special-mailbox accessors and other accessors are incomplete. Observed equivalents are not subtracted from this total. Not a net purchase quantity.
 	measure 'Exchange Scenario SE Required Label' =
@@ -982,11 +1016,13 @@ table 'Exchange Mailbox Reconciliation'
 			RETURN IF(ISBLANK(_n),"Unknown",">= " & FORMAT(_n,"#,0"))
 		formatString: @
 		displayFolder: Migration mailbox populations
+		lineageTag: 92119002-8924-4295-8882-419de61c71a4
 
 	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
 	measure 'Exchange Population Note' = "INCOMPLETE SERVICE SCOPE: classification is not captured; Generic is not Service. Potential EXO excludes confirmed retention and " & FORMAT([Exchange Population Register Review],"0") & " other mailboxes with pending register hints; upper bound before service/technical review, not licence demand. SE = known minimum user scope; service accounts and other accessors uncounted. ESTIMATE: F3 <=2 GB, no archive/hold/delegation, frontline eligibility assumed; E3 for other known user cases <=100 GB. Assigned suites deducted; free tenant stock shared, assumed allocatable, not reserved. " & FORMAT([Exchange Scenario Register Review Rows],"0") & " register rows to reconcile; " & FORMAT([Exchange Scenario Review People],"0") & " unpriced people; " & FORMAT([Exchange Scenario Plan Remediation],"0") & " plan repairs, not purchases."
 		formatString: @
 		displayFolder: Migration mailbox populations
+		lineageTag: 773384c0-e245-4dfe-98d3-07996db9fe14
 
 	column 'Mailbox GUID'
 		dataType: string

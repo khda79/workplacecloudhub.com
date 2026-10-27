@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "9800d1567e37b963c787",
   "position": {
-    "x": 1608,
-    "y": 200,
-    "width": 280,
+    "x": 1136,
+    "y": 8,
+    "z": 39000,
     "height": 80,
-    "z": 31000,
-    "tabOrder": 31
+    "width": 192,
+    "tabOrder": 9000
   },
   "visual": {
     "visualType": "slicer",
@@ -28,6 +28,7 @@
               },
               "queryRef": "M365 License Selection.License Product",
               "nativeQueryRef": "Licences M365",
+              "active": true,
               "displayName": "Licences M365"
             }
           ]

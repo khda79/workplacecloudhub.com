@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "def394e7dc9c6bb76cca",
   "position": {
     "x": 96,
-    "y": 88,
-    "width": 1080,
-    "height": 22,
-    "z": 101,
-    "tabOrder": 145
+    "y": 80,
+    "z": 39000,
+    "height": 24,
+    "width": 616,
+    "tabOrder": 24000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Device Explorer | current private inventory and update evidence",
+                    "value": "Windows and macOS PCs · Windows-specific controls are identified by name",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

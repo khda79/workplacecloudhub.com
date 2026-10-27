@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "4b7fcdd010dc32c416e4",
   "position": {
     "x": 32,
-    "y": 336,
-    "width": 1856,
-    "height": 296,
+    "y": 320,
     "z": 14000,
+    "height": 306.82926829268291,
+    "width": 1856,
     "tabOrder": 14000
   },
   "visual": {
@@ -28,6 +28,7 @@
               },
               "queryRef": "Collaboration Adoption Evidence.Service",
               "nativeQueryRef": "Service",
+              "active": true,
               "displayName": "Service"
             }
           ]

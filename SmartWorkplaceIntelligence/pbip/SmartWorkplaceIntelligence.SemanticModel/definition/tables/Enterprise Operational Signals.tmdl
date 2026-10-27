@@ -30,20 +30,13 @@ table 'Enterprise Operational Signals'
 			        20, [Expected Mailboxes Not Protected],
 			        21, [Devices Without Active Defender Protection (#)],
 			        22, [Devices Without Enabled Firewall (#)],
-			        23, [Conditional Access Policies Not Enforced (#)]
+			        23, [Conditional Access Policies Not Enforced (#)],
+			        24, [Enabled AD Windows PCs Not Found in Intune]
 			    )
 			)
 		formatString: #,0
 		displayFolder: Enterprise Signals
 		lineageTag: ec55ec4c-fbd0-4268-9f96-e0218f34223c
-
-	/// Short evidence detail for the selected signal; currently the unassigned governed license units behind signal 2. BLANK for other signals.
-	measure 'Enterprise Signal Detail' =
-			VAR _units = [Unassigned Governed License Units]
-			RETURN IF ( SELECTEDVALUE ( 'Enterprise Operational Signals'[Signal Sort] ) = 2 && NOT ISBLANK ( _units ), FORMAT ( _units, "#,0" ) & " unassigned units" )
-		formatString: @
-		displayFolder: Enterprise Signals
-		lineageTag: f8008f79-a26e-4e36-ab19-9fb8290f3be9
 
 	/// Relevant covered population calculated from current source-backed evidence for the selected enterprise operational signal.
 	measure 'Enterprise Signal Covered' =
@@ -63,7 +56,8 @@ table 'Enterprise Operational Signals'
 			        19, [Content Containers], 20, [Expected Mailboxes],
 			        21, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Defender protection active"),
 			        22, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Firewall enabled"),
-			        23, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Conditional Access enforcement")
+			        23, CALCULATE(SUM('Security Control Evidence'[Covered Entities]), 'Security Control Evidence'[Control Name] = "Conditional Access enforcement") ,
+			        24, [Exploration AD Coverage Denominator]
 			    )
 			)
 		formatString: #,0
@@ -74,6 +68,16 @@ table 'Enterprise Operational Signals'
 		formatString: 0.0%
 		displayFolder: Enterprise Signals
 		lineageTag: 2cb0a942-41f5-4b11-897a-5aca2eea0089
+
+	/// Short evidence detail for the selected signal; currently the unassigned governed license units behind signal 2. BLANK for other signals.
+	measure 'Enterprise Signal Detail' =
+			IF(SELECTEDVALUE('Enterprise Operational Signals'[Signal Sort]) = 24, FORMAT([Exploration Unresolved AD Windows PCs], "#,0") & " enabled AD PCs with unresolved native identity; excluded from not-found count",
+			VAR _units = [Unassigned Governed License Units]
+			RETURN IF ( SELECTEDVALUE ( 'Enterprise Operational Signals'[Signal Sort] ) = 2 && NOT ISBLANK ( _units ), FORMAT ( _units, "#,0" ) & " unassigned units" )
+			)
+		formatString: @
+		displayFolder: Enterprise Signals
+		lineageTag: f8008f79-a26e-4e36-ab19-9fb8290f3be9
 
 	column 'Signal Sort'
 		dataType: int64
@@ -141,9 +145,9 @@ table 'Enterprise Operational Signals'
 				            {20, "Backup", "High", "Expected mailboxes not protected", "Protection gap", "Observed", "Add each mailbox to a protection policy and verify a successful protection unit."},
 				            {21, "Security", "Critical", "Devices failing active Defender checks", "Endpoint protection", "Observed", "Verify approved EDR coverage; where Defender is required, restore real-time protection and address overdue signatures."},
 				            {22, "Security", "High", "Devices without enabled firewall", "Endpoint protection", "Observed", "Enable the firewall on disabled or limited devices and investigate policy drift."},
-				            {23, "Security", "High", "Conditional Access policies not enforced", "Access protection", "Observed", "Review report-only or disabled policies and complete staged enforcement."}
+				            {23, "Security", "High", "Conditional Access policies not enforced", "Access protection", "Observed", "Review report-only or disabled policies and complete staged enforcement."},
+				            {24, "Devices", "High", "Enabled AD Windows PCs not found in Intune", "Management coverage", "Observed", "Verify native AD/Entra identity and enroll the workstation, or review its lifecycle. Unknown/ambiguous identities are excluded."}
 				        }
 				    )
 				in
 				    Source
-

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "5d41e9a35628f4f46979",
   "position": {
     "x": 32,
     "y": 128,
-    "width": 912,
-    "height": 80,
-    "z": 114,
-    "tabOrder": 261
+    "z": 27000,
+    "height": 104,
+    "width": 1200,
+    "tabOrder": 17000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -15,6 +15,22 @@
       "queryState": {
         "Data": {
           "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "All Mailboxes"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.All Mailboxes",
+              "nativeQueryRef": "All Mailboxes",
+              "active": true,
+              "displayName": "All Mailboxes"
+            },
             {
               "field": {
                 "Measure": {
@@ -28,6 +44,7 @@
               },
               "queryRef": "Mailbox Evidence.Mailboxes",
               "nativeQueryRef": "Mailboxes",
+              "active": false,
               "displayName": "Mailboxes"
             },
             {
@@ -43,6 +60,7 @@
               },
               "queryRef": "Mailbox Evidence.Large Mailboxes Without Archive",
               "nativeQueryRef": "Mailboxes >=45 GB Without Archive",
+              "active": false,
               "displayName": "Mailboxes >=45 GB Without Archive"
             },
             {
@@ -58,7 +76,28 @@
               },
               "queryRef": "Mailbox Evidence.Mailboxes With Extensive Delegation",
               "nativeQueryRef": "Extensive Delegation",
+              "active": false,
               "displayName": "Extensive Delegation"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Mailbox Scope Explanation"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Mailbox Scope Explanation",
+              "nativeQueryRef": "Mailbox Scope Explanation",
+              "active": true,
+              "displayName": "Mailbox Scope Explanation"
             }
           ]
         }
@@ -78,7 +117,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -126,7 +165,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -245,7 +284,7 @@
             "paddingUniform": {
               "expr": {
                 "Literal": {
-                  "Value": "0D"
+                  "Value": "0L"
                 }
               }
             },
@@ -259,7 +298,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "3L"
+                  "Value": "5L"
                 }
               }
             },
@@ -311,6 +350,13 @@
               "expr": {
                 "Literal": {
                   "Value": "8D"
+                }
+              }
+            },
+            "paddingUniform": {
+              "expr": {
+                "Literal": {
+                  "Value": "2L"
                 }
               }
             }

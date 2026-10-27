@@ -1,6 +1,7 @@
 /// Utility: same-batch native object GUID to captured mailbox server reference. This is not a complete active-server inventory. Joined explicitly by object identity and batch; no automatic relationship.
 table 'Exchange Mailbox Server Reference'
 	isHidden
+	lineageTag: 1836fbdb-0724-49d4-8566-60b2d598034d
 
 	column 'Object GUID'
 		dataType: string

@@ -20,6 +20,12 @@ table 'Native Upgrade Eligibility'
 		isHidden
 		lineageTag: 10aed998-82cc-4cd9-a52c-fa4127fa3df0
 
+	/// Read-only report utility applying the disconnected primary-user selector to source-qualified device rows.
+	measure 'Primary user row match · Native Upgrade Eligibility' = VAR PresentRows = IF(ISFILTERED('Primary User Selection'[Primary user]), CALCULATE(COUNTROWS('Native Upgrade Eligibility'), KEEPFILTERS(TREATAS(VALUES('Primary User Selection'[Primary user]), 'Native Upgrade Eligibility'[Primary User (report)]))), COUNTROWS('Native Upgrade Eligibility')) RETURN IF(PresentRows>0,1,BLANK())
+		formatString: 0
+		isHidden
+		lineageTag: a7b53dec-e6e3-4412-bfc0-cfb3da144958
+
 	/// Native FactEndpointAnalyticsUpgradeEligibility attribute; source qualification is retained.
 	column TenantKey
 		dataType: string
@@ -124,6 +130,83 @@ table 'Native Upgrade Eligibility'
 		lineageTag: 34502eb3-13d3-42f1-8c27-bc9201c2e747
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
+
+	/// Observed primary user, exact source ID and tenant/batch matching only; used by the report search.
+	column 'Primary User (report)' =
+			VAR _t='Native Upgrade Eligibility'[TenantKey]
+			VAR _b='Native Upgrade Eligibility'[Loaded Batch ID]
+			VAR _gkey='Native Upgrade Eligibility'[DeviceId]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _native=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_gkey,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _fromNative=IF(NOT ISBLANK(_native),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_native,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=IF(NOT ISBLANK(_resolved)&&NOT ISBLANK(_fromNative)&&_resolved<>_fromNative,BLANK(),COALESCE(_resolved,_fromNative))
+			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: aabc3790-4936-4966-996c-acb2f50b000e
+
+	/// Qualified SAM of the primary user; never inferred from UPN text.
+	column 'Primary User SAM (report)' =
+			VAR _t='Native Upgrade Eligibility'[TenantKey]
+			VAR _b='Native Upgrade Eligibility'[Loaded Batch ID]
+			VAR _gkey='Native Upgrade Eligibility'[DeviceId]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _native=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_gkey,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _fromNative=IF(NOT ISBLANK(_native),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_native,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=IF(NOT ISBLANK(_resolved)&&NOT ISBLANK(_fromNative)&&_resolved<>_fromNative,BLANK(),COALESCE(_resolved,_fromNative))
+			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: c11bddf5-496b-40d2-9456-31cfd7bdfe1b
+
+	/// Last Windows console user observed at collection. Does not mean current user or last RDP session.
+	column 'Last Console User (report)' =
+			VAR _t='Native Upgrade Eligibility'[TenantKey]
+			VAR _b='Native Upgrade Eligibility'[Loaded Batch ID]
+			VAR _gkey='Native Upgrade Eligibility'[DeviceId]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _native=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_gkey,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _fromNative=IF(NOT ISBLANK(_native),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_native,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=IF(NOT ISBLANK(_resolved)&&NOT ISBLANK(_fromNative)&&_resolved<>_fromNative,BLANK(),COALESCE(_resolved,_fromNative))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 4df00f02-81c3-43e9-b473-37d3f0929fc7
+
+	/// Source-qualified time of last observed console logon; unknown remains blank.
+	column 'Last Console Logon UTC (report)' =
+			VAR _t='Native Upgrade Eligibility'[TenantKey]
+			VAR _b='Native Upgrade Eligibility'[Loaded Batch ID]
+			VAR _gkey='Native Upgrade Eligibility'[DeviceId]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _native=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_gkey,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _fromNative=IF(NOT ISBLANK(_native),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_native,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=IF(NOT ISBLANK(_resolved)&&NOT ISBLANK(_fromNative)&&_resolved<>_fromNative,BLANK(),COALESCE(_resolved,_fromNative))
+			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm
+		displayFolder: Report identity context
+		lineageTag: f4e798a4-5a6c-4306-a7ec-b4a72b04df31
+
+	/// Preserves source status and timestamp qualification, including stale/missing/error evidence.
+	column 'Console Logon Qualification (report)' =
+			VAR _t='Native Upgrade Eligibility'[TenantKey]
+			VAR _b='Native Upgrade Eligibility'[Loaded Batch ID]
+			VAR _gkey='Native Upgrade Eligibility'[DeviceId]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _native=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_gkey,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _fromNative=IF(NOT ISBLANK(_native),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_native,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=IF(NOT ISBLANK(_resolved)&&NOT ISBLANK(_fromNative)&&_resolved<>_fromNative,BLANK(),COALESCE(_resolved,_fromNative))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _quality=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Quality],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(ISBLANK(_status),"No matched system observation",_status&" · "&_quality)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 3bc6a298-0b3a-4235-8f18-17e5d27c7ec0
 
 	partition 'Native Upgrade Eligibility' = m
 		mode: import

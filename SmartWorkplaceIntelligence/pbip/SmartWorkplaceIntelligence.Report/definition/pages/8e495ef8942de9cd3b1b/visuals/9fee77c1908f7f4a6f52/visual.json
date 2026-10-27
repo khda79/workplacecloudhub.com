@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "9fee77c1908f7f4a6f52",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 70022,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 70022
+  },
+  "visualGroup": {
+    "displayName": "Compliance detail",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

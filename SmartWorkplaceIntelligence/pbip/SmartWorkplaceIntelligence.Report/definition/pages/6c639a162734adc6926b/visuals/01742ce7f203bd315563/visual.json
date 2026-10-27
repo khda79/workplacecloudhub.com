@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "01742ce7f203bd315563",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 70024,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 70024
+  },
+  "visualGroup": {
+    "displayName": "Data quality & coverage",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

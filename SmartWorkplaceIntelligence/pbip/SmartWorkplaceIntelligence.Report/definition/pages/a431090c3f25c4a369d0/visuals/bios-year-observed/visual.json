@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "bios-year-observed",
   "position": {
     "x": 976,
-    "y": 384,
+    "y": 320,
+    "z": 4000,
+    "height": 322.10526315789474,
     "width": 912,
-    "height": 288,
-    "z": 120,
-    "tabOrder": 677
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "columnChart",

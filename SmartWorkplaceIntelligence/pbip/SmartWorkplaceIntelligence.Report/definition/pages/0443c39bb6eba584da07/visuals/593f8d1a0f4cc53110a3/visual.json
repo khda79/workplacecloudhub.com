@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "593f8d1a0f4cc53110a3",
   "position": {
     "x": 32,
     "y": 296,
-    "z": 117,
-    "height": 696,
-    "width": 1856,
+    "z": 0,
+    "height": 720,
+    "width": 916,
     "tabOrder": 672
   },
   "visual": {
@@ -159,6 +159,13 @@
                   }
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
             }
           }
         }
@@ -250,15 +257,103 @@
                   "Value": "true"
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
             }
           }
         }
       ],
       "columnFormatting": [
         {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.Country"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
           "selector": {
             "metadata": "User Inventory Evidence.Enabled Workforce Accounts"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -287,13 +382,20 @@
                   "Value": "true"
                 }
               }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "User Inventory Evidence.Active Workforce"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -322,48 +424,20 @@
                   "Value": "true"
                 }
               }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "User Inventory Evidence.Activity Evidence Coverage"
-          },
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
           }
         },
         {
-          "selector": {
-            "metadata": "User Inventory Evidence.Workforce MFA Registration Coverage (%)"
-          },
           "properties": {
             "alignment": {
               "expr": {
@@ -392,7 +466,17 @@
                   "Value": "true"
                 }
               }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
             }
+          },
+          "selector": {
+            "metadata": "User Inventory Evidence.Workforce MFA Registration Coverage (%)"
           }
         }
       ]
@@ -404,7 +488,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography \u00b7 selected evidence'"
+                  "Value": "'Geography · selected evidence'"
                 }
               }
             }
@@ -424,7 +508,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Workforce by country \u00b7 current population and evidence coverage'"
+                  "Value": "'Workforce by country · current population and evidence coverage'"
                 }
               }
             },

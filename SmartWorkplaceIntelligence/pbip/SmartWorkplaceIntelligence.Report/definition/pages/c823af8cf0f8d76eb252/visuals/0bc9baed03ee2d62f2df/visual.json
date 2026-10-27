@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "0bc9baed03ee2d62f2df",
   "position": {
-    "x": 32.0,
-    "y": 120,
-    "width": 608.0,
+    "x": 32,
+    "y": 224,
+    "z": 2000,
     "height": 80,
-    "z": 104,
-    "tabOrder": 59
+    "width": 608,
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "slicer",
@@ -61,7 +61,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Severity'"
+                  "Value": "'Control severity'"
                 }
               }
             },
@@ -270,6 +270,7 @@
       ]
     }
   },
+  "parentGroupName": "2a7753a9127d00987ec0",
   "filterConfig": {
     "filters": [
       {

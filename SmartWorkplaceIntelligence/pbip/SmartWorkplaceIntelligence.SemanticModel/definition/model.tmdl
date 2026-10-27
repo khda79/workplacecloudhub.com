@@ -4,12 +4,11 @@ model SmartWorkplaceIntelligence
 	defaultPowerBIDataSourceVersion: powerBI_V3
 	discourageImplicitMeasures
 	sourceQueryCulture: en-US
-	maxParallelismPerRefresh: 1
 	dataAccessOptions
 		legacyRedirects
 		returnErrorValuesAsNull
 
-annotation PBI_QueryOrder = ["Date","Tenant","Environment","Organization","Geography","Report Metadata","Executive KPI Trends","Device Inventory Evidence","User Inventory Evidence","Mailbox Evidence","Security Control Evidence","Enterprise Operational Signals","DataRoot","Device Risk Evidence Summary","User Activity History Evidence","Workforce Trend Evidence","Identity Reconciliation Evidence","Workforce Operational Signals","Windows Lifecycle Trend Evidence","Endpoint Experience Trend Evidence","Application Inventory Evidence","Application Trend Evidence","Application Operational Signals","Collaboration Adoption Evidence","Collaboration Object Evidence","Collaboration Trend Evidence","Collaboration Operational Signals","Content Storage Evidence","Content Storage Trend Evidence","Content Storage Operational Signals","Backup Mailbox Evidence","Backup Operational Signals","Data Trust Evidence","Data Trust Operational Signals","Device Directory Summary","SharePointSiteUrl","SharePointLibraryName","SharePointDataFolder","GetSmartInventoryFolder","GetSmartInventoryFile","License Report Summary","License Report Candidates","License Report Gaps","License Report Sources","PreparedSourceMode","PreparedEvidenceRoot","PreparedSharePointFolder","GetPreparedEvidenceFile","PreparedBatchId","GetLicenseReportSnapshot","GetLicenseReportCsv","License Report Assignment Issues","License SKU Capacity","License SKU Candidates","License Report Qualification"]
+annotation PBI_QueryOrder = ["Date","Report Metadata","Executive KPI Trends","Device Inventory Evidence","User Inventory Evidence","Mailbox Evidence","Security Control Evidence","Enterprise Operational Signals","DataRoot","Device Risk Evidence Summary","User Activity History Evidence","Workforce Trend Evidence","Identity Reconciliation Evidence","Workforce Operational Signals","Windows Lifecycle Trend Evidence","Endpoint Experience Trend Evidence","Application Inventory Evidence","Application Trend Evidence","Application Operational Signals","Collaboration Adoption Evidence","Collaboration Object Evidence","Collaboration Trend Evidence","Collaboration Operational Signals","Content Storage Evidence","Content Storage Trend Evidence","Content Storage Operational Signals","Backup Mailbox Evidence","Backup Operational Signals","Data Trust Evidence","Data Trust Operational Signals","Device Directory Summary","SharePointSiteUrl","SharePointLibraryName","SharePointDataFolder","License Report Summary","License Report Candidates","License Report Gaps","License Report Sources","PreparedSourceMode","PreparedEvidenceRoot","PreparedSharePointFolder","GetPreparedEvidenceFile","PreparedBatchId","GetLicenseReportSnapshot","GetLicenseReportCsv","License Report Assignment Issues","License SKU Capacity","License SKU Candidates","License Report Qualification","Windows Migration Evidence","Mailbox Migration Batches","Windows Migration History","Mailbox Migration Inventory","Mailbox Migration Weekly History","Windows Migration AD Observations","Country Reference","SharePoint On-prem Farms","SharePoint On-prem Servers","SharePoint On-prem Service Applications","SharePoint On-prem Web Applications","SharePoint On-prem Web Zones","SharePoint On-prem Content Databases","SharePoint On-prem Site Collections","SharePoint On-prem Collection Coverage","All Accounts Evidence","All Devices Evidence","Device System Evidence","Endpoint Protection Policy","Endpoint Protection Evidence","Intune Configuration Policy Evidence","Intune Configuration Setting Evidence","Intune Configuration Assignment Evidence","Intune Configuration Device Evidence","Intune Managed App Evidence","Intune Managed App Assignment Evidence","Intune Managed App Deployment Evidence","Intune Enrollment Failure Evidence","Intune Operational Source Evidence","Tenant Evidence","Native Country Evidence","Native User Evidence","Native Device Evidence","Native Managed Device Evidence","Native Group Evidence","Verified Domain Evidence","AD User Evidence","AD Computer Evidence","AD Group Evidence","AD Domain Evidence","AD Object Evidence","AD Membership Evidence","Entra Membership Evidence","Native Hardware Evidence","Hardware Coverage Evidence","Device Source Evidence","Native AD Intune Coverage","Native Compliance Evidence","Autopilot Evidence","Native Configuration Catalog","Native Update Policy Evidence","Native Update Alert Evidence","Native Endpoint Score Evidence","Native Upgrade Eligibility","Native Discovered Application","Native Device Application","Native Application Ranking","Native License SKU","Native Service Plan","Native User License","Native User Service Plan","Native License Assignment","Native SharePoint Site","Native Team","Native Team Membership","Native EXO Mailbox","Native Mailbox Hosting","Native Hybrid Coverage","Native Workload Activity","Native User Device Link","Native Relationship Summary","Native Entity Finding","Native Quality Finding","Native Source Health","Teams Site Links","SharePoint Site Links","SharePoint Tenant Capacity","Collaboration Source Qualification","Daily Directory Trends","Daily Mailbox Trends","ReadMigrationCsv","ReadMigrationWeeklyHistory","GetSharePointOnPremCsv","NativeEvidenceTypes","PreparedExpectedTenantKey","GetPreparedBatchManifest","GetLicenseReportQualification","LicenseReportFileUsable","CreateMailboxMigrationReader","ReadMailboxMigrationCsv","Mailbox Migration Exceptions","Mailbox Migration Exception Summary","SPO Migration Plan","SPO Migration Web","SPO Migration Collection","SPO Migration Legacy Web","SPO Migration Legacy Collection","SPO Migration Scope","SPO Migration Findings","SPO Migration History","SPO Migration Source Summary","SPO Migration Source Type","SPO Migration Business Unit","SPO Migration Phase","SPO Migration Project","SPO Migration Operation","SPO Migration Snapshot Date","GetSharePointMigrationEvidence","PreparedReadFolder","CreatePreparedReaders","Exchange On-prem Infrastructure","Exchange Mailbox Server Reference","Exchange Mailbox Databases","Exchange Health Checker Servers","Exchange Health Checker Findings","Exchange Hybrid Free Busy Summary","Exchange Hybrid Free Busy Findings","ReadPreparedADAccountClassification","Device Deployment Risk","License User Assignments","Mailbox Delegation Detail","Mailbox Exploration Inventory","Mailbox License Membership","Mailbox License Selection","Device Exploration Inventory","Intune Presence Selection","NativeSourceHealthState","Hybrid Identity Findings","Device Readiness Gap Evidence","Readiness Source Status","Mailbox Account License Coverage","Readiness Reading","Readiness Condition","Backlog Attribution Selection","Readiness Matrix Metric","AssessDailyReadiness","CreateBacklogTools"]
 
 annotation PBI_ProTooling = ["MCP-PBIModeling","DevMode"]
 
@@ -18,12 +17,6 @@ annotation __PBI_TimeIntelligenceEnabled = 1
 ref table Date
 ref table 'Report Metadata'
 ref table 'Executive KPI Trends'
-ref table 'Daily Directory Trends'
-ref table 'Daily Mailbox Trends'
-ref table 'Daily Axis'
-ref table 'Daily Domain'
-ref table 'Daily Period'
-ref table 'Daily View'
 ref table DateTableTemplate_b24e4abb-ee4b-49b2-9882-957599ce3aa1
 ref table 'Device Inventory Evidence'
 ref table 'Device Operational Signals'
@@ -84,9 +77,6 @@ ref table LocalDateTable_5687bff7-bb24-402c-aec1-3a5d0ec7aa58
 ref table LocalDateTable_cdbfe80e-2839-456b-be8f-cb16ce0d35a5
 ref table 'Country Selection'
 ref table 'License Report Summary'
-ref table 'License Report Qualification'
-ref table 'License SKU Capacity'
-ref table 'License SKU Candidates'
 ref table 'License Report Candidates'
 ref table 'License Report Gaps'
 ref table 'License Report Sources'
@@ -169,6 +159,17 @@ ref table 'Teams Site Links'
 ref table 'SharePoint Site Links'
 ref table 'SharePoint Tenant Capacity'
 ref table 'Collaboration Source Qualification'
+ref table 'Daily Directory Trends'
+ref table 'Daily Mailbox Trends'
+ref table 'Daily Axis'
+ref table 'Daily Domain'
+ref table 'Daily Period'
+ref table 'Daily View'
+ref table 'License Report Qualification'
+ref table 'License SKU Capacity'
+ref table 'License SKU Candidates'
+ref table LocalDateTable_391e0fd3-2e65-424c-9946-867c32d26a61
+ref table LocalDateTable_e51866cf-71bd-4a60-84c1-b0e49716c831
 ref table 'Mailbox Migration Exceptions'
 ref table 'Mailbox Migration Exception Summary'
 ref table 'SPO Migration Plan'
@@ -186,18 +187,54 @@ ref table 'SPO Migration Phase'
 ref table 'SPO Migration Project'
 ref table 'SPO Migration Operation'
 ref table 'SPO Migration Snapshot Date'
+ref table LocalDateTable_12cfc3be-73ac-46ad-83d3-b500fc834d3c
+ref table LocalDateTable_639f0ff7-b3b6-4a85-b662-3f9d23dd56f6
+ref table LocalDateTable_c8aab280-bc3d-4589-b957-cec92f234126
+ref table LocalDateTable_729976aa-a054-4d50-a79f-69df3e5654c0
+ref table LocalDateTable_d2e80d94-adc2-414c-8fa9-39bef439df3d
+ref table LocalDateTable_41b13c2b-fe1c-4d4e-abe2-c09e72f23525
+ref table LocalDateTable_a0cc9fe0-d3b1-4526-8fee-f1c3ed7fdc06
+ref table LocalDateTable_88fdfd00-17a7-4997-9c17-ce7ed1b56395
+ref table LocalDateTable_88b22d85-506f-48b8-a8ef-5d1d75dceb8a
+ref table LocalDateTable_734702e0-e7a1-4e0c-b4da-1ab6de316636
+ref table LocalDateTable_3c2bb49b-fdd0-41f3-a80d-34ce2f30e957
+ref table LocalDateTable_a5141330-a230-4c06-bddc-4c44597d9684
+ref table LocalDateTable_2a1736ef-f358-4c1d-a66f-352e2a360979
+ref table LocalDateTable_caef29d4-4061-4742-a804-43aaa04f73d2
+ref table LocalDateTable_6441f0c4-711f-4aec-ab37-50cfbb093e99
 ref table 'Loaded Batch Audit'
 ref table 'Exchange On-prem Infrastructure'
+ref table 'M365 License Selection'
+ref table 'M365 User License Membership'
+ref table 'M365 Device License Membership'
+ref table 'Exchange Mailbox Reconciliation'
+ref table 'Exchange Mailbox Server Reference'
 ref table 'Exchange Mailbox Databases'
 ref table 'Exchange Health Checker Servers'
 ref table 'Exchange Health Checker Findings'
 ref table 'Exchange Hybrid Free Busy Summary'
 ref table 'Exchange Hybrid Free Busy Findings'
-ref table 'Exchange Mailbox Server Reference'
-ref table 'Exchange Mailbox Reconciliation'
-
-ref table 'M365 License Selection'
-ref table 'M365 User License Membership'
-ref table 'M365 Device License Membership'
+ref table 'Device Deployment Risk'
+ref table 'License User Assignments'
+ref table 'Mailbox Delegation Detail'
+ref table 'Mailbox Exploration Inventory'
+ref table 'Mailbox License Membership'
+ref table 'Mailbox License Selection'
+ref table 'Device Exploration Inventory'
+ref table 'Intune Presence Selection'
+ref table 'Account License Selection'
+ref table 'Account Explorer Inventory'
+ref table 'Global Device Inventory'
+ref table 'Device Identity Inventory'
+ref table 'Autopilot Identity Audit'
+ref table 'Primary User Selection'
+ref table 'Hybrid Identity Findings'
+ref table 'Device Readiness Gap Evidence'
+ref table 'Readiness Source Status'
+ref table 'Mailbox Account License Coverage'
+ref table 'Readiness Reading'
+ref table 'Readiness Condition'
+ref table 'Backlog Attribution Selection'
+ref table 'Readiness Matrix Metric'
 
 ref cultureInfo en-US

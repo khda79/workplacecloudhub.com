@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "bd6a0132d18fc76b8a64",
   "position": {
     "x": 32,
-    "y": 714.4,
+    "y": 432,
+    "z": 3000,
+    "height": 568,
     "width": 1856,
-    "height": 278.6,
-    "z": 110,
-    "tabOrder": 677
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "barChart",
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Content Storage Evidence.Storage Pressure",
-              "nativeQueryRef": "Storage Pressure"
+              "nativeQueryRef": "Storage Pressure",
+              "active": true
             }
           ]
         },

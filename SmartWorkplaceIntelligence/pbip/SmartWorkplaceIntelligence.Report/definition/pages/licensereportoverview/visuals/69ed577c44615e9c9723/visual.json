@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "69ed577c44615e9c9723",
   "position": {
     "x": 0,
     "y": 0,
-    "width": 1920,
+    "z": 6000,
     "height": 1080,
-    "z": 3,
-    "tabOrder": 3
+    "width": 1920,
+    "tabOrder": 6000
   },
   "visualGroup": {
     "displayName": "Assignment issues",

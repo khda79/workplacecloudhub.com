@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "957c68c2debe0872abd9",
   "position": {
     "x": 32,
-    "y": 488,
+    "y": 320,
+    "z": 1000,
+    "height": 96,
     "width": 1856,
-    "height": 128,
-    "z": 106,
     "tabOrder": 1328
   },
   "visual": {
@@ -41,7 +41,8 @@
                 }
               },
               "queryRef": "Collaboration Adoption Evidence.Collaboration Service Objects",
-              "nativeQueryRef": "Service Objects"
+              "nativeQueryRef": "Service Objects",
+              "displayName": "Service Resources"
             },
             {
               "field": {
@@ -55,7 +56,8 @@
                 }
               },
               "queryRef": "Collaboration Adoption Evidence.Collaboration Inactive Objects",
-              "nativeQueryRef": "Inactive Objects"
+              "nativeQueryRef": "Inactive Objects",
+              "displayName": "Inactive Resources"
             },
             {
               "field": {
@@ -69,7 +71,52 @@
                 }
               },
               "queryRef": "Collaboration Adoption Evidence.Collaboration Orphaned Objects",
-              "nativeQueryRef": "Orphaned Objects"
+              "nativeQueryRef": "Orphaned Objects",
+              "displayName": "Orphaned Resources"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Adoption Evidence"
+                    }
+                  },
+                  "Property": "Service-weighted Activity Rate (%)"
+                }
+              },
+              "queryRef": "Collaboration Adoption Evidence.Service-weighted Activity Rate (%)",
+              "nativeQueryRef": "Service-weighted activity (30D)",
+              "displayName": "Service-weighted activity (30D)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Adoption Evidence"
+                    }
+                  },
+                  "Property": "Active User-Service Observations 30D"
+                }
+              },
+              "queryRef": "Collaboration Adoption Evidence.Active User-Service Observations 30D",
+              "nativeQueryRef": "User-service observations (30D)",
+              "displayName": "User-service observations (30D)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Adoption Evidence"
+                    }
+                  },
+                  "Property": "Stale Collaboration Sources"
+                }
+              },
+              "queryRef": "Collaboration Adoption Evidence.Stale Collaboration Sources",
+              "nativeQueryRef": "Stale Usage Sources"
             }
           ]
         }
@@ -317,6 +364,27 @@
                   "Value": "0L"
                 }
               }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "7L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
             }
           },
           "selector": {
@@ -406,32 +474,21 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Supporting KPIs'"
+                  "Value": "''"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
+                  "Value": "11D"
                 }
               }
             }

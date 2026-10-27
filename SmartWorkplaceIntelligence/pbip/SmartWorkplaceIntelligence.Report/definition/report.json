@@ -23,6 +23,21 @@
   "filterConfig": {
     "filterSortOrder": "Custom"
   },
+  "objects": {
+    "outspacePane": [
+      {
+        "properties": {
+          "expanded": {
+            "expr": {
+              "Literal": {
+                "Value": "false"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
   "resourcePackages": [
     {
       "name": "SharedResources",

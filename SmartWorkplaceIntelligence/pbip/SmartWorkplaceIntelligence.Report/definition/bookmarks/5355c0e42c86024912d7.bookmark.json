@@ -1,15 +1,25 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
-  "displayName": "Actions",
+  "displayName": "Remediation actions",
   "name": "5355c0e42c86024912d7",
   "options": {
     "applyOnlyToTargetVisuals": true,
     "targetVisualNames": [
       "cbe79466bbafde369ae0",
+      "7dbfb122566e65960823",
+      "7fa3ad86cbb13db25d81",
+      "5c048ea3af19e711756c",
+      "b253bf0200d639e9eca8",
       "4a812a76e68b9a8eff9d",
       "498f0691cab15403f175",
-      "7dbfb122566e65960823",
-      "5c048ea3af19e711756c"
+      "2a7753a9127d00987ec0",
+      "0a51176318cb211b834f",
+      "2f03f33686dc1cb4e084",
+      "3b93a75b061a16879641",
+      "3dc616b967871f35e717",
+      "959dd3e315cc76c3e5a2",
+      "cb269b764b368e36cbfe",
+      "d8fbcda3338a8e14e7e8"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -19,9 +29,47 @@
     "activeSection": "c823af8cf0f8d76eb252",
     "sections": {
       "c823af8cf0f8d76eb252": {
-        "visualContainers": {},
+        "visualContainers": {
+          "0a51176318cb211b834f": {
+            "singleVisual": {}
+          },
+          "2f03f33686dc1cb4e084": {
+            "singleVisual": {}
+          },
+          "3b93a75b061a16879641": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "3dc616b967871f35e717": {
+            "singleVisual": {}
+          },
+          "959dd3e315cc76c3e5a2": {
+            "singleVisual": {}
+          },
+          "cb269b764b368e36cbfe": {
+            "singleVisual": {}
+          },
+          "d8fbcda3338a8e14e7e8": {
+            "singleVisual": {}
+          }
+        },
         "visualContainerGroups": {
           "cbe79466bbafde369ae0": {
+            "isHidden": true
+          },
+          "7dbfb122566e65960823": {
+            "isHidden": true
+          },
+          "7fa3ad86cbb13db25d81": {
+            "isHidden": true
+          },
+          "5c048ea3af19e711756c": {
+            "isHidden": true
+          },
+          "b253bf0200d639e9eca8": {
             "isHidden": true
           },
           "4a812a76e68b9a8eff9d": {
@@ -30,11 +78,8 @@
           "498f0691cab15403f175": {
             "isHidden": true
           },
-          "7dbfb122566e65960823": {
-            "isHidden": true
-          },
-          "5c048ea3af19e711756c": {
-            "isHidden": true
+          "2a7753a9127d00987ec0": {
+            "isHidden": false
           }
         }
       }

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "9d7e04d718f66be8c757",
   "position": {
     "x": 32,
-    "y": 480,
-    "width": 1856,
+    "y": 392,
+    "z": 9000,
     "height": 80,
-    "z": 12000,
-    "tabOrder": 256
+    "width": 1856,
+    "tabOrder": 1000
   },
   "visual": {
     "visualType": "slicer",
@@ -61,7 +61,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection \u00b7 Native activity'"
+                  "Value": "'Native selection · Native activity'"
                 }
               }
             },

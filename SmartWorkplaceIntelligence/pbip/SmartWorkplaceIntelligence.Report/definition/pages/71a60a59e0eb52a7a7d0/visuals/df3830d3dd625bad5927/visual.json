@@ -2,10 +2,10 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
   "name": "df3830d3dd625bad5927",
   "position": {
-    "x": 32,
-    "y": 291.5,
-    "width": 1856,
-    "height": 702.5,
+    "x": 968,
+    "y": 790,
+    "width": 920,
+    "height": 210,
     "z": 112,
     "tabOrder": 677
   },
@@ -20,146 +20,99 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
-                  "Property": "Domain"
+                  "Property": "Mailbox Type Group"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Domain",
-              "nativeQueryRef": "Domain"
+              "queryRef": "Mailbox Exploration Inventory.Mailbox Type Group",
+              "nativeQueryRef": "Mailbox Type Group",
+              "displayName": "Mailbox Type Group",
+              "active": true
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
-                  "Property": "Severity Label"
+                  "Property": "Hosting Location"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Severity Label",
-              "nativeQueryRef": "Severity"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Signal"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Signal",
-              "nativeQueryRef": "Signal"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Risk Category"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Risk Category",
-              "nativeQueryRef": "Risk Category"
+              "queryRef": "Mailbox Exploration Inventory.Hosting Location",
+              "nativeQueryRef": "Hosting Location",
+              "displayName": "Hosting Location",
+              "active": true
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
-                  "Property": "Affected Signal Observations"
+                  "Property": "All Mailboxes"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Affected Signal Observations",
-              "nativeQueryRef": "Affected"
+              "queryRef": "Mailbox Exploration Inventory.All Mailboxes",
+              "nativeQueryRef": "Mailboxes",
+              "displayName": "Mailboxes",
+              "active": true
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "Mailbox Evidence"
                     }
                   },
-                  "Property": "Enterprise Signal Covered"
+                  "Property": "Mailboxes with Archive"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Enterprise Signal Covered",
-              "nativeQueryRef": "Covered"
+              "queryRef": "Mailbox Evidence.Mailboxes with Archive",
+              "nativeQueryRef": "Mailboxes with Archive",
+              "displayName": "Mailboxes with Archive",
+              "active": true
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "Mailbox Evidence"
                     }
                   },
-                  "Property": "Enterprise Signal Affected (%)"
+                  "Property": "Mailboxes with Delegations"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Enterprise Signal Affected (%)",
-              "nativeQueryRef": "Affected (%)"
+              "queryRef": "Mailbox Evidence.Mailboxes with Delegations",
+              "nativeQueryRef": "Mailboxes with Delegations",
+              "displayName": "Mailboxes with Delegations",
+              "active": true
             },
             {
               "field": {
-                "Column": {
+                "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "Mailbox Evidence"
                     }
                   },
-                  "Property": "Evidence Status"
+                  "Property": "Total Mailbox Storage (TB)"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Evidence Status",
-              "nativeQueryRef": "Evidence Status"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Recommended Action"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Recommended Action",
-              "nativeQueryRef": "Recommended Action"
+              "queryRef": "Mailbox Evidence.Total Mailbox Storage (TB)",
+              "nativeQueryRef": "Total Mailbox Storage (TB)",
+              "displayName": "Total Mailbox Storage (TB)",
+              "active": true
             }
           ]
         }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Enterprise Operational Signals"
-                  }
-                },
-                "Property": "Signal"
-              }
-            },
-            "direction": "Ascending"
-          }
-        ]
       }
     },
     "objects": {
@@ -183,7 +136,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -217,9 +170,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -232,7 +192,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -309,7 +269,220 @@
             }
           }
         }
-      ]
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Mailbox Type Group"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Hosting Location"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.All Mailboxes"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Evidence.Mailboxes with Archive"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Evidence.Mailboxes with Delegations"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Evidence.Total Mailbox Storage (TB)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -318,7 +491,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Types and geography \u00b7 selected evidence'"
+                  "Value": "'Types and geography · selected evidence'"
                 }
               }
             }
@@ -338,7 +511,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Types and geography \u00b7 selected evidence'"
+                  "Value": "'Types and geography · selected evidence'"
                 }
               }
             },
@@ -495,91 +668,5 @@
     },
     "drillFilterOtherVisuals": true
   },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "994cccb00c3eb0c268a4",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Enterprise Operational Signals"
-              }
-            },
-            "Property": "Signal"
-          }
-        },
-        "type": "Categorical",
-        "filter": {
-          "Version": 2,
-          "From": [
-            {
-              "Name": "f",
-              "Entity": "Enterprise Operational Signals",
-              "Type": 0
-            }
-          ],
-          "Where": [
-            {
-              "Condition": {
-                "In": {
-                  "Expressions": [
-                    {
-                      "Column": {
-                        "Expression": {
-                          "SourceRef": {
-                            "Source": "f"
-                          }
-                        },
-                        "Property": "Signal"
-                      }
-                    }
-                  ],
-                  "Values": [
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Large mailboxes without archive'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Mailboxes with extensive delegation'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Mailboxes inactive for more than 180 days'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Mailboxes with forwarding configured'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'On-premises mailboxes'"
-                        }
-                      }
-                    ]
-                  ]
-                }
-              }
-            }
-          ]
-        },
-        "howCreated": "User"
-      }
-    ]
-  },
-  "parentGroupName": "44b410e354eea9b64e0c"
+  "parentGroupName": "356f38365fae5fd56ff9"
 }

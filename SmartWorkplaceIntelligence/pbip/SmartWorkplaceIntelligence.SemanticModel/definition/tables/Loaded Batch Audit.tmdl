@@ -24,6 +24,17 @@ table 'Loaded Batch Audit'
 		summarizeBy: none
 		sourceColumn: [Loaded Rows]
 
+	column 'Source Availability' = VAR _table = 'Loaded Batch Audit'[Table Name] RETURN IF(_table IN {"Hybrid Identity Findings","Device Readiness Gap Evidence"}, LOOKUPVALUE('Readiness Source Status'[Availability], 'Readiness Source Status'[Table Name], _table), IF('Loaded Batch Audit'[Loaded Rows] > 0, "Loaded", "Unobserved"))
+		dataType: string
+		lineageTag: 636e372c-c7a2-4a6c-9aa9-099f815d3227
+		summarizeBy: none
+
+	column 'Evidence Date' = VAR _table = 'Loaded Batch Audit'[Table Name] RETURN LOOKUPVALUE('Readiness Source Status'[Evidence Date], 'Readiness Source Status'[Table Name], _table)
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		lineageTag: 314b7cca-8b39-4d39-9ba3-2000d7b2809e
+		summarizeBy: none
+
 	partition 'Loaded Batch Audit' = calculated
 		mode: import
 		source =
@@ -156,12 +167,17 @@ table 'Loaded Batch Audit'
 				ROW("Table Name", "Workforce Operational Signals", "Loaded Batch ID", MAXX('Workforce Operational Signals', 'Workforce Operational Signals'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Workforce Operational Signals')),
 				ROW("Table Name", "Workforce Trend Evidence", "Loaded Batch ID", MAXX('Workforce Trend Evidence', 'Workforce Trend Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Workforce Trend Evidence'))
 				,
-				ROW("Table Name", "Exchange On-prem Infrastructure", "Loaded Batch ID", MAXX('Exchange On-prem Infrastructure', 'Exchange On-prem Infrastructure'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange On-prem Infrastructure')),
+				ROW("Table Name", "Exchange On-prem Infrastructure", "Loaded Batch ID", MAXX('Exchange On-prem Infrastructure', 'Exchange On-prem Infrastructure'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange On-prem Infrastructure'))
+				,
+				ROW("Table Name", "Exchange Mailbox Server Reference", "Loaded Batch ID", MAXX('Exchange Mailbox Server Reference', 'Exchange Mailbox Server Reference'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange Mailbox Server Reference'))
+				,
 				ROW("Table Name", "Exchange Mailbox Databases", "Loaded Batch ID", MAXX('Exchange Mailbox Databases', 'Exchange Mailbox Databases'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange Mailbox Databases')),
 				ROW("Table Name", "Exchange Health Checker Servers", "Loaded Batch ID", MAXX('Exchange Health Checker Servers', 'Exchange Health Checker Servers'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange Health Checker Servers')),
 				ROW("Table Name", "Exchange Health Checker Findings", "Loaded Batch ID", MAXX('Exchange Health Checker Findings', 'Exchange Health Checker Findings'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange Health Checker Findings')),
 				ROW("Table Name", "Exchange Hybrid Free Busy Summary", "Loaded Batch ID", MAXX('Exchange Hybrid Free Busy Summary', 'Exchange Hybrid Free Busy Summary'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange Hybrid Free Busy Summary')),
 				ROW("Table Name", "Exchange Hybrid Free Busy Findings", "Loaded Batch ID", MAXX('Exchange Hybrid Free Busy Findings', 'Exchange Hybrid Free Busy Findings'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange Hybrid Free Busy Findings'))
 				,
-				ROW("Table Name", "Exchange Mailbox Server Reference", "Loaded Batch ID", MAXX('Exchange Mailbox Server Reference', 'Exchange Mailbox Server Reference'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Exchange Mailbox Server Reference'))
+				ROW("Table Name", "Hybrid Identity Findings", "Loaded Batch ID", MAXX('Hybrid Identity Findings', 'Hybrid Identity Findings'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Hybrid Identity Findings')),
+				ROW("Table Name", "Device Readiness Gap Evidence", "Loaded Batch ID", MAXX('Device Readiness Gap Evidence', 'Device Readiness Gap Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Device Readiness Gap Evidence')),
+				ROW("Table Name", "Readiness Source Status", "Loaded Batch ID", MAXX('Readiness Source Status', 'Readiness Source Status'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Readiness Source Status'))
 				)

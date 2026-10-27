@@ -166,10 +166,6 @@ relationship rel_country_selection_to_workforce_inventory
 	fromColumn: 'User Inventory Evidence'.Country
 	toColumn: 'Country Selection'.'Source Country'
 
-relationship rel_country_selection_to_device_inventory
-	fromColumn: 'Device Inventory Evidence'.Country
-	toColumn: 'Country Selection'.'Source Country'
-
 relationship 'License Assignment Issues to Summary'
 	fromColumn: 'License Report Assignment Issues'.Product
 	toColumn: 'License Report Summary'.Product
@@ -374,6 +370,16 @@ relationship rel_daily_mailbox_domain
 	fromColumn: 'Daily Mailbox Trends'.'Domain Key'
 	toColumn: 'Daily Domain'.'Domain Key'
 
+relationship b2e36157-b645-4d93-8482-218dd1dd94c8
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Windows Migration History'.'Snapshot Date'
+	toColumn: LocalDateTable_391e0fd3-2e65-424c-9946-867c32d26a61.Date
+
+relationship ed027ab5-54c2-4030-ac03-e835e9ca972e
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'Mailbox Migration Weekly History'.'Snapshot Date'
+	toColumn: LocalDateTable_e51866cf-71bd-4a60-84c1-b0e49716c831.Date
+
 relationship SpoMigration1
 	fromColumn: 'SPO Migration Plan'.'Source Type'
 	toColumn: 'SPO Migration Source Type'.'Source Type'
@@ -465,6 +471,81 @@ relationship SpoMigration22
 	fromColumn: 'SPO Migration Plan'.'Validation Date'
 	toColumn: Date.Date
 
+relationship 8270c404-4c3b-4fa6-ad57-15c577491570
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Plan'.'Snapshot Date'
+	toColumn: LocalDateTable_12cfc3be-73ac-46ad-83d3-b500fc834d3c.Date
+
+relationship 1d58d390-b94e-43e6-a61f-2e81993486aa
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Plan'.'Imported Migration Date'
+	toColumn: LocalDateTable_639f0ff7-b3b6-4a85-b662-3f9d23dd56f6.Date
+
+relationship 2d06df6a-55a9-40a1-b80e-9f072dfdcea3
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Web'.'Snapshot Date'
+	toColumn: LocalDateTable_c8aab280-bc3d-4589-b957-cec92f234126.Date
+
+relationship 8b3f8134-0156-49a1-9919-5364b13e2afe
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Collection'.'Snapshot Date'
+	toColumn: LocalDateTable_729976aa-a054-4d50-a79f-69df3e5654c0.Date
+
+relationship 632dd022-5b8a-415c-be33-6192a9a8ef6c
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Legacy Web'.'Snapshot Date'
+	toColumn: LocalDateTable_d2e80d94-adc2-414c-8fa9-39bef439df3d.Date
+
+relationship 7a4fed8e-bb12-4fe8-8402-065f9d4a18ac
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Legacy Collection'.'Snapshot Date'
+	toColumn: LocalDateTable_41b13c2b-fe1c-4d4e-abe2-c09e72f23525.Date
+
+relationship 34b20d78-9e75-458a-be34-8a3b2c6a9608
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Scope'.'Snapshot Date'
+	toColumn: LocalDateTable_a0cc9fe0-d3b1-4526-8fee-f1c3ed7fdc06.Date
+
+relationship 0933e60d-e3a0-46d3-aee6-6aedbb58d043
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Findings'.'Snapshot Date'
+	toColumn: LocalDateTable_88fdfd00-17a7-4997-9c17-ce7ed1b56395.Date
+
+relationship 5f1b4e41-b63f-4b58-89c2-966e60bfaf2e
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration History'.'Validation Date'
+	toColumn: LocalDateTable_88b22d85-506f-48b8-a8ef-5d1d75dceb8a.Date
+
+relationship d7b985dc-5b77-4612-b6a5-285ac941f2ec
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration History'.'Planned Date'
+	toColumn: LocalDateTable_734702e0-e7a1-4e0c-b4da-1ab6de316636.Date
+
+relationship d2db6f6f-8aba-4e41-9496-8f008496c81a
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration History'.'Actual Date'
+	toColumn: LocalDateTable_3c2bb49b-fdd0-41f3-a80d-34ce2f30e957.Date
+
+relationship 4c69d527-f16f-4c24-bb6e-7174c28d7edf
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration History'.'Imported Migration Date'
+	toColumn: LocalDateTable_a5141330-a230-4c06-bddc-4c44597d9684.Date
+
+relationship 1b886297-16e3-468a-ab89-405b13280c23
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Source Summary'.'Snapshot Date'
+	toColumn: LocalDateTable_2a1736ef-f358-4c1d-a66f-352e2a360979.Date
+
+relationship 2e47bbca-d23f-4eec-9eeb-7bb21eb4da6d
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Source Summary'.'Review Date'
+	toColumn: LocalDateTable_caef29d4-4061-4742-a804-43aaa04f73d2.Date
+
+relationship e07820e4-53f2-4241-95fe-a4107e4d2b7f
+	joinOnDateBehavior: datePartOnly
+	fromColumn: 'SPO Migration Snapshot Date'.Date
+	toColumn: LocalDateTable_6441f0c4-711f-4aec-ab37-50cfbb093e99.Date
+
 relationship report_scope_Mailbox_Evidence_Country
 	fromColumn: 'Mailbox Evidence'.Country
 	toColumn: 'Country Selection'.'Source Country'
@@ -522,3 +603,98 @@ relationship m365_license_device_selection
 relationship 9ffdd70a-a7cd-4620-879e-3d9a84d108cf
 	fromColumn: 'Exchange Mailbox Reconciliation'.Country
 	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_IntunePresence_DeviceSystemEvidence
+	fromColumn: 'Device System Evidence'.'Intune presence'
+	toColumn: 'Intune Presence Selection'.'Intune presence'
+
+relationship Private_IntunePresence_DeviceExplorationInventory
+	fromColumn: 'Device Exploration Inventory'.'Intune presence'
+	toColumn: 'Intune Presence Selection'.'Intune presence'
+
+relationship Private_DeviceExploration_Intune
+	fromColumn: 'Device Inventory Evidence'.'Device Tenant Key'
+	toColumn: 'Device Exploration Inventory'.'Inventory Key'
+
+relationship Private_Scope_User_Inventory_Evidence_AD_Domain
+	fromColumn: 'User Inventory Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_Device_Exploration_Inventory_AD_Domain
+	fromColumn: 'Device Exploration Inventory'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_Native_AD_Intune_Coverage_AD_Domain
+	fromColumn: 'Native AD Intune Coverage'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_Device_System_Evidence_AD_Domain
+	fromColumn: 'Device System Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_All_Devices_Evidence_AD_Domain
+	fromColumn: 'All Devices Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_License_Report_Candidates_AD_Domain
+	fromColumn: 'License Report Candidates'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_License_Report_Candidates_Scope_Country
+	fromColumn: 'License Report Candidates'.'Scope Country'
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_Scope_License_Report_Assignment_Issues_AD_Domain
+	fromColumn: 'License Report Assignment Issues'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_License_Report_Assignment_Issues_Scope_Country
+	fromColumn: 'License Report Assignment Issues'.'Scope Country'
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_Scope_License_SKU_Candidates_AD_Domain
+	fromColumn: 'License SKU Candidates'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_License_SKU_Candidates_Scope_Country
+	fromColumn: 'License SKU Candidates'.'Scope Country'
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_Scope_License_User_Assignments_AD_Domain
+	fromColumn: 'License User Assignments'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_Scope_License_User_Assignments_Country
+	fromColumn: 'License User Assignments'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_MailboxExploration_AD_Domain
+	fromColumn: 'Mailbox Exploration Inventory'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship Private_MailboxExploration_Country
+	fromColumn: 'Mailbox Exploration Inventory'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_MailboxDelegates_Inventory
+	fromColumn: 'Mailbox Delegation Detail'.'Mailbox Key'
+	toColumn: 'Mailbox Exploration Inventory'.'Mailbox Key'
+
+relationship Private_MailboxLicenses_Inventory
+	crossFilteringBehavior: bothDirections
+	fromColumn: 'Mailbox License Membership'.'Mailbox Key'
+	toColumn: 'Mailbox Exploration Inventory'.'Mailbox Key'
+
+relationship Private_MailboxLicenses_Selection
+	fromColumn: 'Mailbox License Membership'.'License Product'
+	toColumn: 'Mailbox License Selection'.'License Product'
+
+relationship Private_DeviceExploration_Country
+	fromColumn: 'Device Exploration Inventory'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_DeviceRisk_Inventory
+	crossFilteringBehavior: bothDirections
+	fromCardinality: one
+	fromColumn: 'Device Deployment Risk'.'Inventory Key'
+	toColumn: 'Device Exploration Inventory'.'Inventory Key'

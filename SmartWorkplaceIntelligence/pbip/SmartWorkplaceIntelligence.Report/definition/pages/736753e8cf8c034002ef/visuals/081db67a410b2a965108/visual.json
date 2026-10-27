@@ -1,16 +1,144 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "081db67a410b2a965108",
   "position": {
     "x": 32,
-    "y": 664,
+    "y": 682.077922077922,
+    "z": 0,
+    "height": 317.92207792207796,
     "width": 1856,
-    "height": 288,
-    "z": 110,
     "tabOrder": 1328
   },
   "visual": {
     "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Batches"
+                    }
+                  },
+                  "Property": "Batch Name"
+                }
+              },
+              "queryRef": "Mailbox Migration Batches.Batch Name",
+              "nativeQueryRef": "Batch Name",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Batches"
+                    }
+                  },
+                  "Property": "Batch Status"
+                }
+              },
+              "queryRef": "Mailbox Migration Batches.Batch Status",
+              "nativeQueryRef": "Batch Status",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Batches"
+                    }
+                  },
+                  "Property": "Migration Direction"
+                }
+              },
+              "queryRef": "Mailbox Migration Batches.Migration Direction",
+              "nativeQueryRef": "Migration Direction",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Batches"
+                    }
+                  },
+                  "Property": "Total Mailboxes"
+                }
+              },
+              "queryRef": "Mailbox Migration Batches.Total Mailboxes",
+              "nativeQueryRef": "Total Mailboxes",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Batches"
+                    }
+                  },
+                  "Property": "Failed Mailboxes"
+                }
+              },
+              "queryRef": "Mailbox Migration Batches.Failed Mailboxes",
+              "nativeQueryRef": "Failed Mailboxes",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Batches"
+                    }
+                  },
+                  "Property": "Warnings"
+                }
+              },
+              "queryRef": "Mailbox Migration Batches.Warnings",
+              "nativeQueryRef": "Warnings",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Batches"
+                    }
+                  },
+                  "Property": "Last Sync"
+                }
+              },
+              "queryRef": "Mailbox Migration Batches.Last Sync",
+              "nativeQueryRef": "Last Sync",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Batches"
+                    }
+                  },
+                  "Property": "Observation Date"
+                }
+              },
+              "queryRef": "Mailbox Migration Batches.Observation Date",
+              "nativeQueryRef": "Observation Date",
+              "active": true
+            }
+          ]
+        }
+      }
+    },
     "objects": {
       "columnHeaders": [
         {
@@ -32,7 +160,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -66,9 +194,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -142,20 +277,125 @@
       "columnFormatting": [
         {
           "selector": {
-            "metadata": "Mailbox Migration Batches.Total Mailboxes"
+            "metadata": "Mailbox Migration Batches.Batch Name"
           },
           "properties": {
-            "labelPrecision": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "'Left'"
                 }
               }
             },
-            "labelDisplayUnits": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
-                  "Value": "1D"
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Batches.Batch Status"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Batches.Migration Direction"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Batches.Total Mailboxes"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -180,17 +420,17 @@
             "metadata": "Mailbox Migration Batches.Failed Mailboxes"
           },
           "properties": {
-            "labelPrecision": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "'Center'"
                 }
               }
             },
-            "labelDisplayUnits": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
-                  "Value": "1D"
+                  "Value": "true"
                 }
               }
             },
@@ -215,17 +455,87 @@
             "metadata": "Mailbox Migration Batches.Warnings"
           },
           "properties": {
-            "labelPrecision": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "'Center'"
                 }
               }
             },
-            "labelDisplayUnits": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
-                  "Value": "1D"
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Batches.Last Sync"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Migration Batches.Observation Date"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -245,128 +555,8 @@
             }
           }
         }
-      ]
-    },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Batches"
-                    }
-                  },
-                  "Property": "Batch Name"
-                }
-              },
-              "queryRef": "Mailbox Migration Batches.Batch Name",
-              "nativeQueryRef": "Batch Name"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Batches"
-                    }
-                  },
-                  "Property": "Batch Status"
-                }
-              },
-              "queryRef": "Mailbox Migration Batches.Batch Status",
-              "nativeQueryRef": "Batch Status"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Batches"
-                    }
-                  },
-                  "Property": "Migration Direction"
-                }
-              },
-              "queryRef": "Mailbox Migration Batches.Migration Direction",
-              "nativeQueryRef": "Migration Direction"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Batches"
-                    }
-                  },
-                  "Property": "Total Mailboxes"
-                }
-              },
-              "queryRef": "Mailbox Migration Batches.Total Mailboxes",
-              "nativeQueryRef": "Total Mailboxes"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Batches"
-                    }
-                  },
-                  "Property": "Failed Mailboxes"
-                }
-              },
-              "queryRef": "Mailbox Migration Batches.Failed Mailboxes",
-              "nativeQueryRef": "Failed Mailboxes"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Batches"
-                    }
-                  },
-                  "Property": "Warnings"
-                }
-              },
-              "queryRef": "Mailbox Migration Batches.Warnings",
-              "nativeQueryRef": "Warnings"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Batches"
-                    }
-                  },
-                  "Property": "Last Sync"
-                }
-              },
-              "queryRef": "Mailbox Migration Batches.Last Sync",
-              "nativeQueryRef": "Last Sync"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Batches"
-                    }
-                  },
-                  "Property": "Observation Date"
-                }
-              },
-              "queryRef": "Mailbox Migration Batches.Observation Date",
-              "nativeQueryRef": "Observation Date"
-            }
-          ]
-        }
-      }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "title": [
@@ -482,7 +672,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -549,7 +746,8 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "parentGroupName": "9d826b9160c65a3fbfa7"
 }

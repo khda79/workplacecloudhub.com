@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "1073e8ba7110f338ecc2",
   "position": {
-    "x": 1592,
+    "x": 1363.4285714285713,
     "y": 256,
-    "width": 296,
+    "z": 30000,
     "height": 56,
-    "z": 38,
-    "tabOrder": 38
+    "width": 258.28571428571428,
+    "tabOrder": 28000
   },
   "visual": {
     "visualType": "actionButton",
@@ -45,7 +45,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Sources & evidence gaps'"
+                  "Value": "'Source freshness & gaps'"
                 }
               }
             },
@@ -84,9 +84,59 @@
           }
         },
         {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Source freshness & gaps'"
+                }
+              }
+            },
+            "fontFamily": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Segoe UI'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "selector": {
             "id": "default"
-          },
+          }
+        },
+        {
           "properties": {
             "show": {
               "expr": {
@@ -98,7 +148,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Sources & evidence gaps'"
+                  "Value": "'Source freshness & gaps'"
                 }
               }
             },
@@ -134,12 +184,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "id": "hover"
-          },
+          }
+        },
+        {
           "properties": {
             "show": {
               "expr": {
@@ -151,7 +201,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Sources & evidence gaps'"
+                  "Value": "'Source freshness & gaps'"
                 }
               }
             },
@@ -187,65 +237,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "id": "selected"
-          },
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Sources & evidence gaps'"
-                }
-              }
-            },
-            "fontFamily": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Segoe UI'"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#FFFFFF'"
-                    }
-                  }
-                }
-              }
-            }
           }
         },
         {
-          "selector": {
-            "id": "disabled"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -257,7 +254,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Sources & evidence gaps'"
+                  "Value": "'Source freshness & gaps'"
                 }
               }
             },
@@ -293,6 +290,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "disabled"
           }
         }
       ],
@@ -327,9 +327,6 @@
           }
         },
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -356,12 +353,12 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         },
         {
-          "selector": {
-            "id": "hover"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -388,44 +385,44 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "hover"
           }
         },
         {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fillColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#005A9E'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          },
           "selector": {
             "id": "selected"
-          },
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fillColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#005A9E'"
-                    }
-                  }
-                }
-              }
-            },
-            "transparency": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            }
           }
         },
         {
-          "selector": {
-            "id": "disabled"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -452,6 +449,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "disabled"
           }
         }
       ],
@@ -468,9 +468,6 @@
           }
         },
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -479,6 +476,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ],
@@ -495,9 +495,6 @@
           }
         },
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "show": {
               "expr": {
@@ -506,6 +503,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]

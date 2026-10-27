@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "7cf7dd8ae4d5ede99d3e",
   "position": {
     "x": 32,
-    "y": 304,
+    "y": 320,
+    "z": 0,
+    "height": 96,
     "width": 1856,
-    "height": 128,
-    "z": 106,
     "tabOrder": 672
   },
   "visual": {
@@ -58,6 +58,78 @@
               "queryRef": "Application Inventory Evidence.Installations Outside Dominant Version",
               "nativeQueryRef": "Outside dominant version",
               "displayName": "Outside dominant version"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Application Inventory Evidence"
+                    }
+                  },
+                  "Property": "Applications"
+                }
+              },
+              "queryRef": "Application Inventory Evidence.Applications",
+              "nativeQueryRef": "Applications"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Application Inventory Evidence"
+                    }
+                  },
+                  "Property": "Application Versions"
+                }
+              },
+              "queryRef": "Application Inventory Evidence.Application Versions",
+              "nativeQueryRef": "Application Versions"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Application Inventory Evidence"
+                    }
+                  },
+                  "Property": "Application Publishers"
+                }
+              },
+              "queryRef": "Application Inventory Evidence.Application Publishers",
+              "nativeQueryRef": "Publishers"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Application Inventory Evidence"
+                    }
+                  },
+                  "Property": "Dominant Version Coverage (%)"
+                }
+              },
+              "queryRef": "Application Inventory Evidence.Dominant Version Coverage (%)",
+              "nativeQueryRef": "Dominant version coverage (%)",
+              "displayName": "Dominant version coverage (%)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Application Inventory Evidence"
+                    }
+                  },
+                  "Property": "Highly Fragmented Applications"
+                }
+              },
+              "queryRef": "Application Inventory Evidence.Highly Fragmented Applications",
+              "nativeQueryRef": "Highly fragmented applications",
+              "displayName": "Highly fragmented applications"
             }
           ]
         }
@@ -316,7 +388,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "3L"
+                  "Value": "8L"
                 }
               }
             },
@@ -415,32 +487,21 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Priority KPIs'"
+                  "Value": "''"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
+                  "Value": "11D"
                 }
               }
             }

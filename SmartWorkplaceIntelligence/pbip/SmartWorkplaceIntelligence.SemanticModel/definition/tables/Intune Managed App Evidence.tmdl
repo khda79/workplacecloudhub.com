@@ -64,11 +64,15 @@ table 'Intune Managed App Evidence'
 
 	/// Prepared IntuneManagedAppEvidence.csv: SourceRecord. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Source Record'
-		dataType: int64
+		dataType: double
 		isHidden
 		lineageTag: c5fddd28-8dde-44ed-b7ed-777ea584ce80
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: SourceRecord
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneManagedAppEvidence.csv: CollectionUTC. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Collection UTC'
@@ -128,52 +132,80 @@ table 'Intune Managed App Evidence'
 
 	/// Prepared IntuneManagedAppEvidence.csv: ObservedRows. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Observed Rows'
-		dataType: int64
+		dataType: double
 		lineageTag: 1b4e4eea-28b1-4789-a8b5-73c6c8281d7e
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: ObservedRows
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneManagedAppEvidence.csv: ReportedInstalledRows. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Reported Installed Rows'
-		dataType: int64
+		dataType: double
 		lineageTag: ce47f697-04f0-45ca-8e0d-bee28354abda
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: ReportedInstalledRows
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneManagedAppEvidence.csv: ReportedFailureRows. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Reported Failure Rows'
-		dataType: int64
+		dataType: double
 		lineageTag: e6050fdc-f599-4363-b701-4bc28676cde3
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: ReportedFailureRows
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneManagedAppEvidence.csv: ReportedNotInstalledRows. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Reported Not Installed Rows'
-		dataType: int64
+		dataType: double
 		lineageTag: 05296d02-bd2d-4a9d-bbef-38a5583c85d7
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: ReportedNotInstalledRows
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneManagedAppEvidence.csv: PendingRows. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Pending Rows'
-		dataType: int64
+		dataType: double
 		lineageTag: fd9a3781-896a-4228-bc34-e210b2d61159
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: PendingRows
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneManagedAppEvidence.csv: NotApplicableRows. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Not Applicable Rows'
-		dataType: int64
+		dataType: double
 		lineageTag: d34626c3-ca4d-4ca8-934a-9fda3661b5d9
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: NotApplicableRows
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneManagedAppEvidence.csv: UnknownRows. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Unknown Rows'
-		dataType: int64
+		dataType: double
 		lineageTag: 6393e67e-08b0-4fa5-b628-2c0dccc24ee0
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: UnknownRows
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneManagedAppEvidence.csv: MeasurementState. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Measurement State'

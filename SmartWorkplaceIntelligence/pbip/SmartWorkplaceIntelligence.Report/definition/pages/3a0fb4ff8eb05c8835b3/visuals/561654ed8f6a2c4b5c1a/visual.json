@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "561654ed8f6a2c4b5c1a",
   "position": {
     "x": 32,
-    "y": 480,
-    "width": 1856,
+    "y": 392,
+    "z": 4000,
     "height": 80,
-    "z": 12000,
-    "tabOrder": 256
+    "width": 1856,
+    "tabOrder": 1000
   },
   "visual": {
     "visualType": "slicer",
@@ -43,6 +43,7 @@
               },
               "queryRef": "AD User Evidence.ModificationUtcDateTime",
               "nativeQueryRef": "ModificationUtcDateTime",
+              "active": false,
               "displayName": "ModificationUtcDateTime"
             }
           ]
@@ -76,7 +77,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Native selection \u00b7 AD users'"
+                  "Value": "'Native selection · AD users'"
                 }
               }
             },

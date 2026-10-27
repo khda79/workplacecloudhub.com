@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "0b327acf93e04d91865a",
   "position": {
     "x": 32,
-    "y": 544.3,
+    "y": 392,
+    "z": 7000,
+    "height": 336,
     "width": 912,
-    "height": 449.7,
-    "z": 250,
-    "tabOrder": 677
+    "tabOrder": 1000
   },
   "visual": {
     "visualType": "barChart",
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Job Title"
                 }
               },
-              "queryRef": "User Inventory Evidence.Job Title",
+              "queryRef": "Account Explorer Inventory.Job Title",
               "nativeQueryRef": "Job Title",
               "active": true
             }
@@ -39,14 +39,14 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
-                  "Property": "Enabled Workforce Accounts"
+                  "Property": "Account Inventory Accounts"
                 }
               },
-              "queryRef": "User Inventory Evidence.Enabled Workforce Accounts",
-              "nativeQueryRef": "Users"
+              "queryRef": "Account Explorer Inventory.Account Inventory Accounts",
+              "nativeQueryRef": "Account Inventory Accounts"
             }
           ]
         }
@@ -58,10 +58,10 @@
               "Measure": {
                 "Expression": {
                   "SourceRef": {
-                    "Entity": "User Inventory Evidence"
+                    "Entity": "Account Explorer Inventory"
                   }
                 },
-                "Property": "Enabled Workforce Accounts"
+                "Property": "Account Inventory Accounts"
               }
             },
             "direction": "Descending"
@@ -241,14 +241,14 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Users by job title'"
+                  "Value": "'Accounts by job title'"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
+                  "Value": "11D"
                 }
               }
             },

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "fd6fd2b2ac737b57de06",
   "position": {
     "x": 32,
-    "y": 565.9,
-    "width": 916,
-    "height": 142,
-    "z": 121,
-    "tabOrder": 1328
+    "y": 392,
+    "z": 3000,
+    "height": 96,
+    "width": 1856,
+    "tabOrder": 4000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -428,7 +428,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Identity observations \u00b7 registration is not MFA enforcement'"
+                  "Value": "'Identity observations · registration is not MFA enforcement'"
                 }
               }
             },

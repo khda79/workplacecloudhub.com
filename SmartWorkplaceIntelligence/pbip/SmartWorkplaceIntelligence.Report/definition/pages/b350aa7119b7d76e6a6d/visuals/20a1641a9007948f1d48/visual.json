@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "20a1641a9007948f1d48",
   "position": {
     "x": 96,
-    "y": 88,
+    "y": 80,
+    "z": 16000,
+    "height": 24,
     "width": 864,
-    "height": 32,
-    "z": 101,
-    "tabOrder": 145
+    "tabOrder": 15000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Private Teams, SharePoint, OneDrive and Copilot evidence \u00b7 source freshness shown",
+                    "value": "Private Teams, SharePoint, OneDrive and Copilot evidence · source freshness shown",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

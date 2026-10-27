@@ -74,6 +74,15 @@ table 'SharePoint On-prem Web Zones'
 		lineageTag: b44280e9-fc5e-45dc-ac14-3747f25bf714
 		sourceColumn: Public URL
 
+	column 'Optional Schema Ready'
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 10c2785e-c171-4d1c-abc3-abdf4771b6ee
+		summarizeBy: none
+		sourceColumn: Optional Schema Ready
+
+		annotation SummarizationSetBy = Automatic
+
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'
 		dataType: string

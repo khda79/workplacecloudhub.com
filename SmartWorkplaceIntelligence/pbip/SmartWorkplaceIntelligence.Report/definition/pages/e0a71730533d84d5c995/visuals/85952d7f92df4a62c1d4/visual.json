@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "85952d7f92df4a62c1d4",
   "position": {
     "x": 96,
     "y": 64,
-    "width": 1080,
+    "z": 6000,
     "height": 48,
-    "z": 12,
-    "tabOrder": 12
+    "width": 920,
+    "tabOrder": 9000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,15 +19,14 @@
               {
                 "textRuns": [
                   {
-                    "value": "Priority license families \u00b7 assignment, capacity and published evidence",
+                    "value": "Priority license families · assignment, capacity and published evidence",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",
-                      "color": "#52606D"
+                      "color": "#52606d"
                     }
                   }
-                ],
-                "horizontalTextAlignment": "left"
+                ]
               }
             ]
           }

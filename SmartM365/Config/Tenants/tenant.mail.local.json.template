@@ -68,10 +68,6 @@
       "From": "__USE_GLOBAL__",
       "Cc": "__USE_GLOBAL__"
     },
-    "SmartM365-Exchange-HybridIdentity-Issues-Inventory": {
-      "From": "__USE_GLOBAL__",
-      "Cc": "__USE_GLOBAL__"
-    },
     "SmartM365-Exchange-Local-Mailboxes-Inventory": {
       "From": "__USE_GLOBAL__",
       "Cc": "__USE_GLOBAL__"
@@ -117,10 +113,6 @@
       "Cc": "__USE_GLOBAL__"
     },
     "SmartM365-Intune-RBAC-GroupMembers": {
-      "From": "__USE_GLOBAL__",
-      "Cc": "__USE_GLOBAL__"
-    },
-    "SmartM365-Intune-Windows11-Readiness-Issues-Inventory": {
       "From": "__USE_GLOBAL__",
       "Cc": "__USE_GLOBAL__"
     },

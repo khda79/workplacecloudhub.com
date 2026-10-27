@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "755b98bbc71afa7ae0c6",
   "position": {
     "x": 1216,
-    "y": 91,
+    "y": 104,
+    "z": 44000,
+    "height": 20,
     "width": 672,
-    "height": 25,
-    "z": 26000,
-    "tabOrder": 12
+    "tabOrder": 11000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,14 +19,15 @@
               {
                 "textRuns": [
                   {
-                    "value": "Scope: attributable records only; tenant totals remain global.",
+                    "value": "Scope: selected primary user applies to attributable current inventory. Published aggregate controls and history remain global.",
                     "textStyle": {
-                      "fontSize": "12px",
+                      "fontSize": "8px",
                       "color": "#52606D",
                       "fontFamily": "Segoe UI"
                     }
                   }
-                ]
+                ],
+                "horizontalTextAlignment": "right"
               }
             ]
           }

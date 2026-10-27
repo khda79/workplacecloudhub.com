@@ -1,16 +1,76 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "597085575d81cdd0eb38",
   "position": {
     "x": 32,
-    "y": 476.9,
+    "y": 430.34410480349345,
+    "z": 1000,
+    "height": 267.01135371179043,
     "width": 720,
-    "height": 224.8,
-    "z": 109,
     "tabOrder": 880
   },
   "visual": {
     "visualType": "barChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "AD Domain"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.AD Domain",
+              "nativeQueryRef": "AD Domain",
+              "active": true,
+              "displayName": "AD Domain"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Remaining Observed Windows 10"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
+              "nativeQueryRef": "Observed Windows 10",
+              "displayName": "Observed Windows 10"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Measure": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Windows Migration Evidence"
+                  }
+                },
+                "Property": "Remaining Observed Windows 10"
+              }
+            },
+            "direction": "Descending"
+          }
+        ]
+      }
+    },
     "objects": {
       "categoryAxis": [
         {
@@ -162,67 +222,6 @@
           }
         }
       ]
-    },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Category": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "AD Domain"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.AD Domain",
-              "nativeQueryRef": "AD Domain",
-              "displayName": "AD Domain",
-              "active": true
-            }
-          ]
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Remaining Observed Windows 10"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
-              "nativeQueryRef": "Observed Windows 10",
-              "displayName": "Observed Windows 10"
-            }
-          ]
-        }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Measure": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Windows Migration Evidence"
-                  }
-                },
-                "Property": "Remaining Observed Windows 10"
-              }
-            },
-            "direction": "Descending"
-          }
-        ]
-      }
     },
     "visualContainerObjects": {
       "title": [
@@ -392,7 +391,8 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "parentGroupName": "b898e5df500a1b30f997"
 }

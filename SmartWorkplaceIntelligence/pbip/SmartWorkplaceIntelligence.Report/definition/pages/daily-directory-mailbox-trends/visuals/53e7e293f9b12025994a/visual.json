@@ -4,10 +4,10 @@
   "position": {
     "x": 32,
     "y": 448,
-    "width": 1856,
+    "z": 3000,
     "height": 472,
-    "z": 9,
-    "tabOrder": 9
+    "width": 1856,
+    "tabOrder": 3000
   },
   "visual": {
     "visualType": "lineChart",
@@ -610,6 +610,7 @@
     },
     "drillFilterOtherVisuals": true
   },
+  "parentGroupName": "890248bf5fea920d9dfc",
   "filterConfig": {
     "filters": [
       {
@@ -664,6 +665,5 @@
         "isLockedInViewMode": true
       }
     ]
-  },
-  "parentGroupName": "890248bf5fea920d9dfc"
+  }
 }

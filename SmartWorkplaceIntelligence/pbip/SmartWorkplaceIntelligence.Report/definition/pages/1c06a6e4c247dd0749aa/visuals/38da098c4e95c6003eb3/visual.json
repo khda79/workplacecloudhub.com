@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "38da098c4e95c6003eb3",
   "position": {
     "x": 32,
     "y": 128,
-    "width": 960,
-    "height": 80,
-    "z": 114,
-    "tabOrder": 261
+    "z": 32000,
+    "height": 104,
+    "width": 1200,
+    "tabOrder": 22000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -28,7 +28,7 @@
               },
               "queryRef": "Collaboration Object Evidence.At-Risk Collaboration Objects",
               "nativeQueryRef": "At-Risk Objects",
-              "displayName": "At-Risk Objects"
+              "displayName": "At-Risk Resources"
             },
             {
               "field": {
@@ -43,7 +43,7 @@
               },
               "queryRef": "Collaboration Object Evidence.Inactive Collaboration Objects",
               "nativeQueryRef": "Inactive Objects",
-              "displayName": "Inactive Objects"
+              "displayName": "Inactive Resources"
             },
             {
               "field": {
@@ -58,7 +58,7 @@
               },
               "queryRef": "Collaboration Object Evidence.Orphaned Collaboration Objects",
               "nativeQueryRef": "Orphaned Objects",
-              "displayName": "Orphaned Objects"
+              "displayName": "Orphaned Resources"
             }
           ]
         }
@@ -78,7 +78,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },

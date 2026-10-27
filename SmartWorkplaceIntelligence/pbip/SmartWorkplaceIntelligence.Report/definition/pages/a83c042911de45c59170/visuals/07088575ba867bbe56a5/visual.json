@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "07088575ba867bbe56a5",
   "position": {
     "x": 32,
     "y": 248,
-    "z": 114,
+    "z": 18000,
     "height": 96,
     "width": 440,
-    "tabOrder": 114
+    "tabOrder": 18000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -47,7 +47,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -483,23 +483,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "d1045955ca5ab7be64fb",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "SharePoint On-prem Farms"
-              }
-            },
-            "Property": "Infrastructure Collection Health"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
   }
 }

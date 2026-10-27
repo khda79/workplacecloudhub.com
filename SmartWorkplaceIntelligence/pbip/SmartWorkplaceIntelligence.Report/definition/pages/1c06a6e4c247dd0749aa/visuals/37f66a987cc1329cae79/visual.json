@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "37f66a987cc1329cae79",
   "position": {
     "x": 1250,
     "y": 626.9,
-    "z": 115,
-    "width": 429,
+    "z": 34000,
     "height": 18,
-    "tabOrder": 115
+    "width": 429,
+    "tabOrder": 18000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Active Object Rate \u00b7 observed history when available",
+                    "value": "Active Object Rate · observed history when available",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

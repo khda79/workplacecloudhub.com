@@ -1,13 +1,18 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
-  "displayName": "Full capacity detail",
+  "displayName": "License capacity details",
   "name": "ca227f19d2422584f250",
   "options": {
     "applyOnlyToTargetVisuals": true,
     "targetVisualNames": [
       "403082f4ddd7359804c4",
       "8a434067a12556e7f725",
-      "4652caff1debb5e4527e"
+      "4652caff1debb5e4527e",
+      "3d2646412457f8b05666",
+      "b284d97356c04fd70c8e",
+      "0b97f2ba5facd3bbabf5",
+      "ff1eb51faf392d7ca319",
+      "5ee61faf06f49b485985"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -17,7 +22,32 @@
     "activeSection": "e0a71730533d84d5c995",
     "sections": {
       "e0a71730533d84d5c995": {
-        "visualContainers": {},
+        "visualContainers": {
+          "b284d97356c04fd70c8e": {
+            "singleVisual": {}
+          },
+          "0b97f2ba5facd3bbabf5": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "ff1eb51faf392d7ca319": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "5ee61faf06f49b485985": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
         "visualContainerGroups": {
           "403082f4ddd7359804c4": {
             "isHidden": true
@@ -27,6 +57,9 @@
           },
           "4652caff1debb5e4527e": {
             "isHidden": false
+          },
+          "3d2646412457f8b05666": {
+            "isHidden": true
           }
         }
       }

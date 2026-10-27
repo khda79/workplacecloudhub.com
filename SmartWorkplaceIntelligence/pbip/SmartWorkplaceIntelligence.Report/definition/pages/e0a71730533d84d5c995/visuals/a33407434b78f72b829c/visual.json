@@ -3,9 +3,9 @@
   "name": "a33407434b78f72b829c",
   "position": {
     "x": 32,
-    "y": 673.3,
+    "y": 324,
     "width": 1856,
-    "height": 343.6,
+    "height": 604,
     "z": 25,
     "tabOrder": 1216
   },
@@ -20,161 +20,78 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "License SKU Capacity"
                     }
                   },
-                  "Property": "Domain"
+                  "Property": "License Product"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Domain",
-              "nativeQueryRef": "Domain"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Severity Label"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Severity Label",
-              "nativeQueryRef": "Severity"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Signal"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Signal",
-              "nativeQueryRef": "Signal"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Risk Category"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Risk Category",
-              "nativeQueryRef": "Risk Category"
+              "queryRef": "License SKU Capacity.License Product",
+              "nativeQueryRef": "License Product",
+              "displayName": "License family"
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "License SKU Capacity"
                     }
                   },
-                  "Property": "Affected Signal Observations"
+                  "Property": "Immediate Reclaimable Assignments"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Affected Signal Observations",
-              "nativeQueryRef": "Affected"
+              "queryRef": "License SKU Capacity.Immediate Reclaimable Assignments",
+              "nativeQueryRef": "Immediate Reclaimable Assignments",
+              "displayName": "Recovery assignments"
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "License Report Summary"
                     }
                   },
-                  "Property": "Enterprise Signal Detail"
+                  "Property": "License Selected E3 Review Label"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Enterprise Signal Detail",
-              "nativeQueryRef": "Enterprise Signal Detail",
-              "displayName": "Detail"
+              "queryRef": "License Report Summary.License Selected E3 Review Label",
+              "nativeQueryRef": "License Selected E3 Review Label",
+              "displayName": "E3 → F3 review · E3 family"
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "License SKU Capacity"
                     }
                   },
-                  "Property": "Enterprise Signal Covered"
+                  "Property": "Available License Units"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Enterprise Signal Covered",
-              "nativeQueryRef": "Covered"
+              "queryRef": "License SKU Capacity.Available License Units",
+              "nativeQueryRef": "Available License Units",
+              "displayName": "Tenant available units"
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
+                      "Entity": "License SKU Capacity"
                     }
                   },
-                  "Property": "Enterprise Signal Affected (%)"
+                  "Property": "Selected Suite Recovery Unknown"
                 }
               },
-              "queryRef": "Enterprise Operational Signals.Enterprise Signal Affected (%)",
-              "nativeQueryRef": "Affected (%)"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Evidence Status"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Evidence Status",
-              "nativeQueryRef": "Evidence Status"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Enterprise Operational Signals"
-                    }
-                  },
-                  "Property": "Recommended Action"
-                }
-              },
-              "queryRef": "Enterprise Operational Signals.Recommended Action",
-              "nativeQueryRef": "Recommended Action"
+              "queryRef": "License SKU Capacity.Selected Suite Recovery Unknown",
+              "nativeQueryRef": "Selected Suite Recovery Unknown",
+              "displayName": "Tenant unknown assessments"
             }
           ]
         }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Enterprise Operational Signals"
-                  }
-                },
-                "Property": "Signal"
-              }
-            },
-            "direction": "Ascending"
-          }
-        ]
       }
     },
     "objects": {
@@ -235,6 +152,13 @@
                       "Value": "'#215E9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -324,6 +248,183 @@
             }
           }
         }
+      ],
+      "columnFormatting": [
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License SKU Capacity.Selected Suite Recovery Unknown"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License SKU Capacity.Available License Units"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.License Selected E3 Review Label"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License SKU Capacity.Immediate Reclaimable Assignments"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License SKU Capacity.License Product"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -333,7 +434,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant-wide optimization signals \u00b7 not product-filtered'"
+                  "Value": "'Tenant-wide optimization signals · not product-filtered'"
                 }
               }
             }
@@ -353,7 +454,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant-wide optimization signals \u00b7 not product-filtered'"
+                  "Value": "'Suite optimization · recovery and E3 → F3 manual review'"
                 }
               }
             },
@@ -506,22 +607,50 @@
             }
           }
         }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Candidate counts follow Country / AD Domain. Capacity and unknown-assessment counts remain tenant-wide. Review is not automatic license removal.'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            }
+          }
+        }
       ]
     },
     "drillFilterOtherVisuals": true
   },
+  "parentGroupName": "8a434067a12556e7f725",
   "filterConfig": {
     "filters": [
       {
-        "name": "79e6c905c567490ee279",
+        "name": "33032772b34ad4a56c5e",
         "field": {
           "Column": {
             "Expression": {
               "SourceRef": {
-                "Entity": "Enterprise Operational Signals"
+                "Entity": "License SKU Capacity"
               }
             },
-            "Property": "Signal"
+            "Property": "Report Product"
           }
         },
         "type": "Categorical",
@@ -529,8 +658,8 @@
           "Version": 2,
           "From": [
             {
-              "Name": "f",
-              "Entity": "Enterprise Operational Signals",
+              "Name": "s",
+              "Entity": "License SKU Capacity",
               "Type": 0
             }
           ],
@@ -543,10 +672,10 @@
                       "Column": {
                         "Expression": {
                           "SourceRef": {
-                            "Source": "f"
+                            "Source": "s"
                           }
                         },
-                        "Property": "Signal"
+                        "Property": "Report Product"
                       }
                     }
                   ],
@@ -554,14 +683,28 @@
                     [
                       {
                         "Literal": {
-                          "Value": "'Potentially reclaimable license assignments'"
+                          "Value": "'Microsoft 365 F1'"
                         }
                       }
                     ],
                     [
                       {
                         "Literal": {
-                          "Value": "'Governed license SKUs with unassigned units'"
+                          "Value": "'Microsoft 365 F3'"
+                        }
+                      }
+                    ],
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Microsoft 365 E3'"
+                        }
+                      }
+                    ],
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Microsoft 365 E5'"
                         }
                       }
                     ]
@@ -574,6 +717,5 @@
         "howCreated": "User"
       }
     ]
-  },
-  "parentGroupName": "8a434067a12556e7f725"
+  }
 }

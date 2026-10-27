@@ -1,17 +1,16 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "a27a0e1c0615db00369b",
   "position": {
     "x": 0,
     "y": 0,
-    "z": 1,
+    "z": 8000,
     "height": 1080,
     "width": 1920,
-    "tabOrder": 1
+    "tabOrder": 8000
   },
   "visualGroup": {
-    "displayName": "Full object detail",
+    "displayName": "Inventory",
     "groupMode": "ScaleMode"
-  },
-  "isHidden": true
+  }
 }

@@ -1,14 +1,40 @@
 {
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "524162890b7bd00db7b6",
   "position": {
-    "x": 1216,
+    "x": 1544,
     "y": 8,
-    "width": 320,
+    "z": 37000,
     "height": 80,
-    "z": 25000,
-    "tabOrder": 10
+    "width": 160,
+    "tabOrder": 5000
   },
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "visual": {
+    "visualType": "slicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Country Selection"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "Country Selection.Country",
+              "nativeQueryRef": "Country",
+              "active": true,
+              "displayName": "Country"
+            }
+          ]
+        }
+      }
+    },
     "objects": {
       "data": [
         {
@@ -75,6 +101,11 @@
           "selector": {
             "id": "default"
           }
+        }
+      ],
+      "general": [
+        {
+          "properties": {}
         }
       ]
     },
@@ -222,35 +253,10 @@
         }
       ]
     },
-    "visualType": "slicer",
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Country Selection"
-                    }
-                  },
-                  "Property": "Country"
-                }
-              },
-              "queryRef": "Country Selection.Country",
-              "nativeQueryRef": "Country",
-              "displayName": "Country"
-            }
-          ]
-        }
-      }
-    },
     "syncGroup": {
       "groupName": "SharedCountry",
       "fieldChanges": true,
       "filterChanges": true
     }
-  },
-  "name": "524162890b7bd00db7b6"
+  }
 }

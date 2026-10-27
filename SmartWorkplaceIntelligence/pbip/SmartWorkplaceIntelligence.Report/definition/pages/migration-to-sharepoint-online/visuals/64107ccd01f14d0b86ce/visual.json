@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "64107ccd01f14d0b86ce",
   "position": {
-    "x": 56,
-    "y": 868,
+    "x": 32,
+    "y": 812.82668977469666,
     "z": 6000,
-    "height": 320,
-    "width": 1808,
-    "tabOrder": 44
+    "height": 387.17331022530334,
+    "width": 1856,
+    "tabOrder": 6000
   },
   "visual": {
     "visualType": "tableEx",
@@ -28,7 +28,8 @@
               },
               "queryRef": "SPO Migration Findings.Severity",
               "nativeQueryRef": "Severity",
-              "displayName": "Severity"
+              "displayName": "Severity",
+              "active": true
             },
             {
               "field": {
@@ -43,7 +44,8 @@
               },
               "queryRef": "SPO Migration Findings.Finding Rule",
               "nativeQueryRef": "Finding Rule",
-              "displayName": "Finding Rule"
+              "displayName": "Finding Rule",
+              "active": true
             },
             {
               "field": {
@@ -58,22 +60,8 @@
               },
               "queryRef": "SPO Migration Findings.Source Type",
               "nativeQueryRef": "Source Type",
-              "displayName": "Source Type"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "SPO Migration Findings"
-                    }
-                  },
-                  "Property": "Migration ID"
-                }
-              },
-              "queryRef": "SPO Migration Findings.Migration ID",
-              "nativeQueryRef": "Migration ID",
-              "displayName": "Migration ID"
+              "displayName": "Source Type",
+              "active": true
             },
             {
               "field": {
@@ -88,7 +76,8 @@
               },
               "queryRef": "SPO Migration Findings.Source Name",
               "nativeQueryRef": "Source Name",
-              "displayName": "Source Name"
+              "displayName": "Source Name",
+              "active": true
             },
             {
               "field": {
@@ -103,7 +92,8 @@
               },
               "queryRef": "SPO Migration Findings.Source Reference",
               "nativeQueryRef": "Source Reference",
-              "displayName": "Source Reference"
+              "displayName": "Source Reference",
+              "active": true
             },
             {
               "field": {
@@ -118,7 +108,8 @@
               },
               "queryRef": "SPO Migration Findings.Observed Value",
               "nativeQueryRef": "Observed Value",
-              "displayName": "Observed Value"
+              "displayName": "Observed Value",
+              "active": true
             },
             {
               "field": {
@@ -133,7 +124,24 @@
               },
               "queryRef": "SPO Migration Findings.Expected Action",
               "nativeQueryRef": "Expected Action",
-              "displayName": "Expected Action"
+              "displayName": "Expected Action",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "SPO Migration Findings"
+                    }
+                  },
+                  "Property": "Migration ID"
+                }
+              },
+              "queryRef": "SPO Migration Findings.Migration ID",
+              "nativeQueryRef": "Migration ID",
+              "displayName": "Migration ID",
+              "active": true
             }
           ]
         }
@@ -143,6 +151,13 @@
       "columnHeaders": [
         {
           "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
             "columnAdjustment": {
               "expr": {
                 "Literal": {
@@ -150,7 +165,14 @@
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -161,13 +183,6 @@
               "expr": {
                 "Literal": {
                   "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
                 }
               }
             },
@@ -187,16 +202,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
                 }
               }
             },
-            "bold": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "'Center'"
                 }
               }
             }
@@ -286,7 +301,290 @@
             }
           }
         }
-      ]
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "SPO Migration Findings.Severity"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Findings.Finding Rule"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Findings.Source Type"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Findings.Source Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Findings.Source Reference"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Findings.Observed Value"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Findings.Expected Action"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "SPO Migration Findings.Migration ID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "title": [
@@ -302,7 +600,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Actionable findings \u2014 global findings remain visible'"
+                  "Value": "'Actionable findings — global findings remain visible'"
                 }
               }
             },
@@ -443,7 +741,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -456,7 +761,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Actionable findings \u2014 global findings remain visible'"
+                  "Value": "'Actionable findings — global findings remain visible'"
                 }
               }
             }

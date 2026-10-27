@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "84855c01196d4a7f589d",
   "position": {
-    "x": 656.0,
-    "y": 120,
-    "width": 608.0,
+    "x": 656,
+    "y": 224,
+    "z": 1000,
     "height": 80,
-    "z": 103,
-    "tabOrder": 62
+    "width": 608,
+    "tabOrder": 1000
   },
   "visual": {
     "visualType": "slicer",
@@ -61,7 +61,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence status'"
+                  "Value": "'Control evidence status'"
                 }
               }
             },
@@ -270,6 +270,7 @@
       ]
     }
   },
+  "parentGroupName": "2a7753a9127d00987ec0",
   "filterConfig": {
     "filters": [
       {

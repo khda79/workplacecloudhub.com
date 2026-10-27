@@ -1,11 +1,11 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "a0810b8444bc8c2c5f91",
   "position": {
     "x": 32,
-    "y": 389.4,
+    "y": 320,
     "z": 112,
-    "height": 603.7,
+    "height": 680,
     "width": 1856,
     "tabOrder": 677
   },
@@ -185,6 +185,13 @@
                   }
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
             }
           }
         }
@@ -290,6 +297,13 @@
                   "Value": "true"
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
             }
           }
         }
@@ -348,9 +362,6 @@
           }
         },
         {
-          "selector": {
-            "id": "Row"
-          },
           "properties": {
             "rowSubtotals": {
               "expr": {
@@ -373,12 +384,12 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "Row"
           }
         },
         {
-          "selector": {
-            "id": "Column"
-          },
           "properties": {
             "columnSubtotals": {
               "expr": {
@@ -401,6 +412,305 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "Column"
+          }
+        }
+      ],
+      "columnFormatting": [
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Content Storage Operational Signals.Affected Content (%)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Content Storage Operational Signals.Covered Content"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Content Storage Operational Signals.Affected Content"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Content Storage Operational Signals.Recommended Action"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Content Storage Operational Signals.Risk Category"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Content Storage Operational Signals.Signal"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleSubtotals": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Content Storage Operational Signals.Severity Label"
           }
         }
       ]
@@ -412,7 +722,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Inactive content \u00b7 selected evidence'"
+                  "Value": "'Inactive content · selected evidence'"
                 }
               }
             }
@@ -432,7 +742,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Inactive content \u00b7 selected evidence'"
+                  "Value": "'Inactive content · selected evidence'"
                 }
               }
             },
@@ -589,107 +899,5 @@
     },
     "drillFilterOtherVisuals": true
   },
-  "parentGroupName": "059be073a33b8aaec6de",
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "0fd41223bef946296062",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Content Storage Operational Signals"
-              }
-            },
-            "Property": "Severity Label"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "a7729127ab74519499f9",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Content Storage Operational Signals"
-              }
-            },
-            "Property": "Signal"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "59da26f36e21605db7bd",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Content Storage Operational Signals"
-              }
-            },
-            "Property": "Risk Category"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "a4c702dbe2e29412d10e",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Content Storage Operational Signals"
-              }
-            },
-            "Property": "Affected Content"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "a182f790de7ab5a783e5",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Content Storage Operational Signals"
-              }
-            },
-            "Property": "Covered Content"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "4fb796ca6c140f9cf70c",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Content Storage Operational Signals"
-              }
-            },
-            "Property": "Affected Content (%)"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "2713e6eb5fb921cba037",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Content Storage Operational Signals"
-              }
-            },
-            "Property": "Recommended Action"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
-  }
+  "parentGroupName": "059be073a33b8aaec6de"
 }

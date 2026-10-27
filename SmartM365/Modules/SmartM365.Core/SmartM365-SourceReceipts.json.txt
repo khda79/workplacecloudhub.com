@@ -64,16 +64,6 @@
       ]
     },
     {
-      "Script": "SmartM365-Exchange-HybridIdentity-Issues-Inventory.ps1",
-      "Receipt": "SmartInventory_SmartM365-Exchange-HybridIdentity-Issues-Inventory.current.json.txt",
-      "Scope": "ConfiguredOutputs",
-      "Files": [
-        "Exchange_HybridIdentity_Issues.csv",
-        "Exchange_HybridIdentity_Issues_Summary.csv"
-      ],
-      "OptionalFiles": []
-    },
-    {
       "Script": "SmartM365-EXO-MigJob-Inventory.ps1",
       "Receipt": "SmartInventory_SmartM365-EXO-MigJob-Inventory.current.json.txt",
       "Scope": "ConfiguredOutputs",
@@ -261,16 +251,6 @@
         "Intune_EndpointSecurity_DefenderAgents.csv",
         "Intune_EndpointSecurity_FirewallStatus.csv",
         "Intune_EndpointSecurity_DataQuality.csv"
-      ],
-      "OptionalFiles": []
-    },
-    {
-      "Script": "SmartM365-Intune-Windows11-Readiness-Issues-Inventory.ps1",
-      "Receipt": "SmartInventory_SmartM365-Intune-Windows11-Readiness-Issues-Inventory.current.json.txt",
-      "Scope": "ConfiguredOutputs",
-      "Files": [
-        "Intune_Windows11_Readiness_Issues.csv",
-        "Intune_Windows11_Readiness_Issues_Summary.csv"
       ],
       "OptionalFiles": []
     },

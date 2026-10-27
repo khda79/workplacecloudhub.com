@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "8284ca6eeddad6298566",
   "position": {
     "x": 32,
     "y": 448,
-    "width": 1856,
+    "z": 2000,
     "height": 336,
-    "z": 12000,
-    "tabOrder": 544
+    "width": 1856,
+    "tabOrder": 3000
   },
   "visual": {
     "visualType": "tableEx",
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Native Endpoint Score Evidence.DeviceName",
-              "nativeQueryRef": "DeviceName"
+              "nativeQueryRef": "DeviceName",
+              "active": true
             },
             {
               "field": {
@@ -37,11 +38,13 @@
                       "Entity": "Native Endpoint Score Evidence"
                     }
                   },
-                  "Property": "TenantEndpointAnalyticsDeviceKey"
+                  "Property": "Primary User (report)"
                 }
               },
-              "queryRef": "Native Endpoint Score Evidence.TenantEndpointAnalyticsDeviceKey",
-              "nativeQueryRef": "TenantEndpointAnalyticsDeviceKey"
+              "queryRef": "Native Endpoint Score Evidence.Primary User (report)",
+              "nativeQueryRef": "Primary User (report)",
+              "active": true,
+              "displayName": "Primary User UPN"
             },
             {
               "field": {
@@ -51,11 +54,45 @@
                       "Entity": "Native Endpoint Score Evidence"
                     }
                   },
-                  "Property": "DeviceId"
+                  "Property": "Primary User SAM (report)"
                 }
               },
-              "queryRef": "Native Endpoint Score Evidence.DeviceId",
-              "nativeQueryRef": "DeviceId"
+              "queryRef": "Native Endpoint Score Evidence.Primary User SAM (report)",
+              "nativeQueryRef": "Primary User SAM (report)",
+              "active": true,
+              "displayName": "Primary User SAM"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Endpoint Score Evidence"
+                    }
+                  },
+                  "Property": "Last Console User (report)"
+                }
+              },
+              "queryRef": "Native Endpoint Score Evidence.Last Console User (report)",
+              "nativeQueryRef": "Last Console User (report)",
+              "active": true,
+              "displayName": "Last console user"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Endpoint Score Evidence"
+                    }
+                  },
+                  "Property": "Last Console Logon UTC (report)"
+                }
+              },
+              "queryRef": "Native Endpoint Score Evidence.Last Console Logon UTC (report)",
+              "nativeQueryRef": "Last Console Logon UTC (report)",
+              "active": true,
+              "displayName": "Last console logon UTC"
             },
             {
               "field": {
@@ -69,7 +106,8 @@
                 }
               },
               "queryRef": "Native Endpoint Score Evidence.Manufacturer",
-              "nativeQueryRef": "Manufacturer"
+              "nativeQueryRef": "Manufacturer",
+              "active": true
             },
             {
               "field": {
@@ -83,7 +121,8 @@
                 }
               },
               "queryRef": "Native Endpoint Score Evidence.Model",
-              "nativeQueryRef": "Model"
+              "nativeQueryRef": "Model",
+              "active": true
             },
             {
               "field": {
@@ -97,7 +136,8 @@
                 }
               },
               "queryRef": "Native Endpoint Score Evidence.EndpointAnalyticsScore",
-              "nativeQueryRef": "EndpointAnalyticsScore"
+              "nativeQueryRef": "EndpointAnalyticsScore",
+              "active": true
             },
             {
               "field": {
@@ -111,7 +151,8 @@
                 }
               },
               "queryRef": "Native Endpoint Score Evidence.StartupPerformanceScore",
-              "nativeQueryRef": "StartupPerformanceScore"
+              "nativeQueryRef": "StartupPerformanceScore",
+              "active": true
             },
             {
               "field": {
@@ -125,7 +166,8 @@
                 }
               },
               "queryRef": "Native Endpoint Score Evidence.AppReliabilityScore",
-              "nativeQueryRef": "AppReliabilityScore"
+              "nativeQueryRef": "AppReliabilityScore",
+              "active": true
             },
             {
               "field": {
@@ -139,7 +181,8 @@
                 }
               },
               "queryRef": "Native Endpoint Score Evidence.WorkFromAnywhereScore",
-              "nativeQueryRef": "WorkFromAnywhereScore"
+              "nativeQueryRef": "WorkFromAnywhereScore",
+              "active": true
             },
             {
               "field": {
@@ -153,7 +196,8 @@
                 }
               },
               "queryRef": "Native Endpoint Score Evidence.SourceCollectedDateTime",
-              "nativeQueryRef": "SourceCollectedDateTime"
+              "nativeQueryRef": "SourceCollectedDateTime",
+              "active": true
             },
             {
               "field": {
@@ -167,7 +211,8 @@
                 }
               },
               "queryRef": "Native Endpoint Score Evidence.SourceSystem",
-              "nativeQueryRef": "SourceSystem"
+              "nativeQueryRef": "SourceSystem",
+              "active": true
             },
             {
               "field": {
@@ -177,39 +222,12 @@
                       "Entity": "Native Endpoint Score Evidence"
                     }
                   },
-                  "Property": "TenantKey"
+                  "Property": "DeviceId"
                 }
               },
-              "queryRef": "Native Endpoint Score Evidence.TenantKey",
-              "nativeQueryRef": "TenantKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Native Endpoint Score Evidence"
-                    }
-                  },
-                  "Property": "OrganizationKey"
-                }
-              },
-              "queryRef": "Native Endpoint Score Evidence.OrganizationKey",
-              "nativeQueryRef": "OrganizationKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Native Endpoint Score Evidence"
-                    }
-                  },
-                  "Property": "EnvironmentKey"
-                }
-              },
-              "queryRef": "Native Endpoint Score Evidence.EnvironmentKey",
-              "nativeQueryRef": "EnvironmentKey"
+              "queryRef": "Native Endpoint Score Evidence.DeviceId",
+              "nativeQueryRef": "DeviceId",
+              "active": true
             },
             {
               "field": {
@@ -223,7 +241,84 @@
                 }
               },
               "queryRef": "Native Endpoint Score Evidence.TenantId",
-              "nativeQueryRef": "TenantId"
+              "nativeQueryRef": "TenantId",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Endpoint Score Evidence"
+                    }
+                  },
+                  "Property": "Console Logon Qualification (report)"
+                }
+              },
+              "queryRef": "Native Endpoint Score Evidence.Console Logon Qualification (report)",
+              "nativeQueryRef": "Console Logon Qualification (report)",
+              "active": true,
+              "displayName": "Console logon qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Endpoint Score Evidence"
+                    }
+                  },
+                  "Property": "TenantEndpointAnalyticsDeviceKey"
+                }
+              },
+              "queryRef": "Native Endpoint Score Evidence.TenantEndpointAnalyticsDeviceKey",
+              "nativeQueryRef": "TenantEndpointAnalyticsDeviceKey",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Endpoint Score Evidence"
+                    }
+                  },
+                  "Property": "TenantKey"
+                }
+              },
+              "queryRef": "Native Endpoint Score Evidence.TenantKey",
+              "nativeQueryRef": "TenantKey",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Endpoint Score Evidence"
+                    }
+                  },
+                  "Property": "OrganizationKey"
+                }
+              },
+              "queryRef": "Native Endpoint Score Evidence.OrganizationKey",
+              "nativeQueryRef": "OrganizationKey",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Native Endpoint Score Evidence"
+                    }
+                  },
+                  "Property": "EnvironmentKey"
+                }
+              },
+              "queryRef": "Native Endpoint Score Evidence.EnvironmentKey",
+              "nativeQueryRef": "EnvironmentKey",
+              "active": true
             }
           ]
         }
@@ -233,13 +328,6 @@
       "columnHeaders": [
         {
           "properties": {
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -251,6 +339,20 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -277,9 +379,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -362,7 +471,710 @@
             }
           }
         }
-      ]
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.DeviceName"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.Primary User (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.Primary User SAM (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.Last Console User (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.Last Console Logon UTC (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.Manufacturer"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.Model"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.EndpointAnalyticsScore"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.StartupPerformanceScore"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.AppReliabilityScore"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.WorkFromAnywhereScore"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.SourceCollectedDateTime"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.SourceSystem"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.DeviceId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.TenantId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.Console Logon Qualification (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.TenantEndpointAnalyticsDeviceKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.TenantKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.OrganizationKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Native Endpoint Score Evidence.EnvironmentKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -371,7 +1183,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint Score \u00b7 complete governed fields'"
+                  "Value": "'Endpoint Score · complete governed fields'"
                 }
               }
             }
@@ -391,7 +1203,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint Score \u00b7 complete governed fields'"
+                  "Value": "'Endpoint Score · complete governed fields'"
                 }
               }
             },
@@ -480,7 +1292,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -562,7 +1381,7 @@
                 "Entity": "Native Endpoint Score Evidence"
               }
             },
-            "Property": "Native Context Rows \u00b7 Native Endpoint Score Evidence"
+            "Property": "Native Context Rows · Native Endpoint Score Evidence"
           }
         },
         "type": "Advanced",
@@ -587,12 +1406,61 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows \u00b7 Native Endpoint Score Evidence"
+                      "Property": "Native Context Rows · Native Endpoint Score Evidence"
                     }
                   },
                   "Right": {
                     "Literal": {
                       "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "7288071749b2fae7953f0000",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Native Endpoint Score Evidence"
+              }
+            },
+            "Property": "Primary user row match · Native Endpoint Score Evidence"
+          }
+        },
+        "type": "Advanced",
+        "howCreated": "User",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "s",
+              "Entity": "Native Endpoint Score Evidence",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 0,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "s"
+                        }
+                      },
+                      "Property": "Primary user row match · Native Endpoint Score Evidence"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "1L"
                     }
                   }
                 }

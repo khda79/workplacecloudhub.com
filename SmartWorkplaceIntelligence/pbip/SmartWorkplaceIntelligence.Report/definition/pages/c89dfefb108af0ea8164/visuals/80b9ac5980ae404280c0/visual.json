@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "80b9ac5980ae404280c0",
   "position": {
     "x": 0,
     "y": 0,
-    "z": 13000,
+    "z": 40000,
     "height": 1080,
     "width": 1920,
-    "tabOrder": 13000
+    "tabOrder": 43000
   },
   "visualGroup": {
     "displayName": "Teams & SharePoint",

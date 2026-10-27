@@ -1,16 +1,87 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "42056163a02717c886ba",
   "position": {
     "x": 32,
-    "y": 720,
+    "y": 743.89610389610391,
+    "z": 2000,
+    "height": 256.10389610389609,
     "width": 1856,
-    "height": 232,
-    "z": 110,
-    "tabOrder": 1440
+    "tabOrder": 4000
   },
   "visual": {
     "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Country",
+              "nativeQueryRef": "Country",
+              "active": true
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Local Business Mailboxes Remaining"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Local Business Mailboxes Remaining",
+              "nativeQueryRef": "Business remaining",
+              "displayName": "Business remaining",
+              "active": true
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Observed Mailbox Migration Blockers"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Observed Mailbox Migration Blockers",
+              "nativeQueryRef": "Inventory blockers",
+              "displayName": "Inventory blockers",
+              "active": true
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Mailbox Migration Risk Review"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Mailbox Migration Risk Review",
+              "nativeQueryRef": "Inventory risk review",
+              "displayName": "Inventory risk review",
+              "active": true
+            }
+          ]
+        }
+      }
+    },
     "objects": {
       "columnHeaders": [
         {
@@ -32,7 +103,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -66,9 +137,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -280,75 +358,8 @@
             }
           }
         }
-      ]
-    },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Country"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Country",
-              "nativeQueryRef": "Country"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Local Business Mailboxes Remaining"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Local Business Mailboxes Remaining",
-              "nativeQueryRef": "Business remaining",
-              "displayName": "Business remaining"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Observed Mailbox Migration Blockers"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Observed Mailbox Migration Blockers",
-              "nativeQueryRef": "Inventory blockers",
-              "displayName": "Inventory blockers"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Mailbox Migration Risk Review"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Mailbox Migration Risk Review",
-              "nativeQueryRef": "Inventory risk review",
-              "displayName": "Inventory risk review"
-            }
-          ]
-        }
-      }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "title": [
@@ -364,7 +375,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Current country breakdown \u00b7 historic curve is tenant-wide'"
+                  "Value": "'Current country breakdown · historic curve is tenant-wide'"
                 }
               }
             },
@@ -511,7 +522,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Current country breakdown \u00b7 historic curve is tenant-wide'"
+                  "Value": "'Current country breakdown · historic curve is tenant-wide'"
                 }
               }
             }
@@ -531,7 +542,8 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "parentGroupName": "de282d5a0762f9248225"
 }

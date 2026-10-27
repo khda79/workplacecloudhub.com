@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "14a7819c86caf681c889",
   "position": {
     "x": 96,
-    "y": 88,
-    "width": 1080,
-    "height": 32,
-    "z": 101,
-    "tabOrder": 145
+    "y": 80,
+    "z": 20000,
+    "height": 24,
+    "width": 880,
+    "tabOrder": 19000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Applications & Standardization | current private Intune discovered-app evidence \u00b7 11 observed DATA-ALL weeks",
+                    "value": "Applications & Standardization | current private Intune discovered-app evidence · 11 observed DATA-ALL weeks",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

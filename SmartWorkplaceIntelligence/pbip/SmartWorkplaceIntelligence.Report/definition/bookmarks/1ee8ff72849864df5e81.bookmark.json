@@ -1,0 +1,80 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "1ee8ff72849864df5e81",
+  "displayName": "Scope reconciliation",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "2086510df0c51fd7df05",
+      "382464e6f8dd54f2c0ff",
+      "520b9e765306427bfad9",
+      "71ce0af4fb34167cd871",
+      "86d1d2829816a4a82bf6",
+      "0b083e2ad1e9f9427cb7",
+      "d07913b5f53723a98a54",
+      "b0419e1e50c9acc20421",
+      "42e29b5ffa0ce5124cf5",
+      "0cbccf48e7b25434fcca"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "7e703070ffe685a52305",
+    "sections": {
+      "7e703070ffe685a52305": {
+        "visualContainers": {
+          "0b083e2ad1e9f9427cb7": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "d07913b5f53723a98a54": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "b0419e1e50c9acc20421": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "42e29b5ffa0ce5124cf5": {
+            "singleVisual": {}
+          },
+          "0cbccf48e7b25434fcca": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "2086510df0c51fd7df05": {
+            "isHidden": true
+          },
+          "382464e6f8dd54f2c0ff": {
+            "isHidden": false
+          },
+          "520b9e765306427bfad9": {
+            "isHidden": true
+          },
+          "71ce0af4fb34167cd871": {
+            "isHidden": true
+          },
+          "86d1d2829816a4a82bf6": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

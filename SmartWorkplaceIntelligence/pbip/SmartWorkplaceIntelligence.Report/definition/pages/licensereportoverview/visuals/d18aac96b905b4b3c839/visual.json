@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "d18aac96b905b4b3c839",
   "position": {
     "x": 32,
-    "y": 856,
+    "y": 888,
+    "z": 10000,
+    "height": 128,
     "width": 1856,
-    "height": 136,
-    "z": 51,
-    "tabOrder": 51
+    "tabOrder": 10000
   },
   "visual": {
     "visualType": "tableEx",
@@ -171,6 +171,13 @@
                   }
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
             }
           }
         }
@@ -258,6 +265,183 @@
             }
           }
         }
+      ],
+      "columnFormatting": [
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.Shared Unknown"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.Shared Removal Candidates"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.Shared Under 50 GB"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.Shared Mailboxes Licensed"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Summary.Product"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -267,7 +451,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Licensed shared mailboxes \u00b7 selected suite families'"
+                  "Value": "'Licensed shared mailboxes · selected suite families'"
                 }
               }
             }
@@ -287,7 +471,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Licensed shared mailboxes \u00b7 selected suite families'"
+                  "Value": "'Licensed shared mailboxes · selected suite families'"
                 }
               }
             },
@@ -494,6 +678,7 @@
     },
     "drillFilterOtherVisuals": true
   },
+  "parentGroupName": "ec3aac9702b5e1a75aa3",
   "filterConfig": {
     "filters": [
       {
@@ -509,7 +694,6 @@
           }
         },
         "type": "Categorical",
-        "howCreated": "User",
         "filter": {
           "Version": 2,
           "From": [
@@ -548,7 +732,8 @@
               }
             }
           ]
-        }
+        },
+        "howCreated": "User"
       },
       {
         "name": "f14cde982d686ba26033",
@@ -602,6 +787,5 @@
         "isLockedInViewMode": true
       }
     ]
-  },
-  "parentGroupName": "ec3aac9702b5e1a75aa3"
+  }
 }

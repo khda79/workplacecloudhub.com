@@ -1,0 +1,28 @@
+/// Matrix cell metadata; state and count grain are explicit. Daily hides non-applicable column.
+table 'Readiness Matrix Metric'
+	lineageTag: 4d1154e0-c2e0-45ab-9bea-e099cfe10763
+
+	column Metric
+		dataType: string
+		lineageTag: 58d3722d-346a-47ac-a8b5-cbfe02c84861
+		sourceColumn: Metric
+		sortByColumn: Order
+
+	column State
+		dataType: string
+		lineageTag: 79089715-37e0-4ded-9b97-eeaa180fdc42
+		sourceColumn: State
+
+	column Grain
+		dataType: string
+		lineageTag: d3fe2a3b-7af6-4988-b7ac-0523060cb2fe
+		sourceColumn: Grain
+
+	column Order
+		dataType: int64
+		lineageTag: a230ae77-e57a-4048-878f-4454a9d16d6a
+		sourceColumn: Order
+
+	partition 'Readiness Matrix Metric' = m
+		mode: import
+		source = #table(type table [Metric=text,State=text,Grain=text,Order=Int64.Type],{{"Triggered (AD GUID)","Triggered","AD GUID",0},{"Triggered (all rows)","Triggered","Rows",1},{"Indeterminate","Indeterminate","Rows",2},{"Not applicable","Not applicable","Rows",3},{"Not triggered","Not triggered","Rows",4}})

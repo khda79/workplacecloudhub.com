@@ -3,11 +3,11 @@
   "name": "migration-style-subtitle",
   "position": {
     "x": 96,
-    "y": 66,
+    "y": 80,
     "z": 13000,
-    "height": 50,
-    "width": 1080,
-    "tabOrder": 101
+    "height": 24,
+    "width": 880,
+    "tabOrder": 12000
   },
   "visual": {
     "visualType": "textbox",

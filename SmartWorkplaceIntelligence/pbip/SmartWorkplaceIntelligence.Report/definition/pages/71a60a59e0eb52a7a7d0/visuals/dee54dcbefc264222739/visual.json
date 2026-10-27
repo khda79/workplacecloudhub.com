@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "dee54dcbefc264222739",
   "position": {
-    "x": 976,
+    "x": 1304,
     "y": 8,
-    "width": 224,
+    "z": 42000,
     "height": 80,
-    "z": 25000,
-    "tabOrder": 880
+    "width": 224,
+    "tabOrder": 27000
   },
   "visual": {
     "visualType": "slicer",
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
                   "Property": "Hosting Location"
                 }
               },
-              "queryRef": "Mailbox Evidence.Hosting Location",
+              "queryRef": "Mailbox Exploration Inventory.Hosting Location",
               "nativeQueryRef": "Hosting Location",
               "active": true
             }

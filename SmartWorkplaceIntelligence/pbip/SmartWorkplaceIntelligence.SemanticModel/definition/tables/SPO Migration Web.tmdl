@@ -1,6 +1,6 @@
 /// SPO means SharePoint Online. Grain: Web Key; source: one selected immutable prepared batch.
 table 'SPO Migration Web'
-	lineageTag: f02c0e88-0061-46f6-aca1-0ab29ab77610
+	lineageTag: a41c6916-26e0-450c-88ca-ca46e8a5cad6
 
 	/// Observed Webs. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Observed Webs' =
@@ -10,43 +10,43 @@ table 'SPO Migration Web'
 			RETURN IF(NOT _sharedOnly, IF(_business, CALCULATE(DISTINCTCOUNT('SPO Migration Web'[Web Key]), TREATAS(_projects,'SPO Migration Web'[Project Identity]), TREATAS(VALUES('SPO Migration Scope'[Web Key]), 'SPO Migration Web'[Web Key])), CALCULATE(DISTINCTCOUNT('SPO Migration Web'[Web Key]), TREATAS(_projects,'SPO Migration Web'[Project Identity]))))
 		formatString: #,##0
 		displayFolder: Migration\Reconciliation
-		lineageTag: 15684a77-d4d8-4f3e-868e-8adc41dbf9f2
+		lineageTag: e6d62724-6486-4949-aa4d-9f323c3f4c52
 
 	/// Webs Without Plan. Observed webs without a plan have no attributable business unit or phase, so that global counter preserves the technical context and source flow but ignores those two business filters.
 	measure 'SPO Webs Without Plan' = CALCULATE([SPO Observed Webs], KEEPFILTERS('SPO Migration Web'[Coverage Kind]="NOTINPLAN"), REMOVEFILTERS('SPO Migration Business Unit'), REMOVEFILTERS('SPO Migration Phase'))
 		formatString: #,##0
 		displayFolder: Migration\Reconciliation
-		lineageTag: 60b9f985-b806-43c3-bf70-d723b2d3f8f1
+		lineageTag: 9c5dad39-7e53-4355-b17e-9a65254ec65a
 
 	/// Whole Webs Covered. Observed webs without a plan have no attributable business unit or phase, so that global counter preserves the technical context and source flow but ignores those two business filters.
 	measure 'SPO Whole Webs Covered' = CALCULATE([SPO Observed Webs], KEEPFILTERS('SPO Migration Web'[Coverage Kind]="Whole web coverage"))
 		formatString: #,##0
 		displayFolder: Migration\Reconciliation
-		lineageTag: 520e5578-f812-4a1f-818c-149a135ae656
+		lineageTag: 63c340bc-20ff-46bc-993a-26789faff4af
 
 	/// Partial Webs. Observed webs without a plan have no attributable business unit or phase, so that global counter preserves the technical context and source flow but ignores those two business filters.
 	measure 'SPO Partial Webs' = CALCULATE([SPO Observed Webs], KEEPFILTERS('SPO Migration Web'[Coverage Kind]="Partial content only"))
 		formatString: #,##0
 		displayFolder: Migration\Reconciliation
-		lineageTag: 62893cb6-2223-4feb-9cb9-6783fb4b35d8
+		lineageTag: 8feb42a2-eb78-4725-a421-5fe7c6032161
 
 	/// Conflicting Webs. Observed webs without a plan have no attributable business unit or phase, so that global counter preserves the technical context and source flow but ignores those two business filters.
 	measure 'SPO Conflicting Webs' = CALCULATE([SPO Observed Webs], KEEPFILTERS('SPO Migration Web'[Coverage Kind]="Conflict"))
 		formatString: #,##0
 		displayFolder: Migration\Reconciliation
-		lineageTag: 3ddb88e0-148f-452a-a6c6-d1794e7729c4
+		lineageTag: 590ae2e9-2812-4f79-99b5-2f22e3c438e0
 
 	/// On-prem Coverage Context. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO On-prem Coverage Context' = IF(SELECTEDVALUE('SPO Migration Source Type'[Source Type])="Shared folders", "Not applicable: no SMB inventory, volume or ACL evidence", "Observed webs; partial inventory cannot prove absence or deletion")
 		formatString: General
 		displayFolder: Migration\Reconciliation
-		lineageTag: 01890348-ef8e-4a5c-9a3c-cf1b767dcdbf
+		lineageTag: 31915391-7aa2-4e5b-83f4-24283cc2f970
 
 	/// Prepared, tenant-qualified migration evidence: TenantKey.
 	column TenantKey
 		dataType: string
 		isHidden
-		lineageTag: dbc9a507-d56e-4553-8a0a-340148a8321d
+		lineageTag: 12dc8f59-4935-455b-b175-c477127ea13d
 		summarizeBy: none
 		sourceColumn: TenantKey
 
@@ -54,7 +54,7 @@ table 'SPO Migration Web'
 	column 'Project Key'
 		dataType: string
 		isHidden
-		lineageTag: ec921c78-b7f8-44ca-87ba-dc7c4da94ed7
+		lineageTag: 22cd0283-1f5b-46a5-b40b-253d00b24331
 		summarizeBy: none
 		sourceColumn: Project Key
 
@@ -62,7 +62,7 @@ table 'SPO Migration Web'
 	column 'Snapshot ID'
 		dataType: string
 		isHidden
-		lineageTag: ea18a886-2e49-44cf-af82-3e6c52f7a680
+		lineageTag: f5a341f5-5d5d-48f5-9f8a-8fe621dcfcc7
 		summarizeBy: none
 		sourceColumn: Snapshot ID
 
@@ -70,15 +70,22 @@ table 'SPO Migration Web'
 	column 'Snapshot Date'
 		dataType: dateTime
 		formatString: yyyy-MM-dd
-		lineageTag: 27623edc-a1d9-4723-98e0-97dbae3f7320
+		lineageTag: 42855dbc-3987-4c20-b01f-efcc8e4c59a3
 		summarizeBy: none
 		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 2d06df6a-55a9-40a1-b80e-9f072dfdcea3
+			defaultHierarchy: LocalDateTable_c8aab280-bc3d-4589-b957-cec92f234126.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Prepared, tenant-qualified migration evidence: Web Key.
 	column 'Web Key'
 		dataType: string
 		isHidden
-		lineageTag: 535ab943-a6dd-49a8-9ccf-66e4bfb1924c
+		lineageTag: 786f9afa-c812-4aa4-a3f3-6781e784cf79
 		summarizeBy: none
 		sourceColumn: Web Key
 
@@ -86,7 +93,7 @@ table 'SPO Migration Web'
 	column 'Collection Key'
 		dataType: string
 		isHidden
-		lineageTag: 81e95ccb-da27-4e8a-9c3c-fac366d79fb7
+		lineageTag: b9dd7fe6-0cdd-4075-9062-f24c883e43f5
 		summarizeBy: none
 		sourceColumn: Collection Key
 
@@ -94,21 +101,21 @@ table 'SPO Migration Web'
 	column 'Parent Web Key'
 		dataType: string
 		isHidden
-		lineageTag: 96e03e86-6630-47c3-817c-0460cd10cc38
+		lineageTag: 5016f1e2-67c7-46bb-99a6-05856b715b4b
 		summarizeBy: none
 		sourceColumn: Parent Web Key
 
 	/// Prepared, tenant-qualified migration evidence: Source URL.
 	column 'Source URL'
 		dataType: string
-		lineageTag: f2f66570-d07b-4ccc-b675-da80387379d7
+		lineageTag: 9be96991-daaa-440e-acc8-9e26f17a04eb
 		summarizeBy: none
 		sourceColumn: Source URL
 
 	/// Prepared, tenant-qualified migration evidence: Source Name.
 	column 'Source Name'
 		dataType: string
-		lineageTag: 15d888ff-d6f5-4488-846f-3fdbd89b02ec
+		lineageTag: b5aeaee6-d1f8-4859-8e10-614d8b17f89a
 		summarizeBy: none
 		sourceColumn: Source Name
 
@@ -116,7 +123,7 @@ table 'SPO Migration Web'
 	column 'Farm Key'
 		dataType: string
 		isHidden
-		lineageTag: e74ec254-b851-418c-9d49-88f6c132b5c9
+		lineageTag: 134ea7c4-3e8c-4058-b164-d7f0f3c46b85
 		summarizeBy: none
 		sourceColumn: Farm Key
 
@@ -124,14 +131,14 @@ table 'SPO Migration Web'
 	column 'Web Application Key'
 		dataType: string
 		isHidden
-		lineageTag: 22486f42-d4ae-4493-a480-9f6488bd5a63
+		lineageTag: 031b00cb-2370-43b4-b9d7-3a8c254ddfd6
 		summarizeBy: none
 		sourceColumn: Web Application Key
 
 	/// Prepared, tenant-qualified migration evidence: Coverage Kind.
 	column 'Coverage Kind'
 		dataType: string
-		lineageTag: d18252ed-2711-4cda-88d0-f35f0ea38ca4
+		lineageTag: 6b89ae71-a3bf-4cc2-860e-801bd4e327d4
 		summarizeBy: none
 		sourceColumn: Coverage Kind
 
@@ -139,7 +146,7 @@ table 'SPO Migration Web'
 	column 'Run ID'
 		dataType: string
 		isHidden
-		lineageTag: e2e4af3d-1559-4196-9263-a4ecf3371e75
+		lineageTag: b5c73f64-e9a6-4844-b0ae-1afb3f0c425e
 		summarizeBy: none
 		sourceColumn: Run ID
 
@@ -148,15 +155,18 @@ table 'SPO Migration Web'
 		dataType: dateTime
 		isHidden
 		formatString: yyyy-MM-dd HH:mm
-		lineageTag: b0fa1204-a8f1-4dc2-98cc-eaf65ee5931d
+		lineageTag: a76d6d94-6464-4ccf-ada2-4a0916fba161
 		summarizeBy: none
 		sourceColumn: Captured UTC
 
 	column 'Project Identity'
 		dataType: string
 		isHidden
-		lineageTag: 4a3d5e40-bd94-405a-a3f0-0ff0c243e184
+		lineageTag: bf4eaffc-4526-4013-ac01-e46ec0467691
+		summarizeBy: none
 		sourceColumn: Project Identity
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'

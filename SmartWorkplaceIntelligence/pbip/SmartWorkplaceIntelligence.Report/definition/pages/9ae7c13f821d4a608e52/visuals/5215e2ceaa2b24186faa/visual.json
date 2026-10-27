@@ -3,7 +3,7 @@
   "name": "5215e2ceaa2b24186faa",
   "position": {
     "x": 32,
-    "y": 344,
+    "y": 280,
     "width": 1856,
     "height": 24,
     "z": 119,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Classification evidence",
+                    "value": "Selected view: Classification gaps",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12pt",

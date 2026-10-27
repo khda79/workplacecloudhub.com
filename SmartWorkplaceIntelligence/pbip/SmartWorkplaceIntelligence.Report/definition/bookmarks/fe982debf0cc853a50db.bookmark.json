@@ -1,0 +1,88 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "fe982debf0cc853a50db",
+  "displayName": "Quality",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "3b7aebbfb8249fe2aa74",
+      "4adbbe2dc2acd8f427f9",
+      "7550e0fb27d1e79d9d99",
+      "7f7ae1df82dd67fc332f",
+      "b2deaadb9550a5b30275",
+      "f5fc2692f3f5f70933fa",
+      "ba3d752e2e46905a28b6",
+      "0b363dc0601a6df8b269",
+      "ca8f63d8e96036344ff9",
+      "8406bb2ea55c5397e695",
+      "6fc94e8ba4fc66cf223e",
+      "ffd2f45598fa88b56376"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "migration-to-sharepoint-online",
+    "sections": {
+      "migration-to-sharepoint-online": {
+        "visualContainers": {
+          "0b363dc0601a6df8b269": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "ca8f63d8e96036344ff9": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "8406bb2ea55c5397e695": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "6fc94e8ba4fc66cf223e": {
+            "singleVisual": {}
+          },
+          "ffd2f45598fa88b56376": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "3b7aebbfb8249fe2aa74": {
+            "isHidden": true
+          },
+          "4adbbe2dc2acd8f427f9": {
+            "isHidden": false
+          },
+          "7550e0fb27d1e79d9d99": {
+            "isHidden": true
+          },
+          "7f7ae1df82dd67fc332f": {
+            "isHidden": true
+          },
+          "b2deaadb9550a5b30275": {
+            "isHidden": true
+          },
+          "f5fc2692f3f5f70933fa": {
+            "isHidden": true
+          },
+          "ba3d752e2e46905a28b6": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

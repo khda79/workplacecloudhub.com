@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "182c5637fe329bf58338",
   "position": {
     "x": 32,
-    "y": 410.5,
+    "y": 432,
+    "z": 11000,
+    "height": 24,
     "width": 1856,
-    "height": 21,
-    "z": 22,
-    "tabOrder": 22
+    "tabOrder": 10000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Rates measure assignment, not application activity. Cards require complete selected families; N/A means not subscribed.",
+                    "value": "Country / AD Domain filter user assignments. Enabled, available and capacity rates are tenant-wide. N/A means not subscribed.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "13px",
@@ -116,5 +116,6 @@
         }
       ]
     }
-  }
+  },
+  "parentGroupName": "403082f4ddd7359804c4"
 }

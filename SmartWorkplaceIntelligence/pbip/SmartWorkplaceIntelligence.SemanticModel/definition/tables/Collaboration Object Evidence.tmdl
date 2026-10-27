@@ -225,6 +225,11 @@ table 'Collaboration Object Evidence'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Observed guest count, with unknown retained explicitly.
+	column 'Guest presence' = VAR n='Collaboration Object Evidence'[Guest Count] RETURN IF(ISBLANK(n),"Unknown",IF(n>0,"With guests","No guests"))
+		dataType: string
+		lineageTag: dcd6334a-07ed-40ab-a4bb-b5818a7cab4b
+
 	partition 'Collaboration Object Evidence Import' = m
 		mode: import
 		source =

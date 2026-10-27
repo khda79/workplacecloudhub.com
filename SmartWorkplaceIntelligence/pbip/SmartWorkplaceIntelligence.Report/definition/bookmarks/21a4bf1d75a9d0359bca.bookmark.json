@@ -1,6 +1,6 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
-  "displayName": "Geography",
+  "displayName": "By country",
   "name": "21a4bf1d75a9d0359bca",
   "options": {
     "applyOnlyToTargetVisuals": true,
@@ -10,7 +10,13 @@
       "c56c4456e97bf8ea5deb",
       "d49388801104f81e006e",
       "10f9633a9f63bcc2ce4e",
-      "4c53c5db4bc925836224"
+      "4c53c5db4bc925836224",
+      "00ee43c51da4321ab6bf",
+      "ccc46a026769b218dcd3",
+      "b5bfed2599baec5c7c24",
+      "5170b10d8e66edf269f1",
+      "463f52a2eea0ddb9c61b",
+      "07f49713336b7984281b"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -20,7 +26,46 @@
     "activeSection": "0443c39bb6eba584da07",
     "sections": {
       "0443c39bb6eba584da07": {
-        "visualContainers": {},
+        "visualContainers": {
+          "00ee43c51da4321ab6bf": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "ccc46a026769b218dcd3": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "b5bfed2599baec5c7c24": {
+            "singleVisual": {}
+          },
+          "5170b10d8e66edf269f1": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "463f52a2eea0ddb9c61b": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "07f49713336b7984281b": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
         "visualContainerGroups": {
           "85f8ac611cbe840f1dd0": {
             "isHidden": true

@@ -126,7 +126,7 @@ table 'Content Storage Evidence'
 	measure 'Total SharePoint Storage (TB)' = CALCULATE([Content Storage Used (TB)], KEEPFILTERS('Content Storage Evidence'[Service] = "SharePoint"))
 		formatString: #,0.0
 		displayFolder: Report presentation
-		lineageTag: 1b880101-72a4-47f9-b2c7-477a96a9bc8a
+		lineageTag: 18198be8-ab0f-493f-a8c9-f1e423b1f22a
 
 	column 'Content Object Key'
 		dataType: string

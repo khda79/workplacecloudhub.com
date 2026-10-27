@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "b92d8f934b48b7b1e812",
   "position": {
     "x": 976,
-    "y": 480,
-    "z": 12000,
-    "height": 248,
+    "y": 370.8185053380783,
+    "z": 4000,
+    "height": 300.07117437722422,
     "width": 912,
-    "tabOrder": 12000
+    "tabOrder": 4000
   },
   "visual": {
     "visualType": "barChart",
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Exchange On-prem Infrastructure.Server Name",
-              "nativeQueryRef": "Server Name"
+              "nativeQueryRef": "Server Name",
+              "active": true
             }
           ]
         },

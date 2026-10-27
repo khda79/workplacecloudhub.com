@@ -52,6 +52,12 @@ table 'Native AD Intune Coverage'
 		isHidden
 		lineageTag: 61eecc17-f1d4-43c2-94c1-21aa54d9cc54
 
+	/// Read-only report utility applying the disconnected primary-user selector to source-qualified device rows.
+	measure 'Primary user row match · Native AD Intune Coverage' = VAR PresentRows = IF(ISFILTERED('Primary User Selection'[Primary user]), CALCULATE(COUNTROWS('Native AD Intune Coverage'), KEEPFILTERS(TREATAS(VALUES('Primary User Selection'[Primary user]), 'Native AD Intune Coverage'[Primary User (report)]))), COUNTROWS('Native AD Intune Coverage')) RETURN IF(PresentRows>0,1,BLANK())
+		formatString: 0
+		isHidden
+		lineageTag: 8a0a6d91-9863-4709-beb5-3f6fe4fdb075
+
 	/// Native FactADIntuneCoverage attribute; source qualification is retained.
 	column TenantKey
 		dataType: string
@@ -179,6 +185,85 @@ table 'Native AD Intune Coverage'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Private report scope. Exact unique native identity and one loaded batch; no UPN suffix or display-name inference. Blank when missing or ambiguous.
+	column 'AD Domain' =
+			VAR _batch = 'Native AD Intune Coverage'[Loaded Batch ID]
+			VAR _tenant = 'Native AD Intune Coverage'[TenantKey]
+			VAR _key = 'Native AD Intune Coverage'[TenantADComputerKey]
+			VAR _rows = FILTER(ALL('AD Computer Evidence'), 'AD Computer Evidence'[TenantKey] == _tenant && 'AD Computer Evidence'[TenantADComputerKey] == _key && 'AD Computer Evidence'[Loaded Batch ID] == _batch)
+			RETURN IF(NOT ISBLANK(_batch) && NOT ISBLANK(_key) && COUNTROWS(_rows) = 1, MAXX(_rows, 'AD Computer Evidence'[DomainName]))
+		dataType: string
+		displayFolder: Report scope
+		lineageTag: 8924c116-0b2f-4df4-b68a-90061058e11e
+		summarizeBy: none
+
+	/// Observed primary user, exact source ID and tenant/batch matching only; used by the report search.
+	column 'Primary User (report)' =
+			VAR _t='Native AD Intune Coverage'[TenantKey]
+			VAR _b='Native AD Intune Coverage'[Loaded Batch ID]
+			VAR _gkey='Native AD Intune Coverage'[TenantDeviceKey]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Native AD Intune Coverage'[IntuneManagedDeviceId],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Native AD Intune Coverage'[IntuneManagedDeviceId]))
+			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 596850c5-d2e5-4871-994b-3544608653ac
+
+	/// Qualified SAM of the primary user; never inferred from UPN text.
+	column 'Primary User SAM (report)' =
+			VAR _t='Native AD Intune Coverage'[TenantKey]
+			VAR _b='Native AD Intune Coverage'[Loaded Batch ID]
+			VAR _gkey='Native AD Intune Coverage'[TenantDeviceKey]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Native AD Intune Coverage'[IntuneManagedDeviceId],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Native AD Intune Coverage'[IntuneManagedDeviceId]))
+			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: e10e2e93-c0e3-4b01-a9d7-01dbc705a3c4
+
+	/// Last Windows console user observed at collection. Does not mean current user or last RDP session.
+	column 'Last Console User (report)' =
+			VAR _t='Native AD Intune Coverage'[TenantKey]
+			VAR _b='Native AD Intune Coverage'[Loaded Batch ID]
+			VAR _gkey='Native AD Intune Coverage'[TenantDeviceKey]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Native AD Intune Coverage'[IntuneManagedDeviceId],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Native AD Intune Coverage'[IntuneManagedDeviceId]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 67d899d9-c23c-4c45-8232-a5f846889541
+
+	/// Source-qualified time of last observed console logon; unknown remains blank.
+	column 'Last Console Logon UTC (report)' =
+			VAR _t='Native AD Intune Coverage'[TenantKey]
+			VAR _b='Native AD Intune Coverage'[Loaded Batch ID]
+			VAR _gkey='Native AD Intune Coverage'[TenantDeviceKey]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Native AD Intune Coverage'[IntuneManagedDeviceId],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Native AD Intune Coverage'[IntuneManagedDeviceId]))
+			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm
+		displayFolder: Report identity context
+		lineageTag: e843f0f5-f4ed-4885-b705-4db883260f70
+
+	/// Preserves source status and timestamp qualification, including stale/missing/error evidence.
+	column 'Console Logon Qualification (report)' =
+			VAR _t='Native AD Intune Coverage'[TenantKey]
+			VAR _b='Native AD Intune Coverage'[Loaded Batch ID]
+			VAR _gkey='Native AD Intune Coverage'[TenantDeviceKey]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Native AD Intune Coverage'[IntuneManagedDeviceId],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Native AD Intune Coverage'[IntuneManagedDeviceId]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _quality=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Quality],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(ISBLANK(_status),"No matched system observation",_status&" · "&_quality)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 4c496c13-d528-4055-82c4-afec37e803e0
+
 	partition 'Native AD Intune Coverage' = m
 		mode: import
 		source =
@@ -199,3 +284,5 @@ table 'Native AD Intune Coverage'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactADIntuneCoverage.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADComputerKey", dataType="String"], [name="CmdbAdComputerId", dataType="String"], [name="DeviceName", dataType="String"], [name="Enabled", dataType="Boolean"], [name="OperatingSystem", dataType="String"], [name="OperatingSystemVersion", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="EntraDeviceId", dataType="String"], [name="IntuneManagedDeviceId", dataType="String"], [name="CoverageState", dataType="String"], [name="MatchMethod", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

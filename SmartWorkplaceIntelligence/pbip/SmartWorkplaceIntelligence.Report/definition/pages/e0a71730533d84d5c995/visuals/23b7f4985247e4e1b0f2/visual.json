@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "23b7f4985247e4e1b0f2",
   "position": {
     "x": 972,
-    "y": 437.1,
+    "y": 316,
+    "z": 6000,
+    "height": 80,
     "width": 160,
-    "height": 114.5,
-    "z": 20,
-    "tabOrder": 20
+    "tabOrder": 5000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -27,8 +27,8 @@
                 }
               },
               "queryRef": "License Report Summary.License Selected Licensing Errors Label",
-              "nativeQueryRef": "Licensing Errors \u00b7 distinct users",
-              "displayName": "Licensing Errors \u00b7 distinct users"
+              "nativeQueryRef": "Licensing Errors · distinct users",
+              "displayName": "Licensing Errors · distinct users"
             }
           ]
         }
@@ -48,7 +48,7 @@
             "textWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
@@ -280,7 +280,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Licensing Errors \u00b7 distinct selected users'"
+                  "Value": "'Licensing Errors · distinct selected users'"
                 }
               }
             }
@@ -475,5 +475,6 @@
         }
       ]
     }
-  }
+  },
+  "parentGroupName": "403082f4ddd7359804c4"
 }

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "55c186994c5b68245a85",
   "position": {
     "x": 32,
-    "y": 584,
-    "width": 1856,
+    "y": 500.5,
+    "z": 5000,
     "height": 264,
-    "z": 12000,
-    "tabOrder": 544
+    "width": 1856,
+    "tabOrder": 11000
   },
   "visual": {
     "visualType": "tableEx",
@@ -27,35 +27,8 @@
                 }
               },
               "queryRef": "Autopilot Evidence.DisplayName",
-              "nativeQueryRef": "DisplayName"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Autopilot Evidence"
-                    }
-                  },
-                  "Property": "TenantAutopilotDeviceKey"
-                }
-              },
-              "queryRef": "Autopilot Evidence.TenantAutopilotDeviceKey",
-              "nativeQueryRef": "TenantAutopilotDeviceKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Autopilot Evidence"
-                    }
-                  },
-                  "Property": "AutopilotDeviceId"
-                }
-              },
-              "queryRef": "Autopilot Evidence.AutopilotDeviceId",
-              "nativeQueryRef": "AutopilotDeviceId"
+              "nativeQueryRef": "DisplayName",
+              "active": true
             },
             {
               "field": {
@@ -69,7 +42,8 @@
                 }
               },
               "queryRef": "Autopilot Evidence.SerialNumber",
-              "nativeQueryRef": "SerialNumber"
+              "nativeQueryRef": "SerialNumber",
+              "active": true
             },
             {
               "field": {
@@ -83,7 +57,8 @@
                 }
               },
               "queryRef": "Autopilot Evidence.Manufacturer",
-              "nativeQueryRef": "Manufacturer"
+              "nativeQueryRef": "Manufacturer",
+              "active": true
             },
             {
               "field": {
@@ -97,7 +72,8 @@
                 }
               },
               "queryRef": "Autopilot Evidence.Model",
-              "nativeQueryRef": "Model"
+              "nativeQueryRef": "Model",
+              "active": true
             },
             {
               "field": {
@@ -111,7 +87,8 @@
                 }
               },
               "queryRef": "Autopilot Evidence.GroupTag",
-              "nativeQueryRef": "GroupTag"
+              "nativeQueryRef": "GroupTag",
+              "active": true
             },
             {
               "field": {
@@ -125,7 +102,8 @@
                 }
               },
               "queryRef": "Autopilot Evidence.EnrollmentState",
-              "nativeQueryRef": "EnrollmentState"
+              "nativeQueryRef": "EnrollmentState",
+              "active": true
             },
             {
               "field": {
@@ -139,35 +117,8 @@
                 }
               },
               "queryRef": "Autopilot Evidence.LastContactedDateTime",
-              "nativeQueryRef": "LastContactedDateTime"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Autopilot Evidence"
-                    }
-                  },
-                  "Property": "AzureAdDeviceId"
-                }
-              },
-              "queryRef": "Autopilot Evidence.AzureAdDeviceId",
-              "nativeQueryRef": "AzureAdDeviceId"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Autopilot Evidence"
-                    }
-                  },
-                  "Property": "ManagedDeviceId"
-                }
-              },
-              "queryRef": "Autopilot Evidence.ManagedDeviceId",
-              "nativeQueryRef": "ManagedDeviceId"
+              "nativeQueryRef": "LastContactedDateTime",
+              "active": true
             },
             {
               "field": {
@@ -181,7 +132,68 @@
                 }
               },
               "queryRef": "Autopilot Evidence.SourceCollectedDateTime",
-              "nativeQueryRef": "SourceCollectedDateTime"
+              "nativeQueryRef": "SourceCollectedDateTime",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Autopilot Evidence"
+                    }
+                  },
+                  "Property": "TenantAutopilotDeviceKey"
+                }
+              },
+              "queryRef": "Autopilot Evidence.TenantAutopilotDeviceKey",
+              "nativeQueryRef": "TenantAutopilotDeviceKey",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Autopilot Evidence"
+                    }
+                  },
+                  "Property": "AutopilotDeviceId"
+                }
+              },
+              "queryRef": "Autopilot Evidence.AutopilotDeviceId",
+              "nativeQueryRef": "AutopilotDeviceId",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Autopilot Evidence"
+                    }
+                  },
+                  "Property": "AzureAdDeviceId"
+                }
+              },
+              "queryRef": "Autopilot Evidence.AzureAdDeviceId",
+              "nativeQueryRef": "AzureAdDeviceId",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Autopilot Evidence"
+                    }
+                  },
+                  "Property": "ManagedDeviceId"
+                }
+              },
+              "queryRef": "Autopilot Evidence.ManagedDeviceId",
+              "nativeQueryRef": "ManagedDeviceId",
+              "active": true
             },
             {
               "field": {
@@ -195,7 +207,8 @@
                 }
               },
               "queryRef": "Autopilot Evidence.TenantKey",
-              "nativeQueryRef": "TenantKey"
+              "nativeQueryRef": "TenantKey",
+              "active": true
             },
             {
               "field": {
@@ -209,7 +222,8 @@
                 }
               },
               "queryRef": "Autopilot Evidence.OrganizationKey",
-              "nativeQueryRef": "OrganizationKey"
+              "nativeQueryRef": "OrganizationKey",
+              "active": true
             },
             {
               "field": {
@@ -223,7 +237,8 @@
                 }
               },
               "queryRef": "Autopilot Evidence.EnvironmentKey",
-              "nativeQueryRef": "EnvironmentKey"
+              "nativeQueryRef": "EnvironmentKey",
+              "active": true
             },
             {
               "field": {
@@ -237,7 +252,8 @@
                 }
               },
               "queryRef": "Autopilot Evidence.TenantId",
-              "nativeQueryRef": "TenantId"
+              "nativeQueryRef": "TenantId",
+              "active": true
             }
           ]
         }
@@ -247,13 +263,6 @@
       "columnHeaders": [
         {
           "properties": {
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -265,6 +274,20 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -291,9 +314,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -376,7 +406,570 @@
             }
           }
         }
-      ]
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.DisplayName"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.SerialNumber"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.Manufacturer"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.Model"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.GroupTag"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.EnrollmentState"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.LastContactedDateTime"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.SourceCollectedDateTime"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.TenantAutopilotDeviceKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.AutopilotDeviceId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.AzureAdDeviceId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.ManagedDeviceId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.TenantKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.OrganizationKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.EnvironmentKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Autopilot Evidence.TenantId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -385,7 +978,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Autopilot \u00b7 complete governed fields'"
+                  "Value": "'Autopilot · complete governed fields'"
                 }
               }
             }
@@ -405,7 +998,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Autopilot \u00b7 complete governed fields'"
+                  "Value": "'Autopilot · complete governed fields'"
                 }
               }
             },
@@ -494,7 +1087,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -576,7 +1176,7 @@
                 "Entity": "Autopilot Evidence"
               }
             },
-            "Property": "Native Context Rows \u00b7 Autopilot Evidence"
+            "Property": "Native Context Rows · Autopilot Evidence"
           }
         },
         "type": "Advanced",
@@ -601,7 +1201,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows \u00b7 Autopilot Evidence"
+                      "Property": "Native Context Rows · Autopilot Evidence"
                     }
                   },
                   "Right": {

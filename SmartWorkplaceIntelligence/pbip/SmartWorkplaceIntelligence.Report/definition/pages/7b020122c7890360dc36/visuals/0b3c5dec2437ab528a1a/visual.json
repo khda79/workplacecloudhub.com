@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "0b3c5dec2437ab528a1a",
   "position": {
-    "x": 1248.0,
-    "y": 216,
-    "z": 104,
+    "x": 1312,
+    "y": 8,
+    "z": 22000,
     "height": 80,
-    "width": 312.0,
-    "tabOrder": 66
+    "width": 216,
+    "tabOrder": 14000
   },
   "visual": {
     "visualType": "slicer",
@@ -270,23 +270,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "fffec206eedc22f64bc5",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Windows Migration Evidence"
-              }
-            },
-            "Property": "Inventory Source"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
   }
 }

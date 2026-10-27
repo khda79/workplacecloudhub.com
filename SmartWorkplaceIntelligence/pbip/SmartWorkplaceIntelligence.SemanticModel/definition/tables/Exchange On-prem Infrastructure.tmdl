@@ -1,51 +1,60 @@
 /// Complete retained Exchange infrastructure source observations at source-file, record and attribute grain. Missing sources are explicit unknown markers. Global infrastructure; Country and AD Domain do not attribute server locations.
 table 'Exchange On-prem Infrastructure'
-	lineageTag: 27cf40b8-aa0c-49c4-9cd1-4bfd7144ac2b
+	lineageTag: fc3ca5b2-7bbf-4fa6-a98e-8327fe09770a
 
 	/// Observed selected-batch infrastructure. Missing captures and missing numeric observations stay blank. This is not a licensing, migration-readiness or effective health assertion.
 	measure 'Exchange Infrastructure Captured Sources' = COALESCE(CALCULATE(DISTINCTCOUNT('Exchange On-prem Infrastructure'[Source File]), REMOVEFILTERS('Exchange On-prem Infrastructure'), 'Exchange On-prem Infrastructure'[Source Available]=TRUE()),0)
 		formatString: #,0
 		displayFolder: Infrastructure
+		lineageTag: ca331a46-3601-4560-8fad-13ad604ef92e
 
 	/// Observed selected-batch infrastructure. Missing captures and missing numeric observations stay blank. This is not a licensing, migration-readiness or effective health assertion.
 	measure 'Exchange Infrastructure Status' = VAR _n=[Exchange Infrastructure Captured Sources] RETURN IF(_n=0,"Not captured in selected batch | Infrastructure files require a future prepared batch; unknown is not healthy.",FORMAT(_n,"0") & "/12 source files captured | Observed configuration; inspect collection status and missing evidence.")
 		formatString: @
 		displayFolder: Infrastructure
+		lineageTag: 17a51966-4fe0-4438-95e1-40bb5c0666ef
 
 	/// Observed selected-batch infrastructure. Missing captures and missing numeric observations stay blank. This is not a licensing, migration-readiness or effective health assertion.
 	measure 'Exchange Infrastructure Servers' = VAR _n=CALCULATE(COUNTROWS('Exchange On-prem Infrastructure'),KEEPFILTERS('Exchange On-prem Infrastructure'[Dataset]="Servers"),KEEPFILTERS('Exchange On-prem Infrastructure'[Attribute]="Name"),KEEPFILTERS('Exchange On-prem Infrastructure'[Source Available]=TRUE())) RETURN IF(_n>0,CALCULATE(DISTINCTCOUNT('Exchange On-prem Infrastructure'[Source Row Key]),KEEPFILTERS('Exchange On-prem Infrastructure'[Dataset]="Servers"),KEEPFILTERS('Exchange On-prem Infrastructure'[Attribute]="Name"),KEEPFILTERS('Exchange On-prem Infrastructure'[Source Available]=TRUE())))
 		formatString: #,0
 		displayFolder: Infrastructure
+		lineageTag: cee79acc-dd25-4087-8225-2a526339f373
 
 	/// Observed selected-batch infrastructure. Missing captures and missing numeric observations stay blank. This is not a licensing, migration-readiness or effective health assertion.
 	measure 'Exchange Infrastructure Physical Cores' = CALCULATE(SUM('Exchange On-prem Infrastructure'[Numeric Value]),KEEPFILTERS('Exchange On-prem Infrastructure'[Dataset]="Compute"),KEEPFILTERS('Exchange On-prem Infrastructure'[Attribute]="PhysicalCoreCount"),KEEPFILTERS('Exchange On-prem Infrastructure'[Source Available]=TRUE()),KEEPFILTERS('Exchange On-prem Infrastructure'[Collection Status]="OK"))
 		formatString: #,0
 		displayFolder: Infrastructure
+		lineageTag: 2f9ac1d1-de98-4be9-ad53-8328d1637d36
 
 	/// Observed selected-batch infrastructure. Missing captures and missing numeric observations stay blank. This is not a licensing, migration-readiness or effective health assertion.
 	measure 'Exchange Infrastructure Memory GB' = CALCULATE(SUM('Exchange On-prem Infrastructure'[Numeric Value]),KEEPFILTERS('Exchange On-prem Infrastructure'[Dataset]="Compute"),KEEPFILTERS('Exchange On-prem Infrastructure'[Attribute]="MemoryGB"),KEEPFILTERS('Exchange On-prem Infrastructure'[Source Available]=TRUE()),KEEPFILTERS('Exchange On-prem Infrastructure'[Collection Status]="OK"))
 		formatString: #,0.0
 		displayFolder: Infrastructure
+		lineageTag: 217eb08e-eb12-4bf7-9e85-168be42565eb
 
 	/// Observed selected-batch infrastructure. Missing captures and missing numeric observations stay blank. This is not a licensing, migration-readiness or effective health assertion.
 	measure 'Exchange Infrastructure Logical Disk GB' = CALCULATE(SUM('Exchange On-prem Infrastructure'[Numeric Value]),KEEPFILTERS('Exchange On-prem Infrastructure'[Dataset]="Logical disks"),KEEPFILTERS('Exchange On-prem Infrastructure'[Attribute]="SizeGB"),KEEPFILTERS('Exchange On-prem Infrastructure'[Source Available]=TRUE()),KEEPFILTERS('Exchange On-prem Infrastructure'[Collection Status]="OK"))
 		formatString: #,0.0
 		displayFolder: Infrastructure
+		lineageTag: 758d1047-e83f-4592-af78-ed07f233d75e
 
 	/// Observed selected-batch infrastructure. Missing captures and missing numeric observations stay blank. This is not a licensing, migration-readiness or effective health assertion.
 	measure 'Exchange Infrastructure Free Disk GB' = CALCULATE(SUM('Exchange On-prem Infrastructure'[Numeric Value]),KEEPFILTERS('Exchange On-prem Infrastructure'[Dataset]="Logical disks"),KEEPFILTERS('Exchange On-prem Infrastructure'[Attribute]="FreeGB"),KEEPFILTERS('Exchange On-prem Infrastructure'[Source Available]=TRUE()),KEEPFILTERS('Exchange On-prem Infrastructure'[Collection Status]="OK"))
 		formatString: #,0.0
 		displayFolder: Infrastructure
+		lineageTag: 1325cd94-3927-45f2-b547-9a02d751a9eb
 
 	/// Observed selected-batch infrastructure. Missing captures and missing numeric observations stay blank. This is not a licensing, migration-readiness or effective health assertion.
 	measure 'Exchange Infrastructure Low Space Volumes' = VAR _observed=CALCULATE(COUNTROWS('Exchange On-prem Infrastructure'),KEEPFILTERS('Exchange On-prem Infrastructure'[Dataset]="Logical disks"),KEEPFILTERS('Exchange On-prem Infrastructure'[Attribute]="LowSpaceWarning"),KEEPFILTERS('Exchange On-prem Infrastructure'[Source Available]=TRUE()),KEEPFILTERS('Exchange On-prem Infrastructure'[Collection Status]="OK")) RETURN IF(_observed>0,COALESCE(CALCULATE(DISTINCTCOUNT('Exchange On-prem Infrastructure'[Source Row Key]),KEEPFILTERS('Exchange On-prem Infrastructure'[Dataset]="Logical disks"),KEEPFILTERS('Exchange On-prem Infrastructure'[Attribute]="LowSpaceWarning"),KEEPFILTERS('Exchange On-prem Infrastructure'[Value]="True"),KEEPFILTERS('Exchange On-prem Infrastructure'[Source Available]=TRUE()),KEEPFILTERS('Exchange On-prem Infrastructure'[Collection Status]="OK")),0))
 		formatString: #,0
 		displayFolder: Infrastructure
+		lineageTag: 60da6e16-e90b-496b-9fd5-182324755365
 
 	/// Observed selected-batch infrastructure. Missing captures and missing numeric observations stay blank. This is not a licensing, migration-readiness or effective health assertion.
 	measure 'Exchange Infrastructure Collection Issues' = VAR _observed=CALCULATE(COUNTROWS('Exchange On-prem Infrastructure'),KEEPFILTERS('Exchange On-prem Infrastructure'[Source Available]=TRUE())) RETURN IF(_observed>0,COALESCE(CALCULATE(DISTINCTCOUNT('Exchange On-prem Infrastructure'[Source Row Key]),KEEPFILTERS('Exchange On-prem Infrastructure'[Source Available]=TRUE()),KEEPFILTERS('Exchange On-prem Infrastructure'[Collection Status] IN {"ERROR","WARNING"})),0))
 		formatString: #,0
 		displayFolder: Infrastructure
+		lineageTag: dc180926-560b-4791-a0ee-96da89bb0668
 
 	/// Legacy means Exchange 2016 or earlier (15.1 or earlier). Percentage unavailable when a server version is unknown; denominator is observed inventoried servers.
 	measure 'Exchange Legacy Servers' =
@@ -58,6 +67,7 @@ table 'Exchange On-prem Infrastructure'
 			    VAR _minor=IFERROR(VALUE(LEFT(_part,FIND(" ",_part & " ")-1)),BLANK())
 			    VAR _valid=NOT ISBLANK(_major) && NOT ISBLANK(_minor) && _major>=6 && _minor>=0 && INT(_major)=_major && INT(_minor)=_minor RETURN IF(_valid && (_major<15 || (_major=15 && _minor<=1)),1,0)),0))
 		formatString: #,0
+		lineageTag: 31ee209d-7566-4eb1-b59f-d147224359f6
 
 	/// Legacy means Exchange 2016 or earlier (15.1 or earlier). Percentage unavailable when a server version is unknown; denominator is observed inventoried servers.
 	measure 'Exchange Unknown Server Versions' =
@@ -71,81 +81,84 @@ table 'Exchange On-prem Infrastructure'
 			    VAR _valid=NOT ISBLANK(_major) && NOT ISBLANK(_minor) && _major>=6 && _minor>=0 && INT(_major)=_major && INT(_minor)=_minor RETURN IF(_valid,1,0))
 			RETURN IF(NOT ISBLANK(_servers),MAX(0,_servers-COALESCE(_known,0)))
 		formatString: #,0
+		lineageTag: 237f7379-be05-4d0a-9180-a8a6e5045f0c
 
 	/// Legacy means Exchange 2016 or earlier (15.1 or earlier). Percentage unavailable when a server version is unknown; denominator is observed inventoried servers.
 	measure 'Exchange Legacy Server Percent' = IF([Exchange Unknown Server Versions]=0,DIVIDE([Exchange Legacy Servers],[Exchange Infrastructure Servers]))
 		formatString: 0.0%
+		lineageTag: a4050c2e-ce22-4331-80ad-eaea77456a4c
 
 	/// Legacy means Exchange 2016 or earlier (15.1 or earlier). Percentage unavailable when a server version is unknown; denominator is observed inventoried servers.
 	measure 'Exchange Legacy Server Display' =
 			VAR _n=[Exchange Legacy Servers] VAR _pct=[Exchange Legacy Server Percent]
 			RETURN IF(ISBLANK(_n),"Not captured",FORMAT(_n,"0") & " (" & IF(ISBLANK(_pct),"n/a",FORMAT(_pct,"0.0%")) & ")")
 		formatString: @
+		lineageTag: b65a2026-e27f-4404-8b2b-25418cf7b7e8
 
 	column Dataset
 		dataType: string
-		lineageTag: 228bb72a-9db7-46b7-ae52-dd8dd861fdb7
+		lineageTag: 1164f15f-2934-4f7c-a910-76c0658d221e
 		summarizeBy: none
 		sourceColumn: Dataset
 
 	column 'Source File'
 		dataType: string
-		lineageTag: 14445554-ff69-409c-b4fb-bab5ba692ae0
+		lineageTag: 8481a165-6655-4c65-824d-b979cb9b796a
 		summarizeBy: none
 		sourceColumn: Source File
 
 	column 'Source Row Key'
 		dataType: string
-		lineageTag: e1df2dd6-b839-4747-9b69-fae276081966
+		lineageTag: 6c7a436d-e3e7-4c5f-b4b1-d15ad79ab9e1
 		summarizeBy: none
 		sourceColumn: Source Row Key
 
 	column 'Server Name'
 		dataType: string
-		lineageTag: 090fd462-e05c-4432-b4d8-492c57ba0053
+		lineageTag: 983f44f7-0bc8-4779-8df0-3a9fc61ebe53
 		summarizeBy: none
 		sourceColumn: Server Name
 
 	column Category
 		dataType: string
-		lineageTag: f893e9db-153c-4981-ac98-0caf1fa4863c
+		lineageTag: 58e2f9af-abd1-4d11-94e9-f3bc9d87c9c7
 		summarizeBy: none
 		sourceColumn: Category
 
 	column Attribute
 		dataType: string
-		lineageTag: 0ab55485-a1c6-43f5-9102-1f2a09bcf718
+		lineageTag: e315eafc-03a8-4e1d-bcb3-6e0cb27eda0c
 		summarizeBy: none
 		sourceColumn: Attribute
 
 	column Value
 		dataType: string
-		lineageTag: 895295ba-ada8-4f32-b89f-750dd25171f3
+		lineageTag: 4eebdffd-e420-4e10-93ec-20035a6cf5cb
 		summarizeBy: none
 		sourceColumn: Value
 
 	column 'Numeric Value'
 		dataType: double
-		lineageTag: 2b5f4fcc-7e7b-4612-a11d-1f59e8eb56ac
+		lineageTag: c8e25d49-ce21-4823-a510-97b702993cbe
 		summarizeBy: none
 		sourceColumn: Numeric Value
 
 	column 'Collection Status'
 		dataType: string
-		lineageTag: 99a5ffe3-c2e6-4c66-b653-e92df4a3f1d0
+		lineageTag: 27ce4274-2014-4ea6-b18b-78ea175f4b29
 		summarizeBy: none
 		sourceColumn: Collection Status
 
 	column 'Source Available'
 		dataType: boolean
-		lineageTag: 3ca5f81c-46a1-45e5-a1d1-d30c6105e223
+		lineageTag: e4b412fe-2b2e-40ee-937f-bd554066e8d1
 		summarizeBy: none
 		sourceColumn: Source Available
 
 	column 'Loaded Batch ID'
 		dataType: string
 		isHidden
-		lineageTag: 4c6f9f07-f5ca-41bb-a6d2-9f795b32950e
+		lineageTag: 926ef695-cc56-47f0-acc0-9bbe89445d35
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 

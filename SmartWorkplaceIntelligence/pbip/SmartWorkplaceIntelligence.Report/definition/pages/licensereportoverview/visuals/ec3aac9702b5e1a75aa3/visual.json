@@ -1,16 +1,16 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "ec3aac9702b5e1a75aa3",
   "position": {
     "x": 0,
     "y": 0,
-    "width": 1920,
+    "z": 8000,
     "height": 1080,
-    "z": 5,
-    "tabOrder": 5
+    "width": 1920,
+    "tabOrder": 8000
   },
   "visualGroup": {
-    "displayName": "Mailboxes & AD coverage",
+    "displayName": "Mailbox gaps & AD coverage",
     "groupMode": "ScaleMode"
   },
   "isHidden": true

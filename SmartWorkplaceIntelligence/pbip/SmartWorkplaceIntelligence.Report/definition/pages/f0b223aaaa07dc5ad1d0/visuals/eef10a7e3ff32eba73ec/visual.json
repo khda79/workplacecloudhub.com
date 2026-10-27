@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "eef10a7e3ff32eba73ec",
   "position": {
     "x": 44,
     "y": 254,
-    "z": 108,
+    "z": 5000,
     "height": 142,
     "width": 412,
-    "tabOrder": 108
+    "tabOrder": 7000
   },
   "visual": {
     "visualType": "lineChart",
@@ -425,62 +425,6 @@
   },
   "filterConfig": {
     "filters": [
-      {
-        "name": "Filter39c5693f821f1da8cbc6a6c3",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Trend Evidence"
-              }
-            },
-            "Property": "Trend Enabled Workforce Accounts"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "Filterd13356abb279bea856ea77f5",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Trend Evidence"
-              }
-            },
-            "Property": "Trend Accounts Without Activity >30D"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "Filter2232f009342d22c58e46bb68",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Trend Evidence"
-              }
-            },
-            "Property": "Trend Activity Evidence Coverage"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "Filterac26da9a506f162f5bd52591",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Workforce Trend Evidence"
-              }
-            },
-            "Property": "Trend Active Workforce"
-          }
-        },
-        "type": "Advanced"
-      },
       {
         "name": "Filter89a0f14d3e28a12013e196f7",
         "field": {

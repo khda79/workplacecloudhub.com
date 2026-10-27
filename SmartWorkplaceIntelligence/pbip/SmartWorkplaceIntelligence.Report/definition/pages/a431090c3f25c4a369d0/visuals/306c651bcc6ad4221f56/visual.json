@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "306c651bcc6ad4221f56",
   "position": {
     "x": 32,
-    "y": 360,
-    "width": 1856,
+    "y": 272,
+    "z": 1000,
     "height": 24,
-    "z": 12000,
-    "tabOrder": 145
+    "width": 1856,
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native \u00b7 Hardware",
+                    "value": "Selected view: Native · Hardware",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

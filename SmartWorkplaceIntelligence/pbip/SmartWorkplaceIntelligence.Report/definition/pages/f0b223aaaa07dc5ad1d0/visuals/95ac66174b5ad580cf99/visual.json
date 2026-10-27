@@ -4,10 +4,10 @@
   "position": {
     "x": 32,
     "y": 744,
-    "z": 127,
+    "z": 27000,
     "height": 264,
     "width": 560,
-    "tabOrder": 127
+    "tabOrder": 29000
   },
   "visual": {
     "visualType": "azureMap",
@@ -332,14 +332,14 @@
             "centerLatitude": {
               "expr": {
                 "Literal": {
-                  "Value": "26.01927788175543D"
+                  "Value": "26.0192778817554D"
                 }
               }
             },
             "centerLongitude": {
               "expr": {
                 "Literal": {
-                  "Value": "25.276674270629854D"
+                  "Value": "25.276674270629883D"
                 }
               }
             }
@@ -536,79 +536,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "Filter727698fbda7925b9ad02bae4",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "User Inventory Evidence"
-              }
-            },
-            "Property": "Country"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "Filterf1113a983e30b5601056db85",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "User Inventory Evidence"
-              }
-            },
-            "Property": "Enabled Workforce Accounts"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "Filter728df66cb32d24229e007fe9",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "User Inventory Evidence"
-              }
-            },
-            "Property": "Active Workforce"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "Filter9adc2bd193d4a68f60de6728",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "User Inventory Evidence"
-              }
-            },
-            "Property": "Confirmed Human Users"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "Filter0a84be0c3fdd9857e05cc7c6",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "User Inventory Evidence"
-              }
-            },
-            "Property": "Activity Evidence Coverage"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
   }
 }

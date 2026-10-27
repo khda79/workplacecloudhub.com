@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "86b338ccf32bc5b85f2f",
   "position": {
     "x": 0,
     "y": 0,
-    "width": 1920,
+    "z": 4000,
     "height": 1080,
-    "z": 2,
-    "tabOrder": 2
+    "width": 1920,
+    "tabOrder": 4000
   },
   "visualGroup": {
     "displayName": "Computer accounts",

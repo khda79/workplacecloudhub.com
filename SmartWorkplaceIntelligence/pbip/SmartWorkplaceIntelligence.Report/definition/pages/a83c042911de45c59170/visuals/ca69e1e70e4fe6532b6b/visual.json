@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "ca69e1e70e4fe6532b6b",
   "position": {
     "x": 504,
     "y": 248,
-    "z": 115,
+    "z": 19000,
     "height": 96,
     "width": 440,
-    "tabOrder": 115
+    "tabOrder": 19000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -47,7 +47,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -483,23 +483,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "2f8e807f9c8f4ef26ba0",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "SharePoint On-prem Content Databases"
-              }
-            },
-            "Property": "Database Size Coverage Label"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
   }
 }

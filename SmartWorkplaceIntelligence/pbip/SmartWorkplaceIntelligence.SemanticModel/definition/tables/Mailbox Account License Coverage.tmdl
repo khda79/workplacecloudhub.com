@@ -1,0 +1,268 @@
+/// One local mailbox per row; native AD/cloud/Workforce license coverage. Not consumed by Exchange migration status.
+table 'Mailbox Account License Coverage'
+	lineageTag: 6509d17c-850d-5a66-9b11-40b953892d40
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Mailbox Account License Review' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Mailbox Account License Coverage'[Backlog Country]),NOT _cf || 'Mailbox Account License Coverage'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Mailbox Account License Coverage'[Backlog AD Domain]),NOT _df || 'Mailbox Account License Coverage'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Mailbox Account License Coverage',(_cf && (ISBLANK('Mailbox Account License Coverage'[Backlog Country]) || 'Mailbox Account License Coverage'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Mailbox Account License Coverage'[Backlog AD Domain]) || 'Mailbox Account License Coverage'[Backlog AD Domain]="Unknown")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((COALESCE(CALCULATE(DISTINCTCOUNT('Mailbox Account License Coverage'[AD Object GUID]),KEEPFILTERS('Mailbox Account License Coverage'[Coverage State]="License review")),0)),KEEPFILTERS(_missing)),CALCULATE((COALESCE(CALCULATE(DISTINCTCOUNT('Mailbox Account License Coverage'[AD Object GUID]),KEEPFILTERS('Mailbox Account License Coverage'[Coverage State]="License review")),0)),KEEPFILTERS(TREATAS(_ck,'Mailbox Account License Coverage'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Mailbox Account License Coverage'[Backlog AD Domain]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: fe5ef56a-46bb-5339-b47e-c7160df142d0
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Mailbox Account Workforce Missing' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Mailbox Account License Coverage'[Backlog Country]),NOT _cf || 'Mailbox Account License Coverage'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Mailbox Account License Coverage'[Backlog AD Domain]),NOT _df || 'Mailbox Account License Coverage'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Mailbox Account License Coverage',(_cf && (ISBLANK('Mailbox Account License Coverage'[Backlog Country]) || 'Mailbox Account License Coverage'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Mailbox Account License Coverage'[Backlog AD Domain]) || 'Mailbox Account License Coverage'[Backlog AD Domain]="Unknown")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((COALESCE(CALCULATE(COUNTROWS('Mailbox Account License Coverage'),KEEPFILTERS('Mailbox Account License Coverage'[Coverage State]="No Workforce row")),0)),KEEPFILTERS(_missing)),CALCULATE((COALESCE(CALCULATE(COUNTROWS('Mailbox Account License Coverage'),KEEPFILTERS('Mailbox Account License Coverage'[Coverage State]="No Workforce row")),0)),KEEPFILTERS(TREATAS(_ck,'Mailbox Account License Coverage'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Mailbox Account License Coverage'[Backlog AD Domain]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 06343568-700a-5bcb-ae88-181493919a37
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Mailbox Account Native Link Missing' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Mailbox Account License Coverage'[Backlog Country]),NOT _cf || 'Mailbox Account License Coverage'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Mailbox Account License Coverage'[Backlog AD Domain]),NOT _df || 'Mailbox Account License Coverage'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Mailbox Account License Coverage',(_cf && (ISBLANK('Mailbox Account License Coverage'[Backlog Country]) || 'Mailbox Account License Coverage'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Mailbox Account License Coverage'[Backlog AD Domain]) || 'Mailbox Account License Coverage'[Backlog AD Domain]="Unknown")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((COALESCE(CALCULATE(COUNTROWS('Mailbox Account License Coverage'),KEEPFILTERS('Mailbox Account License Coverage'[Coverage State]="No usable native link")),0)),KEEPFILTERS(_missing)),CALCULATE((COALESCE(CALCULATE(COUNTROWS('Mailbox Account License Coverage'),KEEPFILTERS('Mailbox Account License Coverage'[Coverage State]="No usable native link")),0)),KEEPFILTERS(TREATAS(_ck,'Mailbox Account License Coverage'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Mailbox Account License Coverage'[Backlog AD Domain]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 9995d0b9-f550-5285-a270-f36121ab1387
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Mailbox Account Assignment Observed' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Mailbox Account License Coverage'[Backlog Country]),NOT _cf || 'Mailbox Account License Coverage'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Mailbox Account License Coverage'[Backlog AD Domain]),NOT _df || 'Mailbox Account License Coverage'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Mailbox Account License Coverage',(_cf && (ISBLANK('Mailbox Account License Coverage'[Backlog Country]) || 'Mailbox Account License Coverage'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Mailbox Account License Coverage'[Backlog AD Domain]) || 'Mailbox Account License Coverage'[Backlog AD Domain]="Unknown")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((COALESCE(CALCULATE(COUNTROWS('Mailbox Account License Coverage'),KEEPFILTERS('Mailbox Account License Coverage'[Coverage State]="Observed assignment or other state")),0)),KEEPFILTERS(_missing)),CALCULATE((COALESCE(CALCULATE(COUNTROWS('Mailbox Account License Coverage'),KEEPFILTERS('Mailbox Account License Coverage'[Coverage State]="Observed assignment or other state")),0)),KEEPFILTERS(TREATAS(_ck,'Mailbox Account License Coverage'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Mailbox Account License Coverage'[Backlog AD Domain]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: f4b27604-801f-5a9f-899f-9fc5bc3ade47
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Mailbox Account Coverage Rows' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Mailbox Account License Coverage'[Backlog Country]),NOT _cf || 'Mailbox Account License Coverage'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Mailbox Account License Coverage'[Backlog AD Domain]),NOT _df || 'Mailbox Account License Coverage'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Mailbox Account License Coverage',(_cf && (ISBLANK('Mailbox Account License Coverage'[Backlog Country]) || 'Mailbox Account License Coverage'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Mailbox Account License Coverage'[Backlog AD Domain]) || 'Mailbox Account License Coverage'[Backlog AD Domain]="Unknown")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((COALESCE(COUNTROWS('Mailbox Account License Coverage'),0)),KEEPFILTERS(_missing)),CALCULATE((COALESCE(COUNTROWS('Mailbox Account License Coverage'),0)),KEEPFILTERS(TREATAS(_ck,'Mailbox Account License Coverage'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Mailbox Account License Coverage'[Backlog AD Domain]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 4046a3be-044f-5778-9b05-629f18655fd9
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Mailbox Account Workforce Covered' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Mailbox Account License Coverage'[Backlog Country]),NOT _cf || 'Mailbox Account License Coverage'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Mailbox Account License Coverage'[Backlog AD Domain]),NOT _df || 'Mailbox Account License Coverage'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Mailbox Account License Coverage',(_cf && (ISBLANK('Mailbox Account License Coverage'[Backlog Country]) || 'Mailbox Account License Coverage'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Mailbox Account License Coverage'[Backlog AD Domain]) || 'Mailbox Account License Coverage'[Backlog AD Domain]="Unknown")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((COALESCE(CALCULATE(COUNTROWS('Mailbox Account License Coverage'),KEEPFILTERS('Mailbox Account License Coverage'[Workforce Match State]="Matched")),0)),KEEPFILTERS(_missing)),CALCULATE((COALESCE(CALCULATE(COUNTROWS('Mailbox Account License Coverage'),KEEPFILTERS('Mailbox Account License Coverage'[Workforce Match State]="Matched")),0)),KEEPFILTERS(TREATAS(_ck,'Mailbox Account License Coverage'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Mailbox Account License Coverage'[Backlog AD Domain]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 14edbab6-e75f-5057-bc73-f55250ee7d64
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Mailbox Account Workforce Coverage (%)' = DIVIDE([Mailbox Account Workforce Covered],[Mailbox Account Coverage Denominator])
+		formatString: 0.0%
+		displayFolder: Remediation Backlog
+		lineageTag: 862842f1-e084-5569-94c8-db75dee3d10f
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Mailbox Account Coverage Denominator' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Mailbox Account License Coverage'[Backlog Country]),NOT _cf || 'Mailbox Account License Coverage'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Mailbox Account License Coverage'[Backlog AD Domain]),NOT _df || 'Mailbox Account License Coverage'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Mailbox Account License Coverage',(_cf && (ISBLANK('Mailbox Account License Coverage'[Backlog Country]) || 'Mailbox Account License Coverage'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Mailbox Account License Coverage'[Backlog AD Domain]) || 'Mailbox Account License Coverage'[Backlog AD Domain]="Unknown")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((CALCULATE(COUNTROWS('Mailbox Account License Coverage'),REMOVEFILTERS('Mailbox Account License Coverage'[Coverage State]))),KEEPFILTERS(_missing)),CALCULATE((CALCULATE(COUNTROWS('Mailbox Account License Coverage'),REMOVEFILTERS('Mailbox Account License Coverage'[Coverage State]))),KEEPFILTERS(TREATAS(_ck,'Mailbox Account License Coverage'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Mailbox Account License Coverage'[Backlog AD Domain]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: c1fed11c-50ae-5f8c-9bf4-9cd230da2c5c
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Mailbox Account License Row In Scope' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Mailbox Account License Coverage'[Backlog Country]),NOT _cf || 'Mailbox Account License Coverage'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Mailbox Account License Coverage'[Backlog AD Domain]),NOT _df || 'Mailbox Account License Coverage'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Mailbox Account License Coverage',(_cf && (ISBLANK('Mailbox Account License Coverage'[Backlog Country]) || 'Mailbox Account License Coverage'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Mailbox Account License Coverage'[Backlog AD Domain]) || 'Mailbox Account License Coverage'[Backlog AD Domain]="Unknown")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(COUNTROWS('Mailbox Account License Coverage')>0,1,0)),KEEPFILTERS(_missing)),CALCULATE((IF(COUNTROWS('Mailbox Account License Coverage')>0,1,0)),KEEPFILTERS(TREATAS(_ck,'Mailbox Account License Coverage'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Mailbox Account License Coverage'[Backlog AD Domain]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: ed804423-658a-5f2e-b47e-d15279d68f8e
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Mailbox Account License Unattributable Rows' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Mailbox Account License Coverage'[Backlog Country]),NOT _cf || 'Mailbox Account License Coverage'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Mailbox Account License Coverage'[Backlog AD Domain]),NOT _df || 'Mailbox Account License Coverage'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Mailbox Account License Coverage',(_cf && (ISBLANK('Mailbox Account License Coverage'[Backlog Country]) || 'Mailbox Account License Coverage'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Mailbox Account License Coverage'[Backlog AD Domain]) || 'Mailbox Account License Coverage'[Backlog AD Domain]="Unknown")))
+			RETURN COALESCE(CALCULATE((COUNTROWS('Mailbox Account License Coverage')),KEEPFILTERS(_missing)),0)
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 9cde0347-23a5-5918-80df-135c458840ba
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Mailbox Account Coverage Note' = FORMAT([Mailbox Account Workforce Covered],"#,##0")&" Workforce rows covered | "&FORMAT([Mailbox Account Workforce Coverage (%)],"0.0%")&" | "&FORMAT([Mailbox Account License Unattributable Rows],"#,##0")&" not attributable. Assignment observed is not proof of Exchange entitlement."
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: ea23971b-87e3-54e8-a684-4f44ffb90186
+
+	column TenantKey
+		dataType: string
+		lineageTag: 83deb0f4-bf19-5450-9a68-a3be7e65cd8c
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'Mailbox GUID'
+		dataType: string
+		lineageTag: 21b06928-e5c6-570d-ac0d-7dd1fef5ce18
+		summarizeBy: none
+		sourceColumn: Mailbox GUID
+
+	column 'AD Object GUID'
+		dataType: string
+		lineageTag: b9146c78-7630-54b1-958d-1bc19fdc0e87
+		summarizeBy: none
+		sourceColumn: AD Object GUID
+
+	column 'Account UPN'
+		dataType: string
+		lineageTag: cbbd5200-208e-5942-80ee-ea382edaa62b
+		summarizeBy: none
+		sourceColumn: Account UPN
+
+	column 'Display Name'
+		dataType: string
+		lineageTag: 67b8ee97-4f47-5025-b789-f974178f8a72
+		summarizeBy: none
+		sourceColumn: Display Name
+
+	column 'Coverage State'
+		dataType: string
+		lineageTag: a8f50ee0-6623-5dd5-8656-52d3fc80059e
+		summarizeBy: none
+		sourceColumn: Coverage State
+
+	column 'Native Link State'
+		dataType: string
+		lineageTag: eafc6de9-de41-5c8c-8541-7802b6298c1f
+		summarizeBy: none
+		sourceColumn: Native Link State
+
+	column 'Workforce Match State'
+		dataType: string
+		lineageTag: 4bc06824-4b00-50be-805b-9c5393dd543a
+		summarizeBy: none
+		sourceColumn: Workforce Match State
+
+	column 'Account State'
+		dataType: string
+		lineageTag: 008a62fa-d1bd-51a0-b97d-0f1b927fb506
+		summarizeBy: none
+		sourceColumn: Account State
+
+	column 'Identity Match Status'
+		dataType: string
+		lineageTag: b860789a-7ae8-5d1d-ac5d-fac06f3c2689
+		summarizeBy: none
+		sourceColumn: Identity Match Status
+
+	column 'Has M365 License'
+		dataType: string
+		lineageTag: d63f3711-14c6-5312-ab65-d1cc59c32c1d
+		summarizeBy: none
+		sourceColumn: Has M365 License
+
+	column 'M365 License Count'
+		dataType: int64
+		lineageTag: 1e86fd2f-0fb2-5708-82c1-02b460af629e
+		summarizeBy: none
+		sourceColumn: M365 License Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Backlog Country'
+		dataType: string
+		lineageTag: c93f9cb7-51b6-5d20-9f5b-a34867b53798
+		summarizeBy: none
+		sourceColumn: Backlog Country
+
+	column 'Backlog AD Domain'
+		dataType: string
+		lineageTag: bfb30e20-ea5d-537a-9f51-8335cbf4966b
+		summarizeBy: none
+		sourceColumn: Backlog AD Domain
+
+	column 'Review Action'
+		dataType: string
+		lineageTag: 906a0b4e-b36a-5e86-b79b-c0695f64acc3
+		summarizeBy: none
+		sourceColumn: Review Action
+
+	column 'Loaded Batch ID'
+		dataType: string
+		lineageTag: f6faf0fa-b3a0-5afb-ac87-09abed33bab2
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Mailbox Account License Coverage' = m
+		mode: import
+		source =
+				let
+				 R=CreatePreparedReaders(), K=CreateBacklogTools(R),
+				 Mail=K[Read]("Source-Exchange_OnPrem_Mailboxes_AllDomains.csv",{"TenantKey","ObjectGUID","ExchangeGuid","DisplayName","UserPrincipalName","RecipientType"}),
+				 Local=Table.SelectRows(Mail,each not Text.StartsWith(K[Key]([RecipientType]),"remote")),
+				 A=K[Index](K[Read]("ADUserSource.csv",{"TenantKey","ObjectGUID","CloudMatchStatus","TenantUserKey","Enabled","DomainName"}),"ObjectGUID"),
+				 U=K[Index](K[Read]("DimUser.csv",{"TenantKey","TenantUserKey","SourceUserId"}),"TenantUserKey"),
+				 W=K[Index](K[Read]("UserInventoryEvidence.csv",{"TenantKey","User Source ID","Account State","Identity Match Status","Has M365 License","M365 License Count"}),"User Source ID"),
+				 C=K[Index](K[Read]("AllAccountsEvidence.csv",{"TenantKey","Account Key","Country"}),"Account Key"),
+				 Project=(r as record) as record =>
+				  let AD=K[Match](A,r[TenantKey],r[ObjectGUID],K[Batch]), Native=AD[State]="Matched" and K[Field](AD,"CloudMatchStatus")="Unique native SID",
+				      DU=K[Match](U,r[TenantKey],if Native then K[Field](AD,"TenantUserKey") else null,K[Batch]),
+				      WF=K[Match](W,r[TenantKey],if DU[State]="Matched" then K[Field](DU,"SourceUserId") else null,K[Batch]),
+				      Link=Native and DU[State]="Matched" and K[Key](K[Field](DU,"SourceUserId"))<>"",
+				      Count=try Number.FromText(K[Field](WF,"M365 License Count"),"en-US") otherwise null,
+				      Review=Link and WF[State]="Matched" and K[Key](K[Field](AD,"Enabled"))="true" and K[Field](WF,"Account State")="Enabled" and K[Field](WF,"Identity Match Status")="Matched" and K[Field](WF,"Has M365 License")="No" and Count=0,
+				      State=if not Link then "No usable native link" else if WF[State]<>"Matched" then "No Workforce row" else if Review then "License review" else "Observed assignment or other state",
+				      Co=K[Match](C,r[TenantKey],"ad:"&K[Key](r[ObjectGUID]),K[Batch])
+				  in [TenantKey=r[TenantKey],#"Mailbox GUID"=r[ExchangeGuid],#"AD Object GUID"=r[ObjectGUID],#"Account UPN"=r[UserPrincipalName],#"Display Name"=r[DisplayName],
+				      #"Coverage State"=State,#"Native Link State"=if Native then DU[State] else AD[State]&" / "&(if K[Field](AD,"CloudMatchStatus")=null then "Unqualified" else K[Field](AD,"CloudMatchStatus")),
+				      #"Workforce Match State"=WF[State],#"Account State"=K[Field](WF,"Account State"),#"Identity Match Status"=K[Field](WF,"Identity Match Status"),
+				      #"Has M365 License"=K[Field](WF,"Has M365 License"),#"M365 License Count"=Count,#"Backlog Country"=K[Field](Co,"Country"),#"Backlog AD Domain"=K[Field](AD,"DomainName"),
+				      #"Review Action"=if Review then "Review observed license assignments" else if not Link then "Qualify native AD/cloud link" else if WF[State]<>"Matched" then "Qualify Workforce coverage: "&WF[State] else "Review assignment suitability; no Exchange entitlement inferred"],
+				 Columns={"TenantKey","Mailbox GUID","AD Object GUID","Account UPN","Display Name","Coverage State","Native Link State","Workforce Match State","Account State","Identity Match Status","Has M365 License","M365 License Count","Backlog Country","Backlog AD Domain","Review Action"},
+				 Rows=Table.FromRecords(List.Transform(Table.ToRecords(Local),Project),Columns,MissingField.UseNull)
+				in R[Finish](Table.TransformColumnTypes(Rows, {{"M365 License Count", Int64.Type}}))

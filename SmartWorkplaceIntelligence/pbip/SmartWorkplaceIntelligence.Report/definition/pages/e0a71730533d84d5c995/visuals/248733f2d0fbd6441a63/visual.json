@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "248733f2d0fbd6441a63",
   "position": {
     "x": 1352,
-    "y": 208.0,
-    "width": 248,
+    "y": 120,
+    "z": 24000,
     "height": 107.4,
-    "z": 129,
-    "tabOrder": 129
+    "width": 248,
+    "tabOrder": 19000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -20,15 +20,35 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "License Report Summary"
+                      "Entity": "License User Assignments"
                     }
                   },
-                  "Property": "License Overview Family Assignment Rate Label"
+                  "Property": "Selected Assignment Count Label"
                 }
               },
-              "queryRef": "License Report Summary.License Overview Family Assignment Rate Label",
-              "nativeQueryRef": "Assignment rate",
-              "displayName": "Assignment rate"
+              "queryRef": "License User Assignments.Selected Assignment Count Label",
+              "nativeQueryRef": "Assigned / tenant rate",
+              "displayName": "Assigned / tenant rate"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License User Assignments"
+                    }
+                  },
+                  "Property": "License Scope Explanation"
+                }
+              },
+              "queryRef": "License User Assignments.License Scope Explanation",
+              "nativeQueryRef": "License Scope Explanation",
+              "active": true,
+              "displayName": "License Scope Explanation"
             }
           ]
         }
@@ -41,7 +61,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -55,7 +75,7 @@
             "textWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
@@ -528,10 +548,6 @@
     "filters": [
       {
         "name": "a9754cf5eb615e7d9b55",
-        "type": "Categorical",
-        "howCreated": "User",
-        "isHiddenInViewMode": true,
-        "isLockedInViewMode": true,
         "field": {
           "Column": {
             "Expression": {
@@ -542,6 +558,7 @@
             "Property": "Product"
           }
         },
+        "type": "Categorical",
         "filter": {
           "Version": 2,
           "From": [
@@ -580,7 +597,10 @@
               }
             }
           ]
-        }
+        },
+        "howCreated": "User",
+        "isHiddenInViewMode": true,
+        "isLockedInViewMode": true
       }
     ]
   }

@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "bcbe3916207958d30bfa",
   "position": {
     "x": 968,
-    "y": 379.5,
-    "width": 920,
+    "y": 291.5,
+    "z": 2000,
     "height": 284.8,
-    "z": 115,
+    "width": 920,
     "tabOrder": 684
   },
   "visual": {
@@ -314,7 +314,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Active workforce \u00b7 recorded history'"
+                  "Value": "'Active workforce · recorded history'"
                 }
               }
             },
@@ -491,6 +491,7 @@
     },
     "drillFilterOtherVisuals": true
   },
+  "parentGroupName": "63e3a170de0fa8d0ef14",
   "filterConfig": {
     "filters": [
       {
@@ -559,6 +560,5 @@
         "howCreated": "User"
       }
     ]
-  },
-  "parentGroupName": "63e3a170de0fa8d0ef14"
+  }
 }

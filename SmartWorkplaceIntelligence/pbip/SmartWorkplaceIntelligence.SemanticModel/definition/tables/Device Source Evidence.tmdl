@@ -4,27 +4,39 @@ table 'Device Source Evidence'
 
 	/// Raw Entra and Intune evidence records; multiple records may describe one CMDB device. Migrated without changing the source calculation.
 	measure 'Native Device source records' =
-			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Device Source Evidence'),0)), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (COALESCE(COUNTROWS('Device Source Evidence'),0)))
+			VAR _privateDomainScope = FILTER(ALL('Native Device Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native Device Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native Device Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native Device Evidence'[CountryCode]) || TRIM('Native Device Evidence'[CountryCode])="", "Unknown", 'Native Device Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Device Source Evidence'),0)), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (COALESCE(COUNTROWS('Device Source Evidence'),0)))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 14b9a0bf-4524-4d00-949d-47c12b45a852
 
 	/// Detail rows only when exactly one device is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
 	measure 'Native Device source details' =
-			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence'))), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence'))))
+			VAR _privateDomainScope = FILTER(ALL('Native Device Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native Device Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native Device Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native Device Evidence'[CountryCode]) || TRIM('Native Device Evidence'[CountryCode])="", "Unknown", 'Native Device Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence'))), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (IF(COUNTROWS(ALLSELECTED('Native Device Evidence')) = 1, COUNTROWS('Device Source Evidence'))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 6ef79887-296a-4e3b-b6d7-d938b7d5ac9b
 
 	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Device Source Evidence' =
-			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Device Source Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (COUNTROWS('Device Source Evidence')))
+			VAR _privateDomainScope = FILTER(ALL('Native Device Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native Device Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native Device Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native Device Evidence'[CountryCode]) || TRIM('Native Device Evidence'[CountryCode])="", "Unknown", 'Native Device Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Device Source Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Device Source Evidence'[TenantDeviceKey]))), (COUNTROWS('Device Source Evidence')))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		isHidden
 		lineageTag: 9860615a-dc98-4ed7-8e73-fe09a43b6b92
+
+	/// Read-only report utility applying the disconnected primary-user selector to source-qualified device rows.
+	measure 'Primary user row match · Device Source Evidence' = VAR PresentRows = IF(ISFILTERED('Primary User Selection'[Primary user]), CALCULATE(COUNTROWS('Device Source Evidence'), KEEPFILTERS(TREATAS(VALUES('Primary User Selection'[Primary user]), 'Device Source Evidence'[Primary User (report)]))), COUNTROWS('Device Source Evidence')) RETURN IF(PresentRows>0,1,BLANK())
+		formatString: 0
+		isHidden
+		lineageTag: af0fb193-c622-44c8-a437-0125b24a634e
 
 	/// Native DeviceSource attribute; source qualification is retained.
 	column TenantKey
@@ -196,6 +208,73 @@ table 'Device Source Evidence'
 		lineageTag: cb26b836-865f-4e00-b8f5-950be678bf03
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
+
+	/// Observed primary user, exact source ID and tenant/batch matching only; used by the report search.
+	column 'Primary User (report)' =
+			VAR _t='Device Source Evidence'[TenantKey]
+			VAR _b='Device Source Evidence'[Loaded Batch ID]
+			VAR _gkey='Device Source Evidence'[TenantDeviceKey]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Source Evidence'[SourceDeviceId],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Source Evidence'[SourceDeviceId]))
+			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 19eb14db-54c7-49a7-bacf-c661e41bdf12
+
+	/// Qualified SAM of the primary user; never inferred from UPN text.
+	column 'Primary User SAM (report)' =
+			VAR _t='Device Source Evidence'[TenantKey]
+			VAR _b='Device Source Evidence'[Loaded Batch ID]
+			VAR _gkey='Device Source Evidence'[TenantDeviceKey]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Source Evidence'[SourceDeviceId],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Source Evidence'[SourceDeviceId]))
+			VAR _upn=COALESCE(BLANK(),IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 7a144f09-c875-4bcb-a01d-b84b397b1405
+
+	/// Last Windows console user observed at collection. Does not mean current user or last RDP session.
+	column 'Last Console User (report)' =
+			VAR _t='Device Source Evidence'[TenantKey]
+			VAR _b='Device Source Evidence'[Loaded Batch ID]
+			VAR _gkey='Device Source Evidence'[TenantDeviceKey]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Source Evidence'[SourceDeviceId],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Source Evidence'[SourceDeviceId]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 94ff4ba6-b621-4fb0-953a-cae20ba6ec69
+
+	/// Source-qualified time of last observed console logon; unknown remains blank.
+	column 'Last Console Logon UTC (report)' =
+			VAR _t='Device Source Evidence'[TenantKey]
+			VAR _b='Device Source Evidence'[Loaded Batch ID]
+			VAR _gkey='Device Source Evidence'[TenantDeviceKey]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Source Evidence'[SourceDeviceId],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Source Evidence'[SourceDeviceId]))
+			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm
+		displayFolder: Report identity context
+		lineageTag: dd3e163b-635c-49b1-99ad-1c47c01a2bcc
+
+	/// Preserves source status and timestamp qualification, including stale/missing/error evidence.
+	column 'Console Logon Qualification (report)' =
+			VAR _t='Device Source Evidence'[TenantKey]
+			VAR _b='Device Source Evidence'[Loaded Batch ID]
+			VAR _gkey='Device Source Evidence'[TenantDeviceKey]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Native Device Key],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Source Evidence'[SourceDeviceId],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Source Evidence'[SourceDeviceId]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _quality=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Quality],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(ISBLANK(_status),"No matched system observation",_status&" · "&_quality)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: ab06d6d4-9baa-4c88-89e5-bfaa8d3601ea
 
 	partition 'Device Source Evidence' = m
 		mode: import

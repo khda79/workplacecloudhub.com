@@ -14,7 +14,32 @@
       "642d582e2c0a83676964",
       "5b16b9433a9e31c23b55",
       "295e5fe6ebd860a63e0a",
-      "90ee4da2ad044ee08d00"
+      "90ee4da2ad044ee08d00",
+      "5da3e50f0b543436d31a",
+      "9e90a5dfdc492a54fd17",
+      "4d1317266f2788c301d6",
+      "1f74aedc43c1e48a5135",
+      "821acf0eed3d7b6d9b53",
+      "8c7774e319be2afcdae3",
+      "606bc6b7127d4d6e9892",
+      "f35638a5395cbff4978a",
+      "b5e39ae071ed5efc4035",
+      "7a4441ed4432dcae74b3",
+      "1a78da0782ecd2a265be",
+      "27e7a2b7f5d5f3ecd067",
+      "4663de19ec7a533d6cf7",
+      "b95807ef714077aed7d1",
+      "1a4df3f29d5e39d00526",
+      "655d538818875582d660",
+      "ddaa33dd04781416c577",
+      "2e5242a6586ab8605f9a",
+      "56f9557ce036425646d4",
+      "5e78458a8d21aa2d2f95",
+      "a469aeda522717bfd4f1",
+      "ac7dec5a8c92433aaf44",
+      "ef4950b36265561256ab",
+      "f5d164303d61b4667406",
+      "77309128895b57b4f38d"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -24,7 +49,132 @@
     "activeSection": "licensereportoverview",
     "sections": {
       "licensereportoverview": {
-        "visualContainers": {},
+        "visualContainers": {
+          "5da3e50f0b543436d31a": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "9e90a5dfdc492a54fd17": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "4d1317266f2788c301d6": {
+            "singleVisual": {}
+          },
+          "1f74aedc43c1e48a5135": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "821acf0eed3d7b6d9b53": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "8c7774e319be2afcdae3": {
+            "singleVisual": {}
+          },
+          "606bc6b7127d4d6e9892": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "f35638a5395cbff4978a": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "b5e39ae071ed5efc4035": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "7a4441ed4432dcae74b3": {
+            "singleVisual": {}
+          },
+          "1a78da0782ecd2a265be": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "27e7a2b7f5d5f3ecd067": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "4663de19ec7a533d6cf7": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "b95807ef714077aed7d1": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "1a4df3f29d5e39d00526": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "655d538818875582d660": {
+            "singleVisual": {}
+          },
+          "2e5242a6586ab8605f9a": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "56f9557ce036425646d4": {
+            "singleVisual": {}
+          },
+          "5e78458a8d21aa2d2f95": {
+            "singleVisual": {}
+          },
+          "a469aeda522717bfd4f1": {
+            "singleVisual": {}
+          },
+          "ac7dec5a8c92433aaf44": {
+            "singleVisual": {}
+          },
+          "ef4950b36265561256ab": {
+            "singleVisual": {}
+          },
+          "f5d164303d61b4667406": {
+            "singleVisual": {}
+          },
+          "77309128895b57b4f38d": {
+            "singleVisual": {}
+          }
+        },
         "visualContainerGroups": {
           "2e0e38071010aadde6c5": {
             "isHidden": true
@@ -54,6 +204,9 @@
             "isHidden": true
           },
           "90ee4da2ad044ee08d00": {
+            "isHidden": true
+          },
+          "ddaa33dd04781416c577": {
             "isHidden": true
           }
         }

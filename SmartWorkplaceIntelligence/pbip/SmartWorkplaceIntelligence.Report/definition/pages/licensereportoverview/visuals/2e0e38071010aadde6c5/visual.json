@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "2e0e38071010aadde6c5",
   "position": {
     "x": 0,
     "y": 0,
-    "width": 1920,
+    "z": 7000,
     "height": 1080,
-    "z": 4,
-    "tabOrder": 4
+    "width": 1920,
+    "tabOrder": 7000
   },
   "visualGroup": {
     "displayName": "Activity & overlap",

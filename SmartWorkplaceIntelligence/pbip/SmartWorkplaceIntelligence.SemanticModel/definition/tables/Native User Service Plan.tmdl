@@ -4,24 +4,30 @@ table 'Native User Service Plan'
 
 	/// Observed user and service-plan assignment rows; this is entitlement configuration, not usage. Migrated without changing the source calculation.
 	measure 'Native User service plan rows' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native User Service Plan'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (COALESCE(COUNTROWS('Native User Service Plan'),0)))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native User Service Plan'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (COALESCE(COUNTROWS('Native User Service Plan'),0)))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 903a5f5f-b7ae-4829-b1f7-12a78f6cdfad
 
 	/// User service-plan rows explicitly enabled in the collection. Migrated without changing the source calculation.
 	measure 'Native Enabled user service plan rows' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (CALCULATE([Native User service plan rows],KEEPFILTERS('Native User Service Plan'[IsEnabled] = "True"))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 19fa3995-e587-4ca8-8860-54244310f67c
 
 	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native User Service Plan' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native User Service Plan')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (COUNTROWS('Native User Service Plan')))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native User Service Plan')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native User Service Plan'[TenantUserKey]))), (COUNTROWS('Native User Service Plan')))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		isHidden
 		lineageTag: b67d253e-fdec-4fb4-b097-307be440c650

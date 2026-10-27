@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "2deaaa6e19cfaf1c259b",
   "position": {
     "x": 32,
-    "y": 744,
-    "z": 12000,
-    "height": 256,
+    "y": 690.24911032028467,
+    "z": 0,
+    "height": 309.75088967971533,
     "width": 1856,
-    "tabOrder": 12000
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "tableEx",
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Exchange On-prem Infrastructure.Server Name",
-              "nativeQueryRef": "Server Name"
+              "nativeQueryRef": "Server Name",
+              "active": true
             },
             {
               "field": {
@@ -41,7 +42,8 @@
                 }
               },
               "queryRef": "Exchange On-prem Infrastructure.Dataset",
-              "nativeQueryRef": "Dataset"
+              "nativeQueryRef": "Dataset",
+              "active": true
             },
             {
               "field": {
@@ -55,7 +57,8 @@
                 }
               },
               "queryRef": "Exchange On-prem Infrastructure.Attribute",
-              "nativeQueryRef": "Attribute"
+              "nativeQueryRef": "Attribute",
+              "active": true
             },
             {
               "field": {
@@ -69,7 +72,8 @@
                 }
               },
               "queryRef": "Exchange On-prem Infrastructure.Value",
-              "nativeQueryRef": "Value"
+              "nativeQueryRef": "Value",
+              "active": true
             },
             {
               "field": {
@@ -83,7 +87,8 @@
                 }
               },
               "queryRef": "Exchange On-prem Infrastructure.Collection Status",
-              "nativeQueryRef": "Collection Status"
+              "nativeQueryRef": "Collection Status",
+              "active": true
             },
             {
               "field": {
@@ -97,7 +102,8 @@
                 }
               },
               "queryRef": "Exchange On-prem Infrastructure.Source Row Key",
-              "nativeQueryRef": "Source Row Key"
+              "nativeQueryRef": "Source Row Key",
+              "active": true
             }
           ]
         }
@@ -107,14 +113,28 @@
       "columnHeaders": [
         {
           "properties": {
-            "columnAdjustment": {
+            "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
-                  "Value": "'fitToContent'"
+                  "Value": "true"
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -144,30 +164,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
                 }
               }
             },
-            "bold": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "defaultColumnWidth": {
-              "expr": {
-                "Literal": {
-                  "Value": "90D"
+                  "Value": "'Center'"
                 }
               }
             }
@@ -258,89 +264,216 @@
           }
         }
       ],
-      "columnWidth": [
+      "columnWidth": [],
+      "columnFormatting": [
         {
-          "properties": {
-            "value": {
-              "expr": {
-                "Literal": {
-                  "Value": "170D"
-                }
-              }
-            }
-          },
           "selector": {
             "metadata": "Exchange On-prem Infrastructure.Server Name"
-          }
-        },
-        {
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "170D"
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
             "metadata": "Exchange On-prem Infrastructure.Dataset"
-          }
-        },
-        {
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "220D"
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
             "metadata": "Exchange On-prem Infrastructure.Attribute"
-          }
-        },
-        {
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "550D"
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
             "metadata": "Exchange On-prem Infrastructure.Value"
-          }
-        },
-        {
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "180D"
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
             "metadata": "Exchange On-prem Infrastructure.Collection Status"
-          }
-        },
-        {
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "350D"
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
             "metadata": "Exchange On-prem Infrastructure.Source Row Key"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
           }
         }
       ]
@@ -472,7 +605,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

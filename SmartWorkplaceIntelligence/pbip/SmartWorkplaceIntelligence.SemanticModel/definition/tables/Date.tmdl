@@ -92,7 +92,7 @@ table Date
 		dataType: dateTime
 		formatString: yyyy-MM-dd
 		displayFolder: Migration calendar
-		lineageTag: c6de11a2-30fd-4386-bbfe-ae02adad89b2
+		lineageTag: a19b1ff5-b156-4d6d-b7df-2a04da197b08
 		summarizeBy: none
 
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
@@ -141,3 +141,5 @@ table Date
 				    Reordered)
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

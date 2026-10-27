@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "ea1bf9caf7573e53354d",
   "position": {
     "x": 600,
-    "y": 587.4,
-    "z": 161,
-    "height": 400.8,
+    "y": 431.28618889416236,
+    "z": 1000,
+    "height": 568.71381110583764,
     "width": 1264,
-    "tabOrder": 161
+    "tabOrder": 1000
   },
   "visual": {
     "visualType": "tableEx",
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "SharePoint On-prem Site Collections.Site URL",
-              "nativeQueryRef": "Site URL"
+              "nativeQueryRef": "Site URL",
+              "active": true
             },
             {
               "field": {
@@ -42,7 +43,8 @@
               },
               "queryRef": "SharePoint On-prem Site Collections.Primary Owner Display",
               "nativeQueryRef": "Primary Owner",
-              "displayName": "Primary Owner"
+              "displayName": "Primary Owner",
+              "active": true
             },
             {
               "field": {
@@ -57,7 +59,8 @@
               },
               "queryRef": "SharePoint On-prem Site Collections.Secondary Owner Display",
               "nativeQueryRef": "Secondary Owner",
-              "displayName": "Secondary Owner"
+              "displayName": "Secondary Owner",
+              "active": true
             },
             {
               "field": {
@@ -71,7 +74,8 @@
                 }
               },
               "queryRef": "SharePoint On-prem Site Collections.Lock State",
-              "nativeQueryRef": "Lock State"
+              "nativeQueryRef": "Lock State",
+              "active": true
             },
             {
               "field": {
@@ -85,7 +89,8 @@
                 }
               },
               "queryRef": "SharePoint On-prem Site Collections.Lock Issue Display",
-              "nativeQueryRef": "Lock Issue Display"
+              "nativeQueryRef": "Lock Issue Display",
+              "active": true
             }
           ]
         }
@@ -112,14 +117,28 @@
       "columnHeaders": [
         {
           "properties": {
-            "columnAdjustment": {
+            "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
-                  "Value": "'fitToContent'"
+                  "Value": "true"
                 }
               }
             },
-            "autoSizeColumnWidth": {
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -149,30 +168,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
                 }
               }
             },
-            "bold": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "defaultColumnWidth": {
-              "expr": {
-                "Literal": {
-                  "Value": "90D"
+                  "Value": "'Center'"
                 }
               }
             }
@@ -263,75 +268,181 @@
           }
         }
       ],
-      "columnWidth": [
+      "columnWidth": [],
+      "columnFormatting": [
         {
-          "properties": {
-            "value": {
-              "expr": {
-                "Literal": {
-                  "Value": "360D"
-                }
-              }
-            }
-          },
           "selector": {
             "metadata": "SharePoint On-prem Site Collections.Site URL"
-          }
-        },
-        {
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "240D"
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
             "metadata": "SharePoint On-prem Site Collections.Primary Owner Display"
-          }
-        },
-        {
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "240D"
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
             "metadata": "SharePoint On-prem Site Collections.Secondary Owner Display"
-          }
-        },
-        {
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "120D"
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
             "metadata": "SharePoint On-prem Site Collections.Lock State"
-          }
-        },
-        {
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "210D"
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
             "metadata": "SharePoint On-prem Site Collections.Lock Issue Display"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
           }
         }
       ]
@@ -470,7 +581,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

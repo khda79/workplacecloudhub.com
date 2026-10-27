@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "17786cd58cd983e32354",
   "position": {
     "x": 32,
-    "y": 521.9,
-    "width": 1856,
+    "y": 438.4,
+    "z": 0,
     "height": 472.2,
-    "z": 12000,
-    "tabOrder": 544
+    "width": 1856,
+    "tabOrder": 5000
   },
   "visual": {
     "visualType": "tableEx",
@@ -23,39 +23,12 @@
                       "Entity": "AD Domain Evidence"
                     }
                   },
-                  "Property": "TenantADDomainKey"
-                }
-              },
-              "queryRef": "AD Domain Evidence.TenantADDomainKey",
-              "nativeQueryRef": "TenantADDomainKey"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "AD Domain Evidence"
-                    }
-                  },
                   "Property": "DNSRoot"
                 }
               },
               "queryRef": "AD Domain Evidence.DNSRoot",
-              "nativeQueryRef": "DNSRoot"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "AD Domain Evidence"
-                    }
-                  },
-                  "Property": "DomainSID"
-                }
-              },
-              "queryRef": "AD Domain Evidence.DomainSID",
-              "nativeQueryRef": "DomainSID"
+              "nativeQueryRef": "DNSRoot",
+              "active": true
             },
             {
               "field": {
@@ -69,7 +42,8 @@
                 }
               },
               "queryRef": "AD Domain Evidence.NetBIOSName",
-              "nativeQueryRef": "NetBIOSName"
+              "nativeQueryRef": "NetBIOSName",
+              "active": true
             },
             {
               "field": {
@@ -83,7 +57,8 @@
                 }
               },
               "queryRef": "AD Domain Evidence.Forest",
-              "nativeQueryRef": "Forest"
+              "nativeQueryRef": "Forest",
+              "active": true
             },
             {
               "field": {
@@ -97,7 +72,8 @@
                 }
               },
               "queryRef": "AD Domain Evidence.DistinguishedName",
-              "nativeQueryRef": "DistinguishedName"
+              "nativeQueryRef": "DistinguishedName",
+              "active": true
             },
             {
               "field": {
@@ -111,7 +87,8 @@
                 }
               },
               "queryRef": "AD Domain Evidence.DomainMode",
-              "nativeQueryRef": "DomainMode"
+              "nativeQueryRef": "DomainMode",
+              "active": true
             },
             {
               "field": {
@@ -125,7 +102,8 @@
                 }
               },
               "queryRef": "AD Domain Evidence.PDCEmulator",
-              "nativeQueryRef": "PDCEmulator"
+              "nativeQueryRef": "PDCEmulator",
+              "active": true
             },
             {
               "field": {
@@ -139,7 +117,8 @@
                 }
               },
               "queryRef": "AD Domain Evidence.RIDMaster",
-              "nativeQueryRef": "RIDMaster"
+              "nativeQueryRef": "RIDMaster",
+              "active": true
             },
             {
               "field": {
@@ -153,7 +132,8 @@
                 }
               },
               "queryRef": "AD Domain Evidence.InfrastructureMaster",
-              "nativeQueryRef": "InfrastructureMaster"
+              "nativeQueryRef": "InfrastructureMaster",
+              "active": true
             },
             {
               "field": {
@@ -167,7 +147,38 @@
                 }
               },
               "queryRef": "AD Domain Evidence.SourceCollectedDateTime",
-              "nativeQueryRef": "SourceCollectedDateTime"
+              "nativeQueryRef": "SourceCollectedDateTime",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Domain Evidence"
+                    }
+                  },
+                  "Property": "TenantADDomainKey"
+                }
+              },
+              "queryRef": "AD Domain Evidence.TenantADDomainKey",
+              "nativeQueryRef": "TenantADDomainKey",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "AD Domain Evidence"
+                    }
+                  },
+                  "Property": "DomainSID"
+                }
+              },
+              "queryRef": "AD Domain Evidence.DomainSID",
+              "nativeQueryRef": "DomainSID",
+              "active": true
             },
             {
               "field": {
@@ -181,7 +192,8 @@
                 }
               },
               "queryRef": "AD Domain Evidence.TenantKey",
-              "nativeQueryRef": "TenantKey"
+              "nativeQueryRef": "TenantKey",
+              "active": true
             },
             {
               "field": {
@@ -195,7 +207,8 @@
                 }
               },
               "queryRef": "AD Domain Evidence.OrganizationKey",
-              "nativeQueryRef": "OrganizationKey"
+              "nativeQueryRef": "OrganizationKey",
+              "active": true
             },
             {
               "field": {
@@ -209,7 +222,8 @@
                 }
               },
               "queryRef": "AD Domain Evidence.EnvironmentKey",
-              "nativeQueryRef": "EnvironmentKey"
+              "nativeQueryRef": "EnvironmentKey",
+              "active": true
             },
             {
               "field": {
@@ -223,7 +237,8 @@
                 }
               },
               "queryRef": "AD Domain Evidence.TenantId",
-              "nativeQueryRef": "TenantId"
+              "nativeQueryRef": "TenantId",
+              "active": true
             }
           ]
         }
@@ -233,13 +248,6 @@
       "columnHeaders": [
         {
           "properties": {
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -251,6 +259,20 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -277,9 +299,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -362,7 +391,535 @@
             }
           }
         }
-      ]
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.DNSRoot"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.NetBIOSName"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.Forest"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.DistinguishedName"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.DomainMode"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.PDCEmulator"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.RIDMaster"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.InfrastructureMaster"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.SourceCollectedDateTime"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.TenantADDomainKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.DomainSID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.TenantKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.OrganizationKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.EnvironmentKey"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "AD Domain Evidence.TenantId"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -371,7 +928,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD Domain \u00b7 complete governed fields'"
+                  "Value": "'AD Domain · complete governed fields'"
                 }
               }
             }
@@ -391,7 +948,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'AD Domain \u00b7 complete governed fields'"
+                  "Value": "'AD Domain · complete governed fields'"
                 }
               }
             },
@@ -480,7 +1037,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -562,7 +1126,7 @@
                 "Entity": "AD Domain Evidence"
               }
             },
-            "Property": "Native Context Rows \u00b7 AD Domain Evidence"
+            "Property": "Native Context Rows · AD Domain Evidence"
           }
         },
         "type": "Advanced",
@@ -587,7 +1151,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows \u00b7 AD Domain Evidence"
+                      "Property": "Native Context Rows · AD Domain Evidence"
                     }
                   },
                   "Right": {

@@ -2,10 +2,10 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
   "name": "3e350d0f0dbd7f8a009b",
   "position": {
-    "x": 32,
-    "y": 379.5,
-    "width": 1856,
-    "height": 614.6,
+    "x": 336,
+    "y": 584,
+    "width": 1552,
+    "height": 432,
     "z": 110,
     "tabOrder": 677
   },
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "User Principal Name"
                 }
               },
-              "queryRef": "User Inventory Evidence.User Principal Name",
+              "queryRef": "Account Explorer Inventory.User Principal Name",
               "nativeQueryRef": "User"
             },
             {
@@ -34,13 +34,27 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "SAM Account Name"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.SAM Account Name",
+              "nativeQueryRef": "SAM Account Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Display Name"
                 }
               },
-              "queryRef": "User Inventory Evidence.Display Name",
+              "queryRef": "Account Explorer Inventory.Display Name",
               "nativeQueryRef": "Display Name"
             },
             {
@@ -48,13 +62,153 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "AD Account State"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.AD Account State",
+              "nativeQueryRef": "AD Account State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Entra Account State"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Entra Account State",
+              "nativeQueryRef": "Entra Account State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Account Type"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Account Type",
+              "nativeQueryRef": "Account Type"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Account Population"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Account Population",
+              "nativeQueryRef": "Account Population"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Workforce Persona"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Workforce Persona",
+              "nativeQueryRef": "Workforce Persona"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Persona Classification Source"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Persona Classification Source",
+              "nativeQueryRef": "Persona Classification Source"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Persona Match State"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Persona Match State",
+              "nativeQueryRef": "Persona Match State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Persona Matched Keywords"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Persona Matched Keywords",
+              "nativeQueryRef": "Persona Matched Keywords"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Job Title"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Job Title",
+              "nativeQueryRef": "Job Title"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Job Title Evidence State"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Job Title Evidence State",
+              "nativeQueryRef": "Job Title Evidence State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Department"
                 }
               },
-              "queryRef": "User Inventory Evidence.Department",
+              "queryRef": "Account Explorer Inventory.Department",
               "nativeQueryRef": "Department"
             },
             {
@@ -62,13 +216,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Manager"
                 }
               },
-              "queryRef": "User Inventory Evidence.Manager",
+              "queryRef": "Account Explorer Inventory.Manager",
               "nativeQueryRef": "Manager"
             },
             {
@@ -76,13 +230,97 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Site Type"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Site Type",
+              "nativeQueryRef": "Site Type"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Directory Site Code"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Directory Site Code",
+              "nativeQueryRef": "Directory Site Code"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Site Match State"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Site Match State",
+              "nativeQueryRef": "Site Match State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Country",
+              "nativeQueryRef": "Country"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "AD Domain"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.AD Domain",
+              "nativeQueryRef": "AD Domain"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Account Classification Rule Version"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Account Classification Rule Version",
+              "nativeQueryRef": "Account Classification Rule Version"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Activity State"
                 }
               },
-              "queryRef": "User Inventory Evidence.Activity State",
+              "queryRef": "Account Explorer Inventory.Activity State",
               "nativeQueryRef": "Activity State"
             },
             {
@@ -90,13 +328,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Days Since Last Activity"
                 }
               },
-              "queryRef": "User Inventory Evidence.Days Since Last Activity",
+              "queryRef": "Account Explorer Inventory.Days Since Last Activity",
               "nativeQueryRef": "Days Since Last Activity"
             },
             {
@@ -104,13 +342,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Last Activity Date"
                 }
               },
-              "queryRef": "User Inventory Evidence.Last Activity Date",
+              "queryRef": "Account Explorer Inventory.Last Activity Date",
               "nativeQueryRef": "Last Activity Date"
             },
             {
@@ -118,13 +356,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Last Activity Workload"
                 }
               },
-              "queryRef": "User Inventory Evidence.Last Activity Workload",
+              "queryRef": "Account Explorer Inventory.Last Activity Workload",
               "nativeQueryRef": "Last Activity Workload"
             },
             {
@@ -132,13 +370,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Identity Match Status"
                 }
               },
-              "queryRef": "User Inventory Evidence.Identity Match Status",
+              "queryRef": "Account Explorer Inventory.Identity Match Status",
               "nativeQueryRef": "Identity Match Status"
             },
             {
@@ -146,13 +384,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "M365 License Count"
                 }
               },
-              "queryRef": "User Inventory Evidence.M365 License Count",
+              "queryRef": "Account Explorer Inventory.M365 License Count",
               "nativeQueryRef": "M365 License Count"
             },
             {
@@ -160,13 +398,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Attention Priority"
                 }
               },
-              "queryRef": "User Inventory Evidence.Attention Priority",
+              "queryRef": "Account Explorer Inventory.Attention Priority",
               "nativeQueryRef": "Attention Priority"
             },
             {
@@ -174,13 +412,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "AD Password Expired"
                 }
               },
-              "queryRef": "User Inventory Evidence.AD Password Expired",
+              "queryRef": "Account Explorer Inventory.AD Password Expired",
               "nativeQueryRef": "AD Password Expired",
               "displayName": "AD Password Expired"
             },
@@ -189,13 +427,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "AD Password Expiry Status"
                 }
               },
-              "queryRef": "User Inventory Evidence.AD Password Expiry Status",
+              "queryRef": "Account Explorer Inventory.AD Password Expiry Status",
               "nativeQueryRef": "AD Password Expiry Status",
               "displayName": "AD Password Expiry Status"
             },
@@ -204,13 +442,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "AD Created (source)"
                 }
               },
-              "queryRef": "User Inventory Evidence.AD Created (source)",
+              "queryRef": "Account Explorer Inventory.AD Created (source)",
               "nativeQueryRef": "AD Created (source)",
               "displayName": "AD Created (source)"
             },
@@ -219,13 +457,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "AD Creation Qualification"
                 }
               },
-              "queryRef": "User Inventory Evidence.AD Creation Qualification",
+              "queryRef": "Account Explorer Inventory.AD Creation Qualification",
               "nativeQueryRef": "AD Creation Qualification",
               "displayName": "AD Creation Qualification"
             },
@@ -234,13 +472,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Entra Created (source)"
                 }
               },
-              "queryRef": "User Inventory Evidence.Entra Created (source)",
+              "queryRef": "Account Explorer Inventory.Entra Created (source)",
               "nativeQueryRef": "Entra Created (source)",
               "displayName": "Entra Created (source)"
             },
@@ -249,13 +487,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Entra Creation Qualification"
                 }
               },
-              "queryRef": "User Inventory Evidence.Entra Creation Qualification",
+              "queryRef": "Account Explorer Inventory.Entra Creation Qualification",
               "nativeQueryRef": "Entra Creation Qualification",
               "displayName": "Entra Creation Qualification"
             },
@@ -264,13 +502,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "AD Modified (source)"
                 }
               },
-              "queryRef": "User Inventory Evidence.AD Modified (source)",
+              "queryRef": "Account Explorer Inventory.AD Modified (source)",
               "nativeQueryRef": "AD Modified (source)",
               "displayName": "AD Modified (source)"
             },
@@ -279,13 +517,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "AD Modification Qualification"
                 }
               },
-              "queryRef": "User Inventory Evidence.AD Modification Qualification",
+              "queryRef": "Account Explorer Inventory.AD Modification Qualification",
               "nativeQueryRef": "AD Modification Qualification",
               "displayName": "AD Modification Qualification"
             },
@@ -294,13 +532,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Entra Modified (source)"
                 }
               },
-              "queryRef": "User Inventory Evidence.Entra Modified (source)",
+              "queryRef": "Account Explorer Inventory.Entra Modified (source)",
               "nativeQueryRef": "Entra Modified (source)",
               "displayName": "Entra Modified (source)"
             },
@@ -309,15 +547,57 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Entra Modification Qualification"
                 }
               },
-              "queryRef": "User Inventory Evidence.Entra Modification Qualification",
+              "queryRef": "Account Explorer Inventory.Entra Modification Qualification",
               "nativeQueryRef": "Entra Modification Qualification",
               "displayName": "Entra Modification Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "License Products"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.License Products",
+              "nativeQueryRef": "License Products"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "License Count"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.License Count",
+              "nativeQueryRef": "License Count"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Account Explorer Inventory"
+                    }
+                  },
+                  "Property": "Account Key"
+                }
+              },
+              "queryRef": "Account Explorer Inventory.Account Key",
+              "nativeQueryRef": "Account Key"
             }
           ]
         }
@@ -381,6 +661,13 @@
                       "Value": "'#215E9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -483,7 +770,7 @@
             }
           },
           "selector": {
-            "metadata": "User Inventory Evidence.AD Password Expired"
+            "metadata": "Account Explorer Inventory.AD Password Expired"
           }
         },
         {
@@ -497,7 +784,7 @@
             }
           },
           "selector": {
-            "metadata": "User Inventory Evidence.AD Password Expiry Status"
+            "metadata": "Account Explorer Inventory.AD Password Expiry Status"
           }
         },
         {
@@ -511,7 +798,7 @@
             }
           },
           "selector": {
-            "metadata": "User Inventory Evidence.AD Created (source)"
+            "metadata": "Account Explorer Inventory.AD Created (source)"
           }
         },
         {
@@ -525,7 +812,7 @@
             }
           },
           "selector": {
-            "metadata": "User Inventory Evidence.AD Creation Qualification"
+            "metadata": "Account Explorer Inventory.AD Creation Qualification"
           }
         },
         {
@@ -539,7 +826,7 @@
             }
           },
           "selector": {
-            "metadata": "User Inventory Evidence.Entra Created (source)"
+            "metadata": "Account Explorer Inventory.Entra Created (source)"
           }
         },
         {
@@ -553,7 +840,7 @@
             }
           },
           "selector": {
-            "metadata": "User Inventory Evidence.Entra Creation Qualification"
+            "metadata": "Account Explorer Inventory.Entra Creation Qualification"
           }
         },
         {
@@ -567,7 +854,7 @@
             }
           },
           "selector": {
-            "metadata": "User Inventory Evidence.AD Modified (source)"
+            "metadata": "Account Explorer Inventory.AD Modified (source)"
           }
         },
         {
@@ -581,7 +868,7 @@
             }
           },
           "selector": {
-            "metadata": "User Inventory Evidence.AD Modification Qualification"
+            "metadata": "Account Explorer Inventory.AD Modification Qualification"
           }
         },
         {
@@ -595,7 +882,7 @@
             }
           },
           "selector": {
-            "metadata": "User Inventory Evidence.Entra Modified (source)"
+            "metadata": "Account Explorer Inventory.Entra Modified (source)"
           }
         },
         {
@@ -609,7 +896,1444 @@
             }
           },
           "selector": {
-            "metadata": "User Inventory Evidence.Entra Modification Qualification"
+            "metadata": "Account Explorer Inventory.Entra Modification Qualification"
+          }
+        }
+      ],
+      "columnFormatting": [
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.User Principal Name"
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.SAM Account Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Display Name"
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.AD Account State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Entra Account State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Account Type"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Account Population"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Workforce Persona"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Persona Classification Source"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Persona Match State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Persona Matched Keywords"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Job Title"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Job Title Evidence State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Department"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Manager"
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Site Type"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Directory Site Code"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Site Match State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Country"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.AD Domain"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Account Classification Rule Version"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Activity State"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Days Since Last Activity"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Last Activity Date"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Last Activity Workload"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Identity Match Status"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.M365 License Count"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Attention Priority"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.AD Password Expired"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.AD Password Expiry Status"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.AD Created (source)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.AD Creation Qualification"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Entra Created (source)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Entra Creation Qualification"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.AD Modified (source)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.AD Modification Qualification"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Entra Modified (source)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Account Explorer Inventory.Entra Modification Qualification"
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.License Products"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.License Count"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Account Explorer Inventory.Account Key"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
           }
         }
       ]
@@ -621,7 +2345,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Classification context \u00b7 selected evidence'"
+                  "Value": "'Classification context · selected evidence'"
                 }
               }
             }
@@ -641,7 +2365,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Classification context \u00b7 selected evidence'"
+                  "Value": "'Account classification · persona, job and site evidence'"
                 }
               }
             },
@@ -741,7 +2465,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -798,5 +2529,58 @@
     },
     "drillFilterOtherVisuals": true
   },
-  "parentGroupName": "5317b03cc5f50ec97842"
+  "parentGroupName": "5317b03cc5f50ec97842",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "f68bd3aeb0edbe0ac289",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Account Explorer Inventory"
+              }
+            },
+            "Property": "Account Inventory Row In Scope"
+          }
+        },
+        "type": "Advanced",
+        "howCreated": "User",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "i",
+              "Entity": "Account Explorer Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 0,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "i"
+                        }
+                      },
+                      "Property": "Account Inventory Row In Scope"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "1L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
 }

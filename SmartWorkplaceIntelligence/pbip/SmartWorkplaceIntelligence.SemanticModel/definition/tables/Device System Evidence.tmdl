@@ -3,403 +3,742 @@ table 'Device System Evidence'
 	lineageTag: a284d322-eda3-4fad-bdaa-615f03c2f099
 
 	/// Unique tenant/device identities in the prepared LocalSystem source, including 12 observations unmatched to the older prepared inventory at the audited checkpoint. Not the full AD + Intune estate.
-	measure 'Device System Observations' = COALESCE(DISTINCTCOUNT('Device System Evidence'[Device System Key]), 0)
+	measure 'Device System Observations' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((COALESCE(DISTINCTCOUNT('Device System Evidence'[Device System Key]), 0)),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(COALESCE(DISTINCTCOUNT('Device System Evidence'[Device System Key]), 0)))
 		formatString: #,##0
 		displayFolder: Device System
 		lineageTag: 15bec58d-37a8-4dce-b738-79c3bec25fb1
 
 	/// Reported Windows registration state for the configured antivirus product. Does not prove EDR presence, health, or current coverage. Missing, unknown and error states are separate.
-	measure 'Expected AV Detected' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "Detected"))
+	measure 'Expected AV Detected' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "Detected"))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "Detected"))))
 		formatString: #,##0
 		displayFolder: Device System\Antivirus
 		lineageTag: 0f719ced-5dfd-4dfe-a639-1475aa96b4c1
 
 	/// Reported Windows registration state for the configured antivirus product. Does not prove EDR presence, health, or current coverage. Missing, unknown and error states are separate.
-	measure 'Expected AV NotDetected' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "NotDetected"))
+	measure 'Expected AV NotDetected' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "NotDetected"))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "NotDetected"))))
 		formatString: #,##0
 		displayFolder: Device System\Antivirus
 		lineageTag: c1f47424-a318-4709-a96d-67d13ed20d1f
 
 	/// Reported Windows registration state for the configured antivirus product. Does not prove EDR presence, health, or current coverage. Missing, unknown and error states are separate.
-	measure 'Expected AV NotCollected' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "NotCollected"))
+	measure 'Expected AV NotCollected' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "NotCollected"))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Expected AV State] = "NotCollected"))))
 		formatString: #,##0
 		displayFolder: Device System\Antivirus
 		lineageTag: 310cd960-ad58-4115-9907-19fb5e70f28a
 
 	/// Configured product and a comparable Detected/NotDetected registration state without conflicting evidence. Observation freshness is qualified separately.
-	measure 'Expected AV Evaluable Observations' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[AV Qualification] = "Evaluable registration observation"))
+	measure 'Expected AV Evaluable Observations' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[AV Qualification] = "Evaluable registration observation"))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[AV Qualification] = "Evaluable registration observation"))))
 		formatString: #,##0
 		displayFolder: Device System\Antivirus
 		lineageTag: ae583d03-c6b0-4757-8e0d-1c930e9879c3
 
 	/// Evaluable Windows registration observations divided by all LocalSystem observations in the same filters. Never a detected-EDR coverage percentage for the whole AD + Intune estate.
-	measure 'Expected AV Evaluable Share (%)' = DIVIDE([Expected AV Evaluable Observations], [Device System Observations])
+	measure 'Expected AV Evaluable Share (%)' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE([Expected AV Evaluable Observations], [Device System Observations])),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(DIVIDE([Expected AV Evaluable Observations], [Device System Observations])))
 		formatString: 0.0%
 		displayFolder: Device System\Antivirus
 		lineageTag: 80c27012-8aba-4b45-a123-0fae13acab08
 
 	/// Product label derived only from prepared Expected AV Name; no tenant-specific product is hardcoded.
 	measure 'Expected Antivirus Product' =
-			VAR _names = FILTER(VALUES('Device System Evidence'[Expected AV Name]), NOT ISBLANK('Device System Evidence'[Expected AV Name]) && 'Device System Evidence'[Expected AV Name] <> "")
-			RETURN IF(COUNTROWS(_names) = 0, "Not configured", IF(COUNTROWS(_names) = 1, MAXX(_names, 'Device System Evidence'[Expected AV Name]), "Multiple configured products"))
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _names = FILTER(VALUES('Device System Evidence'[Expected AV Name]), NOT ISBLANK('Device System Evidence'[Expected AV Name]) && 'Device System Evidence'[Expected AV Name] <> "")
+			RETURN IF(COUNTROWS(_names) = 0, "Not configured", IF(COUNTROWS(_names) = 1, MAXX(_names, 'Device System Evidence'[Expected AV Name]), "Multiple configured products"))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _names = FILTER(VALUES('Device System Evidence'[Expected AV Name]), NOT ISBLANK('Device System Evidence'[Expected AV Name]) && 'Device System Evidence'[Expected AV Name] <> "")
+			RETURN IF(COUNTROWS(_names) = 0, "Not configured", IF(COUNTROWS(_names) = 1, MAXX(_names, 'Device System Evidence'[Expected AV Name]), "Multiple configured products"))))
 		displayFolder: Device System\Antivirus
 		lineageTag: a37184a0-5041-4815-81fc-adcb841f9588
 
 	/// PlatformScriptLastUpdate parsed using an explicit offset or verified configured timezone and age no greater than the configured limit, evaluated at query UTC. Unknown timezone or absent policy never counts as fresh.
 	measure 'Device System Fresh Observations' =
-			VAR _now = UTCNOW()
-			RETURN COALESCE(COUNTROWS(FILTER('Device System Evidence', NOT ISBLANK('Device System Evidence'[Observation UTC]) && NOT ISBLANK('Device System Evidence'[Freshness Max Age Hours]) && 'Device System Evidence'[Freshness Max Age Hours] > 0 && 'Device System Evidence'[Observation UTC] <= _now && (_now - 'Device System Evidence'[Observation UTC]) * 24 <= 'Device System Evidence'[Freshness Max Age Hours])), 0)
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _now = UTCNOW()
+			RETURN COALESCE(COUNTROWS(FILTER('Device System Evidence', NOT ISBLANK('Device System Evidence'[Observation UTC]) && NOT ISBLANK('Device System Evidence'[Freshness Max Age Hours]) && 'Device System Evidence'[Freshness Max Age Hours] > 0 && 'Device System Evidence'[Observation UTC] <= _now && (_now - 'Device System Evidence'[Observation UTC]) * 24 <= 'Device System Evidence'[Freshness Max Age Hours])), 0)),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _now = UTCNOW()
+			RETURN COALESCE(COUNTROWS(FILTER('Device System Evidence', NOT ISBLANK('Device System Evidence'[Observation UTC]) && NOT ISBLANK('Device System Evidence'[Freshness Max Age Hours]) && 'Device System Evidence'[Freshness Max Age Hours] > 0 && 'Device System Evidence'[Observation UTC] <= _now && (_now - 'Device System Evidence'[Observation UTC]) * 24 <= 'Device System Evidence'[Freshness Max Age Hours])), 0)))
 		formatString: #,##0
 		displayFolder: Device System
 		lineageTag: 07e740e7-7c9a-4c53-9312-002d5dd7bb6f
 
 	/// Missing, invalid or offsetless unqualified observation time. Not an adverse device state.
-	measure 'Device System Unqualified Time Observations' = CALCULATE([Device System Observations], KEEPFILTERS(ISBLANK('Device System Evidence'[Observation UTC])))
+	measure 'Device System Unqualified Time Observations' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Device System Observations], KEEPFILTERS(ISBLANK('Device System Evidence'[Observation UTC])))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(CALCULATE([Device System Observations], KEEPFILTERS(ISBLANK('Device System Evidence'[Observation UTC])))))
 		formatString: #,##0
 		displayFolder: Device System\Data quality
 		lineageTag: 759de4a8-1766-4788-84f6-d6db4b268945
 
 	/// Contradictory local, Intune inventory, or OS BitLocker conversion observations. Does not prove an unencrypted device and does not modify the existing Intune encryption KPI.
-	measure 'Device System Encryption Conflicts' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Encryption Comparison] = "Conflict"))
+	measure 'Device System Encryption Conflicts' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Encryption Comparison] = "Conflict"))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Encryption Comparison] = "Conflict"))))
 		formatString: #,##0
 		displayFolder: Device System\Data quality
 		lineageTag: c10cfb11-0c7a-4567-b9a5-41dcb1b85e90
 
 	/// LocalSystem device identities absent from the older prepared Device Inventory export; retained in this source, not silently dropped.
-	measure 'Device System Prepared Inventory Unmatched' = CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Prepared Inventory Match] = "Unmatched"))
+	measure 'Device System Prepared Inventory Unmatched' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Prepared Inventory Match] = "Unmatched"))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(CALCULATE([Device System Observations], KEEPFILTERS('Device System Evidence'[Prepared Inventory Match] = "Unmatched"))))
 		formatString: #,##0
 		displayFolder: Device System\Data quality
 		lineageTag: c464c17d-4a98-46a1-bce6-f433b17dfbd2
 
 	/// Scope and freshness tooltip shared by the new Device System views.
-	measure 'Device System Evidence Scope' = "Windows registration observations; no proof of EDR health or BitLocker recovery-key escrow. Freshness uses PlatformScriptLastUpdate, not preparation time. " & FORMAT([Device System Fresh Observations], "#,##0") & " observations meet configured age/time qualification; " & FORMAT([Device System Unqualified Time Observations], "#,##0") & " have no qualified UTC observation time. Graph inventory fields do not prove per-field measurement time. Last boot aliases are consolidated into one value."
+	measure 'Device System Evidence Scope' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE(("Windows registration observations; no proof of EDR health or BitLocker recovery-key escrow. Freshness uses PlatformScriptLastUpdate, not preparation time. " & FORMAT([Device System Fresh Observations], "#,##0") & " observations meet configured age/time qualification; " & FORMAT([Device System Unqualified Time Observations], "#,##0") & " have no qualified UTC observation time. Graph inventory fields do not prove per-field measurement time. Last boot aliases are consolidated into one value."),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),("Windows registration observations; no proof of EDR health or BitLocker recovery-key escrow. Freshness uses PlatformScriptLastUpdate, not preparation time. " & FORMAT([Device System Fresh Observations], "#,##0") & " observations meet configured age/time qualification; " & FORMAT([Device System Unqualified Time Observations], "#,##0") & " have no qualified UTC observation time. Graph inventory fields do not prove per-field measurement time. Last boot aliases are consolidated into one value."))
 		displayFolder: Device System\Evidence scope
 		lineageTag: e7c0b61c-4274-4824-9b3f-03ceef200926
 
 	/// Prepared BIOS Version, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System BIOS Version' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BIOS Version]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BIOS Version]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: cbe9f44d-f194-4ac1-8736-809d5853013b
 
 	/// Prepared BIOS Date, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System BIOS Date' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BIOS Date]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BIOS Date]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: cdc8e372-f336-46ed-b8b6-57225fee8a28
 
 	/// Prepared Firmware Type, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Firmware Type' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Firmware Type]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Firmware Type]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: f424eccf-1f04-4f7c-b1ec-96e923641834
 
 	/// Prepared Last Boot Time, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Last Boot Time' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Boot Time]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Boot Time]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 964a2247-c3a2-4388-b3d7-cd3b3c0b900e
 
 	/// Prepared Secure Boot State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Secure Boot State' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Secure Boot State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Secure Boot State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 4efebc92-f324-41bb-80c8-a69cc5e72fdc
 
 	/// Prepared VBS State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System VBS State' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[VBS State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[VBS State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 376703e8-c587-449b-9c62-e3604c7d620f
 
 	/// Prepared VBS Hardware Requirements, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System VBS Hardware Requirements' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[VBS Hardware Requirements]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[VBS Hardware Requirements]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: f90f99fd-e87b-4da9-8846-323b6d70e27d
 
 	/// Prepared Credential Guard State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Credential Guard State' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Credential Guard State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Credential Guard State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 9e41e2c8-cdcd-4ae6-8dc4-d04f490e8bac
 
 	/// Prepared Management State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Management State' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Management State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Management State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 5b9e8d28-57cd-460c-a8ce-e65dc11693b4
 
 	/// Prepared Compliance State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Compliance State' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Compliance State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Compliance State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 238fb7bc-eb6d-4011-88c6-a06831428ef1
 
 	/// Prepared Last Sync Raw, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Last Sync Raw' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Sync Raw]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Sync Raw]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 1aa63934-3da6-48b5-855d-01e8c850a238
 
 	/// Prepared Expected AV Name, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Expected AV Name' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Expected AV Name]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Expected AV Name]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 8abe7ac7-4d01-4527-85e1-0e20d06e49a7
 
 	/// Prepared Expected AV State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Expected AV State' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Expected AV State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Expected AV State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 3dd549c6-ad8d-4173-9b3a-f878b68fc9e5
 
 	/// Prepared Third Party AV Products, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Third Party AV Products' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Third Party AV Products]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Third Party AV Products]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 18578fa2-f83e-4006-b747-9a307a3aecf7
 
 	/// Prepared AV Qualification, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System AV Qualification' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[AV Qualification]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[AV Qualification]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 378e98f3-2cb8-4955-9dcd-3910b3bda017
 
 	/// Prepared Observation Raw, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Observation Raw' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Observation Raw]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Observation Raw]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: cde513a1-5c5b-4af3-9f89-041b9f0bda0a
 
 	/// Prepared Freshness, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Freshness' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Freshness]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Freshness]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 6a9c1541-d11a-443e-9dba-d86e277166b1
 
 	/// Prepared Windows Update Reboot Required, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Windows Update Reboot Required' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Windows Update Reboot Required]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Windows Update Reboot Required]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 08e71ef1-9585-4cbb-aacd-0c52a03f1e0c
 
 	/// Prepared BitLocker OS Protection, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System BitLocker OS Protection' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BitLocker OS Protection]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BitLocker OS Protection]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: c75bf22b-fbfb-4e5a-9951-996e6abf0da6
 
 	/// Prepared BitLocker OS Conversion, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System BitLocker OS Conversion' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BitLocker OS Conversion]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[BitLocker OS Conversion]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 6fb928b9-b293-4f2c-8bdd-88c294617bae
 
 	/// Prepared Local Encryption State, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Local Encryption State' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Local Encryption State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Local Encryption State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 4a400d6e-fdc2-40c1-8256-1899aafea381
 
 	/// Prepared Encryption Comparison, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Encryption Comparison' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Encryption Comparison]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Encryption Comparison]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 5fb48b3f-f50a-41a3-b687-006689bafd95
 
 	/// Prepared Data Quality Issues, exposed only for one unique Intune source ID in the existing inventory and a single tenant. No name matching; missing and ambiguous joins are explicit. Reported states retain their source qualification; freshness is separate.
 	measure 'Device System Data Quality Issues' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Data Quality Issues]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Data Quality Issues]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 8d38d887-d301-4eea-8900-4a15185e8e4c
 
 	/// Visual-level guard applies the expected AV registration-state slicer to unique existing inventory identities. With no AV selection, missing system observations remain visible.
 	measure 'Device System AV Selection Match' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _selected = ISFILTERED('Device System Evidence'[Expected AV State])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS(TREATAS({_id},'Device System Evidence'[Device Source ID])))
-			RETURN IF(NOT(_selected), 1, IF(NOT(ISBLANK(_id)) && _tenants = 1 && _matches = 1, 1, BLANK()))
+			RETURN IF(NOT(_selected), 1, IF(NOT(ISBLANK(_id)) && _tenants = 1 && _matches = 1, 1, BLANK()))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _selected = ISFILTERED('Device System Evidence'[Expected AV State])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS(TREATAS({_id},'Device System Evidence'[Device Source ID])))
+			RETURN IF(NOT(_selected), 1, IF(NOT(ISBLANK(_id)) && _tenants = 1 && _matches = 1, 1, BLANK()))))
 		formatString: 0
 		isHidden
 		displayFolder: Device System\Matched device detail
 		lineageTag: bc9dce7c-00dc-4945-ba44-93535bc180a0
 
 	/// Reported Windows Update reboot-required observations. NotCollected, Missing, Unknown and Error are excluded; no claim of current status until observation freshness is qualified.
-	measure 'Device System Reported Reboot Required' = COALESCE(CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS('Device System Evidence'[Windows Update Reboot Required] = "True")),0)
+	measure 'Device System Reported Reboot Required' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((COALESCE(CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS('Device System Evidence'[Windows Update Reboot Required] = "True")),0)),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(COALESCE(CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS('Device System Evidence'[Windows Update Reboot Required] = "True")),0)))
 		formatString: #,##0
 		displayFolder: Device System\Reported review
 		lineageTag: 016785b7-f3e8-4cab-9cea-269716c08fef
 
 	/// Reported Secure Boot Disabled observations only. Error, NotSupported and missingness are not disabled; observation time must be separately qualified.
-	measure 'Device System Reported Secure Boot Disabled' = COALESCE(CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS('Device System Evidence'[Secure Boot State] = "Disabled")),0)
+	measure 'Device System Reported Secure Boot Disabled' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((COALESCE(CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS('Device System Evidence'[Secure Boot State] = "Disabled")),0)),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(COALESCE(CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS('Device System Evidence'[Secure Boot State] = "Disabled")),0)))
 		formatString: #,##0
 		displayFolder: Device System\Reported review
 		lineageTag: 8f3b8c8f-3b89-4bc0-a2c3-6ed08546c46a
 
 	/// Prepared overall third-party antivirus registration state, exposed only for one unique Intune source ID and a single tenant. Separate from expected-product registration and from EDR health.
 	measure 'Device System Third Party AV State' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Third Party AV State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Third Party AV State]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id), BLANK(), SWITCH(TRUE(), _tenants <> 1, "Ambiguous tenant scope", _matches = 0, "Missing observation", _matches <> 1, "Ambiguous device identity", ISBLANK(_value) || _value = "", "Missing", _value))))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 3dad3f50-ecc6-496d-a546-4bc56f5d90e7
 
 	/// Local collection source/state from prepared evidence. One unique tenant/device identity only.
 	measure 'Device System Local Data Source' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Local Data Source]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Local Data Source]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 4872ae2b-999e-47bc-9e1b-f7fffcd5392d
 
 	/// Local collection source/state from prepared evidence. One unique tenant/device identity only.
 	measure 'Device System Local Data Freshness' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Local Data Freshness]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Local Data Freshness]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 4c493340-2bca-4a30-9333-78222d643e4f
 
 	/// Local/console interactive session only. Not primary-user ownership, current login or M365 activity. Requires a unique Intune identity and one tenant. UTC timestamp and collection freshness are separate.
 	measure 'Device System Last Console Logon Status' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon Status]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon Status]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)))
 		displayFolder: Device System\Matched device detail
 		lineageTag: eed3b2c2-5bf9-4c89-b19b-1e3db8f9ab27
 
 	/// Local/console interactive session only. Not primary-user ownership, current login or M365 activity. Requires a unique Intune identity and one tenant. UTC timestamp and collection freshness are separate.
 	measure 'Device System Last Console Logon User' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon User]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon User]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)))
 		displayFolder: Device System\Matched device detail
 		lineageTag: f66654fa-af03-45cd-b0a4-2d9568dd034e
 
 	/// Local/console interactive session only. Not primary-user ownership, current login or M365 activity. Requires a unique Intune identity and one tenant. UTC timestamp and collection freshness are separate.
 	measure 'Device System Last Console Logon UTC' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon UTC]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon UTC]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)))
 		formatString: yyyy-MM-dd HH:mm:ss
 		displayFolder: Device System\Matched device detail
 		lineageTag: d1c495af-94ed-4834-89e3-c7d46d2ac7ea
 
 	/// Local/console interactive session only. Not primary-user ownership, current login or M365 activity. Requires a unique Intune identity and one tenant. UTC timestamp and collection freshness are separate.
 	measure 'Device System Last Console Logon Quality' =
-			VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
 			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
 			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
 			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon Quality]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
-			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _id = SELECTEDVALUE('Device Inventory Evidence'[Device Source ID])
+			VAR _tenants = CALCULATE(DISTINCTCOUNT('Device System Evidence'[TenantKey]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'))
+			VAR _matches = CALCULATE(COUNTROWS('Device System Evidence'), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			VAR _value = CALCULATE(SELECTEDVALUE('Device System Evidence'[Last Console Logon Quality]), REMOVEFILTERS('Device System Evidence'), REMOVEFILTERS('Country Selection'), TREATAS({_id}, 'Device System Evidence'[Device Source ID]))
+			RETURN IF(ISBLANK(_id) || _tenants <> 1 || _matches <> 1, BLANK(), _value)))
 		displayFolder: Device System\Matched device detail
 		lineageTag: 18086442-91e9-4a08-b3df-452195c3175b
+
+	/// Distinct currently loaded device observation keys; Country and AD Domain scope retained. Registration observations do not prove active protection.
+	measure 'Security AV Observed Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _hasDomain=ISFILTERED('Daily Domain')
+			RETURN CALCULATE(DISTINCTCOUNT('Device System Evidence'[Device System Key]),
+			KEEPFILTERS(TREATAS(_countries,'Device System Evidence'[Country])),
+			FILTER(VALUES('Device System Evidence'[AD Domain]),NOT _hasDomain || 'Device System Evidence'[AD Domain] IN _domains))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _hasDomain=ISFILTERED('Daily Domain')
+			RETURN CALCULATE(DISTINCTCOUNT('Device System Evidence'[Device System Key]),
+			KEEPFILTERS(TREATAS(_countries,'Device System Evidence'[Country])),
+			FILTER(VALUES('Device System Evidence'[AD Domain]),NOT _hasDomain || 'Device System Evidence'[AD Domain] IN _domains))))
+		formatString: #,0
+		isHidden
+		displayFolder: Security | Third-party AV
+		lineageTag: 7df8c285-4ded-46e1-b1b6-e7d8d85ebde2
+
+	/// Third-party AV registration observation: Detected. Unknown is not absence; freshness is retained on the device table.
+	measure 'Security AV Detected Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _hasDomain=ISFILTERED('Daily Domain')
+			RETURN CALCULATE(DISTINCTCOUNT('Device System Evidence'[Device System Key]),
+			KEEPFILTERS(TREATAS(_countries,'Device System Evidence'[Country])),
+			FILTER(VALUES('Device System Evidence'[AD Domain]),NOT _hasDomain || 'Device System Evidence'[AD Domain] IN _domains),KEEPFILTERS('Device System Evidence'[Third Party AV State]="Detected"))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _hasDomain=ISFILTERED('Daily Domain')
+			RETURN CALCULATE(DISTINCTCOUNT('Device System Evidence'[Device System Key]),
+			KEEPFILTERS(TREATAS(_countries,'Device System Evidence'[Country])),
+			FILTER(VALUES('Device System Evidence'[AD Domain]),NOT _hasDomain || 'Device System Evidence'[AD Domain] IN _domains),KEEPFILTERS('Device System Evidence'[Third Party AV State]="Detected"))))
+		formatString: #,0
+		isHidden
+		displayFolder: Security | Third-party AV
+		lineageTag: 5c0a6b1f-54b3-47f7-8e7f-2aba1deea466
+
+	/// Third-party AV registration observation: NotDetected. Unknown is not absence; freshness is retained on the device table.
+	measure 'Security AV Not Detected Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _hasDomain=ISFILTERED('Daily Domain')
+			RETURN CALCULATE(DISTINCTCOUNT('Device System Evidence'[Device System Key]),
+			KEEPFILTERS(TREATAS(_countries,'Device System Evidence'[Country])),
+			FILTER(VALUES('Device System Evidence'[AD Domain]),NOT _hasDomain || 'Device System Evidence'[AD Domain] IN _domains),KEEPFILTERS('Device System Evidence'[Third Party AV State]="NotDetected"))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _hasDomain=ISFILTERED('Daily Domain')
+			RETURN CALCULATE(DISTINCTCOUNT('Device System Evidence'[Device System Key]),
+			KEEPFILTERS(TREATAS(_countries,'Device System Evidence'[Country])),
+			FILTER(VALUES('Device System Evidence'[AD Domain]),NOT _hasDomain || 'Device System Evidence'[AD Domain] IN _domains),KEEPFILTERS('Device System Evidence'[Third Party AV State]="NotDetected"))))
+		formatString: #,0
+		isHidden
+		displayFolder: Security | Third-party AV
+		lineageTag: 6786dc2e-3326-4b1f-8d0b-a932facfddc0
+
+	/// Third-party AV registration observation: NotCollected. Unknown is not absence; freshness is retained on the device table.
+	measure 'Security AV Unknown Devices' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _hasDomain=ISFILTERED('Daily Domain')
+			RETURN CALCULATE(DISTINCTCOUNT('Device System Evidence'[Device System Key]),
+			KEEPFILTERS(TREATAS(_countries,'Device System Evidence'[Country])),
+			FILTER(VALUES('Device System Evidence'[AD Domain]),NOT _hasDomain || 'Device System Evidence'[AD Domain] IN _domains),KEEPFILTERS('Device System Evidence'[Third Party AV State]="NotCollected"))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _hasDomain=ISFILTERED('Daily Domain')
+			RETURN CALCULATE(DISTINCTCOUNT('Device System Evidence'[Device System Key]),
+			KEEPFILTERS(TREATAS(_countries,'Device System Evidence'[Country])),
+			FILTER(VALUES('Device System Evidence'[AD Domain]),NOT _hasDomain || 'Device System Evidence'[AD Domain] IN _domains),KEEPFILTERS('Device System Evidence'[Third Party AV State]="NotCollected"))))
+		formatString: #,0
+		isHidden
+		displayFolder: Security | Third-party AV
+		lineageTag: e27d7eec-aaf3-4ac4-a617-c60e6b2a469f
+
+	measure 'Security AV Evidence Coverage (%)' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((DIVIDE([Security AV Detected Devices]+[Security AV Not Detected Devices],[Security AV Observed Devices])),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(DIVIDE([Security AV Detected Devices]+[Security AV Not Detected Devices],[Security AV Observed Devices])))
+		formatString: 0.0%
+		isHidden
+		displayFolder: Security | Third-party AV
+		lineageTag: cf87ddd2-34fb-4120-8eff-e5e79753c2d8
+
+	/// SAM display resolved by qualified native identity, same tenant and loaded batch. Empty text when no qualified SAM; preserves unresolved source rows in table projections.
+	measure 'SAM · Device System Evidence' =
+			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			VAR _pu=VALUES('Primary User Selection'[Primary user])
+			RETURN IF(_puFilter,CALCULATE((VAR _display = (VAR _id=SELECTEDVALUE('Device System Evidence'[Device Source ID]) VAR _tenant=SELECTEDVALUE('Device System Evidence'[TenantKey]) VAR _batch=SELECTEDVALUE('Device System Evidence'[Loaded Batch ID])
+			 VAR _dk=IF(NOT ISBLANK(_id),LOOKUPVALUE('Native Managed Device Evidence'[TenantDeviceKey],'Native Managed Device Evidence'[ManagedDeviceId],_id,'Native Managed Device Evidence'[TenantKey],_tenant,'Native Managed Device Evidence'[Loaded Batch ID],_batch))
+			 VAR _uid=IF(NOT ISBLANK(_dk),LOOKUPVALUE('Native Device Evidence'[PrimaryUserSourceId],'Native Device Evidence'[TenantDeviceKey],_dk,'Native Device Evidence'[TenantKey],_tenant,'Native Device Evidence'[Loaded Batch ID],_batch))
+			 VAR _upn=IF(NOT ISBLANK(_uid),LOOKUPVALUE('Native User Evidence'[UserPrincipalName],'Native User Evidence'[SourceUserId],_uid,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))
+			 RETURN IF(NOT ISBLANK(_uid) && _upn=SELECTEDVALUE('Device System Evidence'[Primary User UPN]),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],_uid,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN IF(COUNTROWS('Device System Evidence') > 0, COALESCE(_display, ""))),KEEPFILTERS(TREATAS(_pu,'Device System Evidence'[Primary User (report)]))),(VAR _display = (VAR _id=SELECTEDVALUE('Device System Evidence'[Device Source ID]) VAR _tenant=SELECTEDVALUE('Device System Evidence'[TenantKey]) VAR _batch=SELECTEDVALUE('Device System Evidence'[Loaded Batch ID])
+			 VAR _dk=IF(NOT ISBLANK(_id),LOOKUPVALUE('Native Managed Device Evidence'[TenantDeviceKey],'Native Managed Device Evidence'[ManagedDeviceId],_id,'Native Managed Device Evidence'[TenantKey],_tenant,'Native Managed Device Evidence'[Loaded Batch ID],_batch))
+			 VAR _uid=IF(NOT ISBLANK(_dk),LOOKUPVALUE('Native Device Evidence'[PrimaryUserSourceId],'Native Device Evidence'[TenantDeviceKey],_dk,'Native Device Evidence'[TenantKey],_tenant,'Native Device Evidence'[Loaded Batch ID],_batch))
+			 VAR _upn=IF(NOT ISBLANK(_uid),LOOKUPVALUE('Native User Evidence'[UserPrincipalName],'Native User Evidence'[SourceUserId],_uid,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))
+			 RETURN IF(NOT ISBLANK(_uid) && _upn=SELECTEDVALUE('Device System Evidence'[Primary User UPN]),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],_uid,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN IF(COUNTROWS('Device System Evidence') > 0, COALESCE(_display, ""))))
+		displayFolder: Private identity display
+		lineageTag: ebebcc3d-5b07-423a-84a7-6727b504acf1
+
+	/// Read-only report utility applying the disconnected primary-user selector to source-qualified device rows.
+	measure 'Primary user row match · Device System Evidence' = VAR PresentRows = IF(ISFILTERED('Primary User Selection'[Primary user]), CALCULATE(COUNTROWS('Device System Evidence'), KEEPFILTERS(TREATAS(VALUES('Primary User Selection'[Primary user]), 'Device System Evidence'[Primary User (report)]))), COUNTROWS('Device System Evidence')) RETURN IF(PresentRows>0,1,BLANK())
+		formatString: 0
+		isHidden
+		lineageTag: fa5ac8f4-b68e-49cf-8bf0-b3632d21f825
 
 	/// Prepared TenantKey observation or qualification from the tenant-aware Device System source. Missing, NotCollected, Unknown, Error and NotSupported are not confirmed adverse states.
 	column TenantKey
@@ -922,8 +1261,53 @@ table 'Device System Evidence'
 			VAR _year = IFERROR(VALUE(LEFT(_raw, 4)), BLANK())
 			RETURN IF('Device System Evidence'[BIOS Date Quality] = "Observed date; not a health verdict" && LEN(_raw) = 10 && MID(_raw, 5, 1) = "-" && MID(_raw, 8, 1) = "-" && NOT ISBLANK(_year), FORMAT(_year, "0000"), "Unknown")
 		dataType: string
-		lineageTag: 7c635046-5205-4aee-a2da-40c1b2c2d7d9
+		lineageTag: c01ab4a8-408b-455d-91da-9eb4cd671a6d
 		summarizeBy: none
+
+	/// System evidence belongs to the observed managed-device population.
+	column 'Intune presence' = "In Intune"
+		dataType: string
+		lineageTag: 01588739-cf47-49a2-a372-86a36d09656b
+		summarizeBy: none
+
+	/// Private report scope. Exact unique native identity and one loaded batch; no UPN suffix or display-name inference. Blank when missing or ambiguous.
+	column 'AD Domain' =
+			VAR _batch = 'Device System Evidence'[Loaded Batch ID]
+			VAR _tenant = 'Device System Evidence'[TenantKey]
+			VAR _id = 'Device System Evidence'[Device Source ID]
+			VAR _rows = FILTER(ALL('Device Exploration Inventory'), 'Device Exploration Inventory'[TenantKey] == _tenant && 'Device Exploration Inventory'[Device Source ID] == _id && 'Device Exploration Inventory'[Loaded Batch ID] == _batch)
+			RETURN IF(NOT ISBLANK(_batch) && NOT ISBLANK(_id) && COUNTROWS(_rows) = 1, MAXX(_rows, 'Device Exploration Inventory'[AD Domain]))
+		dataType: string
+		displayFolder: Report scope
+		lineageTag: 5842745d-1bca-40ac-bef1-32f2b5b63df3
+		summarizeBy: none
+
+	/// Observed primary user, exact source ID and tenant/batch matching only; used by the report search.
+	column 'Primary User (report)' =
+			VAR _t='Device System Evidence'[TenantKey]
+			VAR _b='Device System Evidence'[Loaded Batch ID]
+			VAR _gkey='Device System Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device System Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device System Evidence'[Device Source ID]))
+			VAR _upn=COALESCE('Device System Evidence'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 944a9bcd-c200-46be-a151-ead1bddfd37f
+
+	/// Qualified SAM of the primary user; never inferred from UPN text.
+	column 'Primary User SAM (report)' =
+			VAR _t='Device System Evidence'[TenantKey]
+			VAR _b='Device System Evidence'[Loaded Batch ID]
+			VAR _gkey='Device System Evidence'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device System Evidence'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device System Evidence'[Device Source ID]))
+			VAR _upn=COALESCE('Device System Evidence'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 8c4dd99e-e39f-44c8-8792-942abd12b2dc
 
 	partition 'Device System Evidence' = m
 		mode: import
@@ -954,3 +1338,5 @@ table 'Device System Evidence'
 				in Typed)
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

@@ -1,16 +1,75 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "d02affe700566f68c1fc",
   "position": {
     "x": 32,
-    "y": 379.5,
+    "y": 320,
+    "z": 0,
+    "height": 397.51126516464473,
     "width": 720,
-    "height": 337.3,
-    "z": 109,
     "tabOrder": 672
   },
   "visual": {
     "visualType": "barChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Country Name"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Country Name",
+              "nativeQueryRef": "Country",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Remaining Observed Windows 10"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
+              "nativeQueryRef": "Observed Windows 10",
+              "displayName": "Observed Windows 10"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Measure": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Windows Migration Evidence"
+                  }
+                },
+                "Property": "Remaining Observed Windows 10"
+              }
+            },
+            "direction": "Descending"
+          }
+        ]
+      }
+    },
     "objects": {
       "categoryAxis": [
         {
@@ -162,66 +221,6 @@
           }
         }
       ]
-    },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Category": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Country Name"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Country Name",
-              "nativeQueryRef": "Country",
-              "active": true
-            }
-          ]
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Remaining Observed Windows 10"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
-              "nativeQueryRef": "Observed Windows 10",
-              "displayName": "Observed Windows 10"
-            }
-          ]
-        }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Measure": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Windows Migration Evidence"
-                  }
-                },
-                "Property": "Remaining Observed Windows 10"
-              }
-            },
-            "direction": "Descending"
-          }
-        ]
-      }
     },
     "visualContainerObjects": {
       "title": [
@@ -384,14 +383,15 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 by country \u00b7 primary-user proxy'"
+                  "Value": "'Windows 10 by country · primary-user proxy'"
                 }
               }
             }
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "parentGroupName": "4e08620e3e19e989e676"
 }

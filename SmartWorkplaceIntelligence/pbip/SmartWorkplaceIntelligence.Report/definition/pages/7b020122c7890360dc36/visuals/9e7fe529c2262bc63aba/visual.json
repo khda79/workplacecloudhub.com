@@ -1,16 +1,90 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "9e7fe529c2262bc63aba",
   "position": {
     "x": 776,
-    "y": 379.5,
+    "y": 320,
+    "z": 4000,
+    "height": 397.51126516464473,
     "width": 1112,
-    "height": 337.3,
-    "z": 121,
     "tabOrder": 680
   },
   "visual": {
     "visualType": "lineChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration History"
+                    }
+                  },
+                  "Property": "Snapshot Date"
+                }
+              },
+              "queryRef": "Windows Migration History.Snapshot Date",
+              "nativeQueryRef": "Snapshot Date",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration History"
+                    }
+                  },
+                  "Property": "Migration Trend Windows 10"
+                }
+              },
+              "queryRef": "Windows Migration History.Migration Trend Windows 10",
+              "nativeQueryRef": "Migration Trend Windows 10",
+              "displayName": "Migration Trend Windows 10"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration History"
+                    }
+                  },
+                  "Property": "Migration Trend Windows 11"
+                }
+              },
+              "queryRef": "Windows Migration History.Migration Trend Windows 11",
+              "nativeQueryRef": "Migration Trend Windows 11",
+              "displayName": "Migration Trend Windows 11"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Windows Migration History"
+                  }
+                },
+                "Property": "Snapshot Date"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ]
+      }
+    },
     "objects": {
       "categoryAxis": [
         {
@@ -154,9 +228,6 @@
       ],
       "dataPoint": [
         {
-          "selector": {
-            "metadata": "Windows Migration History.Migration Trend Windows 10"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -169,12 +240,12 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Windows Migration History.Migration Trend Windows 10"
           }
         },
         {
-          "selector": {
-            "metadata": "Windows Migration History.Migration Trend Windows 11"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -187,6 +258,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Windows Migration History.Migration Trend Windows 11"
           }
         }
       ],
@@ -210,81 +284,6 @@
           }
         }
       ]
-    },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Category": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration History"
-                    }
-                  },
-                  "Property": "Snapshot Date"
-                }
-              },
-              "queryRef": "Windows Migration History.Snapshot Date",
-              "nativeQueryRef": "Snapshot Date",
-              "active": true
-            }
-          ]
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration History"
-                    }
-                  },
-                  "Property": "Migration Trend Windows 10"
-                }
-              },
-              "queryRef": "Windows Migration History.Migration Trend Windows 10",
-              "nativeQueryRef": "Migration Trend Windows 10",
-              "displayName": "Migration Trend Windows 10"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration History"
-                    }
-                  },
-                  "Property": "Migration Trend Windows 11"
-                }
-              },
-              "queryRef": "Windows Migration History.Migration Trend Windows 11",
-              "nativeQueryRef": "Migration Trend Windows 11",
-              "displayName": "Migration Trend Windows 11"
-            }
-          ]
-        }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Windows Migration History"
-                  }
-                },
-                "Property": "Snapshot Date"
-              }
-            },
-            "direction": "Ascending"
-          }
-        ]
-      }
     },
     "visualContainerObjects": {
       "title": [
@@ -447,15 +446,17 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows 10 / Windows 11 \u00b7 90 days \u00b7 weekly stock'"
+                  "Value": "'Windows 10 / Windows 11 · 90 days · weekly stock'"
                 }
               }
             }
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
+  "parentGroupName": "4e08620e3e19e989e676",
   "filterConfig": {
     "filters": [
       {
@@ -524,6 +525,5 @@
         "howCreated": "User"
       }
     ]
-  },
-  "parentGroupName": "4e08620e3e19e989e676"
+  }
 }

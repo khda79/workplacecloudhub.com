@@ -199,7 +199,7 @@ class PreparedLatestMTests(unittest.TestCase):
 
 def has_current_batch_provenance(table, source, expressions):
     """Conservative static contract for the returned partition, not a dead Finish call."""
-    source = re.sub(r'\n\tannotation PBI_ResultType = Table\s*$', '', source)
+    source = re.sub(r'\n\tannotation PBI_ResultType = (?:Table|Exception)\s*$', '', source)
     if table == 'Exchange On-prem Infrastructure':
         if not re.search(r'source = let Readers = CreatePreparedReaders\(\) in Readers\[GetExchangeOnPremInfrastructure\]\(\)\s*$', source):
             return False
@@ -215,6 +215,8 @@ def has_current_batch_provenance(table, source, expressions):
             'if ForcedRows >= 0 and CheckStable("verify-infrastructure") then Result else error'
         ]) and '#"Loaded Batch ID"=BatchId' in placeholder and '#"Loaded Batch ID"=BatchId' in observed
     expected = {
+        'User Inventory Evidence': r'Table\.AddColumn\(Readers\[Finish\]\(BusinessRows\), "TenantKey", each PreparedExpectedTenantKey, type text\)',
+        'Data Trust Evidence': r'Readers\[Finish\]\(Combined\)',
         'Exchange Mailbox Databases': r'if Forced >= 0 then Readers\[Finish\]\(Buffered\) else error "Database observations unavailable"',
         'Exchange Mailbox Server Reference': r'Readers\[Finish\]\(Display\)',
         'Exchange Health Checker Findings': r'if Forced >= 0 then Readers\[Finish\]\(BusinessRows\) else error "Health Checker findings unavailable"',
@@ -231,6 +233,12 @@ class PreparedLatestModelTests(unittest.TestCase):
             source = path.read_text(encoding="utf-8-sig")
             if "Readers = CreatePreparedReaders()" not in source:
                 continue
+            # Derived mailbox projections retain provenance from their already monitored inputs.
+            # Their nested transport validates detail artifacts; restamping would hide mixed inputs.
+            if path.stem in {'Mailbox Exploration Inventory','Mailbox Delegation Detail','Mailbox License Membership'}:
+                self.assertIn('Output=if not BatchSafe then error "Mailbox exploration requires one common prepared batch"', source)
+                self.assertIn('"Loaded Batch ID"', source)
+                continue
             monitored.append(path.stem)
             column = re.search(r"\tcolumn 'Loaded Batch ID'\n(.*?)(?=\n\t(?:partition|column|measure)|\Z)", source, re.S)
             self.assertIsNotNone(column, path.name)
@@ -242,7 +250,16 @@ class PreparedLatestModelTests(unittest.TestCase):
         self.assertGreater(len(monitored), 100)
         audit = (DEFINITION / "tables/Loaded Batch Audit.tmdl").read_text(encoding="utf-8-sig")
         rows = re.findall(r'ROW\("Table Name", "([^"]+)"', audit)
-        self.assertEqual(sorted(rows), sorted(monitored))
+        readiness = {'Hybrid Identity Findings','Device Readiness Gap Evidence','Readiness Source Status'}
+        for name in readiness:
+            source = (DEFINITION / ('tables/' + name + '.tmdl')).read_text(encoding='utf-8-sig')
+            self.assertIn('R=CreatePreparedReaders()', source)
+            self.assertIn('R[GetReadinessSource]', source)
+            if name == 'Readiness Source Status':
+                self.assertIn('#"Loaded Batch ID"=V[BatchId]', source)
+            else:
+                self.assertRegex(source, r'in R\[Finish\]\(')
+        self.assertEqual(sorted(rows), sorted(set(monitored) | readiness))
         self.assertNotIn("Loaded Batch ID", (DEFINITION / "relationships.tmdl").read_text(encoding="utf-8-sig"))
         for path in (DEFINITION / "cultures").glob("*.tmdl"):
             self.assertNotIn("Loaded Batch", path.read_text(encoding="utf-8-sig"))
@@ -251,6 +268,7 @@ class PreparedLatestModelTests(unittest.TestCase):
         expressions = (DEFINITION / "expressions.tmdl").read_text(encoding="utf-8-sig")
         for name, call, replacement in [
             ('AD Computer Evidence', 'Readers[Finish](BusinessRows)', 'BusinessRows'),
+            ('Data Trust Evidence', 'Readers[Finish](Combined)', 'Combined'),
             ('Exchange Health Checker Findings', 'Readers[Finish](BusinessRows)', 'BusinessRows'),
             ('Exchange Health Checker Servers', 'Readers[Finish](BusinessRows)', 'BusinessRows'),
             ('Exchange Mailbox Databases', 'Readers[Finish](Buffered)', 'Buffered'),

@@ -4,35 +4,48 @@ table 'Native Team Membership'
 
 	/// Exact group membership edges for Teams. Migrated without changing the source calculation.
 	measure 'Native Team memberships' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native Team Membership')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (COUNTROWS('Native Team Membership')))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native Team Membership')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (COUNTROWS('Native Team Membership')))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 5e57648e-784f-4d3f-b2e8-77608b8f7ba9
 
 	/// Teams containing at least one exact guest membership. Migrated without changing the source calculation.
 	measure 'Native Teams with guests' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE(DISTINCTCOUNT('Native Team Membership'[TenantTeamKey]), KEEPFILTERS('Native Team Membership'[UserType] = "Guest"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (CALCULATE(DISTINCTCOUNT('Native Team Membership'[TenantTeamKey]), KEEPFILTERS('Native Team Membership'[UserType] = "Guest"))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE(DISTINCTCOUNT('Native Team Membership'[TenantTeamKey]), KEEPFILTERS('Native Team Membership'[UserType] = "Guest"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (CALCULATE(DISTINCTCOUNT('Native Team Membership'[TenantTeamKey]), KEEPFILTERS('Native Team Membership'[UserType] = "Guest"))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 26744b77-0e7b-4362-a43b-4475be77252c
 
 	/// Share of exact Team membership edges by owner/member role. Migrated without changing the source calculation.
 	measure 'Native Team membership role rate' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Team memberships], CALCULATE([Native Team memberships], REMOVEFILTERS('Native Team Membership'[Role])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (DIVIDE([Native Team memberships], CALCULATE([Native Team memberships], REMOVEFILTERS('Native Team Membership'[Role])))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Team memberships], CALCULATE([Native Team memberships], REMOVEFILTERS('Native Team Membership'[Role])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (DIVIDE([Native Team memberships], CALCULATE([Native Team memberships], REMOVEFILTERS('Native Team Membership'[Role])))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 80602c60-77f7-4105-a374-71b606189fe0
 
 	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native Team Membership' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native Team Membership')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (COUNTROWS('Native Team Membership')))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native Team Membership')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native Team Membership'[TenantUserKey]))), (COUNTROWS('Native Team Membership')))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		isHidden
 		lineageTag: 53d8a96f-3344-4e2d-9a16-a040802109a6
+
+	/// SAM display resolved by qualified native identity, same tenant and loaded batch. Empty text when no qualified SAM; preserves unresolved source rows in table projections.
+	measure 'SAM · Native Team Membership' = VAR _display = (VAR _key=SELECTEDVALUE('Native Team Membership'[TenantUserKey]) VAR _tenant=SELECTEDVALUE('Native Team Membership'[TenantKey]) VAR _batch=SELECTEDVALUE('Native Team Membership'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(_key),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[TenantUserKey],_key,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN IF(COUNTROWS('Native Team Membership') > 0, COALESCE(_display, ""))
+		displayFolder: Private identity display
+		lineageTag: 3c38b3d6-f5e5-462b-90d2-d945695f2e1d
 
 	/// Native FactTeamMember attribute; source qualification is retained.
 	column TenantKey

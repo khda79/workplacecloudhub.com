@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "ece71b628523ee872f66",
   "position": {
-    "x": 1288,
-    "y": 216,
-    "width": 288,
-    "height": 80,
-    "z": 105,
-    "tabOrder": 880
+    "x": 32,
+    "y": 320,
+    "z": 43000,
+    "height": 76.781933662667612,
+    "width": 608,
+    "tabOrder": 57000
   },
   "visual": {
     "visualType": "slicer",
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Device Exploration Inventory"
                     }
                   },
                   "Property": "Secure Boot State"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Secure Boot State",
+              "queryRef": "Device Exploration Inventory.Secure Boot State",
               "nativeQueryRef": "Secure Boot State",
               "active": true
             }
@@ -296,5 +296,6 @@
         }
       ]
     }
-  }
+  },
+  "parentGroupName": "ba587067c2277d4df717"
 }

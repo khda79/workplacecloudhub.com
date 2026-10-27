@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "75ef9f2547dfbca44b4e",
   "position": {
     "x": 968,
-    "y": 296,
+    "y": 320,
+    "z": 2000,
+    "height": 289.19540229885058,
     "width": 912,
-    "height": 296,
-    "z": 115,
     "tabOrder": 682
   },
   "visual": {
@@ -328,7 +328,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint Analytics score \u00b7 recorded snapshots'"
+                  "Value": "'Endpoint Analytics score · recorded snapshots'"
                 }
               }
             },

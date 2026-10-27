@@ -1,0 +1,96 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "fb740439fe73f985eed3",
+  "displayName": "By country",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "2967efe453aee60263d5",
+      "389fe54faee87edb23b9",
+      "6ad48cbc236761717fe9",
+      "8be5852521e32caa92ed",
+      "94cb542a73622c8a4d5c",
+      "9c336170ee0945cab2bf",
+      "fe96a515abf2c91d4df3",
+      "b3225d63cdb9b203a440",
+      "82dfabf30fc43402bf27",
+      "42d254b6d77ac11b7779",
+      "cbdf37ea0b2be4c40ffa",
+      "c8912c58d3d8d0510af1",
+      "faf69ad4b72f522664f7"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "d301e56b81a0cf6b1812",
+    "sections": {
+      "d301e56b81a0cf6b1812": {
+        "visualContainers": {
+          "b3225d63cdb9b203a440": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "82dfabf30fc43402bf27": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "42d254b6d77ac11b7779": {
+            "singleVisual": {}
+          },
+          "cbdf37ea0b2be4c40ffa": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c8912c58d3d8d0510af1": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "faf69ad4b72f522664f7": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "2967efe453aee60263d5": {
+            "isHidden": false
+          },
+          "389fe54faee87edb23b9": {
+            "isHidden": true
+          },
+          "6ad48cbc236761717fe9": {
+            "isHidden": true
+          },
+          "8be5852521e32caa92ed": {
+            "isHidden": true
+          },
+          "94cb542a73622c8a4d5c": {
+            "isHidden": true
+          },
+          "9c336170ee0945cab2bf": {
+            "isHidden": true
+          },
+          "fe96a515abf2c91d4df3": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

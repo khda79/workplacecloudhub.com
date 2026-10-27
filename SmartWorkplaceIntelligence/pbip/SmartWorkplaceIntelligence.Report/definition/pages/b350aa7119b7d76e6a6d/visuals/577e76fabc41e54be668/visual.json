@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "577e76fabc41e54be668",
   "position": {
     "x": 32,
-    "y": 640,
+    "y": 432,
+    "z": 4000,
+    "height": 568,
     "width": 1856,
-    "height": 352,
-    "z": 10001,
     "tabOrder": 1400
   },
   "visual": {
@@ -46,7 +46,8 @@
                 }
               },
               "queryRef": "Collaboration Trend Evidence.Trend Collaboration Objects",
-              "nativeQueryRef": "Trend Collaboration Objects"
+              "nativeQueryRef": "Trend Collaboration Objects",
+              "displayName": "Trend Collaboration Resources"
             },
             {
               "field": {
@@ -78,7 +79,8 @@
                 }
               },
               "queryRef": "Collaboration Trend Evidence.Trend Active Object Rate (%)",
-              "nativeQueryRef": "Trend Active Object Rate (%)"
+              "nativeQueryRef": "Trend Active Object Rate (%)",
+              "displayName": "Trend Active Resource Rate (%)"
             }
           ]
         }
@@ -280,7 +282,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Active objects (%) \u00b7 trend - last 90 days. Observed history only; 2026-07-08 to 2026-10-05.'"
+                  "Value": "'Active objects (%) · trend - last 90 days. Observed history only; 2026-07-08 to 2026-10-05.'"
                 }
               }
             }
@@ -300,7 +302,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Active objects (%) \u00b7 trend - last 90 days'"
+                  "Value": "'Active resources (%) · trend - last 90 days'"
                 }
               }
             },
@@ -345,7 +347,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Observed snapshots \u00b7 2026-07-08 to 2026-10-05'"
+                  "Value": "'Observed snapshots · 2026-07-08 to 2026-10-05'"
                 }
               }
             },

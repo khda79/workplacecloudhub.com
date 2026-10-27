@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "a5e63dbc78520c4c02b1",
   "position": {
     "x": 32,
     "y": 128,
-    "width": 1200,
-    "height": 120,
-    "z": 114,
-    "tabOrder": 256
+    "z": 2000,
+    "height": 104,
+    "width": 1856,
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -56,7 +56,7 @@
               },
               "queryRef": "Mailbox Migration Inventory.Local Business Mailboxes Remaining",
               "nativeQueryRef": "Business mailboxes remaining",
-              "displayName": "Business mailboxes remaining"
+              "displayName": "Mailboxes remaining"
             },
             {
               "field": {
@@ -87,21 +87,25 @@
               "queryRef": "Mailbox Migration Inventory.Mailbox Migration Risk Review",
               "nativeQueryRef": "Inventory risk review",
               "displayName": "Inventory risk review"
-            },
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
+                      "Entity": "Hybrid Identity Findings"
                     }
                   },
-                  "Property": "Mailbox Migration Readiness"
+                  "Property": "Backlog Exchange Identity Evidence Tooltip"
                 }
               },
-              "queryRef": "Mailbox Migration Inventory.Mailbox Migration Readiness",
-              "nativeQueryRef": "Migration preflight status",
-              "displayName": "Migration preflight status"
+              "queryRef": "Hybrid Identity Findings.Backlog Exchange Identity Evidence Tooltip",
+              "nativeQueryRef": "Backlog Exchange Identity Evidence Tooltip",
+              "displayName": "Backlog Exchange Identity Evidence Tooltip"
             }
           ]
         }
@@ -121,7 +125,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -289,6 +293,27 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "5L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }
@@ -548,8 +573,20 @@
             }
           }
         }
+      ],
+      "visualTooltip": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
       ]
     }
-  },
-  "parentGroupName": "f81843b2c98f223aa742"
+  }
 }

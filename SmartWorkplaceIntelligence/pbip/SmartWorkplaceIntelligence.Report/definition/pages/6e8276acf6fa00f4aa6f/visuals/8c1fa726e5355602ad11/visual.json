@@ -3,7 +3,7 @@
   "name": "8c1fa726e5355602ad11",
   "position": {
     "x": 32,
-    "y": 357.0,
+    "y": 357,
     "width": 1856,
     "height": 22.5,
     "z": 119,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Domain context",
+                    "value": "Selected view: Control details",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12pt",

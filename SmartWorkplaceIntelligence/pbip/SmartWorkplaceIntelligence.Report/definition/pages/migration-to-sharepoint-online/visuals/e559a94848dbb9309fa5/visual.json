@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "e559a94848dbb9309fa5",
   "position": {
-    "x": 32.0,
-    "y": 120,
+    "x": 1008,
+    "y": 8,
     "z": 7000,
     "height": 80,
-    "width": 452.0,
-    "tabOrder": 12
+    "width": 208,
+    "tabOrder": 6000
   },
   "visual": {
     "visualType": "slicer",
@@ -291,23 +291,5 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "300aa23a37b486741a84",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "SPO Migration Source Type"
-              }
-            },
-            "Property": "Source Type"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
   }
 }

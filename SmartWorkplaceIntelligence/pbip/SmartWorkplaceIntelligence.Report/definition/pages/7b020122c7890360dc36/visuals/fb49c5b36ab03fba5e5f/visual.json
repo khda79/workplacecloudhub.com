@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "fb49c5b36ab03fba5e5f",
   "position": {
     "x": 32,
-    "y": 488,
-    "z": 120,
-    "height": 80,
+    "y": 447.86828422876948,
+    "z": 4000,
+    "height": 94.280762564991335,
     "width": 440,
-    "tabOrder": 912
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "slicer",
@@ -270,23 +270,5 @@
       ]
     }
   },
-  "parentGroupName": "d85268b5dc12f6005c09",
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "3065d91831cedc477eae",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Windows Migration Evidence"
-              }
-            },
-            "Property": "Disk Review"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
-  }
+  "parentGroupName": "d85268b5dc12f6005c09"
 }

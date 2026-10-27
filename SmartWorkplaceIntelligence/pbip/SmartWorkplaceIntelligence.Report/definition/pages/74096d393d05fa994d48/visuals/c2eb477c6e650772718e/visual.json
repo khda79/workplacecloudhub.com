@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "c2eb477c6e650772718e",
   "position": {
-    "x": 731.0,
+    "x": 514.66666666666663,
     "y": 128,
-    "width": 225.0,
+    "z": 15000,
     "height": 128,
-    "z": 202,
-    "tabOrder": 203
+    "width": 152.88888888888889,
+    "tabOrder": 18000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -20,34 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Accounts Without Activity >30D"
+                  "Property": "Remaining Observed Windows 10"
                 }
               },
-              "queryRef": "User Inventory Evidence.Accounts Without Activity >30D",
-              "nativeQueryRef": "Workforce inactive >30D",
-              "displayName": "Workforce inactive >30D"
-            }
-          ]
-        },
-        "Tooltips": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Summary"
-                    }
-                  },
-                  "Property": "License Overview Family Over-assigned Units"
-                }
-              },
-              "queryRef": "License Report Summary.License Overview Family Over-assigned Units",
-              "nativeQueryRef": "License Overview Family Over-assigned Units",
-              "displayName": "Over-assigned units"
+              "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
+              "nativeQueryRef": "Windows 10 remaining · Intune + AD",
+              "displayName": "Windows 10 remaining · Intune + AD"
             }
           ]
         }
@@ -67,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -83,7 +64,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#005A9E'"
                     }
                   }
                 }
@@ -345,7 +326,7 @@
             "rightMargin": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "4D"
                 }
               }
             }
@@ -368,7 +349,7 @@
             "paddingUniform": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "0D"
                 }
               }
             },
@@ -512,7 +493,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Global snapshot. Remaining M365 capacity is shown by suite in Licensing. Endpoint Analytics is an average among covered managed devices.'"
+                  "Value": "'Windows 10 remaining · Intune + AD'"
                 }
               }
             }
@@ -636,144 +617,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "Filtera01717f26e1e82f521c0c1d7",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Report Summary"
-              }
-            },
-            "Property": "Product"
-          }
-        },
-        "type": "Categorical",
-        "filter": {
-          "Version": 2,
-          "From": [
-            {
-              "Name": "s",
-              "Entity": "License Report Summary",
-              "Type": 0
-            }
-          ],
-          "Where": [
-            {
-              "Condition": {
-                "In": {
-                  "Expressions": [
-                    {
-                      "Column": {
-                        "Expression": {
-                          "SourceRef": {
-                            "Source": "s"
-                          }
-                        },
-                        "Property": "Product"
-                      }
-                    }
-                  ],
-                  "Values": [
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Microsoft 365 F1'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Microsoft 365 F3'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Microsoft 365 E3'"
-                        }
-                      }
-                    ],
-                    [
-                      {
-                        "Literal": {
-                          "Value": "'Microsoft 365 E5'"
-                        }
-                      }
-                    ]
-                  ]
-                }
-              }
-            }
-          ]
-        },
-        "howCreated": "User"
-      },
-      {
-        "name": "Filter17dd2be23ce70627b0551605",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Security Control Evidence"
-              }
-            },
-            "Property": "Control Name"
-          }
-        },
-        "type": "Categorical",
-        "filter": {
-          "Version": 2,
-          "From": [
-            {
-              "Name": "ep",
-              "Entity": "Security Control Evidence",
-              "Type": 0
-            }
-          ],
-          "Where": [
-            {
-              "Condition": {
-                "Not": {
-                  "Expression": {
-                    "In": {
-                      "Expressions": [
-                        {
-                          "Column": {
-                            "Expression": {
-                              "SourceRef": {
-                                "Source": "ep"
-                              }
-                            },
-                            "Property": "Control Name"
-                          }
-                        }
-                      ],
-                      "Values": [
-                        [
-                          {
-                            "Literal": {
-                              "Value": "'Defender protection active'"
-                            }
-                          }
-                        ]
-                      ]
-                    }
-                  }
-                }
-              }
-            }
-          ]
-        },
-        "howCreated": "User",
-        "isHiddenInViewMode": true,
-        "isLockedInViewMode": true
-      }
-    ]
   }
 }

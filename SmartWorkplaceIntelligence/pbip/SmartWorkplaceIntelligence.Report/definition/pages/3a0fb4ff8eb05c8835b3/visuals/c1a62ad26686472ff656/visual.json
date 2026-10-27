@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "c1a62ad26686472ff656",
   "position": {
     "x": 96,
     "y": 88,
-    "width": 1080,
+    "z": 35000,
     "height": 32,
-    "z": 101,
-    "tabOrder": 145
+    "width": 824,
+    "tabOrder": 28000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "User Explorer | private current workforce evidence \u00b7 11 observed DATA-ALL weeks",
+                    "value": "User Explorer | private AD/Entra accounts and activity evidence · 11 observed DATA-ALL weeks",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

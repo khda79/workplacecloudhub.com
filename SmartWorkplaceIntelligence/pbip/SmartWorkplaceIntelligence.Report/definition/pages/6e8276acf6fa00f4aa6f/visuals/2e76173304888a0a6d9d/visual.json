@@ -3,7 +3,7 @@
   "name": "2e76173304888a0a6d9d",
   "position": {
     "x": 32,
-    "y": 357.0,
+    "y": 357,
     "width": 1856,
     "height": 22.5,
     "z": 119,
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Qualification",
+                    "value": "Selected view: Cross-domain risk signals",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12pt",

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "cd65a62228120ab3e3a2",
   "position": {
-    "x": 1288,
+    "x": 1464,
     "y": 128,
-    "width": 288,
-    "height": 80,
-    "z": 105,
-    "tabOrder": 672
+    "z": 25000,
+    "height": 104,
+    "width": 208,
+    "tabOrder": 25000
   },
   "visual": {
     "visualType": "slicer",
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
                   "Property": "Mailbox Type"
                 }
               },
-              "queryRef": "Mailbox Evidence.Mailbox Type",
+              "queryRef": "Mailbox Exploration Inventory.Mailbox Type",
               "nativeQueryRef": "Mailbox Type",
               "active": true
             }

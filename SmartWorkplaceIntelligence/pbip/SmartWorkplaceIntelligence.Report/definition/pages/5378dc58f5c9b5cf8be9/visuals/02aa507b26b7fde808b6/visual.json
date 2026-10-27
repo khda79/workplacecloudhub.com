@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "02aa507b26b7fde808b6",
   "position": {
     "x": 1412,
     "y": 656.2,
-    "z": 114,
-    "width": 320,
+    "z": 27000,
     "height": 18,
-    "tabOrder": 114
+    "width": 320,
+    "tabOrder": 17000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Dominant Version Coverage \u00b7 observed history when available",
+                    "value": "Dominant Version Coverage · observed history when available",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

@@ -1,10 +1,9 @@
 # Hybrid identity findings and device readiness gaps
 
-Status: implemented and validated offline (synthetic tests and a local comparison
-with the legacy outputs). Not yet run by the server preparation. No Power BI change
-is part of this work. The two legacy SmartInventory producers stay in place,
-unchanged, until the new prepared outputs have been compared on the server; they
-are retired in a later, separate change.
+Status: the private report migration was accepted by the operator. The public
+report now consumes the prepared findings. Legacy producer code and launch entries
+are retired; existing CSVs, archives, receipts and weekly histories are preserved.
+Repository validation does not establish server deployment or a new successful build.
 
 | Legacy producer | Legacy output | Replaced by |
 | --- | --- | --- |
@@ -288,11 +287,23 @@ date evidence: 23 retained hybrid rules identical account by account; HYB-051
 no new-only finding and no unexplained difference. The six device conditions
 re-applied to the facts match the legacy verdicts device by device.
 
-## Later (out of scope)
+## Retirement and compatibility
 
-- Server run of the preparation and comparison report review.
-- Private Power BI: replace the `Exchange_HybridIdentity_Issues.csv` read in
-  `Mailbox Migration Inventory` with `HybridIdentityFindings.csv`; use the device
-  facts.
-- Retire both legacy producers, their outputs, archives and weekly history, and
-  remove them from source selection, schemas, receipts and Data Trust.
+New captures do not select the legacy CSVs. The Workforce licensing signal uses
+qualified License Report per-SKU disabled-account candidates, deduplicated by
+TenantKey and UserId, including Recommended and Review cases. This is a different scope
+from legacy rule 55; it never changes Exchange migration status. Unqualified or
+absent decisions yield Not measured and a blank count, not zero.
+
+AD enrichment retains the legacy severity and score columns for schema compatibility:
+severity is Not evaluated, score is blank. It does not consume a stale legacy CSV or
+read prepared outputs back into the upstream inventory.
+
+Historical artifact contract hashes admit their original Source-Exchange artifact
+with all integrity checks. New batches neither require nor admit it. Pre-findings
+batches remain readable and transferable; a partial new findings pair is rejected.
+No existing source, archive, receipt or WeeklyHistory is deleted or rewritten.
+
+Server deployment and resuming preparation are separate operator actions. Preserve
+the current timeout exceptions and all unrelated runtime settings. See
+[retirement deployment](LEGACY-READINESS-RETIREMENT.md).

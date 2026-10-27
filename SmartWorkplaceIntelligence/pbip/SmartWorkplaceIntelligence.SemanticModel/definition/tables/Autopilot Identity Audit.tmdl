@@ -1,0 +1,117 @@
+/// One row per loaded Autopilot registration. Tenant and batch scoped explicit identifiers. Conflicts never auto-merge. Disconnected audit utility.
+table 'Autopilot Identity Audit'
+	lineageTag: 861148f2-e2da-454b-81af-06ea173b42f7
+
+	measure 'Autopilot Row In Scope' =
+			VAR _c=VALUES('Country Selection'[Country]) VAR _d=VALUES('Daily Domain'[Domain]) VAR _cf=ISFILTERED('Country Selection') VAR _df=ISFILTERED('Daily Domain')
+			VAR _rows=FILTER('Autopilot Identity Audit',VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _k=COALESCE([Equipment key],[Entra identity key])
+			VAR _rawCountry=LOOKUPVALUE('Device Identity Inventory'[Country Name],'Device Identity Inventory'[Canonical Device Key],_k,'Device Identity Inventory'[TenantKey],_t,'Device Identity Inventory'[Loaded Batch ID],_b)
+			VAR _country=COALESCE(LOOKUPVALUE('Country Selection'[Country],'Country Selection'[Source Country],_rawCountry),_rawCountry)
+			VAR _domain=LOOKUPVALUE('Device Identity Inventory'[AD Domain],'Device Identity Inventory'[Canonical Device Key],_k,'Device Identity Inventory'[TenantKey],_t,'Device Identity Inventory'[Loaded Batch ID],_b)
+			RETURN (NOT _cf || _country IN _c) && (NOT _df || _domain IN _d))
+			RETURN IF(COUNTROWS(_rows)>0,1,0)
+		formatString: 0
+		lineageTag: 7008bfd9-c832-499a-9151-c46c25e2309d
+
+	/// All observed Autopilot source registrations, outside PC/Mobile equipment totals. Scoped by linked observed device country/domain.
+	measure 'Autopilot Registrations In Scope' =
+			VAR _c=VALUES('Country Selection'[Country]) VAR _d=VALUES('Daily Domain'[Domain]) VAR _cf=ISFILTERED('Country Selection') VAR _df=ISFILTERED('Daily Domain')
+			VAR _rows=FILTER('Autopilot Identity Audit',VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _k=COALESCE([Equipment key],[Entra identity key])
+			VAR _rawCountry=LOOKUPVALUE('Device Identity Inventory'[Country Name],'Device Identity Inventory'[Canonical Device Key],_k,'Device Identity Inventory'[TenantKey],_t,'Device Identity Inventory'[Loaded Batch ID],_b)
+			VAR _country=COALESCE(LOOKUPVALUE('Country Selection'[Country],'Country Selection'[Source Country],_rawCountry),_rawCountry)
+			VAR _domain=LOOKUPVALUE('Device Identity Inventory'[AD Domain],'Device Identity Inventory'[Canonical Device Key],_k,'Device Identity Inventory'[TenantKey],_t,'Device Identity Inventory'[Loaded Batch ID],_b)
+			RETURN (NOT _cf || _country IN _c) && (NOT _df || _domain IN _d))
+			RETURN COUNTROWS(_rows)
+		formatString: #,0
+		lineageTag: 618c6745-859c-44dc-adaa-c0a5809be072
+
+	column TenantKey
+		lineageTag: 52eab9f5-b097-4ed0-ad1d-ad178eaa4a15
+		isNameInferred
+		sourceColumn: [TenantKey]
+
+	column 'Loaded Batch ID'
+		lineageTag: 7f1c3823-745b-4376-b7c9-d1f49eb42467
+		isNameInferred
+		sourceColumn: [Loaded Batch ID]
+
+	column 'Autopilot ID'
+		lineageTag: 85c397d8-0d16-47fc-8719-8bc4fbc9f0d6
+		isNameInferred
+		sourceColumn: [Autopilot ID]
+
+	column 'Serial number'
+		lineageTag: 8d616f7f-9fe6-4471-a79b-140cc8d065f7
+		isNameInferred
+		sourceColumn: [Serial number]
+
+	column 'Autopilot state'
+		lineageTag: d7c913a5-cff6-46e4-936f-3bc0c543fbbf
+		isNameInferred
+		sourceColumn: [Autopilot state]
+
+	column 'Entra Device ID'
+		lineageTag: 0c6b89ec-f1d1-4eea-ab5a-bc49fdbe3d9f
+		isNameInferred
+		sourceColumn: [Entra Device ID]
+
+	column 'Managed Device ID'
+		lineageTag: f7741aeb-e52f-4a48-9cec-39c02b4b5a85
+		isNameInferred
+		sourceColumn: [Managed Device ID]
+
+	column 'Entra identity key'
+		lineageTag: 97e69e2d-4d4c-434d-87f4-a38ac9829972
+		isNameInferred
+		sourceColumn: [Entra identity key]
+
+	column 'Equipment key'
+		lineageTag: 474d41ef-e4bb-4c84-899d-c28c5b61399e
+		isNameInferred
+		sourceColumn: [Equipment key]
+
+	column 'Source matches'
+		lineageTag: a7013af8-5823-452c-bef2-b535ba4fedfc
+		isNameInferred
+		sourceColumn: [Source matches]
+
+	column 'Managed matches'
+		lineageTag: 563a2dc8-7472-43a7-a5bd-5a284f39d46d
+		isNameInferred
+		sourceColumn: [Managed matches]
+
+	column 'Target variants'
+		lineageTag: ef07759a-8f2d-4e07-976e-001688f63bd4
+		isNameInferred
+		sourceColumn: [Target variants]
+
+	column Reconciliation
+		lineageTag: a472395d-28c7-4c5c-91f2-2f310dadc93a
+		isNameInferred
+		sourceColumn: [Reconciliation]
+
+	partition 'Autopilot Identity Audit' = calculated
+		mode: import
+		source = ```
+
+				VAR _edges=ADDCOLUMNS('Autopilot Evidence',
+				"__EntraNativeKey",VAR _a=[AzureAdDeviceId] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN IF(NOT ISBLANK(_a) && _a<>"00000000-0000-0000-0000-000000000000",LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_a,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b)),
+				"__ManagedTargets",VAR _m=[ManagedDeviceId] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN IF(NOT ISBLANK(_m) && _m<>"00000000-0000-0000-0000-000000000000",COUNTROWS(FILTER('Device Identity Inventory',[Device Source ID]=_m && [TenantKey]=_t && [Loaded Batch ID]=_b)),0),
+				"__APTargetVariants",VAR _a=[AzureAdDeviceId] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN COUNTROWS(SUMMARIZE(FILTER('Autopilot Evidence',[AzureAdDeviceId]=_a && [TenantKey]=_t && [Loaded Batch ID]=_b),'Autopilot Evidence'[ManagedDeviceId])))
+				VAR _links=ADDCOLUMNS(_edges,
+				"__SourceCount",VAR _k=[__EntraNativeKey] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN IF(NOT ISBLANK(_k),COUNTROWS(FILTER('Device Identity Inventory',[Native Device Key]=_k && [TenantKey]=_t && [Loaded Batch ID]=_b)),0),
+				"__SourceKey",VAR _k=[__EntraNativeKey] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN IF(NOT ISBLANK(_k),CONCATENATEX(FILTER('Device Identity Inventory',[Native Device Key]=_k && [TenantKey]=_t && [Loaded Batch ID]=_b),[Canonical Device Key],"|")),
+				"__SourceHasManagement",VAR _k=[__EntraNativeKey] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN COUNTROWS(FILTER('Device Identity Inventory',NOT ISBLANK(_k) && [Native Device Key]=_k && [TenantKey]=_t && [Loaded Batch ID]=_b && (NOT ISBLANK([AD Computer Key]) || NOT ISBLANK([Device Source ID])))),
+				"__TargetKey",VAR _m=[ManagedDeviceId] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN IF([__ManagedTargets]=1,CONCATENATEX(FILTER('Device Identity Inventory',[Device Source ID]=_m && [TenantKey]=_t && [Loaded Batch ID]=_b),[Canonical Device Key])))
+				RETURN SELECTCOLUMNS(_links,
+				"TenantKey",[TenantKey],"Loaded Batch ID",[Loaded Batch ID],"Autopilot ID",[AutopilotDeviceId],"Serial number",[SerialNumber],"Autopilot state",[EnrollmentState],
+				"Entra Device ID",[AzureAdDeviceId],"Managed Device ID",[ManagedDeviceId],"Entra identity key",[__SourceKey],"Equipment key",[__TargetKey],
+				"Source matches",[__SourceCount],"Managed matches",[__ManagedTargets],"Target variants",[__APTargetVariants],
+				"Reconciliation",SWITCH(TRUE(),[__APTargetVariants]>1 || [__ManagedTargets]>1 || [__SourceCount]>1,"Ambiguous identifiers",
+				[__ManagedTargets]=0,"No observed Intune match",
+				[__SourceCount]=0,"Intune matched; Entra identity unresolved",
+				[__SourceKey]=[__TargetKey],"Same enrolled identity",
+				[__SourceHasManagement]>0,"Conflict: distinct managed or AD identities",
+				"Unique Autopilot equipment link"))
+
+				```

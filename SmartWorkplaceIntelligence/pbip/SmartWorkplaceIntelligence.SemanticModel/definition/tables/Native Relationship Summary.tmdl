@@ -41,6 +41,14 @@ table 'Native Relationship Summary'
 		summarizeBy: none
 		sourceColumn: EvidenceSource
 
+	column TenantKey
+		dataType: string
+		lineageTag: cb7ecc33-338b-4b0c-ae6e-2e244e2a9a43
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+		annotation SummarizationSetBy = Automatic
+
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'
 		dataType: string

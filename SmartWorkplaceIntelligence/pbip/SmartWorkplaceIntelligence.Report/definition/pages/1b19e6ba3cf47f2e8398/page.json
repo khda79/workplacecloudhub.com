@@ -63,7 +63,7 @@
           "Column": {
             "Expression": {
               "SourceRef": {
-                "Entity": "Mailbox Evidence"
+                "Entity": "Mailbox Exploration Inventory"
               }
             },
             "Property": "Mailbox Key"
@@ -85,7 +85,7 @@
           "Column": {
             "Expression": {
               "SourceRef": {
-                "Entity": "Mailbox Evidence"
+                "Entity": "Mailbox Exploration Inventory"
               }
             },
             "Property": "Mailbox Key"
@@ -93,5 +93,17 @@
         }
       }
     ]
-  }
+  },
+  "visualInteractions": [
+    {
+      "source": "5567b1108ad710094810",
+      "target": "3da949c164371aa5e16b",
+      "type": "DataFilter"
+    },
+    {
+      "source": "5567b1108ad710094810",
+      "target": "07746fe43d00a2874ec1",
+      "type": "DataFilter"
+    }
+  ]
 }

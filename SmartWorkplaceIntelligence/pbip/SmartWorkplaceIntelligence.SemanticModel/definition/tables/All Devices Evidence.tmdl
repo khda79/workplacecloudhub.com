@@ -104,7 +104,7 @@ table 'All Devices Evidence'
 			RETURN IF(_batchSafe, CALCULATE([All Devices], KEEPFILTERS(TREATAS(_enabledKeys, 'All Devices Evidence'[TenantKey], 'All Devices Evidence'[Device Key]))))
 		formatString: #,0
 		displayFolder: Executive overview
-		lineageTag: 3a650f7d-4e08-47a7-9cee-2b7500673183
+		lineageTag: 858a159e-50a2-4650-acd6-5f469d799251
 
 	/// Identities in the strong union without a qualified primary enabled/disabled state: AD Enabled for AD-prefixed identities, or Entra state for Intune-only. Excluded from All Enabled Devices. Returns blank across mixed/unknown batches.
 	measure 'Device State Unknown Identities' =
@@ -194,7 +194,7 @@ table 'All Devices Evidence'
 		formatString: #,0
 		isHidden
 		displayFolder: Evidence scope
-		lineageTag: a80847a9-7857-405c-bc78-b0b3062f0626
+		lineageTag: 15513c68-9b60-48d6-affc-11696db79a14
 
 	/// Existing union identities with explicit enabled/disabled conflicts across exact unique SID/device-ID links, or contradictory AD states. These identities are excluded from All Enabled Devices. Returns blank across mixed/unknown batches.
 	measure 'Device State Conflicting Identities' =
@@ -283,7 +283,7 @@ table 'All Devices Evidence'
 		formatString: #,0
 		isHidden
 		displayFolder: Evidence scope
-		lineageTag: 41648ab4-29d5-4649-b5b9-9eaeeb235bb8
+		lineageTag: 93197fba-542c-41ba-a88b-55b1fed97324
 
 	column TenantKey
 		dataType: string
@@ -362,6 +362,146 @@ table 'All Devices Evidence'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Private report scope. Exact unique native identity and one loaded batch; no UPN suffix or display-name inference. Blank when missing or ambiguous.
+	column 'AD Domain' =
+			VAR _batch = 'All Devices Evidence'[Loaded Batch ID]
+			VAR _tenant = 'All Devices Evidence'[TenantKey]
+			VAR _key = 'All Devices Evidence'[Device Key]
+			VAR _ad = FILTER(ALL('AD Computer Evidence'), 'AD Computer Evidence'[TenantKey] == _tenant && 'AD Computer Evidence'[Loaded Batch ID] == _batch && "ad:" & LOWER('AD Computer Evidence'[ObjectGUID]) == _key)
+			VAR _intune = FILTER(ALL('Device Exploration Inventory'), 'Device Exploration Inventory'[TenantKey] == _tenant && 'Device Exploration Inventory'[Loaded Batch ID] == _batch && "intune:" & LOWER('Device Exploration Inventory'[Device Source ID]) == _key && 'Device Exploration Inventory'[Device Source ID] <> "")
+			RETURN IF(NOT ISBLANK(_batch) && NOT ISBLANK(_tenant) && NOT ISBLANK(_key), IF(COUNTROWS(_ad) = 1, MAXX(_ad, 'AD Computer Evidence'[DomainName]), IF(COUNTROWS(_intune) = 1, MAXX(_intune, 'Device Exploration Inventory'[AD Domain]))))
+		dataType: string
+		displayFolder: Report scope
+		lineageTag: b131af82-471b-4fad-8a72-894022383c85
+		summarizeBy: none
+
+	/// Exact tenant/batch and AD GUID/native SID or Intune managed-device ID link. No name matching.
+	column 'Report Native Device Key' =
+			VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _k=[Device Key]
+			VAR _ad=IF(LEFT(_k,3)="ad:",MID(_k,4,500))
+			VAR _mid=IF(LEFT(_k,7)="intune:",MID(_k,8,500))
+			RETURN IF(NOT ISBLANK(_ad),IF(LOOKUPVALUE('AD Computer Evidence'[CloudMatchStatus],'AD Computer Evidence'[ObjectGUID],_ad,'AD Computer Evidence'[TenantKey],_t,'AD Computer Evidence'[Loaded Batch ID],_b)="Unique native SID",LOOKUPVALUE('AD Computer Evidence'[TenantDeviceKey],'AD Computer Evidence'[ObjectGUID],_ad,'AD Computer Evidence'[TenantKey],_t,'AD Computer Evidence'[Loaded Batch ID],_b,BLANK())),LOOKUPVALUE('Native Managed Device Evidence'[TenantDeviceKey],'Native Managed Device Evidence'[ManagedDeviceId],_mid,'Native Managed Device Evidence'[TenantKey],_t,'Native Managed Device Evidence'[Loaded Batch ID],_b,BLANK()))
+		dataType: string
+		isHidden
+		displayFolder: Device qualification
+		lineageTag: 7334b257-6e5a-4e07-ac66-f1b23d4c2c03
+		summarizeBy: none
+
+	column 'Report Managed Device ID' =
+			VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _k=[Device Key]
+			VAR _ad=IF(LEFT(_k,3)="ad:",MID(_k,4,500))
+			VAR _mid=IF(LEFT(_k,7)="intune:",MID(_k,8,500))
+			VAR _n=[Report Native Device Key]
+			RETURN IF(NOT ISBLANK(_mid),_mid,IF(NOT ISBLANK(_n),LOOKUPVALUE('Native Managed Device Evidence'[ManagedDeviceId],'Native Managed Device Evidence'[TenantDeviceKey],_n,'Native Managed Device Evidence'[TenantKey],_t,'Native Managed Device Evidence'[Loaded Batch ID],_b,BLANK())))
+		dataType: string
+		isHidden
+		displayFolder: Device qualification
+		lineageTag: b30302b7-4f8c-46b7-9103-50261184987d
+		summarizeBy: none
+
+	/// Observed AD domain, used as the approved corporate-membership rule.
+	column 'AD domain (report)' =
+			VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _k=[Device Key]
+			VAR _ad=IF(LEFT(_k,3)="ad:",MID(_k,4,500))
+			VAR _mid=IF(LEFT(_k,7)="intune:",MID(_k,8,500))
+			RETURN COALESCE(IF(NOT ISBLANK(_ad),LOOKUPVALUE('AD Computer Evidence'[DomainName],'AD Computer Evidence'[ObjectGUID],_ad,'AD Computer Evidence'[TenantKey],_t,'AD Computer Evidence'[Loaded Batch ID],_b,BLANK())),"Unknown")
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 5eab05bc-5253-4a45-9be4-c27cea61f046
+		summarizeBy: none
+
+	/// Intune platform first; if absent, OS from exact AD GUID/tenant/batch. Windows Server kept outside PC family.
+	column 'Platform (report)' =
+			VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _k=[Device Key]
+			VAR _ad=IF(LEFT(_k,3)="ad:",MID(_k,4,500))
+			VAR _mid=IF(LEFT(_k,7)="intune:",MID(_k,8,500))
+			VAR _raw=LOWER(TRIM(COALESCE([Platform],"")))
+			VAR _os=LOWER(TRIM(COALESCE(IF(NOT ISBLANK(_ad),LOOKUPVALUE('AD Computer Evidence'[OperatingSystem],'AD Computer Evidence'[ObjectGUID],_ad,'AD Computer Evidence'[TenantKey],_t,'AD Computer Evidence'[Loaded Batch ID],_b,BLANK())),"")))
+			VAR _v=IF(_raw IN {"","unknown","not reported","unclassified"},_os,_raw)
+			RETURN SWITCH(TRUE(),CONTAINSSTRING(_os,"windows")&&CONTAINSSTRING(_os,"server"),"Windows Server",CONTAINSSTRING(_v,"windows"),"Windows",CONTAINSSTRING(_v,"mac")||_v IN {"os x","osx","darwin"},"macOS",CONTAINSSTRING(_v,"android"),"Android",_v IN {"ipados","ipad"},"iPadOS",_v IN {"ios","iphone"},"iOS",CONTAINSSTRING(_v,"linux"),"Linux",_v IN {"","unknown","not reported","unclassified"},"Unknown","Other")
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 984ccf10-c58f-4fa7-8842-fd3308cc53f0
+		summarizeBy: none
+
+	column 'Platform evidence (report)' =
+			VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _k=[Device Key]
+			VAR _ad=IF(LEFT(_k,3)="ad:",MID(_k,4,500))
+			VAR _mid=IF(LEFT(_k,7)="intune:",MID(_k,8,500))
+			VAR _raw=LOWER(TRIM(COALESCE([Platform],"")))
+			VAR _os=IF(NOT ISBLANK(_ad),LOOKUPVALUE('AD Computer Evidence'[OperatingSystem],'AD Computer Evidence'[ObjectGUID],_ad,'AD Computer Evidence'[TenantKey],_t,'AD Computer Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN SWITCH(TRUE(),[Platform (report)]="Windows Server","AD operatingSystem: server",NOT(_raw IN {"","unknown","not reported","unclassified"}),"Intune operating system",NOT ISBLANK(_os)&&_os<>"","AD operatingSystem","Not observed")
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: cd63e27b-4db3-4d6d-9fe7-8380a1632c83
+		summarizeBy: none
+
+	column 'Device type (report)' = SWITCH(TRUE(),[Platform (report)] IN {"Windows","macOS"},"PC",[Platform (report)] IN {"Android","iOS","iPadOS"},"Mobile",[Platform (report)]="Windows Server","Server",[Platform (report)]="Unknown","Unknown","Other")
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 38dc2c28-5cc3-4585-b42c-3dda580af434
+		summarizeBy: none
+
+	/// Uses loaded Intune inventory or native device ownership only for an exact managed-device identity.
+	column 'Intune ownership (report)' =
+			VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _k=[Device Key]
+			VAR _ad=IF(LEFT(_k,3)="ad:",MID(_k,4,500))
+			VAR _mid=IF(LEFT(_k,7)="intune:",MID(_k,8,500))
+			VAR _id=[Report Managed Device ID] VAR _n=[Report Native Device Key]
+			VAR _raw=COALESCE(IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Inventory Evidence'[Ownership],'Device Inventory Evidence'[Device Source ID],_id,'Device Inventory Evidence'[TenantKey],_t,'Device Inventory Evidence'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_id)&&NOT ISBLANK(_n),LOOKUPVALUE('Native Device Evidence'[Ownership],'Native Device Evidence'[TenantDeviceKey],_n,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b,BLANK())))
+			RETURN SWITCH(LOWER(_raw),"corporate","Corporate","company","Corporate","personal","Personal","Unknown")
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: d4aa525d-ad58-49e0-9976-3e813cec74bd
+		summarizeBy: none
+
+	/// Approved rule: device in observed AD domain is corporate; otherwise use Intune ownership. Source ownership remains available.
+	column 'Ownership (report)' =
+			VAR _domain=TRIM([AD domain (report)])
+			RETURN IF(NOT(_domain IN {"","Unknown","Not resolved"}),"Corporate",[Intune ownership (report)])
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: fc319f91-a2c6-42a7-9bad-0503770835ad
+		summarizeBy: none
+
+	column 'Ownership qualification (report)' =
+			VAR _ad=NOT(TRIM([AD domain (report)]) IN {"","Unknown","Not resolved"})
+			RETURN SWITCH(TRUE(),_ad&&[Intune ownership (report)]="Personal","AD domain corporate / Intune Personal conflict",_ad,"Corporate: observed AD domain",[Intune ownership (report)]="Corporate","Corporate: Intune ownership",[Intune ownership (report)]="Personal","Personal: Intune ownership","Ownership not observed")
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: cdb987ce-523c-4eaf-89b9-45edd624e566
+		summarizeBy: none
+
+	/// AccountEnabled evidence already loaded in the model. Missing mobile account-state evidence is Unknown, never Disabled or presumed Enabled.
+	column 'Entra state (report)' =
+			VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _id=[Report Managed Device ID]
+			VAR _states=IF(NOT ISBLANK(_id),CALCULATE(DISTINCTCOUNT('Device Inventory Evidence'[Entra Account State]),REMOVEFILTERS('Device Inventory Evidence'),TREATAS({_id},'Device Inventory Evidence'[Device Source ID]),TREATAS({_t},'Device Inventory Evidence'[TenantKey]),TREATAS({_b},'Device Inventory Evidence'[Loaded Batch ID]),'Device Inventory Evidence'[Entra Account State] IN {"Enabled","Disabled"}))
+			VAR _raw=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Inventory Evidence'[Entra Account State],'Device Inventory Evidence'[Device Source ID],_id,'Device Inventory Evidence'[TenantKey],_t,'Device Inventory Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(_states>1,"Conflicting",SWITCH(_raw,"Enabled","Enabled","Disabled","Disabled","Unknown"))
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: eb3710d7-20c6-44bd-91ee-804dd398bb3a
+		summarizeBy: none
+
+	/// Explicit AD Enabled or Entra AccountEnabled; opposite known states are Conflicting and excluded from enabled KPIs.
+	column 'Enabled state (report)' =
+			VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _k=[Device Key]
+			VAR _ad=IF(LEFT(_k,3)="ad:",MID(_k,4,500))
+			VAR _hasAD=NOT ISBLANK(_ad)&&NOT ISBLANK(LOOKUPVALUE('AD Computer Evidence'[ObjectGUID],'AD Computer Evidence'[ObjectGUID],_ad,'AD Computer Evidence'[TenantKey],_t,'AD Computer Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _a=IF(_hasAD,LOOKUPVALUE('AD Computer Evidence'[Enabled],'AD Computer Evidence'[ObjectGUID],_ad,'AD Computer Evidence'[TenantKey],_t,'AD Computer Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _e=[Entra state (report)]
+			RETURN SWITCH(TRUE(),_e="Conflicting"||(_hasAD&&_a==TRUE()&&_e="Disabled")||(_hasAD&&_a==FALSE()&&_e="Enabled"),"Conflicting",(_hasAD&&_a==TRUE())||_e="Enabled","Enabled",(_hasAD&&_a==FALSE())||_e="Disabled","Disabled","Unknown")
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 771b0993-0179-46b4-89ce-7975fa512068
+		summarizeBy: none
+
+	column 'Account state evidence (report)' = SWITCH(TRUE(),[Enabled state (report)]="Conflicting","Conflicting AD / Entra account states",[Entra state (report)] IN {"Enabled","Disabled"},"Entra AccountEnabled observed",[Device type (report)]="Mobile","Entra AccountEnabled absent from cached mobile evidence",[Enabled state (report)] IN {"Enabled","Disabled"},"AD Enabled observed; Entra state not observed","Account state not observed")
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 4917e6c8-fb62-46e3-8c16-c11c7c58ff12
+		summarizeBy: none
+
 	partition 'All Devices Evidence' = m
 		mode: import
 		source =
@@ -391,3 +531,5 @@ table 'All Devices Evidence'
 				    NormalizedUtc)
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

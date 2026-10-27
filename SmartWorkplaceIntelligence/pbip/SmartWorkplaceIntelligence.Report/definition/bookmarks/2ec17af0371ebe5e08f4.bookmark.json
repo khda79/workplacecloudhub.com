@@ -1,0 +1,68 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "displayName": "By country",
+  "name": "2ec17af0371ebe5e08f4",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "403082f4ddd7359804c4",
+      "8a434067a12556e7f725",
+      "4652caff1debb5e4527e",
+      "3d2646412457f8b05666",
+      "b284d97356c04fd70c8e",
+      "0b97f2ba5facd3bbabf5",
+      "ff1eb51faf392d7ca319",
+      "5ee61faf06f49b485985"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "e0a71730533d84d5c995",
+    "sections": {
+      "e0a71730533d84d5c995": {
+        "visualContainers": {
+          "b284d97356c04fd70c8e": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "0b97f2ba5facd3bbabf5": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "ff1eb51faf392d7ca319": {
+            "singleVisual": {}
+          },
+          "5ee61faf06f49b485985": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "403082f4ddd7359804c4": {
+            "isHidden": true
+          },
+          "8a434067a12556e7f725": {
+            "isHidden": true
+          },
+          "4652caff1debb5e4527e": {
+            "isHidden": true
+          },
+          "3d2646412457f8b05666": {
+            "isHidden": false
+          }
+        }
+      }
+    }
+  }
+}

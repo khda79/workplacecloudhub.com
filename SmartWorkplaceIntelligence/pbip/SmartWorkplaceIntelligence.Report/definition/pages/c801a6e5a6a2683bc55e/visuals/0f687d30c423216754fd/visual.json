@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "0f687d30c423216754fd",
   "position": {
     "x": 32,
     "y": 594.5,
-    "z": 110,
+    "z": 9000,
     "height": 415.2,
     "width": 1856,
-    "tabOrder": 110
+    "tabOrder": 12000
   },
   "visual": {
     "visualType": "tableEx",
@@ -197,6 +197,13 @@
                   }
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
             }
           }
         }
@@ -288,6 +295,146 @@
       "columnFormatting": [
         {
           "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Enterprise Operational Signals.Recommended Action"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Enterprise Operational Signals.Signal"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Enterprise Operational Signals.Domain"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Enterprise Operational Signals.Severity Label"
+          }
+        },
+        {
+          "properties": {
             "labelDisplayUnits": {
               "expr": {
                 "Literal": {
@@ -298,7 +445,28 @@
             "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "'Right'"
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -378,7 +546,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Risk signals and recommended actions \u00b7 priority order'"
+                  "Value": "'Risk signals and recommended actions · priority order'"
                 }
               }
             },
@@ -544,76 +712,6 @@
   },
   "filterConfig": {
     "filters": [
-      {
-        "name": "f1990b94468fd6127bf8",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Enterprise Operational Signals"
-              }
-            },
-            "Property": "Severity Label"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "08cee57e8f582aa26109",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Enterprise Operational Signals"
-              }
-            },
-            "Property": "Domain"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "31ad0fefb2133bb04e7a",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Enterprise Operational Signals"
-              }
-            },
-            "Property": "Signal"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "a872931c45508ea92581",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Enterprise Operational Signals"
-              }
-            },
-            "Property": "Affected Signal Observations"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "a823f12ebd0670cd56da",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Enterprise Operational Signals"
-              }
-            },
-            "Property": "Recommended Action"
-          }
-        },
-        "type": "Categorical"
-      },
       {
         "name": "Filtera1d150877c174404220af814",
         "field": {

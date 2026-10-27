@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "dbb016761aaa5692f4a7",
   "position": {
     "x": 32,
-    "y": 357.0,
-    "width": 1856,
-    "height": 22.5,
+    "y": 269,
     "z": 119,
+    "height": 22.5,
+    "width": 1856,
     "tabOrder": 629
   },
   "visual": {
@@ -19,12 +19,12 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Classification context",
+                    "value": "Selected view: Account classification",
                     "textStyle": {
+                      "fontWeight": "bold",
                       "fontFamily": "Segoe UI",
                       "fontSize": "12pt",
-                      "color": "#215E9E",
-                      "fontWeight": "bold"
+                      "color": "#215e9e"
                     }
                   }
                 ]

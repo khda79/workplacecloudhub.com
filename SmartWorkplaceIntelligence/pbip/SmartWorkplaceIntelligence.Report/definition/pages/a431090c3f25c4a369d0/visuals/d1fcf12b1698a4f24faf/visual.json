@@ -1,19 +1,19 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "d1fcf12b1698a4f24faf",
   "position": {
     "x": 976,
-    "y": 688,
-    "z": 111,
-    "height": 304,
+    "y": 660,
+    "z": 2000,
+    "height": 340,
     "width": 912,
-    "tabOrder": 1333
+    "tabOrder": 4000
   },
   "visual": {
-    "visualType": "pivotTable",
+    "visualType": "tableEx",
     "query": {
       "queryState": {
-        "Rows": {
+        "Values": {
           "projections": [
             {
               "field": {
@@ -60,6 +60,54 @@
               "queryRef": "Device Inventory Evidence.Primary User UPN",
               "nativeQueryRef": "Primary User",
               "active": true
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "SAM · Device Inventory Evidence"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.SAM · Device Inventory Evidence",
+              "nativeQueryRef": "SAM · Device Inventory Evidence",
+              "displayName": "SAM",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Last Console User (report)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Last Console User (report)",
+              "nativeQueryRef": "Last Console User (report)",
+              "active": true,
+              "displayName": "Last console user"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Last Console Logon UTC (report)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Last Console Logon UTC (report)",
+              "nativeQueryRef": "Last Console Logon UTC (report)",
+              "active": true,
+              "displayName": "Last console logon UTC"
             },
             {
               "field": {
@@ -164,6 +212,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Password Expired",
               "nativeQueryRef": "AD Password Expired",
+              "active": true,
               "displayName": "AD Password Expired"
             },
             {
@@ -179,6 +228,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Password Expiry Status",
               "nativeQueryRef": "AD Password Expiry Status",
+              "active": true,
               "displayName": "AD Password Expiry Status"
             },
             {
@@ -194,6 +244,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Created (source)",
               "nativeQueryRef": "AD Created (source)",
+              "active": true,
               "displayName": "AD Created (source)"
             },
             {
@@ -209,6 +260,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Creation Qualification",
               "nativeQueryRef": "AD Creation Qualification",
+              "active": true,
               "displayName": "AD Creation Qualification"
             },
             {
@@ -224,6 +276,7 @@
               },
               "queryRef": "Device Inventory Evidence.Entra Created (source)",
               "nativeQueryRef": "Entra Created (source)",
+              "active": true,
               "displayName": "Entra Created (source)"
             },
             {
@@ -239,6 +292,7 @@
               },
               "queryRef": "Device Inventory Evidence.Entra Creation Qualification",
               "nativeQueryRef": "Entra Creation Qualification",
+              "active": true,
               "displayName": "Entra Creation Qualification"
             },
             {
@@ -254,6 +308,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Modified (source)",
               "nativeQueryRef": "AD Modified (source)",
+              "active": true,
               "displayName": "AD Modified (source)"
             },
             {
@@ -269,6 +324,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Modification Qualification",
               "nativeQueryRef": "AD Modification Qualification",
+              "active": true,
               "displayName": "AD Modification Qualification"
             },
             {
@@ -284,6 +340,7 @@
               },
               "queryRef": "Device Inventory Evidence.Entra Modified (source)",
               "nativeQueryRef": "Entra Modified (source)",
+              "active": true,
               "displayName": "Entra Modified (source)"
             },
             {
@@ -299,7 +356,120 @@
               },
               "queryRef": "Device Inventory Evidence.Entra Modification Qualification",
               "nativeQueryRef": "Entra Modification Qualification",
+              "active": true,
               "displayName": "Entra Modification Qualification"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System BIOS Version"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System BIOS Version",
+              "nativeQueryRef": "BIOS Version",
+              "active": true,
+              "displayName": "BIOS Version"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System BIOS Date"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System BIOS Date",
+              "nativeQueryRef": "BIOS Date",
+              "active": true,
+              "displayName": "BIOS Date"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Firmware Type"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Firmware Type",
+              "nativeQueryRef": "Firmware Type",
+              "active": true,
+              "displayName": "Firmware Type"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Last Boot Time"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Last Boot Time",
+              "nativeQueryRef": "Last Boot Time",
+              "active": true,
+              "displayName": "Last Boot Time"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Observation Raw"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Observation Raw",
+              "nativeQueryRef": "Observation Raw",
+              "active": true,
+              "displayName": "Observation Raw"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Freshness"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Freshness",
+              "nativeQueryRef": "Freshness",
+              "active": true,
+              "displayName": "Freshness"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Console Logon Qualification (report)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Console Logon Qualification (report)",
+              "nativeQueryRef": "Console Logon Qualification (report)",
+              "active": true,
+              "displayName": "Console logon qualification"
             },
             {
               "field": {
@@ -318,307 +488,10 @@
               "displayName": "Intune device ID"
             }
           ]
-        },
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System BIOS Version"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System BIOS Version",
-              "nativeQueryRef": "BIOS Version",
-              "displayName": "BIOS Version"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System BIOS Date"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System BIOS Date",
-              "nativeQueryRef": "BIOS Date",
-              "displayName": "BIOS Date"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Firmware Type"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Firmware Type",
-              "nativeQueryRef": "Firmware Type",
-              "displayName": "Firmware Type"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Last Boot Time"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Last Boot Time",
-              "nativeQueryRef": "Last Boot Time",
-              "displayName": "Last Boot Time"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Observation Raw"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Observation Raw",
-              "nativeQueryRef": "Observation Raw",
-              "displayName": "Observation Raw"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Freshness"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Freshness",
-              "nativeQueryRef": "Freshness",
-              "displayName": "Freshness"
-            }
-          ]
         }
       }
     },
-    "expansionStates": [
-      {
-        "roles": [
-          "Rows"
-        ],
-        "levels": [
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Country Name"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Country Name"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Device Name"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Device Name"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Primary User UPN"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Primary User UPN"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Manufacturer"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Manufacturer"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Model"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Model"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Ownership"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Ownership"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Operating System Family"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Operating System Family"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Windows Release"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Windows Release"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Windows Generation"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Windows Generation"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Device Source ID"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Device Source ID"
-                }
-              }
-            ],
-            "isPinned": true
-          }
-        ],
-        "root": {}
-      }
-    ],
     "objects": {
-      "general": [
-        {
-          "properties": {
-            "layout": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Tabular'"
-                }
-              }
-            }
-          }
-        }
-      ],
       "columnHeaders": [
         {
           "properties": {
@@ -639,7 +512,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -673,9 +546,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -746,45 +626,10 @@
           }
         }
       ],
-      "rowHeaders": [
+      "total": [
         {
           "properties": {
-            "unfrozen": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "stepped": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "wordWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "repeatRowHeaders": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "showExpandCollapseButtons": {
+            "totals": {
               "expr": {
                 "Literal": {
                   "Value": "false"
@@ -794,89 +639,1059 @@
           }
         }
       ],
-      "subTotals": [
+      "columnFormatting": [
         {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Country Name"
+          },
           "properties": {
-            "rowSubtotals": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "'Left'"
                 }
               }
             },
-            "columnSubtotals": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
-            "fontSize": {
+            "styleValues": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
           }
         },
         {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Device Name"
+          },
           "properties": {
-            "rowSubtotals": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "'Center'"
                 }
               }
             },
-            "perRowLevel": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
-            "fontSize": {
+            "styleValues": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
-          "selector": {
-            "id": "Row"
           }
         },
         {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Primary User UPN"
+          },
           "properties": {
-            "columnSubtotals": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "'Center'"
                 }
               }
             },
-            "perColumnLevel": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
-            "fontSize": {
+            "styleValues": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
-            "id": "Column"
+            "metadata": "Device Inventory Evidence.SAM · Device Inventory Evidence"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Last Console User (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Last Console Logon UTC (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Manufacturer"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Model"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Ownership"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Operating System Family"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Windows Release"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Windows Generation"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Password Expired"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Password Expiry Status"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Created (source)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Creation Qualification"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Entra Created (source)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Entra Creation Qualification"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Modified (source)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Modification Qualification"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Entra Modified (source)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Entra Modification Qualification"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System BIOS Version"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System BIOS Date"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Firmware Type"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Last Boot Time"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Observation Raw"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Freshness"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Console Logon Qualification (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Device Source ID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
           }
         }
-      ]
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -885,7 +1700,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full inventory \u00b7 selected evidence'"
+                  "Value": "'Full inventory · selected evidence'"
                 }
               }
             }
@@ -905,7 +1720,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Full inventory \u00b7 BIOS, firmware and one consolidated last boot'"
+                  "Value": "'Full inventory · BIOS, firmware and one consolidated last boot'"
                 }
               }
             },
@@ -1005,7 +1820,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -1066,118 +1888,6 @@
   "filterConfig": {
     "filters": [
       {
-        "name": "062fe659371bd31ec824",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Device Name"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "24e9aee44e9818bf0f84",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Primary User UPN"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "32311aa65ec3addbad73",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Manufacturer"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "7de048bfa6911e577952",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Model"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "ea46beb4e985ceea5be6",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Ownership"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "dad3e1ea4e96d2534e4c",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Operating System Family"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "518f10a3b9c44b0515d4",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Windows Release"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "7d0476d89d068acab404",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Windows Generation"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
         "name": "Filter9156d6180d71a8c175159dbd",
         "field": {
           "Measure": {
@@ -1226,6 +1936,55 @@
         },
         "howCreated": "User",
         "isHiddenInViewMode": true
+      },
+      {
+        "name": "dcf5738faa3839e272150000",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Device Inventory Evidence"
+              }
+            },
+            "Property": "Primary user row match · Device Inventory Evidence"
+          }
+        },
+        "type": "Advanced",
+        "howCreated": "User",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "s",
+              "Entity": "Device Inventory Evidence",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 0,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "s"
+                        }
+                      },
+                      "Property": "Primary user row match · Device Inventory Evidence"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "1L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
       }
     ]
   }

@@ -1,16 +1,39 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "c395a600f0f7107c40bf",
   "position": {
-    "x": 1576,
-    "y": 128,
-    "width": 312,
+    "x": 1304,
+    "y": 8,
+    "z": 0,
     "height": 80,
-    "z": 104,
-    "tabOrder": 64
+    "width": 216,
+    "tabOrder": 1000
   },
   "visual": {
     "visualType": "slicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Exchange Version"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Exchange Version",
+              "nativeQueryRef": "Exchange Version",
+              "active": true
+            }
+          ]
+        }
+      }
+    },
     "objects": {
       "data": [
         {
@@ -76,29 +99,6 @@
           }
         }
       ]
-    },
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Exchange Version"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Exchange Version",
-              "nativeQueryRef": "Exchange Version",
-              "active": true
-            }
-          ]
-        }
-      }
     },
     "visualContainerObjects": {
       "title": [
@@ -269,6 +269,5 @@
         }
       ]
     }
-  },
-  "parentGroupName": "f81843b2c98f223aa742"
+  }
 }

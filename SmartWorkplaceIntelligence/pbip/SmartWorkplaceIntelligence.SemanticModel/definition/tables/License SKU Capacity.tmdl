@@ -170,6 +170,18 @@ table 'License SKU Capacity'
 		displayFolder: Licensing | SKU decisions
 		lineageTag: 1d733d73-3957-46cc-9be3-39a3f7d0d2b9
 
+	/// Tenant-wide unknown-assessment count for selected complete suite families. Not allocated geographically; this is a qualification column, not scoped candidate count.
+	measure 'Selected Suite Recovery Unknown' =
+			VAR _products=VALUES('License SKU Capacity'[Report Product])
+			RETURN IF([License Report Snapshot Consistent]=1,
+			CALCULATE(SUM('License Report Summary'[Recovery Unknown]),
+			KEEPFILTERS(TREATAS(_products,'License Report Summary'[Product])),
+			KEEPFILTERS('License Report Summary'[Category]="Suite")))
+		formatString: #,0
+		isHidden
+		displayFolder: Licensing | Suites
+		lineageTag: b267412b-6fcf-4cd3-8dec-56238e6261af
+
 	column 'Snapshot ID'
 		dataType: string
 		lineageTag: 6837da53-90d7-435f-869c-d4a514760247
@@ -438,4 +450,4 @@ table 'License SKU Capacity'
 				in
 				    Readers[Finish](BusinessRows)
 
-	annotation PBI_ResultType = Table
+	annotation PBI_ResultType = Exception

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "373b5135afe4e365869f",
   "position": {
     "x": 1216,
     "y": 91,
-    "width": 672,
+    "z": 37000,
     "height": 25,
-    "z": 26000,
-    "tabOrder": 12
+    "width": 672,
+    "tabOrder": 8000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,14 +19,15 @@
               {
                 "textRuns": [
                   {
-                    "value": "Scope: attributable records only; tenant totals remain global.",
+                    "value": "Scope: native-linked records only. Tenant capacity and aggregate evidence remain global.",
                     "textStyle": {
                       "fontSize": "12px",
                       "color": "#52606D",
                       "fontFamily": "Segoe UI"
                     }
                   }
-                ]
+                ],
+                "horizontalTextAlignment": "right"
               }
             ]
           }

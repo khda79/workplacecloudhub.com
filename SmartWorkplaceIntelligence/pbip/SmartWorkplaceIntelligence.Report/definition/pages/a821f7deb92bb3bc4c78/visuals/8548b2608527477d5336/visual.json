@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "8548b2608527477d5336",
   "position": {
     "x": 32,
-    "y": 379.5,
-    "width": 600,
-    "height": 128,
-    "z": 107,
+    "y": 320,
+    "z": 0,
+    "height": 96,
+    "width": 1856,
     "tabOrder": 677
   },
   "visual": {
@@ -56,6 +56,65 @@
               },
               "queryRef": "Application Inventory Evidence.Application Publishers",
               "nativeQueryRef": "Publishers"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Application Inventory Evidence"
+                    }
+                  },
+                  "Property": "Application Install Observations"
+                }
+              },
+              "queryRef": "Application Inventory Evidence.Application Install Observations",
+              "nativeQueryRef": "Application install observations",
+              "displayName": "Install observations"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Application Inventory Evidence"
+                    }
+                  },
+                  "Property": "Highly Fragmented Applications"
+                }
+              },
+              "queryRef": "Application Inventory Evidence.Highly Fragmented Applications",
+              "nativeQueryRef": "Highly fragmented applications",
+              "displayName": "Fragmented applications"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Application Inventory Evidence"
+                    }
+                  },
+                  "Property": "Long Tail Versions"
+                }
+              },
+              "queryRef": "Application Inventory Evidence.Long Tail Versions",
+              "nativeQueryRef": "Long Tail Versions"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Application Inventory Evidence"
+                    }
+                  },
+                  "Property": "Unknown Publisher Versions"
+                }
+              },
+              "queryRef": "Application Inventory Evidence.Unknown Publisher Versions",
+              "nativeQueryRef": "Unknown publisher versions",
+              "displayName": "Unknown publisher versions"
             }
           ]
         }
@@ -314,7 +373,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "3L"
+                  "Value": "7L"
                 }
               }
             },
@@ -413,32 +472,21 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Priority KPIs'"
+                  "Value": "''"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
+                  "Value": "11D"
                 }
               }
             }

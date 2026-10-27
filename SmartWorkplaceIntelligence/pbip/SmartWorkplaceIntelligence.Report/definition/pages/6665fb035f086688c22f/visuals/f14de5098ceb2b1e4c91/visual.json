@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "f14de5098ceb2b1e4c91",
   "position": {
     "x": 32,
     "y": 416.9,
+    "z": 5000,
+    "height": 96,
     "width": 1856,
-    "height": 127.4,
-    "z": 13000,
-    "tabOrder": 13000
+    "tabOrder": 5000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -354,9 +354,6 @@
       ],
       "spacing": [
         {
-          "selector": {
-            "id": "default"
-          },
           "properties": {
             "verticalSpacing": {
               "expr": {
@@ -365,6 +362,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "id": "default"
           }
         }
       ]

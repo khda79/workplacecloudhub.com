@@ -1,13 +1,20 @@
 /// Migration reporting dimension; current and historical members retained.
 table 'SPO Migration Snapshot Date'
-	lineageTag: 70b8e8cd-58a8-4d8d-9337-4fe68a06927e
+	lineageTag: 33b75801-8f20-4e3a-9219-f508d3ad5e01
 
 	column Date
 		dataType: dateTime
 		formatString: yyyy-MM-dd
-		lineageTag: c49fb4db-222a-49ea-87f3-91a8e2ba188b
+		lineageTag: bc04222f-3763-4c6d-830e-a9d179d839c4
 		summarizeBy: none
 		sourceColumn: Date
+
+		variation Variation
+			isDefault
+			relationship: e07820e4-53f2-4241-95fe-a4107e4d2b7f
+			defaultHierarchy: LocalDateTable_6441f0c4-711f-4aec-ab37-50cfbb093e99.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'

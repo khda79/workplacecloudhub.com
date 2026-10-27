@@ -1,10 +1,10 @@
 /// Observed Microsoft 365 F3/E3/E5 suite membership. Multiple selections match any selected suite; not an entitlement or eligibility decision.
 table 'M365 License Selection'
-	lineageTag: b6fd3c9a-1c2b-48e2-9162-c107d765087a
+	lineageTag: 04337c31-c1aa-4177-8639-adcb5bb42c70
 
 	column 'License Product'
 		dataType: string
-		lineageTag: d92a3e69-79ac-4baf-87c2-f3a46b9ee1c1
+		lineageTag: 92ef803c-c684-4d6d-8d71-3f75bdeeef6e
 		summarizeBy: none
 		sourceColumn: [License Product]
 

@@ -3,10 +3,10 @@
   "name": "722d478b7b229d2ee02a",
   "position": {
     "x": 32,
-    "y": 394,
-    "z": 109,
-    "height": 600,
-    "width": 600,
+    "y": 432,
+    "z": 1000,
+    "height": 342,
+    "width": 608,
     "tabOrder": 1333
   },
   "visual": {
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
                   "Property": "Country"
                 }
               },
-              "queryRef": "Mailbox Evidence.Country",
+              "queryRef": "Mailbox Exploration Inventory.Country",
               "nativeQueryRef": "Country",
               "active": true
             }
@@ -295,7 +295,7 @@
             "zoom": {
               "expr": {
                 "Literal": {
-                  "Value": "1.23D"
+                  "Value": "1.16D"
                 }
               }
             },
@@ -309,7 +309,7 @@
             "centerLongitude": {
               "expr": {
                 "Literal": {
-                  "Value": "25.276674270629883D"
+                  "Value": "-39.94197082519531D"
                 }
               }
             }
@@ -500,5 +500,5 @@
       ]
     }
   },
-  "parentGroupName": "509da9ee86e35c2c4711"
+  "parentGroupName": "356f38365fae5fd56ff9"
 }

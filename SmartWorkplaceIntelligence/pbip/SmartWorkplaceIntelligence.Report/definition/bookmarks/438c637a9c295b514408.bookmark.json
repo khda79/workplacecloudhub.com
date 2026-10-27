@@ -1,0 +1,128 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "438c637a9c295b514408",
+  "displayName": "Identity issues & actions",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "0a43c9c252d5cc187e10",
+      "7cb4aca7881a67d51ce5",
+      "9d826b9160c65a3fbfa7",
+      "b357c8bd7fbca6dffa77",
+      "b752060c616c209f2c3a",
+      "b95d141b0fea39fdff6b",
+      "de282d5a0762f9248225",
+      "f81843b2c98f223aa742",
+      "716ef3b14029c7a01a00",
+      "06c8335b3dd0b9504dee",
+      "b5e29e2bfb0e18762fcf",
+      "41b64502e50341406a73",
+      "2fdc55a355668bc5640f",
+      "4da2995bccae4f652ed2",
+      "19adeeaf1e4e94f0cf91",
+      "fb067449dae4e4f55469",
+      "a906eecfe1b4b097ebbb",
+      "a5e63dbc78520c4c02b1"
+    ],
+    "suppressData": true,
+    "suppressActiveSection": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "736753e8cf8c034002ef",
+    "sections": {
+      "736753e8cf8c034002ef": {
+        "visualContainerGroups": {
+          "0a43c9c252d5cc187e10": {
+            "isHidden": true
+          },
+          "7cb4aca7881a67d51ce5": {
+            "isHidden": true
+          },
+          "9d826b9160c65a3fbfa7": {
+            "isHidden": true
+          },
+          "b357c8bd7fbca6dffa77": {
+            "isHidden": true
+          },
+          "b752060c616c209f2c3a": {
+            "isHidden": true
+          },
+          "b95d141b0fea39fdff6b": {
+            "isHidden": true
+          },
+          "de282d5a0762f9248225": {
+            "isHidden": true
+          },
+          "f81843b2c98f223aa742": {
+            "isHidden": true
+          },
+          "716ef3b14029c7a01a00": {
+            "isHidden": false
+          }
+        },
+        "visualContainers": {
+          "06c8335b3dd0b9504dee": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "b5e29e2bfb0e18762fcf": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "41b64502e50341406a73": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "2fdc55a355668bc5640f": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "4da2995bccae4f652ed2": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "19adeeaf1e4e94f0cf91": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "fb067449dae4e4f55469": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "a906eecfe1b4b097ebbb": {
+            "singleVisual": {}
+          },
+          "a5e63dbc78520c4c02b1": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "de0dd9989ce4c8f4d1b9",
   "position": {
-    "x": 968,
-    "y": 584,
+    "x": 32,
+    "y": 432,
+    "z": 4000,
+    "height": 568,
     "width": 920,
-    "height": 408,
-    "z": 10001,
     "tabOrder": 1400
   },
   "visual": {
@@ -308,7 +308,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint score \u00b7 trend - last 90 days. Observed history only; 2026-07-07 to 2026-10-04.'"
+                  "Value": "'Endpoint score · trend - last 90 days. Observed history only; 2026-07-07 to 2026-10-04.'"
                 }
               }
             }
@@ -328,7 +328,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Endpoint score \u00b7 trend - last 90 days'"
+                  "Value": "'Endpoint score · trend - last 90 days'"
                 }
               }
             },
@@ -373,7 +373,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Observed snapshots \u00b7 2026-07-07 to 2026-10-04'"
+                  "Value": "'Observed snapshots · 2026-07-07 to 2026-10-04'"
                 }
               }
             },

@@ -2,8 +2,22 @@
 table 'User Inventory Evidence'
 	lineageTag: df26e7e4-eb8d-421b-a918-ac6b09df54fb
 
-	/// Enabled non-guest Entra workforce users in the current private evidence snapshot.
-	measure 'Enabled Workforce Accounts' = DISTINCTCOUNT ( 'User Inventory Evidence'[User Source ID] )
+	/// Original enabled-workforce population retained. Intersects the new global-account and full-license selections through native source IDs.
+	measure 'Enabled Workforce Accounts' =
+
+			VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[TenantUserKey]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _rows=FILTER('Account Explorer Inventory',
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _lf || [Native User Key] IN _withLicense || (_none && NOT ISBLANK([Native User Key]) && [License Count]=0) || (_unknown && ISBLANK([Native User Key]))))
+			VAR _users=SELECTCOLUMNS(_rows,"ID",[User Source ID]) RETURN CALCULATE(DISTINCTCOUNT('User Inventory Evidence'[User Source ID]),KEEPFILTERS(TREATAS(_users,'User Inventory Evidence'[User Source ID])))
 		formatString: #,0
 		displayFolder: Workforce | Current
 		lineageTag: 0cbd7b34-7544-4f67-8be9-0621ffbbc7a0
@@ -348,6 +362,28 @@ table 'User Inventory Evidence'
 		formatString: 0.0%
 		displayFolder: Intune | Reported scope
 		lineageTag: ea6a2a91-53a5-4f0f-b1f8-ee0282757a31
+
+	/// Inactivity among enabled workforce: amber >5% to 10%; red >10%; otherwise existing color. Missing activity evidence is not inactivity. Status codes: 0 normal, 1 attention, 2 critical, 3 unknown.
+	measure 'KPI Alert Level Accounts Without Activity >30D' =
+			VAR _n = [Accounts Without Activity >30D]
+			VAR _d = [Enabled Workforce Accounts]
+			VAR _r = DIVIDE(_n,_d)
+			RETURN SWITCH(TRUE(), ISBLANK(_n) || ISBLANK(_r),3, _r > 0.10,2, _r > 0.05,1,0)
+		formatString: 0
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: bf62cba5-521b-4be2-ad2e-62c72b43d555
+
+	/// User-visible threshold explanation for Accounts Without Activity >30D
+	measure 'KPI Alert Details Accounts Without Activity >30D' = VAR _s=[KPI Alert Level Accounts Without Activity >30D] RETURN SWITCH(_s,0,"Normal",1,"Attention",2,"Critical",3,"Unknown") & " | Inactivity among enabled workforce: amber >5% to 10%; red >10%; otherwise existing color. Missing activity evidence is not inactivity."
+		isHidden
+		displayFolder: Presentation | KPI alerts
+		lineageTag: 7dd1d76e-fa02-4187-b368-f442c7bbc199
+
+	/// SAM display resolved by qualified native identity, same tenant and loaded batch. Empty text when no qualified SAM; preserves unresolved source rows in table projections.
+	measure 'SAM · User Inventory Evidence' = VAR _display = (VAR _key=SELECTEDVALUE('User Inventory Evidence'[User Source ID]) VAR _tenant=SELECTEDVALUE('User Inventory Evidence'[TenantKey]) VAR _batch=SELECTEDVALUE('User Inventory Evidence'[Loaded Batch ID]) RETURN IF(NOT ISBLANK(_key),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],_key,'Native User Evidence'[TenantKey],_tenant,'Native User Evidence'[Loaded Batch ID],_batch))) RETURN IF(COUNTROWS('User Inventory Evidence') > 0, COALESCE(_display, ""))
+		displayFolder: Private identity display
+		lineageTag: cc481036-9222-4950-8e0d-0beeaacde055
 
 	column 'User Source ID'
 		dataType: string
@@ -766,7 +802,7 @@ table 'User Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, MAXX ( _adRows, 'AD User Evidence'[CreationRaw] ), BLANK () )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: d4b42864-ce2c-4f50-896d-ad9f591dc1e5
+		lineageTag: d7cc2bc4-478f-4790-b922-5872f21fa9fa
 		summarizeBy: none
 
 	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
@@ -782,7 +818,7 @@ table 'User Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD User Evidence'[CreationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: 708ed795-2fa2-434e-acb6-6839405353ef
+		lineageTag: 62d33246-79fd-4e48-abc0-81cc9f970d15
 		summarizeBy: none
 
 	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
@@ -800,7 +836,7 @@ table 'User Inventory Evidence'
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
 		displayFolder: Account lifecycle
-		lineageTag: dcc8750f-7496-44c6-bb24-bcfb13bc9f7b
+		lineageTag: 47cf6065-28d4-4d28-b259-8fbbcbb39538
 		summarizeBy: none
 
 	/// Observed AD modification value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
@@ -816,7 +852,7 @@ table 'User Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, MAXX ( _adRows, 'AD User Evidence'[ModificationRaw] ), BLANK () )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: ec81c949-ca41-408c-b6d3-7d1673c289ea
+		lineageTag: 4da0051e-6e92-4e8e-bfb7-e6f8485e5d97
 		summarizeBy: none
 
 	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
@@ -832,7 +868,7 @@ table 'User Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD User Evidence'[ModificationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: d9a328a0-3bbb-4d1b-89ef-01266e9e200f
+		lineageTag: 782e0dd1-ee3b-4fb8-856a-389b58241905
 		summarizeBy: none
 
 	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
@@ -850,7 +886,7 @@ table 'User Inventory Evidence'
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
 		displayFolder: Account lifecycle
-		lineageTag: f946891b-fb76-4f9a-9732-b47ccaa820b6
+		lineageTag: 9415f341-d27e-4ea2-90a0-63b56bc640b0
 		summarizeBy: none
 
 	/// Observed Entra creation value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
@@ -864,7 +900,7 @@ table 'User Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1, MAXX ( _nativeRows, 'Native User Evidence'[CreationRaw] ), BLANK () )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: cebea15a-ca50-4047-b8af-efe7df0f012a
+		lineageTag: b47be449-d020-4ae7-99e6-52f9448eb66d
 		summarizeBy: none
 
 	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
@@ -878,7 +914,7 @@ table 'User Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1, COALESCE ( MAXX ( _nativeRows, 'Native User Evidence'[CreationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: 51e3c665-022a-449c-b7fa-0d8056b893cf
+		lineageTag: c5935662-2022-464c-b6e7-d04277781196
 		summarizeBy: none
 
 	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
@@ -894,7 +930,7 @@ table 'User Inventory Evidence'
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
 		displayFolder: Account lifecycle
-		lineageTag: 7fe1a70c-522e-4ff2-b518-5f1af5684064
+		lineageTag: 4b3556b7-0475-4078-92e6-402f474f7410
 		summarizeBy: none
 
 	/// Observed Entra modification value copied as source text through one exact native identity and one loaded batch. Culture and timezone are not inferred; consult the qualification column.
@@ -908,7 +944,7 @@ table 'User Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1, MAXX ( _nativeRows, 'Native User Evidence'[ModificationRaw] ), BLANK () )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: 8e7647d0-6432-4495-acf6-c738ab91ba85
+		lineageTag: 8005da75-a33d-4023-8dee-a4c44c59b943
 		summarizeBy: none
 
 	/// Source date qualification and identity coverage; unqualified source text is never relabeled as UTC.
@@ -922,7 +958,7 @@ table 'User Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1, COALESCE ( MAXX ( _nativeRows, 'Native User Evidence'[ModificationStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: 9a7e4140-0103-48c9-ac24-34d4a70dc958
+		lineageTag: 04186cf2-9acc-4a01-b8e3-a0e27b2f9595
 		summarizeBy: none
 
 	/// UTC date only when the source explicitly qualifies timezone and format, with one native identity in the same loaded batch. No earliest-date fallback.
@@ -938,7 +974,7 @@ table 'User Inventory Evidence'
 		isHidden
 		formatString: yyyy-MM-dd HH:mm:ss
 		displayFolder: Account lifecycle
-		lineageTag: 493ab4a9-b302-4dec-82be-83d8e2284ada
+		lineageTag: 341e6173-b674-4f21-b670-47a288bb63cd
 		summarizeBy: none
 
 	/// Display true/false only when the source explicitly marks PasswordExpiryStatus Observed. Unknown remains Unknown; nullable Boolean storage is never used as proof of false.
@@ -955,7 +991,7 @@ table 'User Inventory Evidence'
 			RETURN IF ( _nativeCount=1 && _sourceId<>"" && NOT ISBLANK(_nativeKey) && _status = "Observed" && COUNTROWS(_adRows)=1 && NOT ISBLANK(_batch), IF(_observed=1,"true","false"),"Unknown")
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: 74553116-da14-46d6-a019-8ad9f2b754d6
+		lineageTag: 4280e2a7-0bc9-4f13-979f-1477586fd204
 		summarizeBy: none
 
 	/// Observed/Not collected from the explicit PasswordExpired field, or identity resolution limitation.
@@ -971,8 +1007,28 @@ table 'User Inventory Evidence'
 			    IF ( NOT ISBLANK ( _batch ) && _sourceId <> "" && _nativeCount = 1 && NOT ISBLANK ( _nativeKey ) && _adCount = 1, COALESCE ( MAXX ( _adRows, 'AD User Evidence'[PasswordExpiryStatus] ), "Not collected" ), "Identity unresolved or ambiguous" )
 		dataType: string
 		displayFolder: Account lifecycle
-		lineageTag: 40fdc2f6-b298-4e6a-918e-d427c427b326
+		lineageTag: 6e497771-9e54-4ae9-a732-dc56aa24c48c
 		summarizeBy: none
+
+	/// Private report scope. Exact unique native identity and one loaded batch; no UPN suffix or display-name inference. Blank when missing or ambiguous.
+	column 'AD Domain' =
+			VAR _batch = 'User Inventory Evidence'[Loaded Batch ID]
+			VAR _id = TRIM('User Inventory Evidence'[User Source ID])
+			VAR _tenant = 'User Inventory Evidence'[TenantKey]
+			VAR _users = FILTER(ALL('Native User Evidence'), 'Native User Evidence'[SourceUserId] == _id && 'Native User Evidence'[Loaded Batch ID] == _batch && 'Native User Evidence'[TenantKey] == _tenant)
+			RETURN IF(NOT ISBLANK(_batch) && _id <> "" && COUNTROWS(_users) = 1, MAXX(_users, 'Native User Evidence'[AD Domain]))
+		dataType: string
+		displayFolder: Report scope
+		lineageTag: bf9f7fc5-011f-4418-bc7d-4c9bb2d53761
+		summarizeBy: none
+
+	/// Expected tenant from the validated prepared batch reader; no change to its private parameter.
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 83258e67-b2d0-43b8-819f-a219dd0582ec
+		summarizeBy: none
+		sourceColumn: TenantKey
 
 	partition 'User Inventory Evidence Import' = m
 		mode: import
@@ -1002,4 +1058,6 @@ table 'User Inventory Evidence'
 				in
 				    Typed)
 				in
-				    Readers[Finish](BusinessRows)
+				    Table.AddColumn(Readers[Finish](BusinessRows), "TenantKey", each PreparedExpectedTenantKey, type text)
+
+	annotation PBI_ResultType = Exception

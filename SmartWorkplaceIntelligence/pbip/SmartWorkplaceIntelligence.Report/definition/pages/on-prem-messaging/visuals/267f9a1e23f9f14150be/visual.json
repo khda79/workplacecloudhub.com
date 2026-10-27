@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "267f9a1e23f9f14150be",
   "position": {
-    "x": 1056,
-    "y": 91,
-    "width": 832,
-    "height": 25,
-    "z": 12000,
-    "tabOrder": 12000
+    "x": 960,
+    "y": 104,
+    "z": 6000,
+    "height": 20,
+    "width": 928,
+    "tabOrder": 6000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,10 +19,10 @@
               {
                 "textRuns": [
                   {
-                    "value": "Global data: Country/AD Domain ignored. Dataset/Server/Category filter attribute views only.",
+                    "value": "Dataset / Server / Category scope attribute views. Aggregate infrastructure evidence remains global.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
-                      "fontSize": "12px",
+                      "fontSize": "8px",
                       "color": "#52606D"
                     }
                   }

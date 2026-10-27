@@ -1,153 +1,31 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "ef6ce03e08bbaf720ee7",
   "position": {
     "x": 32,
     "y": 376,
+    "z": 1000,
+    "height": 96,
     "width": 1856,
-    "height": 128,
-    "z": 211,
-    "tabOrder": 212
+    "tabOrder": 1000
   },
   "visual": {
-    "visualType": "cardVisual",
-    "query": {
-      "queryState": {
-        "Data": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Security Control Evidence"
-                    }
-                  },
-                  "Property": "Microsoft Secure Score (%)"
-                }
-              },
-              "queryRef": "Security Control Evidence.Microsoft Secure Score (%)",
-              "nativeQueryRef": "Microsoft Secure Score (%)",
-              "displayName": "Microsoft Secure Score (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Security Control Evidence"
-                    }
-                  },
-                  "Property": "Conditional Access Enforcement (%)"
-                }
-              },
-              "queryRef": "Security Control Evidence.Conditional Access Enforcement (%)",
-              "nativeQueryRef": "CA enforcement (%)",
-              "displayName": "CA enforcement (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Security Control Evidence"
-                    }
-                  },
-                  "Property": "Firewall Enabled (%)"
-                }
-              },
-              "queryRef": "Security Control Evidence.Firewall Enabled (%)",
-              "nativeQueryRef": "Firewall enabled (%)",
-              "displayName": "Firewall enabled (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Security Control Evidence"
-                    }
-                  },
-                  "Property": "Disk Encryption Healthy (%)"
-                }
-              },
-              "queryRef": "Security Control Evidence.Disk Encryption Healthy (%)",
-              "nativeQueryRef": "Disk encryption (%)",
-              "displayName": "Disk encryption (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Security Control Evidence"
-                    }
-                  },
-                  "Property": "Secure Boot Healthy (%)"
-                }
-              },
-              "queryRef": "Security Control Evidence.Secure Boot Healthy (%)",
-              "nativeQueryRef": "Secure Boot (%)",
-              "displayName": "Secure Boot (%)"
-            }
-          ]
-        }
-      }
-    },
+    "visualType": "shape",
     "objects": {
-      "value": [
+      "shape": [
         {
           "properties": {
-            "show": {
+            "tileShape": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "'rectangle'"
                 }
               }
             },
-            "fontSize": {
+            "roundEdge": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
-                    }
-                  }
-                }
-              }
-            },
-            "labelDisplayUnits": {
-              "expr": {
-                "Literal": {
-                  "Value": "1D"
-                }
-              }
-            },
-            "textWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "showBlankAs": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Unknown'"
+                  "Value": "12L"
                 }
               }
             }
@@ -157,38 +35,24 @@
           }
         }
       ],
-      "label": [
+      "fill": [
         {
           "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "fontColor": {
+            "fillColor": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#52606D'"
+                      "Value": "'#FFFFFF'"
                     }
                   }
                 }
               }
             },
-            "textWrap": {
+            "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "0D"
                 }
               }
             }
@@ -207,251 +71,26 @@
                   "Value": "false"
                 }
               }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "accentBar": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
             },
-            "position": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Left'"
-                }
-              }
-            },
-            "width": {
-              "expr": {
-                "Literal": {
-                  "Value": "4D"
-                }
-              }
-            },
-            "color": {
+            "lineColor": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
                 }
               }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "layout": [
-        {
-          "properties": {
-            "rowCount": {
-              "expr": {
-                "Literal": {
-                  "Value": "1L"
-                }
-              }
             },
-            "columnCount": {
-              "expr": {
-                "Literal": {
-                  "Value": "5L"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "topOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            },
-            "bottomOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            },
-            "leftOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            },
-            "rightOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            },
-            "style": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Table'"
-                }
-              }
-            },
-            "customizeLines": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "gridlineWidth": {
+            "weight": {
               "expr": {
                 "Literal": {
                   "Value": "1D"
                 }
               }
             },
-            "gridlineColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#CCDCEC'"
-                    }
-                  }
-                }
-              }
-            },
-            "autoGrid": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "padding": [
-        {
-          "properties": {
-            "paddingIndividual": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "topMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            },
-            "bottomMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            },
-            "leftMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8D"
-                }
-              }
-            },
-            "rightMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8D"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "cardCalloutArea": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "rectangleRoundedCurve": {
-              "expr": {
-                "Literal": {
-                  "Value": "6L"
-                }
-              }
-            },
-            "backgroundFillColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#F4F7FB'"
-                    }
-                  }
-                }
-              }
-            },
-            "backgroundTransparency": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            }
-          }
-        }
-      ],
-      "spacing": [
-        {
-          "properties": {
-            "verticalSpacing": {
+            "transparency": {
               "expr": {
                 "Literal": {
                   "Value": "0D"
@@ -680,69 +319,5 @@
       ]
     }
   },
-  "parentGroupName": "7d3b44a8181361449965",
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "Filter437ae7f556f9d9a6728cc8ee",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Security Control Evidence"
-              }
-            },
-            "Property": "Control Name"
-          }
-        },
-        "type": "Categorical",
-        "filter": {
-          "Version": 2,
-          "From": [
-            {
-              "Name": "ep",
-              "Entity": "Security Control Evidence",
-              "Type": 0
-            }
-          ],
-          "Where": [
-            {
-              "Condition": {
-                "Not": {
-                  "Expression": {
-                    "In": {
-                      "Expressions": [
-                        {
-                          "Column": {
-                            "Expression": {
-                              "SourceRef": {
-                                "Source": "ep"
-                              }
-                            },
-                            "Property": "Control Name"
-                          }
-                        }
-                      ],
-                      "Values": [
-                        [
-                          {
-                            "Literal": {
-                              "Value": "'Defender protection active'"
-                            }
-                          }
-                        ]
-                      ]
-                    }
-                  }
-                }
-              }
-            }
-          ]
-        },
-        "howCreated": "User",
-        "isHiddenInViewMode": true,
-        "isLockedInViewMode": true
-      }
-    ]
-  }
+  "parentGroupName": "7d3b44a8181361449965"
 }

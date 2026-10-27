@@ -4,10 +4,10 @@
   "position": {
     "x": 0,
     "y": 0,
-    "z": 1,
+    "z": 7000,
     "height": 1080,
     "width": 1920,
-    "tabOrder": 1
+    "tabOrder": 7000
   },
   "visualGroup": {
     "displayName": "Migration summary context",

@@ -112,17 +112,25 @@ table 'Intune Operational Source Evidence'
 
 	/// Prepared IntuneOperationalSourceEvidence.csv: FileCount. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'File Count'
-		dataType: int64
+		dataType: double
 		lineageTag: 65ede7c2-e884-44f9-8f7d-7964fe4ce4f7
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: FileCount
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneOperationalSourceEvidence.csv: RowCount. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Row Count'
-		dataType: int64
+		dataType: double
 		lineageTag: a400921a-e1bb-450d-b852-1ef1aee63e20
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: RowCount
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Prepared IntuneOperationalSourceEvidence.csv: Qualification. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column Qualification

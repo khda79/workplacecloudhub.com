@@ -1,0 +1,13 @@
+/// Disconnected selection utility for scoped operational evidence; no physical relationships.
+table 'Backlog Attribution Selection'
+	lineageTag: be9cd8ff-07b3-584f-8782-11142996a41b
+
+	column Mode
+		dataType: string
+		lineageTag: b414c952-e5ae-589c-a7b1-a0582b896337
+		summarizeBy: none
+		sourceColumn: Mode
+
+	partition 'Backlog Attribution Selection' = m
+		mode: import
+		source = #table(type table [#"Mode" = text],{{"In scope"},{"Unassigned evidence"}})

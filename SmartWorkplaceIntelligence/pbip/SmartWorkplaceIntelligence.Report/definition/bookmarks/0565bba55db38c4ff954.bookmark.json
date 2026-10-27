@@ -1,0 +1,104 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "0565bba55db38c4ff954",
+  "displayName": "Adoption & country trends",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "061d12ad31275555c4c6",
+      "227d0810c3517d985400",
+      "28116b6ef3ed17ec5ab9",
+      "314d4a5e7a09dd6543a2",
+      "4b6ded666457d0cb208b",
+      "631845f07258f9eab137",
+      "720cd6910a97074eca9a",
+      "e4c94c7298d3ae8985aa",
+      "fa5746d42f6566b93ea9",
+      "fef6074db661ab657c39",
+      "b5eec12035570e77e720",
+      "43764a23b779c04c9990",
+      "b00f3e874a4a60293357",
+      "fa3e7be201dc93b18eea",
+      "742f8769b682c27be324"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "0793507e95ae84a32c4a",
+    "sections": {
+      "0793507e95ae84a32c4a": {
+        "visualContainers": {
+          "fef6074db661ab657c39": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "b5eec12035570e77e720": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "43764a23b779c04c9990": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "b00f3e874a4a60293357": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "fa3e7be201dc93b18eea": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "742f8769b682c27be324": {
+            "singleVisual": {}
+          }
+        },
+        "visualContainerGroups": {
+          "061d12ad31275555c4c6": {
+            "isHidden": true
+          },
+          "227d0810c3517d985400": {
+            "isHidden": false
+          },
+          "28116b6ef3ed17ec5ab9": {
+            "isHidden": true
+          },
+          "314d4a5e7a09dd6543a2": {
+            "isHidden": true
+          },
+          "4b6ded666457d0cb208b": {
+            "isHidden": true
+          },
+          "631845f07258f9eab137": {
+            "isHidden": true
+          },
+          "720cd6910a97074eca9a": {
+            "isHidden": true
+          },
+          "e4c94c7298d3ae8985aa": {
+            "isHidden": true
+          },
+          "fa5746d42f6566b93ea9": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

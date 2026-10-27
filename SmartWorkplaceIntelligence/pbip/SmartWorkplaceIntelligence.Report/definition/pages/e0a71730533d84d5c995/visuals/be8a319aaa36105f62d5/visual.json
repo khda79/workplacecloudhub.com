@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "be8a319aaa36105f62d5",
   "position": {
     "x": 32,
-    "y": 902.3,
+    "y": 870,
+    "z": 0,
+    "height": 136,
     "width": 1208,
-    "height": 114.5,
-    "z": 17,
-    "tabOrder": 1824
+    "tabOrder": 15000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -112,7 +112,7 @@
             "textWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
@@ -373,7 +373,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Selected SKU totals \u00b7 units, not distinct users'"
+                  "Value": "'Selected SKU totals · units, not distinct users'"
                 }
               }
             }
@@ -393,7 +393,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Selected SKU totals \u00b7 units, not distinct users'"
+                  "Value": "'Selected SKU totals · units, not distinct users'"
                 }
               }
             },

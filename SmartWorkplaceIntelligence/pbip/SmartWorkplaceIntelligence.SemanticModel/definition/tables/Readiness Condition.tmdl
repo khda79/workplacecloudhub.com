@@ -1,0 +1,26 @@
+/// Disconnected selection utility for scoped operational evidence; no physical relationships.
+table 'Readiness Condition'
+	lineageTag: 2b75cb39-2b52-5b47-a271-5aee378ecc30
+
+	column 'Condition Code'
+		dataType: string
+		lineageTag: e645b8d2-5f1f-5a33-bdd5-70fae046e73f
+		summarizeBy: none
+		sourceColumn: Condition Code
+
+	column Condition
+		dataType: string
+		lineageTag: 57f8f516-63a8-5e6d-8392-4f07ba98240c
+		summarizeBy: none
+		sourceColumn: Condition
+		sortByColumn: Order
+
+	column Order
+		dataType: int64
+		lineageTag: 09199186-9d65-5a68-9114-c4a7dbf66ce4
+		summarizeBy: none
+		sourceColumn: Order
+
+	partition 'Readiness Condition' = m
+		mode: import
+		source = #table(type table [#"Condition Code" = text, #"Condition" = text, #"Order" = Int64.Type],{{"032","Entra pending",0},{"018","RAM < 8 GB",1},{"054","Reboot >= 10 days",2},{"055","Reboot >= 30 days",3},{"Firmware","BIOS or Secure Boot NotSupported",4},{"Disabled","Secure Boot Disabled",5}})

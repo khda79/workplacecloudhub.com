@@ -5,18 +5,30 @@
   "options": {
     "applyOnlyToTargetVisuals": true,
     "targetVisualNames": [
-      "04fb115fc1be1f864068",
-      "1c6d33a4683b9a17b0bf",
       "22b160e0ebbb603bf705",
-      "2f58430f2c24747abcba",
-      "5970dff343532782eaec",
       "a27a0e1c0615db00369b",
       "ecef3b57cf9414288eea",
       "251cf9340d2ff05fbd02",
       "1509fa6c653aef6f2878",
       "edc33c2bd8508a0363e3",
       "21e720e86e6bc1c585f3",
-      "390477e54ebd61612a45"
+      "390477e54ebd61612a45",
+      "ffc9a46977016b25e190",
+      "8a5cb1d5f691d13c3403",
+      "e3f615de7428b390b04b",
+      "39a211ee6845be6105d5",
+      "1e8b641f33cc76c61028",
+      "724abb769a01dd6c75c8",
+      "7c6a32710eb44a398cc6",
+      "1ec1d5eebf86cfe9346f",
+      "f4dd297946b9816e73bb",
+      "731fcf98ae0f94bdc177",
+      "e473c9dc06b4512688b0",
+      "778861c047d6238b9f42",
+      "e4e9c77751e07cf4ff8a",
+      "ba7b43b4b8700fb7bb47",
+      "d2bbe9e435bfd0879b8f",
+      "16e8b007be2914e2b6e7"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -26,21 +38,106 @@
     "activeSection": "1c06a6e4c247dd0749aa",
     "sections": {
       "1c06a6e4c247dd0749aa": {
-        "visualContainers": {},
+        "visualContainers": {
+          "ffc9a46977016b25e190": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "8a5cb1d5f691d13c3403": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "e3f615de7428b390b04b": {
+            "singleVisual": {}
+          },
+          "39a211ee6845be6105d5": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "1e8b641f33cc76c61028": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "724abb769a01dd6c75c8": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "7c6a32710eb44a398cc6": {
+            "singleVisual": {}
+          },
+          "1ec1d5eebf86cfe9346f": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "f4dd297946b9816e73bb": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "731fcf98ae0f94bdc177": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "e473c9dc06b4512688b0": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "778861c047d6238b9f42": {
+            "singleVisual": {}
+          },
+          "e4e9c77751e07cf4ff8a": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "ba7b43b4b8700fb7bb47": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "d2bbe9e435bfd0879b8f": {
+            "singleVisual": {}
+          },
+          "16e8b007be2914e2b6e7": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
         "visualContainerGroups": {
-          "04fb115fc1be1f864068": {
-            "isHidden": true
-          },
-          "1c6d33a4683b9a17b0bf": {
-            "isHidden": true
-          },
           "22b160e0ebbb603bf705": {
-            "isHidden": true
-          },
-          "2f58430f2c24747abcba": {
-            "isHidden": true
-          },
-          "5970dff343532782eaec": {
             "isHidden": true
           },
           "a27a0e1c0615db00369b": {

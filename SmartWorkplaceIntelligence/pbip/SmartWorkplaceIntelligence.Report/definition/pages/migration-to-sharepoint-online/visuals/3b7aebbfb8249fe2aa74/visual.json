@@ -4,14 +4,15 @@
   "position": {
     "x": 0,
     "y": 0,
-    "z": 0,
+    "z": 1000,
     "height": 1280,
     "width": 1920,
-    "tabOrder": 1
+    "tabOrder": 0
   },
   "visualGroup": {
     "displayName": "Deadlines",
     "groupMode": "ScaleMode"
   },
-  "parentGroupName": "b2deaadb9550a5b30275"
+  "parentGroupName": "b2deaadb9550a5b30275",
+  "isHidden": true
 }

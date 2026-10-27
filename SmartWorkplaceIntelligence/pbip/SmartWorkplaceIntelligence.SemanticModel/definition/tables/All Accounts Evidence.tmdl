@@ -2,12 +2,8 @@
 table 'All Accounts Evidence'
 	lineageTag: ca87930c-7b4d-4be6-9f41-ed1a68dca80f
 
-	/// Deduplicated AD user and managed-service accounts plus all Entra users. Includes disabled, guest and service accounts; excludes computer accounts, groups and contacts. Strong SID/immutable-ID matches only; never name or UPN merges. Country filters are applied virtually from Country Selection.
-	measure 'All Accounts' =
-			VAR _countries = VALUES('Country Selection'[Country])
-			VAR _filtered = ISCROSSFILTERED('Country Selection'[Country])
-			VAR _total = DISTINCTCOUNT('All Accounts Evidence'[Account Key])
-			RETURN COALESCE(IF(_filtered, CALCULATE(DISTINCTCOUNT('All Accounts Evidence'[Account Key]), KEEPFILTERS(TREATAS(_countries, 'All Accounts Evidence'[Country Name]))), _total), 0)
+	/// All canonical AD/Entra account identities from the loaded batch, including disabled/guests/service identities. Country and AD Domain apply through the global account inventory; exact native identities only.
+	measure 'All Accounts' = [Account Inventory Accounts]
 		formatString: #,0
 		displayFolder: Executive overview
 		lineageTag: 5cbdbf1d-6da3-4609-af7f-e2e26b813552

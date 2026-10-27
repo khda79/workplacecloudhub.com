@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "f00a31c4fd49d9c3ccf7",
   "position": {
     "x": 32,
     "y": 521.9,
-    "width": 1856,
+    "z": 9000,
     "height": 314.8,
-    "z": 12000,
-    "tabOrder": 544
+    "width": 1856,
+    "tabOrder": 3000
   },
   "visual": {
     "visualType": "tableEx",
@@ -114,6 +114,13 @@
                   }
                 }
               }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
             }
           }
         }
@@ -194,6 +201,113 @@
             }
           }
         }
+      ],
+      "columnFormatting": [
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Native Relationship Summary.EvidenceSource"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Native Relationship Summary.RelationshipCount"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Native Relationship Summary.RelationshipType"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -203,7 +317,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Link summary \u00b7 complete governed fields'"
+                  "Value": "'Link summary · complete governed fields'"
                 }
               }
             }
@@ -223,7 +337,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Link summary \u00b7 complete governed fields'"
+                  "Value": "'Link summary · complete governed fields'"
                 }
               }
             },
@@ -394,7 +508,7 @@
                 "Entity": "Native Relationship Summary"
               }
             },
-            "Property": "Native Context Rows \u00b7 Native Relationship Summary"
+            "Property": "Native Context Rows · Native Relationship Summary"
           }
         },
         "type": "Advanced",
@@ -419,7 +533,7 @@
                           "Source": "c"
                         }
                       },
-                      "Property": "Native Context Rows \u00b7 Native Relationship Summary"
+                      "Property": "Native Context Rows · Native Relationship Summary"
                     }
                   },
                   "Right": {

@@ -1,16 +1,75 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "60f80a3d4d259c63fc18",
   "position": {
     "x": 32,
-    "y": 336,
+    "y": 320,
+    "z": 0,
+    "height": 397.40259740259739,
     "width": 600,
-    "height": 360,
-    "z": 109,
-    "tabOrder": 672
+    "tabOrder": 1000
   },
   "visual": {
     "visualType": "barChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Country",
+              "nativeQueryRef": "Country",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
+                  "Property": "Local Business Mailboxes Remaining"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Local Business Mailboxes Remaining",
+              "nativeQueryRef": "Local Business Mailboxes Remaining",
+              "displayName": "Local Business Mailboxes Remaining"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Measure": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Mailbox Migration Inventory"
+                  }
+                },
+                "Property": "Local Business Mailboxes Remaining"
+              }
+            },
+            "direction": "Descending"
+          }
+        ]
+      }
+    },
     "objects": {
       "categoryAxis": [
         {
@@ -162,66 +221,6 @@
           }
         }
       ]
-    },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Category": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Country"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Country",
-              "nativeQueryRef": "Country",
-              "active": true
-            }
-          ]
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
-                    }
-                  },
-                  "Property": "Local Business Mailboxes Remaining"
-                }
-              },
-              "queryRef": "Mailbox Migration Inventory.Local Business Mailboxes Remaining",
-              "nativeQueryRef": "Local Business Mailboxes Remaining",
-              "displayName": "Local Business Mailboxes Remaining"
-            }
-          ]
-        }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Measure": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Mailbox Migration Inventory"
-                  }
-                },
-                "Property": "Local Business Mailboxes Remaining"
-              }
-            },
-            "direction": "Descending"
-          }
-        ]
-      }
     },
     "visualContainerObjects": {
       "title": [
@@ -391,7 +390,8 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
   "parentGroupName": "de282d5a0762f9248225"
 }

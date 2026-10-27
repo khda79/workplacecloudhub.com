@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "migration-style-panel",
   "position": {
     "x": 32,
     "y": 218.7,
     "z": 0,
-    "width": 1856,
     "height": 998.1,
-    "tabOrder": 140
+    "width": 1856,
+    "tabOrder": 14000
   },
   "visual": {
     "visualType": "shape",

@@ -129,6 +129,14 @@ table 'Native Country Evidence'
 		lineageTag: cf0c8788-a33a-4e5a-aa5d-c8c3e18753cd
 		summarizeBy: none
 
+	column TenantKey
+		dataType: string
+		lineageTag: c362f4b3-4079-440c-9eb0-3e0a84c821da
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+		annotation SummarizationSetBy = Automatic
+
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'
 		dataType: string

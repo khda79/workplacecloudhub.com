@@ -3,11 +3,11 @@
   "name": "639bcc87cc19419112e9",
   "position": {
     "x": 56,
-    "y": 508.6,
-    "z": 8000,
-    "height": 35.8,
+    "y": 465.25892547660317,
+    "z": 10000,
+    "height": 38.716117850953211,
     "width": 1200,
-    "tabOrder": 100
+    "tabOrder": 10000
   },
   "visual": {
     "visualType": "bookmarkNavigator",
@@ -201,7 +201,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#006B70'"
                     }
                   }
                 }

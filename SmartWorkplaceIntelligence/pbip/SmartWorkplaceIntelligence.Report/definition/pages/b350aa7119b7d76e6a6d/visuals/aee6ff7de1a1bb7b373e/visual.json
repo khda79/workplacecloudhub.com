@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "aee6ff7de1a1bb7b373e",
   "position": {
     "x": 32,
     "y": 128,
+    "z": 22000,
+    "height": 104,
     "width": 1856,
-    "height": 120,
-    "z": 114,
-    "tabOrder": 256
+    "tabOrder": 16000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -58,7 +58,7 @@
               },
               "queryRef": "Collaboration Adoption Evidence.Collaboration Orphaned Objects",
               "nativeQueryRef": "Orphaned Objects",
-              "displayName": "Orphaned Objects"
+              "displayName": "Orphaned Resources"
             },
             {
               "field": {
@@ -88,7 +88,7 @@
               },
               "queryRef": "Collaboration Adoption Evidence.Collaboration Service Objects",
               "nativeQueryRef": "Service objects",
-              "displayName": "Service objects"
+              "displayName": "Service resources"
             },
             {
               "field": {
@@ -103,7 +103,7 @@
               },
               "queryRef": "Collaboration Adoption Evidence.Collaboration Inactive Objects",
               "nativeQueryRef": "Inactive service objects",
-              "displayName": "Inactive service objects"
+              "displayName": "Inactive service resources"
             }
           ]
         }
@@ -123,7 +123,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -305,6 +305,13 @@
               "expr": {
                 "Literal": {
                   "Value": "6L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }

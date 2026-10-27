@@ -2,35 +2,9 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
   "name": "migration-to-sharepoint-online",
   "displayName": "Migration to SharePoint Online",
-  "displayOption": "FitToWidth",
+  "displayOption": "FitToPage",
   "height": 1280,
   "width": 1920,
-  "objects": {
-    "background": [
-      {
-        "properties": {
-          "color": {
-            "solid": {
-              "color": {
-                "expr": {
-                  "Literal": {
-                    "Value": "'#FFFFFF'"
-                  }
-                }
-              }
-            }
-          },
-          "transparency": {
-            "expr": {
-              "Literal": {
-                "Value": "0D"
-              }
-            }
-          }
-        }
-      }
-    ]
-  },
   "filterConfig": {
     "filters": [
       {
@@ -212,6 +186,56 @@
         },
         "type": "Categorical",
         "howCreated": "User"
+      }
+    ]
+  },
+  "objects": {
+    "background": [
+      {
+        "properties": {
+          "color": {
+            "solid": {
+              "color": {
+                "expr": {
+                  "Literal": {
+                    "Value": "'#F4F7FB'"
+                  }
+                }
+              }
+            }
+          },
+          "transparency": {
+            "expr": {
+              "Literal": {
+                "Value": "0D"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "outspace": [
+      {
+        "properties": {
+          "color": {
+            "solid": {
+              "color": {
+                "expr": {
+                  "Literal": {
+                    "Value": "'#E8EEF5'"
+                  }
+                }
+              }
+            }
+          },
+          "transparency": {
+            "expr": {
+              "Literal": {
+                "Value": "0D"
+              }
+            }
+          }
+        }
       }
     ]
   }

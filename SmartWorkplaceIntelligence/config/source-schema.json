@@ -2,238 +2,238 @@
   "version": "3.8.0-beta.3",
   "origin": "Pinned source columns from the canonical 3.7.1 generated model; no data rows.",
   "files": {
-      "Intune_ConfigurationPolicies.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "PolicyId",
-              "PolicyFamily",
-              "DisplayName",
-              "PolicyType",
-              "Platforms",
-              "Technologies",
-              "CreatedDateTime",
-              "LastModifiedDateTime",
-              "NativePolicyJson",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
-      "Intune_ConfigurationSettings.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "PolicyId",
-              "PolicyFamily",
-              "SettingId",
-              "SettingDefinitionId",
-              "SettingInstanceType",
-              "SettingInstanceJson",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
-      "Intune_ConfigurationAssignments.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "PolicyId",
-              "PolicyFamily",
-              "AssignmentId",
-              "TargetType",
-              "GroupId",
-              "AssignmentFilterId",
-              "AssignmentFilterType",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
-      "Intune_ConfigurationAssignmentStates.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "PolicyId",
-              "IntuneDeviceId",
-              "AssignmentStatus",
-              "ReportStatus",
-              "LastModifiedTimeUtc",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
-      "Intune_ConfigurationDeviceStates.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "PolicyId",
-              "IntuneDeviceId",
-              "UPN",
-              "PolicyName",
-              "DeviceName",
-              "PolicyInCollectedCatalog",
-              "PolicyStatus",
-              "ReportedApplicationState",
-              "ReportStatus",
-              "LastModifiedTimeUtc",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
-      "Intune_ConfigurationDeviceCurrentStates.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "PolicyId",
-              "IntuneDeviceId",
-              "UPN",
-              "PolicyName",
-              "DeviceName",
-              "PolicyInCollectedCatalog",
-              "PolicyStatus",
-              "ReportedApplicationState",
-              "ReportStatus",
-              "LastModifiedTimeUtc",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
-      "Intune_ConfigurationStatusCoverage.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "AssignmentStatusReportState",
-              "AssignmentStatusRows",
-              "DeviceStatusHistoryRows",
-              "DeviceStatusCurrentRows",
-              "UnknownDeviceStatusRows",
-              "UndatedDeviceStatusRows",
-              "CurrentStatesOutsideCollectedCatalog",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
-      "Intune_ManagedApps.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "ApplicationId",
-              "DisplayName",
-              "Publisher",
-              "AppType",
-              "DisplayVersion",
-              "CreatedDateTime",
-              "LastModifiedDateTime",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
-      "Intune_ManagedAppAssignments.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "ApplicationId",
-              "AssignmentId",
-              "Intent",
-              "TargetType",
-              "GroupId",
-              "AssignmentFilterId",
-              "AssignmentFilterType",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
-      "Intune_ManagedAppInstallSummary.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "ApplicationId",
-              "InCollectedCatalog",
-              "StatusSource",
-              "ObservedRows",
-              "ReportedInstalledRows",
-              "ReportedFailureRows",
-              "ReportedNotInstalledRows",
-              "PendingRows",
-              "NotApplicableRows",
-              "UnknownRows",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
-      "Intune_ManagedAppDeviceStates.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "ApplicationId",
-              "DeviceId",
-              "UserPrincipalName",
-              "AppVersion",
-              "Platform",
-              "InstallState",
-              "ReportedDeploymentState",
-              "InstallStateDetail",
-              "ErrorCode",
-              "LastModifiedDateTime",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
-      "Intune_EnrollmentFailures.csv": {
-          "delimiter": ",",
-          "columns": [
-              "TenantKey",
-              "OrganizationKey",
-              "EnvironmentKey",
-              "TenantId",
-              "EventId",
-              "EventDateTime",
-              "CorrelationId",
-              "ManagedDeviceIdentifier",
-              "HasManagedDeviceIdentifier",
-              "DeviceId",
-              "UserId",
-              "EnrollmentType",
-              "FailureCategory",
-              "FailureReason",
-              "OperatingSystem",
-              "OSVersion",
-              "RunId",
-              "CollectedAtUtc"
-          ]
-      },
+    "Intune_ConfigurationPolicies.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "PolicyId",
+        "PolicyFamily",
+        "DisplayName",
+        "PolicyType",
+        "Platforms",
+        "Technologies",
+        "CreatedDateTime",
+        "LastModifiedDateTime",
+        "NativePolicyJson",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
+    "Intune_ConfigurationSettings.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "PolicyId",
+        "PolicyFamily",
+        "SettingId",
+        "SettingDefinitionId",
+        "SettingInstanceType",
+        "SettingInstanceJson",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
+    "Intune_ConfigurationAssignments.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "PolicyId",
+        "PolicyFamily",
+        "AssignmentId",
+        "TargetType",
+        "GroupId",
+        "AssignmentFilterId",
+        "AssignmentFilterType",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
+    "Intune_ConfigurationAssignmentStates.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "PolicyId",
+        "IntuneDeviceId",
+        "AssignmentStatus",
+        "ReportStatus",
+        "LastModifiedTimeUtc",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
+    "Intune_ConfigurationDeviceStates.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "PolicyId",
+        "IntuneDeviceId",
+        "UPN",
+        "PolicyName",
+        "DeviceName",
+        "PolicyInCollectedCatalog",
+        "PolicyStatus",
+        "ReportedApplicationState",
+        "ReportStatus",
+        "LastModifiedTimeUtc",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
+    "Intune_ConfigurationDeviceCurrentStates.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "PolicyId",
+        "IntuneDeviceId",
+        "UPN",
+        "PolicyName",
+        "DeviceName",
+        "PolicyInCollectedCatalog",
+        "PolicyStatus",
+        "ReportedApplicationState",
+        "ReportStatus",
+        "LastModifiedTimeUtc",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
+    "Intune_ConfigurationStatusCoverage.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "AssignmentStatusReportState",
+        "AssignmentStatusRows",
+        "DeviceStatusHistoryRows",
+        "DeviceStatusCurrentRows",
+        "UnknownDeviceStatusRows",
+        "UndatedDeviceStatusRows",
+        "CurrentStatesOutsideCollectedCatalog",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
+    "Intune_ManagedApps.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "ApplicationId",
+        "DisplayName",
+        "Publisher",
+        "AppType",
+        "DisplayVersion",
+        "CreatedDateTime",
+        "LastModifiedDateTime",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
+    "Intune_ManagedAppAssignments.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "ApplicationId",
+        "AssignmentId",
+        "Intent",
+        "TargetType",
+        "GroupId",
+        "AssignmentFilterId",
+        "AssignmentFilterType",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
+    "Intune_ManagedAppInstallSummary.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "ApplicationId",
+        "InCollectedCatalog",
+        "StatusSource",
+        "ObservedRows",
+        "ReportedInstalledRows",
+        "ReportedFailureRows",
+        "ReportedNotInstalledRows",
+        "PendingRows",
+        "NotApplicableRows",
+        "UnknownRows",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
+    "Intune_ManagedAppDeviceStates.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "ApplicationId",
+        "DeviceId",
+        "UserPrincipalName",
+        "AppVersion",
+        "Platform",
+        "InstallState",
+        "ReportedDeploymentState",
+        "InstallStateDetail",
+        "ErrorCode",
+        "LastModifiedDateTime",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
+    "Intune_EnrollmentFailures.csv": {
+      "delimiter": ",",
+      "columns": [
+        "TenantKey",
+        "OrganizationKey",
+        "EnvironmentKey",
+        "TenantId",
+        "EventId",
+        "EventDateTime",
+        "CorrelationId",
+        "ManagedDeviceIdentifier",
+        "HasManagedDeviceIdentifier",
+        "DeviceId",
+        "UserId",
+        "EnrollmentType",
+        "FailureCategory",
+        "FailureReason",
+        "OperatingSystem",
+        "OSVersion",
+        "RunId",
+        "CollectedAtUtc"
+      ]
+    },
     "AD_Computers_AllDomains.csv": {
       "delimiter": ",",
       "columns": [
@@ -937,20 +937,6 @@
         "LastSyncTime",
         "CompleteAfterUser",
         "CompleteAfterUTCUser"
-      ]
-    },
-    "Exchange_HybridIdentity_Issues.csv": {
-      "delimiter": ",",
-      "columns": [
-        "TenantKey",
-        "OrganizationKey",
-        "EnvironmentKey",
-        "TenantId",
-        "IssueNumber",
-        "ObjectGUID",
-        "Potential_Issue",
-        "IssueCategory",
-        "RecommendedAction"
       ]
     },
     "Exchange_Mailboxes_AllSources_PermissionsByUser.csv": {
@@ -1741,24 +1727,6 @@
         "WorkFromAnywhereScore",
         "CloudManagementScore",
         "WindowsScore"
-      ]
-    },
-    "Intune_Windows11_Readiness_Issues.csv": {
-      "delimiter": ",",
-      "columns": [
-        "TenantKey",
-        "OrganizationKey",
-        "EnvironmentKey",
-        "TenantId",
-        "IssueCode",
-        "Area",
-        "ObjectGUID_Norm",
-        "Potential_Issue",
-        "IssueCategory",
-        "PriorityScore",
-        "IsBlocking",
-        "RecommendedAction",
-        "ImpactMigration"
       ]
     },
     "Intune_WindowsAutopatch_Alerts_Detail.csv": {

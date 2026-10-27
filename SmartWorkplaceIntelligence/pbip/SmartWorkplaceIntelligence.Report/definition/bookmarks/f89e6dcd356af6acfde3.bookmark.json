@@ -1,0 +1,92 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "f89e6dcd356af6acfde3",
+  "displayName": "Quota pressure",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "059be073a33b8aaec6de",
+      "525e2ab60ffb1c451d06",
+      "6ccaf09572cb23dfaa02",
+      "80b9ac5980ae404280c0",
+      "f5b0361254aaffde54bc",
+      "f6148d1913e33adbffc2",
+      "83ed0b559886756e0562",
+      "00eca8fc26fe8c437485",
+      "3ce932e5729c03f34ebe",
+      "c380d9cf16c53115fd19",
+      "9d19b61fd9fec2a20e9d",
+      "7913fa2e714f0b2de695"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "c89dfefb108af0ea8164",
+    "sections": {
+      "c89dfefb108af0ea8164": {
+        "visualContainers": {
+          "83ed0b559886756e0562": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "00eca8fc26fe8c437485": {
+            "singleVisual": {}
+          },
+          "3ce932e5729c03f34ebe": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c380d9cf16c53115fd19": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "9d19b61fd9fec2a20e9d": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "7913fa2e714f0b2de695": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "059be073a33b8aaec6de": {
+            "isHidden": true
+          },
+          "525e2ab60ffb1c451d06": {
+            "isHidden": true
+          },
+          "6ccaf09572cb23dfaa02": {
+            "isHidden": true
+          },
+          "80b9ac5980ae404280c0": {
+            "isHidden": true
+          },
+          "f5b0361254aaffde54bc": {
+            "isHidden": false
+          },
+          "f6148d1913e33adbffc2": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "e0318a841520a9fec967",
   "position": {
-    "x": 1600,
-    "y": 216,
-    "width": 288,
-    "height": 80,
-    "z": 12500,
-    "tabOrder": 250
+    "x": 656,
+    "y": 320,
+    "z": 75000,
+    "height": 76.781933662667612,
+    "width": 608,
+    "tabOrder": 26000
   },
   "visual": {
     "visualType": "slicer",
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Device Exploration Inventory"
                     }
                   },
                   "Property": "Intune Encryption State"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Intune Encryption State",
+              "queryRef": "Device Exploration Inventory.Intune Encryption State",
               "nativeQueryRef": "Intune Encryption State",
               "active": true
             }
@@ -285,5 +285,6 @@
         }
       ]
     }
-  }
+  },
+  "parentGroupName": "ba587067c2277d4df717"
 }

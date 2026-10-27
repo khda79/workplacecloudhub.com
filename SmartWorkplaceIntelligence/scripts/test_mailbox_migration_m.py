@@ -1,4 +1,4 @@
-"""Mailbox Inventory: actual M differential tests, isolated from Power BI Desktop.
+"""Mailbox Inventory: non-identity M differential tests and historical source guards, isolated from Power BI Desktop.
 
 Set PQTEST_PATH to the SDK's PQTest.exe and run:
   python -B -m unittest test_mailbox_migration_m -v
@@ -156,7 +156,7 @@ def differential(files, check='true', error=False, mode='Local', overrides=None)
              'CreateMailboxMigrationReader', 'ReadMailboxMigrationCsv']
     bindings += [n + '=(' + expression(n) + ')' for n in names]
     bindings += ['Before=(' + BASELINE.read_text(encoding='utf-8') + ')', 'After=(' + partition() + ')',
-                 'Serialize=(t)=>let business=Table.RemoveColumns(t,{"Loaded Batch ID"},MissingField.Ignore) '
+                 'Serialize=(t)=>let business=Table.RemoveColumns(t,{"Loaded Batch ID","Identity Issues","Migration Status","Risk Reasons","Next Action"},MissingField.Ignore) '
                  'in Binary.Buffer(Json.FromValue([Columns=Table.ColumnNames(business),Rows=Table.ToRows(business)]))',
                  'Old=try Serialize(Before)', 'New=try Serialize(After)']
     if error:
@@ -233,7 +233,7 @@ def cases():
         add('Ambiguous duplicate: ' + name, binaries(rows), check=check)
     rows = fixture()
     rows[IDENTITY].append({**rows[IDENTITY][0], 'Potential_Issue': 'Second issue'})
-    add('Multiple identity issues retain order', binaries(rows), check='After{0}[Identity Issues]="Synthetic identity issue; Second issue"')
+    add('Stale legacy identity findings are ignored', binaries(rows), check='After{0}[Identity Issues]="Hybrid identity evidence unavailable in selected batch"')
     rows = fixture()
     rows[JOBS][0]['EmailAddress'] = ''
     rows[JOBS][0]['MigrationUser'] = 'PERSON@example.invalid'
@@ -249,7 +249,7 @@ def cases():
     rows[MAIL] = []
     add('Header-only mailbox source', binaries(rows), check='Table.RowCount(After)=0 and '
         'List.Count(Table.ColumnNames(After))=27 and List.Contains(Table.ColumnNames(After),"Loaded Batch ID")')
-    for name in REQUIRED:
+    for name in (n for n in REQUIRED if n != IDENTITY):
         rows = fixture()
         rows[name][0]['TenantKey'] = 'different-synthetic-tenant'
         add('Tenant mismatch: ' + name, binaries(rows), error=True)
@@ -309,9 +309,9 @@ class MailboxMigrationMTests(unittest.TestCase):
         candidate = partition()
         business = candidate.split('BusinessRows = (', 1)[1].rsplit(')\nin\n', 1)[0]
         old = BASELINE.read_text(encoding='utf-8')
-        # Business projection, risk precedence and output types must stay byte-identical.
-        self.assertEqual(business[business.index('    Project ='):].strip(),
-                         old[old.index('    Project ='):].strip())
+        # Unrelated mailbox projection stays equivalent; readiness semantics are tested separately.
+        self.assertIn('Readers[GetReadinessSource]("HybridIdentityFindings.csv")', candidate)
+        self.assertNotIn('Exchange_HybridIdentity_Issues.csv', candidate)
         self.assertEqual(candidate.count('CreateMailboxMigrationReader()'), 1)
         self.assertNotIn('GetPreparedEvidenceFile(', candidate)
         factory = expression('CreatePreparedReaders')

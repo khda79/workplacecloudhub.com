@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "b4bb3d72c06c91c6817e",
   "position": {
     "x": 96,
     "y": 80,
-    "width": 1080,
+    "z": 25000,
     "height": 48,
-    "z": 101,
-    "tabOrder": 145
+    "width": 1080,
+    "tabOrder": 18000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Data Trust \u00b7 file/schema/freshness checks and reconciliation. License analytical qualification is separate: see License Overview / License Recovery & Evidence.",
+                    "value": "Data Trust · file/schema/freshness checks and reconciliation. License analytical qualification is separate: see License Overview / License Recovery & Evidence.",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

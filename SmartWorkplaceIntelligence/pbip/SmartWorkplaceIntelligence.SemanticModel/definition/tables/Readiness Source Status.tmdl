@@ -1,0 +1,79 @@
+/// Two source-status rows separate unavailable, valid empty and loaded facts. Metadata batch is not proof of fact-row lineage. Evidence Date is oldest observed row date; never a replacement collector timestamp.
+table 'Readiness Source Status'
+	isHidden
+	lineageTag: eda0e759-7625-400a-b11d-ce4d4fce503c
+
+	column 'Table Name'
+		dataType: string
+		lineageTag: 99b60ecc-96b6-4962-bfae-3f84f5b60cf7
+		summarizeBy: none
+		sourceColumn: Table Name
+
+	column 'Source File'
+		dataType: string
+		lineageTag: de18e317-a186-4206-968c-8a60c41d7629
+		summarizeBy: none
+		sourceColumn: Source File
+
+	column Availability
+		dataType: string
+		lineageTag: fd90981a-bc81-4abc-a56a-320976e58098
+		summarizeBy: none
+		sourceColumn: Availability
+
+	column 'Source Available'
+		dataType: boolean
+		lineageTag: 85f88188-e54e-43f3-93d6-f34e805dfaca
+		summarizeBy: none
+		sourceColumn: Source Available
+
+	column 'Source Rows'
+		dataType: int64
+		lineageTag: 92cdab9c-779a-4d9f-9f07-7ed3e88c4845
+		summarizeBy: none
+		sourceColumn: Source Rows
+
+	column 'Source Columns'
+		dataType: int64
+		lineageTag: b2acdff5-7b2f-4b4f-bf65-b0b3fd77dcf5
+		summarizeBy: none
+		sourceColumn: Source Columns
+
+	column 'Evidence Date'
+		dataType: dateTime
+		lineageTag: 49a440a4-e93d-42ac-bb11-99aeb9272681
+		summarizeBy: none
+		sourceColumn: Evidence Date
+
+	column 'Latest Evidence Date'
+		dataType: dateTime
+		lineageTag: fae8ad42-985e-4fe9-b4a9-02798d24403c
+		summarizeBy: none
+		sourceColumn: Latest Evidence Date
+
+	column 'Date Basis'
+		dataType: string
+		lineageTag: 14ee7501-e0d7-475d-8cc5-a850efedab53
+		summarizeBy: none
+		sourceColumn: Date Basis
+
+	column 'Loaded Batch ID'
+		dataType: string
+		lineageTag: c26f3381-5987-40c2-9469-22d8202e3b10
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Readiness Source Status' = m
+		mode: import
+		source =
+				let
+				    R=CreatePreparedReaders(),
+				    Specs={ [Name="Hybrid Identity Findings",File="HybridIdentityFindings.csv"], [Name="Device Readiness Gap Evidence",File="DeviceReadinessGapEvidence.csv"] },
+				    Rows=List.Transform(Specs, (s)=> let V=R[GetReadinessSource](s[File]) in [
+				        #"Table Name"=s[Name], #"Source File"=s[File], Availability=V[State], #"Source Available"=V[Available],
+				        #"Source Rows"=V[RowCount], #"Source Columns"=V[ColumnCount], #"Evidence Date"=V[EvidenceDate],
+				        #"Latest Evidence Date"=V[LatestEvidenceDate], #"Date Basis"=V[DateBasis], #"Loaded Batch ID"=V[BatchId]]),
+				    Result=Table.FromRecords(Rows,type table [#"Table Name"=text,#"Source File"=text,Availability=text,#"Source Available"=logical,
+				        #"Source Rows"=nullable Int64.Type,#"Source Columns"=Int64.Type,#"Evidence Date"=nullable datetime,
+				        #"Latest Evidence Date"=nullable datetime,#"Date Basis"=text,#"Loaded Batch ID"=text])
+				in Result

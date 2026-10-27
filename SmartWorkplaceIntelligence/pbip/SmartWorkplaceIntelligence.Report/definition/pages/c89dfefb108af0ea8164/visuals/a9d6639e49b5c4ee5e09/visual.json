@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "a9d6639e49b5c4ee5e09",
   "position": {
     "x": 96,
     "y": 80,
-    "width": 1080,
-    "height": 48,
-    "z": 101,
-    "tabOrder": 145
+    "z": 19000,
+    "height": 24,
+    "width": 880,
+    "tabOrder": 15000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Cloud Content & Storage | current private SharePoint inventory \u00b7 OneDrive usage freshness shown \u00b7 SharePoint weekly history",
+                    "value": "Cloud Content & Storage | current private SharePoint inventory · OneDrive usage freshness shown · SharePoint weekly history",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

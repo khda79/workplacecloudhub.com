@@ -7,14 +7,20 @@
     "targetVisualNames": [
       "1e918a13d57e3b4d689b",
       "56fc29e1fc6aac59e488",
-      "7a060b34882f0b9fc3b5",
-      "85adfe174595e196029e",
       "8855e6d6b9d6ed227bda",
       "99c5332ccc8744a3025d",
-      "d56a4e106ab1b8434696",
       "02043332d0451484c4e1",
       "e68d2d91aa9a731482da",
-      "fb347f49f7ecd2c8e0dc"
+      "fb347f49f7ecd2c8e0dc",
+      "5740e841382be14afc41",
+      "c3c9693eb0537bc19141",
+      "78278c2f54276aa11131",
+      "69f5be10b8497d3ae39a",
+      "7c5d9427b46067c35ee0",
+      "677b0ad814d84ba04de9",
+      "511cd9940fad7d2fb48e",
+      "c303702868269d87f219",
+      "72918b8b9c0595e21ec8"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -24,7 +30,59 @@
     "activeSection": "1b19e6ba3cf47f2e8398",
     "sections": {
       "1b19e6ba3cf47f2e8398": {
-        "visualContainers": {},
+        "visualContainers": {
+          "5740e841382be14afc41": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c3c9693eb0537bc19141": {
+            "singleVisual": {}
+          },
+          "78278c2f54276aa11131": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "69f5be10b8497d3ae39a": {
+            "singleVisual": {}
+          },
+          "7c5d9427b46067c35ee0": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "677b0ad814d84ba04de9": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "511cd9940fad7d2fb48e": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c303702868269d87f219": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "72918b8b9c0595e21ec8": {
+            "singleVisual": {}
+          }
+        },
         "visualContainerGroups": {
           "1e918a13d57e3b4d689b": {
             "isHidden": true
@@ -32,19 +90,10 @@
           "56fc29e1fc6aac59e488": {
             "isHidden": true
           },
-          "7a060b34882f0b9fc3b5": {
-            "isHidden": true
-          },
-          "85adfe174595e196029e": {
-            "isHidden": true
-          },
           "8855e6d6b9d6ed227bda": {
             "isHidden": true
           },
           "99c5332ccc8744a3025d": {
-            "isHidden": true
-          },
-          "d56a4e106ab1b8434696": {
             "isHidden": true
           },
           "02043332d0451484c4e1": {

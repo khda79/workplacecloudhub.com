@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "bc28edebfdb31e0275fd",
   "position": {
     "x": 32,
-    "y": 357.0,
-    "width": 1856,
+    "y": 357,
+    "z": 1000,
     "height": 22.5,
-    "z": 119,
-    "tabOrder": 629
+    "width": 1856,
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Reconciliation signals",
+                    "value": "Selected view: Reconciliation risks",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12pt",

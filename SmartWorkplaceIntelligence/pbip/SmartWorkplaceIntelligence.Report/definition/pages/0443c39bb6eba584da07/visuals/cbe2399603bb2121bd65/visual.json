@@ -1,127 +1,31 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "cbe2399603bb2121bd65",
   "position": {
     "x": 972,
     "y": 296,
+    "z": 0,
+    "height": 96,
     "width": 916,
-    "height": 152,
-    "z": 106,
-    "tabOrder": 682
+    "tabOrder": 2000
   },
   "visual": {
-    "visualType": "cardVisual",
-    "query": {
-      "queryState": {
-        "Data": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "User Inventory Evidence"
-                    }
-                  },
-                  "Property": "Enabled Workforce Accounts"
-                }
-              },
-              "queryRef": "User Inventory Evidence.Enabled Workforce Accounts",
-              "nativeQueryRef": "Enabled Workforce Accounts"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "User Inventory Evidence"
-                    }
-                  },
-                  "Property": "Active Workforce"
-                }
-              },
-              "queryRef": "User Inventory Evidence.Active Workforce",
-              "nativeQueryRef": "Active Workforce"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "User Inventory Evidence"
-                    }
-                  },
-                  "Property": "Accounts Without Activity >30D"
-                }
-              },
-              "queryRef": "User Inventory Evidence.Accounts Without Activity >30D",
-              "nativeQueryRef": "Accounts Without Activity >30D"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "User Inventory Evidence"
-                    }
-                  },
-                  "Property": "Activity Evidence Coverage"
-                }
-              },
-              "queryRef": "User Inventory Evidence.Activity Evidence Coverage",
-              "nativeQueryRef": "Activity Evidence Coverage"
-            }
-          ]
-        }
-      }
-    },
+    "visualType": "shape",
     "objects": {
-      "value": [
+      "shape": [
         {
           "properties": {
-            "show": {
+            "tileShape": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "'rectangle'"
                 }
               }
             },
-            "fontSize": {
+            "roundEdge": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
-                }
-              }
-            },
-            "bold": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#005A9E'"
-                    }
-                  }
-                }
-              }
-            },
-            "labelDisplayUnits": {
-              "expr": {
-                "Literal": {
-                  "Value": "1D"
-                }
-              }
-            },
-            "textWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
+                  "Value": "12L"
                 }
               }
             }
@@ -131,38 +35,24 @@
           }
         }
       ],
-      "label": [
+      "fill": [
         {
           "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "fontColor": {
+            "fillColor": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#52606D'"
+                      "Value": "'#FFFFFF'"
                     }
                   }
                 }
               }
             },
-            "textWrap": {
+            "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "0D"
                 }
               }
             }
@@ -181,176 +71,28 @@
                   "Value": "false"
                 }
               }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "accentBar": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
             },
-            "position": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Left'"
-                }
-              }
-            },
-            "width": {
-              "expr": {
-                "Literal": {
-                  "Value": "4D"
-                }
-              }
-            },
-            "color": {
+            "lineColor": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
+                }
+              }
+            },
+            "weight": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
                 }
               }
             },
             "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "padding": [
-        {
-          "properties": {
-            "paddingIndividual": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "topMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "bottomMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "leftMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            },
-            "rightMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "layout": [
-        {
-          "properties": {
-            "topOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "bottomOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "leftOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "rightOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "columnCount": {
-              "expr": {
-                "Literal": {
-                  "Value": "3L"
-                }
-              }
-            },
-            "rowCount": {
-              "expr": {
-                "Literal": {
-                  "Value": "2L"
-                }
-              }
-            },
-            "autoGrid": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "spacing": [
-        {
-          "properties": {
-            "verticalSpacing": {
-              "expr": {
-                "Literal": {
                   "Value": "0D"
                 }
               }
@@ -358,51 +100,6 @@
           },
           "selector": {
             "id": "default"
-          }
-        }
-      ],
-      "cardCalloutArea": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            },
-            "rectangleRoundedCurve": {
-              "expr": {
-                "Literal": {
-                  "Value": "6L"
-                }
-              }
-            },
-            "backgroundFillColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#F7FAFC'"
-                    }
-                  }
-                }
-              }
-            },
-            "backgroundTransparency": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            }
           }
         }
       ]
@@ -576,52 +273,6 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "5eade4a7244bf0b0e325",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "User Inventory Evidence"
-              }
-            },
-            "Property": "Active Workforce"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "5f40c756a368e658cc75",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "User Inventory Evidence"
-              }
-            },
-            "Property": "Accounts Without Activity >30D"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "ace579b4cac1c058ff2e",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "User Inventory Evidence"
-              }
-            },
-            "Property": "Activity Evidence Coverage"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
   },
   "parentGroupName": "10f9633a9f63bcc2ce4e"
 }

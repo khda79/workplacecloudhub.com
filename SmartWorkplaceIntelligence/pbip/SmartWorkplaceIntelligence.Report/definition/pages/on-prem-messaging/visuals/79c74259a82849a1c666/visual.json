@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "79c74259a82849a1c666",
   "position": {
     "x": 32,
-    "y": 744,
-    "z": 12000,
-    "height": 256,
+    "y": 690.24911032028467,
+    "z": 3000,
+    "height": 309.75088967971533,
     "width": 912,
-    "tabOrder": 12000
+    "tabOrder": 3000
   },
   "visual": {
     "visualType": "barChart",
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Exchange Mailbox Databases.Database",
-              "nativeQueryRef": "Database"
+              "nativeQueryRef": "Database",
+              "active": true
             }
           ]
         },

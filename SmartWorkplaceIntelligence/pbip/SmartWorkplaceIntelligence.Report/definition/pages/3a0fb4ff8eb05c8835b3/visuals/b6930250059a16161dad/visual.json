@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "b6930250059a16161dad",
   "position": {
     "x": 1357,
-    "y": 829.1,
-    "z": 113,
-    "width": 322,
+    "y": 741.1,
+    "z": 41000,
     "height": 22.5,
-    "tabOrder": 113
+    "width": 322,
+    "tabOrder": 25000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected-scope activity \u00b7 last 30 days",
+                    "value": "Selected-scope activity · last 30 days",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "13px",

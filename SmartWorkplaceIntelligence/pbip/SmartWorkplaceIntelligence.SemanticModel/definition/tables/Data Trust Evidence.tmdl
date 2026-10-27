@@ -297,4 +297,19 @@ table 'Data Trust Evidence'
 				in
 				    Typed)
 				in
-				    Readers[Finish](BusinessRows)
+				    let
+				        Specs={ [Name="Hybrid Identity Findings",File="HybridIdentityFindings.csv",Domain="Identity"], [Name="Device Readiness Gap Evidence",File="DeviceReadinessGapEvidence.csv",Domain="Devices"] },
+				        BatchDate=Date.From(DateTimeZone.FromText(Readers[GetPreparedBatchManifest]()[CreatedUtc])),
+				        NewRows=List.Transform(Specs,(s)=>let
+				            V=Readers[GetReadinessSource](s[File]), Stamp=V[EvidenceDate],
+				            Age=if Stamp=null then null else Duration.Days(BatchDate-Date.From(Stamp)),
+				            Fresh=if Age=null then "Unknown" else if Age<0 then "Unknown" else if Age<=7 then "Fresh" else if Age<=30 then "Aging" else "Stale",
+				            Ready=if not V[Available] then "Blocked" else if Age=null or Age<0 then "Review required" else if Age>30 then "Refresh required" else "Ready"
+				          in [#"Source Key"="Prepared:" & s[File], #"Evidence Domain"=s[Domain], #"Source Name"=s[Name], #"File Name"=s[File],
+				              #"File State"=if V[Available] then "Available" else "Missing", #"Schema State"=if V[Available] then "Qualified" else "Not available",
+				              #"Expected Columns"=Text.From(V[ColumnCount]), #"Missing Columns"="", #"Row Count"=V[RowCount], #"Column Count"=V[ColumnCount],
+				              #"Snapshot Date"=Stamp, #"Snapshot Basis"=V[DateBasis], #"Evidence Age Days"=Age, #"Freshness State"=Fresh,
+				              #"Decision Readiness"=Ready, #"Evidence Status"=V[State], #"Recommended Action"=if not V[Available] then "Select a batch containing both prepared readiness sources" else "Review observed findings; absence of findings is not readiness proof", #"Read Error"=""]),
+				        Added=Table.FromRecords(NewRows,Value.Type(BusinessRows),MissingField.Error),
+				        Combined=Table.Combine({BusinessRows,Added})
+				    in Readers[Finish](Combined)

@@ -7,7 +7,10 @@
     "targetVisualNames": [
       "7d584e32a5442cf9165c",
       "72ebc8bf2c9ba3aef7ff",
-      "cdf6cd14c95f860de447"
+      "cdf6cd14c95f860de447",
+      "66baac4c14b32910f266",
+      "4414742e2fcdd2b39db5",
+      "efef0b6992c9a241229e"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -17,7 +20,25 @@
     "activeSection": "a83c042911de45c59170",
     "sections": {
       "a83c042911de45c59170": {
-        "visualContainers": {},
+        "visualContainers": {
+          "66baac4c14b32910f266": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "4414742e2fcdd2b39db5": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "efef0b6992c9a241229e": {
+            "singleVisual": {}
+          }
+        },
         "visualContainerGroups": {
           "7d584e32a5442cf9165c": {
             "isHidden": true

@@ -1,14 +1,40 @@
 {
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "e1099757cc6498104098",
   "position": {
-    "x": 1552,
+    "x": 1720,
     "y": 8,
-    "width": 336,
+    "z": 77000,
     "height": 80,
-    "z": 25000,
-    "tabOrder": 11
+    "width": 168,
+    "tabOrder": 19000
   },
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
   "visual": {
+    "visualType": "slicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Domain"
+                    }
+                  },
+                  "Property": "Domain"
+                }
+              },
+              "queryRef": "Daily Domain.Domain",
+              "nativeQueryRef": "AD Domain",
+              "active": true,
+              "displayName": "AD Domain"
+            }
+          ]
+        }
+      }
+    },
     "objects": {
       "data": [
         {
@@ -86,6 +112,11 @@
               }
             }
           }
+        }
+      ],
+      "general": [
+        {
+          "properties": {}
         }
       ]
     },
@@ -233,35 +264,10 @@
         }
       ]
     },
-    "visualType": "slicer",
-    "query": {
-      "queryState": {
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Domain"
-                    }
-                  },
-                  "Property": "Domain"
-                }
-              },
-              "queryRef": "Daily Domain.Domain",
-              "nativeQueryRef": "AD Domain",
-              "displayName": "AD Domain"
-            }
-          ]
-        }
-      }
-    },
     "syncGroup": {
       "groupName": "SharedADDomain",
       "fieldChanges": true,
       "filterChanges": true
     }
-  },
-  "name": "e1099757cc6498104098"
+  }
 }

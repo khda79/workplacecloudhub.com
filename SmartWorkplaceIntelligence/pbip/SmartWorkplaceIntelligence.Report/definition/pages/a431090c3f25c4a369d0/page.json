@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
   "name": "a431090c3f25c4a369d0",
-  "displayName": "Device Explorer",
+  "displayName": "Device Explorer (PC)",
   "displayOption": "FitToPage",
   "height": 1080,
   "width": 1920,
@@ -21,6 +21,60 @@
         },
         "type": "Categorical",
         "howCreated": "Drillthrough"
+      },
+      {
+        "name": "Filter7eca59d98ebf48dc1b4e0000",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Global Device Inventory"
+              }
+            },
+            "Property": "Device type (report)"
+          }
+        },
+        "type": "Categorical",
+        "howCreated": "User",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "d",
+              "Entity": "Global Device Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "d"
+                          }
+                        },
+                        "Property": "Device type (report)"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'PC'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        }
       }
     ]
   },

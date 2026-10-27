@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "d28d039390ae4c378ce1",
   "position": {
-    "x": 1436.0,
-    "y": 120,
-    "z": 203,
+    "x": 1680,
+    "y": 8,
+    "z": 31000,
     "height": 80,
-    "width": 452.0,
-    "tabOrder": 203
+    "width": 208,
+    "tabOrder": 30000
   },
   "visual": {
     "visualType": "slicer",
@@ -269,23 +269,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "cf17fc4261d86f128da0",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "SharePoint On-prem Site Collections"
-              }
-            },
-            "Property": "Lock State"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
   }
 }

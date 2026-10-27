@@ -561,48 +561,7 @@
       ],
       "EstimatedDurationMinutes": 5
     },
-    {
-      "Name": "Intune-Windows11-Readiness-Issues",
-      "ScriptPath": "M365Inventory\\IntuneInventory\\WindowsUpdate\\SmartM365-Intune-Windows11-Readiness-Issues-Inventory.ps1",
-      "Arguments": "",
-      "LegacyLaunchers": [
-        "Launchers\\Cloud\\Start-SmartM365-Intune-Windows11-Readiness-Issues-Inventory.cmd"
-      ],
-      "Enabled": true,
-      "Group": "Intune",
-      "DependsOn": [
-        "AD-Inventory",
-        "Intune-Devices-Inventory",
-        "Intune-Devices-Compliance-Inventory",
-        "Intune-Devices-BIOS-Inventory",
-        "Intune-DeviceSystem-Inventory",
-        "Intune-Devices-UpgradeEligibility",
-        "Intune-WinUpdate-Status",
-        "M365-EntraDevices-Inventory",
-        "M365-Licences-Inventory"
-      ],
-      "AllowedServers": [],
-      "TimeoutMinutes": 1380,
-      "MaxRetries": 1,
-      "RetryDelaySeconds": 300,
-      "ContinueOnError": true,
-      "Schedule": {
-        "Type": "Daily",
-        "Times": [
-          "07:00"
-        ],
-        "MissedRunPolicy": "RunOnce",
-        "DaysOfWeek": []
-      },
-      "AssignmentMode": "Elected",
-      "RequiredCapabilities": [
-        "SharedRuntime"
-      ],
-      "RequiredGraphAppRoles": [],
-      "EstimatedDurationMinutes": 5,
-      "DependencyMode": "FreshSuccess",
-      "DependencyMaxAgeHours": 48
-    },
+
     {
       "Name": "Exchange2016-ProxyAddresses-Check",
       "ScriptPath": "ExchangeInventory\\OnPremises\\ProxyAddresses\\SmartM365-Check-ProxyAddresses-Exchange.ps1",
@@ -1337,47 +1296,7 @@
       "PowerShellEdition": "PowerShell7",
       "EstimatedDurationMinutes": 1
     },
-    {
-      "Name": "Exchange-HybridIdentity-Issues",
-      "ScriptPath": "ExchangeInventory\\Migration\\SmartM365-Exchange-HybridIdentity-Issues-Inventory.ps1",
-      "Arguments": "",
-      "LegacyLaunchers": [
-        "Launchers\\Cloud\\Start-SmartM365-Exchange-HybridIdentity-Issues-Inventory.cmd"
-      ],
-      "Enabled": true,
-      "Group": "Exchange",
-      "DependsOn": [
-        "AD-Inventory",
-        "EXO-Mailboxes-Inventory-Fast",
-        "EXO-Mailboxes-Permissions",
-        "Exchange2016-Local-Mailboxes-Inventory",
-        "EXO-AcceptedDomains-Inventory",
-        "M365-VerifiedDomains-Inventory",
-        "M365-Licences-Inventory",
-        "M365-ActiveUsers-Inventory"
-      ],
-      "AllowedServers": [],
-      "TimeoutMinutes": 1380,
-      "MaxRetries": 1,
-      "RetryDelaySeconds": 300,
-      "ContinueOnError": true,
-      "DependencyWaitTimeoutMinutes": 1380,
-      "Schedule": {
-        "Type": "Daily",
-        "Times": [
-          "01:00"
-        ],
-        "MissedRunPolicy": "RunOnce",
-        "DaysOfWeek": []
-      },
-      "AssignmentMode": "Elected",
-      "RequiredCapabilities": [
-        "SharedRuntime"
-      ],
-      "RequiredGraphAppRoles": [],
-      "EstimatedDurationMinutes": 5,
-      "DependencyMode": "LatestOccurrence"
-    },
+
     {
       "Name": "Mailboxes-PermissionsByUser-Report",
       "ScriptPath": "ExchangeInventory\\Permissions\\SmartM365-Mailboxes-AllSources-PermissionsByUserReport.ps1",
@@ -1467,7 +1386,6 @@
         "EXO-Mailboxes-Permissions",
         "Exchange2016-Local-Mailboxes-Inventory",
         "Exchange2016-Infrastructure-Inventory",
-        "Exchange-HybridIdentity-Issues",
         "M365-SyncHealth-Inventory",
         "M365-Usage-Inventory",
         "Intune-DiscoveredApps-Inventory",

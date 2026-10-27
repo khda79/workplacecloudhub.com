@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "9e78d98609177cb04557",
   "position": {
     "x": 1250,
     "y": 731.7,
-    "z": 123,
+    "z": 51000,
+    "height": 18,
     "width": 429,
-    "height": 18.0,
-    "tabOrder": 123
+    "tabOrder": 23000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "# Devices \u00b7 observed history when available",
+                    "value": "# Devices · observed history when available",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "10px",

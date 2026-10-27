@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "1fe74329ef6006458241",
   "position": {
     "x": 32,
-    "y": 544.3,
+    "y": 413.79310344827587,
+    "z": 1000,
+    "height": 586.20689655172418,
     "width": 912,
-    "height": 449.7,
-    "z": 110,
-    "tabOrder": 684
+    "tabOrder": 4000
   },
   "visual": {
     "visualType": "barChart",
@@ -20,15 +20,16 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Platform"
+                  "Property": "Platform (report)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Platform",
+              "queryRef": "Global Device Inventory.Platform (report)",
               "nativeQueryRef": "Platform",
-              "active": true
+              "active": true,
+              "displayName": "Platform"
             }
           ]
         },
@@ -39,14 +40,14 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Managed Devices"
+                  "Property": "Equipment Managed Devices"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Managed Devices",
-              "nativeQueryRef": "Managed Devices"
+              "queryRef": "Global Device Inventory.Equipment Managed Devices",
+              "nativeQueryRef": "Equipment Managed Devices"
             }
           ]
         }
@@ -58,10 +59,10 @@
               "Measure": {
                 "Expression": {
                   "SourceRef": {
-                    "Entity": "Device Inventory Evidence"
+                    "Entity": "Global Device Inventory"
                   }
                 },
-                "Property": "Managed Devices"
+                "Property": "Equipment Managed Devices"
               }
             },
             "direction": "Descending"
@@ -233,7 +234,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Managed device estate by platform'"
+                  "Value": "'Managed PC equipment by platform'"
                 }
               }
             },

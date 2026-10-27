@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "c44dabba931c4fb49b67",
   "position": {
-    "x": 1664,
-    "y": 128,
-    "width": 224,
+    "x": 936,
+    "y": 8,
+    "z": 39000,
     "height": 80,
-    "z": 106,
-    "tabOrder": 672
+    "width": 184,
+    "tabOrder": 40000
   },
   "visual": {
     "visualType": "slicer",
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "User Inventory Evidence"
+                      "Entity": "Account Explorer Inventory"
                     }
                   },
                   "Property": "Site Type"
                 }
               },
-              "queryRef": "User Inventory Evidence.Site Type",
+              "queryRef": "Account Explorer Inventory.Site Type",
               "nativeQueryRef": "Site Type",
               "active": true
             }

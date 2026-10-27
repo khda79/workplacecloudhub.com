@@ -13,7 +13,16 @@
       "fa5746d42f6566b93ea9",
       "4b6ded666457d0cb208b",
       "720cd6910a97074eca9a",
-      "061d12ad31275555c4c6"
+      "061d12ad31275555c4c6",
+      "d3b846d6e66dbcdc2cdf",
+      "9b701bd9f5d1a7e2b82b",
+      "e1cd85e9576b3dcdaec7",
+      "3820a77b99b83e372b51",
+      "08166bc21640df6f1b7d",
+      "e1f681b1ab43195f39f1",
+      "a37e20589fba3f2186a3",
+      "afbed79ea9d1508a740f",
+      "33ed7d03fc448f48f719"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -23,7 +32,59 @@
     "activeSection": "0793507e95ae84a32c4a",
     "sections": {
       "0793507e95ae84a32c4a": {
-        "visualContainers": {},
+        "visualContainers": {
+          "d3b846d6e66dbcdc2cdf": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "9b701bd9f5d1a7e2b82b": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "e1cd85e9576b3dcdaec7": {
+            "singleVisual": {}
+          },
+          "3820a77b99b83e372b51": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "08166bc21640df6f1b7d": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "e1f681b1ab43195f39f1": {
+            "singleVisual": {}
+          },
+          "a37e20589fba3f2186a3": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "afbed79ea9d1508a740f": {
+            "singleVisual": {}
+          },
+          "33ed7d03fc448f48f719": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
         "visualContainerGroups": {
           "227d0810c3517d985400": {
             "isHidden": true

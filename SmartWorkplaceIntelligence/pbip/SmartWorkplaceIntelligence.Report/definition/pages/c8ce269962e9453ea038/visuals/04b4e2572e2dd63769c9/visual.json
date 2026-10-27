@@ -1,32 +1,48 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "04b4e2572e2dd63769c9",
   "position": {
-    "x": 32,
-    "y": 379.5,
+    "x": 336,
+    "y": 320,
     "z": 111,
-    "height": 614.6,
-    "width": 1856,
+    "height": 680,
+    "width": 1552,
     "tabOrder": 677
   },
   "visual": {
-    "visualType": "pivotTable",
+    "visualType": "tableEx",
     "query": {
       "queryState": {
-        "Rows": {
+        "Values": {
           "projections": [
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Device Name"
+                }
+              },
+              "queryRef": "Global Device Inventory.Device Name",
+              "nativeQueryRef": "Device Name",
+              "active": true,
+              "displayName": "Device Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
                     }
                   },
                   "Property": "Country Name"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Country Name",
+              "queryRef": "Global Device Inventory.Country Name",
               "nativeQueryRef": "Country Name",
               "active": true,
               "displayName": "Country Name"
@@ -36,14 +52,46 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Device Name"
+                  "Property": "AD Domain"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Device Name",
-              "nativeQueryRef": "Device",
+              "queryRef": "Global Device Inventory.AD Domain",
+              "nativeQueryRef": "AD Domain",
+              "active": true,
+              "displayName": "AD Domain"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Primary User UPN"
+                }
+              },
+              "queryRef": "Global Device Inventory.Primary User UPN",
+              "nativeQueryRef": "Primary User UPN",
+              "active": true,
+              "displayName": "Primary User UPN"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Primary User SAM"
+                }
+              },
+              "queryRef": "Global Device Inventory.Primary User SAM",
+              "nativeQueryRef": "Primary User SAM",
               "active": true
             },
             {
@@ -51,14 +99,142 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Management State"
+                  "Property": "Last Console User (report)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Management State",
-              "nativeQueryRef": "Management",
+              "queryRef": "Global Device Inventory.Last Console User (report)",
+              "nativeQueryRef": "Last Console User (report)",
+              "active": true,
+              "displayName": "Last console user"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Last Console Logon UTC (report)"
+                }
+              },
+              "queryRef": "Global Device Inventory.Last Console Logon UTC (report)",
+              "nativeQueryRef": "Last Console Logon UTC (report)",
+              "active": true,
+              "displayName": "Last console logon UTC"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "AD Enabled"
+                }
+              },
+              "queryRef": "Global Device Inventory.AD Enabled",
+              "nativeQueryRef": "AD Enabled",
+              "active": true,
+              "displayName": "AD Enabled"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Intune presence"
+                }
+              },
+              "queryRef": "Global Device Inventory.Intune presence",
+              "nativeQueryRef": "Intune presence",
+              "active": true,
+              "displayName": "Intune presence"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "AD Match Qualification"
+                }
+              },
+              "queryRef": "Global Device Inventory.AD Match Qualification",
+              "nativeQueryRef": "AD Match Qualification",
+              "active": true,
+              "displayName": "AD Match Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Manufacturer"
+                }
+              },
+              "queryRef": "Global Device Inventory.Manufacturer",
+              "nativeQueryRef": "Manufacturer",
+              "active": true,
+              "displayName": "Manufacturer"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Model"
+                }
+              },
+              "queryRef": "Global Device Inventory.Model",
+              "nativeQueryRef": "Model",
+              "active": true,
+              "displayName": "Model"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Platform (report)"
+                }
+              },
+              "queryRef": "Global Device Inventory.Platform (report)",
+              "nativeQueryRef": "Platform",
+              "active": true,
+              "displayName": "Platform"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Autopilot link status"
+                }
+              },
+              "queryRef": "Global Device Inventory.Autopilot link status",
+              "nativeQueryRef": "Autopilot link status",
               "active": true
             },
             {
@@ -66,14 +242,14 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Compliance State"
+                  "Property": "Autopilot serial numbers"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Compliance State",
-              "nativeQueryRef": "Compliance",
+              "queryRef": "Global Device Inventory.Autopilot serial numbers",
+              "nativeQueryRef": "Autopilot serial numbers",
               "active": true
             },
             {
@@ -81,89 +257,559 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Ownership"
+                  "Property": "Ownership (report)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Ownership",
+              "queryRef": "Global Device Inventory.Ownership (report)",
               "nativeQueryRef": "Ownership",
-              "active": true
+              "active": true,
+              "displayName": "Ownership"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
                   "Property": "Operating System Family"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Operating System Family",
-              "nativeQueryRef": "Operating System",
-              "active": true
+              "queryRef": "Global Device Inventory.Operating System Family",
+              "nativeQueryRef": "Operating System Family",
+              "active": true,
+              "displayName": "Operating System Family"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Operating System Version"
+                }
+              },
+              "queryRef": "Global Device Inventory.Operating System Version",
+              "nativeQueryRef": "Operating System Version",
+              "active": true,
+              "displayName": "Operating System Version"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
                     }
                   },
                   "Property": "Windows Release"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows Release",
+              "queryRef": "Global Device Inventory.Windows Release",
               "nativeQueryRef": "Windows Release",
-              "active": true
+              "active": true,
+              "displayName": "Windows Release"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "AD Password Expired"
+                  "Property": "Windows Generation"
                 }
               },
-              "queryRef": "Device Inventory Evidence.AD Password Expired",
-              "nativeQueryRef": "AD Password Expired",
-              "displayName": "AD Password Expired"
+              "queryRef": "Global Device Inventory.Windows Generation",
+              "nativeQueryRef": "Windows Generation",
+              "active": true,
+              "displayName": "Windows Generation"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "AD Password Expiry Status"
+                  "Property": "Compliance State"
                 }
               },
-              "queryRef": "Device Inventory Evidence.AD Password Expiry Status",
-              "nativeQueryRef": "AD Password Expiry Status",
-              "displayName": "AD Password Expiry Status"
+              "queryRef": "Global Device Inventory.Compliance State",
+              "nativeQueryRef": "Compliance State",
+              "active": true,
+              "displayName": "Compliance State"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Intune Encryption State"
+                }
+              },
+              "queryRef": "Global Device Inventory.Intune Encryption State",
+              "nativeQueryRef": "Intune Encryption State",
+              "active": true,
+              "displayName": "Intune Encryption State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Secure Boot State"
+                }
+              },
+              "queryRef": "Global Device Inventory.Secure Boot State",
+              "nativeQueryRef": "Secure Boot State",
+              "active": true,
+              "displayName": "Secure Boot State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Last Sync DateTime"
+                }
+              },
+              "queryRef": "Global Device Inventory.Last Sync DateTime",
+              "nativeQueryRef": "Last Sync DateTime",
+              "active": true,
+              "displayName": "Last Sync DateTime"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "System Drive Capacity (GB)"
+                }
+              },
+              "queryRef": "Global Device Inventory.System Drive Capacity (GB)",
+              "nativeQueryRef": "System Drive Capacity (GB)",
+              "active": true,
+              "displayName": "System Drive Capacity (GB)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Free Disk Space (GB)"
+                }
+              },
+              "queryRef": "Global Device Inventory.Free Disk Space (GB)",
+              "nativeQueryRef": "Free Disk Space (GB)",
+              "active": true,
+              "displayName": "Free Disk Space (GB)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Free Disk Space (%)"
+                }
+              },
+              "queryRef": "Global Device Inventory.Free Disk Space (%)",
+              "nativeQueryRef": "Free Disk Space (%)",
+              "active": true,
+              "displayName": "Free Disk Space (%)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Disk Space State"
+                }
+              },
+              "queryRef": "Global Device Inventory.Disk Space State",
+              "nativeQueryRef": "Disk Space State",
+              "active": true,
+              "displayName": "Disk Space State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Windows Update State"
+                }
+              },
+              "queryRef": "Global Device Inventory.Windows Update State",
+              "nativeQueryRef": "Windows Update State",
+              "active": true,
+              "displayName": "Windows Update State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Windows Update Risk"
+                }
+              },
+              "queryRef": "Global Device Inventory.Windows Update Risk",
+              "nativeQueryRef": "Windows Update Risk",
+              "active": true,
+              "displayName": "Windows Update Risk"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Windows Update Action Code"
+                }
+              },
+              "queryRef": "Global Device Inventory.Windows Update Action Code",
+              "nativeQueryRef": "Windows Update Action Code",
+              "active": true,
+              "displayName": "Windows Update Action Code"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Expected AV Name"
+                }
+              },
+              "queryRef": "Global Device Inventory.Expected AV Name",
+              "nativeQueryRef": "Expected AV Name",
+              "active": true,
+              "displayName": "Expected AV Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Expected AV State"
+                }
+              },
+              "queryRef": "Global Device Inventory.Expected AV State",
+              "nativeQueryRef": "Expected AV State",
+              "active": true,
+              "displayName": "Expected AV State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Third Party AV Products"
+                }
+              },
+              "queryRef": "Global Device Inventory.Third Party AV Products",
+              "nativeQueryRef": "Third Party AV Products",
+              "active": true,
+              "displayName": "Third Party AV Products"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Windows Update Reboot Required"
+                }
+              },
+              "queryRef": "Global Device Inventory.Windows Update Reboot Required",
+              "nativeQueryRef": "Windows Update Reboot Required",
+              "active": true,
+              "displayName": "Windows Update Reboot Required"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "BitLocker OS Protection"
+                }
+              },
+              "queryRef": "Global Device Inventory.BitLocker OS Protection",
+              "nativeQueryRef": "BitLocker OS Protection",
+              "active": true,
+              "displayName": "BitLocker OS Protection"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "BitLocker OS Conversion"
+                }
+              },
+              "queryRef": "Global Device Inventory.BitLocker OS Conversion",
+              "nativeQueryRef": "BitLocker OS Conversion",
+              "active": true,
+              "displayName": "BitLocker OS Conversion"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Encryption Comparison"
+                }
+              },
+              "queryRef": "Global Device Inventory.Encryption Comparison",
+              "nativeQueryRef": "Encryption Comparison",
+              "active": true,
+              "displayName": "Encryption Comparison"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "System Freshness"
+                }
+              },
+              "queryRef": "Global Device Inventory.System Freshness",
+              "nativeQueryRef": "System Freshness",
+              "active": true,
+              "displayName": "System Freshness"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "System Observation (source)"
+                }
+              },
+              "queryRef": "Global Device Inventory.System Observation (source)",
+              "nativeQueryRef": "System Observation (source)",
+              "active": true,
+              "displayName": "System Observation (source)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "System Data Quality Issues"
+                }
+              },
+              "queryRef": "Global Device Inventory.System Data Quality Issues",
+              "nativeQueryRef": "System Data Quality Issues",
+              "active": true,
+              "displayName": "System Data Quality Issues"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Endpoint Analytics Score"
+                }
+              },
+              "queryRef": "Global Device Inventory.Endpoint Analytics Score",
+              "nativeQueryRef": "Endpoint Analytics Score",
+              "active": true,
+              "displayName": "Endpoint Analytics Score"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Endpoint Analytics State"
+                }
+              },
+              "queryRef": "Global Device Inventory.Endpoint Analytics State",
+              "nativeQueryRef": "Endpoint Analytics State",
+              "active": true,
+              "displayName": "Endpoint Analytics State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Stop Error Count"
+                }
+              },
+              "queryRef": "Global Device Inventory.Stop Error Count",
+              "nativeQueryRef": "Stop Error Count",
+              "active": true,
+              "displayName": "Stop Error Count"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Windows 11 Upgrade Eligibility"
+                }
+              },
+              "queryRef": "Global Device Inventory.Windows 11 Upgrade Eligibility",
+              "nativeQueryRef": "Windows 11 Upgrade Eligibility",
+              "active": true,
+              "displayName": "Windows 11 Upgrade Eligibility"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Windows 11 Blocking Reasons"
+                }
+              },
+              "queryRef": "Global Device Inventory.Windows 11 Blocking Reasons",
+              "nativeQueryRef": "Windows 11 Blocking Reasons",
+              "active": true,
+              "displayName": "Windows 11 Blocking Reasons"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Observed Since"
+                }
+              },
+              "queryRef": "Global Device Inventory.Observed Since",
+              "nativeQueryRef": "Observed Since",
+              "active": true,
+              "displayName": "Observed Since"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Managed Tenure (Years)"
+                }
+              },
+              "queryRef": "Global Device Inventory.Managed Tenure (Years)",
+              "nativeQueryRef": "Managed Tenure (Years)",
+              "active": true,
+              "displayName": "Managed Tenure (Years)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Tenure Confidence"
+                }
+              },
+              "queryRef": "Global Device Inventory.Tenure Confidence",
+              "nativeQueryRef": "Tenure Confidence",
+              "active": true,
+              "displayName": "Tenure Confidence"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
                     }
                   },
                   "Property": "AD Created (source)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.AD Created (source)",
+              "queryRef": "Global Device Inventory.AD Created (source)",
               "nativeQueryRef": "AD Created (source)",
+              "active": true,
               "displayName": "AD Created (source)"
             },
             {
@@ -171,14 +817,15 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
                   "Property": "AD Creation Qualification"
                 }
               },
-              "queryRef": "Device Inventory Evidence.AD Creation Qualification",
+              "queryRef": "Global Device Inventory.AD Creation Qualification",
               "nativeQueryRef": "AD Creation Qualification",
+              "active": true,
               "displayName": "AD Creation Qualification"
             },
             {
@@ -186,44 +833,15 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Entra Created (source)"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Entra Created (source)",
-              "nativeQueryRef": "Entra Created (source)",
-              "displayName": "Entra Created (source)"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Entra Creation Qualification"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Entra Creation Qualification",
-              "nativeQueryRef": "Entra Creation Qualification",
-              "displayName": "Entra Creation Qualification"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
                   "Property": "AD Modified (source)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.AD Modified (source)",
+              "queryRef": "Global Device Inventory.AD Modified (source)",
               "nativeQueryRef": "AD Modified (source)",
+              "active": true,
               "displayName": "AD Modified (source)"
             },
             {
@@ -231,14 +849,15 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
                   "Property": "AD Modification Qualification"
                 }
               },
-              "queryRef": "Device Inventory Evidence.AD Modification Qualification",
+              "queryRef": "Global Device Inventory.AD Modification Qualification",
               "nativeQueryRef": "AD Modification Qualification",
+              "active": true,
               "displayName": "AD Modification Qualification"
             },
             {
@@ -246,298 +865,544 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "AD Password Expiry Status"
+                }
+              },
+              "queryRef": "Global Device Inventory.AD Password Expiry Status",
+              "nativeQueryRef": "AD Password Expiry Status",
+              "active": true,
+              "displayName": "AD Password Expiry Status"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Entra state (report)"
+                }
+              },
+              "queryRef": "Global Device Inventory.Entra state (report)",
+              "nativeQueryRef": "Entra account state",
+              "active": true,
+              "displayName": "Entra account state"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Entra Match"
+                }
+              },
+              "queryRef": "Global Device Inventory.Entra Match",
+              "nativeQueryRef": "Entra Match",
+              "active": true,
+              "displayName": "Entra Match"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Removal Candidate"
+                }
+              },
+              "queryRef": "Global Device Inventory.Removal Candidate",
+              "nativeQueryRef": "Removal Candidate",
+              "active": true,
+              "displayName": "Removal Candidate"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Entra Created (source)"
+                }
+              },
+              "queryRef": "Global Device Inventory.Entra Created (source)",
+              "nativeQueryRef": "Entra Created (source)",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Entra Creation Qualification"
+                }
+              },
+              "queryRef": "Global Device Inventory.Entra Creation Qualification",
+              "nativeQueryRef": "Entra Creation Qualification",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
                     }
                   },
                   "Property": "Entra Modified (source)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Entra Modified (source)",
+              "queryRef": "Global Device Inventory.Entra Modified (source)",
               "nativeQueryRef": "Entra Modified (source)",
-              "displayName": "Entra Modified (source)"
+              "active": true
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
                   "Property": "Entra Modification Qualification"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Entra Modification Qualification",
+              "queryRef": "Global Device Inventory.Entra Modification Qualification",
               "nativeQueryRef": "Entra Modification Qualification",
-              "displayName": "Entra Modification Qualification"
+              "active": true
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "AD Password Expired"
+                }
+              },
+              "queryRef": "Global Device Inventory.AD Password Expired",
+              "nativeQueryRef": "AD Password Expired",
+              "active": true
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Enrollment Risk"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Enrollment Risk",
+              "nativeQueryRef": "Enrollment Risk",
+              "active": true,
+              "displayName": "Enrollment Risk"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Enrollment Risk Reasons"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Enrollment Risk Reasons",
+              "nativeQueryRef": "Enrollment Risk Reasons",
+              "active": true,
+              "displayName": "Enrollment Risk Reasons"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Enrollment Action"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Enrollment Action",
+              "nativeQueryRef": "Enrollment Action",
+              "active": true,
+              "displayName": "Enrollment Action"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Windows 11 Deployment Risk"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Windows 11 Deployment Risk",
+              "nativeQueryRef": "Windows 11 Deployment Risk",
+              "active": true,
+              "displayName": "Windows 11 Deployment Risk"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Windows 11 Risk Reasons"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Windows 11 Risk Reasons",
+              "nativeQueryRef": "Windows 11 Risk Reasons",
+              "active": true,
+              "displayName": "Windows 11 Risk Reasons"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Windows 11 Action"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Windows 11 Action",
+              "nativeQueryRef": "Windows 11 Action",
+              "active": true,
+              "displayName": "Windows 11 Action"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Observed Edition"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Observed Edition",
+              "nativeQueryRef": "Observed Edition",
+              "active": true,
+              "displayName": "Observed Edition"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Servicing Channel"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Servicing Channel",
+              "nativeQueryRef": "Servicing Channel",
+              "active": true,
+              "displayName": "Servicing Channel"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Observed Build"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Observed Build",
+              "nativeQueryRef": "Observed Build",
+              "active": true,
+              "displayName": "Observed Build"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Feature Target"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Feature Target",
+              "nativeQueryRef": "Feature Target",
+              "active": true,
+              "displayName": "Feature Target"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Readiness Observation (source)"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Readiness Observation (source)",
+              "nativeQueryRef": "Readiness Observation (source)",
+              "active": true,
+              "displayName": "Readiness Observation (source)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Assessment UTC"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Assessment UTC",
+              "nativeQueryRef": "Assessment UTC",
+              "active": true,
+              "displayName": "Assessment UTC"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Rule Version"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Rule Version",
+              "nativeQueryRef": "Rule Version",
+              "active": true,
+              "displayName": "Rule Version"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Evidence Source"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Evidence Source",
+              "nativeQueryRef": "Evidence Source",
+              "active": true,
+              "displayName": "Evidence Source"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Inventory Source"
+                }
+              },
+              "queryRef": "Global Device Inventory.Inventory Source",
+              "nativeQueryRef": "Inventory Source",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Console Logon Qualification (report)"
+                }
+              },
+              "queryRef": "Global Device Inventory.Console Logon Qualification (report)",
+              "nativeQueryRef": "Console Logon Qualification (report)",
+              "active": true,
+              "displayName": "Console logon qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
                     }
                   },
                   "Property": "Device Source ID"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Device Source ID",
-              "nativeQueryRef": "Intune device ID",
+              "queryRef": "Global Device Inventory.Device Source ID",
+              "nativeQueryRef": "Device Source ID",
               "active": true,
-              "displayName": "Intune device ID"
-            }
-          ]
-        },
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Management State"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Management State",
-              "nativeQueryRef": "Management State",
-              "displayName": "Management State"
+              "displayName": "Device Source ID"
             },
             {
               "field": {
-                "Measure": {
+                "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device System Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Device System Compliance State"
+                  "Property": "Inventory Key"
                 }
               },
-              "queryRef": "Device System Evidence.Device System Compliance State",
-              "nativeQueryRef": "Compliance State",
-              "displayName": "Compliance State"
+              "queryRef": "Global Device Inventory.Inventory Key",
+              "nativeQueryRef": "Inventory Key",
+              "active": true,
+              "displayName": "Inventory Key"
             },
             {
               "field": {
-                "Measure": {
+                "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device System Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Device System Last Sync Raw"
+                  "Property": "Enabled state (report)"
                 }
               },
-              "queryRef": "Device System Evidence.Device System Last Sync Raw",
-              "nativeQueryRef": "Last Sync Raw",
-              "displayName": "Last Sync Raw"
+              "queryRef": "Global Device Inventory.Enabled state (report)",
+              "nativeQueryRef": "Enabled state",
+              "active": false,
+              "displayName": "Enabled state"
             },
             {
               "field": {
-                "Measure": {
+                "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device System Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Device System Observation Raw"
+                  "Property": "Platform evidence (report)"
                 }
               },
-              "queryRef": "Device System Evidence.Device System Observation Raw",
-              "nativeQueryRef": "Observation Raw",
-              "displayName": "Observation Raw"
+              "queryRef": "Global Device Inventory.Platform evidence (report)",
+              "nativeQueryRef": "Platform evidence",
+              "active": false,
+              "displayName": "Platform evidence"
             },
             {
               "field": {
-                "Measure": {
+                "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device System Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Device System Freshness"
+                  "Property": "Ownership qualification (report)"
                 }
               },
-              "queryRef": "Device System Evidence.Device System Freshness",
-              "nativeQueryRef": "Freshness",
-              "displayName": "Freshness"
+              "queryRef": "Global Device Inventory.Ownership qualification (report)",
+              "nativeQueryRef": "Ownership qualification",
+              "active": false,
+              "displayName": "Ownership qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Account state evidence (report)"
+                }
+              },
+              "queryRef": "Global Device Inventory.Account state evidence (report)",
+              "nativeQueryRef": "Account state evidence",
+              "active": false,
+              "displayName": "Account state evidence"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "OS Family"
+                }
+              },
+              "queryRef": "Global Device Inventory.OS Family",
+              "nativeQueryRef": "OS Family · source",
+              "active": false,
+              "displayName": "OS Family · source"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Ownership"
+                }
+              },
+              "queryRef": "Global Device Inventory.Ownership",
+              "nativeQueryRef": "Ownership · source",
+              "active": false,
+              "displayName": "Ownership · source"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Entra Account State"
+                }
+              },
+              "queryRef": "Global Device Inventory.Entra Account State",
+              "nativeQueryRef": "Entra Account State · source",
+              "active": false,
+              "displayName": "Entra Account State · source"
             }
           ]
         }
       }
     },
-    "expansionStates": [
-      {
-        "roles": [
-          "Rows"
-        ],
-        "levels": [
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Country Name"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Country Name"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Device Name"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Device Name"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Management State"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Management State"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Compliance State"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Compliance State"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Ownership"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Ownership"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Operating System Family"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Operating System Family"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Windows Release"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Windows Release"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Device Source ID"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Device Source ID"
-                }
-              }
-            ],
-            "isPinned": true
-          }
-        ],
-        "root": {}
-      }
-    ],
     "objects": {
-      "general": [
-        {
-          "properties": {
-            "layout": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Tabular'"
-                }
-              }
-            }
-          }
-        }
-      ],
       "columnHeaders": [
         {
           "properties": {
@@ -558,7 +1423,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -592,9 +1457,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -607,7 +1479,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -665,17 +1537,10 @@
           }
         }
       ],
-      "rowHeaders": [
+      "total": [
         {
           "properties": {
-            "unfrozen": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "stepped": {
+            "totals": {
               "expr": {
                 "Literal": {
                   "Value": "false"
@@ -686,116 +1551,2815 @@
               "expr": {
                 "Literal": {
                   "Value": "11D"
-                }
-              }
-            },
-            "wordWrap": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "repeatRowHeaders": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "showExpandCollapseButtons": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
                 }
               }
             }
           }
         }
       ],
-      "subTotals": [
+      "columnFormatting": [
         {
           "properties": {
-            "rowSubtotals": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "'Left'"
                 }
               }
             },
-            "columnSubtotals": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
-            "fontSize": {
+            "styleValues": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
-                }
-              }
-            }
-          }
-        },
-        {
-          "properties": {
-            "rowSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
-            "perRowLevel": {
+            "styleTotal": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
+                  "Value": "true"
                 }
               }
             }
           },
           "selector": {
-            "id": "Row"
+            "metadata": "Global Device Inventory.Device Name"
           }
         },
         {
           "properties": {
-            "columnSubtotals": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "'Center'"
                 }
               }
             },
-            "perColumnLevel": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
-            "fontSize": {
+            "styleValues": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
           },
           "selector": {
-            "id": "Column"
+            "metadata": "Global Device Inventory.Country Name"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.AD Domain"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Primary User UPN"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Primary User SAM"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Last Console User (report)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Last Console Logon UTC (report)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.AD Enabled"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Intune presence"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.AD Match Qualification"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Manufacturer"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Model"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Platform (report)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Autopilot link status"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Autopilot serial numbers"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Ownership (report)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Operating System Family"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Operating System Version"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Windows Release"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Windows Generation"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Compliance State"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Intune Encryption State"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Secure Boot State"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Last Sync DateTime"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.System Drive Capacity (GB)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Free Disk Space (GB)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Free Disk Space (%)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Disk Space State"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Windows Update State"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Windows Update Risk"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Windows Update Action Code"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Expected AV Name"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Expected AV State"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Third Party AV Products"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Windows Update Reboot Required"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.BitLocker OS Protection"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.BitLocker OS Conversion"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Encryption Comparison"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.System Freshness"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.System Observation (source)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.System Data Quality Issues"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Endpoint Analytics Score"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Endpoint Analytics State"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Stop Error Count"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Windows 11 Upgrade Eligibility"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Windows 11 Blocking Reasons"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Observed Since"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Managed Tenure (Years)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Tenure Confidence"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.AD Created (source)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.AD Creation Qualification"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.AD Modified (source)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.AD Modification Qualification"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.AD Password Expiry Status"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Entra state (report)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Entra Match"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Removal Candidate"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Entra Created (source)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Entra Creation Qualification"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Entra Modified (source)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Entra Modification Qualification"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.AD Password Expired"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Enrollment Risk"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Enrollment Risk Reasons"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Enrollment Action"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Windows 11 Deployment Risk"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Windows 11 Risk Reasons"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Windows 11 Action"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Observed Edition"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Servicing Channel"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Observed Build"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Feature Target"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Readiness Observation (source)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Assessment UTC"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Rule Version"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Evidence Source"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Source"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Console Logon Qualification (report)"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Device Source ID"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "Global Device Inventory.Inventory Key"
           }
         }
-      ]
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -804,7 +4368,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Devices & Compliance detail'"
+                  "Value": "'Device Explorer detail'"
                 }
               }
             }
@@ -824,7 +4388,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device compliance \u00b7 inventory and matched System observations'"
+                  "Value": "'Device inventory · AD, Entra and Intune'"
                 }
               }
             },
@@ -924,7 +4488,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -981,5 +4552,107 @@
     },
     "drillFilterOtherVisuals": true
   },
-  "parentGroupName": "fb4afc01f98a718de907"
+  "parentGroupName": "fb4afc01f98a718de907",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "6c344430c39fe0f3b344",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Global Device Inventory"
+              }
+            },
+            "Property": "Global Device Row In Scope"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "i",
+              "Entity": "Global Device Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 0,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "i"
+                        }
+                      },
+                      "Property": "Global Device Row In Scope"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "1L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      },
+      {
+        "name": "cdd78cbbc43193c6f3590000",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Global Device Inventory"
+              }
+            },
+            "Property": "Primary user row match · Global Device Inventory"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "s",
+              "Entity": "Global Device Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 0,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "s"
+                        }
+                      },
+                      "Property": "Primary user row match · Global Device Inventory"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "1L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      }
+    ]
+  }
 }

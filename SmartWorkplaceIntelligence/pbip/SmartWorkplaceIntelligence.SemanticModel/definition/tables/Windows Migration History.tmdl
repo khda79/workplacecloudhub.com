@@ -17,50 +17,76 @@ table 'Windows Migration History'
 	/// Snapshot Date from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Snapshot Date'
 		dataType: dateTime
+		formatString: Long Date
 		lineageTag: d57a2bb7-014a-431e-b8da-54257abd5b5a
+		summarizeBy: none
 		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: b2e36157-b645-4d93-8482-218dd1dd94c8
+			defaultHierarchy: LocalDateTable_391e0fd3-2e65-424c-9946-867c32d26a61.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Snapshot Week from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Snapshot Week'
 		dataType: string
 		lineageTag: 1e9e3a64-c4f5-483a-88ee-5f2cee1113f2
+		summarizeBy: none
 		sourceColumn: Snapshot Week
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Windows 10 Devices from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Windows 10 Devices'
 		dataType: double
 		formatString: #,0
 		lineageTag: e2ab110e-b57b-4454-ad6e-162fd88800cf
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: Windows 10 Devices
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Windows 11 Devices from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Windows 11 Devices'
 		dataType: double
 		formatString: #,0
 		lineageTag: ca6b323f-d593-4035-aff5-4cc7c2b16e22
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: Windows 11 Devices
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Excluded Ambiguous Keys from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Excluded Ambiguous Keys'
 		dataType: double
 		formatString: #,0
 		lineageTag: 73df4da5-91e4-4507-9f57-150989b5a960
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: Excluded Ambiguous Keys
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Evidence Status from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Evidence Status'
 		dataType: string
 		lineageTag: 044d74fe-1426-4dea-a742-ef640dca1f0d
+		summarizeBy: none
 		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Evidence Note from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Evidence Note'
 		dataType: string
 		lineageTag: 71f9f8d0-60e8-403c-a928-172570e47a92
+		summarizeBy: none
 		sourceColumn: Evidence Note
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "ee0c0a9ba4dd463d9df1",
   "position": {
     "x": 1654,
-    "y": 237,
+    "y": 261,
+    "z": 45000,
+    "height": 64,
     "width": 222,
-    "height": 78,
-    "z": 1001,
-    "tabOrder": 1001
+    "tabOrder": 46000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -29,6 +29,24 @@
               "queryRef": "Report Metadata.Executive E3 Recovery",
               "nativeQueryRef": "E3 recovery",
               "displayName": "E3 recovery"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Summary"
+                    }
+                  },
+                  "Property": "KPI Alert Details License Selected E3 Recovery Label"
+                }
+              },
+              "queryRef": "License Report Summary.KPI Alert Details License Selected E3 Recovery Label",
+              "nativeQueryRef": "KPI Alert Details License Selected E3 Recovery Label"
             }
           ]
         }
@@ -63,8 +81,95 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#6D5BD0'"
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Selected E3 Recovery Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Selected E3 Recovery Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Selected E3 Recovery Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#6D5BD0'"
+                        }
+                      }
                     }
                   }
                 }
@@ -103,7 +208,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "9D"
                 }
               }
             },
@@ -175,8 +280,95 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#6D5BD0'"
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Selected E3 Recovery Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Selected E3 Recovery Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Selected E3 Recovery Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#6D5BD0'"
+                        }
+                      }
                     }
                   }
                 }

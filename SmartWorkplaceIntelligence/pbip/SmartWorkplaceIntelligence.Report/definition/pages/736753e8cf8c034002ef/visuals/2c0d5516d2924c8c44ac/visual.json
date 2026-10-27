@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "2c0d5516d2924c8c44ac",
   "position": {
     "x": 1280,
-    "y": 400,
+    "y": 544,
+    "z": 5000,
+    "height": 88,
     "width": 608,
-    "height": 104,
-    "z": 3000,
-    "tabOrder": 3000
+    "tabOrder": 5000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -48,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "32D"
+                  "Value": "20D"
                 }
               }
             },
@@ -363,14 +363,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Microsoft 365 E3 | estimate'"
+                  "Value": "'Exchange SE · CAL review'"
                 }
               }
             },
@@ -378,17 +378,6 @@
               "expr": {
                 "Literal": {
                   "Value": "11D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
                 }
               }
             }
@@ -533,5 +522,5 @@
       ]
     }
   },
-  "parentGroupName": "7cb4aca7881a67d51ce5"
+  "parentGroupName": "b752060c616c209f2c3a"
 }

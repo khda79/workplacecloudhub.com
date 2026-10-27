@@ -1,0 +1,17 @@
+/// M365 suite filter for mailbox inventory.
+table 'Mailbox License Selection'
+	lineageTag: 2d934edb-0291-47d7-a66d-780316243082
+
+	column 'License Product'
+		dataType: string
+		lineageTag: a9f4192d-b217-4575-882a-45086ab370fb
+		summarizeBy: none
+		sourceColumn: License Product
+
+	partition 'Mailbox License Selection' = m
+		mode: import
+		source =
+				let
+				 I=#"Mailbox License Membership",
+				 Output=Table.Distinct(Table.SelectColumns(I,{"License Product"}))
+				in Output

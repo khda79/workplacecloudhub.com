@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "03f5bee42350372600c6",
   "position": {
     "x": 0,
     "y": 0,
-    "width": 1920,
+    "z": 6000,
     "height": 1080,
-    "z": 4,
-    "tabOrder": 4
+    "width": 1920,
+    "tabOrder": 6000
   },
   "visualGroup": {
     "displayName": "Domain detail",

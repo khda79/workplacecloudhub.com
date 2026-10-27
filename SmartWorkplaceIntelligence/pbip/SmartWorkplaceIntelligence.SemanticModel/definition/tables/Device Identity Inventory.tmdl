@@ -1,0 +1,651 @@
+/// Source identity grain retained for audit. Cached AD/Entra/Intune only; consolidation uses explicit unambiguous Autopilot IDs. Disconnected audit utility.
+table 'Device Identity Inventory'
+	lineageTag: f9125591-2067-4ac1-a027-066fc2410a3b
+
+	/// Source-grain audit, outside PC equipment totals. Observed device Country/AD Domain only.
+	measure 'Source Identity Row In Scope' = VAR _c=VALUES('Country Selection'[Country]) VAR _d=VALUES('Daily Domain'[Domain]) VAR _cf=ISFILTERED('Country Selection') VAR _df=ISFILTERED('Daily Domain') VAR _rows=FILTER('Device Identity Inventory',(NOT _cf || COALESCE(LOOKUPVALUE('Country Selection'[Country],'Country Selection'[Source Country],[Country Name]),[Country Name]) IN _c) && (NOT _df || [AD Domain] IN _d)) RETURN IF(COUNTROWS(_rows)>0,1,0)
+		formatString: 0
+		lineageTag: efa6cc38-5776-4eee-a1c4-4137c45fe918
+
+	/// Read-only report utility applying the disconnected primary-user selector to source-qualified device rows.
+	measure 'Primary user row match · Device Identity Inventory' = VAR PresentRows = IF(ISFILTERED('Primary User Selection'[Primary user]), CALCULATE(COUNTROWS('Device Identity Inventory'), KEEPFILTERS(TREATAS(VALUES('Primary User Selection'[Primary user]), 'Device Identity Inventory'[Primary User (report)]))), COUNTROWS('Device Identity Inventory')) RETURN IF(PresentRows>0,1,BLANK())
+		formatString: 0
+		isHidden
+		lineageTag: 943ff70d-fd69-4989-b61a-52eb13e81022
+
+	column 'Device Source ID'
+		lineageTag: 4a47afc2-f3cb-479b-9ec0-9464b31a5ff9
+		isNameInferred
+		sourceColumn: [Device Source ID]
+
+	column 'Device Name'
+		lineageTag: 277c7849-71f0-441b-b0d0-bf1da7dec5b2
+		isNameInferred
+		sourceColumn: [Device Name]
+
+	column 'Primary User UPN'
+		lineageTag: e0f3a686-58d0-4086-927b-bf8a63263b0b
+		isNameInferred
+		sourceColumn: [Primary User UPN]
+
+	column Country
+		lineageTag: 30b83982-740a-41cd-af79-4228a5cc77a2
+		isNameInferred
+		sourceColumn: [Country]
+
+	column Platform
+		lineageTag: d080b4b0-c87c-4b32-a23d-ca00c299ad74
+		isNameInferred
+		sourceColumn: [Platform]
+
+	column 'Device Category'
+		lineageTag: 66593785-9cfb-49f2-85e7-6799a03b6cdc
+		isNameInferred
+		sourceColumn: [Device Category]
+
+	column Ownership
+		lineageTag: 784212b2-52bf-433f-bb58-6afa89e87833
+		isNameInferred
+		sourceColumn: [Ownership]
+
+	column 'Management State'
+		lineageTag: c6a6ad06-c9c6-4753-be62-114db9a54ea7
+		isNameInferred
+		sourceColumn: [Management State]
+
+	column 'Compliance State'
+		lineageTag: 10ad1dc9-456d-4511-affb-06325c502680
+		isNameInferred
+		sourceColumn: [Compliance State]
+
+	column Manufacturer
+		lineageTag: 27d93104-7e20-4cd1-b475-16f0bb1ab7cc
+		isNameInferred
+		sourceColumn: [Manufacturer]
+
+	column Model
+		lineageTag: 9bc59905-ad24-4ada-a071-5c916d4c486a
+		isNameInferred
+		sourceColumn: [Model]
+
+	column 'Operating System Family'
+		lineageTag: 45585dee-4f9a-4715-aa30-c5333efee81e
+		isNameInferred
+		sourceColumn: [Operating System Family]
+
+	column 'Operating System Version'
+		lineageTag: 6a8d49bf-5460-4fe7-bce5-4e60ff34658b
+		isNameInferred
+		sourceColumn: [Operating System Version]
+
+	column 'Windows Release'
+		lineageTag: 128b7b01-832c-4668-bee3-79c50e8374fa
+		isNameInferred
+		sourceColumn: [Windows Release]
+
+	column 'Disk Space State'
+		lineageTag: d564fff9-c781-4301-9027-bb2e3713a4c2
+		isNameInferred
+		sourceColumn: [Disk Space State]
+
+	column 'AD to Intune Match'
+		lineageTag: 8f27faee-786d-4095-891c-1486cf99422e
+		isNameInferred
+		sourceColumn: [AD to Intune Match]
+
+	column 'Entra Match'
+		lineageTag: 5c6dee09-8364-4416-8d0d-8ac2697d50b8
+		isNameInferred
+		sourceColumn: [Entra Match]
+
+	column 'Tenure Confidence'
+		lineageTag: cf729ae2-e599-4108-af77-f0a88062850c
+		isNameInferred
+		sourceColumn: [Tenure Confidence]
+
+	column 'Windows Generation'
+		lineageTag: a1718f80-4af0-4945-8b73-ea8b1ac98832
+		isNameInferred
+		sourceColumn: [Windows Generation]
+
+	column 'Windows 11 Upgrade Eligibility'
+		lineageTag: 2ebe5e8a-5ea7-45a1-95f8-b98540b05282
+		isNameInferred
+		sourceColumn: [Windows 11 Upgrade Eligibility]
+
+	column 'Windows 11 Blocking Reasons'
+		lineageTag: c36daf63-4875-47a3-9101-c86cc505a724
+		isNameInferred
+		sourceColumn: [Windows 11 Blocking Reasons]
+
+	column 'Windows Update State'
+		lineageTag: bc9f58cb-a837-498f-b19b-8b58fc1f0758
+		isNameInferred
+		sourceColumn: [Windows Update State]
+
+	column 'Windows Update Risk'
+		lineageTag: aee7f610-25ac-4034-9d7e-bd5dc54ad509
+		isNameInferred
+		sourceColumn: [Windows Update Risk]
+
+	column 'Windows Update Action Code'
+		lineageTag: a3472a40-c1b3-4a1d-af4e-422e82d9e6b7
+		isNameInferred
+		sourceColumn: [Windows Update Action Code]
+
+	column 'Secure Boot State'
+		lineageTag: bdb8f390-5a51-42cf-8697-1acefdf76a92
+		isNameInferred
+		sourceColumn: [Secure Boot State]
+
+	column 'Endpoint Analytics State'
+		lineageTag: 11e9ed51-0f85-432a-aa61-6d0a35f29270
+		isNameInferred
+		sourceColumn: [Endpoint Analytics State]
+
+	column 'Stop Error State'
+		lineageTag: 7174274e-11f3-40fd-a692-36b6be0ed71c
+		isNameInferred
+		sourceColumn: [Stop Error State]
+
+	column 'Entra Hardware ID Conflict'
+		lineageTag: 4a873b57-9112-45ea-838d-bf064b0f04fc
+		isNameInferred
+		sourceColumn: [Entra Hardware ID Conflict]
+
+	column 'Removal Candidate'
+		lineageTag: 72cc7c23-210f-448f-9d67-93c5f0300ffe
+		isNameInferred
+		sourceColumn: [Removal Candidate]
+
+	column 'Windows 11 Release State'
+		lineageTag: 6029b800-a0ee-466f-aa5b-75048bc2d133
+		isNameInferred
+		sourceColumn: [Windows 11 Release State]
+
+	column 'Entra Account State'
+		lineageTag: 5f6a61b8-dd7e-4bae-b1a3-96a53fc1b4c5
+		isNameInferred
+		sourceColumn: [Entra Account State]
+
+	column 'Intune Encryption State'
+		lineageTag: 271ef763-c860-47ad-922f-c858b3b920cb
+		isNameInferred
+		sourceColumn: [Intune Encryption State]
+
+	column 'System Drive Capacity (GB)'
+		lineageTag: 853760f8-581f-43cb-a370-a1dbae3b5cbd
+		isNameInferred
+		sourceColumn: [System Drive Capacity (GB)]
+
+	column 'Free Disk Space (GB)'
+		lineageTag: 756fd60b-6e5c-4bf8-b291-fd56ce6ce507
+		isNameInferred
+		sourceColumn: [Free Disk Space (GB)]
+
+	column 'Free Disk Space (%)'
+		lineageTag: 84de7af6-ecca-494d-9693-4cc6f3552fde
+		isNameInferred
+		sourceColumn: [Free Disk Space (%)]
+
+	column 'Managed Tenure (Years)'
+		lineageTag: a6514e5f-fe1f-42da-a93a-22b56db952ca
+		isNameInferred
+		sourceColumn: [Managed Tenure (Years)]
+
+	column 'Endpoint Analytics Score'
+		lineageTag: 4dd42a25-79e0-4161-863b-47b5a749dcbe
+		isNameInferred
+		sourceColumn: [Endpoint Analytics Score]
+
+	column 'Stop Error Count'
+		lineageTag: fb6986e9-4659-44ed-a5cd-bbdaa99adf2f
+		isNameInferred
+		sourceColumn: [Stop Error Count]
+
+	column 'Last Sync DateTime'
+		lineageTag: c41c4f35-acd0-4afe-a62b-e5f7fb471bc4
+		isNameInferred
+		sourceColumn: [Last Sync DateTime]
+
+	column 'Observed Since'
+		lineageTag: 620b961b-48ad-491d-9608-b7ba09132eec
+		isNameInferred
+		sourceColumn: [Observed Since]
+
+	column 'Inventory Key'
+		lineageTag: efa04a31-9f79-4fc4-8fd9-d776d8ff2faf
+		isNameInferred
+		sourceColumn: [Inventory Key]
+
+	column 'Intune presence'
+		lineageTag: 40ce220e-4068-4772-9ca8-f1c553adfa8f
+		isNameInferred
+		sourceColumn: [Intune presence]
+
+	column 'AD Enabled'
+		lineageTag: 450f12a5-f67f-4202-bbd1-edc585bb65a2
+		isNameInferred
+		sourceColumn: [AD Enabled]
+
+	column 'AD Domain'
+		lineageTag: 16b4f4ba-9b19-4910-b641-d6917f53c445
+		isNameInferred
+		sourceColumn: [AD Domain]
+
+	column 'AD Match Qualification'
+		lineageTag: 1c81356a-38cf-441b-bdce-41845502b229
+		isNameInferred
+		sourceColumn: [AD Match Qualification]
+
+	column 'AD Created (source)'
+		lineageTag: fbae7aa6-2e88-4375-9828-8985bbc92f8e
+		isNameInferred
+		sourceColumn: [AD Created (source)]
+
+	column 'AD Creation Qualification'
+		lineageTag: b0afdc34-9d96-4bf7-8ae3-221adc570950
+		isNameInferred
+		sourceColumn: [AD Creation Qualification]
+
+	column 'AD Modified (source)'
+		lineageTag: df5dcba5-4fcb-45c4-b2ca-0a6155f1c4a2
+		isNameInferred
+		sourceColumn: [AD Modified (source)]
+
+	column 'AD Modification Qualification'
+		lineageTag: 31b65768-c056-4262-b889-87763ddb88fc
+		isNameInferred
+		sourceColumn: [AD Modification Qualification]
+
+	column 'AD Password Expiry Status'
+		lineageTag: 9a955751-86c8-4cf6-8e1b-16d79bac110a
+		isNameInferred
+		sourceColumn: [AD Password Expiry Status]
+
+	column 'Inventory Source'
+		lineageTag: 4b6a7aae-c36c-42c9-8f82-dd19584ca813
+		isNameInferred
+		sourceColumn: [Inventory Source]
+
+	column 'Expected AV Name'
+		lineageTag: 1d02eda7-bc9d-4c43-91ca-814f7ae819c3
+		isNameInferred
+		sourceColumn: [Expected AV Name]
+
+	column 'Expected AV State'
+		lineageTag: 7191c1ae-c7ba-48c9-8ca2-5444ee489265
+		isNameInferred
+		sourceColumn: [Expected AV State]
+
+	column 'Third Party AV Products'
+		lineageTag: e7916703-82db-43b4-8328-2d9668727a8b
+		isNameInferred
+		sourceColumn: [Third Party AV Products]
+
+	column 'Windows Update Reboot Required'
+		lineageTag: bc145ce4-96be-4f0a-b4b0-87e4ec9ce73b
+		isNameInferred
+		sourceColumn: [Windows Update Reboot Required]
+
+	column 'BitLocker OS Protection'
+		lineageTag: b124514d-6cb1-4093-9dd9-237c6f15afd3
+		isNameInferred
+		sourceColumn: [BitLocker OS Protection]
+
+	column 'BitLocker OS Conversion'
+		lineageTag: 18a83baf-c15c-496e-aac4-7f272fff7a2f
+		isNameInferred
+		sourceColumn: [BitLocker OS Conversion]
+
+	column 'Encryption Comparison'
+		lineageTag: 03d044ed-452a-402b-8a6b-b55f72c452e3
+		isNameInferred
+		sourceColumn: [Encryption Comparison]
+
+	column 'System Data Quality Issues'
+		lineageTag: 976584c3-e0a5-4d5c-9eaf-7bb2caa11a74
+		isNameInferred
+		sourceColumn: [System Data Quality Issues]
+
+	column 'System Freshness'
+		lineageTag: 28ccaf24-aa05-47c7-9bcf-3b217709fa16
+		isNameInferred
+		sourceColumn: [System Freshness]
+
+	column 'System Observation (source)'
+		lineageTag: baa53fb8-c826-4986-ad86-e44864e220c8
+		isNameInferred
+		sourceColumn: [System Observation (source)]
+
+	column 'Loaded Batch ID'
+		lineageTag: a84de21f-4f90-4612-a7e7-fd4024830221
+		isNameInferred
+		sourceColumn: [Loaded Batch ID]
+
+	column TenantKey
+		lineageTag: 517113e4-2c07-41fd-84b3-bdf0b9aefdad
+		isNameInferred
+		sourceColumn: [TenantKey]
+
+	column 'AD Source Collected UTC'
+		lineageTag: d895c2d2-8ba2-4c1c-8e62-e5455de4861a
+		isNameInferred
+		sourceColumn: [AD Source Collected UTC]
+
+	column 'Country Name'
+		lineageTag: 43593922-a7b2-4785-a1f2-6b272ec8aa06
+		isNameInferred
+		sourceColumn: [Country Name]
+
+	column 'AD Windows PC'
+		lineageTag: 0c662ebe-5ad6-400c-84c7-93419944bdb4
+		isNameInferred
+		sourceColumn: [AD Windows PC]
+
+	column 'Entra Created (source)'
+		lineageTag: 20fdc921-3dfd-4f01-a85d-992bf4aa06fa
+		isNameInferred
+		sourceColumn: [Entra Created (source)]
+
+	column 'Entra Creation Qualification'
+		lineageTag: 36979dd6-9341-4c83-b175-124304280bba
+		isNameInferred
+		sourceColumn: [Entra Creation Qualification]
+
+	column 'Entra Modified (source)'
+		lineageTag: cbc90f04-9fb9-437c-8b88-b05cba29711c
+		isNameInferred
+		sourceColumn: [Entra Modified (source)]
+
+	column 'Entra Modification Qualification'
+		lineageTag: c4b5baf1-a41a-410d-83b2-53f094c3dbae
+		isNameInferred
+		sourceColumn: [Entra Modification Qualification]
+
+	column 'AD Password Expired'
+		lineageTag: 551b6470-1970-4229-ab90-8c4bc4cf2ebd
+		isNameInferred
+		sourceColumn: [AD Password Expired]
+
+	column 'Canonical Device Key'
+		lineageTag: 8a226ab9-831e-4443-a123-a9aac073c32f
+		isNameInferred
+		sourceColumn: [Canonical Device Key]
+
+	column 'Native Device Key'
+		lineageTag: 71ae8885-f660-4cb8-8241-101f2f07d024
+		isNameInferred
+		sourceColumn: [Native Device Key]
+
+	column 'AD Computer Key'
+		lineageTag: 4e55c2aa-bd6c-409b-a565-95a1da027203
+		isNameInferred
+		sourceColumn: [AD Computer Key]
+
+	column 'Primary User Source ID'
+		lineageTag: e9cd8dd8-7c7a-4eac-856c-092afc7cdc80
+		isNameInferred
+		sourceColumn: [Primary User Source ID]
+
+	column 'Primary User SAM'
+		lineageTag: 6f3bd43e-8d6a-402f-96fd-fa9b72c4cc51
+		isNameInferred
+		sourceColumn: [Primary User SAM]
+
+	/// Qualified platform/form factor class. Windows/macOS computers PC; Android/iOS/iPadOS mobile; servers separate; no OS invention for unknown identities.
+	column 'Device Class' = VAR _os=LOWER(COALESCE([Operating System Family],"")) VAR _cat=[Device Category] RETURN SWITCH(TRUE(),CONTAINSSTRING(_os,"server")||_cat="Server","Server",CONTAINSSTRING(_os,"android")||_os IN {"ios","ipados","iphone","ipad"},"Mobile",CONTAINSSTRING(_os,"windows")||CONTAINSSTRING(_os,"mac")||_cat IN {"PC","PC Windows"},"PC","Unclassified")
+		dataType: string
+		lineageTag: ed963620-2b80-45b1-a509-9e802a918e5b
+
+	column 'OS Family' = VAR _os=LOWER(COALESCE([Operating System Family],"")) RETURN SWITCH(TRUE(),CONTAINSSTRING(_os,"windows"),"Windows",CONTAINSSTRING(_os,"mac"),"macOS",CONTAINSSTRING(_os,"android"),"Android",_os="ipados","iPadOS",_os IN {"ios","iphone","ipad"},"iOS",CONTAINSSTRING(_os,"linux"),"Linux","Unknown")
+		dataType: string
+		lineageTag: 187a1a8d-84f6-4714-ab23-5aa39e668acf
+
+	/// Observed primary user, exact source ID and tenant/batch matching only; used by the report search.
+	column 'Primary User (report)' =
+			VAR _t='Device Identity Inventory'[TenantKey]
+			VAR _b='Device Identity Inventory'[Loaded Batch ID]
+			VAR _gkey='Device Identity Inventory'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Identity Inventory'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Identity Inventory'[Device Source ID]))
+			VAR _upn=COALESCE('Device Identity Inventory'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			RETURN IF(ISBLANK(_upn)||TRIM(_upn)="","Not resolved",_upn)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: b02ac8c6-5cfc-4148-9533-1ccca958da9f
+
+	/// Qualified SAM of the primary user; never inferred from UPN text.
+	column 'Primary User SAM (report)' =
+			VAR _t='Device Identity Inventory'[TenantKey]
+			VAR _b='Device Identity Inventory'[Loaded Batch ID]
+			VAR _gkey='Device Identity Inventory'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Identity Inventory'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Identity Inventory'[Device Source ID]))
+			VAR _upn=COALESCE('Device Identity Inventory'[Primary User UPN],IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User UPN],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK())),IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Primary User UPN],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+			VAR _sam=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Primary User SAM],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			RETURN COALESCE(_sam,IF(NOT ISBLANK(_upn),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[UserPrincipalName],_upn,'Native User Evidence'[TenantKey],_t,'Native User Evidence'[Loaded Batch ID],_b,BLANK())),"Not resolved")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: ba4e22ed-8bfc-41c5-b817-8ff7c623fffe
+
+	/// Last Windows console user observed at collection. Does not mean current user or last RDP session.
+	column 'Last Console User (report)' =
+			VAR _t='Device Identity Inventory'[TenantKey]
+			VAR _b='Device Identity Inventory'[Loaded Batch ID]
+			VAR _gkey='Device Identity Inventory'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Identity Inventory'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Identity Inventory'[Device Source ID]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(_status="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon User],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())),"Not observed")
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: 658d72b4-7946-4371-b77f-672dc126e108
+
+	/// Source-qualified time of last observed console logon; unknown remains blank.
+	column 'Last Console Logon UTC (report)' =
+			VAR _t='Device Identity Inventory'[TenantKey]
+			VAR _b='Device Identity Inventory'[Loaded Batch ID]
+			VAR _gkey='Device Identity Inventory'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Identity Inventory'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Identity Inventory'[Device Source ID]))
+			RETURN IF(IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))="Observed",IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon UTC],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK())))
+		dataType: dateTime
+		formatString: yyyy-MM-dd HH:mm
+		displayFolder: Report identity context
+		lineageTag: 93be6d1a-a5df-4792-8f05-bac4d01efb91
+
+	/// Preserves source status and timestamp qualification, including stale/missing/error evidence.
+	column 'Console Logon Qualification (report)' =
+			VAR _t='Device Identity Inventory'[TenantKey]
+			VAR _b='Device Identity Inventory'[Loaded Batch ID]
+			VAR _gkey='Device Identity Inventory'[Device Source ID]
+			VAR _resolved=IF(NOT ISBLANK(_gkey),LOOKUPVALUE('Global Device Inventory'[Device Source ID],'Global Device Inventory'[Device Source ID],_gkey,'Global Device Inventory'[TenantKey],_t,'Global Device Inventory'[Loaded Batch ID],_b,BLANK()))
+			VAR _sid=COALESCE(_resolved,IF(CONTAINS('Device System Evidence','Device System Evidence'[Device Source ID],'Device Identity Inventory'[Device Source ID],'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b),'Device Identity Inventory'[Device Source ID]))
+			VAR _status=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Status],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _quality=IF(NOT ISBLANK(_sid),LOOKUPVALUE('Device System Evidence'[Last Console Logon Quality],'Device System Evidence'[Device Source ID],_sid,'Device System Evidence'[TenantKey],_t,'Device System Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN IF(ISBLANK(_status),"No matched system observation",_status&" · "&_quality)
+		dataType: string
+		displayFolder: Report identity context
+		lineageTag: da48919b-b2f0-467b-8a48-fba4519c561b
+
+	column 'Report Estate Device Key' =
+			VAR _canonical=[Canonical Device Key] VAR _id=[Device Source ID]
+			RETURN IF(LEFT(_canonical,3)="ad:",_canonical,IF(NOT ISBLANK(_id)&&_id<>"","intune:"&LOWER(_id)))
+		dataType: string
+		isHidden
+		displayFolder: Device qualification
+		lineageTag: e6adf116-4035-45f7-91cd-ef8f522a0c30
+		summarizeBy: none
+
+	/// Intune/native platform with exact estate AD OS fallback. Missing evidence stays Unknown.
+	column 'Platform (report)' =
+			VAR _k=[Report Estate Device Key] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID]
+			VAR _estate=IF(NOT ISBLANK(_k),LOOKUPVALUE('All Devices Evidence'[Platform (report)],'All Devices Evidence'[Device Key],_k,'All Devices Evidence'[TenantKey],_t,'All Devices Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _os=LOWER(TRIM(COALESCE([Operating System Family],[Platform],"")))
+			VAR _fallback=SWITCH(TRUE(),CONTAINSSTRING(_os,"windows")&&CONTAINSSTRING(_os,"server"),"Windows Server",CONTAINSSTRING(_os,"windows"),"Windows",CONTAINSSTRING(_os,"mac")||_os IN {"os x","osx","darwin"},"macOS",CONTAINSSTRING(_os,"android"),"Android",_os IN {"ipados","ipad"},"iPadOS",_os IN {"ios","iphone"},"iOS",CONTAINSSTRING(_os,"linux"),"Linux",_os IN {"","unknown","unclassified","not observed","other / unknown"},"Unknown","Other")
+			RETURN IF(NOT ISBLANK(_estate)&&_estate<>"Unknown",_estate,_fallback)
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 1f7c1b2a-ef96-42b6-85a3-3f457baa5ee2
+		summarizeBy: none
+
+	column 'Platform evidence (report)' =
+			VAR _k=[Report Estate Device Key] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID]
+			RETURN COALESCE(IF(NOT ISBLANK(_k),LOOKUPVALUE('All Devices Evidence'[Platform evidence (report)],'All Devices Evidence'[Device Key],_k,'All Devices Evidence'[TenantKey],_t,'All Devices Evidence'[Loaded Batch ID],_b,BLANK())),IF([Platform (report)]="Unknown","Not observed","Native device operating system"))
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 7b271227-209f-4094-a41b-32ab132c23d4
+		summarizeBy: none
+
+	column 'Device type (report)' = SWITCH(TRUE(),[Platform (report)] IN {"Windows","macOS"},"PC",[Platform (report)] IN {"Android","iOS","iPadOS"},"Mobile",[Platform (report)]="Windows Server","Server",[Platform (report)]="Unknown","Unknown","Other")
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 7404224e-fb4f-4553-bda9-a2e6b9b9ee3d
+		summarizeBy: none
+
+	column 'Ownership (report)' =
+			VAR _k=[Report Estate Device Key] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID]
+			VAR _estate=IF(NOT ISBLANK(_k),LOOKUPVALUE('All Devices Evidence'[Ownership (report)],'All Devices Evidence'[Device Key],_k,'All Devices Evidence'[TenantKey],_t,'All Devices Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _ad=NOT ISBLANK([AD Computer Key])&&NOT(TRIM(COALESCE([AD Domain],"Unknown")) IN {"","Unknown","Not resolved"})
+			RETURN COALESCE(_estate,IF(_ad,"Corporate",SWITCH(LOWER([Ownership]),"corporate","Corporate","company","Corporate","personal","Personal","Unknown")))
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 7021af9a-4407-4fae-ab3d-f11f17c2c16f
+		summarizeBy: none
+
+	column 'Ownership qualification (report)' =
+			VAR _k=[Report Estate Device Key] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID]
+			VAR _estate=IF(NOT ISBLANK(_k),LOOKUPVALUE('All Devices Evidence'[Ownership qualification (report)],'All Devices Evidence'[Device Key],_k,'All Devices Evidence'[TenantKey],_t,'All Devices Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN COALESCE(_estate,SWITCH([Ownership (report)],"Corporate","Corporate: native device evidence","Personal","Personal: native device evidence","Ownership not observed"))
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 54de2902-f2bf-4291-b836-06d91b10c78c
+		summarizeBy: none
+
+	column 'Entra state (report)' =
+			VAR _k=[Report Estate Device Key] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID]
+			VAR _estate=IF(NOT ISBLANK(_k),LOOKUPVALUE('All Devices Evidence'[Entra state (report)],'All Devices Evidence'[Device Key],_k,'All Devices Evidence'[TenantKey],_t,'All Devices Evidence'[Loaded Batch ID],_b,BLANK()))
+			VAR _raw=IF(_estate IN {"Enabled","Disabled","Conflicting"},_estate,[Entra Account State])
+			RETURN SWITCH(_raw,"Enabled","Enabled","Disabled","Disabled","Conflicting","Conflicting","Unknown")
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 9d00bfef-4cfe-4bcd-a718-ca36cd5408f0
+		summarizeBy: none
+
+	column 'Enabled state (report)' =
+			VAR _ad=[AD Enabled] VAR _e=[Entra state (report)]
+			RETURN SWITCH(TRUE(),_e="Conflicting"||(_ad="Yes"&&_e="Disabled")||(_ad="No"&&_e="Enabled"),"Conflicting",_ad="Yes"||_e="Enabled","Enabled",_ad="No"||_e="Disabled","Disabled","Unknown")
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 4995e786-a323-4a4d-9764-fe69bbf1068e
+		summarizeBy: none
+
+	column 'Account state evidence (report)' =
+			VAR _k=[Report Estate Device Key] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID]
+			VAR _estate=IF(NOT ISBLANK(_k),LOOKUPVALUE('All Devices Evidence'[Account state evidence (report)],'All Devices Evidence'[Device Key],_k,'All Devices Evidence'[TenantKey],_t,'All Devices Evidence'[Loaded Batch ID],_b,BLANK()))
+			RETURN COALESCE(_estate,IF([Entra state (report)] IN {"Enabled","Disabled"},"Entra AccountEnabled observed","Entra AccountEnabled absent from cached native evidence"))
+		dataType: string
+		displayFolder: Device qualification
+		lineageTag: 9e540bef-b562-4d8d-be72-179cc05d23c3
+		summarizeBy: none
+
+	partition 'Device Identity Inventory' = calculated
+		mode: import
+		source =
+				VAR _ad0=SELECTCOLUMNS(FILTER('All Devices Evidence',LEFT([Device Key],3)="ad:"),
+				 "TenantKey",[TenantKey],"Loaded Batch ID",[Loaded Batch ID],"__Canonical",[Device Key],"__ADGuid",MID([Device Key],4,500),"__EstateCountry",[Country],"__EstateCountryName",[Country Name])
+				VAR _ad1=ADDCOLUMNS(_ad0,"__RawNativeKey",IF(LOOKUPVALUE('AD Computer Evidence'[CloudMatchStatus],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID])="Unique native SID",LOOKUPVALUE('AD Computer Evidence'[TenantDeviceKey],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID])))
+				VAR _ad=ADDCOLUMNS(_ad1,"__NativeKey",VAR _k=[__RawNativeKey] VAR _t=[TenantKey] RETURN IF(NOT ISBLANK(_k) && COUNTROWS(FILTER(_ad1,[TenantKey]=_t && [__RawNativeKey]=_k))=1,_k))
+				VAR _cloud=SELECTCOLUMNS(FILTER('Native Device Evidence',
+				 VAR _k=[TenantDeviceKey] VAR _t=[TenantKey] RETURN COUNTROWS(FILTER(_ad,[TenantKey]=_t && [__NativeKey]=_k))=0),
+				 "TenantKey",[TenantKey],"Loaded Batch ID",[Loaded Batch ID],"__Canonical","entra:" & [SourceDeviceId],"__ADGuid",BLANK(),"__EstateCountry",[CountryCode],"__EstateCountryName",[CountryLabel],"__NativeKey",[TenantDeviceKey])
+				VAR _adRows=SELECTCOLUMNS(_ad,"TenantKey",[TenantKey],"Loaded Batch ID",[Loaded Batch ID],"__Canonical",[__Canonical],"__ADGuid",[__ADGuid],"__EstateCountry",[__EstateCountry],"__EstateCountryName",[__EstateCountryName],"__NativeKey",[__NativeKey])
+				VAR _estateIntune=FILTER('All Devices Evidence',LEFT([Device Key],7)="intune:")
+				VAR _orphan=SELECTCOLUMNS(FILTER(_estateIntune,
+				 VAR _id=MID([Device Key],8,500) VAR _t=[TenantKey]
+				 VAR _nk=LOOKUPVALUE('Native Managed Device Evidence'[TenantDeviceKey],'Native Managed Device Evidence'[ManagedDeviceId],_id,'Native Managed Device Evidence'[TenantKey],_t)
+				 RETURN ISBLANK(_nk) || NOT CONTAINS('Native Device Evidence','Native Device Evidence'[TenantDeviceKey],_nk)),
+				 "TenantKey",[TenantKey],"Loaded Batch ID",[Loaded Batch ID],"__Canonical",[Device Key],"__ADGuid",BLANK(),"__EstateCountry",[Country],"__EstateCountryName",[Country Name],"__NativeKey",BLANK())
+				VAR _base=UNION(_adRows,_cloud,_orphan)
+				VAR _linked=ADDCOLUMNS(_base,
+				 "__ManagedId",IF(LEFT([__Canonical],7)="intune:",MID([__Canonical],8,500),IF(NOT ISBLANK([__NativeKey]),LOOKUPVALUE('Native Managed Device Evidence'[ManagedDeviceId],'Native Managed Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Managed Device Evidence'[TenantKey],[TenantKey],'Native Managed Device Evidence'[Loaded Batch ID],[Loaded Batch ID]))),
+				 "__ADNativeKey",LOOKUPVALUE('AD Computer Evidence'[TenantADComputerKey],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID]),
+				 "__PrimaryUserId",LOOKUPVALUE('Native Device Evidence'[PrimaryUserSourceId],'Native Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Device Evidence'[TenantKey],[TenantKey],'Native Device Evidence'[Loaded Batch ID],[Loaded Batch ID]))
+				RETURN SELECTCOLUMNS(_linked,
+				"Device Source ID",[__ManagedId],
+				"Device Name",COALESCE(IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Device Name],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),LOOKUPVALUE('Native Device Evidence'[DeviceName],'Native Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Device Evidence'[TenantKey],[TenantKey],'Native Device Evidence'[Loaded Batch ID],[Loaded Batch ID]),LOOKUPVALUE('AD Computer Evidence'[Name],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID]),"Identity detail unavailable"),
+				"Primary User UPN",COALESCE(IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Primary User UPN],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),LOOKUPVALUE('Native Device Evidence'[AssociatedAccount],'Native Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Device Evidence'[TenantKey],[TenantKey],'Native Device Evidence'[Loaded Batch ID],[Loaded Batch ID])),
+				"Country",COALESCE([__EstateCountry],"Unknown"),
+				"Platform",COALESCE(IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Platform],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),LOOKUPVALUE('Native Device Evidence'[OperatingSystem],'Native Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Device Evidence'[TenantKey],[TenantKey],'Native Device Evidence'[Loaded Batch ID],[Loaded Batch ID]),IF(CONTAINSSTRING(LOOKUPVALUE('AD Computer Evidence'[OperatingSystem],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID]),"Windows"),"Windows"),"Unknown"),
+				"Device Category",COALESCE(IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Device Category],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),IF(CONTAINSSTRING(LOOKUPVALUE('AD Computer Evidence'[OperatingSystem],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID]),"Server"),"Server"),LOOKUPVALUE('Native Device Evidence'[Device form factor],'Native Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Device Evidence'[TenantKey],[TenantKey],'Native Device Evidence'[Loaded Batch ID],[Loaded Batch ID]),"Unknown"),
+				"Ownership",COALESCE(IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Ownership],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),LOOKUPVALUE('Native Device Evidence'[Ownership],'Native Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Device Evidence'[TenantKey],[TenantKey],'Native Device Evidence'[Loaded Batch ID],[Loaded Batch ID]),"Unknown"),
+				"Management State",COALESCE(IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Management State],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),LOOKUPVALUE('Native Device Evidence'[ManagementState],'Native Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Device Evidence'[TenantKey],[TenantKey],'Native Device Evidence'[Loaded Batch ID],[Loaded Batch ID]),"Unknown"),
+				"Compliance State",COALESCE(IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Compliance State],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),LOOKUPVALUE('Native Device Evidence'[ComplianceState],'Native Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Device Evidence'[TenantKey],[TenantKey],'Native Device Evidence'[Loaded Batch ID],[Loaded Batch ID]),"Not assessed"),
+				"Manufacturer",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Manufacturer],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Model",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Model],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Operating System Family",COALESCE(IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Operating System Family],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),LOOKUPVALUE('Native Device Evidence'[OperatingSystem],'Native Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Device Evidence'[TenantKey],[TenantKey],'Native Device Evidence'[Loaded Batch ID],[Loaded Batch ID]),LOOKUPVALUE('AD Computer Evidence'[OperatingSystem],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID]),"Unknown"),
+				"Operating System Version",COALESCE(IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Operating System Version],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),LOOKUPVALUE('Native Device Evidence'[OperatingSystemVersion],'Native Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Device Evidence'[TenantKey],[TenantKey],'Native Device Evidence'[Loaded Batch ID],[Loaded Batch ID]),LOOKUPVALUE('AD Computer Evidence'[OperatingSystemVersion],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID])),
+				"Windows Release",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Windows Release],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Disk Space State",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Disk Space State],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"AD to Intune Match",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[AD to Intune Match],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Entra Match",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Entra Match],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Tenure Confidence",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Tenure Confidence],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Windows Generation",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Windows Generation],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Windows 11 Upgrade Eligibility",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Windows 11 Upgrade Eligibility],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Windows 11 Blocking Reasons",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Windows 11 Blocking Reasons],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Windows Update State",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Windows Update State],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Windows Update Risk",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Windows Update Risk],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Windows Update Action Code",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Windows Update Action Code],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Secure Boot State",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Secure Boot State],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Endpoint Analytics State",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Endpoint Analytics State],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Stop Error State",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Stop Error State],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Entra Hardware ID Conflict",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Entra Hardware ID Conflict],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Removal Candidate",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Removal Candidate],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Windows 11 Release State",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Windows 11 Release State],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Entra Account State",COALESCE(IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Entra Account State],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),"Unknown"),
+				"Intune Encryption State",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Intune Encryption State],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"System Drive Capacity (GB)",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[System Drive Capacity (GB)],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Free Disk Space (GB)",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Free Disk Space (GB)],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Free Disk Space (%)",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Free Disk Space (%)],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Managed Tenure (Years)",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Managed Tenure (Years)],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Endpoint Analytics Score",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Endpoint Analytics Score],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Stop Error Count",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Stop Error Count],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Last Sync DateTime",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Last Sync DateTime],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Observed Since",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Observed Since],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Inventory Key",[__Canonical],
+				"Intune presence",IF(NOT ISBLANK([__ManagedId]),"In Intune",IF(NOT ISBLANK([__NativeKey]),"Not found in Intune",COALESCE(IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Intune presence],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),"Unknown / ambiguous"))),
+				"AD Enabled",SWITCH(TRUE(),ISBLANK([__ADNativeKey]),"Unknown",LOOKUPVALUE('AD Computer Evidence'[Enabled],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID])==TRUE(),"Yes",LOOKUPVALUE('AD Computer Evidence'[Enabled],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID])==FALSE(),"No","Unknown"),
+				"AD Domain",COALESCE(LOOKUPVALUE('AD Computer Evidence'[DomainName],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID]),LOOKUPVALUE('Native Device Evidence'[AD Domain],'Native Device Evidence'[TenantDeviceKey],[__NativeKey],'Native Device Evidence'[TenantKey],[TenantKey],'Native Device Evidence'[Loaded Batch ID],[Loaded Batch ID]),"Unknown"),
+				"AD Match Qualification",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[AD Match Qualification],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"AD Created (source)",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[AD Created (source)],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"AD Creation Qualification",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[AD Creation Qualification],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"AD Modified (source)",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[AD Modified (source)],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"AD Modification Qualification",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[AD Modification Qualification],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"AD Password Expiry Status",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[AD Password Expiry Status],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Inventory Source",SWITCH(TRUE(),NOT ISBLANK([__ADGuid]) && NOT ISBLANK([__NativeKey]),IF(NOT ISBLANK([__ManagedId]),"AD + Entra + Intune","AD + Entra"),NOT ISBLANK([__ADGuid]),"AD only",NOT ISBLANK([__NativeKey]),IF(NOT ISBLANK([__ManagedId]),"Entra + Intune","Entra only"),"Intune only"),
+				"Expected AV Name",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Expected AV Name],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Expected AV State",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Expected AV State],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Third Party AV Products",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Third Party AV Products],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Windows Update Reboot Required",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Windows Update Reboot Required],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"BitLocker OS Protection",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[BitLocker OS Protection],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"BitLocker OS Conversion",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[BitLocker OS Conversion],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Encryption Comparison",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Encryption Comparison],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"System Data Quality Issues",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[System Data Quality Issues],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"System Freshness",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[System Freshness],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"System Observation (source)",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[System Observation (source)],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Loaded Batch ID",[Loaded Batch ID],
+				"TenantKey",[TenantKey],
+				"AD Source Collected UTC",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[AD Source Collected UTC],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Country Name",COALESCE([__EstateCountryName],"Unknown"),
+				"AD Windows PC",IF(CONTAINSSTRING(LOOKUPVALUE('AD Computer Evidence'[OperatingSystem],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID]),"Windows") && NOT CONTAINSSTRING(LOOKUPVALUE('AD Computer Evidence'[OperatingSystem],'AD Computer Evidence'[ObjectGUID],[__ADGuid],'AD Computer Evidence'[TenantKey],[TenantKey],'AD Computer Evidence'[Loaded Batch ID],[Loaded Batch ID]),"Server"),"Yes","No"),
+				"Entra Created (source)",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Entra Created (source)],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Entra Creation Qualification",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Entra Creation Qualification],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Entra Modified (source)",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Entra Modified (source)],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Entra Modification Qualification",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[Entra Modification Qualification],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"AD Password Expired",IF(NOT ISBLANK([__ManagedId]),LOOKUPVALUE('Device Exploration Inventory'[AD Password Expired],'Device Exploration Inventory'[Device Source ID],[__ManagedId],'Device Exploration Inventory'[TenantKey],[TenantKey],'Device Exploration Inventory'[Loaded Batch ID],[Loaded Batch ID])),
+				"Canonical Device Key",[__Canonical],
+				"Native Device Key",[__NativeKey],
+				"AD Computer Key",[__ADNativeKey],
+				"Primary User Source ID",[__PrimaryUserId],
+				"Primary User SAM",IF(NOT ISBLANK([__PrimaryUserId]),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],[__PrimaryUserId],'Native User Evidence'[TenantKey],[TenantKey],'Native User Evidence'[Loaded Batch ID],[Loaded Batch ID])))

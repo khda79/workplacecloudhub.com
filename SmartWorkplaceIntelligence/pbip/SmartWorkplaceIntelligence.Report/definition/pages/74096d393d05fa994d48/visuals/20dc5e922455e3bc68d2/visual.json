@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "20dc5e922455e3bc68d2",
   "position": {
-    "x": 342.6666666666667,
+    "x": 342.66666666666669,
     "y": 376,
-    "width": 302.6666666666667,
-    "height": 128,
-    "z": 205,
-    "tabOrder": 206
+    "z": 1000,
+    "height": 96,
+    "width": 302.66666666666669,
+    "tabOrder": 1000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -27,8 +27,8 @@
                 }
               },
               "queryRef": "License Report Summary.License Overview Family Available Label",
-              "nativeQueryRef": "License Overview Family Available Label",
-              "displayName": "M365 remaining units"
+              "nativeQueryRef": "Tenant available",
+              "displayName": "Tenant available"
             }
           ]
         },
@@ -667,6 +667,7 @@
       ]
     }
   },
+  "parentGroupName": "4221326348240b21e4d6",
   "filterConfig": {
     "filters": [
       {
@@ -745,6 +746,5 @@
         "howCreated": "User"
       }
     ]
-  },
-  "parentGroupName": "4221326348240b21e4d6"
+  }
 }

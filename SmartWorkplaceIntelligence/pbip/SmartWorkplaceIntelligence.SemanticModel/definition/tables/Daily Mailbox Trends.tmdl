@@ -116,25 +116,25 @@ table 'Daily Mailbox Trends'
 	measure 'On-premises Remaining Value Text' = VAR _text = [On-premises Remaining Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, _text, TRIM(LEFT(_text, _separator - 1)))
 		isHidden
 		displayFolder: Daily trends presentation
-		lineageTag: 042a0950-9cbd-46de-88be-26ac73fb8dd6
+		lineageTag: 251981b7-b5ac-4c03-86ee-90df81c79964
 
 	/// Display-only change extracted from [On-premises Remaining Card]; all qualification and period calculations remain in the existing card measure.
 	measure 'On-premises Remaining Change Text' = VAR _text = [On-premises Remaining Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, BLANK(), TRIM(MID(_text, _separator + 1, LEN(_text))))
 		isHidden
 		displayFolder: Daily trends presentation
-		lineageTag: 214099d8-2a1a-426b-9f17-eeecd203a429
+		lineageTag: b72d5230-63fc-41b1-816a-981fe05b515b
 
 	/// Display-only value extracted from [Exchange Online Share Card]; all qualification and period calculations remain in the existing card measure.
 	measure 'Exchange Online Share Value Text' = VAR _text = [Exchange Online Share Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, _text, TRIM(LEFT(_text, _separator - 1)))
 		isHidden
 		displayFolder: Daily trends presentation
-		lineageTag: 1470b309-3612-4bbf-b6f6-7516c408a657
+		lineageTag: 2d5114d9-138b-468f-8532-20e9e9933a93
 
 	/// Display-only change extracted from [Exchange Online Share Card]; all qualification and period calculations remain in the existing card measure.
 	measure 'Exchange Online Share Change Text' = VAR _text = [Exchange Online Share Card] VAR _separator = SEARCH("|", _text, 1, 0) RETURN IF(_separator = 0, BLANK(), TRIM(MID(_text, _separator + 1, LEN(_text))))
 		isHidden
 		displayFolder: Daily trends presentation
-		lineageTag: 8a727554-ccf5-44f8-aa79-8720ef8369da
+		lineageTag: 869a5985-b7a5-4767-ae85-359d666f154a
 
 	column TenantKey
 		dataType: string

@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "6bfc551ed0d337e7c010",
   "position": {
-    "x": 1436.0,
-    "y": 120,
+    "x": 1680,
+    "y": 8,
     "z": 10000,
     "height": 80,
-    "width": 452.0,
-    "tabOrder": 15
+    "width": 208,
+    "tabOrder": 9000
   },
   "visual": {
     "visualType": "slicer",
@@ -291,23 +291,5 @@
       ]
     },
     "drillFilterOtherVisuals": true
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "adeaec4b694ebb706a3b",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "SPO Migration Phase"
-              }
-            },
-            "Property": "Phase"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
   }
 }

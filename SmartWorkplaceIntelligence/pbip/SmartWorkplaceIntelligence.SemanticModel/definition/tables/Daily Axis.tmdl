@@ -83,41 +83,49 @@ table 'Daily Axis'
 	measure 'Axis All AD Computer Accounts Reading Day' = VAR _axis = SELECTEDVALUE('Daily Axis'[Axis Date]) VAR _weekly = [Axis Is Weekly] VAR _end = IF(_weekly = 1, _axis + 6, _axis) RETURN IF([Axis Point Visible] <> 1, BLANK(), MAXX(FILTER(ALLSELECTED('Date'[Date]), 'Date'[Date] >= _axis && 'Date'[Date] <= _end && NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Enabled AD Computer Accounts Daily]) && NOT ISBLANK([Disabled AD Computer Accounts Daily])), 'Date'[Date]))
 		formatString: yyyy-MM-dd
 		displayFolder: Daily Trends\All account states
+		lineageTag: 1ff9bba5-cffc-4772-8311-eaab0ffd2bc9
 
 	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
 	measure 'Axis Windows All AD Accounts Reading Day' = VAR _axis = SELECTEDVALUE('Daily Axis'[Axis Date]) VAR _weekly = [Axis Is Weekly] VAR _end = IF(_weekly = 1, _axis + 6, _axis) RETURN IF([Axis Point Visible] <> 1, BLANK(), MAXX(FILTER(ALLSELECTED('Date'[Date]), 'Date'[Date] >= _axis && 'Date'[Date] <= _end && NOT ISBLANK([Total AD Computers Daily]) && NOT ISBLANK([Windows 10 All AD Accounts Daily]) && NOT ISBLANK([Windows 11 All AD Accounts Daily])), 'Date'[Date]))
 		formatString: yyyy-MM-dd
 		displayFolder: Daily Trends\All account states
+		lineageTag: 78daaa04-7e25-4064-b852-dc08ca0d416c
 
 	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
 	measure 'Axis Total AD Computer Accounts' = VAR _day = [Axis All AD Computer Accounts Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Total AD Computers Daily], TREATAS({_day}, 'Date'[Date])))
 		formatString: #,0
 		displayFolder: Daily Trends\All account states
+		lineageTag: 97d3ca5b-7260-4242-bd54-8ef325fd21ec
 
 	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
 	measure 'Axis Enabled AD Computer Accounts' = VAR _day = [Axis All AD Computer Accounts Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Enabled AD Computer Accounts Daily], TREATAS({_day}, 'Date'[Date])))
 		formatString: #,0
 		displayFolder: Daily Trends\All account states
+		lineageTag: 713b9b04-58a7-4511-b566-dfafc8e34209
 
 	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
 	measure 'Axis Disabled AD Computer Accounts' = VAR _day = [Axis All AD Computer Accounts Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Disabled AD Computer Accounts Daily], TREATAS({_day}, 'Date'[Date])))
 		formatString: #,0
 		displayFolder: Daily Trends\All account states
+		lineageTag: a19865d9-bf93-4f21-b5ba-4ec409e815cb
 
 	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
 	measure 'Axis Windows All AD Accounts Total' = VAR _day = [Axis Windows All AD Accounts Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Total AD Computers Daily], TREATAS({_day}, 'Date'[Date])))
 		formatString: #,0
 		displayFolder: Daily Trends\All account states
+		lineageTag: 69b56af5-b84a-4399-8640-3dc73b525b40
 
 	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
 	measure 'Axis Windows 10 All AD Accounts Chart' = VAR _day = [Axis Windows All AD Accounts Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Windows 10 All AD Accounts Chart Daily], TREATAS({_day}, 'Date'[Date])))
 		displayFolder: Daily Trends\All account states
+		lineageTag: e6f5cc1b-f330-4625-9ab7-cef93a8b69db
 
 		formatStringDefinition = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", "0.0%", "#,0")
 
 	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
 	measure 'Axis Windows 11 All AD Accounts Chart' = VAR _day = [Axis Windows All AD Accounts Reading Day] RETURN IF(ISBLANK(_day), BLANK(), CALCULATE([Windows 11 All AD Accounts Chart Daily], TREATAS({_day}, 'Date'[Date])))
 		displayFolder: Daily Trends\All account states
+		lineageTag: 6f50c0e8-6b09-4967-835c-10fb49fa7bf2
 
 		formatStringDefinition = IF(SELECTEDVALUE('Daily View'[View], "Count") = "Share", "0.0%", "#,0")
 
@@ -125,13 +133,16 @@ table 'Daily Axis'
 	measure 'Axis All AD Computer Accounts Quality Tooltip' = VAR _axis = SELECTEDVALUE('Daily Axis'[Axis Date]) VAR _end = IF([Axis Is Weekly] = 1, _axis + 6, _axis) VAR _core = CALCULATETABLE('Daily Directory Trends', REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Source Day Status] = "Complete", 'Daily Directory Trends'[Metric Status] = "Measured", 'Daily Directory Trends'[Metric Name] IN {"TotalComputers", "EnabledAccounts", "DisabledAccounts"}) VAR _qualified = COUNTROWS(FILTER(SUMMARIZE(_core, 'Daily Directory Trends'[Date Key], "MeasuredCore", DISTINCTCOUNT('Daily Directory Trends'[Metric Name])), [MeasuredCore] = 3)) VAR _incomplete = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Metric Status] = "Not measured") VAR _partial = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Source Day Status] = "Partial capture") RETURN "Retained reading: " & IF(ISBLANK([Axis All AD Computer Accounts Reading Day]), "None", FORMAT([Axis All AD Computer Accounts Reading Day], "yyyy-MM-dd")) & UNICHAR(10) & "Qualified days: " & FORMAT(COALESCE(_qualified, 0), "0") & "  |  Incomplete: " & FORMAT(COALESCE(_incomplete, 0), "0") & "  |  Partial capture: " & FORMAT(COALESCE(_partial, 0), "0")
 		formatString: @
 		displayFolder: Daily Trends\All account states
+		lineageTag: 38420621-f347-4b4c-acff-2184c61d8c75
 
 	/// Qualified immutable-batch daily evidence. Enabled and disabled states are included; missing observations are not zero.
 	measure 'Axis Windows All AD Accounts Quality Tooltip' = VAR _axis = SELECTEDVALUE('Daily Axis'[Axis Date]) VAR _end = IF([Axis Is Weekly] = 1, _axis + 6, _axis) VAR _core = CALCULATETABLE('Daily Directory Trends', REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Source Day Status] = "Complete", 'Daily Directory Trends'[Metric Status] = "Measured", 'Daily Directory Trends'[Metric Name] IN {"TotalComputers", "Windows 10 Enabled", "Windows 10 Disabled", "Windows 11 Enabled", "Windows 11 Disabled"}) VAR _qualified = COUNTROWS(FILTER(SUMMARIZE(_core, 'Daily Directory Trends'[Date Key], "MeasuredCore", DISTINCTCOUNT('Daily Directory Trends'[Metric Name])), [MeasuredCore] = 5)) VAR _incomplete = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Metric Status] = "Not measured") VAR _partial = CALCULATE(DISTINCTCOUNT('Daily Directory Trends'[Date Key]), REMOVEFILTERS('Date'), REMOVEFILTERS('Daily Domain'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Domain Key] = "__all__", 'Daily Directory Trends'[Date] >= _axis, 'Daily Directory Trends'[Date] <= _end, 'Daily Directory Trends'[Source Day Status] = "Partial capture") RETURN "Retained reading: " & IF(ISBLANK([Axis Windows All AD Accounts Reading Day]), "None", FORMAT([Axis Windows All AD Accounts Reading Day], "yyyy-MM-dd")) & UNICHAR(10) & "Qualified days: " & FORMAT(COALESCE(_qualified, 0), "0") & "  |  Incomplete: " & FORMAT(COALESCE(_incomplete, 0), "0") & "  |  Partial capture: " & FORMAT(COALESCE(_partial, 0), "0")
 		formatString: @
 		displayFolder: Daily Trends\All account states
+		lineageTag: 1b344833-a75f-4daf-a04a-d99b498246a9
 
 	column 'Axis Date'
+		lineageTag: 5741b554-d87a-4ad4-9346-b17624357140
 		isNameInferred
 		sourceColumn: [Axis Date]
 

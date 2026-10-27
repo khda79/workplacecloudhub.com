@@ -77,10 +77,14 @@ table 'Endpoint Protection Policy'
 
 	/// Prepared Max Observation Age Hours. Retains source qualification.
 	column 'Max Observation Age Hours'
-		dataType: decimal
+		dataType: double
 		lineageTag: 54ebe7b9-2ef1-496a-b795-9dd8c44ae73f
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: Max Observation Age Hours
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'

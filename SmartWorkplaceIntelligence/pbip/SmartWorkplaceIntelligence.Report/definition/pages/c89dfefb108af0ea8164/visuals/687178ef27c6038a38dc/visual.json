@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "687178ef27c6038a38dc",
   "position": {
     "x": 976,
-    "y": 389.4,
+    "y": 320,
+    "z": 2000,
+    "height": 322.48467782010931,
     "width": 912,
-    "height": 286.3,
-    "z": 116,
     "tabOrder": 684
   },
   "visual": {
@@ -300,7 +300,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'SharePoint storage used (GB) \u00b7 weekly history'"
+                  "Value": "'SharePoint storage used (GB) · weekly history'"
                 }
               }
             },

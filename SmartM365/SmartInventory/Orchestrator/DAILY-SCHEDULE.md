@@ -33,9 +33,7 @@ editing the template.
 | Intune-RBAC-GroupMembers | Daily 04:15 |
 | Intune-Remediations-Export | Daily 04:30 |
 | Intune-AutopatchAlerts-Inventory | Daily 03:10 |
-| Intune-Windows11-Readiness-Issues | Daily 07:00 |
 | Intune-WinUpdate-Status | Daily 02:00 |
-| Exchange-HybridIdentity-Issues | Daily 01:00, chained after its sources |
 | M365-CopilotUsage-Inventory | Daily 05:00 |
 | M365-TeamsPhonePstnUsage-Inventory | Daily 05:15 |
 | Intune-EndpointAnalytics-Inventory | Daily 02:45 |

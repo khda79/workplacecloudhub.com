@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "ba3d752e2e46905a28b6",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 90052,
+    "height": 1280,
+    "width": 1920,
+    "tabOrder": 90052
+  },
+  "visualGroup": {
+    "displayName": "Outside migration plan",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

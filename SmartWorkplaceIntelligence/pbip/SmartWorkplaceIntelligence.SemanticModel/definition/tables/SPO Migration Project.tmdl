@@ -1,17 +1,17 @@
 /// Migration reporting dimension; current and historical members retained.
 table 'SPO Migration Project'
-	lineageTag: 987819bd-bfba-4a67-a62c-58e0285bcd11
+	lineageTag: 6853ae71-8c04-45f8-816d-f0426107003a
 
 	column 'Project Identity'
 		dataType: string
 		isHidden
-		lineageTag: 37931298-a84f-4f64-a145-d34ed5cf4f6f
+		lineageTag: b4913564-b357-4611-8e26-0c9b1e132007
 		summarizeBy: none
 		sourceColumn: Project Identity
 
 	column 'Project Key'
 		dataType: string
-		lineageTag: 36be9888-2538-41f1-8f1f-444993411989
+		lineageTag: 00092554-a916-4b0a-a897-dfa7ecacb8a9
 		summarizeBy: none
 		sourceColumn: Project Key
 

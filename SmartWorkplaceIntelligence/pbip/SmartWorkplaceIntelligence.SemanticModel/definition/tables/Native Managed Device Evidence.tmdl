@@ -4,8 +4,10 @@ table 'Native Managed Device Evidence'
 
 	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native Managed Device Evidence' =
-			VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native Managed Device Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Managed Device Evidence'[TenantDeviceKey]))), (COUNTROWS('Native Managed Device Evidence')))
+			VAR _privateDomainScope = FILTER(ALL('Native Device Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native Device Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native Device Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native Device Evidence'[CountryCode]) || TRIM('Native Device Evidence'[CountryCode])="", "Unknown", 'Native Device Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryDevices = CALCULATETABLE(VALUES('Native Managed Device Evidence'[TenantDeviceKey]), REMOVEFILTERS('Native Managed Device Evidence'), TREATAS(VALUES('Device Inventory Evidence'[Device Source ID]), 'Native Managed Device Evidence'[ManagedDeviceId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('Device Inventory Evidence'), CALCULATE((COUNTROWS('Native Managed Device Evidence')), KEEPFILTERS(TREATAS(InventoryDevices, 'Native Managed Device Evidence'[TenantDeviceKey]))), (COUNTROWS('Native Managed Device Evidence')))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		isHidden
 		lineageTag: 94215afb-0c77-4301-a555-d5c478739ea3
@@ -94,3 +96,5 @@ table 'Native Managed Device Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimIntuneManagedDevice.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantIntuneDeviceKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="ManagedDeviceId", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

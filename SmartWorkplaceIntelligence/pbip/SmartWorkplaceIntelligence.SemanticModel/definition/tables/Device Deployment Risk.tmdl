@@ -1,0 +1,281 @@
+/// One assessment per observed device inventory key. Enrollment and Windows 11 feature deployment are separate. LTSC quality servicing is not conflated with feature upgrade availability. Unknown evidence is retained; rules evaluated at the recorded assessment UTC.
+table 'Device Deployment Risk'
+	lineageTag: d1605000-f69b-45e1-8206-d59ee8c1bd83
+
+	measure 'Intune Enrollment At Risk PCs' = COALESCE(CALCULATE(COUNTROWS('Device Deployment Risk'),KEEPFILTERS('Device Deployment Risk'[Enrollment At Risk]=TRUE())),0)
+		formatString: #,0
+		lineageTag: 9de2471b-ea57-408e-b522-6f55736a4031
+
+	measure 'Windows 11 Deployment At Risk PCs' = COALESCE(CALCULATE(COUNTROWS('Device Deployment Risk'),KEEPFILTERS('Device Deployment Risk'[Windows 11 At Risk]=TRUE())),0)
+		formatString: #,0
+		lineageTag: 50927b80-779d-40b2-828d-aa13a28832ba
+
+	measure 'Intune Enrollment Unknown Evidence PCs' = COALESCE(CALCULATE(COUNTROWS('Device Deployment Risk'),KEEPFILTERS('Device Deployment Risk'[Enrollment Unknown Evidence]=TRUE())),0)
+		formatString: #,0
+		lineageTag: fc824b7b-6998-452e-9b14-321b9afca8a1
+
+	measure 'Windows 11 Unknown Evidence PCs' = COALESCE(CALCULATE(COUNTROWS('Device Deployment Risk'),KEEPFILTERS('Device Deployment Risk'[Windows 11 Unknown Evidence]=TRUE())),0)
+		formatString: #,0
+		lineageTag: f7c67d59-1435-498e-ab3e-1488460fec5d
+
+	measure 'Device Deployment Risk Scope' = "One current inventory key per KPI. Enrollment: enabled AD Windows PCs not already in Intune. Windows 11: Windows 10 upgrade route to existing target; no policy changes. Blocked / Review count as risk; missing, ambiguous or stale readiness is unknown, not healthy. LTSC feature upgrades need an alternate route; supported LTSC quality updates are separate. 20 GB free disk and 28-day readiness age are local assessment guardrails. Licensing, join state, patch level, services and per-device targeting are not certified."
+		lineageTag: c472292d-8747-49c8-8d04-5c1eed8aabe6
+
+	column 'Inventory Key'
+		dataType: string
+		lineageTag: 2f19f98b-3059-463a-878d-84e0146d3353
+		summarizeBy: none
+		sourceColumn: Inventory Key
+
+	column TenantKey
+		dataType: string
+		lineageTag: 2639e0b0-34bd-46c8-bf48-582c17bd47a0
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'Enrollment Risk'
+		dataType: string
+		lineageTag: 42c280c8-7253-4428-9369-c57f8e5f97ff
+		summarizeBy: none
+		sourceColumn: Enrollment Risk
+
+	column 'Enrollment Risk Reasons'
+		dataType: string
+		lineageTag: 5ac973de-a849-495b-8f92-b16eaf80040d
+		summarizeBy: none
+		sourceColumn: Enrollment Risk Reasons
+
+	column 'Enrollment Action'
+		dataType: string
+		lineageTag: 4c7d16aa-0bd9-4998-bcfa-63c119a53ef0
+		summarizeBy: none
+		sourceColumn: Enrollment Action
+
+	column 'Enrollment At Risk'
+		dataType: boolean
+		lineageTag: 2f401898-7e07-497d-b751-30b9b0292ec1
+		summarizeBy: none
+		sourceColumn: Enrollment At Risk
+
+	column 'Enrollment Unknown Evidence'
+		dataType: boolean
+		lineageTag: 75990263-da17-4d84-9dba-1d688ea8c31a
+		summarizeBy: none
+		sourceColumn: Enrollment Unknown Evidence
+
+	column 'Windows 11 Deployment Risk'
+		dataType: string
+		lineageTag: e9e70f1b-d0ba-4d3b-b0e2-9cb9adaf676d
+		summarizeBy: none
+		sourceColumn: Windows 11 Deployment Risk
+
+	column 'Windows 11 Risk Reasons'
+		dataType: string
+		lineageTag: 2c3e93c8-6b3e-42ee-81e4-9f72c9701864
+		summarizeBy: none
+		sourceColumn: Windows 11 Risk Reasons
+
+	column 'Windows 11 Action'
+		dataType: string
+		lineageTag: 00213f23-c210-436a-82e4-d82efa1d6b83
+		summarizeBy: none
+		sourceColumn: Windows 11 Action
+
+	column 'Windows 11 At Risk'
+		dataType: boolean
+		lineageTag: 4c45c363-d901-4d96-812b-1959ec052120
+		summarizeBy: none
+		sourceColumn: Windows 11 At Risk
+
+	column 'Windows 11 Unknown Evidence'
+		dataType: boolean
+		lineageTag: 6074f85f-0b84-4955-a61d-21ed0692ca5b
+		summarizeBy: none
+		sourceColumn: Windows 11 Unknown Evidence
+
+	column 'Observed Edition'
+		dataType: string
+		lineageTag: 08276122-91dd-4709-9eea-3d921981331f
+		summarizeBy: none
+		sourceColumn: Observed Edition
+
+	column 'Servicing Channel'
+		dataType: string
+		lineageTag: e3d32604-7226-4276-85af-0bc3693c9e95
+		summarizeBy: none
+		sourceColumn: Servicing Channel
+
+	column 'Observed Build'
+		dataType: int64
+		lineageTag: 4edf5ae0-c12b-4b35-9e08-ee7a26084fa5
+		summarizeBy: none
+		sourceColumn: Observed Build
+
+	column 'Feature Target'
+		dataType: string
+		lineageTag: 94420521-0280-474c-830e-87af299f926d
+		summarizeBy: none
+		sourceColumn: Feature Target
+
+	column 'Readiness Observation (source)'
+		dataType: string
+		lineageTag: dcb97cf9-cbe2-4f86-8375-d9f92539bf0b
+		summarizeBy: none
+		sourceColumn: Readiness Observation (source)
+
+	column 'Assessment UTC'
+		dataType: string
+		lineageTag: 615b5a70-7b10-4347-8768-76909587b02a
+		summarizeBy: none
+		sourceColumn: Assessment UTC
+
+	column 'Rule Version'
+		dataType: string
+		lineageTag: 0c5aceb9-4dc3-4384-918a-f9e248acb042
+		summarizeBy: none
+		sourceColumn: Rule Version
+
+	column 'Evidence Source'
+		dataType: string
+		lineageTag: 5ed6aac0-2151-4c5d-9791-595def7e47f7
+		summarizeBy: none
+		sourceColumn: Evidence Source
+
+	column 'Loaded Batch ID'
+		dataType: string
+		lineageTag: 9a49b1b8-ae75-48b7-9056-f09275716696
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Device Deployment Risk' = m
+		mode: import
+		source =
+				let
+				    Readers=CreatePreparedReaders(),Manifest=Readers[GetPreparedBatchManifest](),Tenant=PreparedExpectedTenantKey,Batch=Manifest[BatchId],
+				    I=#"Device Exploration Inventory",A=#"AD Computer Evidence",C=#"Native AD Intune Coverage",W=#"Windows Migration Evidence",P=#"Native Update Policy Evidence",ND=#"Native Device Evidence",MD=#"Native Managed Device Evidence",
+				    AThin=Table.Buffer(Table.SelectColumns(A,{"TenantKey","TenantADComputerKey","Loaded Batch ID","ObjectGUID","OperatingSystem"},MissingField.Ignore)),
+				    CThin=Table.Buffer(Table.SelectColumns(C,{"TenantKey","TenantADComputerKey","Loaded Batch ID","IntuneManagedDeviceId"},MissingField.Ignore)),
+				    WThin=Table.Buffer(Table.SelectColumns(W,{"Device Source ID","Loaded Batch ID","Upgrade Eligibility","Eligibility Match Status","Eligibility OS Version","Eligibility Observation Date","Autopatch Registration","Windows 11 Policy State","Windows 11 Blocking Reason","Windows 11 Alert","Windows 11 Device Status","Hardware Reasons"},MissingField.Ignore)),
+				    PThin=Table.Buffer(Table.SelectColumns(P,{"TenantKey","Loaded Batch ID","TargetVersion"},MissingField.Ignore)),
+				    NDThin=Table.Buffer(Table.SelectColumns(ND,{"TenantKey","TenantDeviceKey","Loaded Batch ID","SyncUtcDateTime"},MissingField.Ignore)),
+				    MDThin=Table.Buffer(Table.SelectColumns(MD,{"TenantKey","ManagedDeviceId","TenantDeviceKey","Loaded Batch ID"},MissingField.Ignore)),
+				    AsOf=DateTimeZone.FixedUtcNow(),
+				    TextValue=(v as any) as text=>if v=null then "" else Text.Trim(Text.From(v)),
+				    Norm=(v as any) as text=>Text.Lower(TextValue(v)),
+				    Key=(parts as list) as text=>Text.Combine(List.Transform(parts,each let t=Norm(_) in Text.From(Text.Length(t))&":"&t),"|"),
+				    JoinFlat=(left as table,leftKeys as list,right as table,rightKeys as list,prefix as text) as table=>let
+				        columns=Table.ColumnNames(right),renamed=Table.RenameColumns(right,List.Transform(columns,each {_,prefix&_}))
+				        in Table.Join(left,leftKeys,renamed,List.Transform(rightKeys,each prefix&_),JoinKind.LeftOuter),
+				    Index=(t as table,fn as function) as table=>let
+				        fields=Table.ColumnNames(t),keyed=Table.AddColumn(t,"__lookupKey",each fn(_),type text),
+				        valid=Table.SelectRows(keyed,each [__lookupKey]<>""),
+				        grouped=Table.Group(valid,{"__lookupKey"},{{"__present",each Table.RowCount(_)=1,type logical},{"__first",each if Table.RowCount(_)=1 then Record.SelectFields(Table.First(_),fields) else Record.FromList(List.Repeat({null},List.Count(fields)),fields),type record}})
+				        in Table.Buffer(Table.ExpandRecordColumn(grouped,"__first",fields,fields)),
+				    Unique=(idx as table,key as text) as record=>let t=Table.SelectRows(idx,each [__lookupKey]=key) in if Table.RowCount(t)=1 and t{0}[__present] then Record.RemoveFields(t{0},{"__lookupKey","__present"}) else [],
+				    Attach=(left as table,idx as table,keyFn as function,prefix as text,fields as list) as table=>let
+				        right=Table.SelectColumns(idx,{"__lookupKey","__present"}&fields,MissingField.UseNull),
+				        keyed=Table.AddColumn(left,prefix&"joinKey",each keyFn(_),type nullable text),
+				        joined=JoinFlat(keyed,{prefix&"joinKey"},right,{"__lookupKey"},prefix)
+				        in Table.RemoveColumns(joined,{prefix&"joinKey",prefix&"__lookupKey"}),
+				    Pick=(r as record,prefix as text,fields as list) as record=>if Record.FieldOrDefault(r,prefix&"__present",false)=true then Record.FromList(List.Transform(fields,each Record.FieldOrDefault(r,prefix&_,null)),fields) else [],
+				    Get=(r as record,k as text) as any=>Record.FieldOrDefault(r,k,null),
+				    Number=(v as any) as nullable number=>try Number.FromText(TextValue(v),"en-US") otherwise null,
+				    Utc=(v as any) as nullable datetimezone=>let s=TextValue(v),suffix=if Text.Length(s)>=6 then Text.End(s,6) else "",qualified=Text.EndsWith(Text.Upper(s),"Z") or ((Text.StartsWith(suffix,"+") or Text.StartsWith(suffix,"-")) and Text.At(suffix,3)=":") in if not qualified then null else try DateTimeZone.FromText(s) otherwise null,
+				    Fresh=(v as any) as logical=>let d=Utc(v) in d<>null and d<=AsOf and Duration.TotalDays(AsOf-d)<=28,
+				    Batches=List.Distinct(List.Combine(List.Transform({I,AThin,CThin,WThin,PThin,NDThin,MDThin},each Table.Column(_,"Loaded Batch ID")))),
+				    BatchSafe=List.Count(Batches)=1 and Batches{0}=Batch,
+				    RawName="Source-AD_Computers_AllDomains.csv",
+				    Names=List.Transform(Manifest[Files]&Record.FieldOrDefault(Manifest,"Artifacts",{}),each [File]),
+				    Optional={"ObjectGUID","OperatingSystem","OperatingSystemBuildNumber","IsWindows10LtscByName","IsWindows10LtscByBuild","CollectedAtUtc"},
+				    Raw=if List.Contains(Names,RawName) then Readers[ReadMailboxMigrationCsv](Readers[GetPreparedEvidenceFile](RawName),{"TenantKey"},Optional) else #table({"TenantKey"}&Optional,{}),
+				    CheckedRaw=if List.AllTrue(List.Transform(Raw[TenantKey],each _=Tenant)) then Raw else error "Device risk source tenant mismatch",
+				    RawIndex=Index(CheckedRaw,each Key({[TenantKey],[ObjectGUID]})),
+				    ExactKey=(parts as list) as text=>Binary.ToText(Json.FromValue(parts),BinaryEncoding.Base64),
+				    AdIndex=Index(AThin,each ExactKey({[TenantKey],[TenantADComputerKey],[#"Loaded Batch ID"]})),
+				    AdJoined=Attach(CThin,AdIndex,each ExactKey({[TenantKey],[TenantADComputerKey],[#"Loaded Batch ID"]}),"__AD.",{"ObjectGUID","OperatingSystem"}),
+				    AdQualified=Table.AddColumn(AdJoined,"__ADObjectGUID",each if [#"__AD.__present"]=true then [#"__AD.ObjectGUID"] else null,type nullable text),
+				    AdQualifiedOS=Table.AddColumn(AdQualified,"__ADOperatingSystem",each if [#"__AD.__present"]=true then [#"__AD.OperatingSystem"] else null,type nullable text),
+				    AdFlat=Table.Buffer(Table.SelectColumns(AdQualifiedOS,Table.ColumnNames(CThin)&{"__ADObjectGUID","__ADOperatingSystem"})),
+				    AdKeys=Table.AddColumn(AdFlat,"__keys",each {Key({[TenantKey],"ad:"&[TenantADComputerKey]})}&(if TextValue([IntuneManagedDeviceId])="" then {} else {Key({[TenantKey],"intune:"&[IntuneManagedDeviceId]})})),
+				    CoverageIndex=Index(Table.ExpandListColumn(AdKeys,"__keys"),each [__keys]),
+				    WindowsIndex=Index(Table.SelectRows(WThin,each not Text.StartsWith(TextValue([#"Device Source ID"]),"ad:")),each Key({[#"Device Source ID"],[#"Loaded Batch ID"]})),
+				    ManagedIndex=Index(MDThin,each Key({[TenantKey],[ManagedDeviceId],[#"Loaded Batch ID"]})),
+				    NativeDeviceIndex=Index(NDThin,each Key({[TenantKey],[TenantDeviceKey],[#"Loaded Batch ID"]})),
+				    Targets=List.Sort(List.Distinct(List.Select(Table.Column(Table.SelectRows(PThin,each [TenantKey]=Tenant and [#"Loaded Batch ID"]=Batch),"TargetVersion"),each Text.Contains(Norm(_),"windows 11") or Text.StartsWith(Norm(_),"win11")))),
+				    Target=if List.IsEmpty(Targets) then "Existing Windows 11 feature target; target version not observed" else Text.Combine(Targets,"; ")&" (policy inventory; per-device assignment not proven)",
+				    Reason=(level as text,reason as text,action as text) as record=>[Level=level,Reason=reason,Action=action],
+				    Status=(applicable as logical,reasons as list) as text=>if not applicable then "Not applicable" else if List.AnyTrue(List.Transform(reasons,each [Level]="Blocked")) then "Blocked" else if List.AnyTrue(List.Transform(reasons,each [Level]="Review")) then "Review" else if List.AnyTrue(List.Transform(reasons,each [Level]="Not assessed")) then "Not assessed" else "No observed blocker",
+				    covFields={"__ADObjectGUID","__ADOperatingSystem"},
+				    rawFields={"ObjectGUID","OperatingSystem","OperatingSystemBuildNumber","IsWindows10LtscByName","IsWindows10LtscByBuild","CollectedAtUtc"},
+				    winFields={"Upgrade Eligibility","Eligibility Match Status","Eligibility OS Version","Eligibility Observation Date","Autopatch Registration","Windows 11 Policy State","Windows 11 Blocking Reason","Windows 11 Alert","Windows 11 Device Status","Hardware Reasons"},
+				    mdFields={"TenantDeviceKey"},
+				    ndFields={"SyncUtcDateTime"},
+				    WithCoverage=Attach(I,CoverageIndex,each let id=TextValue([#"Device Source ID"]) in Key({[TenantKey],if id="" then [#"Inventory Key"] else "intune:"&id}),"__cov.",covFields),
+				    WithRaw=Attach(WithCoverage,RawIndex,each let guid=Record.FieldOrDefault(Pick(_,"__cov.",covFields),"__ADObjectGUID",null) in if guid=null then null else Key({[TenantKey],guid}),"__raw.",rawFields),
+				    WithWindows=Attach(WithRaw,WindowsIndex,each let id=TextValue([#"Device Source ID"]) in if id="" then null else Key({id,Batch}),"__win.",winFields),
+				    WithManaged=Attach(WithWindows,ManagedIndex,each let id=TextValue([#"Device Source ID"]) in if id="" then null else Key({[TenantKey],id,Batch}),"__md.",mdFields),
+				    Ready=Attach(WithManaged,NativeDeviceIndex,each let device=Get(Pick(_,"__md.",mdFields),"TenantDeviceKey") in if device=null then null else Key({[TenantKey],device,Batch}),"__nd.",ndFields),
+				    Rows=List.Transform(Table.ToRecords(Ready),(r)=>let
+				        id=TextValue(r[#"Device Source ID"]),presence=TextValue(r[Intune presence]),join=if id="" then r[#"Inventory Key"] else "intune:"&id,
+				        coverage=Pick(r,"__cov.",covFields),ad=[ObjectGUID=Record.FieldOrDefault(coverage,"__ADObjectGUID",null),OperatingSystem=Record.FieldOrDefault(coverage,"__ADOperatingSystem",null)],
+				        raw=Pick(r,"__raw.",rawFields),
+				        os=TextValue(Get(raw,"OperatingSystem")),nativeOs=TextValue(Get(ad,"OperatingSystem")),edition=if os<>"" then os else nativeOs,
+				        version=TextValue(r[#"Operating System Version"]),parts=List.Select(Text.SplitAny(version," .()[]"),each _<>""),
+				        parsed=if List.Count(parts)>=3 and Number(parts{0})=10 and Number(parts{1})=0 then Number(parts{2}) else null,
+				        build=if parsed<>null then parsed else Number(Get(raw,"OperatingSystemBuildNumber")),
+				        generation=TextValue(r[#"Windows Generation"]),win11=generation="Windows 11" or (build<>null and build>=22000),
+				        win10=not win11 and (generation="Windows 10" or (build<>null and build>=10240 and build<22000)),
+				        windows=Text.Contains(Norm(r[#"Operating System Family"]),"windows") or win10 or win11,
+				        ltsc=Text.Contains(Norm(edition),"ltsc") or Text.Contains(Norm(edition),"ltsb") or Norm(Get(raw,"IsWindows10LtscByName"))="true",
+				        suspected=not ltsc and Norm(Get(raw,"IsWindows10LtscByBuild"))="true",
+				        channel=if ltsc then "LTSC/LTSB confirmed by source name" else if suspected then "LTSC suspected by build only; not confirmed" else if edition="" then "Edition/channel not observed" else "General availability name; verify servicing entitlement",
+				        enrollmentCandidate=windows and r[#"AD Enabled"]="Yes" and r[#"AD Windows PC"]="Yes" and presence<>"In Intune",
+				        enrollmentReasons=List.RemoveNulls({
+				            if enrollmentCandidate and presence="Unknown / ambiguous" then Reason("Not assessed","Ambiguous native Intune / AD attribution","Resolve native SID / device identity") else null,
+				            if enrollmentCandidate and build=null then Reason("Not assessed","OS build not observed","Collect OS build and edition") else null,
+				            if enrollmentCandidate and edition="" then Reason("Not assessed","OS edition/channel not observed","Collect edition and enrollment method") else null,
+				            if enrollmentCandidate and win10 and not ltsc then Reason("Review","Windows 10 allowed to enroll; post-support feature guarantees require review","Validate supported features and servicing / ESU route; do not assume enrollment is blocked") else null,
+				            if enrollmentCandidate and ltsc and not (Text.Contains(edition,"2019") or Text.Contains(edition,"2021") or Text.Contains(edition,"2024")) then Reason("Review","LTSC/LTSB release requires platform support verification","Verify exact supported LTSC edition; LTSC alone does not block Intune enrollment") else null,
+				            if enrollmentCandidate and build<>null and build<10240 then Reason("Review","Legacy Windows platform","Validate platform and supported enrollment route") else null}),
+				        migration=Pick(r,"__win.",winFields),
+				        managed=Pick(r,"__md.",mdFields),
+				        nativeDevice=Pick(r,"__nd.",ndFields),
+				        nativeSync=Get(nativeDevice,"SyncUtcDateTime"),
+				        // The native column explicitly represents UTC. No source-wall-clock
+				        // timestamps or generic export dates are assigned a timezone here.
+				        syncUtc=if nativeSync=null then null else if Value.Is(nativeSync,type datetimezone) then DateTimeZone.SwitchZone(nativeSync,0) else if Value.Is(nativeSync,type datetime) then DateTime.AddZone(nativeSync,0) else Utc(nativeSync),
+				        eligibility=TextValue(Get(migration,"Upgrade Eligibility")),eligibilityDate=Get(migration,"Eligibility Observation Date"),
+				        readinessQualified=Get(migration,"Eligibility Match Status")="Unique readiness ID" and TextValue(Get(migration,"Eligibility OS Version"))=version and Fresh(eligibilityDate),
+				        featureApplicable=windows and not win11,
+				        disk=r[#"Free Disk Space (GB)"],autopatch=TextValue(Get(migration,"Autopatch Registration")),
+				        deploymentText=Text.Combine(List.Transform({Get(migration,"Windows 11 Blocking Reason"),Get(migration,"Windows 11 Alert"),Get(migration,"Windows 11 Device Status")},TextValue),"; "),
+				        featureReasons=List.RemoveNulls({
+				            if featureApplicable and not win10 then Reason("Not assessed","Windows generation/build not qualified","Collect exact current OS version") else null,
+				            if featureApplicable and presence<>"In Intune" then Reason("Review","Intune management prerequisite not met or unresolved","Enroll and qualify management before feature deployment") else null,
+				            if featureApplicable and presence="In Intune" and syncUtc=null then Reason("Not assessed","Native UTC Intune check-in not observed","Collect qualified Intune check-in; Autopatch requires communication within 28 days") else null,
+				            if featureApplicable and presence="In Intune" and syncUtc<>null and syncUtc>AsOf then Reason("Not assessed","Native Intune check-in is future dated","Reconcile timestamps before assessing Autopatch registration") else null,
+				            if featureApplicable and presence="In Intune" and syncUtc<>null and syncUtc<=AsOf and Duration.TotalDays(AsOf-syncUtc)>28 then Reason("Review","Intune check-in older than the 28-day Autopatch registration prerequisite","Restore check-in before Autopatch registration; this is not an intrinsic Windows 11 hardware blocker") else null,
+				            if featureApplicable and List.Contains({"personal","personally owned","byod"},Norm(r[Ownership])) then Reason("Review","Personal/BYOD ownership does not meet Autopatch corporate ownership prerequisite","Qualify ownership; do not treat this as proof Intune cannot deploy feature updates") else null,
+				            if featureApplicable and (TextValue(r[Ownership])="" or Norm(r[Ownership])="unknown") then Reason("Not assessed","Autopatch corporate ownership not observed","Collect qualified ownership") else null,
+				            if featureApplicable and win10 and build<>null and build<19041 then Reason("Blocked","Pre-2004 Windows 10: intermediate OS upgrade required for direct Windows 11 upgrade","Use a supported staged upgrade route; verify required security update") else null,
+				            if featureApplicable and ltsc then Reason("Blocked","LTSC/LTSB has no Windows Update / Autopatch feature upgrade offer","Use supported media or Configuration Manager OSD; quality updates remain a separate supported workload") else null,
+				            if featureApplicable and suspected then Reason("Not assessed","LTSC suspected from build, not confirmed","Collect edition/channel; build alone does not prove LTSC") else null,
+				            if featureApplicable and edition="" then Reason("Not assessed","Edition and feature-update platform prerequisites not observed","Verify edition, join state, workloads, licensing and telemetry") else null,
+				            if featureApplicable and win10 and readinessQualified and eligibility="Not capable" then Reason("Blocked","Current ID-qualified readiness reports hardware incompatible: "&TextValue(Get(migration,"Hardware Reasons")),"Review hardware remediation or replacement") else null,
+				            if featureApplicable and win10 and (not readinessQualified or not List.Contains({"Capable","Not capable"},eligibility)) then Reason("Not assessed","Current native-ID readiness unavailable, stale, conflicting or OS-mismatched","Collect fresh native-ID readiness; maximum assessment age is a local 28-day guardrail") else null,
+				            if featureApplicable and disk<>null and disk<20 then Reason("Review","Free disk below 20 GB planning guardrail","Free disk space and verify deployment-specific storage needs; 20 GB is not the Windows 11 hardware minimum") else null,
+				            if featureApplicable and disk=null then Reason("Not assessed","Free disk not observed","Collect current free disk") else null,
+				            if featureApplicable and Norm(Get(migration,"Windows 11 Policy State"))="error" then Reason("Review","Observed feature deployment error: "&deploymentText,"Review policy error and safeguards") else null,
+				            if featureApplicable and Text.Contains(Norm(deploymentText),"safeguard") then Reason("Review","Observed safeguard signal: "&deploymentText,"Investigate the safeguard; do not bypass without qualification") else null,
+				            if featureApplicable and Text.StartsWith(Norm(autopatch),"not registered") then Reason("Review","Autopatch registration not observed as complete","Review Autopatch registration; this does not establish an Intune feature-update blocker") else null,
+				            if featureApplicable and (autopatch="" or Text.StartsWith(Norm(autopatch),"unknown")) then Reason("Not assessed","Autopatch registration/workload evidence unavailable","Collect registration, ownership, recent check-in and workload prerequisites") else null}),
+				        er=Status(enrollmentCandidate,enrollmentReasons),fr=Status(featureApplicable,featureReasons),
+				        reasons=(items as list,applicable as logical) as text=>if not applicable then "Not in this assessment population" else if List.IsEmpty(items) then "No observed blocker; enrollment / deployment not certified" else Text.Combine(List.Transform(items,each [Reason]),"; "),
+				        actions=(items as list) as text=>Text.Combine(List.Distinct(List.Transform(items,each [Action])),"; ")
+				    in [#"Inventory Key"=r[#"Inventory Key"],TenantKey=r[TenantKey],#"Enrollment Risk"=er,#"Enrollment Risk Reasons"=reasons(enrollmentReasons,enrollmentCandidate),#"Enrollment Action"=actions(enrollmentReasons),#"Enrollment At Risk"=List.Contains({"Review","Blocked"},er),#"Enrollment Unknown Evidence"=List.AnyTrue(List.Transform(enrollmentReasons,each [Level]="Not assessed")),
+				        #"Windows 11 Deployment Risk"=fr,#"Windows 11 Risk Reasons"=reasons(featureReasons,featureApplicable),#"Windows 11 Action"=actions(featureReasons),#"Windows 11 At Risk"=List.Contains({"Review","Blocked"},fr),#"Windows 11 Unknown Evidence"=List.AnyTrue(List.Transform(featureReasons,each [Level]="Not assessed")),
+				        #"Observed Edition"=if edition="" then "Not observed" else edition,#"Servicing Channel"=channel,#"Observed Build"=build,#"Feature Target"=Target,#"Readiness Observation (source)"=TextValue(eligibilityDate),#"Assessment UTC"=DateTimeZone.ToText(AsOf,"yyyy-MM-ddTHH:mm:ssZ"),#"Rule Version"="2026-10-23.1",#"Evidence Source"="Prepared native device / AD identities; Windows migration evidence; optional AD snapshot",#"Loaded Batch ID"=Batch]),
+				    Fields={"Inventory Key","TenantKey","Enrollment Risk","Enrollment Risk Reasons","Enrollment Action","Enrollment At Risk","Enrollment Unknown Evidence","Windows 11 Deployment Risk","Windows 11 Risk Reasons","Windows 11 Action","Windows 11 At Risk","Windows 11 Unknown Evidence","Observed Edition","Servicing Channel","Observed Build","Feature Target","Readiness Observation (source)","Assessment UTC","Rule Version","Evidence Source","Loaded Batch ID"},
+				    Output=if not BatchSafe then error "Device risk inputs require one common prepared batch" else if Table.RowCount(CheckedRaw)<0 then error "Invalid AD risk artifact" else Table.FromRecords(Rows,Fields,MissingField.UseNull),
+				    Typed=Table.TransformColumnTypes(Output,List.Transform(List.RemoveItems(Fields,{"Enrollment At Risk","Enrollment Unknown Evidence","Windows 11 At Risk","Windows 11 Unknown Evidence","Observed Build"}),each {_,type text})&List.Transform({"Enrollment At Risk","Enrollment Unknown Evidence","Windows 11 At Risk","Windows 11 Unknown Evidence"},each {_,type logical})&{{"Observed Build",Int64.Type}})
+				in Typed

@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "1b1d14e00ec13d0e6bcb",
   "position": {
     "x": 32,
-    "y": 296,
+    "y": 320,
+    "z": 0,
+    "height": 96,
     "width": 1856,
-    "height": 128,
-    "z": 106,
     "tabOrder": 682
   },
   "visual": {
@@ -59,6 +59,66 @@
               "queryRef": "Device Inventory Evidence.Devices with Stop Errors",
               "nativeQueryRef": "Devices with stop errors",
               "displayName": "Devices with stop errors"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Endpoint Analytics Managed Coverage (%)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Endpoint Analytics Managed Coverage (%)",
+              "nativeQueryRef": "Endpoint Analytics coverage (%)",
+              "displayName": "Endpoint Analytics coverage (%)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Current Startup Score"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Current Startup Score",
+              "nativeQueryRef": "Startup score",
+              "displayName": "Startup score"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Current App Reliability Score"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Current App Reliability Score",
+              "nativeQueryRef": "App reliability score",
+              "displayName": "App reliability score"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Managed Devices"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Managed Devices",
+              "nativeQueryRef": "Managed Devices by Intune",
+              "displayName": "Managed Devices by Intune"
             }
           ]
         }
@@ -317,7 +377,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "3L"
+                  "Value": "7L"
                 }
               }
             },
@@ -416,32 +476,21 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Priority KPIs'"
+                  "Value": "''"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "14D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
+                  "Value": "11D"
                 }
               }
             }

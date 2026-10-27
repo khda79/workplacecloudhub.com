@@ -1,0 +1,80 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "ed79e889e53f4d4ef4e3",
+  "displayName": "Mailbox capacity & risks",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "02043332d0451484c4e1",
+      "1e918a13d57e3b4d689b",
+      "56fc29e1fc6aac59e488",
+      "8855e6d6b9d6ed227bda",
+      "99c5332ccc8744a3025d",
+      "e68d2d91aa9a731482da",
+      "fb347f49f7ecd2c8e0dc",
+      "221c558e7d39a3771bc3",
+      "2b71a3fbd0334bf514e5",
+      "b6fca392407ad67f68f0",
+      "3b0753c3b60d5c34c817"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "1b19e6ba3cf47f2e8398",
+    "sections": {
+      "1b19e6ba3cf47f2e8398": {
+        "visualContainers": {
+          "221c558e7d39a3771bc3": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "2b71a3fbd0334bf514e5": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "b6fca392407ad67f68f0": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "3b0753c3b60d5c34c817": {
+            "singleVisual": {}
+          }
+        },
+        "visualContainerGroups": {
+          "02043332d0451484c4e1": {
+            "isHidden": true
+          },
+          "1e918a13d57e3b4d689b": {
+            "isHidden": true
+          },
+          "56fc29e1fc6aac59e488": {
+            "isHidden": false
+          },
+          "8855e6d6b9d6ed227bda": {
+            "isHidden": true
+          },
+          "99c5332ccc8744a3025d": {
+            "isHidden": true
+          },
+          "e68d2d91aa9a731482da": {
+            "isHidden": true
+          },
+          "fb347f49f7ecd2c8e0dc": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

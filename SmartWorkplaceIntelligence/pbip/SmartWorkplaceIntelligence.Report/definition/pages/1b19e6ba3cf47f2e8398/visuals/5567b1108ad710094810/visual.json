@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "5567b1108ad710094810",
   "position": {
     "x": 32,
-    "y": 291.5,
-    "width": 1856,
-    "height": 702.5,
-    "z": 111,
-    "tabOrder": 677
+    "y": 320,
+    "z": 1000,
+    "height": 680,
+    "width": 928,
+    "tabOrder": 3000
   },
   "visual": {
     "visualType": "tableEx",
@@ -20,59 +20,293 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
                   "Property": "Display Name"
                 }
               },
-              "queryRef": "Mailbox Evidence.Display Name",
-              "nativeQueryRef": "Display Name"
+              "queryRef": "Mailbox Exploration Inventory.Display Name",
+              "nativeQueryRef": "Display Name",
+              "active": true,
+              "displayName": "Display Name"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "User Principal Name"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.User Principal Name",
+              "nativeQueryRef": "User Principal Name",
+              "active": true,
+              "displayName": "User Principal Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "SAM Account Name"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.SAM Account Name",
+              "nativeQueryRef": "SAM Account Name",
+              "active": true,
+              "displayName": "SAM Account Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Recipient Type"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Recipient Type",
+              "nativeQueryRef": "Recipient Type",
+              "active": true,
+              "displayName": "Recipient Type"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "M365 Licenses"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.M365 Licenses",
+              "nativeQueryRef": "M365 Licenses",
+              "active": true,
+              "displayName": "M365 Licenses"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "AD Domain"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.AD Domain",
+              "nativeQueryRef": "AD Domain",
+              "active": true,
+              "displayName": "AD Domain"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "AD Account State"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.AD Account State",
+              "nativeQueryRef": "AD Account State",
+              "active": true,
+              "displayName": "AD Account State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Entra Account State"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Entra Account State",
+              "nativeQueryRef": "Entra Account State",
+              "active": true,
+              "displayName": "Entra Account State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Workforce Persona"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Workforce Persona",
+              "nativeQueryRef": "Workforce Persona",
+              "active": true,
+              "displayName": "Workforce Persona"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
                   "Property": "Delegation Count"
                 }
               },
-              "queryRef": "Mailbox Evidence.Delegation Count",
-              "nativeQueryRef": "Delegations"
+              "queryRef": "Mailbox Exploration Inventory.Delegation Count",
+              "nativeQueryRef": "Delegation Count",
+              "active": true,
+              "displayName": "Delegation Count"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
-                  "Property": "Delegation Types"
+                  "Property": "FullAccess"
                 }
               },
-              "queryRef": "Mailbox Evidence.Delegation Types",
-              "nativeQueryRef": "Delegation Types"
+              "queryRef": "Mailbox Exploration Inventory.FullAccess",
+              "nativeQueryRef": "FullAccess",
+              "active": true,
+              "displayName": "FullAccess"
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
-                  "Property": "Forwarding State"
+                  "Property": "SendAs"
                 }
               },
-              "queryRef": "Mailbox Evidence.Forwarding State",
-              "nativeQueryRef": "Forwarding State"
+              "queryRef": "Mailbox Exploration Inventory.SendAs",
+              "nativeQueryRef": "SendAs",
+              "active": true,
+              "displayName": "SendAs"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "GrantSendOnBehalfTo"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.GrantSendOnBehalfTo",
+              "nativeQueryRef": "GrantSendOnBehalfTo",
+              "active": true,
+              "displayName": "GrantSendOnBehalfTo"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Forwarding Target"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Forwarding Target",
+              "nativeQueryRef": "Forwarding Target",
+              "active": true,
+              "displayName": "Forwarding Target"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Stats Collected UTC"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Stats Collected UTC",
+              "nativeQueryRef": "Stats Collected UTC",
+              "active": true,
+              "displayName": "Stats Collected UTC"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Delegation Evidence"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Delegation Evidence",
+              "nativeQueryRef": "Delegation evidence",
+              "active": true,
+              "displayName": "Delegation evidence"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Mailbox Key"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Mailbox Key",
+              "nativeQueryRef": "Mailbox Key",
+              "active": true,
+              "displayName": "Mailbox Key"
             }
           ]
         }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Mailbox Exploration Inventory"
+                  }
+                },
+                "Property": "Delegation Count"
+              }
+            },
+            "direction": "Descending"
+          }
+        ],
+        "isDefaultSort": true
       }
     },
     "objects": {
@@ -96,7 +330,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -130,9 +364,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -145,7 +386,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -226,7 +467,7 @@
       "columnFormatting": [
         {
           "selector": {
-            "metadata": "Mailbox Evidence.Display Name"
+            "metadata": "Mailbox Exploration Inventory.Display Name"
           },
           "properties": {
             "alignment": {
@@ -261,7 +502,7 @@
         },
         {
           "selector": {
-            "metadata": "Mailbox Evidence.Delegation Count"
+            "metadata": "Mailbox Exploration Inventory.User Principal Name"
           },
           "properties": {
             "alignment": {
@@ -296,7 +537,7 @@
         },
         {
           "selector": {
-            "metadata": "Mailbox Evidence.Delegation Types"
+            "metadata": "Mailbox Exploration Inventory.SAM Account Name"
           },
           "properties": {
             "alignment": {
@@ -331,7 +572,462 @@
         },
         {
           "selector": {
-            "metadata": "Mailbox Evidence.Forwarding State"
+            "metadata": "Mailbox Exploration Inventory.Recipient Type"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.M365 Licenses"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.AD Domain"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.AD Account State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Entra Account State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Workforce Persona"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Delegation Count"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.FullAccess"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.SendAs"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.GrantSendOnBehalfTo"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Forwarding Target"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Stats Collected UTC"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Delegation Evidence"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Mailbox Key"
           },
           "properties": {
             "alignment": {
@@ -364,7 +1060,8 @@
             }
           }
         }
-      ]
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -373,7 +1070,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Delegation and forwarding \u00b7 selected evidence'"
+                  "Value": "'Delegation and forwarding · selected evidence'"
                 }
               }
             }
@@ -393,7 +1090,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Delegation and forwarding \u00b7 selected evidence'"
+                  "Value": "'Delegation and forwarding · selected evidence'"
                 }
               }
             },
@@ -493,7 +1190,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

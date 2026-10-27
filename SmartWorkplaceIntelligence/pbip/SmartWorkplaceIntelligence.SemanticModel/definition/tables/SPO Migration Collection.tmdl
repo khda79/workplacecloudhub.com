@@ -1,6 +1,6 @@
 /// SPO means SharePoint Online. Grain: Collection Key; source: one selected immutable prepared batch.
 table 'SPO Migration Collection'
-	lineageTag: e6b29884-347b-46ce-a546-e7e900e228b2
+	lineageTag: de62807c-b7fa-45a7-83c7-715bc9e494e8
 
 	/// Current Collection Storage GiB. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Current Collection Storage GiB' =
@@ -9,7 +9,7 @@ table 'SPO Migration Collection'
 			DIVIDE(CALCULATE(SUM('SPO Migration Collection'[Storage Bytes]), TREATAS(_keys, 'SPO Migration Collection'[Collection Key])),POWER(1024,3)))
 		formatString: 0.0
 		displayFolder: Migration\Volumes
-		lineageTag: a0d51b14-ceda-4aa3-bdfe-c718b64a7b47
+		lineageTag: 4426eb37-b92c-4797-9cd9-eb0249dae7c5
 
 	/// Fully Qualified Migrating GiB. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Fully Qualified Migrating GiB' =
@@ -19,19 +19,19 @@ table 'SPO Migration Collection'
 			DIVIDE(CALCULATE(SUM('SPO Migration Collection'[Storage Bytes]), KEEPFILTERS('SPO Migration Collection'[Is Fully Migrating]=TRUE()),TREATAS(_collections,'SPO Migration Collection'[Collection Key])),POWER(1024,3)))
 		formatString: 0.0
 		displayFolder: Migration\Volumes
-		lineageTag: b85df497-6622-42cc-a14f-c3a732edc3d0
+		lineageTag: f7ff0cfa-7bd3-4eb8-ad11-ecb8f7a87ac7
 
 	/// Volume Context. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Volume Context' = IF(ISBLANK([SPO Fully Qualified Migrating GiB]),"Not measurable: complete migration scope is not qualified", "Current source storage in fully qualified scope; not transferred bytes")
 		formatString: General
 		displayFolder: Migration\Volumes
-		lineageTag: 758ee064-d55a-4610-bdfb-e59bee4a9f38
+		lineageTag: 50f918c9-56fe-4356-a67d-e129441bfe83
 
 	/// Prepared, tenant-qualified migration evidence: TenantKey.
 	column TenantKey
 		dataType: string
 		isHidden
-		lineageTag: 22be40f8-a80a-4729-af91-bcacebef7888
+		lineageTag: 6b4372f5-a64f-4394-9e2b-a5fdc3ae5368
 		summarizeBy: none
 		sourceColumn: TenantKey
 
@@ -39,7 +39,7 @@ table 'SPO Migration Collection'
 	column 'Project Key'
 		dataType: string
 		isHidden
-		lineageTag: f8ff7637-1ffb-4de6-90f1-5ae6d6f28e2b
+		lineageTag: 4f6e2eda-64f5-4880-86b9-4ce4eed8ad1f
 		summarizeBy: none
 		sourceColumn: Project Key
 
@@ -47,7 +47,7 @@ table 'SPO Migration Collection'
 	column 'Snapshot ID'
 		dataType: string
 		isHidden
-		lineageTag: d1ca278d-6fa9-4c18-87bd-19763b3fc331
+		lineageTag: 0ca11566-4a93-4640-ac78-7d0573d16833
 		summarizeBy: none
 		sourceColumn: Snapshot ID
 
@@ -55,22 +55,29 @@ table 'SPO Migration Collection'
 	column 'Snapshot Date'
 		dataType: dateTime
 		formatString: yyyy-MM-dd
-		lineageTag: ea2e217c-2c27-428d-a0f4-dd745c0d9aa4
+		lineageTag: cc4deec9-a50a-4b19-b56b-6fe8376583b6
 		summarizeBy: none
 		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 8b3f8134-0156-49a1-9919-5364b13e2afe
+			defaultHierarchy: LocalDateTable_729976aa-a054-4d50-a79f-69df3e5654c0.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Prepared, tenant-qualified migration evidence: Collection Key.
 	column 'Collection Key'
 		dataType: string
 		isHidden
-		lineageTag: 663dcd0d-6066-425a-b58b-9f3aa129ffde
+		lineageTag: 3122889f-f290-4162-950e-4da886fdd8ba
 		summarizeBy: none
 		sourceColumn: Collection Key
 
 	/// Prepared, tenant-qualified migration evidence: Source URL.
 	column 'Source URL'
 		dataType: string
-		lineageTag: ca8798e2-f632-4a06-934d-6466c50cb4c3
+		lineageTag: fc8094ab-6041-4639-8506-39a7c7d8aa15
 		summarizeBy: none
 		sourceColumn: Source URL
 
@@ -78,21 +85,23 @@ table 'SPO Migration Collection'
 	column 'Storage Bytes'
 		dataType: int64
 		isHidden
-		lineageTag: ccc698f1-feb5-4775-b881-9a5ff108c94b
-		summarizeBy: none
+		lineageTag: b721b666-5035-4921-a63d-3bfde5bcd657
+		summarizeBy: sum
 		sourceColumn: Storage Bytes
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Prepared, tenant-qualified migration evidence: Is Fully Covered.
 	column 'Is Fully Covered'
 		dataType: boolean
-		lineageTag: 0130edc4-1781-46aa-8bc4-7e3291d37e1e
+		lineageTag: 8c6e4d7d-283c-4864-9022-765bfd514ec0
 		summarizeBy: none
 		sourceColumn: Is Fully Covered
 
 	/// Prepared, tenant-qualified migration evidence: Is Fully Migrating.
 	column 'Is Fully Migrating'
 		dataType: boolean
-		lineageTag: 710bcf9a-f128-4609-8ea2-b7206c5d8ddf
+		lineageTag: 49d0cb12-eaf7-4c27-8f38-209cdb6b3423
 		summarizeBy: none
 		sourceColumn: Is Fully Migrating
 
@@ -101,7 +110,7 @@ table 'SPO Migration Collection'
 		dataType: dateTime
 		isHidden
 		formatString: yyyy-MM-dd HH:mm
-		lineageTag: 09696770-e8d0-4637-bae8-df77b93aa504
+		lineageTag: 0a036dbc-b7c0-4116-849d-25e77f7e4cc2
 		summarizeBy: none
 		sourceColumn: Captured UTC
 
@@ -109,15 +118,18 @@ table 'SPO Migration Collection'
 	column 'Run ID'
 		dataType: string
 		isHidden
-		lineageTag: e91103e5-dd48-4c4d-a419-c5c14e059550
+		lineageTag: c8a7cae9-5fb3-4e75-8cbb-883f24a9bf27
 		summarizeBy: none
 		sourceColumn: Run ID
 
 	column 'Project Identity'
 		dataType: string
 		isHidden
-		lineageTag: a092839c-8b14-4cf5-9cf8-b99b88eae676
+		lineageTag: b69b98a6-19d1-4705-b6b6-1f0cbeaa7eb5
+		summarizeBy: none
 		sourceColumn: Project Identity
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'

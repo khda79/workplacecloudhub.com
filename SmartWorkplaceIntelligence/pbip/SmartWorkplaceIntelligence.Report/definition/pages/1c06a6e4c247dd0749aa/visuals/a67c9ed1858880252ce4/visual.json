@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "a67c9ed1858880252ce4",
   "position": {
     "x": 32,
-    "y": 269.0,
-    "width": 1856,
+    "y": 269,
+    "z": 6000,
     "height": 22,
-    "z": 12000,
-    "tabOrder": 145
+    "width": 1856,
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native \u00b7 Verified Domain",
+                    "value": "Selected view: Native · Verified Domain",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

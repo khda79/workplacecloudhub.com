@@ -1,16 +1,75 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "5545bec45c00200623e6",
   "position": {
     "x": 1296,
-    "y": 336,
+    "y": 320,
+    "z": 5000,
+    "height": 397.40259740259739,
     "width": 592,
-    "height": 360,
-    "z": 121,
-    "tabOrder": 680
+    "tabOrder": 3000
   },
   "visual": {
     "visualType": "lineChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Weekly History"
+                    }
+                  },
+                  "Property": "Snapshot Date"
+                }
+              },
+              "queryRef": "Mailbox Migration Weekly History.Snapshot Date",
+              "nativeQueryRef": "Snapshot Date",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Weekly History"
+                    }
+                  },
+                  "Property": "Remaining Mailboxes Weekly Provisional"
+                }
+              },
+              "queryRef": "Mailbox Migration Weekly History.Remaining Mailboxes Weekly Provisional",
+              "nativeQueryRef": "Remaining Mailboxes Weekly Provisional",
+              "displayName": "Remaining Mailboxes Weekly Provisional"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Mailbox Migration Weekly History"
+                  }
+                },
+                "Property": "Snapshot Date"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ]
+      }
+    },
     "objects": {
       "categoryAxis": [
         {
@@ -154,9 +213,6 @@
       ],
       "dataPoint": [
         {
-          "selector": {
-            "metadata": "Mailbox Migration Weekly History.Remaining Mailboxes Weekly Provisional"
-          },
           "properties": {
             "fill": {
               "solid": {
@@ -169,6 +225,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Mailbox Migration Weekly History.Remaining Mailboxes Weekly Provisional"
           }
         }
       ],
@@ -193,66 +252,6 @@
         }
       ]
     },
-    "drillFilterOtherVisuals": true,
-    "query": {
-      "queryState": {
-        "Category": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Weekly History"
-                    }
-                  },
-                  "Property": "Snapshot Date"
-                }
-              },
-              "queryRef": "Mailbox Migration Weekly History.Snapshot Date",
-              "nativeQueryRef": "Snapshot Date",
-              "active": true
-            }
-          ]
-        },
-        "Y": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Migration Weekly History"
-                    }
-                  },
-                  "Property": "Remaining Mailboxes Weekly Provisional"
-                }
-              },
-              "queryRef": "Mailbox Migration Weekly History.Remaining Mailboxes Weekly Provisional",
-              "nativeQueryRef": "Remaining Mailboxes Weekly Provisional",
-              "displayName": "Remaining Mailboxes Weekly Provisional"
-            }
-          ]
-        }
-      },
-      "sortDefinition": {
-        "sort": [
-          {
-            "field": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Mailbox Migration Weekly History"
-                  }
-                },
-                "Property": "Snapshot Date"
-              }
-            },
-            "direction": "Ascending"
-          }
-        ]
-      }
-    },
     "visualContainerObjects": {
       "title": [
         {
@@ -267,7 +266,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Local mailbox stock \u00b7 90 days \u00b7 PROVISIONAL weekly buckets'"
+                  "Value": "'Local mailbox stock · 90 days · PROVISIONAL weekly buckets'"
                 }
               }
             },
@@ -414,15 +413,17 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Local mailbox stock \u00b7 90 days \u00b7 PROVISIONAL weekly buckets'"
+                  "Value": "'Local mailbox stock · 90 days · PROVISIONAL weekly buckets'"
                 }
               }
             }
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   },
+  "parentGroupName": "de282d5a0762f9248225",
   "filterConfig": {
     "filters": [
       {
@@ -491,6 +492,5 @@
         "howCreated": "User"
       }
     ]
-  },
-  "parentGroupName": "de282d5a0762f9248225"
+  }
 }

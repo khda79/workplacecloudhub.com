@@ -24,6 +24,7 @@ table 'Country Selection'
 				VAR _sourceCountries =
 				    DISTINCT (
 				        UNION (
+				            SELECTCOLUMNS(DISTINCT('Native User Evidence'[CountryCode]), "Source Country", COALESCE('Native User Evidence'[CountryCode],"Unknown")),
 				            SELECTCOLUMNS ( DISTINCT ( 'User Inventory Evidence'[Country] ), "Source Country", 'User Inventory Evidence'[Country] ),
 				            SELECTCOLUMNS ( DISTINCT ( 'Device Inventory Evidence'[Country] ), "Source Country", 'Device Inventory Evidence'[Country] ),
 				            SELECTCOLUMNS ( DISTINCT ( 'All Accounts Evidence'[Country Name] ), "Source Country", 'All Accounts Evidence'[Country Name] ),
@@ -65,4 +66,3 @@ table 'Country Selection'
 				                    TRIM ( _rawCountry )
 				                )
 				    )
-

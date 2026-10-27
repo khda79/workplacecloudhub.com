@@ -1,19 +1,19 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "2e2711095ed21aa35a5c",
   "position": {
     "x": 32,
-    "y": 544.3,
-    "z": 11000,
-    "height": 224.8,
+    "y": 432,
+    "z": 0,
+    "height": 276,
     "width": 1856,
     "tabOrder": 544
   },
   "visual": {
-    "visualType": "pivotTable",
+    "visualType": "tableEx",
     "query": {
       "queryState": {
-        "Rows": {
+        "Values": {
           "projections": [
             {
               "field": {
@@ -55,34 +55,14 @@
                       "Entity": "Intune Managed App Evidence"
                     }
                   },
-                  "Property": "Application ID"
-                }
-              },
-              "queryRef": "Intune Managed App Evidence.Application ID",
-              "nativeQueryRef": "Application ID",
-              "active": false,
-              "displayName": "Application ID"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Intune Managed App Evidence"
-                    }
-                  },
                   "Property": "Status Source"
                 }
               },
               "queryRef": "Intune Managed App Evidence.Status Source",
               "nativeQueryRef": "Status Source",
-              "active": false,
+              "active": true,
               "displayName": "Status Source"
-            }
-          ]
-        },
-        "Values": {
-          "projections": [
+            },
             {
               "field": {
                 "Measure": {
@@ -96,6 +76,7 @@
               },
               "queryRef": "Intune Managed App Deployment Evidence.Intune App Deployment Observations",
               "nativeQueryRef": "Intune App Deployment Observations",
+              "active": true,
               "displayName": "Observations"
             },
             {
@@ -111,6 +92,7 @@
               },
               "queryRef": "Intune Managed App Deployment Evidence.Intune Reported Installed Observations",
               "nativeQueryRef": "Intune Reported Installed Observations",
+              "active": true,
               "displayName": "Reported installed"
             },
             {
@@ -126,6 +108,7 @@
               },
               "queryRef": "Intune Managed App Deployment Evidence.Intune Reported Failure Observations",
               "nativeQueryRef": "Intune Reported Failure Observations",
+              "active": true,
               "displayName": "Reported failures"
             },
             {
@@ -141,6 +124,7 @@
               },
               "queryRef": "Intune Managed App Deployment Evidence.Intune App Pending Observations",
               "nativeQueryRef": "Intune App Pending Observations",
+              "active": true,
               "displayName": "Pending"
             },
             {
@@ -156,62 +140,11 @@
               },
               "queryRef": "Intune Managed App Deployment Evidence.Intune App Unknown Observations",
               "nativeQueryRef": "Intune App Unknown Observations",
+              "active": true,
               "displayName": "Unknown"
-            }
-          ]
-        }
-      }
-    },
-    "expansionStates": [
-      {
-        "roles": [
-          "Rows"
-        ],
-        "levels": [
-          {
-            "queryRefs": [
-              "Intune Managed App Evidence.Display Name"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Intune Managed App Evidence"
-                    }
-                  },
-                  "Property": "Display Name"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Intune Managed App Evidence.Measurement State"
-            ],
-            "isCollapsed": true,
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Intune Managed App Evidence"
-                    }
-                  },
-                  "Property": "Measurement State"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Intune Managed App Evidence.Application ID"
-            ],
-            "isCollapsed": true,
-            "identityKeys": [
-              {
+            },
+            {
+              "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
@@ -220,112 +153,20 @@
                   },
                   "Property": "Application ID"
                 }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Intune Managed App Evidence.Status Source"
-            ],
-            "isCollapsed": true,
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Intune Managed App Evidence"
-                    }
-                  },
-                  "Property": "Status Source"
-                }
-              }
-            ],
-            "isPinned": true
-          }
-        ],
-        "root": {}
+              },
+              "queryRef": "Intune Managed App Evidence.Application ID",
+              "nativeQueryRef": "Application ID",
+              "active": true,
+              "displayName": "Application ID"
+            }
+          ]
+        }
       }
-    ],
+    },
     "objects": {
-      "general": [
-        {
-          "properties": {
-            "layout": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Tabular'"
-                }
-              }
-            }
-          }
-        }
-      ],
-      "subTotals": [
-        {
-          "properties": {
-            "rowSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "perRowLevel": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            }
-          }
-        },
-        {
-          "properties": {
-            "rowSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "perRowLevel": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "Row"
-          }
-        }
-      ],
       "columnHeaders": [
         {
           "properties": {
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -337,6 +178,20 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -363,9 +218,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -449,24 +311,48 @@
           }
         }
       ],
-      "rowHeaders": [
+      "columnWidth": [],
+      "total": [
         {
           "properties": {
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
-            "stepped": {
+            "totals": {
               "expr": {
                 "Literal": {
                   "Value": "false"
                 }
               }
+            }
+          }
+        }
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Intune Managed App Evidence.Display Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
             },
-            "repeatRowHeaders": {
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -474,21 +360,285 @@
               }
             }
           }
-        }
-      ],
-      "columnWidth": [
+        },
         {
+          "selector": {
+            "metadata": "Intune Managed App Evidence.Measurement State"
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "320D"
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
-            "metadata": "Intune Managed App Evidence.Display Name"
+            "metadata": "Intune Managed App Evidence.Status Source"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Managed App Deployment Evidence.Intune App Deployment Observations"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Managed App Deployment Evidence.Intune Reported Installed Observations"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Managed App Deployment Evidence.Intune Reported Failure Observations"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Managed App Deployment Evidence.Intune App Pending Observations"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Managed App Deployment Evidence.Intune App Unknown Observations"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Managed App Evidence.Application ID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
           }
         }
       ]
@@ -500,7 +650,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography \u00b7 selected evidence'"
+                  "Value": "'Geography · selected evidence'"
                 }
               }
             }
@@ -520,7 +670,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Managed catalog \u00b7 reported deployment observations'"
+                  "Value": "'Managed catalog · reported deployment observations'"
                 }
               }
             },
@@ -609,7 +759,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

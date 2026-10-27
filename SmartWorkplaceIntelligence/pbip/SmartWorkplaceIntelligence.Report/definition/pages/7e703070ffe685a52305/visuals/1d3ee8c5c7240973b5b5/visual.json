@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "1d3ee8c5c7240973b5b5",
   "position": {
     "x": 32,
-    "y": 292,
-    "width": 1320,
-    "height": 80,
-    "z": 108,
-    "tabOrder": 677
+    "y": 320,
+    "z": 1000,
+    "height": 104,
+    "width": 1856,
+    "tabOrder": 1000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -84,6 +84,48 @@
               },
               "queryRef": "Backup Mailbox Evidence.Backup Scope Assessment Gaps",
               "nativeQueryRef": "Backup Scope Assessment Gaps"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Backup Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Expected Mailboxes Protected (%)"
+                }
+              },
+              "queryRef": "Backup Mailbox Evidence.Expected Mailboxes Protected (%)",
+              "nativeQueryRef": "Expected Mailboxes Protected (%)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Backup Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Backup Policy Scope Anomalies"
+                }
+              },
+              "queryRef": "Backup Mailbox Evidence.Backup Policy Scope Anomalies",
+              "nativeQueryRef": "Backup Policy Scope Anomalies"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Backup Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Expected Mailboxes Not Protected"
+                }
+              },
+              "queryRef": "Backup Mailbox Evidence.Expected Mailboxes Not Protected",
+              "nativeQueryRef": "Expected Mailboxes Not Protected"
             }
           ]
         }
@@ -342,7 +384,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "5L"
+                  "Value": "8L"
                 }
               }
             },
@@ -441,32 +483,21 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Supporting KPIs'"
+                  "Value": "''"
                 }
               }
             },
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "12D"
-                }
-              }
-            },
-            "fontColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#183153'"
-                    }
-                  }
+                  "Value": "11D"
                 }
               }
             }

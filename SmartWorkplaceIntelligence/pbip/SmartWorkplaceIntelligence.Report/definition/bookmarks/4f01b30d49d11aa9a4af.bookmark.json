@@ -1,0 +1,268 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "4f01b30d49d11aa9a4af",
+  "displayName": "Autopilot reconciliation",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "046523729d9b94293388",
+      "0f3c892261e295ab49fe",
+      "212df6235ea2bd04f13a",
+      "257e6f05fdf464de4412",
+      "2ca17b0e16f397ba09bd",
+      "31ceb7e8041d44d0bcd8",
+      "43f45f8154c24e2769b9",
+      "45c8e559410c1058bcb8",
+      "635af0e8cfb0c8279e14",
+      "8d573bc4ebd0c64cf41f",
+      "a12765da9a93dcb54433",
+      "abf24b94ca9357f54901",
+      "b56065ef07325183948a",
+      "ba587067c2277d4df717",
+      "d0e070fb61d7ebbe95bd",
+      "db0713dd859f6bf7efd6",
+      "dcae98e7e22f9b248681",
+      "e390a4a80e25c5420098",
+      "e4698106369853a145b4",
+      "f16b9358fcd51424cb6b",
+      "0c6eee2fa33ab581567f",
+      "bb01215dda21c09d137e",
+      "44edaab020b10d320d70",
+      "526c0f92e073a34ceae0",
+      "ef4fe40d53bc2f744a58",
+      "96e900038a17e7ea2b5e",
+      "7358b60b4ff2387f60b9",
+      "edc37e411ff009fcb1fe",
+      "d03ffab537a488f3283c",
+      "99da9a76475cdd4d008f",
+      "83bd3b9da1f0768cc974",
+      "99946e450516560b9afb",
+      "bcd7ca0395c08ea58984",
+      "240c0794e712056d23ae",
+      "0ce23c8320d0b7bf97c5",
+      "1c05d9d14b5e07f2ef5d",
+      "26160c2b0b7342aac31a",
+      "508ae47092f8083a1e5f",
+      "5390e62c7b0705808967",
+      "5527d2be1fac7d6813b8",
+      "747a5baf1597e9afb2bb",
+      "8084106fadc8fd97e46b",
+      "8131c2051c48a7d939a9",
+      "c4ad8986f1f57bbfbf66",
+      "c85c3d9ea355b7b483cf",
+      "e1c1b599a1f821d08782",
+      "4166439ecff9514bf11d",
+      "c682aa86b4718d31214e",
+      "d4e6b808ff35c6c28076"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "a431090c3f25c4a369d0",
+    "sections": {
+      "a431090c3f25c4a369d0": {
+        "visualContainers": {
+          "0c6eee2fa33ab581567f": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "bb01215dda21c09d137e": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "44edaab020b10d320d70": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "526c0f92e073a34ceae0": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "ef4fe40d53bc2f744a58": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "96e900038a17e7ea2b5e": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "7358b60b4ff2387f60b9": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "edc37e411ff009fcb1fe": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "d03ffab537a488f3283c": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "99da9a76475cdd4d008f": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "83bd3b9da1f0768cc974": {
+            "singleVisual": {}
+          },
+          "99946e450516560b9afb": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "240c0794e712056d23ae": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "0ce23c8320d0b7bf97c5": {
+            "singleVisual": {}
+          },
+          "1c05d9d14b5e07f2ef5d": {
+            "singleVisual": {}
+          },
+          "26160c2b0b7342aac31a": {
+            "singleVisual": {}
+          },
+          "508ae47092f8083a1e5f": {
+            "singleVisual": {}
+          },
+          "5390e62c7b0705808967": {
+            "singleVisual": {}
+          },
+          "5527d2be1fac7d6813b8": {
+            "singleVisual": {}
+          },
+          "747a5baf1597e9afb2bb": {
+            "singleVisual": {}
+          },
+          "8084106fadc8fd97e46b": {
+            "singleVisual": {}
+          },
+          "8131c2051c48a7d939a9": {
+            "singleVisual": {}
+          },
+          "c4ad8986f1f57bbfbf66": {
+            "singleVisual": {}
+          },
+          "c85c3d9ea355b7b483cf": {
+            "singleVisual": {}
+          },
+          "e1c1b599a1f821d08782": {
+            "singleVisual": {}
+          },
+          "4166439ecff9514bf11d": {
+            "singleVisual": {}
+          },
+          "c682aa86b4718d31214e": {
+            "singleVisual": {}
+          },
+          "d4e6b808ff35c6c28076": {
+            "singleVisual": {}
+          }
+        },
+        "visualContainerGroups": {
+          "046523729d9b94293388": {
+            "isHidden": true
+          },
+          "0f3c892261e295ab49fe": {
+            "isHidden": true
+          },
+          "212df6235ea2bd04f13a": {
+            "isHidden": true
+          },
+          "257e6f05fdf464de4412": {
+            "isHidden": true
+          },
+          "2ca17b0e16f397ba09bd": {
+            "isHidden": true
+          },
+          "31ceb7e8041d44d0bcd8": {
+            "isHidden": true
+          },
+          "43f45f8154c24e2769b9": {
+            "isHidden": true
+          },
+          "45c8e559410c1058bcb8": {
+            "isHidden": true
+          },
+          "635af0e8cfb0c8279e14": {
+            "isHidden": true
+          },
+          "8d573bc4ebd0c64cf41f": {
+            "isHidden": true
+          },
+          "a12765da9a93dcb54433": {
+            "isHidden": true
+          },
+          "abf24b94ca9357f54901": {
+            "isHidden": true
+          },
+          "b56065ef07325183948a": {
+            "isHidden": true
+          },
+          "ba587067c2277d4df717": {
+            "isHidden": true
+          },
+          "d0e070fb61d7ebbe95bd": {
+            "isHidden": true
+          },
+          "db0713dd859f6bf7efd6": {
+            "isHidden": true
+          },
+          "dcae98e7e22f9b248681": {
+            "isHidden": true
+          },
+          "e390a4a80e25c5420098": {
+            "isHidden": false
+          },
+          "e4698106369853a145b4": {
+            "isHidden": true
+          },
+          "f16b9358fcd51424cb6b": {
+            "isHidden": true
+          },
+          "bcd7ca0395c08ea58984": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -5,7 +5,7 @@
   "optionalSourceGroups": "intune-operational-contract.json.txt",
   "currentFiles": [
     "M365_Users_Active.csv", "M365_Users_Activity.csv", "AD_Users_AllDomains.csv",
-    "AD_Users_DuplicateUPN.csv", "Exchange_HybridIdentity_Issues.csv", "M365_Licenses_Users.csv",
+    "AD_Users_DuplicateUPN.csv", "M365_Licenses_Users.csv",
     "M365_Apps_Activations.csv", "M365_Apps_Usage_30D.csv", "M365_Apps_Usage_180D.csv",
     "M365_Entra_AuthenticationMethodsRegistration.csv", "Intune_Devices_Inventory.csv",
     "Intune_Devices_LocalSystem.csv",

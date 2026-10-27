@@ -4,14 +4,13 @@
   "position": {
     "x": 0,
     "y": 0,
-    "z": 1,
+    "z": 6000,
     "height": 1080,
     "width": 1920,
-    "tabOrder": 1
+    "tabOrder": 6000
   },
   "visualGroup": {
-    "displayName": "Country & 90 days",
+    "displayName": "Country & 90-day history",
     "groupMode": "ScaleMode"
-  },
-  "isHidden": true
+  }
 }

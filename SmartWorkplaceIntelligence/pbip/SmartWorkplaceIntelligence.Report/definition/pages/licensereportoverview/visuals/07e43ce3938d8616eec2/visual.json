@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "07e43ce3938d8616eec2",
   "position": {
     "x": 32,
     "y": 592,
-    "z": 36,
+    "z": 2000,
     "height": 400,
     "width": 1856,
-    "tabOrder": 36
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "tableEx",
@@ -38,27 +38,27 @@
                       "Entity": "License Report Candidates"
                     }
                   },
-                  "Property": "User ID"
-                }
-              },
-              "queryRef": "License Report Candidates.User ID",
-              "nativeQueryRef": "UserId",
-              "displayName": "UserId"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Candidates"
-                    }
-                  },
                   "Property": "User Principal Name"
                 }
               },
               "queryRef": "License Report Candidates.User Principal Name",
               "nativeQueryRef": "UserPrincipalName",
               "displayName": "UserPrincipalName"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Candidates"
+                    }
+                  },
+                  "Property": "SAM · License Report Candidates"
+                }
+              },
+              "queryRef": "License Report Candidates.SAM · License Report Candidates",
+              "nativeQueryRef": "SAM · License Report Candidates",
+              "displayName": "SAM"
             },
             {
               "field": {
@@ -149,6 +149,21 @@
               "queryRef": "License Report Candidates.Target Suites",
               "nativeQueryRef": "TargetSuites",
               "displayName": "TargetSuites"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "License Report Candidates"
+                    }
+                  },
+                  "Property": "User ID"
+                }
+              },
+              "queryRef": "License Report Candidates.User ID",
+              "nativeQueryRef": "UserId",
+              "displayName": "UserId"
             }
           ]
         }
@@ -229,6 +244,13 @@
                       "Value": "'#215E9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -318,6 +340,358 @@
             }
           }
         }
+      ],
+      "columnFormatting": [
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Candidates.Product"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Candidates.User Principal Name"
+          }
+        },
+        {
+          "selector": {
+            "metadata": "License Report Candidates.SAM · License Report Candidates"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Candidates.Display Name"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Candidates.Reason"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Candidates.Last AD Activity Date"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Candidates.Last M365 Activity Date"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Candidates.Primary On Intune PC"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Candidates.Target Suites"
+          }
+        },
+        {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "License Report Candidates.User ID"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -327,7 +701,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Recovery candidate detail \u00b7 internal table scroll'"
+                  "Value": "'Recovery candidate detail · internal table scroll'"
                 }
               }
             }
@@ -347,7 +721,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Recovery candidate detail \u00b7 internal table scroll'"
+                  "Value": "'Recovery candidate detail · internal table scroll'"
                 }
               }
             },
@@ -454,7 +828,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -661,132 +1042,6 @@
         "howCreated": "User",
         "isHiddenInViewMode": true,
         "isLockedInViewMode": true
-      },
-      {
-        "name": "123d8fe9a276195ddeec",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Report Candidates"
-              }
-            },
-            "Property": "Product"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "07c7aaf7883201b946e0",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Report Candidates"
-              }
-            },
-            "Property": "User ID"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "71c1e0efb5d69d798afe",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Report Candidates"
-              }
-            },
-            "Property": "User Principal Name"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "3c58456bc6cdcc769c19",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Report Candidates"
-              }
-            },
-            "Property": "Display Name"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "7b2a348a0820a7ce8419",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Report Candidates"
-              }
-            },
-            "Property": "Reason"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "4392586b252cb382ba10",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Report Candidates"
-              }
-            },
-            "Property": "Last AD Activity Date"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "deb552e1b847e1e2acdc",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Report Candidates"
-              }
-            },
-            "Property": "Last M365 Activity Date"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "925cce55018d5ca0e120",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Report Candidates"
-              }
-            },
-            "Property": "Primary On Intune PC"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "8ef9b4e65c33ffa92be1",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "License Report Candidates"
-              }
-            },
-            "Property": "Target Suites"
-          }
-        },
-        "type": "Categorical"
       }
     ]
   }

@@ -1,11 +1,11 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "a8b4e78f2b9c41d8a013",
   "position": {
-    "x": 1280,
-    "y": 394,
-    "z": 150,
-    "height": 600,
+    "x": 656,
+    "y": 432,
+    "z": 3000,
+    "height": 342,
     "width": 608,
     "tabOrder": 1340
   },
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
                   "Property": "Mailbox Type"
                 }
               },
-              "queryRef": "Mailbox Evidence.Mailbox Type",
+              "queryRef": "Mailbox Exploration Inventory.Mailbox Type",
               "nativeQueryRef": "Mailbox Type",
               "active": true
             }
@@ -384,37 +384,5 @@
     },
     "drillFilterOtherVisuals": true
   },
-  "parentGroupName": "509da9ee86e35c2c4711",
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "37d972213f2aab8cb1ef",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Mailbox Evidence"
-              }
-            },
-            "Property": "Mailbox Type"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "6d34492b965ca184bf96",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Mailbox Evidence"
-              }
-            },
-            "Property": "Mailboxes"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
-  }
+  "parentGroupName": "356f38365fae5fd56ff9"
 }

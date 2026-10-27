@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "f0453a0e2d2e18c0f9c2",
   "position": {
     "x": 32,
-    "y": 394,
+    "y": 432,
+    "z": 2000,
+    "height": 568,
     "width": 1856,
-    "height": 600,
-    "z": 110,
     "tabOrder": 677
   },
   "visual": {
@@ -46,7 +46,8 @@
                 }
               },
               "queryRef": "Collaboration Object Evidence.At-Risk Collaboration Objects",
-              "nativeQueryRef": "At-Risk Collaboration Objects"
+              "nativeQueryRef": "At-Risk Collaboration Objects",
+              "displayName": "At-Risk Collaboration Resources"
             }
           ]
         }
@@ -233,7 +234,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'At-risk objects by service'"
+                  "Value": "'At-risk resources by service'"
                 }
               }
             },

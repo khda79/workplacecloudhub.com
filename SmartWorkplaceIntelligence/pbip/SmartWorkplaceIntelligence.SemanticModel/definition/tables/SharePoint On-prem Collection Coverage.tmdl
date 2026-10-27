@@ -104,6 +104,15 @@ table 'SharePoint On-prem Collection Coverage'
 		lineageTag: 21dc9d03-8645-4428-a2a8-01ef142e8b14
 		sourceColumn: Error Message
 
+	column 'Optional Schema Ready'
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 1d317aa2-fad6-4180-adfa-234f83b912fe
+		summarizeBy: none
+		sourceColumn: Optional Schema Ready
+
+		annotation SummarizationSetBy = Automatic
+
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'
 		dataType: string

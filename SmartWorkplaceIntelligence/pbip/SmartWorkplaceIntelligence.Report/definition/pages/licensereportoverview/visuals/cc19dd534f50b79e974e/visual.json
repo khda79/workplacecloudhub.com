@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "cc19dd534f50b79e974e",
   "position": {
     "x": 96,
     "y": 64,
-    "width": 864,
+    "z": 12000,
     "height": 48,
-    "z": 29,
-    "tabOrder": 29
+    "width": 864,
+    "tabOrder": 15000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Published license snapshot \u00b7 complete selected families \u00b7 manual review, never automatic license removal",
+                    "value": "Published license snapshot · complete selected families · manual review, never automatic license removal",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

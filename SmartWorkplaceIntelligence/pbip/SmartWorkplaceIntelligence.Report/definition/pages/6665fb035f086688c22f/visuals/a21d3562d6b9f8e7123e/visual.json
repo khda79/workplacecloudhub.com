@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "a21d3562d6b9f8e7123e",
   "position": {
     "x": 32,
     "y": 686.7,
+    "z": 3000,
+    "height": 96,
     "width": 1856,
-    "height": 119.9,
-    "z": 130,
-    "tabOrder": 700
+    "tabOrder": 3000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -457,7 +457,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device System quality \u00b7 source observations, not current-health conclusions'"
+                  "Value": "'Device System quality · source observations, not current-health conclusions'"
                 }
               }
             },

@@ -4,72 +4,90 @@ table 'Native License Assignment'
 
 	/// Individual direct/group assignment paths, not distinct user/SKU pairs. Migrated without changing the source calculation.
 	measure 'Native Assignment paths' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native License Assignment'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (COALESCE(COUNTROWS('Native License Assignment'),0)))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COALESCE(COUNTROWS('Native License Assignment'),0)), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (COALESCE(COUNTROWS('Native License Assignment'),0)))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: b19b98e2-fde9-4edb-885d-22adc6cb7106
 
 	/// Observed group-based paths, not membership or effective access. Migrated without changing the source calculation.
 	measure 'Native Group assignment paths' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Group"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Group"))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Group"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Group"))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 0f5518fe-fbb2-4a22-be2d-17d5c355bc9f
 
 	/// Observed direct assignment paths. Migrated without changing the source calculation.
 	measure 'Native Direct assignment paths' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Direct"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Direct"))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Direct"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[AssignmentRoute] == "Direct"))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: c7ef4e8d-804d-4fc2-954f-6c22a147962e
 
 	/// Paths reporting an error; another path may still supply the entitlement. Migrated without changing the source calculation.
 	measure 'Native Assignment paths with errors' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[ErrorStatus] == "Error reported"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[ErrorStatus] == "Error reported"))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[ErrorStatus] == "Error reported"))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (CALCULATE([Native Assignment paths], KEEPFILTERS('Native License Assignment'[ErrorStatus] == "Error reported"))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 4b7379d5-49ac-45aa-a701-ca61de39b664
 
 	/// Assignment paths reporting an error divided by all observed assignment paths. Another path may still supply the entitlement. Migrated without changing the source calculation.
 	measure 'Native Assignment error rate' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Assignment paths with errors], [Native Assignment paths])), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (DIVIDE([Native Assignment paths with errors], [Native Assignment paths])))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Assignment paths with errors], [Native Assignment paths])), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (DIVIDE([Native Assignment paths with errors], [Native Assignment paths])))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: 0.000%
 		displayFolder: Native evidence
 		lineageTag: cd76d30b-6f47-4b0f-9c30-a6fe76216929
 
 	/// Detail rows only when exactly one user is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
 	measure 'Native User assignment details' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native License Assignment'))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native User Evidence')) = 1, COUNTROWS('Native License Assignment'))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 9f1a0a7e-34e6-4179-abcd-91b57555105f
 
 	/// Detail rows only when exactly one group is selected outside visual row grouping. Blank otherwise. Migrated without changing the source calculation.
 	measure 'Native Group assignment details' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native License Assignment'))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native License Assignment'))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (IF(COUNTROWS(ALLSELECTED('Native Group Evidence')) = 1, COUNTROWS('Native License Assignment'))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		displayFolder: Native evidence
 		lineageTag: 3cfa237a-8456-442f-86c3-7f8cbee1018a
 
 	/// Share of each observed license-assignment route. Migrated without changing the source calculation.
 	measure 'Native Assignment route rate' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Assignment paths], CALCULATE([Native Assignment paths], REMOVEFILTERS('Native License Assignment'[AssignmentRoute])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (DIVIDE([Native Assignment paths], CALCULATE([Native Assignment paths], REMOVEFILTERS('Native License Assignment'[AssignmentRoute])))))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((DIVIDE([Native Assignment paths], CALCULATE([Native Assignment paths], REMOVEFILTERS('Native License Assignment'[AssignmentRoute])))), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (DIVIDE([Native Assignment paths], CALCULATE([Native Assignment paths], REMOVEFILTERS('Native License Assignment'[AssignmentRoute])))))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: 0.0%
 		displayFolder: Native evidence
 		lineageTag: 6a9545cd-4dd3-4f8b-adc1-57f70bfbbfe9
 
 	/// Existing qualified workforce/device scope via exact native IDs; otherwise the domain selection. No name matching or inferred transitive membership.
 	measure 'Native Context Rows · Native License Assignment' =
-			VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
-			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native License Assignment')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (COUNTROWS('Native License Assignment')))
+			VAR _privateDomainScope = FILTER(ALL('Native User Evidence'[AD Domain]), NOT ISFILTERED('Daily Domain') || 'Native User Evidence'[AD Domain] IN VALUES('Daily Domain'[Domain]))
+			VAR _privateCountryScope = FILTER(ALL('Native User Evidence'[CountryCode]), NOT ISFILTERED('Country Selection') || IF(ISBLANK('Native User Evidence'[CountryCode]) || TRIM('Native User Evidence'[CountryCode])="", "Unknown", 'Native User Evidence'[CountryCode]) IN VALUES('Country Selection'[Source Country]))
+			RETURN CALCULATE((VAR InventoryUsers = CALCULATETABLE(VALUES('Native User Evidence'[TenantUserKey]), REMOVEFILTERS('Native User Evidence'), TREATAS(VALUES('User Inventory Evidence'[User Source ID]), 'Native User Evidence'[SourceUserId]))
+			RETURN SWITCH(TRUE(), ISCROSSFILTERED('User Inventory Evidence'), CALCULATE((COUNTROWS('Native License Assignment')), KEEPFILTERS(TREATAS(InventoryUsers, 'Native License Assignment'[TenantUserKey]))), (COUNTROWS('Native License Assignment')))),KEEPFILTERS(_privateDomainScope),KEEPFILTERS(_privateCountryScope))
 		formatString: #,0
 		isHidden
 		lineageTag: ea68307c-7be5-48e3-97c8-07be23707bab

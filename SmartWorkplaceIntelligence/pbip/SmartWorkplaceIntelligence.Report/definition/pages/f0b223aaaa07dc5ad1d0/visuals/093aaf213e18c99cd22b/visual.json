@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "093aaf213e18c99cd22b",
   "position": {
     "x": 1420,
-    "y": 578,
-    "z": 126,
-    "height": 130,
+    "y": 568,
+    "z": 26000,
+    "height": 64,
     "width": 222,
-    "tabOrder": 126
+    "tabOrder": 28000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -74,6 +74,21 @@
               },
               "queryRef": "Device Inventory Evidence.Recently Synced Devices Encrypted According to Intune",
               "nativeQueryRef": "Recently synced encrypted devices"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "KPI Alert Details Encrypted Recently Synced Intune Devices (%)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.KPI Alert Details Encrypted Recently Synced Intune Devices (%)",
+              "nativeQueryRef": "Encrypted Recently Synced Intune Devices (%) · thresholds",
+              "displayName": "Encrypted Recently Synced Intune Devices (%) · thresholds"
             }
           ]
         }
@@ -108,8 +123,95 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#2F6B9A'"
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Encrypted Recently Synced Intune Devices (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Encrypted Recently Synced Intune Devices (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Encrypted Recently Synced Intune Devices (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#2F6B9A'"
+                        }
+                      }
                     }
                   }
                 }
@@ -295,6 +397,134 @@
             "id": "default"
           }
         }
+      ],
+      "accentBar": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "position": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "3D"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Encrypted Recently Synced Intune Devices (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Encrypted Recently Synced Intune Devices (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "Device Inventory Evidence"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level Encrypted Recently Synced Intune Devices (%)"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#2F6B9A'"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "default"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -324,7 +554,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Encrypted devices (Intune)'"
+                  "Value": "'Encrypted (Intune) (%)'"
                 }
               }
             },
@@ -513,23 +743,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "Filterd04f4012a933e8d626dde4aa",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Encrypted Recently Synced Intune Devices (%)"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
   }
 }

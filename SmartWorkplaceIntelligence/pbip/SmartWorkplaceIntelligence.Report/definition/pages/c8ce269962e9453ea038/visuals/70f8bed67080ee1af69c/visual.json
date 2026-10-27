@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "70f8bed67080ee1af69c",
   "position": {
-    "x": 1248,
-    "y": 128,
-    "width": 312,
+    "x": 1088,
+    "y": 8,
+    "z": 31000,
     "height": 80,
-    "z": 105,
-    "tabOrder": 464
+    "width": 208,
+    "tabOrder": 41000
   },
   "visual": {
     "visualType": "slicer",
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
                   "Property": "Compliance State"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Compliance State",
+              "queryRef": "Global Device Inventory.Compliance State",
               "nativeQueryRef": "Compliance State",
               "active": true
             }

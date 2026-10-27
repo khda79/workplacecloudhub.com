@@ -62,6 +62,15 @@ table 'SharePoint On-prem Service Applications'
 		lineageTag: 9e874d3d-cae3-47df-8aa7-ea75a6ced424
 		sourceColumn: Farm Key
 
+	column 'Optional Schema Ready'
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 80f070b3-8d22-49ab-b707-ab8f10f48a2f
+		summarizeBy: none
+		sourceColumn: Optional Schema Ready
+
+		annotation SummarizationSetBy = Automatic
+
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'
 		dataType: string

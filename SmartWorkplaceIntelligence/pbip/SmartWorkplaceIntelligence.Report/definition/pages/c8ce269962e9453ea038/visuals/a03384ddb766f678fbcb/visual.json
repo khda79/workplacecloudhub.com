@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "a03384ddb766f678fbcb",
   "position": {
     "x": 32,
-    "y": 544.3,
+    "y": 405.97701149425291,
+    "z": 2000,
+    "height": 594.02298850574709,
     "width": 1856,
-    "height": 412.2,
-    "z": 11000,
     "tabOrder": 544
   },
   "visual": {
@@ -28,7 +28,8 @@
               },
               "queryRef": "Intune Enrollment Failure Evidence.Failure Reason",
               "nativeQueryRef": "Failure Reason",
-              "displayName": "Failure Reason"
+              "displayName": "Failure Reason",
+              "active": true
             },
             {
               "field": {
@@ -43,7 +44,8 @@
               },
               "queryRef": "Intune Enrollment Failure Evidence.Failure Category",
               "nativeQueryRef": "Failure Category",
-              "displayName": "Failure Category"
+              "displayName": "Failure Category",
+              "active": true
             },
             {
               "field": {
@@ -58,7 +60,8 @@
               },
               "queryRef": "Intune Enrollment Failure Evidence.Operating System",
               "nativeQueryRef": "Operating System",
-              "displayName": "Operating System"
+              "displayName": "Operating System",
+              "active": true
             },
             {
               "field": {
@@ -73,7 +76,8 @@
               },
               "queryRef": "Intune Enrollment Failure Evidence.Source Status UTC",
               "nativeQueryRef": "Source Status UTC",
-              "displayName": "Source Status UTC"
+              "displayName": "Source Status UTC",
+              "active": true
             },
             {
               "field": {
@@ -88,7 +92,8 @@
               },
               "queryRef": "Intune Enrollment Failure Evidence.Source Status Time Basis",
               "nativeQueryRef": "Source Status Time Basis",
-              "displayName": "Source Status Time Basis"
+              "displayName": "Source Status Time Basis",
+              "active": true
             },
             {
               "field": {
@@ -103,7 +108,8 @@
               },
               "queryRef": "Intune Enrollment Failure Evidence.Inventory Match",
               "nativeQueryRef": "Inventory Match",
-              "displayName": "Inventory Match"
+              "displayName": "Inventory Match",
+              "active": true
             },
             {
               "field": {
@@ -118,22 +124,8 @@
               },
               "queryRef": "Intune Enrollment Failure Evidence.Managed Device Identifier",
               "nativeQueryRef": "Managed Device Identifier",
-              "displayName": "Managed Device Identifier"
-            },
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Intune Enrollment Failure Evidence"
-                    }
-                  },
-                  "Property": "Device ID"
-                }
-              },
-              "queryRef": "Intune Enrollment Failure Evidence.Device ID",
-              "nativeQueryRef": "Device ID",
-              "displayName": "Device ID"
+              "displayName": "Managed Device Identifier",
+              "active": true
             },
             {
               "field": {
@@ -148,7 +140,24 @@
               },
               "queryRef": "Intune Enrollment Failure Evidence.Source Record",
               "nativeQueryRef": "Source Record",
-              "displayName": "Source Record"
+              "displayName": "Source Record",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Intune Enrollment Failure Evidence"
+                    }
+                  },
+                  "Property": "Device ID"
+                }
+              },
+              "queryRef": "Intune Enrollment Failure Evidence.Device ID",
+              "nativeQueryRef": "Device ID",
+              "displayName": "Device ID",
+              "active": true
             }
           ]
         }
@@ -158,13 +167,6 @@
       "columnHeaders": [
         {
           "properties": {
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -176,6 +178,20 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -202,9 +218,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -303,7 +326,325 @@
             "metadata": "Intune Enrollment Failure Evidence.Source Status UTC"
           }
         }
-      ]
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Intune Enrollment Failure Evidence.Failure Reason"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Enrollment Failure Evidence.Failure Category"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Enrollment Failure Evidence.Operating System"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Enrollment Failure Evidence.Source Status UTC"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Enrollment Failure Evidence.Source Status Time Basis"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Enrollment Failure Evidence.Inventory Match"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Enrollment Failure Evidence.Managed Device Identifier"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Enrollment Failure Evidence.Source Record"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Enrollment Failure Evidence.Device ID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -312,7 +653,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography \u00b7 selected evidence'"
+                  "Value": "'Geography · selected evidence'"
                 }
               }
             }
@@ -332,7 +673,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Reported enrollment failures \u00b7 events, not distinct physical devices'"
+                  "Value": "'Reported enrollment failures · events, not distinct physical devices'"
                 }
               }
             },
@@ -421,7 +762,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

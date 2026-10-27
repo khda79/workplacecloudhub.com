@@ -1,0 +1,524 @@
+/// Observed findings at tenant and Finding Key grain. Disconnected audit fact; includes all account populations. Blank population is explicitly Not classified. Severity Blocker alone feeds migration blocking.
+table 'Hybrid Identity Findings'
+	lineageTag: 96e4d461-34ff-4863-be3d-62281948b01b
+
+	/// Findings, not distinct accounts. Unavailable source is BLANK; valid empty is zero.
+	measure 'Hybrid Identity Findings Count' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Hybrid Identity Findings", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(COUNTROWS('Hybrid Identity Findings'),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 5f70fe54-f78f-4762-936b-b95d8cd8cf39
+
+	/// Distinct nonblank AD account GUIDs. Unavailable source is BLANK; valid empty is zero.
+	measure 'Hybrid Identity Accounts' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Hybrid Identity Findings", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(DISTINCTCOUNT('Hybrid Identity Findings'[AD Object GUID]), KEEPFILTERS('Hybrid Identity Findings'[AD Object GUID] <> BLANK())),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 04a313c4-216d-425b-bb4d-55506489146a
+
+	/// Blocker findings, not accounts. Unavailable source is BLANK; valid empty is zero.
+	measure 'Hybrid Identity Blocker Findings' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Hybrid Identity Findings", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Hybrid Identity Findings'), KEEPFILTERS('Hybrid Identity Findings'[Severity] = "Blocker")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 6c170e31-7dec-473e-bcb2-8d393082c285
+
+	/// Findings for HYB-021. Unavailable source is BLANK; valid empty is zero.
+	measure 'Hybrid Identity HYB-021' = IF(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Table Name] = "Hybrid Identity Findings", 'Readiness Source Status'[Source Available] = TRUE()) = 1,COALESCE(CALCULATE(COUNTROWS('Hybrid Identity Findings'), KEEPFILTERS('Hybrid Identity Findings'[Rule ID] = "HYB-021")),0),BLANK())
+		formatString: #,0
+		displayFolder: Readiness | Validation
+		lineageTag: 2ce34d0d-912e-4a9c-bd07-a97eba713bee
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Identity Row In Scope' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Hybrid Identity Findings'[Backlog Country]),NOT _cf || 'Hybrid Identity Findings'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Hybrid Identity Findings'[Backlog AD Domain]),NOT _df || 'Hybrid Identity Findings'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Hybrid Identity Findings',(_cf && (ISBLANK('Hybrid Identity Findings'[Backlog Country]) || 'Hybrid Identity Findings'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Hybrid Identity Findings'[Backlog AD Domain]) || 'Hybrid Identity Findings'[Backlog AD Domain]="Unknown")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(COUNTROWS('Hybrid Identity Findings')>0,1,0)),KEEPFILTERS(_missing)),CALCULATE((IF(COUNTROWS('Hybrid Identity Findings')>0,1,0)),KEEPFILTERS(TREATAS(_ck,'Hybrid Identity Findings'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Hybrid Identity Findings'[Backlog AD Domain]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: d79a12ab-e7d7-5cdf-896e-bbdb50ff2184
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Identity Findings' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Hybrid Identity Findings'[Backlog Country]),NOT _cf || 'Hybrid Identity Findings'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Hybrid Identity Findings'[Backlog AD Domain]),NOT _df || 'Hybrid Identity Findings'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Hybrid Identity Findings',(_cf && (ISBLANK('Hybrid Identity Findings'[Backlog Country]) || 'Hybrid Identity Findings'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Hybrid Identity Findings'[Backlog AD Domain]) || 'Hybrid Identity Findings'[Backlog AD Domain]="Unknown")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Hybrid Identity Findings",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((COUNTROWS('Hybrid Identity Findings')),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Hybrid Identity Findings",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((COUNTROWS('Hybrid Identity Findings')),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Hybrid Identity Findings'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Hybrid Identity Findings'[Backlog AD Domain]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: adcd8dfd-1c6e-557c-9681-82c7c05857bc
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Hybrid Identity Review Findings' = IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Hybrid Identity Findings",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Hybrid Identity Findings'),KEEPFILTERS('Hybrid Identity Findings'[Severity]="Review"))),0),BLANK())
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 6a7c0323-4b56-5eba-90c8-ad044e0ec7bf
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Hybrid Identity Non-Blocker Findings' = IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Hybrid Identity Findings",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(COUNTROWS('Hybrid Identity Findings'),KEEPFILTERS('Hybrid Identity Findings'[Severity]<>"Blocker"))),0),BLANK())
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 206bf019-f861-5f78-a4b9-5408e7355610
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Identity Blocker Findings' = CALCULATE([Backlog Identity Findings],KEEPFILTERS('Hybrid Identity Findings'[Severity]="Blocker"))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: c4ae99b5-90e7-5523-a3e4-2b0eed763489
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Identity Review Findings' = CALCULATE([Backlog Identity Findings],KEEPFILTERS('Hybrid Identity Findings'[Severity]="Review"))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 533c2851-d464-5bce-ae85-814753cafb82
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Identity Non-Blocker Findings' = CALCULATE([Backlog Identity Findings],KEEPFILTERS('Hybrid Identity Findings'[Severity]<>"Blocker"))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 7551eeeb-e69f-54b1-ae7e-71682baa78c6
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Identity Accounts' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Hybrid Identity Findings'[Backlog Country]),NOT _cf || 'Hybrid Identity Findings'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Hybrid Identity Findings'[Backlog AD Domain]),NOT _df || 'Hybrid Identity Findings'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Hybrid Identity Findings',(_cf && (ISBLANK('Hybrid Identity Findings'[Backlog Country]) || 'Hybrid Identity Findings'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Hybrid Identity Findings'[Backlog AD Domain]) || 'Hybrid Identity Findings'[Backlog AD Domain]="Unknown")))
+			RETURN IF(SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")="Unassigned evidence",CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Hybrid Identity Findings",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Hybrid Identity Findings'[AD Object GUID]),KEEPFILTERS('Hybrid Identity Findings'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(_missing)),CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Hybrid Identity Findings",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((CALCULATE(DISTINCTCOUNT('Hybrid Identity Findings'[AD Object GUID]),KEEPFILTERS('Hybrid Identity Findings'[AD Object GUID]<>BLANK()))),0),BLANK())),KEEPFILTERS(TREATAS(_ck,'Hybrid Identity Findings'[Backlog Country])),KEEPFILTERS(TREATAS(_dk,'Hybrid Identity Findings'[Backlog AD Domain]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: a4789020-a8af-52ac-9aa1-6451b0f71bf7
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Identity Unattributable Findings' =
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _countries=VALUES('Country Selection'[Source Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _ck=FILTER(VALUES('Hybrid Identity Findings'[Backlog Country]),NOT _cf || 'Hybrid Identity Findings'[Backlog Country] IN _countries)
+			VAR _dk=FILTER(VALUES('Hybrid Identity Findings'[Backlog AD Domain]),NOT _df || 'Hybrid Identity Findings'[Backlog AD Domain] IN _domains)
+			VAR _missing=FILTER('Hybrid Identity Findings',(_cf && (ISBLANK('Hybrid Identity Findings'[Backlog Country]) || 'Hybrid Identity Findings'[Backlog Country]="Unknown")) || (_df && (ISBLANK('Hybrid Identity Findings'[Backlog AD Domain]) || 'Hybrid Identity Findings'[Backlog AD Domain]="Unknown")))
+			RETURN CALCULATE((IF(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Hybrid Identity Findings",'Readiness Source Status'[Source Available]=TRUE())=1,COALESCE((COUNTROWS('Hybrid Identity Findings')),0),BLANK())),KEEPFILTERS(_missing))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: b89d36be-ebbc-54a0-b533-a31f7e47bdf0
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Blocker Definition' = "Blocker denotes a migration blocker according to the rule specification; it is not a daily incident priority."
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 2ad08dc8-44bf-50dc-a6ab-274e6b3de130
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Identity Coverage Text' = IF(NOT(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Hybrid Identity Findings",'Readiness Source Status'[Source Available]=TRUE())=1),"Identity evidence unavailable",FORMAT([Backlog Identity Findings],"#,##0")&" findings | "&FORMAT([Backlog Identity Accounts],"#,##0")&" distinct AD accounts | "&FORMAT([Backlog Identity Non-Blocker Findings],"#,##0")&" non-Blocker findings | "&FORMAT(CALCULATE([Backlog Identity Findings],KEEPFILTERS('Hybrid Identity Findings'[Backlog Country] IN {BLANK(),"Unknown",""})),"#,##0")&" without Country | "&FORMAT([Backlog Identity Unattributable Findings],"#,##0")&" not attributable to active scope - select Unassigned evidence")
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: d21ba01d-c438-5a5e-8cbe-a43e31350cb6
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog User Findings' =
+			VAR _accounts=SELECTCOLUMNS('Account Explorer Inventory',
+			"__A",LOWER(TRIM('Account Explorer Inventory'[Account Key])),
+			"__N",LOWER(TRIM('Account Explorer Inventory'[Native User Key])),
+			"__B",'Account Explorer Inventory'[Loaded Batch ID]&"",
+			"__T",'Account Explorer Inventory'[TenantKey]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD User Evidence'),
+			"__G",LOWER(TRIM('AD User Evidence'[ObjectGUID])),
+			"__N",LOWER(TRIM('AD User Evidence'[TenantUserKey])),
+			"__B",'AD User Evidence'[Loaded Batch ID]&"",
+			"__T",'AD User Evidence'[TenantKey]&"",
+			"__S",'AD User Evidence'[CloudMatchStatus]&"")
+			VAR _byGuid=FILTER(GROUPBY(_ad,[__G],[__B],[__T],"__Count",COUNTX(CURRENTGROUP(),1)),[__Count]=1)
+			VAR _byNative=FILTER(GROUPBY(FILTER(_ad,[__S]="Unique native SID"),[__N],[__B],[__T],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _direct=SELECTCOLUMNS(FILTER(_accounts,LEFT([__A],3)="ad:"),"__G",MID([__A],4,500),"__B",[__B],"__T",[__T])
+			VAR _cloud=SELECTCOLUMNS(FILTER(_accounts,LEFT([__A],3)<>"ad:" && LEN([__N])>0),"__N",[__N],"__B",[__B],"__T",[__T])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(NATURALINNERJOIN(_direct,_byGuid),NOT ISBLANK([__G])),"GUID",[__G],"Batch",[__B],"Tenant",[__T]),
+			SELECTCOLUMNS(FILTER(NATURALINNERJOIN(_cloud,_byNative),NOT ISBLANK([__G])),"GUID",[__G],"Batch",[__B],"Tenant",[__T]))
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Identity Findings],KEEPFILTERS(TREATAS(_keys,'Hybrid Identity Findings'[AD Object GUID],'Hybrid Identity Findings'[Loaded Batch ID],'Hybrid Identity Findings'[TenantKey]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 017fc6f1-6925-5084-9d9b-22ac180b34e6
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog User Blocker Findings' =
+			VAR _accounts=SELECTCOLUMNS('Account Explorer Inventory',
+			"__A",LOWER(TRIM('Account Explorer Inventory'[Account Key])),
+			"__N",LOWER(TRIM('Account Explorer Inventory'[Native User Key])),
+			"__B",'Account Explorer Inventory'[Loaded Batch ID]&"",
+			"__T",'Account Explorer Inventory'[TenantKey]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD User Evidence'),
+			"__G",LOWER(TRIM('AD User Evidence'[ObjectGUID])),
+			"__N",LOWER(TRIM('AD User Evidence'[TenantUserKey])),
+			"__B",'AD User Evidence'[Loaded Batch ID]&"",
+			"__T",'AD User Evidence'[TenantKey]&"",
+			"__S",'AD User Evidence'[CloudMatchStatus]&"")
+			VAR _byGuid=FILTER(GROUPBY(_ad,[__G],[__B],[__T],"__Count",COUNTX(CURRENTGROUP(),1)),[__Count]=1)
+			VAR _byNative=FILTER(GROUPBY(FILTER(_ad,[__S]="Unique native SID"),[__N],[__B],[__T],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _direct=SELECTCOLUMNS(FILTER(_accounts,LEFT([__A],3)="ad:"),"__G",MID([__A],4,500),"__B",[__B],"__T",[__T])
+			VAR _cloud=SELECTCOLUMNS(FILTER(_accounts,LEFT([__A],3)<>"ad:" && LEN([__N])>0),"__N",[__N],"__B",[__B],"__T",[__T])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(NATURALINNERJOIN(_direct,_byGuid),NOT ISBLANK([__G])),"GUID",[__G],"Batch",[__B],"Tenant",[__T]),
+			SELECTCOLUMNS(FILTER(NATURALINNERJOIN(_cloud,_byNative),NOT ISBLANK([__G])),"GUID",[__G],"Batch",[__B],"Tenant",[__T]))
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Identity Blocker Findings],KEEPFILTERS(TREATAS(_keys,'Hybrid Identity Findings'[AD Object GUID],'Hybrid Identity Findings'[Loaded Batch ID],'Hybrid Identity Findings'[TenantKey]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: c41b5dc0-9dd4-5f05-b1c8-f274271f2dbc
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog User Review Findings' =
+			VAR _accounts=SELECTCOLUMNS('Account Explorer Inventory',
+			"__A",LOWER(TRIM('Account Explorer Inventory'[Account Key])),
+			"__N",LOWER(TRIM('Account Explorer Inventory'[Native User Key])),
+			"__B",'Account Explorer Inventory'[Loaded Batch ID]&"",
+			"__T",'Account Explorer Inventory'[TenantKey]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD User Evidence'),
+			"__G",LOWER(TRIM('AD User Evidence'[ObjectGUID])),
+			"__N",LOWER(TRIM('AD User Evidence'[TenantUserKey])),
+			"__B",'AD User Evidence'[Loaded Batch ID]&"",
+			"__T",'AD User Evidence'[TenantKey]&"",
+			"__S",'AD User Evidence'[CloudMatchStatus]&"")
+			VAR _byGuid=FILTER(GROUPBY(_ad,[__G],[__B],[__T],"__Count",COUNTX(CURRENTGROUP(),1)),[__Count]=1)
+			VAR _byNative=FILTER(GROUPBY(FILTER(_ad,[__S]="Unique native SID"),[__N],[__B],[__T],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _direct=SELECTCOLUMNS(FILTER(_accounts,LEFT([__A],3)="ad:"),"__G",MID([__A],4,500),"__B",[__B],"__T",[__T])
+			VAR _cloud=SELECTCOLUMNS(FILTER(_accounts,LEFT([__A],3)<>"ad:" && LEN([__N])>0),"__N",[__N],"__B",[__B],"__T",[__T])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(NATURALINNERJOIN(_direct,_byGuid),NOT ISBLANK([__G])),"GUID",[__G],"Batch",[__B],"Tenant",[__T]),
+			SELECTCOLUMNS(FILTER(NATURALINNERJOIN(_cloud,_byNative),NOT ISBLANK([__G])),"GUID",[__G],"Batch",[__B],"Tenant",[__T]))
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Identity Review Findings],KEEPFILTERS(TREATAS(_keys,'Hybrid Identity Findings'[AD Object GUID],'Hybrid Identity Findings'[Loaded Batch ID],'Hybrid Identity Findings'[TenantKey]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: afe9e75d-6130-562e-a49c-e20b5f1848b2
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog User Row In Scope' =
+			VAR _accounts=SELECTCOLUMNS('Account Explorer Inventory',
+			"__A",LOWER(TRIM('Account Explorer Inventory'[Account Key])),
+			"__N",LOWER(TRIM('Account Explorer Inventory'[Native User Key])),
+			"__B",'Account Explorer Inventory'[Loaded Batch ID]&"",
+			"__T",'Account Explorer Inventory'[TenantKey]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD User Evidence'),
+			"__G",LOWER(TRIM('AD User Evidence'[ObjectGUID])),
+			"__N",LOWER(TRIM('AD User Evidence'[TenantUserKey])),
+			"__B",'AD User Evidence'[Loaded Batch ID]&"",
+			"__T",'AD User Evidence'[TenantKey]&"",
+			"__S",'AD User Evidence'[CloudMatchStatus]&"")
+			VAR _byGuid=FILTER(GROUPBY(_ad,[__G],[__B],[__T],"__Count",COUNTX(CURRENTGROUP(),1)),[__Count]=1)
+			VAR _byNative=FILTER(GROUPBY(FILTER(_ad,[__S]="Unique native SID"),[__N],[__B],[__T],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _direct=SELECTCOLUMNS(FILTER(_accounts,LEFT([__A],3)="ad:"),"__G",MID([__A],4,500),"__B",[__B],"__T",[__T])
+			VAR _cloud=SELECTCOLUMNS(FILTER(_accounts,LEFT([__A],3)<>"ad:" && LEN([__N])>0),"__N",[__N],"__B",[__B],"__T",[__T])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(NATURALINNERJOIN(_direct,_byGuid),NOT ISBLANK([__G])),"GUID",[__G],"Batch",[__B],"Tenant",[__T]),
+			SELECTCOLUMNS(FILTER(NATURALINNERJOIN(_cloud,_byNative),NOT ISBLANK([__G])),"GUID",[__G],"Batch",[__B],"Tenant",[__T]))
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Identity Row In Scope],KEEPFILTERS(TREATAS(_keys,'Hybrid Identity Findings'[AD Object GUID],'Hybrid Identity Findings'[Loaded Batch ID],'Hybrid Identity Findings'[TenantKey]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 696e30c6-9512-5c27-9af1-58390a06c4f1
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog User Evidence Note' =
+			VAR _accounts=SELECTCOLUMNS('Account Explorer Inventory',
+			"__A",LOWER(TRIM('Account Explorer Inventory'[Account Key])),
+			"__N",LOWER(TRIM('Account Explorer Inventory'[Native User Key])),
+			"__B",'Account Explorer Inventory'[Loaded Batch ID]&"",
+			"__T",'Account Explorer Inventory'[TenantKey]&"")
+			VAR _ad=SELECTCOLUMNS(ALL('AD User Evidence'),
+			"__G",LOWER(TRIM('AD User Evidence'[ObjectGUID])),
+			"__N",LOWER(TRIM('AD User Evidence'[TenantUserKey])),
+			"__B",'AD User Evidence'[Loaded Batch ID]&"",
+			"__T",'AD User Evidence'[TenantKey]&"",
+			"__S",'AD User Evidence'[CloudMatchStatus]&"")
+			VAR _byGuid=FILTER(GROUPBY(_ad,[__G],[__B],[__T],"__Count",COUNTX(CURRENTGROUP(),1)),[__Count]=1)
+			VAR _byNative=FILTER(GROUPBY(FILTER(_ad,[__S]="Unique native SID"),[__N],[__B],[__T],
+			"__Count",COUNTX(CURRENTGROUP(),1),"__G",MAXX(CURRENTGROUP(),[__G])),[__Count]=1 && LEN([__N])>0)
+			VAR _direct=SELECTCOLUMNS(FILTER(_accounts,LEFT([__A],3)="ad:"),"__G",MID([__A],4,500),"__B",[__B],"__T",[__T])
+			VAR _cloud=SELECTCOLUMNS(FILTER(_accounts,LEFT([__A],3)<>"ad:" && LEN([__N])>0),"__N",[__N],"__B",[__B],"__T",[__T])
+			VAR _keys=UNION(
+			SELECTCOLUMNS(FILTER(NATURALINNERJOIN(_direct,_byGuid),NOT ISBLANK([__G])),"GUID",[__G],"Batch",[__B],"Tenant",[__T]),
+			SELECTCOLUMNS(FILTER(NATURALINNERJOIN(_cloud,_byNative),NOT ISBLANK([__G])),"GUID",[__G],"Batch",[__B],"Tenant",[__T]))
+			VAR _resolved=COALESCE(COUNTROWS(_keys),0)
+			VAR _selected=COALESCE(COUNTROWS('Account Explorer Inventory'),0)
+			RETURN IF(NOT(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Hybrid Identity Findings",'Readiness Source Status'[Source Available]=TRUE())=1),
+			"Identity evidence unavailable",FORMAT(_resolved,"#,##0")&" resolved native account rows | "&FORMAT(_selected-_resolved,"#,##0")&" unresolved rows | no findings is meaningful only for a resolved account")
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: c7680ef0-c86d-57d8-9571-2ad35d406159
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Exchange Findings' =
+			VAR _keys=SELECTCOLUMNS('Mailbox Migration Inventory',"GUID",'Mailbox Migration Inventory'[Object GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Identity Findings],KEEPFILTERS(TREATAS(_keys,'Hybrid Identity Findings'[AD Object GUID],'Hybrid Identity Findings'[Loaded Batch ID]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 92e43641-39d0-5fe8-b4f0-4597f258c336
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Exchange Blocker Findings' =
+			VAR _keys=SELECTCOLUMNS('Mailbox Migration Inventory',"GUID",'Mailbox Migration Inventory'[Object GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Identity Blocker Findings],KEEPFILTERS(TREATAS(_keys,'Hybrid Identity Findings'[AD Object GUID],'Hybrid Identity Findings'[Loaded Batch ID]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 0b656852-fcf2-5ee4-936d-8f3581da960c
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Exchange Review Findings' =
+			VAR _keys=SELECTCOLUMNS('Mailbox Migration Inventory',"GUID",'Mailbox Migration Inventory'[Object GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Identity Review Findings],KEEPFILTERS(TREATAS(_keys,'Hybrid Identity Findings'[AD Object GUID],'Hybrid Identity Findings'[Loaded Batch ID]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 40641493-e2b5-544a-a5b5-f6cc9cc50d4a
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Exchange Row In Scope' =
+			VAR _keys=SELECTCOLUMNS('Mailbox Migration Inventory',"GUID",'Mailbox Migration Inventory'[Object GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN IF(COUNTROWS(_keys)=0,BLANK(),CALCULATE([Backlog Identity Row In Scope],KEEPFILTERS(TREATAS(_keys,'Hybrid Identity Findings'[AD Object GUID],'Hybrid Identity Findings'[Loaded Batch ID]))))
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 0f8404d9-3519-5ff3-a5e4-8cd80283f962
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Exchange Evidence Note' =
+			VAR _keys=SELECTCOLUMNS('Mailbox Migration Inventory',"GUID",'Mailbox Migration Inventory'[Object GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN IF(NOT(CALCULATE(COUNTROWS('Readiness Source Status'),REMOVEFILTERS('Readiness Source Status'),'Readiness Source Status'[Table Name]="Hybrid Identity Findings",'Readiness Source Status'[Source Available]=TRUE())=1),"Identity evidence unavailable",IF(COUNTROWS(_keys)=0,"Native account link unresolved; no absence-of-findings claim","Selected native account context | no findings means no observation in the available source"))
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 559d1fc8-0b67-5517-b8ac-7c424457d38a
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Exchange Unavailable Mailboxes' = COALESCE(COUNTROWS(FILTER('Mailbox Migration Inventory',CONTAINSSTRING('Mailbox Migration Inventory'[Risk Reasons],"Identity evidence unavailable"))),0)
+		formatString: #,##0
+		displayFolder: Remediation Backlog
+		lineageTag: 8eb94d39-da55-5831-8e36-0db0a63ec5b7
+
+	/// Scoped lot 1b evidence measure. Counts retain unavailable-source semantics and explicit attribution gaps.
+	measure 'Backlog Identity Scope Text' = "Scope: "&IF(ISFILTERED('Country Selection'),CONCATENATEX(VALUES('Country Selection'[Country]),'Country Selection'[Country],", "),"All countries")&" | "&IF(ISFILTERED('Daily Domain'),CONCATENATEX(VALUES('Daily Domain'[Domain]),'Daily Domain'[Domain],", "),"All domains")&" | "&SELECTEDVALUE('Backlog Attribution Selection'[Mode],"In scope")
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: 0f2e6144-29e2-55b3-b829-3162df617e97
+
+	measure 'Backlog Exchange Identity Evidence Tooltip' = "Identity evidence unavailable is a non-blocking risk reason when HybridIdentityFindings.csv is unavailable. It requires evidence review and never creates a migration blocker. License coverage is separate and never changes Exchange migration status."
+		formatString: @
+		displayFolder: Remediation Backlog
+		lineageTag: e29a63fa-f0cf-5169-956c-a60b0e46791a
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 846c2b41-6f8c-460c-9d04-620422dc0b8d
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'Finding Key'
+		dataType: string
+		isHidden
+		lineageTag: 1cbfe8e1-0ac9-4e09-b2a1-2bbad66156f3
+		summarizeBy: none
+		sourceColumn: Finding Key
+
+	column 'AD Object GUID'
+		dataType: string
+		isHidden
+		lineageTag: 656689c6-2bd8-4912-8032-63efd071573a
+		summarizeBy: none
+		sourceColumn: AD Object GUID
+
+	column 'Entra Object ID'
+		dataType: string
+		isHidden
+		lineageTag: e6d3edef-df80-4d5b-8e8c-45f5b45dfe60
+		summarizeBy: none
+		sourceColumn: Entra Object ID
+
+	column 'Exchange GUID'
+		dataType: string
+		isHidden
+		lineageTag: dcdac005-9961-4643-a668-a662c609d024
+		summarizeBy: none
+		sourceColumn: Exchange GUID
+
+	column 'User Principal Name'
+		dataType: string
+		lineageTag: 34448f1d-1d5d-432c-a941-9b668af31e51
+		summarizeBy: none
+		sourceColumn: User Principal Name
+
+	column 'Primary SMTP Address'
+		dataType: string
+		lineageTag: 875dcf67-e911-4feb-9839-c36771d300f5
+		summarizeBy: none
+		sourceColumn: Primary SMTP Address
+
+	column 'Recipient Type'
+		dataType: string
+		lineageTag: 9bdc5f7a-1671-4b5c-a1bf-7fa6a442387e
+		summarizeBy: none
+		sourceColumn: Recipient Type
+
+	column 'Mailbox Hosting'
+		dataType: string
+		lineageTag: f25f3cc3-6849-4ffc-a943-9337991d11a6
+		summarizeBy: none
+		sourceColumn: Mailbox Hosting
+
+	column 'Rule ID'
+		dataType: string
+		lineageTag: 46ddef1f-b3e0-4c8a-8295-b13ee6db610e
+		summarizeBy: none
+		sourceColumn: Rule ID
+
+	column 'Legacy Issue Number'
+		dataType: int64
+		lineageTag: 19beff5d-e19a-4300-b4f6-9c83e03f7583
+		summarizeBy: none
+		sourceColumn: Legacy Issue Number
+
+	column 'Rule Family'
+		dataType: string
+		lineageTag: 41f33d8b-cd88-4db5-b1bb-1ef0e322175e
+		summarizeBy: none
+		sourceColumn: Rule Family
+
+	column Severity
+		dataType: string
+		lineageTag: 1031fd42-7e73-47e7-a710-e3c961eb0184
+		summarizeBy: none
+		sourceColumn: Severity
+		sortByColumn: 'Severity Sort'
+
+	column 'Is Blocker'
+		dataType: boolean
+		lineageTag: 55cff175-5dbf-4de8-aed6-e59f7ae118b7
+		summarizeBy: none
+		sourceColumn: Is Blocker
+
+	column 'Observed Value'
+		dataType: string
+		lineageTag: e9eabe36-878a-44e5-86d2-38b9f97d502d
+		summarizeBy: none
+		sourceColumn: Observed Value
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 6e79de76-38b7-4476-8145-48b733e82f51
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+	column 'Account Population'
+		dataType: string
+		lineageTag: 44d04904-1bfc-45a9-90ff-e2ad5462eba8
+		summarizeBy: none
+		sourceColumn: Account Population
+
+	column 'Account Population Source'
+		dataType: string
+		lineageTag: 5c34da11-0286-43a3-a9d0-dd2bf5984423
+		summarizeBy: none
+		sourceColumn: Account Population Source
+
+	column 'Account Classification Rule Version'
+		dataType: string
+		lineageTag: 895f499b-36bb-4267-9333-485acc93c6c2
+		summarizeBy: none
+		sourceColumn: Account Classification Rule Version
+
+	column 'Rule Version'
+		dataType: string
+		lineageTag: d6c3551e-2aa0-4475-b619-f6badacd1f61
+		summarizeBy: none
+		sourceColumn: Rule Version
+
+	column 'Evidence Date'
+		dataType: dateTime
+		lineageTag: 6d453e79-70d9-4870-8353-c62286b57bee
+		summarizeBy: none
+		sourceColumn: Evidence Date
+
+	column 'Account Population Label'
+		dataType: string
+		lineageTag: c54f41d6-ef6a-442a-906c-644266a79d3c
+		sourceColumn: Account Population Label
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 6eac2cc0-047b-45d4-96b8-7f7ffd58275e
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Backlog Country'
+		dataType: string
+		lineageTag: e8f967cd-7fc8-51f5-b417-5ea8f7cbd97f
+		summarizeBy: none
+		sourceColumn: Backlog Country
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Backlog AD Domain'
+		dataType: string
+		lineageTag: 4ad495d0-fa78-5cd4-b5c8-f11ddf5d469b
+		summarizeBy: none
+		sourceColumn: Backlog AD Domain
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Country Match State'
+		dataType: string
+		lineageTag: 6ea85fe5-e054-5b09-b8d8-b539f6df72cd
+		summarizeBy: none
+		sourceColumn: Country Match State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Domain Match State'
+		dataType: string
+		lineageTag: 85ac90e3-702e-5bb1-a4db-5988c66364a8
+		summarizeBy: none
+		sourceColumn: Domain Match State
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Rule Observation'
+		dataType: string
+		lineageTag: 7d2e6a11-2c0b-5f96-84e8-2c47424188e9
+		summarizeBy: none
+		sourceColumn: Rule Observation
+
+	/// Lot 1b operational evidence context; unknown attribution stays explicit.
+	column 'Severity Sort'
+		dataType: int64
+		isHidden
+		lineageTag: 22eb995d-1794-5890-a982-2685c30686f0
+		summarizeBy: none
+		sourceColumn: Severity Sort
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Hybrid Identity Findings' = m
+		mode: import
+		source =
+				let
+				 Base=(let
+				    R=CreatePreparedReaders(),
+				    S=R[GetReadinessSource]("HybridIdentityFindings.csv"),
+				    Labels=Table.AddColumn(S[Rows],"Account Population Label", each if [Account Population]=null or Text.Trim([Account Population])="" then "Not classified" else [Account Population],type text)
+				in R[Finish](Labels)),
+				 K=CreateBacklogTools(CreatePreparedReaders()),
+				 A=K[Index](K[Read]("ADUserSource.csv",{"TenantKey","ObjectGUID","DomainName"}),"ObjectGUID"),
+				 C=K[Index](K[Read]("AllAccountsEvidence.csv",{"TenantKey","Account Key","Country"}),"Account Key"),
+				 Added=Table.AddColumn(Base,"__context",each
+				  let AD=K[Match](A,[TenantKey],[AD Object GUID],[Loaded Batch ID]), Co=K[Match](C,[TenantKey],"ad:"&K[Key]([AD Object GUID]),[Loaded Batch ID]),
+				      SeverityOrder=List.PositionOf({"Blocker","High","Medium","Review","Info"},[Severity])
+				  in [#"Backlog Country"=K[Field](Co,"Country"),#"Backlog AD Domain"=K[Field](AD,"DomainName"),#"Country Match State"=Co[State],#"Domain Match State"=AD[State],
+				      #"Rule Observation"=[Rule ID]&" - "&(if [Observed Value]=null then "" else [Observed Value]),#"Severity Sort"=if SeverityOrder<0 then 9 else SeverityOrder],type record),
+				 Expanded=Table.ExpandRecordColumn(Added,"__context",{"Backlog Country","Backlog AD Domain","Country Match State","Domain Match State","Rule Observation","Severity Sort"})
+				in Table.TransformColumnTypes(Expanded, {{"Severity Sort", Int64.Type}})

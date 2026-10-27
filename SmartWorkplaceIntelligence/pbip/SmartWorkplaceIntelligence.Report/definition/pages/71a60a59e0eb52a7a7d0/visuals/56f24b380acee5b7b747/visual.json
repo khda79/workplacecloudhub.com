@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "56f24b380acee5b7b747",
   "position": {
-    "x": 32,
-    "y": 336,
-    "width": 1856,
-    "height": 120,
-    "z": 114,
-    "tabOrder": 261
+    "x": 688,
+    "y": 320,
+    "z": 2000,
+    "height": 92.92526690391459,
+    "width": 1200,
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "cardVisual",
@@ -15,21 +15,6 @@
       "queryState": {
         "Data": {
           "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Exchange Hybrid Free Busy Summary"
-                    }
-                  },
-                  "Property": "Exchange Free Busy Status"
-                }
-              },
-              "queryRef": "Exchange Hybrid Free Busy Summary.Exchange Free Busy Status",
-              "nativeQueryRef": "Free/busy",
-              "displayName": "Free/busy"
-            },
             {
               "field": {
                 "Measure": {
@@ -123,7 +108,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "28D"
+                  "Value": "20D"
                 }
               }
             },
@@ -171,7 +156,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -290,7 +275,28 @@
             "paddingUniform": {
               "expr": {
                 "Literal": {
-                  "Value": "0D"
+                  "Value": "0L"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "5L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }
@@ -335,6 +341,13 @@
               "expr": {
                 "Literal": {
                   "Value": "8D"
+                }
+              }
+            },
+            "paddingUniform": {
+              "expr": {
+                "Literal": {
+                  "Value": "8L"
                 }
               }
             }

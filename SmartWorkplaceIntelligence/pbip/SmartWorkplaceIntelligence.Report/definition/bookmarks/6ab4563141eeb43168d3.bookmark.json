@@ -1,6 +1,6 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
-  "displayName": "Reconciliation signals",
+  "displayName": "Reconciliation risks",
   "name": "6ab4563141eeb43168d3",
   "options": {
     "applyOnlyToTargetVisuals": true,
@@ -17,7 +17,13 @@
       "00a6d4dc0889b06e7f1c",
       "ba1804eb6c006fa575b3",
       "291d06b5cc27286be869",
-      "9b19c8692d08d5e85eb7"
+      "9b19c8692d08d5e85eb7",
+      "5b28cb87511d199d7561",
+      "dd219d436d1475e2b913",
+      "eb2c689d1056a90410cc",
+      "df51902478b4fd41a230",
+      "19535ba7fadbd05595eb",
+      "a9ab0be226538f3ee70c"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -27,7 +33,46 @@
     "activeSection": "6665fb035f086688c22f",
     "sections": {
       "6665fb035f086688c22f": {
-        "visualContainers": {},
+        "visualContainers": {
+          "5b28cb87511d199d7561": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "dd219d436d1475e2b913": {
+            "singleVisual": {}
+          },
+          "eb2c689d1056a90410cc": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "df51902478b4fd41a230": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "19535ba7fadbd05595eb": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "a9ab0be226538f3ee70c": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
         "visualContainerGroups": {
           "00a6d4dc0889b06e7f1c": {
             "isHidden": true

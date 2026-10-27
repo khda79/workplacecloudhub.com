@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "67d515f7784638a497cc",
   "position": {
     "x": 32,
-    "y": 291.5,
-    "width": 1856,
-    "height": 702.5,
+    "y": 320,
     "z": 111,
+    "height": 680,
+    "width": 1856,
     "tabOrder": 677
   },
   "visual": {
@@ -20,56 +20,364 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
                   "Property": "Display Name"
                 }
               },
-              "queryRef": "Mailbox Evidence.Display Name",
-              "nativeQueryRef": "Display Name"
+              "queryRef": "Mailbox Exploration Inventory.Display Name",
+              "nativeQueryRef": "Display Name",
+              "active": true
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
                   "Property": "Mailbox Size GB"
                 }
               },
-              "queryRef": "Mailbox Evidence.Mailbox Size GB",
-              "nativeQueryRef": "Size (GB)"
+              "queryRef": "Mailbox Exploration Inventory.Mailbox Size GB",
+              "nativeQueryRef": "Size (GB)",
+              "active": true
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
                   "Property": "Archive State"
                 }
               },
-              "queryRef": "Mailbox Evidence.Archive State",
-              "nativeQueryRef": "Archive State"
+              "queryRef": "Mailbox Exploration Inventory.Archive State",
+              "nativeQueryRef": "Archive State",
+              "active": true
             },
             {
               "field": {
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Evidence"
+                      "Entity": "Mailbox Exploration Inventory"
                     }
                   },
                   "Property": "Archive Size GB"
                 }
               },
-              "queryRef": "Mailbox Evidence.Archive Size GB",
-              "nativeQueryRef": "Archive (GB)"
+              "queryRef": "Mailbox Exploration Inventory.Archive Size GB",
+              "nativeQueryRef": "Archive (GB)",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "User Principal Name"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.User Principal Name",
+              "nativeQueryRef": "User Principal Name",
+              "active": true,
+              "displayName": "User Principal Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "SAM Account Name"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.SAM Account Name",
+              "nativeQueryRef": "SAM Account Name",
+              "active": true,
+              "displayName": "SAM Account Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Recipient Type"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Recipient Type",
+              "nativeQueryRef": "Recipient Type",
+              "active": true,
+              "displayName": "Recipient Type"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "M365 Licenses"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.M365 Licenses",
+              "nativeQueryRef": "M365 Licenses",
+              "active": true,
+              "displayName": "M365 Licenses"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "AD Domain"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.AD Domain",
+              "nativeQueryRef": "AD Domain",
+              "active": true,
+              "displayName": "AD Domain"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "AD Account State"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.AD Account State",
+              "nativeQueryRef": "AD Account State",
+              "active": true,
+              "displayName": "AD Account State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Entra Account State"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Entra Account State",
+              "nativeQueryRef": "Entra Account State",
+              "active": true,
+              "displayName": "Entra Account State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Workforce Persona"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Workforce Persona",
+              "nativeQueryRef": "Workforce Persona",
+              "active": true,
+              "displayName": "Workforce Persona"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Mailbox Type Group"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Mailbox Type Group",
+              "nativeQueryRef": "Mailbox Type Group",
+              "active": true,
+              "displayName": "Mailbox Type Group"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Size Band"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Size Band",
+              "nativeQueryRef": "Size Band",
+              "active": true,
+              "displayName": "Size Band"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Stats Collected UTC"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Stats Collected UTC",
+              "nativeQueryRef": "Stats Collected UTC",
+              "active": true,
+              "displayName": "Stats Collected UTC"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Stats Collection Qualification"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Stats Collection Qualification",
+              "nativeQueryRef": "Stats Collection Qualification",
+              "active": true,
+              "displayName": "Stats Collection Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Stats Source"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Stats Source",
+              "nativeQueryRef": "Stats Source",
+              "active": true,
+              "displayName": "Stats Source"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Export Collected UTC"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Export Collected UTC",
+              "nativeQueryRef": "Export Collected UTC",
+              "active": true,
+              "displayName": "Export Collected UTC"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Server Name"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Server Name",
+              "nativeQueryRef": "Server Name",
+              "active": true,
+              "displayName": "Server Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Database"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Database",
+              "nativeQueryRef": "Database",
+              "active": true,
+              "displayName": "Database"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Identity Qualification"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Identity Qualification",
+              "nativeQueryRef": "Identity Qualification",
+              "active": true,
+              "displayName": "Identity Qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Raw Detail State"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Raw Detail State",
+              "nativeQueryRef": "Raw Detail State",
+              "active": true,
+              "displayName": "Raw Detail State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Delegation Evidence"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Delegation Evidence",
+              "nativeQueryRef": "Delegation evidence",
+              "active": true,
+              "displayName": "Delegation evidence"
             }
           ]
         }
@@ -96,7 +404,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -130,9 +438,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -145,7 +460,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -226,7 +541,7 @@
       "columnFormatting": [
         {
           "selector": {
-            "metadata": "Mailbox Evidence.Display Name"
+            "metadata": "Mailbox Exploration Inventory.Display Name"
           },
           "properties": {
             "alignment": {
@@ -261,7 +576,7 @@
         },
         {
           "selector": {
-            "metadata": "Mailbox Evidence.Mailbox Size GB"
+            "metadata": "Mailbox Exploration Inventory.Mailbox Size GB"
           },
           "properties": {
             "alignment": {
@@ -296,7 +611,7 @@
         },
         {
           "selector": {
-            "metadata": "Mailbox Evidence.Archive State"
+            "metadata": "Mailbox Exploration Inventory.Archive State"
           },
           "properties": {
             "alignment": {
@@ -331,7 +646,672 @@
         },
         {
           "selector": {
-            "metadata": "Mailbox Evidence.Archive Size GB"
+            "metadata": "Mailbox Exploration Inventory.Archive Size GB"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.User Principal Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.SAM Account Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Recipient Type"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.M365 Licenses"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.AD Domain"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.AD Account State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Entra Account State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Workforce Persona"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Mailbox Type Group"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Size Band"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Stats Collected UTC"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Stats Collection Qualification"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Stats Source"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Export Collected UTC"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Server Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Database"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Identity Qualification"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Raw Detail State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Mailbox Exploration Inventory.Delegation Evidence"
           },
           "properties": {
             "alignment": {
@@ -364,7 +1344,8 @@
             }
           }
         }
-      ]
+      ],
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -373,7 +1354,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Archive and capacity \u00b7 selected evidence'"
+                  "Value": "'Archive and capacity · selected evidence'"
                 }
               }
             }
@@ -393,7 +1374,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Archive and capacity \u00b7 selected evidence'"
+                  "Value": "'Archive and capacity · selected evidence'"
                 }
               }
             },
@@ -493,7 +1474,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

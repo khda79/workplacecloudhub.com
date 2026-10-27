@@ -202,47 +202,47 @@ table 'AD Computer Evidence'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
-	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	/// Explicit source observation. Missing historical fields remain unknown.
 	column ModificationRaw
 		dataType: string
-		lineageTag: 7311294b-4359-4779-a21a-7f104985a8b9
+		lineageTag: a7751e3d-e480-49b7-821b-2d5a0121e181
 		summarizeBy: none
 		sourceColumn: ModificationRaw
 
-	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	/// Explicit source observation. Missing historical fields remain unknown.
 	column ModificationUtcDateTime
 		dataType: dateTime
 		isHidden
-		lineageTag: d09c27f7-3948-40be-99b7-00765e9688b9
+		lineageTag: f096206b-af9b-46c6-885f-22045bd92aef
 		summarizeBy: none
 		sourceColumn: ModificationUtcDateTime
 
-	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	/// Explicit source observation. Missing historical fields remain unknown.
 	column ModificationStatus
 		dataType: string
-		lineageTag: 150962d6-7e3c-40f1-af98-6626deafc520
+		lineageTag: b618bfc7-c78f-48e8-b595-b53a5e51d291
 		summarizeBy: none
 		sourceColumn: ModificationStatus
 
-	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	/// Explicit source observation. Missing historical fields remain unknown.
 	column PasswordExpired
 		dataType: boolean
 		isHidden
-		lineageTag: 1fdee1ed-4706-405c-a012-29f636929b89
+		lineageTag: 0f39439d-2522-4197-bbde-4b7b9877bc92
 		summarizeBy: none
 		sourceColumn: PasswordExpired
 
-	/// Explicit native source observation. Historical missing fields are null, never false or a substituted timestamp.
+	/// Explicit source observation. Missing historical fields remain unknown.
 	column PasswordExpiryStatus
 		dataType: string
-		lineageTag: 454d4493-8e24-45d9-adb6-0f217f316656
+		lineageTag: 8887878c-a99f-489a-a629-9eeb1384c3d0
 		summarizeBy: none
 		sourceColumn: PasswordExpiryStatus
 
 	/// Observed Boolean display with an explicit Unknown state. Technical Boolean alone must not be interpreted without source observation status.
 	column 'Password Expired (display)' = IF('AD Computer Evidence'[PasswordExpiryStatus]="Observed",IF('AD Computer Evidence'[PasswordExpired],"true","false"),"Unknown")
 		dataType: string
-		lineageTag: 34c0e606-9d1d-448a-9a94-48039ccfd63b
+		lineageTag: 5f8e8456-2669-407c-8e5c-8bd03b162696
 		summarizeBy: none
 
 	partition 'AD Computer Evidence' = m
@@ -265,3 +265,5 @@ table 'AD Computer Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADComputerSource.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADComputerKey", dataType="String"], [name="ObjectGUID", dataType="String"], [name="ObjectSID", dataType="String"], [name="DomainName", dataType="String"], [name="DistinguishedName", dataType="String"], [name="Name", dataType="String"], [name="DNSHostName", dataType="String"], [name="Enabled", dataType="Boolean"], [name="OperatingSystem", dataType="String"], [name="OperatingSystemVersion", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="CloudMatchStatus", dataType="String"], [name="LastLogonTimestampRaw", dataType="String"], [name="LastLogonUtcDateTime", dataType="DateTime"], [name="LastLogonStatus", dataType="String"], [name="CreationRaw", dataType="String"], [name="CreationUtcDateTime", dataType="DateTime"], [name="CreationStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="ModificationRaw", dataType="String", allowHistoricalMissing=true], [name="ModificationUtcDateTime", dataType="DateTime", allowHistoricalMissing=true], [name="ModificationStatus", dataType="String", allowHistoricalMissing=true], [name="PasswordExpired", dataType="Boolean", allowHistoricalMissing=true], [name="PasswordExpiryStatus", dataType="String", allowHistoricalMissing=true]}))
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

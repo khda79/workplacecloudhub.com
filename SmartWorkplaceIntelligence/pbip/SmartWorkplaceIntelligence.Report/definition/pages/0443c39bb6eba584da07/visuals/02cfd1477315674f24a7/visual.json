@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "02cfd1477315674f24a7",
   "position": {
     "x": 1412,
     "y": 648,
-    "z": 119,
-    "width": 320,
+    "z": 33000,
     "height": 24,
-    "tabOrder": 119
+    "width": 320,
+    "tabOrder": 17000
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Active workforce trend \u00b7 last 30 days",
+                    "value": "Active workforce trend · last 30 days",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "13px",

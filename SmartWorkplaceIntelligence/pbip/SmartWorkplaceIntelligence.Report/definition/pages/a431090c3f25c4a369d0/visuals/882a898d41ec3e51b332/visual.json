@@ -1,19 +1,19 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.13.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "882a898d41ec3e51b332",
   "position": {
     "x": 32,
-    "y": 384,
+    "y": 416.45730416372618,
     "z": 111,
-    "height": 608,
+    "height": 583.54269583627388,
     "width": 1856,
     "tabOrder": 677
   },
   "visual": {
-    "visualType": "pivotTable",
+    "visualType": "tableEx",
     "query": {
       "queryState": {
-        "Rows": {
+        "Values": {
           "projections": [
             {
               "field": {
@@ -30,6 +30,70 @@
               "nativeQueryRef": "Device Name",
               "active": true,
               "displayName": "Device Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Primary User (report)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Primary User (report)",
+              "nativeQueryRef": "Primary User (report)",
+              "active": true,
+              "displayName": "Primary User UPN"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Primary User SAM (report)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Primary User SAM (report)",
+              "nativeQueryRef": "Primary User SAM (report)",
+              "active": true,
+              "displayName": "Primary User SAM"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Last Console User (report)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Last Console User (report)",
+              "nativeQueryRef": "Last Console User (report)",
+              "active": true,
+              "displayName": "Last console user"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Last Console Logon UTC (report)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Last Console Logon UTC (report)",
+              "nativeQueryRef": "Last Console Logon UTC (report)",
+              "active": true,
+              "displayName": "Last console logon UTC"
             },
             {
               "field": {
@@ -180,6 +244,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Password Expired",
               "nativeQueryRef": "AD Password Expired",
+              "active": true,
               "displayName": "AD Password Expired"
             },
             {
@@ -195,6 +260,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Password Expiry Status",
               "nativeQueryRef": "AD Password Expiry Status",
+              "active": true,
               "displayName": "AD Password Expiry Status"
             },
             {
@@ -210,6 +276,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Created (source)",
               "nativeQueryRef": "AD Created (source)",
+              "active": true,
               "displayName": "AD Created (source)"
             },
             {
@@ -225,6 +292,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Creation Qualification",
               "nativeQueryRef": "AD Creation Qualification",
+              "active": true,
               "displayName": "AD Creation Qualification"
             },
             {
@@ -240,6 +308,7 @@
               },
               "queryRef": "Device Inventory Evidence.Entra Created (source)",
               "nativeQueryRef": "Entra Created (source)",
+              "active": true,
               "displayName": "Entra Created (source)"
             },
             {
@@ -255,6 +324,7 @@
               },
               "queryRef": "Device Inventory Evidence.Entra Creation Qualification",
               "nativeQueryRef": "Entra Creation Qualification",
+              "active": true,
               "displayName": "Entra Creation Qualification"
             },
             {
@@ -270,6 +340,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Modified (source)",
               "nativeQueryRef": "AD Modified (source)",
+              "active": true,
               "displayName": "AD Modified (source)"
             },
             {
@@ -285,6 +356,7 @@
               },
               "queryRef": "Device Inventory Evidence.AD Modification Qualification",
               "nativeQueryRef": "AD Modification Qualification",
+              "active": true,
               "displayName": "AD Modification Qualification"
             },
             {
@@ -300,6 +372,7 @@
               },
               "queryRef": "Device Inventory Evidence.Entra Modified (source)",
               "nativeQueryRef": "Entra Modified (source)",
+              "active": true,
               "displayName": "Entra Modified (source)"
             },
             {
@@ -315,7 +388,328 @@
               },
               "queryRef": "Device Inventory Evidence.Entra Modification Qualification",
               "nativeQueryRef": "Entra Modification Qualification",
+              "active": true,
               "displayName": "Entra Modification Qualification"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Expected AV Name"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Expected AV Name",
+              "nativeQueryRef": "Expected AV Name",
+              "active": true,
+              "displayName": "Expected AV Name"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Expected AV State"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Expected AV State",
+              "nativeQueryRef": "Expected AV State",
+              "active": true,
+              "displayName": "Expected AV State"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Third Party AV State"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Third Party AV State",
+              "nativeQueryRef": "Third Party AV State",
+              "active": true,
+              "displayName": "Third Party AV State"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Third Party AV Products"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Third Party AV Products",
+              "nativeQueryRef": "Third Party AV Products",
+              "active": true,
+              "displayName": "Third Party AV Products"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System AV Qualification"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System AV Qualification",
+              "nativeQueryRef": "AV Qualification",
+              "active": true,
+              "displayName": "AV Qualification"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Secure Boot State"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Secure Boot State",
+              "nativeQueryRef": "Secure Boot — Device System",
+              "active": true,
+              "displayName": "Secure Boot — Device System"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System VBS State"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System VBS State",
+              "nativeQueryRef": "VBS State",
+              "active": true,
+              "displayName": "VBS State"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System VBS Hardware Requirements"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System VBS Hardware Requirements",
+              "nativeQueryRef": "VBS Hardware Requirements",
+              "active": true,
+              "displayName": "VBS Hardware Requirements"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Credential Guard State"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Credential Guard State",
+              "nativeQueryRef": "Credential Guard State",
+              "active": true,
+              "displayName": "Credential Guard State"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System BitLocker OS Protection"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System BitLocker OS Protection",
+              "nativeQueryRef": "BitLocker OS Protection",
+              "active": true,
+              "displayName": "BitLocker OS Protection"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System BitLocker OS Conversion"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System BitLocker OS Conversion",
+              "nativeQueryRef": "BitLocker OS Conversion",
+              "active": true,
+              "displayName": "BitLocker OS Conversion"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Observation Raw"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Observation Raw",
+              "nativeQueryRef": "Observation Raw",
+              "active": true,
+              "displayName": "Observation Raw"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Freshness"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Freshness",
+              "nativeQueryRef": "Freshness",
+              "active": true,
+              "displayName": "Freshness"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Local Data Source"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Local Data Source",
+              "nativeQueryRef": "Device System Local Data Source",
+              "active": true,
+              "displayName": "Local source"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Local Data Freshness"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Local Data Freshness",
+              "nativeQueryRef": "Device System Local Data Freshness",
+              "active": true,
+              "displayName": "Local collection state"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Last Console Logon Status"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Last Console Logon Status",
+              "nativeQueryRef": "Device System Last Console Logon Status",
+              "active": true,
+              "displayName": "Console observation status"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Last Console Logon User"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Last Console Logon User",
+              "nativeQueryRef": "Device System Last Console Logon User",
+              "active": true,
+              "displayName": "Last console user"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Last Console Logon UTC"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Last Console Logon UTC",
+              "nativeQueryRef": "Device System Last Console Logon UTC",
+              "active": true,
+              "displayName": "Last console logon (UTC)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device System Evidence"
+                    }
+                  },
+                  "Property": "Device System Last Console Logon Quality"
+                }
+              },
+              "queryRef": "Device System Evidence.Device System Last Console Logon Quality",
+              "nativeQueryRef": "Device System Last Console Logon Quality",
+              "active": true,
+              "displayName": "Console evidence qualification"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Console Logon Qualification (report)"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Console Logon Qualification (report)",
+              "nativeQueryRef": "Console Logon Qualification (report)",
+              "active": true,
+              "displayName": "Console logon qualification"
             },
             {
               "field": {
@@ -332,295 +726,6 @@
               "nativeQueryRef": "Intune device ID",
               "active": true,
               "displayName": "Intune device ID"
-            }
-          ]
-        },
-        "Values": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Expected AV Name"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Expected AV Name",
-              "nativeQueryRef": "Expected AV Name",
-              "displayName": "Expected AV Name"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Expected AV State"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Expected AV State",
-              "nativeQueryRef": "Expected AV State",
-              "displayName": "Expected AV State"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Third Party AV State"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Third Party AV State",
-              "nativeQueryRef": "Third Party AV State",
-              "displayName": "Third Party AV State"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Third Party AV Products"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Third Party AV Products",
-              "nativeQueryRef": "Third Party AV Products",
-              "displayName": "Third Party AV Products"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System AV Qualification"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System AV Qualification",
-              "nativeQueryRef": "AV Qualification",
-              "displayName": "AV Qualification"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Secure Boot State"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Secure Boot State",
-              "nativeQueryRef": "Secure Boot \u2014 Device System",
-              "displayName": "Secure Boot \u2014 Device System"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System VBS State"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System VBS State",
-              "nativeQueryRef": "VBS State",
-              "displayName": "VBS State"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System VBS Hardware Requirements"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System VBS Hardware Requirements",
-              "nativeQueryRef": "VBS Hardware Requirements",
-              "displayName": "VBS Hardware Requirements"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Credential Guard State"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Credential Guard State",
-              "nativeQueryRef": "Credential Guard State",
-              "displayName": "Credential Guard State"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System BitLocker OS Protection"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System BitLocker OS Protection",
-              "nativeQueryRef": "BitLocker OS Protection",
-              "displayName": "BitLocker OS Protection"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System BitLocker OS Conversion"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System BitLocker OS Conversion",
-              "nativeQueryRef": "BitLocker OS Conversion",
-              "displayName": "BitLocker OS Conversion"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Observation Raw"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Observation Raw",
-              "nativeQueryRef": "Observation Raw",
-              "displayName": "Observation Raw"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Freshness"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Freshness",
-              "nativeQueryRef": "Freshness",
-              "displayName": "Freshness"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Local Data Source"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Local Data Source",
-              "nativeQueryRef": "Device System Local Data Source",
-              "displayName": "Local source"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Local Data Freshness"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Local Data Freshness",
-              "nativeQueryRef": "Device System Local Data Freshness",
-              "displayName": "Local collection state"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Last Console Logon Status"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Last Console Logon Status",
-              "nativeQueryRef": "Device System Last Console Logon Status",
-              "displayName": "Console observation status"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Last Console Logon User"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Last Console Logon User",
-              "nativeQueryRef": "Device System Last Console Logon User",
-              "displayName": "Last console user"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Last Console Logon UTC"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Last Console Logon UTC",
-              "nativeQueryRef": "Device System Last Console Logon UTC",
-              "displayName": "Last console logon (UTC)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device System Evidence"
-                    }
-                  },
-                  "Property": "Device System Last Console Logon Quality"
-                }
-              },
-              "queryRef": "Device System Evidence.Device System Last Console Logon Quality",
-              "nativeQueryRef": "Device System Last Console Logon Quality",
-              "displayName": "Console evidence qualification"
             }
           ]
         }
@@ -643,214 +748,6 @@
         ]
       }
     },
-    "expansionStates": [
-      {
-        "roles": [
-          "Rows"
-        ],
-        "levels": [
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Device Name"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Device Name"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Country Name"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Country Name"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Management State"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Management State"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Compliance State"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Compliance State"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Windows Update State"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Windows Update State"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Secure Boot State"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Secure Boot State"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Endpoint Analytics State"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Endpoint Analytics State"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Stop Error State"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Stop Error State"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Entra Hardware ID Conflict"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Entra Hardware ID Conflict"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Windows 11 Release State"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Windows 11 Release State"
-                }
-              }
-            ],
-            "isPinned": true
-          },
-          {
-            "queryRefs": [
-              "Device Inventory Evidence.Device Source ID"
-            ],
-            "identityKeys": [
-              {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Device Source ID"
-                }
-              }
-            ],
-            "isPinned": true
-          }
-        ],
-        "root": {}
-      }
-    ],
     "objects": {
       "columnHeaders": [
         {
@@ -872,7 +769,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -906,9 +803,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -979,45 +883,1587 @@
           }
         }
       ],
-      "rowHeaders": [
+      "total": [
         {
           "properties": {
-            "stepped": {
+            "totals": {
               "expr": {
                 "Literal": {
                   "Value": "false"
                 }
               }
-            },
-            "fontSize": {
+            }
+          }
+        }
+      ],
+      "columnFormatting": [
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Device Name"
+          },
+          "properties": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "'Left'"
                 }
               }
             },
-            "wordWrap": {
+            "styleHeader": {
               "expr": {
                 "Literal": {
                   "Value": "true"
                 }
               }
             },
-            "repeatRowHeaders": {
+            "styleValues": {
               "expr": {
                 "Literal": {
                   "Value": "true"
                 }
               }
             },
-            "showExpandCollapseButtons": {
+            "styleTotal": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Primary User (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             },
-            "unfrozen": {
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Primary User SAM (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Last Console User (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Last Console Logon UTC (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Country Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Management State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Compliance State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Windows Update State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Secure Boot State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Endpoint Analytics State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Stop Error State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Entra Hardware ID Conflict"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Windows 11 Release State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Password Expired"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Password Expiry Status"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Created (source)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Creation Qualification"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Entra Created (source)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Entra Creation Qualification"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Modified (source)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.AD Modification Qualification"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Entra Modified (source)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Entra Modification Qualification"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Expected AV Name"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Expected AV State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Third Party AV State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Third Party AV Products"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System AV Qualification"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Secure Boot State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System VBS State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System VBS Hardware Requirements"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Credential Guard State"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System BitLocker OS Protection"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System BitLocker OS Conversion"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Observation Raw"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Freshness"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Local Data Source"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Local Data Freshness"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Last Console Logon Status"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Last Console Logon User"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Last Console Logon UTC"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device System Evidence.Device System Last Console Logon Quality"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Console Logon Qualification (report)"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Device Inventory Evidence.Device Source ID"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
               "expr": {
                 "Literal": {
                   "Value": "true"
@@ -1027,102 +2473,7 @@
           }
         }
       ],
-      "subTotals": [
-        {
-          "properties": {
-            "rowSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "columnSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            }
-          }
-        },
-        {
-          "properties": {
-            "rowSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "perRowLevel": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "Row"
-          }
-        },
-        {
-          "properties": {
-            "columnSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "perColumnLevel": {
-              "expr": {
-                "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "Column"
-          }
-        }
-      ],
-      "general": [
-        {
-          "properties": {
-            "layout": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Tabular'"
-                }
-              }
-            }
-          }
-        }
-      ]
+      "columnWidth": []
     },
     "visualContainerObjects": {
       "general": [
@@ -1131,7 +2482,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Compliance and security \u00b7 selected evidence'"
+                  "Value": "'Compliance and security · selected evidence'"
                 }
               }
             }
@@ -1151,7 +2502,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Compliance and security \u00b7 inventory plus matched Device System observations'"
+                  "Value": "'Compliance and security · inventory plus matched Device System observations'"
                 }
               }
             },
@@ -1251,7 +2602,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
@@ -1362,340 +2720,53 @@
         "isHiddenInViewMode": true
       },
       {
-        "name": "29e8e57d3bbaa5612996",
+        "name": "27cce37711ef5701dae20000",
         "field": {
-          "Column": {
+          "Measure": {
             "Expression": {
               "SourceRef": {
                 "Entity": "Device Inventory Evidence"
               }
             },
-            "Property": "Device Name"
+            "Property": "Primary user row match · Device Inventory Evidence"
           }
         },
-        "type": "Categorical"
-      },
-      {
-        "name": "5f02047ba7a0d3da5333",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
+        "type": "Advanced",
+        "howCreated": "User",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "s",
+              "Entity": "Device Inventory Evidence",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 0,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "s"
+                        }
+                      },
+                      "Property": "Primary user row match · Device Inventory Evidence"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "1L"
+                    }
+                  }
+                }
               }
-            },
-            "Property": "Country Name"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "75e3fa00d44053f91643",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Management State"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "a428cc668aee44018b6b",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Compliance State"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "7bf0573e9bb76397d5a0",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Windows Update State"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "fbff01c79a51883db624",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Secure Boot State"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "54db4c7a12ef9341cb69",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Endpoint Analytics State"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "07870f41477f77cfec1e",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Stop Error State"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "9dd65841d40272c0c868",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Entra Hardware ID Conflict"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "152c514433c8cc77b26c",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Windows 11 Release State"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "e4c4fb24b1ed658313c4",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device Inventory Evidence"
-              }
-            },
-            "Property": "Device Source ID"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "9c26ceeaeb270e010f7f",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System Expected AV Name"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "a6bc1e47a54cc23ba901",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System Expected AV State"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "b65f18944374cac94f01",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System Third Party AV State"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "320ed7b3e99c0c32d681",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System Third Party AV Products"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "4193478afd77a488ac39",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System AV Qualification"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "a5a3e7f3fdcb8fd5d817",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System Secure Boot State"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "f217c84f3662a26eb2c9",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System VBS State"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "ff9bdf0328627e3735c9",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System VBS Hardware Requirements"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "585b5dd0e6292369f0bf",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System Credential Guard State"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "1451490af17c2a2c0ec6",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System BitLocker OS Protection"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "f402c427727717160372",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System BitLocker OS Conversion"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "85b67024dca08284e7d9",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System Observation Raw"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "17c0bf34dadf21db1302",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Device System Evidence"
-              }
-            },
-            "Property": "Device System Freshness"
-          }
-        },
-        "type": "Advanced"
+            }
+          ]
+        }
       }
     ]
   }

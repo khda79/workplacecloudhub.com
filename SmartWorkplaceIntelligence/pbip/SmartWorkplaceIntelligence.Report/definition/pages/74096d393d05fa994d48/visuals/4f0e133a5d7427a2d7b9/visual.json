@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "4f0e133a5d7427a2d7b9",
   "position": {
-    "x": 964.0,
+    "x": 675.55555555555554,
     "y": 128,
-    "width": 225.0,
+    "z": 10000,
     "height": 128,
-    "z": 202,
-    "tabOrder": 203
+    "width": 152.88888888888889,
+    "tabOrder": 13000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -20,15 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "License Report Summary"
                     }
                   },
-                  "Property": "Current Endpoint Analytics Score"
+                  "Property": "License Report Awaiting Capacity Label"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Current Endpoint Analytics Score",
-              "nativeQueryRef": "Endpoint Analytics score",
-              "displayName": "Endpoint Analytics score"
+              "queryRef": "License Report Summary.License Report Awaiting Capacity Label",
+              "nativeQueryRef": "Users awaiting license capacity",
+              "displayName": "Users awaiting license capacity"
             }
           ]
         },
@@ -42,12 +42,12 @@
                       "Entity": "License Report Summary"
                     }
                   },
-                  "Property": "License Overview Family Over-assigned Units"
+                  "Property": "KPI Alert Details License Report Awaiting Capacity Label"
                 }
               },
-              "queryRef": "License Report Summary.License Overview Family Over-assigned Units",
-              "nativeQueryRef": "License Overview Family Over-assigned Units",
-              "displayName": "Over-assigned units"
+              "queryRef": "License Report Summary.KPI Alert Details License Report Awaiting Capacity Label",
+              "nativeQueryRef": "License Report Awaiting Capacity Label · thresholds",
+              "displayName": "License Report Awaiting Capacity Label · thresholds"
             }
           ]
         }
@@ -67,7 +67,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "26D"
                 }
               }
             },
@@ -82,8 +82,95 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Awaiting Capacity Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Awaiting Capacity Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Awaiting Capacity Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#005A9E'"
+                        }
+                      }
                     }
                   }
                 }
@@ -201,8 +288,95 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#215E9E'"
+                    "Conditional": {
+                      "Cases": [
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Awaiting Capacity Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "1L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#A85D00'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Awaiting Capacity Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "2L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#B42318'"
+                            }
+                          }
+                        },
+                        {
+                          "Condition": {
+                            "Comparison": {
+                              "ComparisonKind": 0,
+                              "Left": {
+                                "Measure": {
+                                  "Expression": {
+                                    "SourceRef": {
+                                      "Entity": "License Report Summary"
+                                    }
+                                  },
+                                  "Property": "KPI Alert Level License Report Awaiting Capacity Label"
+                                }
+                              },
+                              "Right": {
+                                "Literal": {
+                                  "Value": "3L"
+                                }
+                              }
+                            }
+                          },
+                          "Value": {
+                            "Literal": {
+                              "Value": "'#64748B'"
+                            }
+                          }
+                        }
+                      ],
+                      "DefaultValue": {
+                        "Literal": {
+                          "Value": "'#215E9E'"
+                        }
+                      }
                     }
                   }
                 }
@@ -345,7 +519,7 @@
             "rightMargin": {
               "expr": {
                 "Literal": {
-                  "Value": "8D"
+                  "Value": "4D"
                 }
               }
             }
@@ -368,7 +542,7 @@
             "paddingUniform": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
+                  "Value": "0D"
                 }
               }
             },
@@ -512,7 +686,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Global snapshot. Remaining M365 capacity is shown by suite in Licensing. Endpoint Analytics is an average among covered managed devices.'"
+                  "Value": "'Users awaiting license capacity'"
                 }
               }
             }
@@ -713,66 +887,6 @@
           ]
         },
         "howCreated": "User"
-      },
-      {
-        "name": "Filter1f2ee00eefb38c2ea13f02d8",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Security Control Evidence"
-              }
-            },
-            "Property": "Control Name"
-          }
-        },
-        "type": "Categorical",
-        "filter": {
-          "Version": 2,
-          "From": [
-            {
-              "Name": "ep",
-              "Entity": "Security Control Evidence",
-              "Type": 0
-            }
-          ],
-          "Where": [
-            {
-              "Condition": {
-                "Not": {
-                  "Expression": {
-                    "In": {
-                      "Expressions": [
-                        {
-                          "Column": {
-                            "Expression": {
-                              "SourceRef": {
-                                "Source": "ep"
-                              }
-                            },
-                            "Property": "Control Name"
-                          }
-                        }
-                      ],
-                      "Values": [
-                        [
-                          {
-                            "Literal": {
-                              "Value": "'Defender protection active'"
-                            }
-                          }
-                        ]
-                      ]
-                    }
-                  }
-                }
-              }
-            }
-          ]
-        },
-        "howCreated": "User",
-        "isHiddenInViewMode": true,
-        "isLockedInViewMode": true
       }
     ]
   }

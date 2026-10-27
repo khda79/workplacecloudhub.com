@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "d13abe9abef750e36f8c",
   "position": {
     "x": 968,
-    "y": 336,
+    "y": 320,
+    "z": 2000,
+    "height": 306.82926829268291,
     "width": 912,
-    "height": 296,
-    "z": 114,
     "tabOrder": 682
   },
   "visual": {
@@ -46,7 +46,8 @@
                 }
               },
               "queryRef": "Collaboration Trend Evidence.Trend Collaboration Objects",
-              "nativeQueryRef": "Trend Collaboration Objects"
+              "nativeQueryRef": "Trend Collaboration Objects",
+              "displayName": "Trend Collaboration Resources"
             },
             {
               "field": {
@@ -78,7 +79,8 @@
                 }
               },
               "queryRef": "Collaboration Trend Evidence.Trend Active Object Rate (%)",
-              "nativeQueryRef": "Trend Active Object Rate (%)"
+              "nativeQueryRef": "Trend Active Object Rate (%)",
+              "displayName": "Trend Active Resource Rate (%)"
             }
           ]
         }
@@ -300,7 +302,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Active collaboration objects (%) · weekly history'"
+                  "Value": "'Active collaboration resources (%) · weekly history'"
                 }
               }
             },

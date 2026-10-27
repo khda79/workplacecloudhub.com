@@ -11,38 +11,64 @@ table 'Mailbox Migration Weekly History'
 	/// Snapshot Date from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Snapshot Date'
 		dataType: dateTime
+		formatString: Long Date
 		lineageTag: 9ac9b39f-7ffe-4363-8169-a6cdde05630f
+		summarizeBy: none
 		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: ed027ab5-54c2-4030-ac03-e835e9ca972e
+			defaultHierarchy: LocalDateTable_e51866cf-71bd-4a60-84c1-b0e49716c831.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Snapshot Week from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Snapshot Week'
 		dataType: string
 		lineageTag: 7d2c7884-207f-4f6b-9cf1-5cddd33dca04
+		summarizeBy: none
 		sourceColumn: Snapshot Week
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Observed Local Mailboxes from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Observed Local Mailboxes'
 		dataType: string
 		lineageTag: 5689e667-1b56-4196-8216-7cdabe4c6889
+		summarizeBy: none
 		sourceColumn: Observed Local Mailboxes
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Provisional Local Mailboxes from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Provisional Local Mailboxes'
 		dataType: double
 		lineageTag: c6db8393-ac14-4762-9e09-aa03422d9b4c
+		summarizeBy: sum
 		sourceColumn: Provisional Local Mailboxes
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Evidence Status from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Evidence Status'
 		dataType: string
 		lineageTag: 403ff7a4-de94-4c89-96ca-7a5d94748ddb
+		summarizeBy: none
 		sourceColumn: Evidence Status
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Evidence Note from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Evidence Note'
 		dataType: string
 		lineageTag: 8137f2cf-3c04-43a6-8b63-603f7f05237f
+		summarizeBy: none
 		sourceColumn: Evidence Note
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'

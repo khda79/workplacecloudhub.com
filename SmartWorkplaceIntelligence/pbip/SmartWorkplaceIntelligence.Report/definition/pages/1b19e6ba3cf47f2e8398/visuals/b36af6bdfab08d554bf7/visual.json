@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "b36af6bdfab08d554bf7",
   "position": {
     "x": 32,
     "y": 269,
-    "width": 1856,
+    "z": 5000,
     "height": 22.5,
-    "z": 12000,
-    "tabOrder": 145
+    "width": 1856,
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "textbox",
@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Selected view: Native \u00b7 EXO Mailbox",
+                    "value": "Selected view: Native · EXO Mailbox",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

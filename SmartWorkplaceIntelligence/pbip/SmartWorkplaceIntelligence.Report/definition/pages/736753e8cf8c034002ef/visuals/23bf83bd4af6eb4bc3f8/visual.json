@@ -3,9 +3,9 @@
   "name": "23bf83bd4af6eb4bc3f8",
   "position": {
     "x": 32,
-    "y": 128,
+    "y": 320,
     "width": 1856,
-    "height": 120,
+    "height": 104,
     "z": 3000,
     "tabOrder": 3000
   },
@@ -93,7 +93,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "24D"
+                  "Value": "20D"
                 }
               }
             },

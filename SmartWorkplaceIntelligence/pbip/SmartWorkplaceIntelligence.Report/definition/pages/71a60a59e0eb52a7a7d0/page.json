@@ -13,7 +13,7 @@
           "Column": {
             "Expression": {
               "SourceRef": {
-                "Entity": "Mailbox Evidence"
+                "Entity": "Mailbox Exploration Inventory"
               }
             },
             "Property": "Mailbox Key"
@@ -35,7 +35,7 @@
           "Column": {
             "Expression": {
               "SourceRef": {
-                "Entity": "Mailbox Evidence"
+                "Entity": "Mailbox Exploration Inventory"
               }
             },
             "Property": "Mailbox Key"

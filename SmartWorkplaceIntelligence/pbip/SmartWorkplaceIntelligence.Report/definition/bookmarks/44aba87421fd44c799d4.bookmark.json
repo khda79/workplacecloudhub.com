@@ -8,7 +8,6 @@
       "020a68837ab1e4142264",
       "05cdff5da39da0ea86eb",
       "6c76b3c17fa0a5b5af97",
-      "830b39bcacaf3379c18c",
       "85c78b4558cc2a14ed5c",
       "875c1fb0e4922aea38b8",
       "b0b0ebdc53fa0b467e8f",
@@ -16,7 +15,16 @@
       "fb4afc01f98a718de907",
       "2126a4b3c4fb6811be92",
       "fa97920737bd2e1c8531",
-      "3eddc2307a90af5dd252"
+      "3eddc2307a90af5dd252",
+      "1a1f387762fe8b6d6431",
+      "a0dc64835bee7ef840d6",
+      "22117a5cb27f5ec6dbae",
+      "3258ab80175987fd03c6",
+      "a517a02515ca12faac5e",
+      "80d9d773a2173172394e",
+      "26471ae45ebdc061e119",
+      "57e6db010678e23702ab",
+      "b2d46296a49565aed4ef"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -26,7 +34,59 @@
     "activeSection": "c8ce269962e9453ea038",
     "sections": {
       "c8ce269962e9453ea038": {
-        "visualContainers": {},
+        "visualContainers": {
+          "1a1f387762fe8b6d6431": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "a0dc64835bee7ef840d6": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "22117a5cb27f5ec6dbae": {
+            "singleVisual": {}
+          },
+          "3258ab80175987fd03c6": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "a517a02515ca12faac5e": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "80d9d773a2173172394e": {
+            "singleVisual": {}
+          },
+          "26471ae45ebdc061e119": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "57e6db010678e23702ab": {
+            "singleVisual": {}
+          },
+          "b2d46296a49565aed4ef": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
         "visualContainerGroups": {
           "020a68837ab1e4142264": {
             "isHidden": true
@@ -35,9 +95,6 @@
             "isHidden": true
           },
           "6c76b3c17fa0a5b5af97": {
-            "isHidden": true
-          },
-          "830b39bcacaf3379c18c": {
             "isHidden": true
           },
           "85c78b4558cc2a14ed5c": {

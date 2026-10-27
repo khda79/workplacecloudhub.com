@@ -1,6 +1,6 @@
 /// SPO means SharePoint Online. Grain: Operation Key; source: one selected immutable prepared batch.
 table 'SPO Migration Plan'
-	lineageTag: 9c7c006d-8c1a-40f6-ab77-9c891588ce01
+	lineageTag: 9715e299-6cc5-438e-bc3f-b00ec30a3be4
 
 	/// Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Operations' =
@@ -11,73 +11,79 @@ table 'SPO Migration Plan'
 			RETURN IF(_technical, IF(NOT ISBLANK(_sp) || NOT ISBLANK(_shared), COALESCE(_sp,0)+COALESCE(_shared,0)), DISTINCTCOUNT('SPO Migration Plan'[Operation Key]))
 		formatString: #,##0
 		displayFolder: Migration\Progress
-		lineageTag: 8e1dcbec-1854-4b5e-b3f0-603b8530d2f4
+		lineageTag: 4c9963cb-e312-40f2-9dac-03aa8cbb78bd
 
 	/// Migrate Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Migrate Operations' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition]="MIGRATE"))
 		formatString: #,##0
 		displayFolder: Migration\Progress
-		lineageTag: 2d49326d-096c-4f82-897c-709ef845651a
+		lineageTag: 2c12a6b5-f644-4a77-ab15-e36eaee05aad
+
+	/// Shared denominator for reported and validated progress: every MIGRATE operation in the selected source/project/business unit/phase and technical context, including cancellations. Execution and validation selections do not shrink the denominator.
+	measure 'SPO Migrate Population' = CALCULATE([SPO Migrate Operations], REMOVEFILTERS('SPO Migration Plan'[Execution Status]), REMOVEFILTERS('SPO Migration Plan'[Validation Status]), REMOVEFILTERS('SPO Migration Plan'[Is Validated]))
+		formatString: #,##0
+		displayFolder: Migration\Progress
+		lineageTag: f174d198-03ee-4af7-a194-07bfa9fa6905
 
 	/// Reported Done. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Reported Done' = VAR _n=[SPO Migrate Population] RETURN IF(_n>0, COALESCE(CALCULATE([SPO Migrate Operations], KEEPFILTERS('SPO Migration Plan'[Execution Status]="DONE")),0))
 		formatString: #,##0
 		displayFolder: Migration\Progress
-		lineageTag: b4a20545-1ef9-4bb2-95e7-0136171d5b10
+		lineageTag: a0becba4-54c4-4a24-888e-d6deb9ce7f73
 
 	/// Validated Done. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Validated Done' = VAR _n=[SPO Migrate Population] RETURN IF(_n>0, COALESCE(CALCULATE([SPO Reported Done], KEEPFILTERS('SPO Migration Plan'[Is Validated]=TRUE())),0))
 		formatString: #,##0
 		displayFolder: Migration\Progress
-		lineageTag: aefd8bd9-7176-439b-b64d-dc4542e91ed2
+		lineageTag: 55bc0ff5-95bc-4b46-92b8-d34fa5c4b638
 
 	/// Reported Completion. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Reported Completion' = DIVIDE([SPO Reported Done], [SPO Migrate Population])
 		formatString: 0.0%
 		displayFolder: Migration\Progress
-		lineageTag: aaf5b17c-beca-4dce-8d3d-c629a11d6233
+		lineageTag: 3f9f59c6-eb8e-4f66-8498-de85af16515a
 
 	/// Validated Completion. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Validated Completion' = DIVIDE([SPO Validated Done], [SPO Migrate Population])
 		formatString: 0.0%
 		displayFolder: Migration\Progress
-		lineageTag: b054b75c-3269-42f2-828b-cdbce09e7b9a
+		lineageTag: 7e702395-ee21-47ad-beab-65f3801f25e4
 
 	/// Reported Progress. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Reported Progress' = VAR _n=[SPO Migrate Population] RETURN IF(_n>0, FORMAT([SPO Reported Done],"#,##0") & " / " & FORMAT(_n,"#,##0") & " (" & FORMAT(DIVIDE([SPO Reported Done],_n),"0.0%") & ")", "n/a")
 		formatString: General
 		displayFolder: Migration\Progress
-		lineageTag: 631b1dee-0774-4e16-af0c-5148c3a1ccb3
+		lineageTag: 6de83d33-9c84-40a2-b0e3-17af25ceb0f2
 
 	/// Validated Progress. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Validated Progress' = VAR _n=[SPO Migrate Population] RETURN IF(_n>0, FORMAT([SPO Validated Done],"#,##0") & " / " & FORMAT(_n,"#,##0") & " (" & FORMAT(DIVIDE([SPO Validated Done],_n),"0.0%") & ")", "n/a")
 		formatString: General
 		displayFolder: Migration\Progress
-		lineageTag: e5c1a825-1b55-4f4a-931b-0ec098c6d682
+		lineageTag: e638c75e-e672-4574-a47b-90ab57ad9229
 
 	/// Remaining to Execute. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Remaining to Execute' = VAR _n=[SPO Migrate Operations] RETURN IF(_n>0, COALESCE(CALCULATE([SPO Migrate Operations], KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"DONE"), KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"CANCELLED")),0))
 		formatString: #,##0
 		displayFolder: Migration\Progress
-		lineageTag: eb02c519-a5f2-4640-b3f2-38a6b46ce853
+		lineageTag: da2dd71b-05b5-4634-bcb5-8db55c4a58e4
 
 	/// Remaining to Close. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Remaining to Close' = IF([SPO Migrate Population]>0, [SPO Migrate Population]-[SPO Validated Done])
 		formatString: #,##0
 		displayFolder: Migration\Progress
-		lineageTag: e7bbf56b-2652-482d-b276-dd7312267014
+		lineageTag: 759c8b0f-6374-4692-8a19-c1b27ab4ed96
 
 	/// Cancelled Migrations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Cancelled Migrations' = CALCULATE([SPO Migrate Operations], KEEPFILTERS('SPO Migration Plan'[Execution Status]="CANCELLED"))
 		formatString: #,##0
 		displayFolder: Migration\Progress
-		lineageTag: 9e1525cb-ebd2-4af8-a082-ca959fbd036a
+		lineageTag: ac0837f3-4f36-4e13-b0f0-5973aa0d1a08
 
 	/// Reference Date. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Reference Date' = CALCULATE(MAX('SPO Migration Source Summary'[Snapshot Date]), REMOVEFILTERS('SPO Migration Source Summary'[Source]))
 		formatString: yyyy-MM-dd
 		displayFolder: Migration\Progress
-		lineageTag: 3aa1d234-c6c9-45d5-9e41-87e49b3fd412
+		lineageTag: 46b00540-8a7d-4aaa-89d6-f8b3b1da6f22
 
 	/// Page Context. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Page Context' =
@@ -87,103 +93,103 @@ table 'SPO Migration Plan'
 			IF(ISCROSSFILTERED('SharePoint On-prem Web Applications') || ISFILTERED('SPO Migration Web'[Collection Key]) || ISFILTERED('SPO Migration Collection'[Source URL]) || ISFILTERED('SPO Migration Web'[Source URL]) || ISFILTERED('SPO Migration Web'[Coverage Kind]), "On-prem filter; shared folders not applicable", "Declared progress; validation is separate")
 		formatString: General
 		displayFolder: Migration\Progress
-		lineageTag: 1593b1d3-4a42-4ab7-b707-30b54cdf6c7f
+		lineageTag: 8a005cbf-446e-481f-b9d2-4c2984224b88
 
 	/// Archive Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Archive Operations' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition]="ARCHIVE"))
 		formatString: #,##0
 		displayFolder: Migration\Decisions
-		lineageTag: e3f1f82a-2167-4b72-b0d1-b9363f061aa8
+		lineageTag: 62248258-7c66-4aaa-8a96-fcec1c514a50
 
 	/// Delete Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Delete Operations' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition]="DELETE"))
 		formatString: #,##0
 		displayFolder: Migration\Decisions
-		lineageTag: e1e65be5-3fdc-462e-993f-fecfb24869b0
+		lineageTag: 945477c8-76d1-4922-86e6-50276826324c
 
 	/// Keep Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Keep Operations' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition]="KEEP"))
 		formatString: #,##0
 		displayFolder: Migration\Decisions
-		lineageTag: 04f0c554-1788-4365-a9a0-da70572e209d
+		lineageTag: 85a96643-eaac-48c7-aa4b-d6a3e5e152c3
 
 	/// Tbd Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Tbd Operations' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition]="TBD"))
 		formatString: #,##0
 		displayFolder: Migration\Decisions
-		lineageTag: 311beda5-1582-4d12-9730-d9f5110d8e7d
+		lineageTag: cb065b79-e341-4f11-af00-9fb9b83dea33
 
 	/// Notinplan Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Notinplan Operations' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition]="NOTINPLAN"))
 		formatString: #,##0
 		displayFolder: Migration\Decisions
-		lineageTag: bd22e3be-962e-49d8-adc2-bc6b05fa1988
+		lineageTag: f8881eb0-def6-4097-8af9-b7c9a1ed8ec2
 
 	/// Other Actions Done. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Other Actions Done' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition]<>"MIGRATE"), KEEPFILTERS('SPO Migration Plan'[Execution Status]="DONE"))
 		formatString: #,##0
 		displayFolder: Migration\Decisions
-		lineageTag: 0f90df09-bacf-4d9b-955d-e07b02cc74e4
+		lineageTag: 4e41dbda-6ada-4b2a-87c5-960625c1d468
 
 	/// Overdue. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Overdue' = VAR _ref=[SPO Reference Date] RETURN IF(NOT ISBLANK(_ref) && [SPO Migrate Operations]>0, COALESCE(CALCULATE([SPO Migrate Operations], KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"DONE"), KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"CANCELLED"), KEEPFILTERS(NOT ISBLANK('SPO Migration Plan'[Planned Date])), KEEPFILTERS('SPO Migration Plan'[Planned Date]<_ref)),0))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: 0a177cc2-212b-4746-912f-9ee56c92725f
+		lineageTag: aa2018d8-15e4-472a-8a74-9bbda239a625
 
 	/// Due Today. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Due Today' = VAR _ref=[SPO Reference Date] RETURN IF(NOT ISBLANK(_ref) && [SPO Migrate Operations]>0, COALESCE(CALCULATE([SPO Migrate Operations], KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"DONE"), KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"CANCELLED"), KEEPFILTERS(NOT ISBLANK('SPO Migration Plan'[Planned Date])), KEEPFILTERS('SPO Migration Plan'[Planned Date]=_ref)),0))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: 30b93805-b41a-4c91-9303-9b138ea57acd
+		lineageTag: b135216d-52ca-4157-be50-91dce1d4fe58
 
 	/// Due Next 7 Days. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Due Next 7 Days' = VAR _ref=[SPO Reference Date] RETURN IF(NOT ISBLANK(_ref) && [SPO Migrate Operations]>0, COALESCE(CALCULATE([SPO Migrate Operations], KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"DONE"), KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"CANCELLED"), KEEPFILTERS(NOT ISBLANK('SPO Migration Plan'[Planned Date])), KEEPFILTERS('SPO Migration Plan'[Planned Date]>_ref && 'SPO Migration Plan'[Planned Date]<=_ref+7)),0))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: 77a0c836-b2c1-49f3-b21e-35bc72e0b732
+		lineageTag: ab7eb340-001f-4adf-a684-172f8ef99495
 
 	/// Due Days 8 to 14. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Due Days 8 to 14' = VAR _ref=[SPO Reference Date] RETURN IF(NOT ISBLANK(_ref) && [SPO Migrate Operations]>0, COALESCE(CALCULATE([SPO Migrate Operations], KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"DONE"), KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"CANCELLED"), KEEPFILTERS(NOT ISBLANK('SPO Migration Plan'[Planned Date])), KEEPFILTERS('SPO Migration Plan'[Planned Date]>_ref+7 && 'SPO Migration Plan'[Planned Date]<=_ref+14)),0))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: ccbafad9-43b0-4a30-8253-ecf76933f0dd
+		lineageTag: aa1a3f77-920a-45cd-b621-b119bf29a57f
 
 	/// Due Within 14 Days. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Due Within 14 Days' = VAR _ref=[SPO Reference Date] RETURN IF(NOT ISBLANK(_ref) && [SPO Migrate Operations]>0, COALESCE(CALCULATE([SPO Migrate Operations], KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"DONE"), KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"CANCELLED"), KEEPFILTERS(NOT ISBLANK('SPO Migration Plan'[Planned Date])), KEEPFILTERS('SPO Migration Plan'[Planned Date]>=_ref && 'SPO Migration Plan'[Planned Date]<=_ref+14)),0))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: 36301426-435a-4da1-8473-bb295b993e6a
+		lineageTag: e3fd826f-f286-43f5-b298-9a235971f921
 
 	/// Missing Planned Date. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Missing Planned Date' = CALCULATE([SPO Migrate Operations], KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"DONE"), KEEPFILTERS('SPO Migration Plan'[Execution Status]<>"CANCELLED"), KEEPFILTERS(ISBLANK('SPO Migration Plan'[Planned Date])))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: cd7e35a8-ec2d-4c90-90dd-a6d477ecc8fd
+		lineageTag: 4121af56-26fa-45d7-9b59-0c0af4cdbbd0
 
 	/// Done Missing Actual Date. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Done Missing Actual Date' = CALCULATE([SPO Reported Done], KEEPFILTERS(ISBLANK('SPO Migration Plan'[Actual Date])))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: 5a39d0aa-f806-458e-94b5-43fc53b23ff5
+		lineageTag: f649774c-8b59-43ac-8113-333d62afe986
 
 	/// Planned Calendar Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Planned Calendar Operations' = CALCULATE([SPO Migrate Operations], USERELATIONSHIP('SPO Migration Plan'[Planned Date],'Date'[Date]))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: 577483d9-30ed-475a-9a66-72c172dfae2a
+		lineageTag: 298f790f-c97d-44e4-968b-953f8a904055
 
 	/// Actual Calendar Completions. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Actual Calendar Completions' = CALCULATE([SPO Reported Done], USERELATIONSHIP('SPO Migration Plan'[Actual Date],'Date'[Date]))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: c2b3faf7-0387-4796-9564-8bf7a1047191
+		lineageTag: 84afdf1b-c4f0-4088-af93-2923659cedb9
 
 	/// Validation Calendar Completions. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Validation Calendar Completions' = CALCULATE([SPO Validated Done], USERELATIONSHIP('SPO Migration Plan'[Validation Date],'Date'[Date]))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: 2138ae8c-82a5-4a05-a1ee-6645f951cb37
+		lineageTag: 243d4ebe-f70f-4ed5-a93b-aa1939f16f24
 
 	/// Cumulative Declared Completions. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Cumulative Declared Completions' =
@@ -191,85 +197,79 @@ table 'SPO Migration Plan'
 			RETURN IF(_day<=_reference, CALCULATE([SPO Actual Calendar Completions], FILTER(ALLSELECTED('Date'), 'Date'[Date]<=_day)))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: 0a173e51-5a92-4d28-9dcd-bf7e26f7b132
+		lineageTag: fa04dba5-a308-44b0-9cc1-182989da0a71
 
 	/// Variance Eligible Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Variance Eligible Operations' = COUNTROWS(FILTER('SPO Migration Plan', 'SPO Migration Plan'[Disposition]="MIGRATE" && 'SPO Migration Plan'[Execution Status]="DONE" && NOT ISBLANK('SPO Migration Plan'[Planned Date]) && NOT ISBLANK('SPO Migration Plan'[Actual Date]) && [SPO Operations]>0))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: c39abf9f-997d-49ba-b90f-6f7042bc589e
+		lineageTag: 6b19b33a-6304-4d3f-91bb-e903ea991fbd
 
 	/// Mean Schedule Variance Days. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Mean Schedule Variance Days' = AVERAGEX(FILTER('SPO Migration Plan', 'SPO Migration Plan'[Disposition]="MIGRATE" && 'SPO Migration Plan'[Execution Status]="DONE" && NOT ISBLANK('SPO Migration Plan'[Planned Date]) && NOT ISBLANK('SPO Migration Plan'[Actual Date]) && [SPO Operations]>0), DATEDIFF('SPO Migration Plan'[Planned Date], 'SPO Migration Plan'[Actual Date], DAY))
 		formatString: 0.0
 		displayFolder: Migration\Schedule
-		lineageTag: 9696f081-e117-4ea4-8bf7-e1ee9befbf56
+		lineageTag: 6edb7c72-56ef-4d3d-87a7-738d88cb0778
 
 	/// Variance Excluded Operations. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Variance Excluded Operations' = IF([SPO Reported Done]>0, [SPO Reported Done]-COALESCE([SPO Variance Eligible Operations],0))
 		formatString: #,##0
 		displayFolder: Migration\Schedule
-		lineageTag: 6c48b5f0-7b1f-4838-8b2f-e7b9446da4b9
+		lineageTag: d5cf59e6-1760-414a-b2a4-c9976bbe280a
 
 	/// Source Identity Review. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Source Identity Review' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Source Type]="SharePoint on-prem"), KEEPFILTERS('SPO Migration Plan'[Source Qualification]<>"Direct native match"))
 		formatString: #,##0
 		displayFolder: Migration\Reconciliation
-		lineageTag: 242776ed-3192-43bc-868e-ee7ca9a2bec4
+		lineageTag: 6a5b0b7f-4ab3-4203-a938-7bb63d1a8fb3
 
 	/// Target Review. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Target Review' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition] IN {"MIGRATE","ARCHIVE"}), KEEPFILTERS('SPO Migration Plan'[Target Approval Evidence]="Not recorded"))
 		formatString: #,##0
 		displayFolder: Migration\Reconciliation
-		lineageTag: 50117af1-906e-4c0b-a3c8-868473d69a3e
+		lineageTag: f92cd7ca-6df8-4cb4-9f99-abe1d823cf85
 
 	/// Required Targets Missing. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Required Targets Missing' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition] IN {"MIGRATE","ARCHIVE"}), KEEPFILTERS(ISBLANK('SPO Migration Plan'[Resolved Target URL])))
 		formatString: #,##0
 		displayFolder: Migration\Reconciliation
-		lineageTag: b5834f87-bf89-40e9-99c5-092dc1f18bca
+		lineageTag: 40071b06-aa07-4b5a-bd8d-c17132db5163
 
 	/// Targets Observed. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Targets Observed' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition] IN {"MIGRATE","ARCHIVE"}), KEEPFILTERS('SPO Migration Plan'[Target Observation]="Site observed"))
 		formatString: #,##0
 		displayFolder: Migration\Reconciliation
-		lineageTag: 8a14c67b-6f61-457c-b099-3474ff47f42f
+		lineageTag: 981f3023-66c7-421e-b66c-8351a2c635ab
 
 	/// Targets Not Observed. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Targets Not Observed' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition] IN {"MIGRATE","ARCHIVE"}), KEEPFILTERS('SPO Migration Plan'[Target Observation]="Not observed"))
 		formatString: #,##0
 		displayFolder: Migration\Reconciliation
-		lineageTag: ada5775f-8a23-4354-8cb0-84be2be229a5
+		lineageTag: af85086b-ad76-4f50-b5cf-9e52afea2298
 
 	/// Targets Not Verifiable. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Targets Not Verifiable' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Disposition] IN {"MIGRATE","ARCHIVE"}), KEEPFILTERS('SPO Migration Plan'[Target Observation]="Not verifiable"))
 		formatString: #,##0
 		displayFolder: Migration\Reconciliation
-		lineageTag: ae4fc6f5-7f4c-4c09-a0f3-10c27e485f0d
+		lineageTag: 15cded9e-4157-4754-baf4-2aec9c503050
 
 	/// Operations With Findings. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Operations With Findings' = CALCULATE([SPO Operations], KEEPFILTERS('SPO Migration Plan'[Requires Review]=TRUE()))
 		formatString: #,##0
 		displayFolder: Migration\Quality
-		lineageTag: 702b8a79-1153-41f9-801e-0c5f5fab651a
+		lineageTag: 3b146ccf-6353-47f2-bb62-78d99544a5ef
 
 	/// Permission Evidence Context. Operations use distinct source-type-qualified identities. Declared progress is separate from technical observation and validation.
 	measure 'SPO Permission Evidence Context' = "Permission strategy is declared; effective ACL equivalence is not measured"
 		formatString: General
 		displayFolder: Migration\Quality
-		lineageTag: d6712a56-3a68-4c40-8bd8-e7784c316042
-
-	/// Shared denominator for reported and validated progress: every MIGRATE operation in the selected source/project/business unit/phase and technical context, including cancellations. Execution and validation selections do not shrink the denominator.
-	measure 'SPO Migrate Population' = CALCULATE([SPO Migrate Operations], REMOVEFILTERS('SPO Migration Plan'[Execution Status]), REMOVEFILTERS('SPO Migration Plan'[Validation Status]), REMOVEFILTERS('SPO Migration Plan'[Is Validated]))
-		formatString: #,##0
-		displayFolder: Migration\Progress
-		lineageTag: 160786f6-94d3-40a5-abd7-2fff56fff5d7
+		lineageTag: 5da66818-002f-4cb5-a0e7-93974bf36fcc
 
 	/// Prepared, tenant-qualified migration evidence: TenantKey.
 	column TenantKey
 		dataType: string
 		isHidden
-		lineageTag: 1d017ba5-01b5-4b75-a715-cdebf63b1709
+		lineageTag: cf520fc0-760d-4a9c-b013-ec211013f60f
 		summarizeBy: none
 		sourceColumn: TenantKey
 
@@ -277,7 +277,7 @@ table 'SPO Migration Plan'
 	column 'Project Key'
 		dataType: string
 		isHidden
-		lineageTag: 7f97fe71-360f-4103-bf69-01654867033a
+		lineageTag: d0e0d598-a7b9-481d-bd11-956fc2265ec9
 		summarizeBy: none
 		sourceColumn: Project Key
 
@@ -285,7 +285,7 @@ table 'SPO Migration Plan'
 	column 'Snapshot ID'
 		dataType: string
 		isHidden
-		lineageTag: c903e45b-172c-4e55-8b42-a48791624ef6
+		lineageTag: 1b77ce01-e974-45c8-8d00-e692d0923a7c
 		summarizeBy: none
 		sourceColumn: Snapshot ID
 
@@ -293,43 +293,50 @@ table 'SPO Migration Plan'
 	column 'Snapshot Date'
 		dataType: dateTime
 		formatString: yyyy-MM-dd
-		lineageTag: a31c03de-8b09-4fcf-a672-b00874c8b6c5
+		lineageTag: 4e902c81-322d-435a-9ff0-79b7a7a00b83
 		summarizeBy: none
 		sourceColumn: Snapshot Date
+
+		variation Variation
+			isDefault
+			relationship: 8270c404-4c3b-4fa6-ad57-15c577491570
+			defaultHierarchy: LocalDateTable_12cfc3be-73ac-46ad-83d3-b500fc834d3c.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Prepared, tenant-qualified migration evidence: Operation Key.
 	column 'Operation Key'
 		dataType: string
 		isHidden
-		lineageTag: b4a001d3-04d1-4883-9188-f81dba70966d
+		lineageTag: 3db7ae13-4e4a-42d8-b7a5-1e8734ec1bb7
 		summarizeBy: none
 		sourceColumn: Operation Key
 
 	/// Prepared, tenant-qualified migration evidence: Migration ID.
 	column 'Migration ID'
 		dataType: string
-		lineageTag: d9e23b87-6f41-4909-a4f4-08d9202db5eb
+		lineageTag: f67dc010-ebf8-4d33-94db-801b18ae156f
 		summarizeBy: none
 		sourceColumn: Migration ID
 
 	/// Prepared, tenant-qualified migration evidence: Source Type.
 	column 'Source Type'
 		dataType: string
-		lineageTag: 8c560a7e-4df0-4c32-bcf4-dcaa34d0b78e
+		lineageTag: 8356d19f-d4e1-4d39-b6d7-8c0c49001537
 		summarizeBy: none
 		sourceColumn: Source Type
 
 	/// Prepared, tenant-qualified migration evidence: Business Unit.
 	column 'Business Unit'
 		dataType: string
-		lineageTag: 08309276-6f56-4008-817a-8efabfacd17e
+		lineageTag: f73753c9-4978-410a-a3b8-f93f5008aa4e
 		summarizeBy: none
 		sourceColumn: Business Unit
 
 	/// Prepared, tenant-qualified migration evidence: Phase.
 	column Phase
 		dataType: string
-		lineageTag: abc3b9aa-cb52-4359-93ba-b5b6431ed3b9
+		lineageTag: f01d0ca4-b767-42ad-9a01-cf2348045c92
 		summarizeBy: none
 		sourceColumn: Phase
 
@@ -337,14 +344,14 @@ table 'SPO Migration Plan'
 	column 'Project Scope Key'
 		dataType: string
 		isHidden
-		lineageTag: e5a23198-eb9d-49b2-9a5e-bc389167ef97
+		lineageTag: 639ad557-0cb5-4945-8f82-7861abe609a0
 		summarizeBy: none
 		sourceColumn: Project Scope Key
 
 	/// Prepared, tenant-qualified migration evidence: Source Reference.
 	column 'Source Reference'
 		dataType: string
-		lineageTag: b962d19a-8cba-4f40-9ac3-0ee55108ac14
+		lineageTag: 788209c2-e8f4-40b4-a3c9-83ace5de88eb
 		summarizeBy: none
 		sourceColumn: Source Reference
 
@@ -352,35 +359,35 @@ table 'SPO Migration Plan'
 	column 'Source URL Aliases'
 		dataType: string
 		isHidden
-		lineageTag: b465f689-8053-4bf1-9f81-4d6b97cdc3b7
+		lineageTag: 09854756-927b-481f-9df6-471808e20f58
 		summarizeBy: none
 		sourceColumn: Source URL Aliases
 
 	/// Prepared, tenant-qualified migration evidence: Source Name.
 	column 'Source Name'
 		dataType: string
-		lineageTag: 0971930a-feb4-40df-8eea-de53d2d2ee13
+		lineageTag: bf9f181f-64bc-4141-9f3d-a84d5edd10c6
 		summarizeBy: none
 		sourceColumn: Source Name
 
 	/// Prepared, tenant-qualified migration evidence: Disposition.
 	column Disposition
 		dataType: string
-		lineageTag: f7ac9f8f-6177-4233-9163-7d4205310758
+		lineageTag: 073dd144-a690-4865-a372-5d2fd2b53c14
 		summarizeBy: none
 		sourceColumn: Disposition
 
 	/// Prepared, tenant-qualified migration evidence: Execution Status.
 	column 'Execution Status'
 		dataType: string
-		lineageTag: 338f9b8a-4202-4105-aaae-f0d471e4b5ed
+		lineageTag: 4b1a18a6-ff29-43dd-8a8b-9c651c370f33
 		summarizeBy: none
 		sourceColumn: Execution Status
 
 	/// Prepared, tenant-qualified migration evidence: Validation Status.
 	column 'Validation Status'
 		dataType: string
-		lineageTag: a9fc9d63-bdb5-4bc7-b3e2-52a9197b5306
+		lineageTag: fc5595ce-7260-41af-b199-d3fd20b96b0a
 		summarizeBy: none
 		sourceColumn: Validation Status
 
@@ -388,37 +395,43 @@ table 'SPO Migration Plan'
 	column 'Validation Date'
 		dataType: dateTime
 		formatString: yyyy-MM-dd
-		lineageTag: eafbcd2d-d648-4c50-ab17-cf3fe927f75d
+		lineageTag: c0ccf2af-6ebd-4316-8820-26969c34399c
 		summarizeBy: none
 		sourceColumn: Validation Date
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Prepared, tenant-qualified migration evidence: Planned Date.
 	column 'Planned Date'
 		dataType: dateTime
 		formatString: yyyy-MM-dd
-		lineageTag: a4153545-c3ea-4a8c-88bb-4907d561831a
+		lineageTag: 0781c9f4-6b0f-46d5-b46f-ca705b94a571
 		summarizeBy: none
 		sourceColumn: Planned Date
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Prepared, tenant-qualified migration evidence: Actual Date.
 	column 'Actual Date'
 		dataType: dateTime
 		formatString: yyyy-MM-dd
-		lineageTag: 021fda2e-edcd-477a-b1d0-a7311f43c0fc
+		lineageTag: 61cbabd0-dffc-4ee9-9bd4-227c38da6bf1
 		summarizeBy: none
 		sourceColumn: Actual Date
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Prepared, tenant-qualified migration evidence: Target URL.
 	column 'Target URL'
 		dataType: string
-		lineageTag: e942ae4c-8dd6-4e78-8372-247e28713626
+		lineageTag: da6c1bd0-e580-4cc0-a367-942b14c94965
 		summarizeBy: none
 		sourceColumn: Target URL
 
 	/// Prepared, tenant-qualified migration evidence: Resolved Target URL.
 	column 'Resolved Target URL'
 		dataType: string
-		lineageTag: 7f9aff1f-f34c-45d5-9060-95d9da613879
+		lineageTag: 96b7d646-efd2-4676-82a2-56c77c502d77
 		dataCategory: WebUrl
 		summarizeBy: none
 		sourceColumn: Resolved Target URL
@@ -426,84 +439,84 @@ table 'SPO Migration Plan'
 	/// Prepared, tenant-qualified migration evidence: Target Review Status.
 	column 'Target Review Status'
 		dataType: string
-		lineageTag: 5b31393e-0506-476a-968a-a3d903ff2284
+		lineageTag: 4d8ce119-2876-42dd-b8aa-2572d5d7d8b2
 		summarizeBy: none
 		sourceColumn: Target Review Status
 
 	/// Prepared, tenant-qualified migration evidence: Target Mapping Level.
 	column 'Target Mapping Level'
 		dataType: string
-		lineageTag: ab1cef67-1b08-4b2d-ab43-585ce8f7cb6a
+		lineageTag: 9edae66b-30bf-4111-8197-1abefea550f2
 		summarizeBy: none
 		sourceColumn: Target Mapping Level
 
 	/// Prepared, tenant-qualified migration evidence: Target Approval Evidence.
 	column 'Target Approval Evidence'
 		dataType: string
-		lineageTag: e191ae3a-0903-4cba-8e15-7d7129f73e5a
+		lineageTag: 1ef36ef3-0e1b-43b8-bcfa-b2cb036e1bc6
 		summarizeBy: none
 		sourceColumn: Target Approval Evidence
 
 	/// Prepared, tenant-qualified migration evidence: Target Observation.
 	column 'Target Observation'
 		dataType: string
-		lineageTag: a901ea36-0f24-421c-84c3-391bb2998131
+		lineageTag: eace7102-9389-452d-a2da-bf4e3cf08c5c
 		summarizeBy: none
 		sourceColumn: Target Observation
 
 	/// Prepared, tenant-qualified migration evidence: Target Precision Status.
 	column 'Target Precision Status'
 		dataType: string
-		lineageTag: 661c6b60-baf0-40cb-b868-20f087be7bc0
+		lineageTag: a6bb1a6f-6e11-4e0f-b6fd-1fe94b3ac187
 		summarizeBy: none
 		sourceColumn: Target Precision Status
 
 	/// Prepared, tenant-qualified migration evidence: Source Object Type.
 	column 'Source Object Type'
 		dataType: string
-		lineageTag: e1ab2dd2-5568-4936-8ac9-52aa922daf04
+		lineageTag: c1d7e3f5-12c7-42c7-baaf-c85a4a5cf08f
 		summarizeBy: none
 		sourceColumn: Source Object Type
 
 	/// Prepared, tenant-qualified migration evidence: Source Scope.
 	column 'Source Scope'
 		dataType: string
-		lineageTag: cdca7bfb-b985-416b-bdff-d3b087365628
+		lineageTag: 3cd63a2a-7807-4c99-9d65-e934f5455040
 		summarizeBy: none
 		sourceColumn: Source Scope
 
 	/// Prepared, tenant-qualified migration evidence: Source Qualification.
 	column 'Source Qualification'
 		dataType: string
-		lineageTag: 0f2b678c-eb7d-43e8-bec9-acb04a580762
+		lineageTag: b42a6d5d-fdb1-4549-b5db-bf5ad373d124
 		summarizeBy: none
 		sourceColumn: Source Qualification
 
 	/// Prepared, tenant-qualified migration evidence: Business Contact.
 	column 'Business Contact'
 		dataType: string
-		lineageTag: 85e2be00-5a48-449e-baed-d6dacbd92add
+		lineageTag: 6b1a4530-cd7f-450e-8423-c5999e5363b0
 		summarizeBy: none
 		sourceColumn: Business Contact
 
 	/// Prepared, tenant-qualified migration evidence: Comments.
 	column Comments
 		dataType: string
-		lineageTag: dc205ca6-3a13-4c5d-9caf-43f4221d8c09
+		lineageTag: 9a3a39ef-609b-4db5-944e-87a521ff4168
 		summarizeBy: none
 		sourceColumn: Comments
 
 	/// Prepared, tenant-qualified migration evidence: Permission Strategy.
 	column 'Permission Strategy'
 		dataType: string
-		lineageTag: 78b74d95-d9a0-4661-99e1-ecce76fe8ae2
+		lineageTag: 08b20fec-edb7-4348-801c-c9fa221393ee
 		summarizeBy: none
 		sourceColumn: Permission Strategy
 
 	/// Prepared, tenant-qualified migration evidence: Audience.
 	column Audience
 		dataType: string
-		lineageTag: 64be479a-2ccd-418e-a958-bf6fa6505576
+		lineageTag: 9910d064-fa82-4b7d-b6ba-4b9bb882e3ad
 		summarizeBy: none
 		sourceColumn: Audience
 
@@ -511,15 +524,17 @@ table 'SPO Migration Plan'
 	column 'Source Row'
 		dataType: int64
 		isHidden
-		lineageTag: f587e365-ed42-4ce9-9d41-19a4638cdc29
-		summarizeBy: none
+		lineageTag: a4e069a2-c4f7-4fe3-bbb2-1da058f64a20
+		summarizeBy: sum
 		sourceColumn: Source Row
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Prepared, tenant-qualified migration evidence: Source SHA256.
 	column 'Source SHA256'
 		dataType: string
 		isHidden
-		lineageTag: 81cf7438-88aa-4979-86d6-89a2ae7874cc
+		lineageTag: 34692de9-9561-4ed9-884d-53aa8e8ac41c
 		summarizeBy: none
 		sourceColumn: Source SHA256
 
@@ -528,7 +543,7 @@ table 'SPO Migration Plan'
 		dataType: dateTime
 		isHidden
 		formatString: yyyy-MM-dd HH:mm
-		lineageTag: d303cbca-bf97-422e-89f2-e1bbfc3e3945
+		lineageTag: ff7473f5-c222-4f53-a828-d61652599837
 		summarizeBy: none
 		sourceColumn: Capture UTC
 
@@ -536,15 +551,17 @@ table 'SPO Migration Plan'
 	column 'Native Web Count'
 		dataType: int64
 		isHidden
-		lineageTag: 5bf9f7e3-903e-4de8-b359-178e919d9026
-		summarizeBy: none
+		lineageTag: 8a0fe963-34b0-4422-936a-08f22bf6e744
+		summarizeBy: sum
 		sourceColumn: Native Web Count
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Prepared, tenant-qualified migration evidence: Is Validated.
 	column 'Is Validated'
 		dataType: boolean
 		isHidden
-		lineageTag: f6d4a4f2-efc4-44a5-be87-f53cfac01ff4
+		lineageTag: 5220f5ce-0c68-4003-9b55-35bf7e9f0211
 		summarizeBy: none
 		sourceColumn: Is Validated
 
@@ -552,7 +569,7 @@ table 'SPO Migration Plan'
 	column 'Requires Review'
 		dataType: boolean
 		isHidden
-		lineageTag: 09238454-9e7b-44ae-a441-f1134b517cc1
+		lineageTag: 542dfd24-6390-4203-bbfc-019db02e03ad
 		summarizeBy: none
 		sourceColumn: Requires Review
 
@@ -560,7 +577,7 @@ table 'SPO Migration Plan'
 	column 'Present In Register'
 		dataType: boolean
 		isHidden
-		lineageTag: 3cdb2602-ff73-4891-a266-fc968dfe853f
+		lineageTag: 8b70a05c-3719-45a6-8e42-b7f479b0fb10
 		summarizeBy: none
 		sourceColumn: Present In Register
 
@@ -569,15 +586,22 @@ table 'SPO Migration Plan'
 		dataType: dateTime
 		isHidden
 		formatString: yyyy-MM-dd
-		lineageTag: 9376fadb-d240-4e4f-8e67-51e5da32b466
+		lineageTag: a076399f-e920-4be9-bb58-059883128f22
 		summarizeBy: none
 		sourceColumn: Imported Migration Date
+
+		variation Variation
+			isDefault
+			relationship: 1d58d390-b94e-43e6-a61f-2e81993486aa
+			defaultHierarchy: LocalDateTable_639f0ff7-b3b6-4a85-b662-3f9d23dd56f6.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Prepared, tenant-qualified migration evidence: Imported Date Meaning.
 	column 'Imported Date Meaning'
 		dataType: string
 		isHidden
-		lineageTag: 005d26a9-85a9-4609-96aa-1e2dac983a9d
+		lineageTag: 34532208-8b93-45f5-ab08-9317a36002f2
 		summarizeBy: none
 		sourceColumn: Imported Date Meaning
 
@@ -585,7 +609,7 @@ table 'SPO Migration Plan'
 	column 'Imported Target Site'
 		dataType: string
 		isHidden
-		lineageTag: 1b73d07d-062e-4389-ad05-70f8d5fb8467
+		lineageTag: ce1a1c0b-8e8d-49fc-baba-c6206549f574
 		summarizeBy: none
 		sourceColumn: Imported Target Site
 
@@ -593,7 +617,7 @@ table 'SPO Migration Plan'
 	column 'Imported Target Library'
 		dataType: string
 		isHidden
-		lineageTag: e059bdc4-3fd6-4583-9247-5fc97a95f501
+		lineageTag: e086d487-6e16-4d0e-8e12-10a4282cfaa9
 		summarizeBy: none
 		sourceColumn: Imported Target Library
 
@@ -601,7 +625,7 @@ table 'SPO Migration Plan'
 	column 'Imported Target Folder'
 		dataType: string
 		isHidden
-		lineageTag: 30171861-3ccd-4726-a777-2141fea8a926
+		lineageTag: fe9839e8-e207-40fa-87a0-3bf9d7754b49
 		summarizeBy: none
 		sourceColumn: Imported Target Folder
 
@@ -609,29 +633,34 @@ table 'SPO Migration Plan'
 	column 'Legacy Web ID'
 		dataType: string
 		isHidden
-		lineageTag: 32561c82-235d-4060-b90a-8abff655a2ae
+		lineageTag: e6b4774d-a0a7-40e5-85c3-0d1e4efe9e5b
 		summarizeBy: none
 		sourceColumn: Legacy Web ID
 
 	/// Prepared, tenant-qualified migration evidence: Next Action.
 	column 'Next Action'
 		dataType: string
-		lineageTag: 5a23e265-63e4-4269-887a-1ba23d6c358c
+		lineageTag: 44fd61c8-8826-4175-8381-1123c9923f45
 		summarizeBy: none
 		sourceColumn: Next Action
 
 	column 'Project Identity'
 		dataType: string
 		isHidden
-		lineageTag: 22cbd6c3-7cb2-41da-9d67-963cf40a320a
+		lineageTag: b1990ee0-e416-4ed4-b699-c7f3a962d730
+		summarizeBy: none
 		sourceColumn: Project Identity
+
+		annotation SummarizationSetBy = Automatic
 
 	column 'Schedule Variance Days'
 		dataType: int64
 		isHidden
-		lineageTag: 0732c7de-05b4-4d43-a468-4395a4647465
-		summarizeBy: none
+		lineageTag: e7a66770-7834-409a-9c03-f6dd86262fe0
+		summarizeBy: sum
 		sourceColumn: Schedule Variance Days
+
+		annotation SummarizationSetBy = Automatic
 
 	/// Actual prepared batch used by this query. Technical provenance only; empty tables have no observable batch.
 	column 'Loaded Batch ID'
@@ -667,3 +696,5 @@ table 'SPO Migration Plan'
 				in Variance)
 				in
 				    Readers[Finish](BusinessRows)
+
+	annotation PBI_ResultType = Exception

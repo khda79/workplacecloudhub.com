@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "6d32af61e06880fdbcbe",
   "position": {
     "x": 976,
-    "y": 761.7,
+    "y": 710.80459770114942,
+    "z": 3000,
+    "height": 289.19540229885058,
     "width": 912,
-    "height": 198.6,
-    "z": 11000,
     "tabOrder": 1720
   },
   "visual": {
@@ -28,7 +28,8 @@
               },
               "queryRef": "Intune Configuration Policy Evidence.Display Name",
               "nativeQueryRef": "Display Name",
-              "displayName": "Display Name"
+              "displayName": "Display Name",
+              "active": true
             },
             {
               "field": {
@@ -43,7 +44,8 @@
               },
               "queryRef": "Intune Configuration Policy Evidence.Policy Family",
               "nativeQueryRef": "Policy Family",
-              "displayName": "Policy Family"
+              "displayName": "Policy Family",
+              "active": true
             },
             {
               "field": {
@@ -58,7 +60,8 @@
               },
               "queryRef": "Intune Configuration Policy Evidence.Policy Type",
               "nativeQueryRef": "Policy Type",
-              "displayName": "Policy Type"
+              "displayName": "Policy Type",
+              "active": true
             },
             {
               "field": {
@@ -73,7 +76,8 @@
               },
               "queryRef": "Intune Configuration Policy Evidence.Platforms",
               "nativeQueryRef": "Platforms",
-              "displayName": "Platforms"
+              "displayName": "Platforms",
+              "active": true
             }
           ]
         }
@@ -83,13 +87,6 @@
       "columnHeaders": [
         {
           "properties": {
-            "fontSize": {
-              "expr": {
-                "Literal": {
-                  "Value": "11D"
-                }
-              }
-            },
             "autoSizeColumnWidth": {
               "expr": {
                 "Literal": {
@@ -101,6 +98,20 @@
               "expr": {
                 "Literal": {
                   "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             },
@@ -127,9 +138,16 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#215E9E'"
+                      "Value": "'#2D5F9E'"
                     }
                   }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
                 }
               }
             }
@@ -213,19 +231,146 @@
           }
         }
       ],
-      "columnWidth": [
+      "columnWidth": [],
+      "columnFormatting": [
         {
+          "selector": {
+            "metadata": "Intune Configuration Policy Evidence.Display Name"
+          },
           "properties": {
-            "value": {
+            "alignment": {
               "expr": {
                 "Literal": {
-                  "Value": "320D"
+                  "Value": "'Left'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
-            "metadata": "Intune Configuration Policy Evidence.Display Name"
+            "metadata": "Intune Configuration Policy Evidence.Policy Family"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Configuration Policy Evidence.Policy Type"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Intune Configuration Policy Evidence.Platforms"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
           }
         }
       ]
@@ -237,7 +382,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Geography \u00b7 selected evidence'"
+                  "Value": "'Geography · selected evidence'"
                 }
               }
             }
@@ -257,7 +402,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Collected policy catalog \u00b7 tenant scope'"
+                  "Value": "'Collected policy catalog · tenant scope'"
                 }
               }
             },
@@ -346,7 +491,14 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "showOptionsMenu": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

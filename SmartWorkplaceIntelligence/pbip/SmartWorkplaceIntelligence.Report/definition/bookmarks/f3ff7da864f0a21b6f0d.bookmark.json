@@ -1,0 +1,68 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "f3ff7da864f0a21b6f0d",
+  "displayName": "Coverage issues",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "3140a6ae825cc681694b",
+      "5453945c8163a37c7689",
+      "bde7963abaae4d36f00f",
+      "c59e2e8425347d14fd1c",
+      "e44373929abff02b8536",
+      "8a0ea089982848faf352",
+      "e4b0e460f91f59b8ebd1",
+      "a08c26a67545cd53a5c5"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "df08428a0c9c23d39f3f",
+    "sections": {
+      "df08428a0c9c23d39f3f": {
+        "visualContainers": {
+          "e44373929abff02b8536": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "8a0ea089982848faf352": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "e4b0e460f91f59b8ebd1": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "a08c26a67545cd53a5c5": {
+            "singleVisual": {}
+          }
+        },
+        "visualContainerGroups": {
+          "3140a6ae825cc681694b": {
+            "isHidden": true
+          },
+          "5453945c8163a37c7689": {
+            "isHidden": false
+          },
+          "bde7963abaae4d36f00f": {
+            "isHidden": true
+          },
+          "c59e2e8425347d14fd1c": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

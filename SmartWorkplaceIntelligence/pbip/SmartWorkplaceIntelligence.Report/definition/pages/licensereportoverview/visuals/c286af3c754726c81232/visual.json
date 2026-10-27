@@ -1,106 +1,31 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "c286af3c754726c81232",
   "position": {
     "x": 32,
     "y": 328,
+    "z": 0,
+    "height": 128,
     "width": 1856,
-    "height": 112,
-    "z": 45,
-    "tabOrder": 45
+    "tabOrder": 4000
   },
   "visual": {
-    "visualType": "cardVisual",
-    "query": {
-      "queryState": {
-        "Data": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Gaps"
-                    }
-                  },
-                  "Property": "License Report Gap UserMailboxes Total"
-                }
-              },
-              "queryRef": "License Report Gaps.License Report Gap UserMailboxes Total",
-              "nativeQueryRef": "EXO UserMailbox without suite",
-              "displayName": "EXO UserMailbox without suite"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Gaps"
-                    }
-                  },
-                  "Property": "License Report Gap UserMailboxes (%)"
-                }
-              },
-              "queryRef": "License Report Gaps.License Report Gap UserMailboxes (%)",
-              "nativeQueryRef": "% of qualified EXO UserMailbox",
-              "displayName": "% of qualified EXO UserMailbox"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Gaps"
-                    }
-                  },
-                  "Property": "License Report Gap NoUserMailbox Total"
-                }
-              },
-              "queryRef": "License Report Gaps.License Report Gap NoUserMailbox Total",
-              "nativeQueryRef": "Entra accounts without mailbox or suite",
-              "displayName": "Entra accounts without mailbox or suite"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "License Report Gaps"
-                    }
-                  },
-                  "Property": "License Report Gap NoUserMailbox (%)"
-                }
-              },
-              "queryRef": "License Report Gaps.License Report Gap NoUserMailbox (%)",
-              "nativeQueryRef": "% of qualified Entra accounts",
-              "displayName": "% of qualified Entra accounts"
-            }
-          ]
-        }
-      }
-    },
+    "visualType": "shape",
     "objects": {
-      "value": [
+      "shape": [
         {
           "properties": {
-            "fontSize": {
+            "tileShape": {
               "expr": {
                 "Literal": {
-                  "Value": "20D"
+                  "Value": "'rectangle'"
                 }
               }
             },
-            "textWrap": {
+            "roundEdge": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
-                }
-              }
-            },
-            "labelDisplayUnits": {
-              "expr": {
-                "Literal": {
-                  "Value": "1D"
+                  "Value": "12L"
                 }
               }
             }
@@ -110,20 +35,24 @@
           }
         }
       ],
-      "label": [
+      "fill": [
         {
           "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
+            "fillColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
                 }
               }
             },
-            "fontSize": {
+            "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "0D"
                 }
               }
             }
@@ -142,155 +71,28 @@
                   "Value": "false"
                 }
               }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "accentBar": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
             },
-            "position": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Left'"
-                }
-              }
-            },
-            "width": {
-              "expr": {
-                "Literal": {
-                  "Value": "4D"
-                }
-              }
-            },
-            "color": {
+            "lineColor": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#CBD8E5'"
                     }
                   }
+                }
+              }
+            },
+            "weight": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
                 }
               }
             },
             "transparency": {
               "expr": {
                 "Literal": {
-                  "Value": "0L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "padding": [
-        {
-          "properties": {
-            "paddingIndividual": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "topMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "bottomMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "leftMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            },
-            "rightMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "layout": [
-        {
-          "properties": {
-            "topOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "bottomOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "leftOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "rightOuterMargin": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "0L"
-                }
-              }
-            }
-          },
-          "selector": {
-            "id": "default"
-          }
-        }
-      ],
-      "spacing": [
-        {
-          "properties": {
-            "verticalSpacing": {
-              "expr": {
-                "Literal": {
                   "Value": "0D"
                 }
               }
@@ -298,51 +100,6 @@
           },
           "selector": {
             "id": "default"
-          }
-        }
-      ],
-      "cardCalloutArea": [
-        {
-          "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "paddingUniform": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
-                }
-              }
-            },
-            "rectangleRoundedCurve": {
-              "expr": {
-                "Literal": {
-                  "Value": "6L"
-                }
-              }
-            },
-            "backgroundFillColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#F7FAFC'"
-                    }
-                  }
-                }
-              }
-            },
-            "backgroundTransparency": {
-              "expr": {
-                "Literal": {
-                  "Value": "0D"
-                }
-              }
-            }
           }
         }
       ]
@@ -354,7 +111,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant-wide mailbox / suite gaps \u00b7 unaffected by product selection'"
+                  "Value": "'Tenant-wide mailbox / suite gaps · unaffected by product selection'"
                 }
               }
             }
@@ -374,7 +131,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Tenant-wide mailbox / suite gaps \u00b7 unaffected by product selection'"
+                  "Value": "'Tenant-wide mailbox / suite gaps · unaffected by product selection'"
                 }
               }
             },
