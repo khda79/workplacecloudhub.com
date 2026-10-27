@@ -4,7 +4,7 @@
 Offline WPF tests of the asynchronous run request submission: wait window, slow, success,
 error, uncertain result, double click and auto-refresh during the wait. No job is launched.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -174,7 +174,7 @@ try{
     Assert-Case (-not $dialog.IsVisible -and $null -eq $script:RequestSubmitDialog) 'Wait window not closed after success.'
     Assert-Case ($script:Results.Count -eq 1 -and -not $script:Results[0].DialogOpen -and -not $script:Results[0].Busy) 'Result shown while the wait window was open.'
     $result=$script:Results[0]
-    Assert-Case ($result.Title -eq 'Run requested' -and $result.Icon -eq 'Information' -and $result.Message -match '^Request submitted\.' -and $result.Message -match 'Batch: Batch\d+' -and $result.Message -match 'Jobs: 2' -and $result.Message -match 'Requests tab') 'Success confirmation lost BatchId, job count or Requests pointer.'
+    Assert-Case ($result.Title -eq 'Run requested' -and $result.Icon -eq 'Information' -and $result.Message -match '^Request submitted\.' -and $result.Message -match 'Batch: Batch\d+' -and $result.Message -match 'Jobs: 2' -and $result.Message -match 'Operations > Requests') 'Success confirmation lost BatchId, job count or Requests pointer.'
     Assert-Case ($result.Message -match 'no job has started yet' -and $script:Controls.StatusText.Text -match 'not started yet') 'Success announced a started job.'
     Assert-Case ($script:Controls.RequestRunButton.IsEnabled -and $script:Controls.RequestJobButton.IsEnabled -and $script:Controls.RefreshButton.IsEnabled) 'Controls not restored after success.'
     Assert-Case (@($script:RequestRows).Count -eq 1) 'Requests grid not refreshed from the worker.'

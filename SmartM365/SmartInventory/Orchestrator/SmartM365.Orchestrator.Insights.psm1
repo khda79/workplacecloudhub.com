@@ -748,12 +748,62 @@ function Select-SmartM365OrchestratorLogEvents {
     }
 }
 
+function Get-SmartM365OrchestratorScriptVersion {
+    <#
+    Reads the .VERSION header of each job script (first 8 KB only, never parsed or executed).
+    Returns a case-insensitive map ScriptPath -> version text: the version, 'missing' when the file
+    is absent, '?' when no valid .VERSION header is found. The optional cache (FullPath -> entry)
+    makes a later call re-read only the scripts whose size or last write time changed.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SmartInventoryRoot,
+        [AllowEmptyCollection()][string[]]$ScriptPath = @(),
+        [AllowNull()][System.Collections.IDictionary]$Cache = $null
+    )
+    $versions = @{}
+    $pattern = [regex]'(?im)^[ \t]*\.VERSION(?:[ \t]+(?<Inline>[^\r\n]+)|[ \t]*\r?\n[ \t]*(?<Version>[^\r\n]+))'
+    foreach ($relative in @($ScriptPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        $key = $relative.Trim()
+        if ($versions.ContainsKey($key)) { continue }
+        $version = '?'
+        try {
+            $fullPath = [IO.Path]::GetFullPath((Join-Path $SmartInventoryRoot $key))
+            $file = [IO.FileInfo]::new($fullPath)
+            if (-not $file.Exists) { $version = 'missing' }
+            elseif ($file.Extension -eq '.ps1') {
+                $stamp = '{0}|{1}' -f $file.Length, $file.LastWriteTimeUtc.Ticks
+                if ($null -ne $Cache -and $Cache.Contains($fullPath) -and $Cache[$fullPath].Stamp -eq $stamp) { $version = [string]$Cache[$fullPath].Version }
+                else {
+                    $stream = [IO.FileStream]::new($fullPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+                    try {
+                        $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+                        $buffer = New-Object char[] 8192
+                        $count = $reader.ReadBlock($buffer, 0, $buffer.Length)
+                    }
+                    finally { $stream.Dispose() }
+                    $match = $pattern.Match([string]::new($buffer, 0, $count))
+                    if ($match.Success) {
+                        $text = if ($match.Groups['Inline'].Success) { $match.Groups['Inline'].Value } else { $match.Groups['Version'].Value }
+                        if ($text.Trim() -match '^[0-9][0-9A-Za-z.+-]{0,31}$') { $version = $text.Trim() }
+                    }
+                    if ($null -ne $Cache) { $Cache[$fullPath] = [pscustomobject]@{ Stamp = $stamp; Version = $version } }
+                }
+            }
+        }
+        catch { $version = '?' }
+        $versions[$key] = $version
+    }
+    return $versions
+}
+
 Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorScheduleOccurrences', 'Get-SmartM365OrchestratorExpectedMaxAgeHours', 'Get-SmartM365OrchestratorRecentRuns',
     'Get-SmartM365OrchestratorJobHealth', 'Get-SmartM365OrchestratorDependents', 'Get-SmartM365OrchestratorDependencyReadiness',
     'Get-SmartM365OrchestratorOperations', 'Get-SmartM365OrchestratorRecentPipelineRuns', 'New-SmartM365OrchestratorJobRunRequest',
     'Get-SmartM365OrchestratorLogEventCategory', 'Get-SmartM365OrchestratorLogEvents', 'Select-SmartM365OrchestratorLogEvents',
-    'Get-SmartM365OrchestratorDashboard', 'Get-SmartM365OrchestratorDashboardData'
+    'Get-SmartM365OrchestratorDashboard', 'Get-SmartM365OrchestratorDashboardData',
+    'Get-SmartM365OrchestratorScriptVersion'
 )
 
 # SIG # Begin signature block

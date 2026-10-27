@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline tests of the Operations launch features of the orchestrator GUI.
 .VERSION
-1.1.1
+1.1.2
 .NOTES
 GUI functions are extracted by AST and bound to the real XAML. The catalog is the committed
 template (read only); the published configuration is a copy of its jobs. No orchestrator, request
@@ -28,7 +28,7 @@ Import-Module (Join-Path $folder 'SmartM365.Orchestrator.Management.psm1') -Forc
 $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $folder 'SmartM365-Inventory-Orchestrator-GUI.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'GUI parsing failed.' }
-foreach ($name in @('ConvertFrom-OrchestratorGuiXaml', 'Get-OrchestratorGuiPropertyValue', 'Set-JsonProperty', 'Copy-JsonDocument', 'Get-ComboText', 'Select-ComboText', 'Get-GuiLaunchCatalog', 'Refresh-LaunchView',
+foreach ($name in @('ConvertFrom-OrchestratorGuiXaml', 'Get-OrchestratorGuiPropertyValue', 'Set-JsonProperty', 'Copy-JsonDocument', 'Get-ComboText', 'Select-ComboText', 'Get-GuiLaunchCatalog', 'Get-GuiJobScriptVersion', 'Refresh-LaunchView',
         'Get-GuiLaunchPlanText', 'Update-SelectedLaunchPreview', 'Start-GuiConsoleProcess', 'Get-GuiOrchestratorActionCommand', 'Set-GuiJobExecutionMode', 'Request-SelectedJobRun')) {
     $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     if ($null -eq $definition) { throw "Missing GUI function: $name" }
@@ -45,7 +45,7 @@ foreach ($name in @('OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo',
 }
 
 $script:Cases = 0
-$script:RequestSubmitBusy = $false; $script:CancellationBusy = $false
+$script:RequestSubmitBusy = $false; $script:CancellationBusy = $false; $script:ScriptVersions = @{}
 function Assert-Case { param([bool]$Condition, [string]$Message) $script:Cases++; if (-not $Condition) { throw "FAIL: $Message" } }
 $script:Activity = [Collections.Generic.List[string]]::new()
 function Write-GuiActivity { param($Message, $Level = 'INFO', [switch]$DisplayOnly) $script:Activity.Add("$Level|$Message") }

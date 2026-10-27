@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.2
+1.6.3
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.2'
+$script:AppVersion = '1.6.3'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -78,6 +78,9 @@ $script:HistoryRows = @()
 $script:InitialHistoryLoaded = $false
 $script:RecentRuns = @()
 $script:HealthByName = @{}
+# Job script .VERSION read in the Full refresh worker; the cache keeps unchanged files from being re-read.
+$script:ScriptVersions = @{}
+$script:ScriptVersionCache = [hashtable]::Synchronized(@{})
 $script:RequestRows = @()
 $script:MailFolderPath = ''
 $script:LogEventsCache = @{}
@@ -434,6 +437,7 @@ $xaml = @'
                                 <DataGrid x:Name="LaunchJobsGrid" Grid.Row="1">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="Job" Binding="{Binding Name}" Width="290"/>
+                                        <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="70"/>
                                         <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="90"/>
                                         <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="65"/>
                                         <DataGridTextColumn Header="Runtime" Binding="{Binding Runtime}" Width="130"/>
@@ -449,6 +453,44 @@ $xaml = @'
                                     <CheckBox x:Name="LaunchIncludeDependenciesCheck" Content="Also run the enabled dependencies (Request)" VerticalAlignment="Center" Margin="10,0,0,0"/>
                                 </StackPanel>
                                 <TextBox x:Name="LaunchJobCommandBox" Grid.Row="3" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                            </Grid>
+                        </TabItem>
+                        <TabItem x:Name="OperationsRequestsTab" Header="Requests">
+                            <Grid Margin="8">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <TextBlock Text="Cancellation reason" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox x:Name="CancellationReasonBox" Width="340" Margin="0,0,8,0"/>
+                                    <Button x:Name="CancelRequestButton" Content="Cancel remaining jobs" IsEnabled="False" ToolTip="Cancel pending jobs and retries in the selected request. Running collectors continue. All residents must support cancellation."/>
+                                    <Button x:Name="CancelAllRequestsButton" Content="Cancel All remaining Jobs" IsEnabled="False" Margin="8,0,0,0" ToolTip="Cancel pending jobs and retries in all active pipeline requests for this tenant. Running collectors and automatic schedules are unchanged."/>
+                                </StackPanel>
+                                <TextBlock x:Name="CancellationProgressText" Grid.Row="1" Margin="0,0,0,8" Foreground="#5D6B78" TextWrapping="Wrap"/>
+                                <GroupBox Grid.Row="2" Header="Pipeline and job run requests (newest first)">
+                                    <DataGrid x:Name="RequestsGrid" SelectionMode="Single">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Batch" Binding="{Binding BatchId}" Width="260"/>
+                                            <DataGridTextColumn Header="Selection" Binding="{Binding Selection}" Width="90"/>
+                                            <DataGridTextColumn Header="Created" Binding="{Binding Created}" Width="125"/>
+                                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="150"/>
+                                            <DataGridTextColumn Header="Jobs" Binding="{Binding Jobs}" Width="55"/>
+                                            <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="65"/>
+                                            <DataGridTextColumn Header="Failed" Binding="{Binding Failed}" Width="60"/>
+                                            <DataGridTextColumn Header="Cancelled" Binding="{Binding Cancelled}" Width="70"/>
+                                            <DataGridTextColumn Header="Requested by" Binding="{Binding RequestedBy}" Width="*"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </GroupBox>
+                                <GroupBox Grid.Row="3" Header="Jobs of the selected request">
+                                    <DataGrid x:Name="RequestJobsGrid">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Job" Binding="{Binding JobName}" Width="260"/>
+                                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="170"/>
+                                            <DataGridTextColumn Header="Server" Binding="{Binding OwnerServer}" Width="140"/>
+                                            <DataGridTextColumn Header="Updated (UTC)" Binding="{Binding UpdatedAtUtc}" Width="170"/>
+                                            <DataGridTextColumn Header="Detail" Binding="{Binding Detail}" Width="*"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </GroupBox>
                             </Grid>
                         </TabItem>
                         <TabItem Header="Manual launches">
@@ -488,6 +530,7 @@ $xaml = @'
                     <DataGrid x:Name="PlanningGrid" SelectionMode="Single">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Job" Binding="{Binding Name}" SortMemberPath="Name" SortDirection="Ascending" Width="250"/>
+                            <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="70"/>
                             <DataGridTextColumn Header="Arguments" Binding="{Binding Arguments}" Width="180"/>
                             <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="70"/>
                             <DataGridTextColumn Header="Frequency" Binding="{Binding Frequency}" Width="90"/>
@@ -616,45 +659,6 @@ $xaml = @'
                             <DataGridTextColumn Header="Log" Binding="{Binding LogPath}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
-                </Grid>
-            </TabItem>
-
-            <TabItem Header="Requests">
-                <Grid Margin="12">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                        <TextBlock Text="Cancellation reason" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox x:Name="CancellationReasonBox" Width="340" Margin="0,0,8,0"/>
-                        <Button x:Name="CancelRequestButton" Content="Cancel remaining jobs" IsEnabled="False" ToolTip="Cancel pending jobs and retries in the selected request. Running collectors continue. All residents must support cancellation."/>
-                        <Button x:Name="CancelAllRequestsButton" Content="Cancel All remaining Jobs" IsEnabled="False" Margin="8,0,0,0" ToolTip="Cancel pending jobs and retries in all active pipeline requests for this tenant. Running collectors and automatic schedules are unchanged."/>
-                    </StackPanel>
-                    <TextBlock x:Name="CancellationProgressText" Grid.Row="1" Margin="0,0,0,8" Foreground="#5D6B78" TextWrapping="Wrap"/>
-                    <GroupBox Grid.Row="2" Header="Pipeline and job run requests (newest first)">
-                        <DataGrid x:Name="RequestsGrid" SelectionMode="Single">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="Batch" Binding="{Binding BatchId}" Width="260"/>
-                                <DataGridTextColumn Header="Selection" Binding="{Binding Selection}" Width="90"/>
-                                <DataGridTextColumn Header="Created" Binding="{Binding Created}" Width="125"/>
-                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="150"/>
-                                <DataGridTextColumn Header="Jobs" Binding="{Binding Jobs}" Width="55"/>
-                                <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="65"/>
-                                <DataGridTextColumn Header="Failed" Binding="{Binding Failed}" Width="60"/>
-                                <DataGridTextColumn Header="Cancelled" Binding="{Binding Cancelled}" Width="70"/>
-                                <DataGridTextColumn Header="Requested by" Binding="{Binding RequestedBy}" Width="*"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
-                    </GroupBox>
-                    <GroupBox Grid.Row="3" Header="Jobs of the selected request">
-                        <DataGrid x:Name="RequestJobsGrid">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="Job" Binding="{Binding JobName}" Width="260"/>
-                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="170"/>
-                                <DataGridTextColumn Header="Server" Binding="{Binding OwnerServer}" Width="140"/>
-                                <DataGridTextColumn Header="Updated (UTC)" Binding="{Binding UpdatedAtUtc}" Width="170"/>
-                                <DataGridTextColumn Header="Detail" Binding="{Binding Detail}" Width="*"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
-                    </GroupBox>
                 </Grid>
             </TabItem>
 
@@ -1001,7 +1005,7 @@ if ($ValidateOnly) {
         'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
         'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
         'ConfigFilterBox', 'ConfigShowSensitiveButton', 'ConfigRefreshButton', 'ConfigOpenFolderButton', 'ConfigSummaryText', 'ConfigFileTabs', 'ConfigGlobalTab', 'ConfigTenantTab', 'ConfigMailTab', 'ConfigGlobalStatusText', 'ConfigTenantStatusText', 'ConfigMailStatusText', 'ConfigGlobalGrid', 'ConfigTenantGrid', 'ConfigMailGrid',
-        'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox')) {
+        'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OperationsRequestsTab', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
     }
     $source = [IO.File]::ReadAllText($PSCommandPath)
@@ -1257,6 +1261,20 @@ function Update-ScheduleDaysControlState {
     if (-not $isWeekly) { Set-SelectedScheduleDays -Days @() }
 }
 
+function Get-GuiJobScriptPaths {
+    param([AllowNull()]$JobsDocument)
+    $paths = foreach ($job in @(Get-OrchestratorGuiPropertyValue -Object $JobsDocument -Name 'Jobs' -DefaultValue @())) { [string](Get-OrchestratorGuiPropertyValue -Object $job -Name 'ScriptPath' -DefaultValue '') }
+    return @($paths | Where-Object { $_ })
+}
+
+function Get-GuiJobScriptVersion {
+    # Version of the script present on this computer; empty until the first Full refresh read it.
+    param([AllowNull()]$Job)
+    $path = [string](Get-OrchestratorGuiPropertyValue -Object $Job -Name 'ScriptPath' -DefaultValue '')
+    if (-not $path -or -not $script:ScriptVersions.ContainsKey($path.Trim())) { return '' }
+    return [string]$script:ScriptVersions[$path.Trim()]
+}
+
 function Refresh-PlanningView {
     param([AllowNull()]$Owners = $null)
     $owners = if ($null -ne $Owners) { $Owners } else { Get-ElectionOwners }
@@ -1273,6 +1291,7 @@ function Refresh-PlanningView {
         $health = if ($script:HealthByName.ContainsKey([string]$job.Name)) { $script:HealthByName[[string]$job.Name] } else { $null }
         [pscustomobject]@{
             Name = [string]$job.Name
+            Version = Get-GuiJobScriptVersion -Job $job
             Arguments = if ([string]::IsNullOrWhiteSpace($arguments)) { '(none)' } else { $arguments }
             Enabled = [bool]$job.Enabled
             Frequency = [string]$job.Schedule.Type
@@ -1645,7 +1664,7 @@ function Request-SelectedJobRun {
         # Fast pre-check; New-SmartM365OrchestratorPipelineRequest repeats it under the submission lock.
         Refresh-RequestsView
         $activeRequest = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling') | Select-Object -First 1)
-        if ($activeRequest.Count) { throw "An active pipeline request already exists: $($activeRequest[0].BatchId) (created $($activeRequest[0].Created), $($activeRequest[0].Pending) job(s) not finished). See the Requests tab." }
+        if ($activeRequest.Count) { throw "An active pipeline request already exists: $($activeRequest[0].BatchId) (created $($activeRequest[0].Created), $($activeRequest[0].Pending) job(s) not finished). See Operations > Requests." }
         $request = New-SmartM365OrchestratorJobRunRequest -SharedDataFolderPath $script:SharedDataFolderPath -JobsPath (Get-PublishedJobsPath) -JobName @($jobName) -Tenant $Tenant -IncludeDependencies:$includeDependencies
         Write-GuiActivity -Message ("Run request recorded. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}" -f $jobName, $includeDependencies, $request.BatchId, $request.TotalCount) -Level SUCCESS
         $script:Controls.StatusText.Text = "Run request recorded: $($request.BatchId)"
@@ -1655,7 +1674,7 @@ function Request-SelectedJobRun {
     # Pre-check on the displayed rows only: no shared read on the WPF thread. The submission
     # API repeats it under the shared submission lock.
     $activeRequest = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling') | Select-Object -First 1)
-    if ($activeRequest.Count) { throw "An active pipeline request already exists: $($activeRequest[0].BatchId) (created $($activeRequest[0].Created), $($activeRequest[0].Pending) job(s) not finished). See the Requests tab." }
+    if ($activeRequest.Count) { throw "An active pipeline request already exists: $($activeRequest[0].BatchId) (created $($activeRequest[0].Created), $($activeRequest[0].Pending) job(s) not finished). See Operations > Requests." }
     $message = "Ask the orchestrators to run '$jobName' now?"
     if ($includeDependencies) { $message += "`n`nIts enabled dependencies are included and run first." }
     else { $message += "`n`nDependencies are not run; the job starts on its elected server when its dependency rule allows it." }
@@ -1854,7 +1873,7 @@ function Receive-GuiJobRunSubmission {
         if (-not $result.RefreshError) { Set-GuiRequestRows -Rows @($result.Rows) }
         Write-GuiActivity -Level SUCCESS -DisplayOnly -Message ("Run request recorded. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}" -f $jobName, [bool]$context.Input.IncludeDependencies, $result.BatchId, $result.TotalCount)
         $script:Controls.StatusText.Text = "Run request recorded: $($result.BatchId) (not started yet)"
-        $message = "Request submitted.`nBatch: $($result.BatchId)`nJobs: $($result.TotalCount)`n`nThe request is recorded; no job has started yet. The orchestrators start it on its elected server when its dependency rule allows it.`n`nFollow it in the Requests tab."
+        $message = "Request submitted.`nBatch: $($result.BatchId)`nJobs: $($result.TotalCount)`n`nThe request is recorded; no job has started yet. The orchestrators start it on its elected server when its dependency rule allows it.`n`nFollow it in Operations > Requests."
         if ($result.RefreshError) { $message += "`n`nThe Requests list could not be refreshed ($($result.RefreshError)). Refresh it before relying on it." }
         $title = 'Run requested'; $icon = 'Information'
     }
@@ -1865,16 +1884,16 @@ function Receive-GuiJobRunSubmission {
     }
     elseif ($null -ne $result -and [string]$result.Outcome -eq 'Failed') {
         $seen = if (@($result.NewBatchIds).Count) { "New request(s) appeared meanwhile: $(@($result.NewBatchIds) -join ', ')." } else { "The shared folder could not be checked: $($result.CheckError)" }
-        $message = "The run request for '$jobName' reported an error and may still have been recorded.`n`n$($result.Error)`n`n$seen`n`nCheck the Requests tab (Refresh) before requesting again. Nothing is resubmitted automatically."
+        $message = "The run request for '$jobName' reported an error and may still have been recorded.`n`n$($result.Error)`n`n$seen`n`nCheck Operations > Requests (Refresh) before requesting again. Nothing is resubmitted automatically."
         Write-GuiActivity -Level WARN -DisplayOnly -Message "Run request result uncertain. Job=$jobName; Error=$($result.Error); $seen"
-        $script:Controls.StatusText.Text = 'Run request result uncertain: check the Requests tab.'
+        $script:Controls.StatusText.Text = 'Run request result uncertain: check Operations > Requests.'
         $title = 'Run request uncertain'; $icon = 'Warning'
     }
     elseif ($stage -in @('Submitting', 'Recorded')) {
         $detail = if ($received.Error) { $received.Error } else { 'The submission worker returned an invalid result.' }
-        $message = "The run request for '$jobName' was interrupted while it was being recorded and may have been recorded.`n`n$detail`n`nCheck the Requests tab (Refresh) before requesting again. Nothing is resubmitted automatically."
+        $message = "The run request for '$jobName' was interrupted while it was being recorded and may have been recorded.`n`n$detail`n`nCheck Operations > Requests (Refresh) before requesting again. Nothing is resubmitted automatically."
         Write-GuiActivity -Level WARN -DisplayOnly -Message "Run request result uncertain. Job=$jobName; Stage=$stage; Error=$detail"
-        $script:Controls.StatusText.Text = 'Run request result uncertain: check the Requests tab.'
+        $script:Controls.StatusText.Text = 'Run request result uncertain: check Operations > Requests.'
         $title = 'Run request uncertain'; $icon = 'Warning'
     }
     else {
@@ -1919,6 +1938,7 @@ function Refresh-LaunchView {
             $draftMode = [string](Get-OrchestratorGuiPropertyValue -Object (Get-OrchestratorGuiPropertyValue -Object $draftJob -Name 'Execution' -DefaultValue $null) -Name 'Mode' -DefaultValue '')
             [pscustomobject]@{
                 Name = $entry.Name
+                Version = Get-GuiJobScriptVersion -Job $definition
                 Group = [string](Get-OrchestratorGuiPropertyValue -Object $draftJob -Name 'Group' -DefaultValue (Get-OrchestratorGuiPropertyValue -Object $definition -Name 'Group' -DefaultValue ''))
                 Enabled = [bool](Get-OrchestratorGuiPropertyValue -Object $draftJob -Name 'Enabled' -DefaultValue $false)
                 Runtime = $runtime
@@ -2012,7 +2032,7 @@ function Get-GuiOrchestratorActionCommand {
         'Restart' { [pscustomobject]@{ Title = 'Restart the orchestrator'; ScriptPath = (Join-Path $folder 'Restart-SmartM365-Inventory-Orchestrator.ps1'); Arguments = @('-Tenant', $Tenant); Icon = 'Warning'; KeepOpen = $true
                 Message = "Restart the orchestrator of this computer ($env:COMPUTERNAME)?`n`nIt is stopped cleanly, then its scheduled task is started." } }
         'FullCollect' { [pscustomobject]@{ Title = 'Full collect'; ScriptPath = (Join-Path $folder 'SmartM365-Inventory-Pipeline.ps1'); Arguments = @('-Tenant', $Tenant, '-Pipeline', 'Full', '-Collect'); Icon = 'Warning'; KeepOpen = $true
-                Message = "Request the full pipeline from the resident orchestrators?`n`nEvery enabled job runs on its elected server with the shared locks and dependency rules. Only one request can be active; follow it in the new console or the Requests tab." } }
+                Message = "Request the full pipeline from the resident orchestrators?`n`nEvery enabled job runs on its elected server with the shared locks and dependency rules. Only one request can be active; follow it in the new console or Operations > Requests." } }
         'SendSummary' { [pscustomobject]@{ Title = 'Send summary'; ScriptPath = $orchestrator; Arguments = @('-Tenant', $Tenant, '-SendExecutionSummary'); Icon = 'Question'; KeepOpen = $true
                 Message = 'Send the execution summary email now? The resident orchestrator and its jobs are not affected.' } }
     }
@@ -2197,6 +2217,8 @@ function Invoke-GuiDashboardTarget {
 
 function Select-GuiTab {
     param([Parameter(Mandatory = $true)][string]$Header)
+    # Requests is a sub-tab of Operations since GUI 1.6.3.
+    if ($Header -eq 'Requests') { $script:Controls.OperationsRequestsTab.IsSelected = $true; $Header = 'Operations' }
     foreach ($tab in $script:Controls.MainTabs.Items) { if ([string]$tab.Header -eq $Header) { $script:Controls.MainTabs.SelectedItem = $tab; return } }
 }
 
@@ -2263,6 +2285,7 @@ function Get-GuiRefreshWork {
             return [pscustomobject]@{ Mode = 'History'; History = $rows; ReadAt = Get-Date }
         }
         $snapshot = $null; $recentRuns = @(); $servers = @(); $history = @(); $versions = @(); $owners = @{}
+        $scriptVersions = $null; $scriptVersionsError = ''
         if ($InputData.Mode -eq 'Full') {
             $Progress.Message = 'Reading configuration and history...'
             $snapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $root
@@ -2273,6 +2296,17 @@ function Get-GuiRefreshWork {
             }
             $history = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $root -From $InputData.HistoryFrom -To $InputData.HistoryTo)
             $versions = @(Get-SmartM365OrchestratorConfigurationVersions -SharedDataFolderPath $root)
+            # Local job scripts (published manifest and committed catalog): header read only, isolated.
+            $Progress.Message = 'Reading job script versions...'
+            try {
+                $documents = @($snapshot.Jobs)
+                if (Test-Path -LiteralPath $InputData.JobsTemplatePath -PathType Leaf) { $documents += Read-SmartM365OrchestratorJson -Path $InputData.JobsTemplatePath }
+                $paths = foreach ($document in $documents) {
+                    foreach ($job in @($document.Jobs)) { if ($null -ne $job.PSObject.Properties['ScriptPath']) { [string]$job.ScriptPath } }
+                }
+                $scriptVersions = Get-SmartM365OrchestratorScriptVersion -SmartInventoryRoot $InputData.SmartInventoryRoot -ScriptPath @($paths) -Cache $InputData.ScriptVersionCache
+            }
+            catch { $scriptVersionsError = $_.Exception.Message }
         }
         $Progress.Message = 'Reading live operations and requests...'
         $publishedCluster = Read-SmartM365OrchestratorJson -Path (Join-Path $root 'Config/Orchestrator-Cluster.json')
@@ -2318,7 +2352,8 @@ function Get-GuiRefreshWork {
             Owners = $owners; History = $history; Versions = $versions; Operations = $operations
             Requests = $requests; LogEvents = $logEvents; LogEventsError = $logEventsError
             Dashboard = $dashboard; DashboardError = $dashboardError
-            Configuration = $configuration; ConfigurationError = $configurationError; ReadAt = Get-Date
+            Configuration = $configuration; ConfigurationError = $configurationError
+            ScriptVersions = $scriptVersions; ScriptVersionsError = $scriptVersionsError; ReadAt = Get-Date
         }
     }
 }
@@ -2357,6 +2392,7 @@ function Start-GuiRefresh {
         IncludeDashboard = $includeDashboard
         ConfigurationProfile = $(if ($Mode -ne 'History' -and (Test-GuiConfigurationTabVisible)) { [string]$script:EffectiveConfig.ProfileKey } else { '' })
         ConfigRootPath = $script:SmartM365RootPath; ConfigViewModulePath = (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ConfigView.psm1')
+        SmartInventoryRoot = $script:SmartInventoryRoot; JobsTemplatePath = (Join-Path $PSScriptRoot 'Orchestrator-Jobs.json.template'); ScriptVersionCache = $script:ScriptVersionCache
     }
     $script:RefreshContext.Input = $inputData
     $script:RefreshContext.Progress.Message = ''
@@ -2399,6 +2435,10 @@ function Receive-GuiRefresh {
             $script:DraftJobs = Copy-JsonDocument -Document $script:Snapshot.Jobs
             $script:DraftCluster = Copy-JsonDocument -Document $script:Snapshot.Cluster
             Update-JobHealth -Runs $result.RecentRuns
+            $scriptVersionsProperty = $result.PSObject.Properties['ScriptVersions']
+            if ($null -ne $scriptVersionsProperty -and $scriptVersionsProperty.Value -is [hashtable]) { $script:ScriptVersions = $scriptVersionsProperty.Value }
+            $scriptVersionsErrorProperty = $result.PSObject.Properties['ScriptVersionsError']
+            if ($null -ne $scriptVersionsErrorProperty -and $scriptVersionsErrorProperty.Value) { Write-GuiActivity -Level WARN -Message "Job script versions unavailable: $($scriptVersionsErrorProperty.Value)" }
             Refresh-PlanningView -Owners $result.Owners
             Refresh-LaunchView
             $servers = @(Refresh-ServersView -Servers $result.Servers)
@@ -2469,6 +2509,12 @@ function Refresh-AllViewsSync {
         $script:DraftJobs = Copy-JsonDocument -Document $script:Snapshot.Jobs
         $script:DraftCluster = Copy-JsonDocument -Document $script:Snapshot.Cluster
         try { Update-JobHealth } catch { $script:HealthByName = @{}; Write-GuiException -Context 'Job health could not be computed' -ErrorRecord $_ }
+        try {
+            $templatePath = Join-Path $PSScriptRoot 'Orchestrator-Jobs.json.template'
+            $templatePaths = if (Test-Path -LiteralPath $templatePath -PathType Leaf) { Get-GuiJobScriptPaths -JobsDocument (Read-SmartM365OrchestratorJson -Path $templatePath) } else { @() }
+            $script:ScriptVersions = Get-SmartM365OrchestratorScriptVersion -SmartInventoryRoot $script:SmartInventoryRoot -ScriptPath (@(Get-GuiJobScriptPaths -JobsDocument $script:DraftJobs) + @($templatePaths)) -Cache $script:ScriptVersionCache
+        }
+        catch { Write-GuiActivity -Level WARN -Message "Job script versions unavailable: $($_.Exception.Message)" }
         Refresh-PlanningView
         Refresh-LaunchView
         $servers = @(Refresh-ServersView)
@@ -2739,7 +2785,7 @@ foreach ($name in @(
     'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
     'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
     'ConfigFilterBox', 'ConfigShowSensitiveButton', 'ConfigRefreshButton', 'ConfigOpenFolderButton', 'ConfigSummaryText', 'ConfigFileTabs', 'ConfigGlobalTab', 'ConfigTenantTab', 'ConfigMailTab', 'ConfigGlobalStatusText', 'ConfigTenantStatusText', 'ConfigMailStatusText', 'ConfigGlobalGrid', 'ConfigTenantGrid', 'ConfigMailGrid',
-    'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox'
+    'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OperationsRequestsTab', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox'
 )) {
     $script:Controls[$name] = $window.FindName($name)
 }

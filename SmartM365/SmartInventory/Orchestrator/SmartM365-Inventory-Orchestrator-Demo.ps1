@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.3.2
+1.3.3
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -53,7 +53,7 @@ function New-OrchestratorDemoData {
             $scheduleDays=@(Get-OrchestratorGuiPropertyValue $source.Schedule 'DaysOfWeek' @())
             $owner = $servers[$i % 3].Server
             $row=[pscustomobject]@{
-                Name=[string]$source.Name; Arguments=[string]$source.Arguments
+                Name=[string]$source.Name; Version=('1.{0}.{1}' -f (1 + $i % 6), (($i * 7) % 40)); Arguments=[string]$source.Arguments
                 Enabled=[bool]$source.Enabled; Frequency=[string]$source.Schedule.Type; Times=(@($source.Schedule.Times) -join ', ')
                 Days=$(if($source.Schedule.Type -eq 'Weekly'){$scheduleDays -join ', '}else{'Every day'})
                 ScheduleDays=$scheduleDays
@@ -433,7 +433,8 @@ function Invoke-OrchestratorDemoAction {
 function Select-OrchestratorDemoTarget {
     param([string]$Target)
     $c=$script:OrchestratorDemo.Controls
-    $header=switch($Target){'Failures24h'{'History'}default{$Target}}
+    $header=switch($Target){'Failures24h'{'History'}'Requests'{'Operations'}default{$Target}}
+    if($Target -eq 'Requests'){$c.OperationsRequestsTab.IsSelected=$true}
     if($Target -eq 'Failures24h'){$c.HistoryStatusCombo.SelectedItem='Failed';Update-OrchestratorDemoHistory}
     if($Target -eq 'Events'){$c.EventsLevelCombo.SelectedIndex=1}
     foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $header){$c.MainTabs.SelectedItem=$tab;break}}
@@ -474,7 +475,7 @@ function Invoke-OrchestratorDemo {
     $c.SharedPathText.Text='Contoso | DEMO - Sample data | All actions are simulated'
     $c.ConnectionText.Text='Offline demo'; $c.LastRefreshText.Text='2026-10-18 09:30 (frozen)'
     $c.FooterText.Text='DEMO - Sample data. Exports use a separate temporary demo folder.'
-    $c.VersionText.Text='v1.6.2 | DEMO'
+    $c.VersionText.Text='v1.6.3 | DEMO'
     $c.AutoRefreshCheck.IsChecked=$false; $c.AutoRefreshCheck.IsEnabled=$false
     # Keep both running sample rows visible at the default capture size.
     $operationsLayout=$c.OperationsServersGrid.Parent
@@ -538,7 +539,8 @@ function Invoke-OrchestratorDemo {
     $c.HeaderLogo.Add_MouseLeftButtonUp({Start-Process 'https://workplacecloudhub.com'})
     Update-OrchestratorDemoViews
     Write-OrchestratorDemoActivity 'Contoso sample data loaded. No connection, resident worker or collector was started.'
-    foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $View){$c.MainTabs.SelectedItem=$tab;break}}
+    if($View -eq 'Requests'){Select-OrchestratorDemoTarget 'Requests'}
+    else{foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $View){$c.MainTabs.SelectedItem=$tab;break}}}
     if($ValidateOnly){return $s}
     $splash=$null
     try {

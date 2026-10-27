@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline WPF selection and asynchronous cancellation tests with synthetic delays.
 .VERSION
-1.1.1
+1.1.2
 #>
 [CmdletBinding()]
 param()
@@ -175,7 +175,7 @@ try{
     Reset-Case;$script:Controls.CancelAllRequestsButton.IsEnabled=$true
     $script:Controls.CancelAllRequestsButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));Wait-GuiOperation
     Assert-Case ($script:ConfirmationCalls -eq 1) 'Bulk click not wired.'
-    $tab=$script:Controls.RequestsGrid.Parent.Parent.Parent;$tab.IsSelected=$true
+    $tab=$script:Controls.RequestsGrid.Parent.Parent.Parent;$tab.IsSelected=$true;$window.FindName('MainTabs').SelectedIndex=1
     $layout=$window.Content;$layout.Measure([Windows.Size]::new(1180,720));$layout.Arrange([Windows.Rect]::new(0,0,1180,720));$layout.UpdateLayout()
     $button=$script:Controls.CancelAllRequestsButton;$position=$button.TranslatePoint([Windows.Point]::new(0,0),$layout)
     Assert-Case ($button.ActualWidth -gt 0 -and $position.X+$button.ActualWidth -lt 1180) 'Bulk button clipped.'

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercises the two pilot demos with WPF events and forbidden operational commands.
 .VERSION
-1.0.4
+1.0.5
 .NOTES
 Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
 #>
@@ -134,8 +134,15 @@ try {
         Assert-Demo (-not (Test-Path -LiteralPath $s.OutputRoot)) 'Demo wrote files during initialization.'
         Assert-Demo ($c.RequestJobsGrid.Items.Count -eq 3) 'Request detail selection failed.'
         foreach($view in @('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity','Events','Configuration')){
-            foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $view){$c.MainTabs.SelectedItem=$tab}}
-            Assert-Demo ($c.MainTabs.SelectedItem.Header -eq $view) "Cannot navigate to $view"
+            if($view -eq 'Requests'){
+                # Requests is a sub-tab of Operations since GUI 1.6.3.
+                Select-OrchestratorDemoTarget 'Requests'
+                Assert-Demo ($c.MainTabs.SelectedItem.Header -eq 'Operations' -and $c.OperationsTabs.SelectedItem -eq $c.OperationsRequestsTab -and @($c.MainTabs.Items | Where-Object Header -EQ 'Requests').Count -eq 0) 'Requests is not under Operations.'
+            }
+            else{
+                foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $view){$c.MainTabs.SelectedItem=$tab}}
+                Assert-Demo ($c.MainTabs.SelectedItem.Header -eq $view) "Cannot navigate to $view"
+            }
             Export-DemoPreview $s.Window ('orchestrator-'+($view -replace ' ','-').ToLowerInvariant())
         }
         Assert-Demo (@($c.DashboardTilesList.ItemsSource).Count -eq 9 -and @($c.DashboardGrid.ItemsSource).Count -eq 3 -and @($c.DashboardTimelineCanvas.Tag.Items).Count -gt 0) 'Dashboard tiles, servers or timeline missing.'
