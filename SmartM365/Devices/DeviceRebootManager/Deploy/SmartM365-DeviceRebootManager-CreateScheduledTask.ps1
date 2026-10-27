@@ -66,7 +66,17 @@ if (-not [string]::IsNullOrWhiteSpace($ConfigPath)) {
     $taskArguments += @('-ConfigPath', (ConvertTo-QuotedArgument -Value $ConfigPath))
 }
 
-$action = New-ScheduledTaskAction -Execute $PowerShellPath -Argument ($taskArguments -join ' ')
+# powershell.exe -WindowStyle Hidden still flashes a console window at every run, even
+# when the GUI exits silently below the threshold. A headless console host prevents it
+# (Windows 10 2004 and later); older builds keep the direct PowerShell host.
+$conhostPath = Join-Path -Path $env:SystemRoot -ChildPath 'System32\conhost.exe'
+if ([Environment]::OSVersion.Version.Build -ge 19041 -and (Test-Path -LiteralPath $conhostPath)) {
+    $taskArguments = @('--headless', (ConvertTo-QuotedArgument -Value $PowerShellPath)) + $taskArguments
+    $action = New-ScheduledTaskAction -Execute $conhostPath -Argument ($taskArguments -join ' ')
+}
+else {
+    $action = New-ScheduledTaskAction -Execute $PowerShellPath -Argument ($taskArguments -join ' ')
+}
 $logonTrigger = New-ScheduledTaskTrigger -AtLogOn
 $repeatTrigger = New-ScheduledTaskTrigger `
     -Once `

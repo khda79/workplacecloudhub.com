@@ -148,13 +148,8 @@ function Write-AppLog {
         [string]$Level = 'INFO'
     )
 
-    if ($Demo) {
-        if ($script:Ui.ContainsKey('ActivityText') -and $script:Ui.ActivityText) {
-            $script:Ui.ActivityText.AppendText(("[09:30:00] [{0}] {1}`r`n" -f $Level, $Message))
-            $script:Ui.ActivityText.ScrollToEnd()
-        }
-        return
-    }
+    # The demo never writes files; the log is no longer shown in the window.
+    if ($Demo) { return }
     try {
         Initialize-AppFolder
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -162,11 +157,6 @@ function Write-AppLog {
         $lines = @([regex]::Split(([string]$Message), '\r?\n') | ForEach-Object { '{0} [{1}] {2}' -f $timestamp, $Level, $_ })
         [IO.File]::AppendAllText($script:LogPath, (($lines -join "`r`n") + "`r`n"), $utf8NoBom)
         if ($EnableDebugLogging) { $lines | ForEach-Object { Write-Host $_ } }
-        if ($script:Ui.ContainsKey('ActivityText') -and $null -ne $script:Ui.ActivityText) {
-            $uiLine = '[{0}] {1}' -f (Get-Date -Format 'HH:mm:ss'), $Message
-            $script:Ui.ActivityText.AppendText("$uiLine`r`n")
-            $script:Ui.ActivityText.ScrollToEnd()
-        }
     }
     catch {
         if ($EnableDebugLogging) { Write-Warning "Unable to write app log: $($_.Exception.Message)" }
@@ -590,37 +580,16 @@ function Update-SecondsRemainingFromDeadline {
     $script:SecondsRemaining = [int][Math]::Ceiling(($script:DeadlineUtc - (Get-Date).ToUniversalTime()).TotalSeconds)
 }
 
-function Get-PrimaryIPv4Address {
-    try {
-        $address = Get-NetIPAddress -AddressFamily IPv4 |
-            Where-Object {
-                $_.IPAddress -and
-                $_.IPAddress -notlike '169.254.*' -and
-                $_.IPAddress -ne '127.0.0.1' -and
-                $_.PrefixOrigin -ne 'WellKnown'
-            } |
-            Sort-Object InterfaceMetric, InterfaceIndex |
-            Select-Object -First 1 -ExpandProperty IPAddress
-
-        if (-not [string]::IsNullOrWhiteSpace([string]$address)) { return [string]$address }
-    }
-    catch {
-        Write-AppLog -Level WARN -Message ("Primary IPv4 detection failed. {0}" -f $_.Exception.Message)
-    }
-
-    return 'N/A'
-}
-
 function Get-DetectedCompanyName {
     if (-not [string]::IsNullOrWhiteSpace([string]$script:Effective.CompanyName)) {
         return [string]$script:Effective.CompanyName
     }
 
+    # Device-level sources only: a user WorkplaceJoin (work account added on a personal or
+    # BYOD profile) must not brand the title with that account's tenant.
     $registryPaths = @(
         'HKLM:\SYSTEM\CurrentControlSet\Control\CloudDomainJoin\TenantInfo\*',
-        'HKLM:\SYSTEM\CurrentControlSet\Control\CloudDomainJoin\JoinInfo\*',
-        'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\WorkplaceJoin\TenantInfo\*',
-        'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\WorkplaceJoin\JoinInfo\*'
+        'HKLM:\SYSTEM\CurrentControlSet\Control\CloudDomainJoin\JoinInfo\*'
     )
     $candidateProperties = @('DisplayName','TenantDisplayName','TenantName','TenantDomain','IdpDomain')
 
@@ -642,7 +611,7 @@ function Get-DetectedCompanyName {
 
     try {
         $tenantLine = & dsregcmd.exe /status 2>$null |
-            Where-Object { $_ -match '^\s*(TenantName|WorkplaceTenantName)\s*:' } |
+            Where-Object { $_ -match '^\s*TenantName\s*:' } |
             Select-Object -First 1
         if ($tenantLine -match ':\s*(.+)$') {
             $tenantName = $matches[1].Trim()
@@ -907,6 +876,25 @@ function Get-AppStrings {
     if (-not $english.ContainsKey('RestartFailed')) {
         $english.RestartFailed = 'The device could not be restarted automatically. Save your work and restart it from the Start menu.'
     }
+    # Custom catalogs (LanguageCatalogPath) may predate the 1.1.0 layout.
+    if (-not $english.ContainsKey('DetailForced')) {
+        $english.DetailForced = 'Your PC has not been restarted for {0} days (maximum allowed: {1} days).'
+    }
+    if (-not $english.ContainsKey('DetailRecommended')) {
+        $english.DetailRecommended = 'Your PC has not been restarted for {0} days (recommended: every {1} days).'
+    }
+    if (-not $english.ContainsKey('LastBootLine')) {
+        $english.LastBootLine = 'Last restart: {0}'
+    }
+    if (-not $english.ContainsKey('DeviceLabel')) {
+        $english.DeviceLabel = 'PC: {0}'
+    }
+    if (-not $english.ContainsKey('AwarenessTitle')) {
+        $english.AwarenessTitle = 'Why restart regularly?'
+    }
+    if (-not $english.ContainsKey('AwarenessText')) {
+        $english.AwarenessText = 'Putting your PC to sleep is not enough: only a restart fully installs security updates, frees up memory and fixes any slowdowns. Make a habit of restarting your PC regularly.'
+    }
 
     Write-AppLog -Message ("Language selected: {0}" -f $selected)
     return [pscustomobject]$english
@@ -964,17 +952,40 @@ function Update-CountdownUi {
 }
 
 function Set-PostponeState {
+    # Only the actions available in the current mode are shown.
+    $collapsed = [System.Windows.Visibility]::Collapsed
+    $visible = [System.Windows.Visibility]::Visible
+    $script:Ui.LaterButton.Visibility = if ($script:ForceMode) { $collapsed } else { $visible }
+    $script:Ui.LaterButton.IsEnabled = -not $script:ForceMode
+    $script:Ui.CloseButton.Visibility = if ($script:ForceMode -and -not $script:PreviewOnly) { $collapsed } else { $visible }
+
     if (-not $script:ForceMode) {
         $script:Ui.PostponeButton.IsEnabled = $false
         $script:Ui.PostponeCombo.IsEnabled = $false
+        $script:Ui.PostponeButton.Visibility = $collapsed
+        $script:Ui.PostponeCombo.Visibility = $collapsed
         $script:Ui.PostponeButton.Content = $script:Strings.Postpone
         return
     }
 
     $remainingPostpones = [Math]::Max(0, [int]$script:Effective.MaxPostponeCount - [int]$script:PostponeCount)
+    $postponeVisibility = if ($remainingPostpones -gt 0) { $visible } else { $collapsed }
     $script:Ui.PostponeButton.IsEnabled = ($remainingPostpones -gt 0)
     $script:Ui.PostponeCombo.IsEnabled = ($remainingPostpones -gt 0)
+    $script:Ui.PostponeButton.Visibility = $postponeVisibility
+    $script:Ui.PostponeCombo.Visibility = $postponeVisibility
     $script:Ui.PostponeButton.Content = ('{0} ({1})' -f $script:Strings.Postpone, $remainingPostpones)
+}
+
+function Get-LocalizedBootTime {
+    # Short date and time in the selected UI language, invariant layout as fallback.
+    try {
+        $culture = [Globalization.CultureInfo]::GetCultureInfo([string]$script:SelectedLanguage)
+        return $script:LastBoot.ToString('g', $culture)
+    }
+    catch {
+        return $script:LastBoot.ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)
+    }
 }
 
 function Get-EffectiveWindowTitle {
@@ -982,7 +993,8 @@ function Get-EffectiveWindowTitle {
         return [string]$script:Effective.WindowTitle
     }
 
-    $baseTitle = ('{0} v{1}' -f $script:Strings.WindowTitle, $script:AppVersion)
+    # The version is shown in the window footer, not in the title bar.
+    $baseTitle = [string]$script:Strings.WindowTitle
     if (-not [string]::IsNullOrWhiteSpace([string]$script:DetectedCompanyName)) {
         return ('{0} - {1}' -f $script:DetectedCompanyName, $baseTitle)
     }
@@ -1042,7 +1054,6 @@ function Update-LanguageSelector {
             $index++
         }
 
-        $script:Ui.LanguageCombo.DisplayMemberPath = 'Display'
         $script:Ui.LanguageCombo.SelectedIndex = $selectedIndex
         $script:Ui.LanguageCombo.IsEnabled = (-not [bool]$script:Effective.ForceLanguage)
     }
@@ -1068,17 +1079,18 @@ function Apply-LocalizedUi {
         $script:Ui.StatusPill.Background = '#FFF1F0'
         $script:Ui.StatusPillText.Foreground = '#B42318'
         $script:Ui.TitleText.Text = $script:Strings.ForcedTitle
-        $script:Ui.SummaryText.Text = $script:Strings.ForcedSummary
+        $script:Ui.SummaryText.Text = [string]::Format([string]$script:Strings.DetailForced, $script:DaysSinceReboot, $script:Effective.RequiredRestartAfterDays)
         $script:Ui.NextActionText.Text = $script:Strings.NextActionForced
+        $script:Ui.CountdownPanel.Visibility = [System.Windows.Visibility]::Visible
     }
     else {
         $script:Ui.StatusPillText.Text = $script:Strings.PillRecommended
         $script:Ui.StatusPill.Background = '#E6F4FF'
         $script:Ui.StatusPillText.Foreground = '#005A9E'
         $script:Ui.TitleText.Text = $script:Strings.RecommendedTitle
-        $script:Ui.SummaryText.Text = $script:Strings.RecommendedSummary
+        $script:Ui.SummaryText.Text = ('{0} {1}' -f [string]::Format([string]$script:Strings.DetailRecommended, $script:DaysSinceReboot, $script:Effective.RecommendedRestartAfterDays), $script:Strings.NextActionRecommended)
         $script:Ui.NextActionText.Text = $script:Strings.NextActionRecommended
-        $script:Ui.CountdownText.Text = $script:Strings.NoCountdown
+        $script:Ui.CountdownPanel.Visibility = [System.Windows.Visibility]::Collapsed
         $script:Ui.CountdownProgress.Value = 0
     }
 
@@ -1088,18 +1100,13 @@ function Apply-LocalizedUi {
 
     $script:Ui.DaysBadgeText.Text = [string]$script:DaysSinceReboot
     $script:Ui.DaysUnitText.Text = $script:Strings.DaysUnit
-    $script:Ui.UptimeLabel.Text = $script:Strings.Uptime
-    $script:Ui.UptimeValue.Text = ('{0} d' -f $script:DaysSinceReboot)
-    $script:Ui.ThresholdLabel.Text = $script:Strings.Threshold
-    $script:Ui.ThresholdValue.Text = ('{0} d' -f $script:Effective.RecommendedRestartAfterDays)
-    $script:Ui.MaximumLabel.Text = $script:Strings.Maximum
-    $script:Ui.MaximumValue.Text = ('{0} d' -f $script:Effective.RequiredRestartAfterDays)
-    $script:Ui.LastBootLabel.Text = $script:Strings.LastBoot
-    $script:Ui.LastBootValue.Text = $script:LastBoot.ToString('yyyy-MM-dd HH:mm')
-    $script:Ui.ActivityTitleText.Text = $script:Strings.Activity
-    $script:Ui.LanguageLabelText.Text = $script:Strings.LanguageLabel
-    $script:Ui.DeviceIdentityText.Text = ('{0} ({1})' -f $env:COMPUTERNAME, $script:PrimaryIPv4Address)
-    if ($Demo) { $script:Ui.DeviceIdentityText.Text = 'CTSO-LAP-0142 (192.0.2.42) | DEMO - Sample data' }
+    $script:Ui.LastBootText.Text = [string]::Format([string]$script:Strings.LastBootLine, (Get-LocalizedBootTime))
+    $script:Ui.LanguageCombo.ToolTip = $script:Strings.LanguageLabel
+    $script:Ui.AwarenessTitleText.Text = $script:Strings.AwarenessTitle
+    $script:Ui.AwarenessText.Text = $script:Strings.AwarenessText
+    $deviceName = if ($Demo) { 'CTSO-LAP-0142' } else { $env:COMPUTERNAME }
+    $script:Ui.DeviceIdentityText.Text = [string]::Format([string]$script:Strings.DeviceLabel, $deviceName)
+    if ($Demo) { $script:Ui.DeviceIdentityText.Text += ' | DEMO - Sample data' }
     $script:Ui.RestartButton.Content = $script:Strings.RestartNow
     $script:Ui.LaterButton.Content = $script:Strings.RemindLater
     $script:Ui.CloseButton.Content = $script:Strings.Close
@@ -1115,13 +1122,12 @@ function New-RebootManagerWindow {
     [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart Device Reboot Manager v$($script:AppVersion)"
-        Width="800"
-        Height="600"
-        MinWidth="760"
-        MinHeight="560"
+        Title="Smart Device Reboot Manager"
+        Width="760"
+        MinWidth="680"
+        SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
-        ResizeMode="CanResize"
+        ResizeMode="CanMinimize"
         Background="#F4F7FB"
         FontFamily="Segoe UI">
     <Window.Resources>
@@ -1187,29 +1193,86 @@ function New-RebootManagerWindow {
         </Style>
         <Style TargetType="ComboBox">
             <Setter Property="Height" Value="34"/>
-            <Setter Property="Padding" Value="8,4"/>
             <Setter Property="Margin" Value="0,0,8,0"/>
-            <Setter Property="Background" Value="#FFFFFF"/>
             <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
-            <Setter Property="BorderBrush" Value="#B9C8D7"/>
-            <Setter Property="BorderThickness" Value="1"/>
-        </Style>
-        <Style x:Key="MetricLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
-            <Setter Property="FontSize" Value="12"/>
-        </Style>
-        <Style x:Key="MetricValue" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
-            <Setter Property="FontSize" Value="20"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Margin" Value="0,3,0,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Focusable="False" ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="ComboBorder" Background="#FFFFFF" BorderBrush="#B9C8D7" BorderThickness="1" CornerRadius="6">
+                                            <Path HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0"
+                                                  Data="M 0 0 L 4 4 L 8 0" Stroke="#5D6B7C" StrokeThickness="1.5"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="ComboBorder" Property="Background" Value="#EAF6FF"/>
+                                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter IsHitTestVisible="False" Margin="12,0,30,0"
+                                              HorizontalAlignment="Left" VerticalAlignment="Center"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"/>
+                            <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}">
+                                <Border Margin="0,4,0,0" Background="#FFFFFF" BorderBrush="#B9C8D7" BorderThickness="1" CornerRadius="6" Padding="0,4"
+                                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <ScrollViewer SnapsToDevicePixels="True">
+                                        <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemBorder" Padding="12,6" Background="Transparent">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#EAF6FF"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
     <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -1223,103 +1286,82 @@ function New-RebootManagerWindow {
                     <Border x:Name="StatusPill" HorizontalAlignment="Left" CornerRadius="12" Padding="10,4" Background="#E6F4FF">
                         <TextBlock x:Name="StatusPillText" Foreground="#005A9E" FontWeight="SemiBold" FontSize="12"/>
                     </Border>
-                    <TextBlock x:Name="TitleText" Margin="0,12,0,0" FontSize="28" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
-                    <TextBlock x:Name="ProductVersionText" Text="v$($script:AppVersion)" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/>
-                    <TextBlock x:Name="SummaryText" Margin="0,8,0,0" FontSize="14" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="TitleText" Margin="0,12,0,0" FontSize="26" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="SummaryText" Margin="0,8,0,0" FontSize="14" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="LastBootText" Margin="0,4,0,0" FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                 </StackPanel>
-                <Border Grid.Column="1" Width="116" Height="116" CornerRadius="58" Background="#EAF6FF" Margin="18,0,0,0">
+                <Border Grid.Column="1" Width="104" Height="104" CornerRadius="52" Background="#EAF6FF" Margin="18,0,0,0" VerticalAlignment="Top">
                     <StackPanel VerticalAlignment="Center">
-                        <TextBlock x:Name="DaysBadgeText" HorizontalAlignment="Center" FontSize="36" FontWeight="Bold" Foreground="{StaticResource AccentBrush}"/>
+                        <TextBlock x:Name="DaysBadgeText" HorizontalAlignment="Center" FontSize="34" FontWeight="Bold" Foreground="{StaticResource AccentBrush}"/>
                         <TextBlock x:Name="DaysUnitText" HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
                     </StackPanel>
                 </Border>
             </Grid>
         </Border>
 
-        <Border Grid.Row="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,12,0,0">
+        <Border Grid.Row="1" Background="#EAF6FF" BorderBrush="#B3DAF7" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,12,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="1.3*"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock x:Name="UptimeLabel" Style="{StaticResource MetricLabel}"/>
-                    <TextBlock x:Name="UptimeValue" Style="{StaticResource MetricValue}"/>
-                </StackPanel>
+                <TextBlock Grid.Column="0" Text="&#xE946;" FontFamily="Segoe MDL2 Assets" FontSize="18" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Top" Margin="0,2,12,0"/>
                 <StackPanel Grid.Column="1">
-                    <TextBlock x:Name="ThresholdLabel" Style="{StaticResource MetricLabel}"/>
-                    <TextBlock x:Name="ThresholdValue" Style="{StaticResource MetricValue}"/>
-                </StackPanel>
-                <StackPanel Grid.Column="2">
-                    <TextBlock x:Name="MaximumLabel" Style="{StaticResource MetricLabel}"/>
-                    <TextBlock x:Name="MaximumValue" Style="{StaticResource MetricValue}"/>
-                </StackPanel>
-                <StackPanel Grid.Column="3">
-                    <TextBlock x:Name="LastBootLabel" Style="{StaticResource MetricLabel}"/>
-                    <TextBlock x:Name="LastBootValue" Style="{StaticResource MetricValue}" FontSize="15"/>
+                    <TextBlock x:Name="AwarenessTitleText" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="AwarenessText" Margin="0,2,0,0" FontSize="13" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <Grid Grid.Row="2" Margin="0,12,0,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.1*"/>
-                <ColumnDefinition Width="0.9*"/>
-            </Grid.ColumnDefinitions>
-            <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,12,0">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <TextBlock x:Name="CountdownText" Grid.Row="0" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap"/>
-                    <ProgressBar x:Name="CountdownProgress" Grid.Row="1" Margin="0,14,0,12" Minimum="0" Maximum="100"/>
-                    <TextBlock x:Name="NextActionText" Grid.Row="2" Foreground="{StaticResource MutedBrush}" FontSize="14" TextWrapping="Wrap"/>
-                    <Separator Grid.Row="3" Margin="0,14,0,10"/>
-                    <TextBlock x:Name="DeviceIdentityText" Grid.Row="4" Foreground="{StaticResource MutedBrush}" FontSize="13" TextWrapping="Wrap"/>
-                </Grid>
-            </Border>
-            <Border Grid.Column="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="16">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <TextBlock x:Name="ActivityTitleText" Grid.Row="0" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" Margin="0,0,0,6"/>
-                    <Grid Grid.Row="1" Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="LanguageLabelText" Grid.Column="0" Foreground="{StaticResource MutedBrush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <ComboBox x:Name="LanguageCombo" Grid.Column="1" MinWidth="150" HorizontalAlignment="Stretch" Height="28" Margin="0"/>
-                    </Grid>
-                    <TextBox x:Name="ActivityText" Grid.Row="2" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" BorderBrush="#E4EAF1" Background="#FAFCFE"/>
-                </Grid>
-            </Border>
-        </Grid>
+        <Border x:Name="CountdownPanel" Grid.Row="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="18,14" Margin="0,12,0,0">
+            <StackPanel>
+                <TextBlock x:Name="CountdownText" HorizontalAlignment="Center" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap" TextAlignment="Center"/>
+                <ProgressBar x:Name="CountdownProgress" Margin="0,12,0,10" Minimum="0" Maximum="100"/>
+                <TextBlock x:Name="NextActionText" HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="14" TextWrapping="Wrap" TextAlignment="Center"/>
+            </StackPanel>
+        </Border>
 
-        <Border Grid.Row="3" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="12">
+        <Border Grid.Row="3" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8" Padding="14,12" Margin="0,12,0,0">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="120"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <Button x:Name="RestartButton" Grid.Column="0" Width="158" Style="{StaticResource DangerButton}"/>
-                <ComboBox x:Name="PostponeCombo" Grid.Column="1" Width="112"/>
-                <Button x:Name="PostponeButton" Grid.Column="2" Width="126" HorizontalAlignment="Left"/>
-                <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="LaterButton" Width="160"/>
-                    <Button x:Name="CloseButton" Width="118" Margin="0"/>
-                </StackPanel>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="RestartButton" Grid.Column="0" MinWidth="180" Style="{StaticResource DangerButton}"/>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <ComboBox x:Name="PostponeCombo" Width="100"/>
+                        <Button x:Name="PostponeButton" Margin="0"/>
+                        <Button x:Name="LaterButton" Margin="0"/>
+                    </StackPanel>
+                </Grid>
+                <Separator Grid.Row="1" Margin="0,12,0,0" VerticalAlignment="Top"/>
+                <Grid Grid.Row="1" Margin="0,22,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="LanguageCombo" Grid.Column="1" MinWidth="150" Margin="0" VerticalAlignment="Center">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Display}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="16,0,16,0" VerticalAlignment="Center">
+                        <TextBlock x:Name="DeviceIdentityText" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="ProductVersionText" Text="v$($script:AppVersion)" Margin="12,0,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+                    </StackPanel>
+                    <Button x:Name="CloseButton" Grid.Column="3" Margin="0"/>
+                </Grid>
             </Grid>
         </Border>
     </Grid>
@@ -1330,10 +1372,9 @@ function New-RebootManagerWindow {
     $window = [Windows.Markup.XamlReader]::Load($reader)
 
     foreach ($name in @(
-        'ProductVersionText','StatusPill','StatusPillText','TitleText','SummaryText','DaysBadgeText','DaysUnitText',
-        'UptimeLabel','UptimeValue','ThresholdLabel','ThresholdValue','MaximumLabel','MaximumValue',
-        'LastBootLabel','LastBootValue','CountdownText','CountdownProgress','NextActionText',
-        'DeviceIdentityText','ActivityTitleText','ActivityText','LanguageLabelText',
+        'ProductVersionText','StatusPill','StatusPillText','TitleText','SummaryText','LastBootText','DaysBadgeText','DaysUnitText',
+        'CountdownPanel','CountdownText','CountdownProgress','NextActionText',
+        'DeviceIdentityText','AwarenessTitleText','AwarenessText',
         'LanguageCombo','RestartButton','PostponeCombo','PostponeButton','LaterButton','CloseButton'
     )) {
         $script:Ui[$name] = $window.FindName($name)
@@ -1365,7 +1406,6 @@ if ($ValidateOnly) {
     $script:ForceMode = $false
     $script:DaysSinceReboot = [int]$script:Effective.RecommendedRestartAfterDays
     $script:LastBoot = (Get-Date).AddDays(-[int]$script:DaysSinceReboot)
-    $script:PrimaryIPv4Address = Get-PrimaryIPv4Address
     $script:InitialSeconds = [Math]::Max(60, [int]$script:Effective.RestartCountdownMinutes * 60)
     $script:SecondsRemaining = $script:InitialSeconds
     $script:Window = New-RebootManagerWindow
@@ -1438,7 +1478,6 @@ if ($splashHelperPath) {
 
 $script:DaysSinceReboot = $daysSinceReboot
 $script:LastBoot = $lastBoot
-$script:PrimaryIPv4Address = Get-PrimaryIPv4Address
 $script:InitialSeconds = [Math]::Max(60, [int]$script:Effective.RestartCountdownMinutes * 60)
 $script:SecondsRemaining = $script:InitialSeconds
 
@@ -1482,12 +1521,6 @@ foreach ($minutes in $script:Effective.PostponeOptionsMinutes) {
 }
 $script:Ui.PostponeCombo.SelectedIndex = 0
 
-if (-not $script:ForceMode) {
-    $script:Ui.LaterButton.IsEnabled = $true
-}
-else {
-    $script:Ui.LaterButton.IsEnabled = $false
-}
 $script:Ui.CloseButton.IsEnabled = (-not $script:ForceMode -or $script:PreviewOnly)
 
 Apply-LocalizedUi

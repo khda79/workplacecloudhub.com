@@ -92,13 +92,17 @@ The committed template contains safe generic defaults only. Runtime `.json` file
 
 `DefaultLanguage` can be `auto`, `en`, `fr`, `de`, `es`, `nl`, `it`, `pt`, `pl`, `ar`, `tr`, `sv`, `da`, `nb`, `fi`, `ro`, `hu`, `ja`, `ko`, `zh-Hans`, or `uk`. The app also maps common regional cultures, for example `zh-CN` to `zh-Hans` and `no` to `nb`. Arabic uses right-to-left layout.
 
-`WindowTitle` overrides the localized window title when set. Leave it empty to use the title from the selected language.
+`WindowTitle` overrides the localized window title when set. Leave it empty to use the title from the selected language (`PC restart`, `Redémarrage du PC`, ...). The title bar never shows the version; the version is shown in the window footer.
 
-When `WindowTitle` is empty, the app tries to detect the company name from the device Entra join or AD domain and prefixes the localized title, for example `Company - Smart Device Reboot Manager`. Set `CompanyName` to force a specific company prefix, or leave it empty for automatic detection.
+The window is a single column designed for standard users: status, days since the last restart with the allowed or recommended interval, last restart date in the selected language, the awareness banner, the countdown (required mode only), then the actions. Only the actions available in the current mode are shown: `Remind me later` in recommended mode, postponement while postponements remain in required mode, and `Close` unless closing is blocked. The footer shows the language selector, the PC name and the version. Activity is written to the log file only; it is not shown in the window.
+
+When `WindowTitle` is empty, the app tries to detect the company name from the device Entra join or AD domain and prefixes the localized title, for example `Company - Smart Device Reboot Manager`. Only device-level sources are used (HKLM `CloudDomainJoin`, the device `TenantName` from `dsregcmd /status`, then the AD domain); a work or school account added to a user profile (HKCU `WorkplaceJoin`) is ignored. Set `CompanyName` to force a specific company prefix, or leave it empty for automatic detection.
 
 Users can change the UI language from the language selector in the GUI. The choice is stored in `%APPDATA%\SmartM365\DeviceRebootManager\SmartM365-DeviceRebootManager.preferences.json` and is reused on later launches unless `-DefaultLanguage` is passed on the command line. Set `ForceLanguage` to `true` to ignore the saved user preference and lock the GUI to `DefaultLanguage`.
 
 `LanguageCatalogPath` can point to a custom PowerShell data file with the same structure as `SmartM365-DeviceRebootManager-GUI.strings.psd1`. Leave it empty to use the bundled catalog.
+
+The window always shows an awareness banner (`AwarenessTitle`, `AwarenessText`) explaining that sleep is not enough and that only a restart fully installs security updates, frees memory and fixes slowdowns. Both keys are translated in every bundled language; a custom catalog without them falls back to English.
 
 `SplashEnabled` controls the startup WorkplaceCloudHub splash. Set it to `false` to disable the splash. Keep it enabled and customize `SplashMinimumDurationMs`, `SplashProductName`, `SplashBadgeText`, `SplashSubtitle`, and `SplashLogoPath` to adapt the splash for a deployment. The splash URL remains `https://workplacecloudhub.com`.
 
@@ -243,6 +247,8 @@ To recreate only the scheduled task on an already installed device:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Deploy\SmartM365-DeviceRebootManager-CreateScheduledTask.ps1 -RepeatIntervalMinutes 240
 ```
+
+On Windows 10 2004 (build 19041) and later, the task runs `conhost.exe --headless "...\powershell.exe" -STA -NoProfile -WindowStyle Hidden ...`. The headless console host prevents the black console window that `powershell.exe -WindowStyle Hidden` alone briefly shows at every run, including runs where the GUI exits silently below the threshold. Older builds keep the direct `powershell.exe` action. The task result is the console host result, not the GUI exit code. Existing installations keep their previous action until the task is recreated (reinstall, or the command above). The `Pending-Reboot-Age-DeviceRebootManager` Intune remediation accepts both actions.
 
 ## PowerShell Gallery packaging
 

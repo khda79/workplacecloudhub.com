@@ -216,7 +216,11 @@ Invoke-PackageCase 'drm-elevated-task' Reboot Pending-Reboot-Age-DeviceRebootMan
 Invoke-PackageCase 'drm-invalid-signature' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm.Replace("Status='Valid'","Status='HashMismatch'")) 1 'Status=Error'
 Invoke-PackageCase 'drm-injected-action' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm.Replace('-STA -NoProfile','-Command evil -STA -NoProfile')) 1 'Status=Error'
 Invoke-PackageCase 'drm-legacy-programdata' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm.Replace('$(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) ''WCH\SmartDeviceRebootManager\','$env:ProgramData ''SmartM365\DeviceRebootManager\')) 1 'Status=Error'
-Invoke-PackageCase 'drm-running-task' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm.Replace("State='Ready'","State='Running'")) 0 'AlreadyRunning'
+$drmHeadless=$drm.Replace("Execute=(Join-Path `$env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe');Arguments=('-STA","Execute=(Join-Path `$env:SystemRoot 'System32\conhost.exe');Arguments=('--headless `"'+(Join-Path `$env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')+'`" -STA")
+if($drmHeadless -eq $drm){throw 'Headless task fixture was not applied.'}
+Invoke-PackageCase 'drm-headless-task-start' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation $drmHeadless 0 'RebootManagerTaskStarted.*RebootVerified=False' '' 'OP:(?!StartRebootManager)'
+Invoke-PackageCase 'drm-headless-other-host' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drmHeadless.Replace("(Join-Path `$env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')","'C:\Temp\evil.exe'")) 1 'Status=Error'
+Invoke-PackageCase 'drm-running-task'Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm.Replace("State='Ready'","State='Running'")) 0 'AlreadyRunning'
 Invoke-PackageCase 'drm-missing-task' Reboot Pending-Reboot-Age-DeviceRebootManager Remediation ($drm+"`nfunction Get-ScheduledTask { [CmdletBinding()]param(`$TaskPath,`$TaskName) throw 'Synthetic task missing' }") 1 'Status=Error'
 
 $resultPath=Join-Path $TestRoot 'results.json'

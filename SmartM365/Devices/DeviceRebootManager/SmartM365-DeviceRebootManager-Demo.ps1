@@ -20,11 +20,6 @@ function Set-RebootManagerDemoScene {
     $script:InitialSeconds = if ($Scenario -eq 'Postponed') { 1500 } else { 900 }
     $script:SecondsRemaining = $script:InitialSeconds
     Apply-LocalizedUi
-    $script:Ui.LaterButton.IsEnabled = -not $script:ForceMode
-    $script:Ui.ActivityText.Text = "[09:30:00] DEMO - Sample data. Contoso demonstration device.`r`n[09:30:00] Scene: $Scenario. Countdown is frozen for screenshots.`r`n"
-    if ($Scenario -eq 'Postponed') {
-        Write-AppLog -Message 'Restart postponed by 10 minutes. One postponement remains.'
-    }
 }
 
 function Invoke-RebootManagerDemo {
@@ -54,12 +49,13 @@ function Invoke-RebootManagerDemo {
     $script:Effective.PostponeOptionsMinutes = @(10,30,60)
     $script:PreviewOnly = $true
     $script:DetectedCompanyName = 'Contoso'
-    $script:PrimaryIPv4Address = '192.0.2.42'
     $script:AllowClose = $true
     $script:Strings = Get-AppStrings
     $script:Window = New-RebootManagerWindow
     $script:Window.Width = $Width
     $script:Window.Height = $Height
+    # The product window sizes its height to the content; keep that in the demo.
+    $script:Window.SizeToContent = 'Height'
     $script:Window.Topmost = $false
     $script:Window.UseLayoutRounding = $true
 

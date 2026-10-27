@@ -31,6 +31,11 @@ function Export-DemoPreview {
     [void][IO.Directory]::CreateDirectory($PreviewFolder)
     $visual=$Window.Content
     $width=[int]$Window.Width; $height=[int]$Window.Height-40
+    if([string]$Window.SizeToContent -eq 'Height'){
+        # Windows that size to their content are captured at their content height.
+        $visual.Measure([System.Windows.Size]::new($width,[double]::PositiveInfinity))
+        $height=[int][Math]::Ceiling($visual.DesiredSize.Height)
+    }
     $visual.Measure([System.Windows.Size]::new($width,$height))
     $visual.Arrange([System.Windows.Rect]::new(0,0,$width,$height))
     $visual.UpdateLayout()
@@ -83,17 +88,18 @@ try {
     if($Application -eq 'RebootManager'){
         $result=. (Join-Path $rebootFolder 'SmartM365-DeviceRebootManager-GUI.ps1') -Demo -ValidateOnly -ConfigPath 'Z:\DO-NOT-READ\private.json' -ResetRunState
         Assert-Demo ($script:Ui.ProductVersionText.Text -eq "v$rebootVersion") "Reboot product version is not $rebootVersion."
-        Assert-Demo ($script:Window.Title -like "*$rebootVersion*") "Reboot title version is not $rebootVersion."
+        Assert-Demo ($script:Window.Title -notlike "*$rebootVersion*") 'Reboot title must not show the version.'
         Assert-Demo ($script:Window.Title -like '*DEMO*') 'Reboot demo identification missing.'
-        Assert-Demo ($script:Ui.DeviceIdentityText.Text -like 'CTSO-LAP-*') 'Real device identity leaked.'
-        Assert-Demo ($script:Ui.DeviceIdentityText.Text -like '*192.0.2.42*') 'Sample IP missing.'
+        Assert-Demo ($script:Ui.DeviceIdentityText.Text -like '*CTSO-LAP-*' -and $script:Ui.DeviceIdentityText.Text -notlike "*$env:COMPUTERNAME*") 'Real device identity leaked.'
+        Assert-Demo (-not $script:Ui.ContainsKey('ActivityText')) 'Reboot activity log is still shown.'
         $frozen=$script:SecondsRemaining
         Start-Sleep -Milliseconds 1100
         Assert-Demo ($script:SecondsRemaining -eq $frozen) 'Demo countdown is running.'
         foreach($scene in @('Required','Recommended','Postponed')){
             $script:Ui.DemoScenarioCombo.SelectedItem=$scene
             Assert-Demo ($script:ForceMode -eq ($scene -ne 'Recommended')) "Wrong force mode for $scene"
-            Assert-Demo ($script:Ui.ActivityText.Text -like "*Scene: $scene*") 'Scenario selector did not update.'
+            Assert-Demo ($script:RebootDemoScenario -eq $scene) 'Scenario selector did not update.'
+            Assert-Demo (($script:Ui.CountdownPanel.Visibility -eq 'Visible') -eq ($scene -ne 'Recommended')) "Wrong countdown visibility for $scene"
             Export-DemoPreview $script:Window ('reboot-'+$scene.ToLowerInvariant())
         }
         $script:Ui.DemoScenarioCombo.SelectedItem='Required'

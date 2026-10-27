@@ -180,6 +180,16 @@ param([string]$A, [string]$B, [string]$C, [string]$D)
     Assert-True ([bool]('SmartM365.DeviceRebootManager.WtsSession' -as [type])) 'WTS interop type is available'
     Assert-True (-not ((Get-Content -LiteralPath $script:LogPath -Raw) -match 'Session visibility check failed')) 'WTS session query succeeded'
 
+    # Restart awareness banner: translated everywhere, bound in the window.
+    $catalogPath = Join-Path -Path (Split-Path -Path $GuiPath -Parent) -ChildPath 'SmartM365-DeviceRebootManager-GUI.strings.psd1'
+    $catalog = Import-PowerShellDataFile -LiteralPath $catalogPath
+    $missingAwareness = @($catalog.Strings.Keys | Where-Object {
+        [string]::IsNullOrWhiteSpace([string]$catalog.Strings[$_].AwarenessTitle) -or [string]::IsNullOrWhiteSpace([string]$catalog.Strings[$_].AwarenessText)
+    })
+    Assert-True ($missingAwareness.Count -eq 0) ('awareness banner is translated in every language; missing: {0}' -f ($missingAwareness -join ', '))
+    $guiText = Get-Content -LiteralPath $GuiPath -Raw
+    Assert-True ($guiText -match 'x:Name="AwarenessText"' -and $guiText -match '\.AwarenessText\.Text = \$script:Strings\.AwarenessText') 'awareness banner is bound in the window'
+
     Write-Output ("PASS: {0} Device Reboot Manager GUI logic checks; PowerShell {1}; no restart, task, CIM or window operation." -f $script:Checks, $PSVersionTable.PSVersion)
 }
 finally {

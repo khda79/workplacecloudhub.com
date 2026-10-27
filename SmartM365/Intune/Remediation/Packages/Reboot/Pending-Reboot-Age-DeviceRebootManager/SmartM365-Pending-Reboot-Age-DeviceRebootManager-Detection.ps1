@@ -95,8 +95,11 @@ function Get-ValidatedRebootManagerTask {
     $gui = Join-Path $appRoot 'SmartM365-DeviceRebootManager-GUI.ps1'
     $hostPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $action = $task.Actions[0]
-    if ([string]$action.Execute -ine $hostPath) { throw 'Unexpected task executable.' }
-    $pattern = '^\s*-STA\s+-NoProfile\s+-WindowStyle\s+Hidden\s+-ExecutionPolicy\s+Bypass\s+-File\s+"' + [regex]::Escape($gui) + '"(?:\s+-ConfigPath\s+"' + [regex]::Escape((Join-Path $appRoot 'SmartM365-DeviceRebootManager-GUI.config.json')) + '")?\s*$'
+    # App 1.1.0 runs PowerShell through a headless console host so no console window flashes.
+    $headlessPrefix = ''
+    if ([string]$action.Execute -ieq (Join-Path $env:SystemRoot 'System32\conhost.exe')) { $headlessPrefix = '--headless\s+"' + [regex]::Escape($hostPath) + '"\s+' }
+    elseif ([string]$action.Execute -ine $hostPath) { throw 'Unexpected task executable.' }
+    $pattern = '^\s*' + $headlessPrefix + '-STA\s+-NoProfile\s+-WindowStyle\s+Hidden\s+-ExecutionPolicy\s+Bypass\s+-File\s+"' + [regex]::Escape($gui) + '"(?:\s+-ConfigPath\s+"' + [regex]::Escape((Join-Path $appRoot 'SmartM365-DeviceRebootManager-GUI.config.json')) + '")?\s*$'
     if ([string]$action.Arguments -notmatch $pattern) { throw 'Unexpected task arguments.' }
     if ((Get-AuthenticodeSignature -LiteralPath $gui -ErrorAction Stop).Status -ne 'Valid') { throw 'Installed GUI signature is not valid.' }
     return $task
