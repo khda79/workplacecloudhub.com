@@ -1,4 +1,4 @@
-# Version 1.2.0: receipt-bound native semantic artifacts and explicit historical cohorts.
+# Version 1.2.1: receipt-bound native semantic artifacts and explicit historical cohorts.
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 
@@ -231,13 +231,67 @@ function Assert-PreparedArtifacts {
     if($referenced.Count -ne $seen.Count){throw 'Unindexed historical artifact.'}
 }
 
+function Assert-PreparedLicenseSnapshotSource {
+    # Only frozen capture paths are read. Never repair a snapshot from current live DATA-LAST.
+    param([Parameter(Mandatory)][string]$Last,[Parameter(Mandatory)][string]$TenantKey,
+        [Parameter(Mandatory)]$Snapshot)
+    function Read-Utc($Value) {
+        # PowerShell 7.5+ may deserialize ISO timestamps directly to UTC DateTime.
+        if ($Value -is [datetimeoffset]) { return $Value.ToUniversalTime() }
+        if ($Value -is [datetime]) {
+            if ($Value.Kind -ne [DateTimeKind]::Utc) { throw 'License source timestamp is not UTC.' }
+            return [datetimeoffset]::new($Value)
+        }
+        if ($Value -notmatch '(Z|[+-]\d{2}:\d{2})$') { throw 'License source timestamp has no explicit timezone.' }
+        [datetimeoffset]::Parse($Value,[Globalization.CultureInfo]::InvariantCulture).ToUniversalTime()
+    }
+    if (-not $Snapshot.PSObject.Properties['Sources'] -or $Snapshot.Sources -isnot [array]) { throw 'License snapshot contains no source qualification evidence.' }
+    $generated=Read-Utc $Snapshot.GeneratedAtUtc
+    $groups=@(
+        @{Producer='SmartM365-M365UserActivity-Inventory.ps1';Files=@('M365_Users_Activity.csv','M365_Mailbox_Usage.csv','M365_Email_Activity.csv','M365_Apps_Usage_180D.csv','M365_OneDrive_Usage.csv')},
+        @{Producer='SmartM365-Devices-Inventory.ps1';Files=@('Intune_Devices_Inventory.csv')}
+    )
+    foreach ($group in $groups) {
+        $stem='SmartInventory_'+[IO.Path]::GetFileNameWithoutExtension($group.Producer)
+        $proofPath=Join-Path $Last ($stem+'.current.json.txt')
+        if (-not (Test-Path -LiteralPath $proofPath -PathType Leaf)) { throw "License dependency receipt not captured: $($group.Producer)" }
+        $proof=Get-Content -LiteralPath $proofPath -Raw | ConvertFrom-Json
+        if ($proof.Owner -cne 'SmartInventory-SourceReceipt' -or $proof.TenantKey -cne $TenantKey -or $proof.Producer -cne $group.Producer -or
+            $proof.Status -cne 'Completed' -or $proof.Errors -ne 0 -or $proof.IsPartialInventory -ne $false -or
+            $proof.ConsumerScopeQualified -ne $true -or -not $proof.RunId) { throw "License dependency receipt is not qualified: $($group.Producer)" }
+        $completed=Read-Utc $proof.CompletedAtUtc
+        if ($generated -lt $completed) { throw "License snapshot predates the completed dependency: $($group.Producer)" }
+        $runPath=Join-Path $Last ($stem+'.run.json.txt')
+        if ($proof.PSObject.Properties['PublicationProtocol'] -or (Test-Path -LiteralPath $runPath)) {
+            if (-not (Test-Path -LiteralPath $runPath -PathType Leaf)) { throw "License dependency run state not captured: $($group.Producer)" }
+            $run=Get-Content -LiteralPath $runPath -Raw | ConvertFrom-Json
+            if ($run.Owner -cne 'SmartInventory-SourceRun' -or $run.Status -cne 'Completed' -or $run.UnqualifiedPublication -ne $false -or $run.RunId -cne $proof.RunId -or
+                $run.TenantKey -cne $TenantKey -or $run.Producer -cne $group.Producer) { throw "License dependency publication is not complete: $($group.Producer)" }
+        }
+        foreach ($name in $group.Files) {
+            $source=@($Snapshot.Sources | Where-Object { $_.Name -ceq $name })
+            if ($source.Count -ne 1 -or $source[0].Ready -isnot [bool] -or -not $source[0].Ready -or ($source[0].PSObject.Properties['Provisional'] -and $source[0].Provisional -ne $false)) { throw "License snapshot did not qualify source: $name" }
+            $record=@($proof.Files | Where-Object { $_.File -ceq $name })
+            $path=Join-Path $Last $name
+            if ($record.Count -ne 1 -or $record[0].Status -cne 'Success' -or $record[0].IsPartialInventory -ne $false -or
+                $record[0].RunId -cne $proof.RunId -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "License source completion proof is invalid: $name" }
+            $hash=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+            if ([string]$source[0].SHA256 -cnotmatch '^[A-Fa-f0-9]{64}$' -or
+                $hash -ine [string]$source[0].SHA256 -or $hash -ine [string]$record[0].SHA256) { throw "License snapshot uses a different source capture: $name" }
+        }
+    }
+}
+
 function Get-PreparedLicenseReportQualification {
     # The license report is consumed only when the current licensing receipt records it:
     # completed receipt, same tenant and producer, every report CSV hashed in Files and declared
     # Published, snapshot ReceiptRun.RunId equal to the receipt RunId. A lineage defect yields
     # "Not qualified" (empty tables in the report), never a failed batch or older values.
+    # New Prepare/Workforce consumption additionally requires frozen Usage/Devices sources to
+    # match the report's qualified SHA256s and completed producer receipts. Historical callers
+    # may omit RequireCurrentSources; existing batches are never rewritten or repaired.
     param([Parameter(Mandatory)][string]$SnapshotRoot,[Parameter(Mandatory)][string]$TenantKey,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Artifacts)
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Artifacts,[switch]$RequireCurrentSources)
     $spec=(Get-PreparedArtifactContract).licenseReport
     $last=Join-Path $SnapshotRoot 'DATA-LAST'
     $hashes=@{}
@@ -257,6 +311,10 @@ function Get-PreparedLicenseReportQualification {
             elseif(-not $snapshot.PSObject.Properties['ReceiptRun'] -or $null -eq $snapshot.ReceiptRun){$receiptReason='Report snapshot names no licensing receipt run (produced outside a receipt run).'}
             elseif([string]$snapshot.ReceiptRun.Producer -cne $spec.producer -or [string]$snapshot.ReceiptRun.RunId -cne [string]$receipt.RunId){$receiptReason='Report snapshot belongs to another licensing receipt run.'}
         }catch{$receiptReason=('Licensing receipt is unreadable: {0}' -f $_.Exception.Message)}
+    }
+    if ($RequireCurrentSources -and -not $receiptReason) {
+        try { Assert-PreparedLicenseSnapshotSource -Last $last -TenantKey $TenantKey -Snapshot $snapshot }
+        catch { $receiptReason=('License snapshot dependency mismatch: '+$_.Exception.Message) }
     }
     $files=[Collections.Generic.List[object]]::new()
     foreach($name in @($spec.reportFiles)+@($spec.decisionFiles)){
@@ -305,8 +363,8 @@ Export-ModuleMember -Function Get-PreparedArtifactSources,Copy-PreparedArtifacts
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBqMTgpb37WZjlX
-# /YtJjJZF06VnU5nq6ZLOliGp6PkjfKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDqXfqIJjg/Ivvk
+# 0j0en2W9n0ZDVd65owowMKXfwPspdqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -439,31 +497,31 @@ Export-ModuleMember -Function Get-PreparedArtifactSources,Copy-PreparedArtifacts
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII6wjBVMDRJRs1KrP9IoFc7bYpQOyroGp50QDnWvDrlDMA0GCSqG
-# SIb3DQEBAQUABIIBgCRO64VptiXBjWx+5A1fyS5wpjhcSASd5wwXuoZM1iQeugSv
-# HveJkIhzIg2TxAF/BSTv7lXSkQTAWUQXwOK+IQsXVycf2kOP4ifW1KxiEAn/0w9Y
-# A/NQRXH6OoW9alTCximIeFgL4mvCktFUzx6A+uiYNPwy2f2xrEjypV6JqyAzfrxI
-# fLwCoLprd0eQm+P3wSIJk4I3kMyo4R5+Vosj2ZIWMa2+MaGKwi9OyhakriFyPmHd
-# ipV+uLTuDum7EjvHnyHifktb8acCk3r1B3q9vSWrrVr57IbUOtGWDZlj+Ws2lJ2c
-# mUbYHQShc9vXi/sG3Ev3oQQ7SU8NytUGMkT+NMvvUYtvhYqbwgOiZiw4B6oUAPBU
-# Z3orwgzWVm5dQTK+bJVR+y2CWcRjAzcd+iIKpsl+GUCJVGXO/hAcwNWYRzmGzRhT
-# bmx0FU4QcLL7215szudbbZ9rgWn0B9wDdA1gQ9YD0uqgOLpFE31IQN3iIJqWc1eC
-# 9Cjqv9hoAQh1/sD7OaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIL5+UGu2r2LlM3rUpXeunGLq0GI1vobXntDiHbmThpRfMA0GCSqG
+# SIb3DQEBAQUABIIBgJ5KcfvlWnT/4DR1wn6RSKW/dsoAN47Y6U3lM9EJVrNWxDGc
+# G8BPi2fBYXePTKzmfQlr110WUkZ5aPIFG2A1+buHcr3oFiyhYOfed10tEEUfphRI
+# IoNZS/EyMFbAtZb9XGAEViiUXBYZQT/hx/boWag9MRRpxmgqfm4JkMPi6qPwxNEW
+# JyPHXYGmFUWnkQqJXIJzk/nIEkcCLQ1iiokOUVMfz5uQwnSN1sex+tIbaEby5z/t
+# 7JIQMx4V/tn8lQCB+AT8/mCtI8c9LNAQvHL0U4ecI0t8QDFmFaPLXoil3n1aVW6V
+# 94h1m1NOiIE9XCyRb17AmVFrsSgqcOQNlBxAUIomXo6V25IJ21dWM15MsA9N9Yjk
+# C5WlPm3Z5/6ql66jOD8VD4UJ2yBYvt1qGC2JzYwGw+8+UUGz7yjJyhVpBJiSaqlz
+# bgCZCSV8ismOnPMcPb6i5/FOzqqc/zK0PuK4oMjYQUCmBlHeZUcri6jYEeWWKNLS
+# eYeO3+mEGa6z8cgFVqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
-# NTRaMC8GCSqGSIb3DQEJBDEiBCAqGxuTGe5PpZkfM1cvQEO1xlm8viHy69QNTliY
-# RdOQ3DANBgkqhkiG9w0BAQEFAASCAgCgny6Ct/F9oofhcfJtGUYRk1w0m4BU90QG
-# YElQFNoGIyAP96sOkoB5ZgzqZhBT52vsAfKOyQyLTJo7EG2PoleSHAVJRdnDhDj0
-# CG7n7BQtpVsXLnjpX81X3HZoePejeFKpDLnfgCegJ4E7wf8C4UTecFXWgPnX4GeF
-# CHul7Mtaz1vXD85G+jNpBtsqfKISy8O6zz8O2rdtPivp67m/I3wvaVINXkkLnshD
-# m+T9ie1ZhMPnNYaq92hzZx38zE40GCK+vRZfwx9wlWKg3CV7FkBIPRnxNYQk0QJg
-# S5sswTFmWX9cBKCcT3I9GHxLZtEZ/5H7ncUSqyu29DnceHGjFA5vbRLVpaeHf+a1
-# v7zEHvvUYmqGzRmgONOAihhZk6JhT20VoQxV+eIasi3XW3Pc+JFTOo1KrW1mCQbn
-# r96t8jevkj+Www8bbUQJOuYVxC9QCGJjqDFnklLL3AoCA0xn0f+MQzhfSmkcK3TO
-# Xj/5b+G2v1/Xm+2vvcy88IUJIY31f0MFMs823XbmPWWh/f6x7nblX2VXhTGS5UYO
-# oFgV1ARRVktWCRK/EpQPHZTnilUc38tARzMtZ2j4qhwHs7ipfq389Hs+HM+mxrqf
-# HugL7ro/DvFp12w4Ow9Q78rJqm/1iaHCUy0+yDVZeXHR3SILyyylcb78r3aSvj7w
-# 6lE5DltayA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcyMTEx
+# MDRaMC8GCSqGSIb3DQEJBDEiBCAwUQ3K8TatTfxnSpgRhxFjqOhQyklk9XKm4ANf
+# 4fUjSjANBgkqhkiG9w0BAQEFAASCAgCkbcMoAYKQ6urnL6AzxUr/xr+MtDOn2fAO
+# gsHRJRG86919uzkd/wQPE/iPTa2/KkVoBGPtG78SPYthmRzv7XXoi5Sirrn9nqV4
+# 4vHwpwvb89y5UhNNQr/ol83jMBy2OdcsWfSIdFyTqQLxRu0iJdMHvpqIquqvgUnU
+# 6lbJ0M7ZuS5unyzQDTSwr+bR1XaW6NpEQN8ofheeWvClriOfFfx+OnIltVlwv9uG
+# XuOh1AGRJGdKDR3Ylc74PrFfXj69wj63D0Q/S59Ntuh959jP9Qv0PdKA1zj0NGWH
+# E63/1GMEy7n618RlHNzEmql15agKZJjpyAuJcSRZ91XRaTEvabGOpaQOcyYKeE5Q
+# Pkml+xuM45D+53GK/Xhp4AR2ApYx0nkaIHnpnRm90u78K21XmZxBhPTJ1A9eLSgV
+# Ci4xu/wTuis4m1rBiHPy4/47mro+UcQR8sDnbXphODtWpH4Y8i/7Kl8JtKNqLhpD
+# d2T403nTlmdyuKnpygomTffJqtdce9r5BkWKImQu6BrAs8Js8s6d2vlt25RS4PGh
+# QppCU+7rHILQOWcUlvtLWTIVJtwOGnqRFKOAOYZezTI8XWMTz66exjz6aukjH2hH
+# CXjv4TyGaTQ3gcFF9wzJF3mCfv5snODhWMfmQNdGTQT42FUbRFB519XBcCdF5K6z
+# K5PWnzz35Q==
 # SIG # End signature block

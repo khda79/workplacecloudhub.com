@@ -344,6 +344,14 @@ function Test-SmartM365OrchestratorJobsDocument {
             $missed = if ($job.Schedule.PSObject.Properties['MissedRunPolicy'] -and $job.Schedule.MissedRunPolicy) { [string]$job.Schedule.MissedRunPolicy } else { 'RunOnce' }
             if ($missed -notin @('RunOnce', 'Skip')) { $errors.Add("Job '$name': invalid MissedRunPolicy.") }
         }
+        if ($job.PSObject.Properties['LatestOccurrenceDependencies']) {
+            $strictNames = @($job.LatestOccurrenceDependencies | ForEach-Object { ([string]$_).Trim() })
+            $parents = if ($job.PSObject.Properties['DependsOn']) { @($job.DependsOn) } else { @() }
+            if (@($strictNames | Sort-Object -Unique).Count -ne $strictNames.Count -or
+                @($strictNames | Where-Object { -not $_ -or $_ -notin $parents }).Count) {
+                $errors.Add("Job '$name': LatestOccurrenceDependencies must contain unique names from DependsOn.")
+            }
+        }
         $dependencies[$name] = if ($job.PSObject.Properties['DependsOn']) { @($job.DependsOn | ForEach-Object { [string]$_ }) } else { @() }
     }
     foreach ($name in @($dependencies.Keys)) { foreach ($dependency in @($dependencies[$name])) { if (-not $seen.ContainsKey($dependency)) { $errors.Add("Job '$name': unknown dependency '$dependency'.") } } }
@@ -690,8 +698,8 @@ Export-ModuleMember -Function @(
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDxrb6rfbHE1IMw
-# UoMb1FMtXDZEulThWKQeNKXw4xSFNqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmASHYItoyhjoz
+# ijo5k0qN7PBuDYxlSCOmH/Lt5aykVaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -824,31 +832,31 @@ Export-ModuleMember -Function @(
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINnrFCIHW3CZQy+iAnTcu3c8G3Mc9xefpFUZ6I3DgbrcMA0GCSqG
-# SIb3DQEBAQUABIIBgDSKkhapIwQ3O2PyFyPN9r/uC3jtVvlShmccIrwp/DlM7UPw
-# +BmUkHQ0KqU0KtFRsDD7YcIXQWHJa61p8GRvH6NJDF4uIEJ6DL0IRg/JsTAT6t48
-# imPkpLONn7ULT/OMtMr8dFxp4w0hBWfINPnpHAX+6u9RyxQ6ygRdaEBGPPLs7igO
-# pxNvw/30tPGtw5hAF9NRdVpgTEs5nEw+p20pbCW5gAC7ps5U4SP8uXEDAbif8LqI
-# SvE7sm02rDZiW/9AZ50VGpXyQTTKLTNia2VOynMUUTjzk7OmA9myEN341CF9ND6c
-# rIxYYX2CjBc7OV4LskzcrLaEeAHUeJA8a5RHUiGM3eGG1GlD48CrzC7w8c77ulPw
-# +sSj3isI7xw3FPSdrQA97/XUH7HT3bG8ryR5zInnTw1sPnoysAFqlSmjOz3Rm0vG
-# bixGn9n6NXKfqNH11Nm9Z1GB5jrete11LYt8ijCgA4VThezgzXm90kdU05ngch89
-# GKUOngP1c1whzvsNBKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFAg4SRiJGRvava1qrhsDd+Eg8iJXT1jJGRlJREn8Y6GMA0GCSqG
+# SIb3DQEBAQUABIIBgG/1BYfiiYzBmbaB4GUSEv4rIVYHemuN0n4z7+kpgUD00M+T
+# QVfOKRcGf9QXxmTIF97UUOqBq5xc28y76ZsFOAbgZvctiNEp0G6ENPQCDJDHtwEK
+# R/TXJBNCdlTtQ8SxHZFvIM0+UArKMfjRv3oVLQQ1/eo42BCmqz4wUe81mpCJBRrH
+# b6ghQ4/rmTlweC54lfoFk69X6E0E1okpcveTmlKwsCBgNXuZWgWxSwClQtTUOcy/
+# aUCyPhsVW/EGAwz6pw/voi88bnrcuJrx2DC7U5AaBTF5Zelmg1GxwPCJpCfY8q/x
+# UqECWyLtKvuhLofCODfeJTKYIUBV73YrcD/yBWir4koyVM5mlRfc1/BsmdDqQD3J
+# wQo05FY/E//lNTj8W3UrIPEhN1ecP1jAxY2tx4D7C9OhCmMReVQKbQtmba0dKbDb
+# +JGav+bQRbd7Z80PF2ZQV/HoWP3T4OmGYkCS4idjRPy26AV3UcLm6AdDyA5fau21
+# fjKLvucWXA/TF0XHJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcwOTE2
-# MzBaMC8GCSqGSIb3DQEJBDEiBCBHt+LFEqtRyu750I297uc56bLnAUQTO73tWeNE
-# emL+rjANBgkqhkiG9w0BAQEFAASCAgCTlXsMM/YpoYoVPXRQaVw1eY7WEbL+bqAi
-# yAQhb7EoHWfLJRqD2VQD8KNeuIUmhG9PKGdpOczO5L2WQYtuQoYqWGi6tJCRmXT6
-# JpOIU9Uk+aelJ2qCmfK8t5msCoA8wnJNaKxJfY2SZ63hp/xm0ntHuta0VH+IT54/
-# qKEwW9JgCRg5x1dRACPh9wcBeJERYS3ZAGoBYfVo781v4/HOV1EzOQU+HZKzSvNd
-# R/cydviwCD+0JvsmxM6IL6gMtnGqzbTo5kZ9vblUIOHEaRzQgfvs5Oknf+3+BV3R
-# HtdokyQumbBpGHEFUhJJErwkJlSLNp3MtCMv/hjPwFotSO8cILd7hFqsJUzkzoKl
-# tZKQYugYLM5+iPbQDf2AKjxzRGJHN8Z6CWFUJ+Jkn+DB93Okl28Hlkl1cBmRimO6
-# mmyGl0OyJtdmCER3hpGq0irw448EzmEsZcGPBq3dmNIn4G7iJOg5Ybh8UIMqlRTB
-# axDmLZor0CfCPvw75XZ3EkyP+/RQxVOpR5a/5Z2c5tqTZiT1tU59GK0I6ewL/zUQ
-# RpAGTDclpJXGjyzG2k84HphP/KH/tzK8Qyv5vnIqBvPp+YjfNSrEFApSx6Pcgbo0
-# /Rj33cWuoaEblL/igqRlTwE3optnW/B7C6gs9Ws6BQltprwG8q7dsixqqdLRZC+N
-# 4TUi+EKaFA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcyMTEx
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCvG+v8fcwgeXQEIdCK1ckb7JzYhytXokHTO1Xf
+# HudtzzANBgkqhkiG9w0BAQEFAASCAgBPKdmHbZXPcda1Lb+tQQhvwSord50t98tj
+# 9/ydfcZa9oNx2OByaaIZppGl8ptaQqYlZa96qv3lycXTwZNT6rKOpjklqn2nvrZr
+# 0D0TXo38WO4bFLNR85J8SXliDG4PvO76FZr5cayJhvqSxss7CZRea40swVbb5NCK
+# 2NLJ1bLYEhtBl6ehCXYkIioYJEigMPoleASFOEaaX17TOIPmvLkwMJxm+HDXGZAX
+# ClB0mwsG9SRe2e9vvvuEQ3//OnEWZRfBfGLEM6DdcfkjUuADKBPL6ChPoyY+sUim
+# FKBgKx7Xn1s8EKELyrRTekO6OrHXFiXh6yhch5cKNSB95jT1WyZ+QAj2fCZN3jMx
+# 8p4ifgutfHMpNrwJiKwVsgGMGbdhb+HI7/XILtHNtvdBBx8CzEpg0fsRXxM5igv8
+# 9/9PZQH0uUqHyduLfWz4tH8IkvO3XQ3VPm4qIRlR4jy1gRG8kVpFuLfXcvj1KySi
+# EYuPR8NfpCFyz/Xn9rXWoRuMjTX65AAWATij1ddyP+h4k8K/p31yNmit60Oby6Wa
+# hWdlxXkX8LMCpBtkHl/flt4/dbuxxoSi8a5mig7SC6r/tkmIrGWaPpERv6bfDIyy
+# 7HRl2/dq8a21Nfu+bPLqyFrJYq36C1mRaNd2OwdEu8ReZqNOohz/jjLg4GT22KKX
+# vLE0FJgzNw==
 # SIG # End signature block

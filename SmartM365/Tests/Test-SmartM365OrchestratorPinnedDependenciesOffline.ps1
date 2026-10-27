@@ -2,7 +2,7 @@
 .SYNOPSIS
 Offline checks for pinned FreshSuccess dependencies across runtime, pipeline and GUI.
 .VERSION
-1.0.0
+1.0.1
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -14,13 +14,13 @@ Import-Module (Join-Path $base 'SmartM365.Orchestrator.Insights.psm1') -Force
 $parseErrors=$null; $tokens=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $base 'SmartM365-Inventory-Orchestrator.ps1'),[ref]$tokens,[ref]$parseErrors)
 if ($parseErrors.Count) { throw 'Orchestrator does not parse.' }
-$definitions=foreach($name in @('Get-OrchestratorDependencyFreshStatus','Get-OrchestratorExternalDependencyStatus','Get-OrchestratorDependencyMaxAge','Get-JobOccurrencesInWindow')) {
+$definitions=foreach($name in @('Get-OrchestratorEffectiveDependencyMode','Get-OrchestratorDependencyFreshStatus','Get-OrchestratorExternalDependencyStatus','Get-OrchestratorDependencyMaxAge','Get-JobOccurrencesInWindow')) {
     $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true).Extent.Text
 }
 # Execute the real scheduled branch in a minimal loop; never execute the entry script.
 $scheduled=$ast.Find({param($n) $n -is [Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -like '*depJob.AssignmentMode*Pinned*FreshSuccess*'},$true)
 if (-not $scheduled) { throw 'Pinned scheduled dependency gate is absent.' }
-$definitions += 'function ScheduledStatus($job,$depJob,$Now) { $deferred=$false; $blockingDependencies=[Collections.Generic.List[string]]::new(); foreach($dep in @($depJob.Name)) { ' + $scheduled.Extent.Text + ' }; if($deferred){"Waiting"}else{"Ready"} }'
+$definitions += 'function ScheduledStatus($job,$depJob,$Now) { $deferred=$false; $blockingDependencies=[Collections.Generic.List[string]]::new(); foreach($dep in @($depJob.Name)) { $dependencyMode=Get-OrchestratorEffectiveDependencyMode -Job $job -DependencyName $dep; ' + $scheduled.Extent.Text + ' }; if($deferred){"Waiting"}else{"Ready"} }'
 $definitions += 'function Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now) throw $Message }'
 $gate=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
 $root=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-PinnedDeps-'+[guid]::NewGuid().ToString('N'))
@@ -114,8 +114,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCATMefNNLkD5Uf0
-# LDGhY1/BC3hnSED6bWoaNga+ocu1y6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDst5sxEkt0YpVp
+# 43xTGM5NHDwGOp2Kqlhrr8U4iO1uX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -248,31 +248,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIARDF6rhXZhpulWJj9qxY02NE/qvsAvU38LS9Yoy+7nUMA0GCSqG
-# SIb3DQEBAQUABIIBgC6mkeh8Gyzfa0RrO1KAP4MA9hUbewZcSZIw6ApiGc7XsFEJ
-# rpIBia6C2PVjNvfWItix8wW06iMoM95IgH66H00f0LhiX08Ak3sZ8CNYiq45dYni
-# z5H7wfjY4AbA0Vub6l8zTKtsJd9u9j16q/ahC3EZOnh4IixDhWBmCQgcVabbQvBQ
-# lFQTgSnhxkvCZa5bolr5bb/qHB6JaaZzJfSGh7Kx2JsxwFbFjLSIE3k40Ti7QVQH
-# E/NcNjZn1aXMjp3hXpDbZKjfamm8KGowZylzU4/f0iLol/6Mo1T35RsWtvLcz+Nn
-# ylJshsfcoYs6uZKtLBagoUwLahNvac2xlyC0rSjlKKY90Vc9c3yMzLmQbsrzYvKe
-# BJ2AGtm/iJBmaRDRHeJozsbYI30QPbwNUaYnY0iGHK0lkrcGAL0SFKesz1ZritF+
-# uaH2JEIPlRbGVP0wn9d/FIJZwypDzz1W2jhepEGj4BPbrEqml+K6P1ZRTV/58VLR
-# dqfcLeo4427/OQ/RXKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJjXyrR0rAv6CShrXD3HLbJbvKfdcOfygnNHaECITGHjMA0GCSqG
+# SIb3DQEBAQUABIIBgKuMr6vTIxG5q1ZFte+BFSnkDaW2fnREr3OkMn2kOkjJ+IhU
+# IBQgM+WKxlgAYwSipXMgULOBfEA3DoYJmcbwTpsyhOwIkrGtA+df8BlXep8oFX6u
+# 7Lrv+q4SXy/XycxxIlTfRE34+t6lhn2Edd758XDcMSFc/NGYkc4PwREaMKevaBqY
+# Y4/mc/FhOuXyXQbh9mxAKNqKvGIQoYak4rxlGb7fU8VVAk+7hJdamNY4CRmwRo8u
+# o23+YS8uSrdx4IGiljOfY0WnAqbmOveYjIRRwrXzfxZd261SULjdSFabETL/jFsJ
+# tNyjHbNoUqGQj4miVYZhRYRvxjbTlvmEc18yOx4Sqtn1Yx9OQji9ijlPBMJIadvg
+# ZrzKDu9iX+inP4fDLPLRCjBute6pQMcVI14V07TXi0iq5GLJbOgoTmr6xHq6r4Yj
+# ksybrplRXvmoFS2j0rPnTdDhyihnlop8dx9rAqgXLObTFAT2zKn8dMAQVFb/L4e0
+# lcoahRbJzoJHdOSwSqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQyMjE1
-# NTZaMC8GCSqGSIb3DQEJBDEiBCCuz+JG/tb4OqKejKGDqLKy0uOVPtpudWHNijKd
-# SPas9jANBgkqhkiG9w0BAQEFAASCAgBkcFS1Mh5psXwDba68IKu0Itq48wxWnXxj
-# 5HjtCrkvAMIQpJNobhChzqERgHaJNw1Mp0npY3lUzS2YQ6bzVt+INJKtU2zsfw/2
-# 9Dp3/ppBZdM7z+4Sq6EtHKiSUJFvyaqK3jrWi7KN/2C3bV93cFjT1qYEAbl6j7RN
-# S2uQzgN/JyVFtKgvEBs9HmEOMQIp8XPVjrnR9SH8Q3QnJZFQDW+jeSlaS9cRlSvM
-# BQzXFVRwBfz5bvByRLoa9Gb++TVzmDQGAvMta9IYd44WptvD0EEsC9zx5D++qAQr
-# ixPrnNRQ78ttKqKzLKMYwilzTFeDabYzl1mX3Lly2PE+S0ULhK0GdZ3+vaDKXQ3m
-# GSfO2hMpHP+CSOQPng9VXxQpbgMic7mp4f4nNWFxY0sN4m28544x5nD16yh4c44Y
-# wkKvVXsEljCqStcLiQ3tP4uBFLGQSPU1kp+k9W88HhzXIN/RNILKWchZYJf1CNMv
-# 9iEpsPnlXwpYFbT5PRQV6qVJ9nCZ8/YUsC5kfibFNcgstIXm2jGp1p46ddR8RTt8
-# gG7qrqIy70Be11MdHfJhnLBQT0bNnO23LTrnGFS84UXwLnE1tyqJDlOt2dAIQIsr
-# 2Vy7y8OotTPsqq/BgnT+dzfvxm6eoqJk/EwAkgIB07Nlvu3XFUIFLTXfj3daeOrW
-# 5i+bniolTw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcyMTEx
+# MDRaMC8GCSqGSIb3DQEJBDEiBCDflhx0iirhS4qfzbTsiN1QhTkaXrEAbSF2/lR6
+# yQKhDTANBgkqhkiG9w0BAQEFAASCAgCL27ozHFQ9g5lVUYocfXyKbDbuzRS8yziI
+# 0sXCxKiNwQGtRdojEZuj32jisS202bUdbVU7BPFOI/WHINLhnIsKGpycZLE75DFg
+# qVmj60BERF9hg8jgUF+mK7FXvdFNPR0atj4VZLxwyoJmmaQhFP0rrj8jl40MDnbl
+# LosF4M7AS8R8T2D0dCUmwcJL2Xc9aC4WzVqkaK78ON3BYRsXuh10f/nbWo/QDtAJ
+# VKhxKPuypdT6/8+A0eOSoVIlBKdd+8EKmmXK7856fjdjuvMzw5hjwuEB61qA0h15
+# X6ivsn93mTt/qX5c5vDl7M8/FS+f+rScHH6/cZYdpJVtrB39amclVt2DJ48m3yaX
+# wxuz/c6zdzBN2IkZ8kxY9ms+JjUvPfzGFp4l7vIVti3/RddxKPZ0bqs38XlswabG
+# 0kEnHHFaSD2RVl0ck94RbKgSNgTrc796PJIx/gqsX29lPpu2bo35OibNQ9hrdlCm
+# u7lmeHh4SFjQTXM2ohJfKWEDjICmzszgJRUIuvghahMpXsvxECnhosV6LX3tRzyt
+# cA/ZZNalvP3r6NLImPXYZAUkU6Mv0siAZ+TgR2wPzvEPkVI7Qbd8y2mj4BhvRuuh
+# f8P89L1HeeyJfEWTUHZmrzFVWE+rsSlQZUkEfGKRyR6H7Xrjrk7vmohkV/7KTZh0
+# V6XIjNQIUQ==
 # SIG # End signature block

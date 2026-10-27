@@ -209,7 +209,9 @@
       "Enabled": true,
       "Group": "M365",
       "DependsOn": [
-        "EXO-Mailboxes-Inventory-Fast"
+        "EXO-Mailboxes-Inventory-Fast",
+        "M365-Usage-Inventory",
+        "Intune-Devices-Inventory"
       ],
       "DependencyMode": "LatestOccurrence",
       "AllowedServers": [],
@@ -221,7 +223,7 @@
       "Schedule": {
         "Type": "Daily",
         "Times": [
-          "00:15"
+          "04:45"
         ],
         "MissedRunPolicy": "RunOnce",
         "DaysOfWeek": []
@@ -1435,6 +1437,7 @@
       "EstimatedDurationMinutes": 30,
       "ConcurrencyKey": "WorkplaceEvidence-Prepare",
       "DependencyMode": "FreshSuccess",
+      "LatestOccurrenceDependencies": ["M365-Licences-Inventory"],
       "DependencyMaxAgeHours": 48
     },
     {

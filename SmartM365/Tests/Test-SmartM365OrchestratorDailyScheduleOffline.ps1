@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.9
+1.2.10
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -134,7 +134,8 @@ foreach ($path in $paths) {
         Assert-True ($matches.Count -eq 1) "Missing or duplicate daily job: $name"
         $schedule = $matches[0].Schedule
         Assert-True ($schedule.Type -eq 'Daily') "Non-daily schedule: $name"
-        Assert-True ((@($schedule.Times) -join ',') -ceq $daily[$name]) "Wrong daily occurrences: $name"
+        $expectedTime=if($isTemplate -and $name -eq 'M365-Licences-Inventory'){'04:45'}else{$daily[$name]}
+        Assert-True ((@($schedule.Times) -join ',') -ceq $expectedTime) "Wrong daily occurrences: $name"
         Assert-True (@($schedule.DaysOfWeek).Count -eq 0) "Daily job retains weekly day restrictions: $name"
     }
     foreach ($name in $weekly.Keys) {
@@ -163,6 +164,7 @@ foreach ($path in $paths) {
     foreach ($name in $chain.Keys) {
         $job = @($document.Jobs | Where-Object Name -eq $name)[0]
         $expected = $chain[$name].Split('|')
+        if ($isTemplate -and $name -eq 'M365-Licences-Inventory') { $expected[0]='EXO-Mailboxes-Inventory-Fast,M365-Usage-Inventory,Intune-Devices-Inventory' }
         Assert-True ((@($job.DependsOn) -join ',') -ceq $expected[0]) "Chained dependencies changed: $name"
         $mode = if ($job.PSObject.Properties['DependencyMode']) { [string]$job.DependencyMode } else { '' }
         Assert-True ($mode -in @('', 'LatestOccurrence')) "Chained job no longer uses LatestOccurrence: $name"
@@ -173,6 +175,7 @@ foreach ($path in $paths) {
     Assert-True ($valuation.ConcurrencyKey -eq 'SmartFinOps-Workplace' -and $report.ConcurrencyKey -eq $valuation.ConcurrencyKey) 'SmartFinOps jobs can run concurrently.'
     $prepare = @($document.Jobs | Where-Object Name -eq 'WorkplaceEvidence-Prepare')[0]
     Assert-True ($prepare.DependencyMode -eq 'FreshSuccess' -and $prepare.DependencyMaxAgeHours -eq 48) 'Workplace preparation scheduler gate changed.'
+    if ($isTemplate) { Assert-True ((@($prepare.LatestOccurrenceDependencies) -join ',') -ceq 'M365-Licences-Inventory') 'Prepare must wait for the latest licensing occurrence.' }
     Assert-True (@($prepare.DependsOn) -contains 'EXO-Mailboxes-Inventory-Fast' -and
         @($prepare.DependsOn) -notcontains 'EXO-Mailboxes-Inventory' -and
         @($prepare.DependsOn) -contains 'M365-WorkplaceScope-Inventory' -and
@@ -270,8 +273,8 @@ Write-Output "PASS: $checks daily schedule offline checks. No collectors, schedu
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC7EEnYIKL/VRJw
-# NdocptV0Lh43DaTWmNqta6Wd60iM+KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2Qwvt+/d/zrKa
+# +CxetPxAmVrfeh/mhM00Z/OpSMZ186CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -404,31 +407,31 @@ Write-Output "PASS: $checks daily schedule offline checks. No collectors, schedu
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFUPwazUnVSy/Fcn+PvWCxRLdDdWmT3yF5J888YhTh+8MA0GCSqG
-# SIb3DQEBAQUABIIBgHdpystWn8wONKRmAHgaAsG4RJDUu2yCoJ6GK+T2VV9teErG
-# EtytpODOccHMOUnDGgAZWqbTd9uAk/n0+d9on8QZDUfqCPC5zi0vtj3k/g/3uvDf
-# oATw9rZ4F9c2AnzaO94cg3Vby/F6iWdaFSVi4WP/fKarix7xGmmdZj0QmCkEJSij
-# CJrbN7Mu9yAlQ87gYr52+nimtRHJoTSDAb8W8wdktOrYlfouXswB82gCo/JS7fQF
-# fwuT5Q9EwMk/it1i/xzIM+7GakGcYJBszBJbkd60JgBxu91PT2a4vnVMpdQYbVOJ
-# mKaWpOPzjYoTNfKhWyjNFaqmRE+il0g4lWyRdiY/5kIxctixwOF5dwAK9Bogz1s4
-# zLq5Qj7GTA4j5QHh3lhP1Pa19f3JQkxQ+waPNQFh4bWZtQ3tk2KneIb/1jw19iV7
-# xGNWf+oyhEqLxxqCoRJ8iCZcU5dePp3sAb/9YvgVSuRCCaEenZ5V6LpT3vvNZfjp
-# dT5Upiq0FEnm4gWAYKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB83NsNQYaeoYfo+vCjmRvUYhKvPdzizHT9riLBMbtK2MA0GCSqG
+# SIb3DQEBAQUABIIBgCNd3PWp1fzAAsDpaS+5ep4+/ikPt9Q6Zj40HDK3EL24/AgM
+# OmhXzDEKqh4ApiX1f+OFAhDfMKeYRwXuROY1D8ujUZEV/A2PL2g3p70tWkNuUKsg
+# VjApAS9Ko/PlaxxSCooqBsSBJSzcTkd8pLnSX6Qyzeqa70InLPI3YGDxjST3v6nn
+# DMZ0Q1sMt1kvvRYDWPGg2r10FNDRKlQLqNkcZNezOH0UgzRhLe8aKi0jcLxj6oMH
+# yTT6WiibuGwxhP5MbhQ2MbMIbZiM1e/eV6/VTpsSdTMpwEG6FaYa1g/WGNQhco6y
+# +vI2fiHbbagib5OATDhOslim/p+2FQmhnmh32Hbo4QuOd5aeD4hZM6n8ujCuGuZg
+# J/KcsSVRlbTh/tHqqPZD5fPdBrHBVbs0IVu8vs+OHQf9Rf4Fgy/NZA/fA8aJdsWy
+# tbf253GFmN567M9oGmtc9PinUsROzIzi02bjGB4jgiDd7Ec27Hmumc4XPG1V8Fht
+# YqZiC8Q9Sws5RbpftKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcwOTQx
-# NTJaMC8GCSqGSIb3DQEJBDEiBCBUBrF5jEFYFG5neYBX/vOWpf+Ikv+aLUpiG2VX
-# zuqDzjANBgkqhkiG9w0BAQEFAASCAgCYhAoifYg6BAap2aE1YaOK6P0zSLyq3QC4
-# f5fjmUc7rHM7VmtKO5LVCpcKrh0y3Smy1FFv0C74zUIGp6V+ZdL+XIAI2zCRQZyp
-# XrQYL47iKOn9vRPg3gaOUMfOIHDWbhZcLBYKmBfJasRtBb3dPCcLnpAHC6Safu6q
-# 9K733CasCDoLhHnVcluXgpf8KxVzwvrl0GSy6uUG7EtZAhvL+6F/bDL6nZdMptmQ
-# cRRC2Ncf6degJNRqctCiZPx9g3HOhOsXQvotl022D3F7VHyeTJrnnnKc12Cw9aKG
-# YQFwgE8h0oxeWsM3ACC1HCAnLzHM1//+YSN6XfaP/E5QlYzy1Nn4V5pcwcitYD6g
-# Yzmilfh4CCbfhXip6hcxfjreGZ5wzGHNVI9+1gQt4Vfo3XQzIZrHTuKXmw+9MY+b
-# 8fCnVUN+UAQl5tDaE4vqa6CogaT0zxOtScoHa7pNeRw+zoYvZZCBhVFBP75otGCD
-# l3Xld3skzsJINd2YcNHnMFfmMW7/OhMfWOdKlm6hq00DBVdCFfc9m/TYh36v8EF9
-# VjDaVQvE4uT/cP001xiOKcdH51ltkzWb6BdB3Cna6qdc6+1yNHNQxnNFFAO3nAlw
-# fe3KE2l9J7a7gqSuTGjxIlpauIzk52KePTyuIGt5y/dGqWNZIn1cqhkAFVz4ajFw
-# i2bZeBq18Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcyMTEx
+# MDRaMC8GCSqGSIb3DQEJBDEiBCAlzxwh8829aijDteGGqyNZ9lgfc6W0orfQtcmq
+# 3CERIDANBgkqhkiG9w0BAQEFAASCAgB0dTnkIXdIFqz43NqVHD82gur2w/FVUys5
+# NTauI6WBLBaenDPPKQQkZllYF+lACR1s+oG8lWyEu2LKw3go3r88ZfdigqbsXnvL
+# yvwU9PwRS/Vh7pS6AruznhD6ziFxbkoTa6QtbdgzShfDJPXyGHh8lWlewmhq8Nkf
+# xK1H9m7QZDnHqMq9nCR0QdlUicbA1klvJijJnMZyJhVKDD4Lo9k0v7UL9I8Aaw3Q
+# 7ykTu61ceRXg2XWTpVGvBpOraiyY60UwX6m6hS/VrpkWIpu2ZlUqXBFRSI1/2yB/
+# Ya+PbT7LMIfVGJOiRo7OoNahfYIr0U4r0LvjcnBWcPCITifXbF1xJmNyxE9eN/2E
+# fpLnjE1aj+YusyJ8VQBYJW9kRv12H6COD3VSQdmj9zW4y8prf+5T5KAddMDOiuwC
+# Q2f2YATvSpWWgna68Wb8FQj8sew5dQvepZYAb3hEkGS0VyidMZqtUNSYB5dqMr7l
+# PLNvCcN/JVrsTxTHUQnoObkyvElUzwp9KyDgumOwXTFrHY9gYstS9mkv5UPAfRE9
+# g9JdK/NNNC8kfSTbcMTsDvBbh1ZppvQaf7LpM5U31cwmgmlXZdYlYcjI9e3dG9xN
+# +7FRKJuRfTFYS8xfN+X0nSWaklbV4sA7McMe2OWt21RMQexRECFv+qM8U3E/fFlS
+# D0+X4/OysQ==
 # SIG # End signature block

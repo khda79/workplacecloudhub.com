@@ -1,4 +1,4 @@
-# Version 1.1.0
+# Version 1.2.0
 #Requires -Version 7.0
 [CmdletBinding()]
 param()
@@ -34,6 +34,22 @@ function New-Capture {
     }
     $snapshot=[ordered]@{TenantKey=$tenant;SnapshotId=$snapshotId;SchemaVersion=2;Products=@(1,2,3,4);OtherProducts=@(1,2,3);AssignmentIssues=@{Available=$false;Rows=@()}}
     if(-not $NoReceiptRun){$snapshot.ReceiptRun=@{Producer=$license.producer;RunId=$SnapshotRunId;StartedAtUtc='2026-10-17T22:00:00Z'}}
+    $snapshot.GeneratedAtUtc='2026-10-17T23:00:00Z'
+    $snapshot.Sources=@(foreach($group in @(
+        @{Producer='SmartM365-M365UserActivity-Inventory.ps1';Files=@('M365_Users_Activity.csv','M365_Mailbox_Usage.csv','M365_Email_Activity.csv','M365_Apps_Usage_180D.csv','M365_OneDrive_Usage.csv')},
+        @{Producer='SmartM365-Devices-Inventory.ps1';Files=@('Intune_Devices_Inventory.csv')}
+    )) {
+        $records=@(foreach($name in $group.Files) {
+            $raw=Join-Path $last $name
+            [pscustomobject]@{UserId='contoso-one';Value='synthetic'} | Export-Csv -LiteralPath $raw -NoTypeInformation
+            $hash=(Get-FileHash -LiteralPath $raw).Hash
+            @{File=$name;RunId='source-run';Status='Success';Errors=0;IsPartialInventory=$false;SHA256=$hash}
+        })
+        $stem='SmartInventory_'+[IO.Path]::GetFileNameWithoutExtension($group.Producer)
+        Json (Join-Path $last ($stem+'.current.json.txt')) @{Owner='SmartInventory-SourceReceipt';Producer=$group.Producer;TenantKey=$tenant;RunId='source-run';Status='Completed';Errors=0;IsPartialInventory=$false;ConsumerScopeQualified=$true;PublicationProtocol=1;CompletedAtUtc='2026-10-17T22:00:00Z';Files=$records}
+        Json (Join-Path $last ($stem+'.run.json.txt')) @{Owner='SmartInventory-SourceRun';Producer=$group.Producer;TenantKey=$tenant;RunId='source-run';Status='Completed';UnqualifiedPublication=$false}
+        foreach($record in $records) { @{Name=$record.File;Ready=$true;Provisional=$false;SHA256=$record.SHA256} }
+    })
     Json (Join-Path $last $license.snapshot) $snapshot
     $published=@($license.reportFiles)
     if($WithDecisions){
@@ -62,12 +78,12 @@ function New-Capture {
     }
     return $capture
 }
-function Get-Qualification([string]$Capture){
+function Get-Qualification([string]$Capture,[switch]$RequireCurrentSources){
     $batch=Join-Path $root ('batch-'+[guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $batch|Out-Null
     $entries=@(Copy-PreparedArtifacts -SnapshotRoot $Capture -Destination $batch -TenantKey $tenant)
     Assert-PreparedArtifacts -BatchRoot $batch -Entries $entries -TenantKey $tenant
-    [pscustomobject]@{Entries=$entries;Result=(Get-PreparedLicenseReportQualification -SnapshotRoot $Capture -TenantKey $tenant -Artifacts $entries)}
+    [pscustomobject]@{Entries=$entries;Result=(Get-PreparedLicenseReportQualification -SnapshotRoot $Capture -TenantKey $tenant -Artifacts $entries -RequireCurrentSources:$RequireCurrentSources)}
 }
 function FileState($Result,[string]$Name){@($Result.Files | Where-Object File -ceq $Name)[0].State}
 
@@ -131,6 +147,48 @@ try {
     # A decision file of another run is Not qualified on its own; the report stays qualified.
     $q=Get-Qualification (New-Capture 'decisionrun' -WithDecisions -ForeignRunFile 'M365_Licenses_ReportSkuCapacity.csv')
     Check ($q.Result.State -eq 'Qualified' -and (FileState $q.Result 'M365_Licenses_ReportSkuCapacity.csv') -eq 'Not qualified' -and (FileState $q.Result 'M365_Licenses_ReportSkuCandidates.csv') -eq 'Qualified') 'Decision file of another run must be disqualified alone.'
+    # Frozen-source matching: a valid report must not be reused after its dependencies change.
+    $q=Get-Qualification (New-Capture 'strict-valid' -WithDecisions) -RequireCurrentSources
+    Check ($q.Result.State -eq 'Qualified') ('Current qualified dependency snapshot refused: '+$q.Result.Reason)
+    $strictCases=@(
+        @{Name='source-unqualified';Change={$snapshot.Sources[0].Ready=$false}},
+        @{Name='source-string-ready';Change={$snapshot.Sources[0].Ready='true'}},
+        @{Name='source-provisional';Change={$snapshot.Sources[0].Provisional=$true}},
+        @{Name='source-missing';Change={$snapshot.Sources=@($snapshot.Sources | Select-Object -Skip 1)}},
+        @{Name='source-duplicate';Change={$snapshot.Sources+=@($snapshot.Sources[0])}},
+        @{Name='source-hash';Change={$snapshot.Sources[0].SHA256='0'*64}},
+        @{Name='source-legacy';Change={$snapshot.PSObject.Properties.Remove('Sources')}},
+        @{Name='source-older';Change={$snapshot.GeneratedAtUtc='2026-10-17T21:00:00Z'}},
+        @{Name='source-offsetless';Change={$snapshot.GeneratedAtUtc='2026-10-17T23:00:00'}},
+        @{Name='receipt-missing';Change={Remove-Item -LiteralPath $proofPath}},
+        @{Name='receipt-foreign';Change={$proof.TenantKey='foreign';Json $proofPath $proof}},
+        @{Name='receipt-failed';Change={$proof.Status='Failed';Json $proofPath $proof}},
+        @{Name='receipt-partial';Change={$proof.IsPartialInventory=$true;Json $proofPath $proof}},
+        @{Name='receipt-unqualified';Change={$proof.ConsumerScopeQualified=$false;Json $proofPath $proof}},
+        @{Name='receipt-hash';Change={$proof.Files[0].SHA256='0'*64;Json $proofPath $proof}},
+        @{Name='receipt-other-run';Change={$proof.Files[0].RunId='other-run';Json $proofPath $proof}},
+        @{Name='run-active';Change={$run.Status='Running';Json $runPath $run}},
+        @{Name='run-unqualified';Change={$run.UnqualifiedPublication=$true;Json $runPath $run}},
+        @{Name='run-other';Change={$run.RunId='other-run';Json $runPath $run}},
+        @{Name='run-missing';Change={Remove-Item -LiteralPath $runPath}},
+        @{Name='raw-changed';Change={Add-Content -LiteralPath (Join-Path $last 'M365_Users_Activity.csv') -Value 'changed'}}
+    )
+    foreach($case in $strictCases) {
+        $current=New-Capture $case.Name -WithDecisions
+        $last=Join-Path $current 'DATA-LAST'
+        $snapshotPath=Join-Path $last $license.snapshot
+        $snapshot=Get-Content -LiteralPath $snapshotPath -Raw | ConvertFrom-Json
+        $proofPath=Join-Path $last 'SmartInventory_SmartM365-M365UserActivity-Inventory.current.json.txt'
+        $runPath=Join-Path $last 'SmartInventory_SmartM365-M365UserActivity-Inventory.run.json.txt'
+        $proof=Get-Content -LiteralPath $proofPath -Raw | ConvertFrom-Json
+        $run=Get-Content -LiteralPath $runPath -Raw | ConvertFrom-Json
+        & $case.Change
+        Json $snapshotPath $snapshot
+        $q=Get-Qualification $current -RequireCurrentSources
+        Check ($q.Result.State -eq 'Not qualified' -and $q.Result.Reason -like '*dependency mismatch*') ('Stale source accepted: '+$case.Name+' '+$q.Result.Reason)
+        Check (@($q.Result.Files | Where-Object State -eq 'Qualified').Count -eq 0) ('Unqualified snapshot exposed report or decision values: '+$case.Name)
+        Check ((Get-WorkforceDisabledLicenseEvidence -DataRoot $current -TenantKey $tenant).State -eq 'Not measured') ('Workforce reused unqualified snapshot: '+$case.Name)
+    }
     # Another tenant stays fatal.
     $foreign=New-Capture 'foreigntenant' -WithDecisions -RowTenant 'foreign'
     $failed=$false
@@ -152,8 +210,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWpl5OHqfRkYfM
-# bobwkhUJvnTiCwmBejF32CL3K9l8hqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+AoC3mTnE/UrZ
+# 7bDC4m2PazpBJbSO9ARTgDRVr/Hbn6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -286,31 +344,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILkwUMgsmwZPC3L4mUwFE3G/atFYTGseyK4Sd3vrbH9cMA0GCSqG
-# SIb3DQEBAQUABIIBgDYzGkZTcVx2/BgMnBQQYdrE+8n0/CS4sdm5qiaY4qijNCTE
-# gNkkyFkzduZvSj8f2QqacWIQjOAHB4hyV85KFBg9+Dx/+vSX8vY2ZVqAdVIf23+6
-# DVGhuwrZl3qApc1ONn3BAB5zeAzS2Nwcewl1XTzl0dDjWF45W5WoSJ6v8eqnpUTi
-# 6XENninsNUDXmyJRg5Wg0Wr+Tn4VwGDssbxrBe5gAH71X3TuB4DdmxMzBIz4IVBi
-# 1+4lYcH9GYSC+TWzmHQUHmCg250lgAO/jPG061y1xD/waf65zqeZYJcGGAzyQLr5
-# dDaJ8dW9q4nKOLaLx03AkSZ2rAF6NDjF7m3zFSlPC359cSGgvUvZc37vl5gu9GHD
-# 606WoVjdnEd0ZxcopM573YjH1N9f4mO/+JggNSRM177c4SkMPrwTe8+7bG0xTHEy
-# Z7CAZbni5j827jZt/DLWTzUj8MYpWDkZ9WzyzNq2/0EcZDRJUNXOHcKYWkYCmk0Q
-# 6jT/v4kZQUS9H4PLKKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPym6J6tzidOHnAnt9ylLN6nIKC61vzPeAKb/NtYnjcLMA0GCSqG
+# SIb3DQEBAQUABIIBgFVT8sE7pmLQw8tJKn7p0Fa8t+HfY+0SyvcHyw0U9pPhSfz5
+# 9/8q1L1/hqJpUv+V0d9CchyEzh+zxsjFggVUUO7+TQWRv/HyEcOdtGPoAMSQS7je
+# m3wWHTg4UUtRbau6eopvddWg9dwqcj8VymK9eE9IDR/2t++1ZLAb6ePXeCGwewSN
+# bY7ZU3SKcHoW+3UZVsFMINI4GUbqAQumOeB8UQWzd69XX8SNjN9l+SptI61/KVCv
+# t2r+blcIC1olod3jhpOrbkfmCeTfwb7XfYVckI5QiBgkY34Xmz1+J0GtmwlfTEg+
+# OeIBAfVXnVjISEFXQQqsyPf5KGGum33RjOtf/fYxvhP0X0mRIlJ/4YrHuCGXnHS+
+# l4ctWjdPsOLk4vbh8W1aFXNeiNlkinoxYPPO6EvQOgExlkt2sbNT9UXjUIH8Xu3a
+# CH2DWMPrSdLF2g8Hbdlfpc2P2RHP4IKcz9GGSwpWIEPq4MofMRp9LbK8DinUJZCM
+# 2pIuINRJIsvI2V97AqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcwOTQx
-# NTRaMC8GCSqGSIb3DQEJBDEiBCC1FRu1p1iejAeNDI56oL9L/fNEsjudzqb3Vle9
-# qre7FDANBgkqhkiG9w0BAQEFAASCAgCyUA3P6XynJJ/KlfwlZKdnppibEj9AQb+c
-# wXUMpBFdqIqxH/3zTLZi1EQN4ptzuYQQ87yRvuLyPYE6mtNfLkrG30RhkBGrkICs
-# IZzSh5OnrE8yiwX1hFYn++v2mgLfYkDZyuNCftsHObjCDEXTHbgwA038mJudgmyj
-# EdklXGaRP+yijh7+VS/PgOVv/B5/lWdZUaFOtCyuI0C7fNsMZp2a1lFV9xloNVra
-# M37m+9/gGlvresn6XMEqj9934tTdVQlmhHyu13PKdt01EwT7T7kpLd1HPxC7Cm8v
-# LGokVGnU31hJ8IP9MGq1uADICUCZpzf6wstxn5T2ijG61z4fVMFfLJ+rzRSSq9Ns
-# 8eTnyI7ITa2jkX2FyB+k7MrVk9rPlxGlnKn7YwKyj1As1LUGb+lZ6qj2F9HAKNwf
-# soXmXv+Sfy41RPRMHqTBI3N2XBR+e+hmsPkUexbytzAd7jT8Cl1pW8OXWf33C05e
-# s2DL0fQHlLAyqZKaMMFCkMCn2ME2z8GH4oT50IeyHH1EMgmI6sAUc0hBOQO1GgsM
-# GbgpCIfCgGGjhpwxuJggv2DrOwsBe3IcwlO/4RXMKb20xutJC754ugmoPDeCCGD6
-# OUrcyV29yDueEEXT3IiPK7fLlOl59hrGq01Tsyt+U9fesznDUsG0LkUqtjrzBdpf
-# 1PizvXMfHA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcyMTEx
+# MDVaMC8GCSqGSIb3DQEJBDEiBCCxDU85Wv0qdAJCERXqCB3+zNSExZDXgYLA6JG/
+# jPbxhTANBgkqhkiG9w0BAQEFAASCAgBb9IgaTIyPL9p5YpZCvsXEjUxhJeRrtyxr
+# fO1WUxzIbZ5saw/psHAa3jH09Ru6EWPM0QFGxiq5zWJ/1kxAd6PjPm3syOpL3KwV
+# GL5etUhv0JNbfa0Ye7QnjHvjQxz+htqjplbRTOXYLhMRspidnjcfKlgD19EBpANZ
+# DkiRunDGLe3kdt2kvah76anx0XpWXu/DzcFqzTNLpKww1nzZjkPV1KRs8LIPg/WF
+# V1PQZnmM/lE50P1PPR1KcQAtnWXKGXEPb4rogotXtfPCmnWlS35yq0W3kWEdFS1U
+# 3JR0j0rlBfjlqcYpnExrTkvGZ6fqRZxLxUDKrHT8MapifYKA81l3kLQrt2bISdeP
+# yXzhitihQe6zPpvM1q1zi5tamsiQIC3FJ7gr5/VHe8FqWpbphTz2Z/tlvmILpE25
+# OL22uiyzmB7vWXSSY+YZTgylr+juOReH7L3B8M/dPjMB3K91gV+q+e3/rtN21Hc4
+# yDqBYDjg1VN297LMrdVi7N7kx+MxJBSPI5/NsV24BAb3z4iUaO7v4WI3y48bIq9e
+# 0AN4dU7TwQWCvvbIwOhbvfYfN+/P/5bwddNkhC92jCJjaAiiQCtmq6uQ9EdDBVB/
+# NB3cHcx0Dbqq+kHnjFLWdYwKxqVCUcpR7jehnDnfRMBm1+aZfkitOUOcmaETS29d
+# TQz0Amrbyg==
 # SIG # End signature block

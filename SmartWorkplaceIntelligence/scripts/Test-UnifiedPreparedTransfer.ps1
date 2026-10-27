@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# Version: 0.1.1
+# Version: 0.1.2
 [CmdletBinding()]
 param()
 # Synthetic inputs and local callbacks only: no collector, tenant or cloud connection.
@@ -138,13 +138,32 @@ try {
         if($name -like '*.csv'){@{TenantKey='synthetic-unified';SnapshotId=('a'*32)}|Export-Csv -LiteralPath $path -NoTypeInformation}
     }
     $runId='synthetic-licensing-run'
-    Json (Join-Path $last 'M365_Licenses_ReportSnapshot.json.txt') @{TenantKey='synthetic-unified';SnapshotId=('a'*32);SchemaVersion=2;Products=@(1,2,3,4);OtherProducts=@(1,2,3);AssignmentIssues=@{Available=$false;Rows=@()};ReceiptRun=@{Producer='SmartM365-Licences-Inventory.ps1';RunId=$runId}}
+    $sources=@(foreach($group in @(
+        @{Producer='SmartM365-M365UserActivity-Inventory.ps1';Files=@('M365_Users_Activity.csv','M365_Mailbox_Usage.csv','M365_Email_Activity.csv','M365_Apps_Usage_180D.csv','M365_OneDrive_Usage.csv')},
+        @{Producer='SmartM365-Devices-Inventory.ps1';Files=@('Intune_Devices_Inventory.csv')}
+    )) {
+        $records=@(foreach($name in $group.Files) {
+            [pscustomobject]@{UserId='contoso-one'} | Export-Csv -LiteralPath (Join-Path $last $name) -NoTypeInformation
+            @{File=$name;RunId='source-run';Status='Success';Errors=0;IsPartialInventory=$false;SHA256=(Get-FileHash (Join-Path $last $name)).Hash}
+        })
+        $stem='SmartInventory_'+[IO.Path]::GetFileNameWithoutExtension($group.Producer)
+        Json (Join-Path $last ($stem+'.current.json.txt')) @{Owner='SmartInventory-SourceReceipt';Producer=$group.Producer;TenantKey='synthetic-unified';RunId='source-run';Status='Completed';Errors=0;IsPartialInventory=$false;ConsumerScopeQualified=$true;PublicationProtocol=1;CompletedAtUtc='2026-10-17T22:00:00Z';Files=$records}
+        Json (Join-Path $last ($stem+'.run.json.txt')) @{Owner='SmartInventory-SourceRun';Producer=$group.Producer;TenantKey='synthetic-unified';RunId='source-run';Status='Completed';UnqualifiedPublication=$false}
+        foreach($record in $records) { @{Name=$record.File;Ready=$true;Provisional=$false;SHA256=$record.SHA256} }
+    })
+
+    Json (Join-Path $last 'M365_Licenses_ReportSnapshot.json.txt') @{GeneratedAtUtc='2026-10-17T23:00:00Z';Sources=$sources;TenantKey='synthetic-unified';SnapshotId=('a'*32);SchemaVersion=2;Products=@(1,2,3,4);OtherProducts=@(1,2,3);AssignmentIssues=@{Available=$false;Rows=@()};ReceiptRun=@{Producer='SmartM365-Licences-Inventory.ps1';RunId=$runId}}
     $reportFiles=@($artifacts.licenseReport.reportFiles)
     Json (Join-Path $last $artifacts.licenseReport.receipt) @{Producer='SmartM365-Licences-Inventory.ps1';TenantKey='synthetic-unified';Status='Completed';RunId=$runId
         Files=@($reportFiles | ForEach-Object {@{File=$_;SHA256=(Get-FileHash -LiteralPath (Join-Path $last $_)).Hash}});OptionalFiles=@($reportFiles | ForEach-Object {@{File=$_;Published=$true}})}
     $qualified=Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $output -TenantKey 'synthetic-unified' -Provenance $provenance -ContractPath $contractPath -ArtifactSnapshotRoot $capture -SkipRetention
     $qualifiedManifest=Get-Content (Join-Path $qualified.BatchPath 'batch.json.txt') -Raw|ConvertFrom-Json
     Check ($qualifiedManifest.LicenseReportQualification.State -eq 'Qualified' -and $qualifiedManifest.LicenseReportQualification.ReceiptRunId -eq $runId) 'Recorded license report not qualified'
+    Add-Content -LiteralPath (Join-Path $last 'Intune_Devices_Inventory.csv') -Value 'newer device capture'
+    $stale=Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $output -TenantKey 'synthetic-unified' -Provenance $provenance -ContractPath $contractPath -ArtifactSnapshotRoot $capture -SkipRetention 3>$null
+    $staleManifest=Get-Content (Join-Path $stale.BatchPath 'batch.json.txt') -Raw|ConvertFrom-Json
+    Check ($staleManifest.LicenseReportQualification.State -eq 'Not qualified' -and $staleManifest.LicenseReportQualification.Reason -like '*different source capture*') 'Old licensing snapshot survived a newer device capture'
+    Check ($staleManifest.Files.Count -eq $qualifiedManifest.Files.Count -and (Get-Content (Join-Path $output 'current.json.txt') -Raw|ConvertFrom-Json).BatchId -eq $stale.BatchId) 'A stale licensing report blocked unrelated batch evidence'
     Remove-Item -LiteralPath (Join-Path $last $artifacts.licenseReport.receipt)
     $unqualified=Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $output -TenantKey 'synthetic-unified' -Provenance $provenance -ContractPath $contractPath -ArtifactSnapshotRoot $capture -SkipRetention 3>$null
     $unqualifiedManifest=Get-Content (Join-Path $unqualified.BatchPath 'batch.json.txt') -Raw|ConvertFrom-Json
@@ -161,8 +180,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCRlzDPhwZEj2H3
-# QWcb3cQ8HRZS5+7OK0nXxtG2YMhgiaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDznqbVgVIv/wsa
+# 7oR+p74m9Pa9bjjKfKDqPIG4qDrwQqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -295,31 +314,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMzA/EBRVKEmjPPkH3mYV9Me9oPdMdFAH2siXqOvEV3yMA0GCSqG
-# SIb3DQEBAQUABIIBgE8h1KrawQaI4Ra7TYyWXRBLvcs74v3+kabxj/JqILnifZlD
-# VSkHR1Wy2G2IaR+FWXtgHZqxRLzRym6mI1Fysb+vXYcjC6taLVs4GdUM72iexNKq
-# JM6vwF36f9rTJ2ntR4lX9xOGOk839YV7tEIr62ab2TMaMEYIna8etp6OwoZa2bNU
-# 9B/68fq0YlR6DPw7hEipJWJtyi14/2bXPPIk2n26vIocU81ZdToU/1hXl7PXMNHA
-# 6Owapai2LVbNfQxWis8QUj2czh/97vx67QLt2YGvp7Es+yEaoGrc4lHpPAJWYReS
-# pqBOV0E/ZIzI/vMw9ZzmeBSkcIJMdCRnqc1D6wXCrwNAxawquqFLlB6V1Sz/ng8T
-# Nip1JhOpRxpW9vjCUo6dNnsQ+617NKclte22QVYWHJKjUKfm2VyxnDtMT3krY/tC
-# kZLqyJvi1ofjX2natIinXPhyFilLGZrldhTIg4lI3lbFmMxfcQlZddXLloLJSJuZ
-# vLNWNEntho2NI1EjVKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDID6gQWgl8Um8dZFYK9+19Nh/SOM+Nn09+0BEIyQLfKMA0GCSqG
+# SIb3DQEBAQUABIIBgFhiAJdkN5AkUcoayHBE1srkkTGBEaJR4wpbZrEoBYS8Q9pw
+# M/cjG2b6H8koycwuXpV/ePrEbYvNb8j+DJrKoTmOPLWd8evn/Q6UF/dKMrXwK4i9
+# tPuOCmiT2Ed2LgSsrVgM1yzA8JugggtF/nTJqaJjUqxZl7+D5Yrgn5IHU80/ddsf
+# MERp+3CLZ4SNbTOS4Tpe5V7/5ulUaQCISnznwJzuJfOXPofy1cviTY9QDsJWBaQ/
+# LftjzI1JKtD40XnmpZz2JYz42aR/2LmEOmabzc5lqRytO8WUUn2ctXYDACdaxciT
+# yXcVO/k+O+CErxgUXGyfMNgqSK7EeMqN54Y6GAoFfzqbmKl+w0RD5yYQV45BZxgi
+# 6+Kbq6XfRRia9Pf4/ebvkE6F8tZh4SM9uICnNUk3nDodpCYm7QfIAqqovgcXXDEG
+# sOoRLL7DxNrBOIGvFWYDjGIVDdnuO3ExocQ7MydCJF0VLTPblwsWs9dr6bZXEiDV
+# ZZOfHo+zQVGEK0q94qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMjI0
-# MDlaMC8GCSqGSIb3DQEJBDEiBCB4w4u76K/bdS/hj9DMFMzeUXV+PgwXZNM6NkV0
-# 7E0tJjANBgkqhkiG9w0BAQEFAASCAgAryn9AB7kiYKTRkl8b4tE2kBM5feJHN6Ve
-# SQdvgNCEACtIICCnbCXcQi4Dz8GtZ5+KxGwQq+ntyHWjkOJE1Wwru98MSpPN13kk
-# o3ghVlAKxxFCjijWYBd5ibKO6VcdDaASdfRlNqgcIXm0lxpHS0hyeTakBtSvWn4I
-# WNCqTKd1Z2hlknjnin4zFU3e7CtJXQ5XTwceuu6d/7ZnLvEsJLhTu6B8IXQm7Q9V
-# Cx7t3enqFVISnBYHqy+lI5tVjPHeLNRvZcaIYjf/7jmqSa8bJs0e5XlTtEIJ7QtG
-# 4MUw/CB8BNA+SelWg5sUAwiPXS886/XsCCQlhT5DQ3mUpfSjZvDLsp5ynG9MZXWG
-# KDGwsFnqTk8FM6hmFgr/pJ2FfNA7LrPJXM+r32vStn8WqAHT7gpc4EquqcT1DWVF
-# Dye086Ac5aSmeCg1PbMxmBV5G2JCaZnBNG/fC4Lrm9ld4Z/BidvT6xleGI6thh53
-# kiYV2W4D6A8+VUOhs9I+7EXRUm3P29BRuSI88WI0OWkMR2qQ8CFCgXfZoBDlQrmc
-# C5CblyBIjXHFKlwxovTBwiTHHidtvY9MxNmgCnZlgmtunjp+lwj6vILwJyatL7zK
-# Px6ZrG0zEwIRr5Eoa4TnnJ3cqdTBu5emKp7DpqH6YHc25QfIimolDWNb0SfKM8ho
-# qklpjgsVsw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcyMTEx
+# MDVaMC8GCSqGSIb3DQEJBDEiBCCu/uSPuBF67Z4A4d8hFwyYZfVe9KnItGLEnx1y
+# hH0XETANBgkqhkiG9w0BAQEFAASCAgAKAvKzkXEw/1H1w7EIohFxa2AFASzK9Pc6
+# u7jC7EvWpbm72wKs/MEq3KQhKX54/HVTBdUvXsbZ6tgx5n2CfM8zPh5MLpW/zyxg
+# 0sTf0L1ZSPz9bk6SHXL+wAt+QKLXoEVMQP3DWbH23Sr9sLYhzYRWGSUh0NipEH96
+# bgQt1dL3ZlOgFW9/61sSLOP3vw6wVUQALkyRXq4ho9bX/Hwe3wyejhtqcjOFbqiQ
+# ra/c67bLO1a/Sr52X2jGbEgQeAiQfyZSXgl/2N2CZY8oBQejUDMWKaFNIZjM8EhP
+# oCaeKyK7c3HliOUEsNWr6eDuEq2jVTvrw5NWuOzcODL2P+/tOr/rS3aDsdqYcxu5
+# UD/KAjn7uSHw847NW8YdBUDbFBfhZ0fYk8QkNz3gAFjipZTjEmJ5WvkauCUJj7dK
+# jdBOydKAzll1xM67A0iXg0q5Mf8Btv5iZyxm01Pnh09MXXaKUNBi58IfQHriQcW/
+# MuhPoLE1IiXcbTqb3wV1T3zgvB+rCjnD/Y4hadQqOl1bhhPwyYABEJBHPQKu7dr9
+# NUgFn2hkZATbJhzBHV3kb7bpAOdBkAg6uFv56u9d9x83Mj/t4TSXS5fnCu/oLdZd
+# gZyDuIaAai3PmIp9qvI0iUFwYSvpMaJTfw+p7IgjTZrT9dk2hjqkuUlfBK48ATcp
+# e3onetxkOg==
 # SIG # End signature block

@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.64
+1.5.65
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -1211,6 +1211,14 @@ function ConvertTo-NormalizedJob {
     if ($dependencyMode -notin @('LatestOccurrence', 'FreshSuccess')) {
         $Errors.Add("Job '$name': DependencyMode must be 'LatestOccurrence' or 'FreshSuccess'.")
     }
+    $latestOccurrenceDependencies = @()
+    if ($RawJob.PSObject.Properties['LatestOccurrenceDependencies']) {
+        $latestOccurrenceDependencies = @($RawJob.LatestOccurrenceDependencies | ForEach-Object { ([string]$_).Trim() })
+        if (@($latestOccurrenceDependencies | Sort-Object -Unique).Count -ne $latestOccurrenceDependencies.Count -or
+            @($latestOccurrenceDependencies | Where-Object { -not $_ -or $_ -notin $dependsOn }).Count) {
+            $Errors.Add("Job '$name': LatestOccurrenceDependencies must contain unique names from DependsOn.")
+        }
+    }
     $dependencyMaxAgeHours = 0
     if ($RawJob.PSObject.Properties['DependencyMaxAgeHours'] -and $null -ne $RawJob.DependencyMaxAgeHours) {
         $dependencyMaxAgeHours = [int]$RawJob.DependencyMaxAgeHours
@@ -1296,6 +1304,7 @@ function ConvertTo-NormalizedJob {
         MinimumSuccessDurationSeconds = $minimumSuccessDurationSeconds
         DependencyWaitTimeoutMinutes = $dependencyWaitTimeoutMinutes
         DependencyMode = $dependencyMode
+        LatestOccurrenceDependencies = $latestOccurrenceDependencies
         DependencyMaxAgeHours = $dependencyMaxAgeHours
         PowerShellEdition = $powerShellEdition
         ExecutionMode = $executionMode
@@ -4884,6 +4893,13 @@ function Update-OrchestratorPipelineRequests {
     $script:PipelinePending = $pending
 }
 
+function Get-OrchestratorEffectiveDependencyMode {
+    param([Parameter(Mandatory)]$Job,[Parameter(Mandatory)][string]$DependencyName)
+    if ($Job.PSObject.Properties['LatestOccurrenceDependencies'] -and
+        $DependencyName -in @($Job.LatestOccurrenceDependencies)) { return 'LatestOccurrence' }
+    return [string]$Job.DependencyMode
+}
+
 function Get-OrchestratorExternalDependencyStatus {
     # Dependency that is not part of a pipeline request (-Job without -IncludeDependencies): apply
     # the requested job's scheduled dependency rule, so a request never consumes stale data.
@@ -4898,7 +4914,8 @@ function Get-OrchestratorExternalDependencyStatus {
     # The scheduled gate ignores disabled and manual dependencies.
     if (-not $dependencyJob.Enabled -or [string]$dependencyJob.AssignmentMode -eq 'Manual') { return 'Ready' }
 
-    if ($Job.DependencyMode -eq 'FreshSuccess') {
+    $dependencyMode = Get-OrchestratorEffectiveDependencyMode -Job $Job -DependencyName $DependencyName
+    if ($dependencyMode -eq 'FreshSuccess') {
         $maxAgeHours = Get-OrchestratorDependencyMaxAge -DependencyJob $dependencyJob -OverrideHours ([int]$Job.DependencyMaxAgeHours) -Now $Now
         try {
             # A request starts now: a dependency that should already have finished must not be running.
@@ -6034,7 +6051,8 @@ function Invoke-LaunchPhase {
                 $depJob = $null
                 if ($script:Manifest.JobsByName.ContainsKey($dep)) { $depJob = $script:Manifest.JobsByName[$dep] }
 
-                if ($null -ne $depJob -and $depJob.Enabled -and $depJob.AssignmentMode -eq 'Pinned' -and $job.DependencyMode -eq 'FreshSuccess') {
+                $dependencyMode = Get-OrchestratorEffectiveDependencyMode -Job $job -DependencyName $dep
+                if ($null -ne $depJob -and $depJob.Enabled -and $depJob.AssignmentMode -eq 'Pinned' -and $dependencyMode -eq 'FreshSuccess') {
                     $pinnedStatus = Get-OrchestratorExternalDependencyStatus -Job $job -DependencyName $dep -Now $Now
                     if ($pinnedStatus -eq 'Ready') { continue }
                     $deferred = $true
@@ -6042,7 +6060,7 @@ function Invoke-LaunchPhase {
                     continue
                 }
                 if ($script:Settings.DistributedSchedulingEnabled -and $null -ne $depJob -and $depJob.Enabled -and $depJob.AssignmentMode -eq 'Elected') {
-                    if ($job.DependencyMode -eq 'FreshSuccess') {
+                    if ($dependencyMode -eq 'FreshSuccess') {
                         $activity = $null
                         try { $activity = Get-OrchestratorDependencyActivity -DependencyJob $depJob -DownstreamOccurrence $occurrence -Now $Now }
                         catch { Write-OrchestratorRuntimeUpdateWarning -Key ("dependency-activity:{0}:{1}" -f $name, $dep) -Message ("Job {0}: activity of dependency {1} could not be read; waiting: {2}" -f $name, $dep, $_.Exception.Message) -Now $Now }
@@ -7646,8 +7664,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+SPZTQy2G9sPr
-# Wecq7xy6gtKGOXsnXuSjrjDSy37rv6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCyjaU4P5qyHaMl
+# CgTK/BQ1CXtWN7hqqYotqZpBu8RlgaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -7780,31 +7798,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKGTofDbkBMZ/4bd7Po6wbpmgoJ/7ncAynYS8X3b0wv0MA0GCSqG
-# SIb3DQEBAQUABIIBgFGK0Vb6kYpd25LgVu9gy6OHmi3UMezT0A6ezVtNnw2NfExh
-# 3IqMsMkNP8jPELYsziVKzdZtl35Wd90m4C2BzPl8buV27cp6cqi6KYZ8vMCX//MC
-# vKoNKW/0Gnty6pQow0RJ+5nrOmSXyjYQ2v/73n2UdhbwlzP7arnDPWqlvMQg7rif
-# zygWWgBL3z9/nLZOgksm8w/Ou4qfFgPEHg6nmu5WDgD3VZzs/+BRUqdo3WVl+18t
-# gKuE0d3ZF37GfJEy1y5YyYLqYu0JRsgx3/tfPRiqoNADKQ353q7brkyh7hy1PVsk
-# caWFq0NjtepzbEVe39eJxf6eEHU8nWQfj7si+pN41IIs7yCVFfh7LcxMjypiCWa/
-# 4xJIChGOFdZ99jb35b+SbX4htxvXPfxk9tga9v0j/eA8App7C0eQzNs9F1MWXcpI
-# ZoQk9tasSz+A7ZhAs3RdVNu24wqMLxoRqEvBCNSGjG4FZ5vk+QVIkaN7y9Q+U1bu
-# 4xf0QkCZ4lBOT4YjIKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPQ8d9QCjEUvAwU2xDukcdIEDNKFmSXkIsMoF8kJLk7oMA0GCSqG
+# SIb3DQEBAQUABIIBgKcpoOXGL3WvoG5QVZEIRtCInGjYtt8AVZRNxmbkpFJY4lC7
+# 3hjttAzo99dyMOMItPs/POBI8n81oGU+1mrwOHp7QCkf2Q6aPql78vFyFD8bQKZw
+# opK8ouzt4oP8SCXUWY9bGhP0wkWpXmMGn/xL6soKAjLjGSX4HymgZdKrFtZYc6CL
+# vcw7JacOdfpMXSyE35969qQ0NemDTwoAZW8ZKSSK570NTZmxm3i73kzhrL2TaQfi
+# fsP+iaTNd2f45jvLIidNCT9N7ZT1Q+lhvVYRPCC2QDP+yE6QYplBpnVZ1qwWwsRB
+# NxKmvBtwjBlVtYwdQ3luXjoOZmoGN7UXoE0Wnm0YAFgMwyPUDnwtZJ4SwgggrurH
+# EEeJiIuvM8AZEz2ytNJUMlNSkKvZQ6DlxaYR42e9I3PvYXvK7LiwwbBQGZdpypVR
+# PBvUUFlUgPGGGVECrvRkTuaHoCQnTDaQ7pYsaHD8ixb+j7hg6ZgQ47RcNykoz7kQ
+# sExStxnzmiNe6N/wV6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcyMDUz
-# NDZaMC8GCSqGSIb3DQEJBDEiBCAhKAxbkt1ovYoywFfQmwLVWofSqh8YG1fsZoOB
-# vT3M0TANBgkqhkiG9w0BAQEFAASCAgA5ZOQv59LixLSEfuMIeLqWBoXB/qwaoY3P
-# I2bV7EM6PBUJHgvjHLSJ7aR+0OGru7tmT14ZLGUoHZfl3AgAwafTApPJYblIEVX/
-# NyvFIr867tr5btoeHj1noBKZdg0pW1YZoG7svQTgJdeBh4ZuriT6AnO35xHtSo+T
-# D2YsB6Lu0yAhcLzVnF4lG50O66I4xAgY+fThlJ71Bdkm4l1JPm6mvNS38YsTPxWv
-# /00GEIGMfUagvB5/0mRuPn1zBlafy5wTe/NyWz4nVaoHMNTORz5ZVe6X9L33JiEh
-# RERmSwDLn8M+XoKNhrSps699ZhwQDlkEooGh9DRph/TjcZNlYUnURPJHuczT8cPh
-# muu84elc24dM1Vgv9qUG300lKNXillSsXZRJKnFhh15l4tQploIvss83ZZbpSlgg
-# NbjR76bhuGoMCFfB66hDu/OCWK5HzIoNPll31+1H3i3qOmsALNXa4wi9Uewz796I
-# Cj5A4XqKKXXoojK5qCpCjXUCZFQbszVU6ybChQnjtiFwRKx882QQQWQkr6WOs0bU
-# zUtDt+A1ppTs3ZG6RhuYF8LHhM/1FZLmCxQfaHw1gWPrRJtCSZ/CckiaXKF2aBTF
-# RbYjjf4cxMRFFsEsUTsQ+RB+KveJhiv519d4J94AQSE+y0t8DCO/7fYzP8eFxWJC
-# 5sHx/c4UDw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcyMTEx
+# MDNaMC8GCSqGSIb3DQEJBDEiBCBppdWl09U7sHIGdCwEa3mwI6sIAUBzPeC3ahrV
+# ZvpqXjANBgkqhkiG9w0BAQEFAASCAgCNVi+o3U9IPCfe3aZkMhNT002rja2v2TiZ
+# fqw1gjINOifItCj9TkH0LBzc6cDx3VNv9sNd93fDjWHpnfCBTwH5Q7fXMgl6AyZh
+# E+tRbIQsZWmN3Vea4iJUz1lnTT1ashwbtsPCcFigEhhWbRMJAtiCJWy56PCkVitH
+# FRT7OuhpcgWRvhOYsGitWqnCl3t8zcmgAgWYc1gSD10LYQy2ziQ8e/V3Z1Pm4iF/
+# 0BUFQuZ+TD3ALX2KWGlOt0Snys29d8DvucqJSnNBXRYLxQKmSV0N2wZZS60buIP9
+# mMR50OQabH3l6PwshNK8dznIGooWX9rDhAb7mlKBggML48pVI0TWKmhumvSC5mSi
+# VG3jYepRHVKmewpHcWsE/UPLk4J9bGgNuG7N8QP75lw0XMFQ4FljoqR3FVq9FdN9
+# 8HxpXKGqt02vHcDNaimAelQ7Pls05kijMzbdGfUKjlC2H6pngcp3gt6V4OauAkSS
+# ulUy8lIFpYG+sckMU66OWY6LFCmcuKS1OtkKfQT3gv0UnqGomIpUL3eerxDvd2PP
+# CGD4sJZNbkwCI1LCfsWujZC4mULUNWydHvrBcbC1aX+GbAMreQWnVWP3YG6+wLBA
+# nf2EKArLDA0JU2B9qULz+WhyZJ8DzTFxTmCdwpG5vk0h0fHj+ZmrQ560JnRAHECo
+# EY/EssJWPA==
 # SIG # End signature block
