@@ -17,6 +17,7 @@ from pathlib import Path
 from workplace_native_sources import rows, normalized as key, utc, application_coverage_status
 from workplace_mailbox_identity import reconcile as reconcile_mailboxes
 from workplace_native_types import count64, source_datetime, validate_value
+from workplace_country import normalize_country
 
 UNKNOWN = 'Unknown / unassigned'
 ZERO = '00000000-0000-0000-0000-000000000000'
@@ -239,7 +240,8 @@ def build_tables(source, output, contract, identity, evidence, now=None):
     for row in read('users'):
         sid = get(row,'Object Id')
         location = get(row,'Usage location').upper()
-        country = location if re.fullmatch('[A-Z]{2}',location) else ''
+        country_evidence = normalize_country(get(row, 'CountryOrRegion'))
+        country = country_evidence['Code']
         enabled = boolean(get(row,'AccountEnabled'))
         sign_in = {name: typed_source(row, name, 'DimUser') for name in
                    ('LastSignInDateTime', 'LastNonInteractiveSignInDateTime', 'LastSuccessfulSignInDateTime')}
@@ -248,7 +250,9 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                 'DisplayName':get(row,'Display name'),'AccountEnabled':enabled,'UserType':get(row,'UserType'),
                 'Department':get(row,'Department'),'JobTitle':get(row,'Title'),
                 'CountryCode':country,'CountryLabel':country or UNKNOWN,
-                'CountryStatus':'Reported' if country else 'Invalid' if location else 'Not provided',
+                'CountryStatus':country_evidence['Status'],
+                'CountryRaw':country_evidence['Raw'],'CountryName':country_evidence['Name'],
+                'CountrySource':'Entra country','UsageLocation':location,
                 **sign_in,
                 'ActivityState':activity_state(sign_in['LastSuccessfulSignInDateTime'] or sign_in['LastSignInDateTime'], acquired('users'), enabled),
                 'AccountStatusLabel':'Enabled' if enabled=='true' else 'Disabled' if enabled=='false' else 'Unknown',
@@ -258,7 +262,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                 'UserActivityStatus':'Separate workload evidence','UserSelection':get(row,'Display name')+' | '+sid}
         users.append(item); users_by_native[key(sid)] = item
         if not country:
-            finding('User',item['CmdbUserId'],'UserCountryUnknown','User usage location is missing or invalid; country is not inferred from AD.')
+            finding('User',item['CmdbUserId'],'UserCountryUnknown','Entra country is missing or unrecognized; no usage location or AD fallback.')
         if item['ActivityState'] in ('Invalid date','Future date','Timezone not established'):
             finding('User',item['CmdbUserId'],'InvalidActivityDate','User sign-in evidence is unqualified or in the future.')
     user_addresses = collections.defaultdict(list)
@@ -354,7 +358,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
                 'AssociationStatus':'Resolved' if primary else 'Unresolved' if get(md or {},'UserId') else 'Not provided',
                 'PrimaryUserSourceId':get(md or {},'UserId'), 'CountryCode':primary['CountryCode'] if primary else '',
                 'CountryLabel':primary['CountryLabel'] if primary else UNKNOWN,
-                'CountryStatus':'Primary user usage location' if primary else 'No resolved primary user',
+                'CountryStatus':('Primary user Entra country' if primary['CountryCode'] else 'Primary user Entra country unavailable') if primary else 'No resolved primary user',
                 'SyncRaw':sync_raw,'SyncUtcDateTime':sync,'SyncStatus':sync_status,
                 **lifecycle_date(ed or {}, 'Creation', 'createdDateTime'),
                 **lifecycle_date(ed or {}, 'Modification', 'lastModifiedDateTime', 'ModifiedDateTime'),
@@ -368,7 +372,7 @@ def build_tables(source, output, contract, identity, evidence, now=None):
         if not item['CountryCode']:
             finding('Device',item['CmdbDeviceId'],'DeviceCountryUnknown','Device country cannot be established from a uniquely resolved primary user.')
         else:
-            finding('Device',item['CmdbDeviceId'],'DeviceCountryDerived','Device country comes from the primary user usage location, not device geolocation.', 'Information')
+            finding('Device',item['CmdbDeviceId'],'DeviceCountryDerived','Device country comes from the primary user Entra country, not device geolocation.', 'Information')
         if len(candidates.get(corr,[])) > 1:
             finding('Device',item['CmdbDeviceId'],'MultipleIntuneCandidates','Multiple native Intune records share a correlation ID; all evidence is retained and selection is deterministic.','Information')
     emit('DimDevice', devices.values())

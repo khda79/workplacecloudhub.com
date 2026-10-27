@@ -1,6 +1,7 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 # Offline Device System preparation. No collection, refresh or publication.
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'CountryEvidence.psm1') -Force -ErrorAction Stop
 
 function Get-SystemText {
     param($Row,[string]$Name)
@@ -120,9 +121,9 @@ function New-DeviceSystemEvidence {
         if ($match -eq 'Matched' -and $upn) {
             $userKey=$tenants[0]+'|'+$upn.ToLowerInvariant(); $user=$userIndex[$userKey]
             if ($null -ne $user) {
-                $primaryCountry=Get-SystemText $user 'CountryOrRegion'; $usage=Get-SystemText $user 'Usage location'
-                if ($primaryCountry -and $primaryCountry -ine 'Unknown') { $country=$primaryCountry; $countryBasis='Primary user CountryOrRegion' }
-                elseif ($usage -and $usage -ine 'Unknown') { $country=$usage.ToUpperInvariant(); $countryBasis='Primary user UsageLocation fallback' }
+                $primaryCountry=Resolve-DirectoryCountry (Get-SystemText $user 'CountryOrRegion')
+                $country=$primaryCountry.Name
+                $countryBasis=if($primaryCountry.Code){'Primary user Entra country'}else{'Primary user Entra country unavailable'}
             } elseif ($userIndex.ContainsKey($userKey)) { $issues.Add('Ambiguous primary-user match') }
         }
         $localSource=Get-SystemText $row 'LocalDataSource'
@@ -261,8 +262,8 @@ Export-ModuleMember -Function New-DeviceSystemEvidence,Get-DeviceSystemEvidenceC
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBQV88wILruGaht
-# zwrz8+IY/0/S3eEfi6GfddyeAbR4maCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBbwJq/35xbwhqY
+# muMDGjmeDRaAWMhgGCGVjdjAvmyzVKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -395,31 +396,31 @@ Export-ModuleMember -Function New-DeviceSystemEvidence,Get-DeviceSystemEvidenceC
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINeOMJhZN06WMnOdxTF4vNdpZYwHAywwg8/okd6wf6f9MA0GCSqG
-# SIb3DQEBAQUABIIBgCkMZIEPeAdveBwdnDo63JK8nYZvzomsXzabgMsqp3a1PIO+
-# hArdNRjIubasPAluR51zMNnzUaYVYk+Xv8MzUjfLwZZSgLJeHw8CvrMOPrn/NkVP
-# 7U1MyQ3DDhWXmfsMVC3J95RJtrTSuHBgvakL0lMNarHum9D8AGzM0SXjnAtH7Dln
-# 00jDSVuzml06AbMsD2vQ66Bf17KZifgJ2gUzGTSQHzUDzXVm0G3wcRGt3HZaEBaz
-# yV8WgqXEoGy2rWT+8+SkP3GLVQhGN0CNvzna14dI1YF/bzMAWoZ5ZhicsSr+ocZU
-# MK3l6EejL2k9Y/cg4CWIvV/m9932zuaKlY2HmX5AYzKVqOI66xX4tFLnmyqadTs+
-# AVJ7XoXKx1/zMX/UX6wr8+KiOHmTGHI6PwS98XSdU7TfQ3JYeki9rWavBawI2wmW
-# ernhcNQS4fMX3vIvjPAhCxi/i37fBHIIu4kX7UOZ2bsLzdgiXTtaCuE8j21jOHDb
-# DCcKpYDNN2TgT+A3tKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIHd/Qge1S5ozHhrykk9UEdJMPUWevBH8Ttgbw9vqAxSIMA0GCSqG
+# SIb3DQEBAQUABIIBgC+yc/NKafn7iRr6rUWW2Q2LMAnLYmS0fw0SHS8AL/VC02ig
+# CoRQiETWC3qBDq2ZlaBVh6/U/pFgqN3+LDEUpYzGQsW9Utn0XNiNcGtyJZJBvSe+
+# EKHEzXv+gYe58hWvBeuNmu7M+F4ZlojdU/0B+slftVOChQsWoAkw2j/6ZzLx15V1
+# vBPfS9G7AT2XZFVGE56rGvX+AQ433/6wRTxNxsTZTCbHhfPPaL8FqRtfockzr6Dv
+# TbeuGC9yF+qVZyRbYOPeuzOQ/BAR2KxmJA4l01OgmPw1OvApemQlVpyV3+eIMldk
+# 8rNgDg88tktC/ONq2Nq88edanOF48v1tBGQIv4m24e8lDy11AE1aPNg/hZM1YqSm
+# lf6+q65eT5I01m/QHP41HG8Mba28DdtUQ8+m9Zyut1a0ziDLKrj1rqgwT7KN45yN
+# VKa9fayzh0aMjnKSBJHVhljFfWolCPoc/IkVegq9DF/i+YrNquSRYv+W/wU7ZFk/
+# 2H2xdIZ96H+h40fTTKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNzMx
-# MzhaMC8GCSqGSIb3DQEJBDEiBCDqlduhHTgTIM9C20xyASBbyhL25Ern4VwSYFJe
-# jNw+sDANBgkqhkiG9w0BAQEFAASCAgCBmqlKt8aA6sgvEi7/w9Urk9KQsNU0dfvj
-# 4DOcpD2exjLIKpvU/NQu1jN43APhNQPPApji6u+VRd67kZ3E93k2qUPX7j0xp7SD
-# d/9YzOOtmNqg8wukMZmy7LakBo+4ycKF1mbjCzeoL2S2IehWy1ZHyL0Fp3pcb2bf
-# 0Gi2ArYFUGbN7aI3Si5kq6XFNsZdDPQq+IuFj9O8k3RSIXEStM0A6PA3R22A7Omj
-# DnmR5EQ7FKJ1DaxeXdOCdM6xF4vak9IGKTmT++f8uGZuD9G0axJfGVHMJk2NC08/
-# iDdVAZtwI1gVLx2YIevl45N2RjBqGBMO01Shevy0D6xU1fCZd+D9tr8eETxy3dxb
-# zapu0Qbxa2XdEEavUhkE3LpUeGfEMhWvieIh5r+EwQL3w2S1mRoZ3x5hPoe9YpYa
-# M56+XbKLc8L3QYkdlR5T49O1RSeXGV5bEMOjQC10CiJ1HttWcFv8aozMdYldXxLl
-# mxz6op+e5j88B/KwLlDGtAVjJV2zAuPcO0DGqDnoTzatE2D5BRMkqxqtzRvN/A+H
-# bdanJ1nxH7vflXC8bK9rSFFJDf71Awz1O+nXOuOLF7YzPREYMhNzFtTJCNGUf1k4
-# 4x7QZdfxkL7Mzm5CqjiAVplv64yWb9HQe5S57HC6O7qrv0O6fe9Kon4WJprS2fFx
-# feF+ou14BA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMzQx
+# MDNaMC8GCSqGSIb3DQEJBDEiBCAPoGgxItAL95yNjPxNmquKRKZt/zixIFj/dQVh
+# lGCOZDANBgkqhkiG9w0BAQEFAASCAgBUHfFu61bzkJcp0CDQ+GHCs0orhclfzUHN
+# NA2bjZ1KrMqOgnfO9O/x/YZcquaf2x2A2Q8KmBscEv5GcKL2Fzb7w3clSaZVta64
+# g6Qeh/APripcKpV4YbYsiX9nhIV+XXJ024lcPzJfq7NIkzwOL8B8EpXpUBEv9a0E
+# 2QnqDOLqWVl08oHVXiQ3w5llTh83/xJv8dE80xAuqjE8y5qfuDysnvbAcvm9Dnca
+# XkxRFMzXFbfH7kj1YSnVaSZvtpNm21Nskz/nhoJtPx2QSilcPM7+IT3OKVuWqzfL
+# J2ISN/cRdXLL3Rs9oTixKuQxnLejAHvVqYUMQePRWWIDeW1DRlF3O73taW+WDLGm
+# tsK8PCyZ8mYAlo5d90m5aa0W42j77aD/L5L4LaoUNk3CTf1zg6kLbbDH7LtOy7pw
+# 8xn0OIkD4ZmoSHH+7lbhfyeeu02wBzcPcvn/5hXlolIou2J+ZF4nhnwjTotbVchV
+# jTJ5/wSw5wEPlEuybGDoP3FndNywT87JOVyxPH7lEtsjFU0x9Q/3/FJ0aYRmP+S4
+# ouJ0H+71txZCBIXaUe88FF0jhp4mJsMucQGeqB/YEuhvHavPyA/1cwzxJbYAFZ/v
+# SyEqZPDlwIimadSmow3QzKMf70O5zU6o6xOznW0c+1lplWDqZEZK2ZqM5XK3EGXH
+# C2reNIoYiQ==
 # SIG # End signature block

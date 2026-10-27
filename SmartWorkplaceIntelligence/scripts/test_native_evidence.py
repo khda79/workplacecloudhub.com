@@ -29,6 +29,9 @@ class NativeEvidenceTests(unittest.TestCase):
             self.extend_collaboration_fixture()
         self.fixture.write_proof = write_qualified_proofs
         self.extend_collaboration_fixture()
+        # Explicit, independent directory country in this synthetic baseline.
+        self.fixture.inputs['users'][0]['CountryOrRegion'] = 'France'
+        self.fixture.write_inputs()
 
     def extend_collaboration_fixture(self):
         """Upgrade only synthetic Teams/SPO proofs to the extended capture."""
@@ -79,12 +82,14 @@ class NativeEvidenceTests(unittest.TestCase):
             name = table['name'] + '.csv'
             if table['name'] in {'ADUserSource','ADComputerSource','DimUser','DimDevice'}:
                 # Lifecycle attributes are additive. Every pre-existing cell,
-                # including immutable keys, must still equal the legacy oracle.
+                # including immutable keys, must still equal the legacy oracle,
+                # except the deliberately corrected country provenance.
                 expected = list(baseline.rows(self.fixture.output / name))
                 actual = self.output_rows(table['name'])
                 self.assertEqual(len(expected), len(actual), name)
-                self.assertEqual(expected, [{field:row[field] for field in old}
-                                            for old,row in zip(expected,actual)], name)
+                ignored = {'CountryStatus'} if table['name'] == 'DimDevice' else set()
+                self.assertEqual([{k:v for k,v in r.items() if k not in ignored} for r in expected],
+                                 [{k:row[k] for k in old if k not in ignored} for old,row in zip(expected,actual)], name)
                 continue
             self.assertEqual(baseline.sha(self.fixture.output / name), sources.sha(self.output / name), name)
         for name in ('FactDataQuality','EntityFinding','FactRelationshipOverview'):
@@ -92,6 +97,10 @@ class NativeEvidenceTests(unittest.TestCase):
                 previous=list(csv.DictReader(stream))
             def unrelated(row):
                 return row.get('EntityType','').casefold() not in ('mailbox','mailbox recipient') and row.get('RelationshipType')!='HasMailbox'
+            for r in previous:
+                for field in ('Description', 'DescriptionLabel'):
+                    if r.get(field) == 'Device country comes from the primary user usage location, not device geolocation.':
+                        r[field] = 'Device country comes from the primary user Entra country, not device geolocation.'
             self.assertEqual([r for r in previous if unrelated(r)], [r for r in self.output_rows(name) if unrelated(r)],name)
         self.assertEqual(len(self.output_rows('FactMailbox')),2)
         self.assertEqual(len(self.output_rows('FactMailboxHosting')),2)
@@ -172,6 +181,43 @@ class NativeEvidenceTests(unittest.TestCase):
 
     def test_same_capture_all_native_columns(self):
         self.compare()
+
+    def test_entra_country_drives_user_device_and_hosting_not_usage_location(self):
+        self.fixture.inputs['users'][0].update(CountryOrRegion='Spain', **{'Usage location': 'FR'})
+        self.fixture.write_inputs()
+        audit = self.audit()
+        source_hashes = {p.name: sources.sha(p) for p in self.fixture.source.glob('*.csv')}
+        result = unified.build(self.fixture.source, self.output, audit)
+        user = self.output_rows('DimUser')[0]
+        self.assertEqual((user['CountryCode'], user['CountryRaw'], user['CountryName'], user['CountrySource'], user['UsageLocation']),
+                         ('ES', 'Spain', 'Spain', 'Entra country', 'FR'))
+        device = next(r for r in self.output_rows('DimDevice') if r['PrimaryUserSourceId'] == user['SourceUserId'])
+        self.assertEqual((device['CountryCode'], device['CountryStatus']), ('ES', 'Primary user Entra country'))
+        mailbox_keys = {r['TenantMailboxKey'] for r in self.output_rows('FactMailbox') if r['TenantUserKey'] == user['TenantUserKey']}
+        hosting = [r for r in self.output_rows('FactMailboxHosting') if r['MailboxHostingKey'] in mailbox_keys]
+        self.assertTrue(hosting)
+        self.assertTrue(all(r['CountryLabel'] == 'ES' for r in hosting))
+        self.assertEqual(result['NativeContractVersion'], '0.4.0')
+        self.assertEqual(source_hashes, {p.name: sources.sha(p) for p in self.fixture.source.glob('*.csv')})
+
+    def test_missing_entra_country_never_uses_licensing_or_ad_country(self):
+        self.fixture.seed_ad()
+        self.fixture.inputs['ad_users'][0]['Country'] = 'DE'
+        self.fixture.inputs['users'][0].pop('CountryOrRegion', None)
+        self.fixture.inputs['users'][0]['Usage location'] = 'FR'
+        self.fixture.write_inputs()
+        unified.build(self.fixture.source, self.output, self.audit())
+        user = self.output_rows('DimUser')[0]
+        self.assertEqual((user['CountryCode'], user['CountryName'], user['CountryStatus']), ('', 'Unknown', 'Not provided'))
+        self.assertEqual(user['UsageLocation'], 'FR')
+        self.assertTrue(all(not r['CountryCode'] for r in self.output_rows('DimDevice')))
+
+    def test_country_reference_changed_after_validation_is_rejected(self):
+        audit = self.audit()
+        audit['CountryReferenceSHA256'] = '0' * 64
+        with self.assertRaisesRegex(ValueError, 'Country reference changed'):
+            unified.build(self.fixture.source, self.output, audit)
+        self.assertFalse(list(self.output.glob('*.csv')))
 
     def test_explicit_ad_password_expiry_retains_true_and_false(self):
         self.fixture.seed_ad()

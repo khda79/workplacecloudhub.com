@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -12,7 +12,7 @@ $pc='20000000-0000-0000-0000-000000000001';$server='20000000-0000-0000-0000-0000
 $cu='30000000-0000-0000-0000-000000000001';$guest='30000000-0000-0000-0000-000000000002'
 $mi='40000000-0000-0000-0000-000000000001';$mobile='40000000-0000-0000-0000-000000000002'
 $ad=@(Row @{ObjectGUID=$au;ObjectSID='S-1-5-21-100-200-300-1001';ImmutableId_AD='CaseSensitiveValue';UserPrincipalName='old@example.test';Enabled='false';Country='DE'})
-$cloud=@((Row @{'Object Id'=$cu;OnPremisesSecurityIdentifier=$ad[0].ObjectSID;OnPremisesImmutableId='CaseSensitiveValue';'User principal name'='new@example.test';AccountEnabled='false';UserType='Member';'Usage location'='de'}),(Row @{'Object Id'=$guest;OnPremisesSecurityIdentifier='';OnPremisesImmutableId='';'User principal name'='guest@example.test';AccountEnabled='true';UserType='Guest';'Usage location'='US'}))
+$cloud=@((Row @{'Object Id'=$cu;OnPremisesSecurityIdentifier=$ad[0].ObjectSID;OnPremisesImmutableId='CaseSensitiveValue';'User principal name'='new@example.test';AccountEnabled='false';UserType='Member';CountryOrRegion='Germany';'Usage location'='de'}),(Row @{'Object Id'=$guest;OnPremisesSecurityIdentifier='';OnPremisesImmutableId='';'User principal name'='guest@example.test';AccountEnabled='true';UserType='Guest';'Usage location'='US'}))
 $directory=@((Row @{ObjectGUID=$au;ObjectSID=$ad[0].ObjectSID;ObjectClass='user'}),(Row @{ObjectGUID=$su;ObjectSID='S-1-5-21-100-200-300-1002';ObjectClass='msDS-GroupManagedServiceAccount'}),(Row @{ObjectGUID=$pc;ObjectSID='S-1-5-21-100-200-300-1003';ObjectClass='computer'}),(Row @{ObjectGUID=$server;ObjectSID='S-1-5-21-100-200-300-1004';ObjectClass='computer'}))
 $managed=@((Row @{ManagedDeviceId=$mi;AzureADDeviceId=$pc;OperatingSystem='Windows';UserId=$cu}),(Row @{ManagedDeviceId=$mobile;AzureADDeviceId='50000000-0000-0000-0000-000000000001';OperatingSystem='Android';UserId='' }))
 $computers=@(Row @{ObjectGUID=$pc})
@@ -22,15 +22,17 @@ Assert ($p.Accounts.Count -eq 3 -and $p.Devices.Count -eq 3) 'Deduplicated union
 Assert ($p.Audit.AccountStrongLinks -eq 1 -and $p.Audit.DeviceStrongLinks -eq 1) 'Only strong one-to-one identity links merge'
 Assert ($p.Accounts[0].'AD State' -eq 'Disabled') 'Disabled accounts are retained'
 Assert ($p.Accounts[0].'AD Observation UTC' -eq '2026-01-01T02:00:00Z' -and $p.Accounts[1].'AD Observation UTC' -eq '2026-01-01T00:00:00Z' -and $p.Devices[0].'AD Observation UTC' -eq '2026-01-01T00:00:00Z') 'User and directory publication times remain distinct'
-Assert ($p.Accounts[0].Country -eq 'DE' -and $p.Devices[0].Country -eq 'DE') 'Country follows observed user evidence'
-$cloud[0]|Add-Member CountryOrRegion 'Germany'
+Assert ($p.Accounts[0].Country -eq 'Germany' -and $p.Devices[0].Country -eq 'Germany') 'Country follows observed user evidence'
+$cloud[0].CountryOrRegion='Germany'
 $cloud[0].'Usage location'='FR'
 $countryPreferred=Project
 Assert ($countryPreferred.Accounts[0].Country -eq 'Germany' -and $countryPreferred.Devices[0].Country -eq 'Germany') 'CountryOrRegion takes priority over licensing usage location'
 Assert ($countryPreferred.Accounts[0].'Country Basis' -eq 'Entra country' -and $countryPreferred.Devices[0].'Country Basis' -eq 'Primary-user proxy: Entra country') 'Country basis records directory-country attribution'
 $cloud[0].CountryOrRegion='Unknown';$cloud[0].'Usage location'='de'
-Assert ((Project).Devices[0].Country -eq 'DE') 'Unknown directory country falls back to usage location'
+Assert ((Project).Devices[0].Country -eq 'Unknown' -and (Project).Accounts[0].Country -eq 'Unknown') 'Unknown Entra country never falls back to licensing or AD'
 $cloud[0].CountryOrRegion=''
+Assert ((Project).Devices[0].Country -eq 'Unknown') 'Blank Entra country never falls back to usage location'
+$cloud[0].CountryOrRegion='Germany'
 Assert ($p.Devices[1].Country -eq 'Unknown') 'AD-only country is not inferred'
 Import-Module (Join-Path $PSScriptRoot 'AdCountryEvidence.psm1') -Force
 $rules=New-AdCountryRules -Configuration @{TenantKey='fixture';AdDomainCountryMappings=@{'north.example.test'='DE'};AdComputerNameCountryPrefixes=@{DE='Germany';FR='France'}} -ExpectedTenantKey 'fixture'
@@ -90,8 +92,8 @@ Write-Host 'Enterprise estate offline tests passed. No collector, network, refre
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAz7THMivB67KxI
-# 0owOEgvjZI5c9+NFrT+3tVS430pJ+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAR7CDiaKQWUZuK
+# 1SKKDAXt0+VEY09ka4OBB3P7Jz5iI6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -224,31 +226,31 @@ Write-Host 'Enterprise estate offline tests passed. No collector, network, refre
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDjsy6/BJv5K0Xbl0ZaYIKkSeGbSNnsWtOWMwZxDvgt8MA0GCSqG
-# SIb3DQEBAQUABIIBgIpK+64urXMpPqTUh5/ro2On4XjBEjSb90NvN1P3MoxmsYM/
-# TIlZkEPa0lW6sX6ErTOh6eab15QfZYbLmNChULPozUurZk2iGXII4tlXSzzL+Mde
-# qHpiIE49Vq8efIfqkfTXQMOwQ7QKAN8kYgqRYqdoAOUKGQo6l2UYkkIrz7j2DX5E
-# 4uujNt0YHJE+KTWxvw+LbV3x92Aor+cb+kVyFOr5mTMYqPCqEdv5RokR79qmB6dk
-# huypatwPHo9bta/EbnhLwWqbV/CCIM7NutK2EBClYFjdr6zT0SXZcCQlK5y8iSVt
-# 9GIKtGEEQoD2WVwBRAf3KonL+E+6bQoq2FR0FQYEGyLrmfLODGyPYKfio3dH66rn
-# 89p8rMeEK6khF9njw5BuNQ2NNrfoce5YNUYkTNMsg75nbkVqM0uAgl/1diI8Ghlc
-# jqtNRi7y1QZXmk/EMdcnI+cz7ZNV1/1SIiEaPx+PyVQFe0rNUkhNJ3wS8O6Hz4Av
-# 0tpmW6Oug4YIIzpzKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKHKWKQCRn/JqUCu3eKDBlfKNGXW8EaqSn/SGx/9OlL3MA0GCSqG
+# SIb3DQEBAQUABIIBgElpdmdmrNUSPjTvyu9oDydiSqYVVJqcrnmzSWwhBDEiUT0E
+# jefT5EpotBgFOtNOBMuqzvoxXmkLMeO6YbfMF7RLyGKlz+1Ftp7y7mKzuM6Qr8OG
+# oJ6dUayI+ksPP6ynMO7rw9VJSs+GEmKxa1lGaH1wPpKGX+1vMus7vrVj6D8R+h9w
+# kfHifVjHMfDD3cFlqqrL3egS+2Li4KGHZZXesUjA2Ladn36PRcyUrjKaEEbRXA0W
+# /gkcjHUQA0RzaubWmB+QtKZ1asNx0zBjNdu46N6ZW7mfoK8ZqUvT/3cYEivAMQ80
+# Y/22BDo4zaDTEARbc1rgMauNCghHBXg6iVMbByiGSxITMhkE4n6BPq98hq7d2G1Q
+# sozgYPY+mYb5Iw9eO89ccztVcI7nUVvXMsHNcVItqMsDSCG9l1K57gekUWNCq/1c
+# DvmNrjH3bbK32iHmuzBwasVJd+fZ5/SpOTlg/EYpoKsiw5bjPMrMgqOM/yUnSxvf
+# dZ0YRUIH3M0ZOmVCzaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE5
-# MTRaMC8GCSqGSIb3DQEJBDEiBCCejKTakldw4XSmZUOihzzI79Yh+7w05I9ytP/E
-# Ej0A8jANBgkqhkiG9w0BAQEFAASCAgA6krrECVcDOriEapAqKX52R2/ViLJkr6s/
-# KPOnAePP89SGu+QSBM+x5fIZUApCGz5W4KaBEcKguavzHnk9veDYqsJotzHeNV72
-# iphFv6wq1vBr3NMvdMhSND39hfJHBOi4AuW8ynRr2l6Skk13FWOosHeiHztiR75I
-# 5FuAxo73sNYFzadWJbnAGDGnoA3gT6xIsRkfpQNDNn8hwqeybKe53akfccItZRDx
-# CEXizTy1ziwDy0UxxACJdeU5CTZQxVFlrBun+pGE+4BtxQ/RgNtjYjPs+kmf4W1i
-# NugliwvddM5kDn5cuU0sjMoR8ZsXmZ9gY7KQs7O9F2KBQ/qLaOupJKpgaa8ozMcv
-# +ZvdBP08qhykEy5Pi3+YAbch3YRAilKyO91RgjwIoXFCYVu756DwM2AGZJM7zTli
-# WDaRXVbCC2pAbrQIdlCqqowOs+P+EDoMGVQ2v/3vQbalQT+3m/UNH6XVifds9v6U
-# ObxPugbI4lpi5aenE4c43FP6qW1RSybByZRwa+2nvc25yytFWafeKRuzqPY/SHOn
-# HSdfZUCbLWeldapY0cbRUWp4+2Y26HPTQuNF8FCIKH5oFr3uL17oabU40ewcsXdd
-# q16to4HpfV8fHbKZsa8mR+NOn2LLf3SkMIGsT8dMn1D4aAqhmibTbKRw+eiDSFYn
-# NoL8AF8qqA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMzQx
+# MDVaMC8GCSqGSIb3DQEJBDEiBCADijvUEcnrBep0sYZXFnieXMJyIjkJyfH27Nhr
+# JUzh9DANBgkqhkiG9w0BAQEFAASCAgBqHKbkUiOQOwuMAeEFFKYYxymZCHXoHeRv
+# Otfnuzn2+5v7WAargG2SVypzB8k7SNysKPvsFP1bj4A7nE3U7IBPEzuRHpF0/+3K
+# yUePWwnS3QvCay6bMu5+hfVeeFvN03xX+h+bhGxNlXNuiQKgaGJTvymkMx0lNX+F
+# CemlCLMiprjoqb70HPvr488YaUgNtelsrbO2zfcMiF8aqYC81rHlqnLAx2XuJzte
+# RwYrt+qfTmvY9ts0CLcIgDIc9lYMb6gJe5vsTOq8x1qAm6Ayje7Wm5GGlj82ZieN
+# YlfYMijHx1Rsq4fZ5w3T9hMcT2IhPHw1cB9uvRqAjkFtn/ialGT9Mt3aTHbnxdIK
+# Yv13fcxyjUKIfqHTFf11G20+bJ/QLfewEuG+KApTyKVjkS1drfZ91CLVb/1ENRoA
+# +n7ckcEmswx/+HTYb0iiMbQ8u6XzazZj6Xcc9G+KvViiLCyccx5WjC0l0/BFRtvO
+# +pYsem46iU7F8qAsywFGm6rrAj36/OGf4jXCuA6Pjlx9UJ1OuZ6Z5FRRncZdlSKf
+# ICbz56SSH/OTE3V42pP79T6L5GERi56slIM16fO0tUF9YeI/7E4LYd4sYKfV2q0Y
+# bcMPgwOzjEa+bOpuhME+o8rwAiOUzw3NYNVzZJEhyQt8gF4Ql+uQfZMSa4qwFKJ1
+# DA7A6E3l4A==
 # SIG # End signature block

@@ -1670,6 +1670,28 @@
     },
     {
       "sourceTable": "DimUser",
+      "capturedOnlyColumns": [
+        {
+          "source": "CountryRaw",
+          "reader": "Country contract 0.4.0 reader migration (separately gated PBIP step)",
+          "reason": "Preserved country provenance and separate licensing location; existing PBIP definitions are intentionally unchanged at producer step."
+        },
+        {
+          "source": "CountryName",
+          "reader": "Country contract 0.4.0 reader migration (separately gated PBIP step)",
+          "reason": "Preserved country provenance and separate licensing location; existing PBIP definitions are intentionally unchanged at producer step."
+        },
+        {
+          "source": "CountrySource",
+          "reader": "Country contract 0.4.0 reader migration (separately gated PBIP step)",
+          "reason": "Preserved country provenance and separate licensing location; existing PBIP definitions are intentionally unchanged at producer step."
+        },
+        {
+          "source": "UsageLocation",
+          "reader": "Country contract 0.4.0 reader migration (separately gated PBIP step)",
+          "reason": "Preserved country provenance and separate licensing location; existing PBIP definitions are intentionally unchanged at producer step."
+        }
+      ],
       "targetTable": "Native User Evidence",
       "file": "DimUser.csv",
       "disposition": "NativeEvidenceFacet",

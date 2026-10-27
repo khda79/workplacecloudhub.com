@@ -1,5 +1,6 @@
-# Offline country attribution from explicit tenant rules, never from DNS prefixes.
+﻿# Offline country attribution from explicit tenant rules, never from DNS prefixes.
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'CountryEvidence.psm1') -Force -ErrorAction Stop
 function Get-AdCountrySetting($Configuration,[string]$Name) {
     if ($null -eq $Configuration) { return $null }
     if ($Configuration -is [Collections.IDictionary]) { return $Configuration[$Name] }
@@ -11,12 +12,7 @@ function New-AdCountryRules {
     param($Configuration,[string]$ExpectedTenantKey)
     $tenant=[string](Get-AdCountrySetting $Configuration 'TenantKey')
     if ($ExpectedTenantKey -and $tenant -cne $ExpectedTenantKey) { throw 'AD country configuration tenant differs from source tenant.' }
-    $reference=Import-Csv -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'reference/CountryReference.csv')
-    $aliases=@{}; $names=@{}
-    foreach($row in $reference){
-        $code=$row.'Country Code';$names[$code]=$row.'Country Name'
-        foreach($alias in @($code,$row.'Country Name',$row.'Source Country Name')){if($alias){$aliases[$alias.Trim()]=$code}}
-    }
+    $names=Get-DirectoryCountryNames
     $maps=@{}
     foreach($setting in @('AdDomainCountryMappings','AdComputerNameCountryPrefixes')){
         $map=@{};$inputMap=Get-AdCountrySetting $Configuration $setting
@@ -31,8 +27,9 @@ function New-AdCountryRules {
                     if($key.Length -gt 253 -or $key -notmatch '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'){throw 'Invalid exact DNS domain in AD country configuration.'}
                 }else{$key=$key.ToUpperInvariant();if($key -cnotmatch '^[A-Z]{2}$'){throw 'AD computer country prefixes must contain exactly two letters.'}}
                 if($map.ContainsKey($key)){throw "Duplicate normalized key in $setting."}
-                if(-not $country -or -not $aliases.ContainsKey($country)){throw "Unrecognized country in $setting; use an ISO alpha-2 code or Country Reference name."}
-                $map[$key]=$aliases[$country]
+                $resolved=Resolve-DirectoryCountry $country
+                if(-not $resolved.Code){throw "Unrecognized country in $setting; use an ISO alpha-2 code or Country Reference name."}
+                $map[$key]=$resolved.Code
             }
         }
         $maps[$setting]=$map
@@ -69,8 +66,8 @@ Export-ModuleMember -Function New-AdCountryRules,Read-AdCountryRules,Resolve-AdC
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCSe15vtBkVazZ7
-# z6B/PR6F28prb6MzvZrB7smH579IX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCuMIth3gU8zd/Y
+# IKLgrpDLwXFG5UY+hZCSQZriiJwapaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -203,31 +200,31 @@ Export-ModuleMember -Function New-AdCountryRules,Read-AdCountryRules,Resolve-AdC
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIbuGVGiDNBbWLM74bPuLeoPQSVhmn6m+Ajr1Tjqe/cbMA0GCSqG
-# SIb3DQEBAQUABIIBgH347u45wbcz8c8UUByqlzsUg1QktDxtZ9AGlfqUEfeqTpDO
-# s9lUjV8s98ysNMIpMpfuZEmi16ke/MK7JkYtPMvkO+rW/efDEsPEl1yCwq/3NHwa
-# JoofLg0HmP/6w473sIdPy3N+OLfQ1gjyCVKl7N2w4FLNH6qBLKrXCBOyYR4Edk6k
-# IWBBK1jrjkdCm6bOc7WLulVFNwp33nbHRbU3sa/APlUSh2Wikh5vpJX+qVdovJVh
-# nVUzopljJ6rd3v3RaJ+XpzWRIPp/YpEE5aGYrYj8wMbxAqKScUjnpdREAm7rz9RW
-# nfErKwddw5/t4gjU4eDn5v2mBVU9EsbjZiVApqmFIlq6WkLtqKj61oteHdYB0MzG
-# mIO5gew3+lxY6/cLhX9yj4iQ2ODFYbbxTO/CyXMuP9zfkjoguj1716e6FaQJS6mi
-# /dFnhPW9SIL8b+AsvXgwUDO9eUZmW5nqef+/a8jjy6RswnLuv91JjDsn0kJSo0r8
-# uzReBanb7sbby5Z0+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMov3ssqLmqo7QAkLnqnLziTQVO4d1mYuLmnp/6KlktLMA0GCSqG
+# SIb3DQEBAQUABIIBgB6MM/5LTJRpZyrJ22sALKek4e82XPxW0uGAFsaGE25QOguP
+# HOt8Qvp+b3NezHKftzOnSV5zK4AfpaV3eP/y9eUqhHYMRiBD/d8oym7mN8ELvcA8
+# GwpNvrDbE2jve94jSpzOocBagDYXnxOLtBZ8ViKsiLZHlAfF7MCpOFDow55YfhHQ
+# qO790LVDGgHFraIqtRnZoMGCGwDYAU713ccHWMz0FpJq9f8YI/SozP02tnQvBSAJ
+# TF7z9841BY9jWSFbxBEWmuGShhNYPyGhsghiMT810Uus1MWehd5oIoEDrNH7ouCt
+# 7RIIQGOqG4jUBLA4rNv/9I5G7t0mc1B5b7tzCszFpeoll3DT8aafl9wG92UmwgPh
+# gRfmO430tFJgKOQBXA42OEg2kJ8qPi+3IY7RDSP/2yaX+5TfRmZ9bPKd8SA7lZm3
+# 1PC8tTf1ycweVTnFPGWGAnEm70ky+ZEVzS4V5hfJ+wD6KBTxNoWJ2mK4LJVlL29q
+# 7LRUYki3T1p042KfHKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE4
-# MzJaMC8GCSqGSIb3DQEJBDEiBCBkYyg0Fn9aihjHnUZ7ybPRPhIWeQePH8ISYxrc
-# aproLjANBgkqhkiG9w0BAQEFAASCAgACz5PdsyFXpBKgLChKdOmwdJpVl9Yknwi9
-# 6sDBqElzjDsEGAK77s/LH7uQzcvH1L3S6h22Q0yolIlv2epwaHyq4YMUHnavi9B8
-# vqo5jgetTfFyQ7ZUdfnGiRR75U4MsalkkD7w4GAkKcP1qRpHspfg14H4GVnDdTiY
-# 6aRJSy5NrEU/Yx1tpubrKQlRvrASUu5PrYBItIcntxS+/okrcdEf18ej84+oWB7L
-# Bc54r0jLGtDZiiwWBl1cJfG0N7oTRigxETEQDFickrotx54tGNe6mFHoEXSThs57
-# thLUUU+wvUGL1XX6Hk/YoN13V+Z0wG6LZN/I1qfHanbSyCUx+E/dxG/eYml2LYqH
-# pMxDyT2MYzyyAuDhfsrtiDoTY/i6sr+1wo1lhhhpNOHnDa+WO6PESuVYtthThu1R
-# /ET2blVTxu6ur/SvsrwbeIgJeFGlVExirrkXyPY+RajpS3qnpqGmyjMOkgeXXXoM
-# x88Fleq5cMLPWxls1pkk7fporJpaacqJmFMIsiOPO+64WPBB6uHEbeZRCY4NNUII
-# Dtz9uzT/mhvTDtHySvHAerxy8G4pEX+dd7f4PXSQ3kXHSL7Fp+SynSqDm4HOZzeo
-# fyl+FrG4cF6OG8boziZDjFJ+2Wev41R2hmMm+twaxg73bPnCVAI5iqPU5IN1PeZs
-# lLkscdNshw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMzQx
+# MDNaMC8GCSqGSIb3DQEJBDEiBCCAqXNVliHFCM42bUO67+KoJajHymmVQ+PRmHlO
+# jtOFAzANBgkqhkiG9w0BAQEFAASCAgCEqF1g7v/LarzqY7uH++XQnSgt2Z1h2qJ0
+# bL5ta9XXuPs8XwIPAuZ9289nrv/TdRLiHrmF1jz20HAhr9OXr8d5pLXhBpvi4Bcj
+# xVMuR9SSicBqPknA0vQndF+ZywEeTKD52QZKV2vrNmiHJnulT5XKPg27keLrgzZa
+# i9uQQ9b6nnQvP1ADHwBk2tOtK61Y4YwTZ2qrEZwHEzXrNA+8gVm02hXkNH2s30qR
+# gyxBwPuFRBgCbMGhmAzHdsjEyE76vMBF28+De1n4icFFv0SBaEHGr7DbcZZDxmkC
+# B96gPZ/S3qkOKdy1slCAkcO8Kum5CDVcRPZcUnXRITWx6LGzVdgylQTNRb59Qcp/
+# gGDWZ6xeix1ea2o1BxqospDqwJT+O18NTGS9BZDQL0Tfv3tUYHC3BiH9daWMYGpo
+# Mx/RYJL8APdfvKlgWthZRHvGv67gHkz89qwx725vcjtZCUaTqxLUzC4XddFTOaN9
+# lWYD6M+gp990CVc7V4vwxvmy/+KLF90ihikAXa7g6DX1PL7naeM8rX58V8Q8sBsj
+# Y2EFToqnvjeuvkEzsOBM9HD/cxLl4GJHXcth/hqnUUaKWbP7UP82aMRmAXj/BxGq
+# vX6OJyoSDG4OrLAU7eHcQOA7ywKeQTs0q3kqy9nnN511NDbdk5/vKuWdrafDAsrj
+# kz+kI3mb5g==
 # SIG # End signature block

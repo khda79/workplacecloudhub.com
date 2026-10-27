@@ -1,5 +1,6 @@
-# Pure, offline identity projection. Names, UPNs and serial numbers never merge records.
+﻿# Pure, offline identity projection. Names, UPNs and serial numbers never merge records.
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'CountryEvidence.psm1') -Force -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'AdCountryEvidence.psm1') -Force
 function Get-EstateValue($Row,[string]$Name) {
     if ($null -eq $Row -or -not $Row.PSObject.Properties[$Name]) { return '' }
@@ -25,13 +26,14 @@ function New-EstateIndex($Rows,[string]$Column,[switch]$Guid,[switch]$CaseSensit
     return ,$index
 }
 function Get-EstateCountry($Cloud,$AD) {
-    # Directory country is the geographic proxy; licensing usage location is fallback only.
-    foreach($pair in @(@($Cloud,'CountryOrRegion','Entra country'),@($Cloud,'Usage location','Entra usage location'),@($AD,'Country','AD country'),@($AD,'CountryName','AD country name'))){
-        $value=Get-EstateValue $pair[0] $pair[1]
-        if($value -and $value -ne 'Unknown'){
-            if($value -match '^[A-Za-z]{2}$'){$value=$value.ToUpperInvariant()}
-            return [pscustomobject]@{Country=$value;Basis=$pair[2]}
-        }
+    # A linked Entra user with unknown country never falls back to AD or licensing.
+    if ($null -ne $Cloud) {
+        $result=Resolve-DirectoryCountry (Get-EstateValue $Cloud 'CountryOrRegion')
+        return [pscustomobject]@{Country=$result.Name;Basis=$(if($result.Code){'Entra country'}else{'Entra country unavailable'})}
+    }
+    foreach($field in @('Country','CountryName')) {
+        $result=Resolve-DirectoryCountry (Get-EstateValue $AD $field)
+        if($result.Code){return [pscustomobject]@{Country=$result.Name;Basis='AD country (AD-only account)'}}
     }
     return [pscustomobject]@{Country='Unknown';Basis='Not observed'}
 }
@@ -153,8 +155,8 @@ Export-ModuleMember -Function New-EnterpriseEstateProjection
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUHRUTSW0XRXCV
-# +9lhrT2shSuLXcfPsESmoC3+bY9g2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASV4cjLbRZ68in
+# AR6wmaxouTfyQCyrjHw+tGbDFKowKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -287,31 +289,31 @@ Export-ModuleMember -Function New-EnterpriseEstateProjection
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICD1HTTbKxQVmNLxqbAeyjbH2FCRBXNVkBPCwbLD8TnVMA0GCSqG
-# SIb3DQEBAQUABIIBgFWwFuhyE1vZoqplPui0ChxoWhpTFPp/tjK4cJhs/Rx4AlaC
-# NqS/jk0d2ZO2kMTlXd55U5m99Btv5wXtoNKlHwMMfADuLpuP8W11dLFcctTgKJGs
-# WMKUR7hGwyRF0kGAokwII1XRh4VhOKskk3wloeXZAkDqAoTBGa3viJPnWzx+2jE4
-# kMemDFtBtTM40bTb4cgck1THKX4AjYy+mG7aUvPajZSx7KZUS972F0RG/SVmoBCd
-# ryad5MZgiZ7bsqRqP7iPqKm3T6DVZwSZSzRhhJsUYD2D387zWa1Btz3wuA1YLoPi
-# z4rtgTXjuNcC5+eUmEW9fL10lrboXa0xg14s72O9xgHSRXgVWsJq7laiJSbZ6kPb
-# FR7D4M6LBheOuBBKY6mmDDyTh8e6FZFO6l5aonFVfs6cTBH7BO8v0h/fdU6U+4Me
-# dvIUhQxuvrme51rhf4UWfiEh41YuHcMN6DvMlhTvoQxN7aC/mZOCQRt/n4ogsGC5
-# PjDdinEFoJYkj3bRDqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOXvbqP+60XCGDMYEnxJBWaGTIUsxqNTJqqV4ltburu9MA0GCSqG
+# SIb3DQEBAQUABIIBgFQ/QOzbCtFFkKtaq2pHPrgQ61ytFgjo8cU0hyR4auucmCHh
+# OwACiKbILXfnUCIjNt9cJ4/cseBo6YxcV7fOhYgK0pvpD95kzbfF4x7SZyZefJ9u
+# LYzyvbH7rH9GYyihyR0adUBjzNYN1XJT7NYKTrgNjpGqjHVhn0ZcRud67ksuAGb2
+# Ae+pedfWbkiRiMfnzzat6EbzBTBYlxbgNyazEhhm9M5qUfpbB4khiSalMm0QNQhS
+# XVbhlMSrh5Q83arml/EIRezSPSzQcn4G3xeEH9lgo1ayw7wvQjzUWW7Iw40wobXV
+# ZSPJA44BzNBh8py7EPI61SeTc2oedoGxMw0YoKdkwd09wRbd2G3t2qutc72aiOZ2
+# 86L6d/c/ZhtaUuvYxyh0/D9Q0LCGCW2IEKQ+VLC3PLAOYllBUBngIB+t+zOYZsy9
+# +D10gQaFG1IKQ3O18vwMM6+g7OWe7PwqLzD6ywLXKN5QNHvqQv9aQ/kk58rdktgM
+# wF35E/rAyYKTmPOB9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE5
-# MTFaMC8GCSqGSIb3DQEJBDEiBCAKfz48J4pXZPkHQtLe9CIq1LOxl1JpDGY02KI6
-# Rj37wDANBgkqhkiG9w0BAQEFAASCAgBQntDnB8GmWMXBLCctVbJz/9eaPeercjWP
-# 9Z79AU2yM9f3Krw1WHMy1XC6cdIf/Jb7uaBIPXAS5Wl8xTtfqJAVLQ615Ng7PW4Q
-# sFtRSnMhGeasNOnewYe84K8VUJTslje/nH1TS/HsBh7S/KowKm0TULAc3mVDQw1b
-# r4mgNkGsX1HNAkQHP04sYkjy0IgixDsmaYXgczh9MjSXkdfLEGaDSIekeuxaZK4F
-# N3fi/bnvwsA5W5k9TExI6N6Dx7Xlpeo9vuS3cU7s7D/VEJJPRa78Nl+J5MmPfJwc
-# F7GCRNPn/WwQMhXdjCgtcJeEXQkA+doUKyByHDwBVV0nYdBU60WaB5CEqZWeSOPP
-# xxxmM6+cKtH4zW/rix4xEjd93A6N6M4xJEw4ckDxBidOL7amqfE+jzl4o0oRsi4v
-# c0Gh7UyBe0fGmSE0iv9am/mwcRtKOJ9ld0tKG5dfdnoka++eI63Fs2igDQEn3Kr0
-# zEiQaMnavApP4X+LoN2bbk3KCiLygRf3JrGn4CHXRZKs6owm3KSPycxhcr6S/E4S
-# zbG4XP5hhHIQZLvDcDyYQ1mZdm5tqTnhOJaMTQ5qwAncxSnp3cxQ3rYP+QqleKfQ
-# unqYr/ri1fjSV3LV7qZrzdTL/GQnbqNIYaoN1jvhmtKC+wEouRs9nsnWeh+LeMIN
-# DFvc9Ks9yw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMzQx
+# MDNaMC8GCSqGSIb3DQEJBDEiBCDmBa7XFTMnr8QIshqtjiy+6dQSZ4NTgApBHDRh
+# lBUd2jANBgkqhkiG9w0BAQEFAASCAgA8a2o7J4sf7xY9RKmJZJ/+Oe5VcWHRPspC
+# goYCKQWTdy7rDYah7nr/wPsf0fpuZjaOx5tgxjgJFd2cnn1doOOZ6VkPf+li+JZA
+# cGjIYxANtfJDYZtmldERAiJ/7e0/Dq+8pBz369Dxc0Rlz6eJj2gRC/0UbbYIdFnA
+# lUxPF6D8Ya1vZWWf9WTwZKL9ZlIzqVdgVTcVazE6q/VyQPKG6ytFm1bLZM+ckewO
+# EbJejbauqNzK8aEtEdGzPcGAHQAaRY5xQTK7JofY9x1Mw2nG+e5grN7YZqJqzXAc
+# b0/WwIp+wUNaZMvPSb84UdIe2WxoQhLTH7Ml7OZNFM85eX3C0/02ASF18vPB5fjV
+# 7jTymjk1fhIDmxJMC7LlRnuSY15+tlM3xp/+kU/nPWdneRtMgGt+SooU/vJPrtla
+# bSISBaCWRr04B/T4Vu8wCmj6YZqBrYeejNJdNkW9HjdIq4XeP5yVbzhilRX8bUEZ
+# wN32qkHHVhb7wwp4n7ZUkGLc5t9ia64aNBi4UlVpH3E6AG+EbomsZ8c6/Hd6GCQI
+# nqRq2ZfjHrMVUiSENNhHVt91bl1GsUeiK4E67opT1Q+VVyjKhEPTrRLxmUgpQnZ+
+# d7rNnDI9+4LwhMMuADHsx8lHX4jS1CxvEyI7MS0dLjfgOXHoMKVpizVwglzAr3bt
+# oLKHepNecw==
 # SIG # End signature block

@@ -1,4 +1,4 @@
-# Version 1.2.0
+﻿# Version 1.2.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -21,6 +21,7 @@ param(
 )
 
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'CountryEvidence.psm1') -Force -ErrorAction Stop
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'EndpointAnalyticsEvidence.psm1') -Force -ErrorAction Stop
 
@@ -372,7 +373,7 @@ $evidence = @(foreach ($device in $intune) {
     $tenureYears = if ($null -ne $observedSince) { [math]::Round(($now - $observedSince).TotalDays / 365.25, 1) } else { $null }
     $tenureBucket = if ($null -eq $tenureYears) { 'Unknown' } elseif ($tenureYears -lt 1) { '< 1 year' } elseif ($tenureYears -lt 2) { '1-2 years' } elseif ($tenureYears -lt 4) { '2-4 years' } else { '4+ years' }
     $tenureConfidence = switch ($observedDates.Count) { 3 { 'High' } 2 { 'Medium' } 1 { 'Low' } default { 'Unknown' } }
-    $country = if ($null -ne $userRow -and -not [string]::IsNullOrWhiteSpace($userRow.CountryOrRegion) -and $userRow.CountryOrRegion.Trim() -ne 'Unknown') { $userRow.CountryOrRegion.Trim() } elseif ($null -ne $userRow -and -not [string]::IsNullOrWhiteSpace($userRow.'Usage location') -and $userRow.'Usage location'.Trim() -ne 'Unknown') { $userRow.'Usage location'.Trim().ToUpperInvariant() } else { 'Unknown' }
+    $country = if ($null -ne $userRow -and $userRow.PSObject.Properties['CountryOrRegion']) { (Resolve-DirectoryCountry $userRow.CountryOrRegion).Name } else { 'Unknown' }
     $sourceScope = @('Intune')
     if ($null -ne $entraRow) { $sourceScope += 'Entra device' }
     if ($null -ne $adRow) { $sourceScope += 'AD computer' }
@@ -535,7 +536,7 @@ $directorySummary = [pscustomobject][ordered]@{
     'AD Windows 10 Ambiguous Intune Matches' = $ambiguousWindows10Matches
     'Intune Windows 10 Eligibility Undetermined' = $intuneWindows10Undetermined
     'Windows 10 Eligibility Undetermined' = $intuneWindows10Undetermined + $adOnlyWindows10
-    'Country Definition' = 'Managed-device country uses the primary user CountryOrRegion first, then UsageLocation as fallback; it is not physical device location.'
+    'Country Definition' = 'Managed-device country uses only the primary user Entra CountryOrRegion; missing or unrecognized country is Unknown, with no UsageLocation fallback. It is not physical device location.'
     'Evidence Status' = 'Observed'
 }
 $directorySummary | Export-Csv -LiteralPath $DirectorySummaryOutputPath -NoTypeInformation -Encoding utf8NoBOM
@@ -589,8 +590,8 @@ $summary = [ordered]@{
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCN1RDLe4eTyATR
-# Bw6LbBzvQjvstjIQKf45vl6xSA3utaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBhkEnwLt/GaNrc
+# Xlwz0+nbpD/lRCXhlDjIF3abJ52ECqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -723,31 +724,31 @@ $summary = [ordered]@{
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMDJe+KVc/p6vWDVG1Yi1KOI7W01o9a+jKPlGKwFFX0UMA0GCSqG
-# SIb3DQEBAQUABIIBgJz/yjSV3R7bdMO9+xsxqoQ5EmBt0kcd1bto3nLfBqldrPF1
-# MWrR9ySa0FaPCJLMbJT8fTs9SfHhRPeMVz5RttWtmwnFIc9txRMOeiha14Gl3Ue0
-# 0I4CZyIRlRP4Qxeebi8X6XE8PeL7XyIGlawjD1D3RJhIiCQfKyj3hKaGQK62UCMJ
-# I8nUmD1Y2qvc3nBar4qvFqCEMowCbAspS4FSAeXX0NgIBnNc56QgnnrrGInq4PRP
-# 9OyQQXM/8Ytz1RuTWgoc915ox45Dqyn55PD2PcbsK6gFRceSRtXkOjeYMhFUVbKm
-# aaafpxHnmCNUOsYl/M8buFVgmMUME4ZUOOIrHIjosWIEWms/RafjboHyCQ6yJct4
-# K1lmO046lAcESabA+CJbiIif3wbXukj3gcSQ6hSI7YofcAKLVj9F7B52Zoa8dxIE
-# dt3FJzgZ/EOyuM3R+ZEdVJhXJZnKlqkQlHrvYa+g6EOl5lEi6rjHF7ri94+YX1B5
-# abGPIkNu6xUZ14jEyKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIE22xr/ubkIlL9PsScTVgbF0LY4BrY/HtDSjjWa/xIEsMA0GCSqG
+# SIb3DQEBAQUABIIBgKqijGly1km750ZJyvjEPUpEzGfBZe8GNCGo3d3fyFDglwjg
+# ZUCv/zxqQBG5IT6o+t1mVz/zUxrb1wDHmKtONjEuUvu5iBhP7aHVHc35Q0YImUNF
+# x4uM1+quwdXJYNz8mratU4MJkFwZUvN9pvlO37GZ+1uA+wFC2y/tv8kBSz007YQw
+# nQxDNFi8JiTsksnnJRQawk2bnLzZ4my9RlecGIquuA95k5jvn9zwzO+ND+jN14ub
+# pfXfhZoEk8hB0iQaDzE9E6RUZtG+DIybUPPUwF3yRgLcE7yQjzU+gaxKOscbWtbj
+# u9tQFLLcH8CIG2UXMhx7iCOjNXQgEAiDOQNQYLswxsTLd0wlwsuUfFaCBHH5gywt
+# KB1pdWXsYvwMFC1GEotFyLxzT+eEw4OUpEQshorxOTOgHM1uqhjEZlMNqLqiFxK2
+# 9BO16HDME+SPw8Og3yKhMbszgCXqUBxoGZ2Y5MYZhj9YSnrulOzfpXRchpyRJuXM
+# zWL6lhtEjXE+4Ror+qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjUxMjU3
-# NTNaMC8GCSqGSIb3DQEJBDEiBCBTxzjaMoRrn813msnWGXn7riZAk2DJzhwmW5qv
-# AfrFwzANBgkqhkiG9w0BAQEFAASCAgCVKJ9NuAyxprQXFWG7P6+ofycvTULWlu20
-# wWW10FytV1GFTV3M84ngfSRdssszGWTiGAai6NbeAH+huUEfBeXKjZZfNA9ljKnD
-# rQIPbpnWp4J8XDQOSTi63btC0RvDB1dRpe6yoQXlc9fUZZZHzDt832ymTJXkrZYQ
-# Lj7fZJ9bx38HUdmWRdye4z/ScaQ1XNPixOgmmj4R8wGgXWR2zmSKYGBpEvWyDMIX
-# o4uJ3eGnKAnQp0axyVFbPC6ZQkoirdzmfiRbx6XNOwN9oS1e0B99AxnzyRX2USU0
-# 3dpKSeK3s7RmCZ7uFnkLSImURiOo76wjod/Z4xx9QNEjLM9uI8X9zilu4SjT2uXO
-# 6fzd7phDSVNHQUUyabttVp1iioneSzhYeTDKttQg8LY3KdmGzYK5LUb503kvOOAH
-# 1ZsYrPI+/6u5fJq9of6WHjxLunU5cTFlmb/KGYK89QiM4mwiwXoz4ZazvD0wOcjp
-# snb8FldYzF2qURdn2XfJK8smDfGyMn/E9/W1SEL7qGQXk6YtbaD9kwhV4rcHuTog
-# pIG7kuIZfCV0ZD5LEvrYJ3SALBnj54Xolwu8iLkRnHEtZGaLZlyx/UeHFcxNyrVD
-# uQMpirD1bL4DUv0fF4IttatZ2ODCnrArb422HLJCOY1E1/6w8hrL9EJ2iqlWiPHi
-# D/uIMdjeoQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMzQx
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCr9/3K4EXLpfV5DMdU0WcuuJVw5bXvl0sfvyQv
+# 65NQbDANBgkqhkiG9w0BAQEFAASCAgByxJayEUmM9A4Rw23j4FFbH2m5n0JiTOrw
+# NxCiDwLI01eV+pgj145KcIJVUtKHNYMUnXXRTN+oYlKkR4hwRPUhx10agm2xzWb/
+# KrRTQcRNPRsmFZcg4/BNDmVP5cFk59P0hWi025eZV5598O3LJku7+hhq6/8x8wYQ
+# R2bcKpuqKV3haBvxdy68mS0Z81uk1eHx+/W8XDNoBLLtTEzpfY87Yxl8Ht2ULRWE
+# G3hDbQTqBWqA688ExCGHA13dxM9ZdzndcRSboP41yvW+poZmRMD8l+QWk9NYOVKw
+# iTmLUymYSPu4GmAxEmCYthcrsDmJw7ZyzFxEisDcNHDIac/ut8MoLdYv0Qg8krY2
+# Y7Mmrm9d0kezJ+enWTTQNtazU549yd40VwU9SM5Nc70yCs2YZEwFF6ujyHeqFbjN
+# nGEJhkHoPpjXn+rLNg1oNy2NXDwOQzwJX4UuajpwJNQzuxUl51irvTcU1UQfpPBQ
+# MybC0Ea8PuRNZT7YNWS7xVW2cZSUlBXlW9u3qosfOJSBjd1G6tC2OW+QZ5U2L8/Z
+# 1RcRQHO0o4HUnhhXdQ2hpxxOxk7GL5sqwM6pJG2T6ETEHkZwmP6SosaiUSo+k5Eh
+# GC6yU9qAf7OoidlqBPBxPdSep9cyCZ+RZ8yRWIPQLfcVrdkr+A/b4gI6JLqkZONT
+# tJ1NgUqZyA==
 # SIG # End signature block

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([Parameter(Mandatory)][string]$DataRoot,[Parameter(Mandatory)][string]$OutputRoot,[string]$AdCountryRulesPath)
 # Local preparation only: no collection, network calls, batch activation or Power BI refresh.
 Set-StrictMode -Version Latest
@@ -33,7 +33,7 @@ function Read-EstateCsv([string]$Name,[string[]]$Columns,[string[]]$Optional=@()
     return ,$rows.ToArray()
 }
 $ad=Read-EstateCsv 'AD_Users_AllDomains.csv' @('ObjectGUID','ObjectSID','ImmutableId_AD','UserPrincipalName','Enabled') @('Country','CountryName')
-$cloud=Read-EstateCsv 'M365_Users_Active.csv' @('Object Id','OnPremisesSecurityIdentifier','OnPremisesImmutableId','User principal name','AccountEnabled','UserType','CollectedAtUtc') @('Usage location','CountryOrRegion')
+$cloud=Read-EstateCsv 'M365_Users_Active.csv' @('Object Id','OnPremisesSecurityIdentifier','OnPremisesImmutableId','User principal name','AccountEnabled','UserType','CollectedAtUtc') @('CountryOrRegion')
 $directory=Read-EstateCsv 'AD_DirectoryObjects_AllDomains.csv' @('ObjectClass','ObjectGUID','ObjectSID','DomainName') @('Name','SamAccountName')
 $managed=Read-EstateCsv 'Intune_ManagedDevices_All.csv' @('ManagedDeviceId','AzureADDeviceId','OperatingSystem','UserId','CollectedAtUtc')
 $computers=Read-EstateCsv 'AD_Computers_AllDomains.csv' @('ObjectGUID') @('Name','SamAccountName','DomainName')
@@ -47,15 +47,15 @@ $accountColumns=@($result.Accounts[0].PSObject.Properties.Name|Where-Object {$_ 
 $deviceColumns=@($result.Devices[0].PSObject.Properties.Name|Where-Object {$_ -ne 'TenantKey'})
 $result.Accounts|Select-Object $accountColumns|Export-Csv -LiteralPath (Join-Path $output 'AllAccountsEvidence.csv') -NoTypeInformation -Encoding utf8
 $result.Devices|Select-Object $deviceColumns|Export-Csv -LiteralPath (Join-Path $output 'AllDevicesEvidence.csv') -NoTypeInformation -Encoding utf8
-$audit=[ordered]@{SchemaVersion=1;CreatedUtc=[datetime]::UtcNow.ToString('O');Projection=$result.Audit;Sources=$sources.ToArray();Published=$false;Refreshed=$false;CountryNormalization='CountryOrRegion before UsageLocation for managed-device primary users; explicit tenant domain then configured name prefix for AD-only; conflicts yield Unknown, not verified physical location.';AdCountryRulesSHA256=$(if($AdCountryRulesPath){(Get-FileHash -LiteralPath $AdCountryRulesPath).Hash}else{''})}
+$audit=[ordered]@{SchemaVersion=1;CreatedUtc=[datetime]::UtcNow.ToString('O');Projection=$result.Audit;Sources=$sources.ToArray();Published=$false;Refreshed=$false;CountryNormalization='Entra CountryOrRegion only for linked accounts and managed-device primary users, no UsageLocation fallback; explicit tenant domain then configured name prefix for AD-only; conflicts yield Unknown, not verified physical location.';AdCountryRulesSHA256=$(if($AdCountryRulesPath){(Get-FileHash -LiteralPath $AdCountryRulesPath).Hash}else{''})}
 [IO.File]::WriteAllText((Join-Path $output 'EnterpriseEstateAudit.json.txt'),($audit|ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
 $result.Audit|ConvertTo-Json -Depth 5
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCANDkpZqEuvtYf4
-# xpiEvnnG6dyc+g+kNdn6tDL0LdeGC6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqclJzwn7TC4cW
+# 3wuBv14NsOyQRnylZ9JTLFfrQaWamaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -188,31 +188,31 @@ $result.Audit|ConvertTo-Json -Depth 5
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIH1xbCfhF6deNQiEzFtO4zSwhqj0q6ZK4j0/1z4ZD1CzMA0GCSqG
-# SIb3DQEBAQUABIIBgAXI0kI1bXBjqqbMv5aPl+e1dy7ObNtpOcoxtE/BbD1r0+fb
-# LT7bY7eluokLg+9S979YmC9TSkCrm7h0uIm4lgKVNwUztDwxts5uNTTB5jp7/XP6
-# 1KlkLbspdsRe0qxjJCiXmamk8jZQPS0aJd2wkaNkdFi5CWveKFRGXEOadqUDUbSC
-# QQBO5DT1GT9QKgO5WY7khwG5EizZUlmFIO3jYp62cGAhWiM4OUWWXxrgIV+BNr4F
-# uN3JhHZx1kXdiLhUVzEM3V7RaFd4L2RCqP0CFPKVF5J8JDx4vge7gkztJZlJKJr5
-# GjrW6CKv4GM7XETvILsXAtjed212VHDSUgklcfyezMNyLH9wDuhaCPxhUPwSiY7w
-# iq2c5Wt02NMkLu4/rjCQV92unLNJ4+Ge4vwX/JBwZQZfHyoGja0rSz+CihUIFnyP
-# 460VPE5vAyX5v4mTWtF+EITy1vk6n8Rj0fSYgvDNHCJcn5R6EENNKYnGmDGbDEb5
-# Nv7o7d8n4HJ1ft3f7aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEQbfCZFiDqJdTzXabvr3gHbx8+73DpkMfr9xnNIn67uMA0GCSqG
+# SIb3DQEBAQUABIIBgGfUuyGkgNhoJs2KPYc69zbKy1mAozJZTeZY8qALZwv2Abey
+# QmJsrrXsmjRxv6nI1SnFi5hXhgyNYYxx5aucnJLHxlUJb+JaIjhPbPHqVzwHu+zL
+# OeawJ+9I2gsK3GtW8qQt1hT2yhFrDEQ4cmV0XGvtaF97IwQODjK+rcBRf8lTqU2A
+# ZY6pG3YDURQ5L8Y41bDLqaqibTCFKg11qvgs4ik5r6nhTAkUjxsqprwVlMYqtWnc
+# L1OneGELSkQBSrl9jBb147sJeyneaM97hcRQBZSmgkxcIhvEJs+WKU+bB7To49tf
+# b7JMSVJG8qbuC0ukBS3H2Y0bouYu62JHqGICGAdVLhMN/WTJTvXntlhQaf90+Ehc
+# vh0tK0LX3IWmuvN9+uPg0kEL9P6b2s/p/03O4w3lEEsoklat9aUxjlMc0/IXMpgF
+# i7AX2kWWctIc5B8dxw1wvlIFApqOner1zMSlK8w2Cuuu2AyrwISBghxZzKlMiZ3p
+# rS/jtT0ZBL1u0piiV6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIyMDE5
-# MTJaMC8GCSqGSIb3DQEJBDEiBCCmr5DGcwJ8BHAbPf3PbVsMYhpVIkHSAYt/zHUs
-# 6U0mWDANBgkqhkiG9w0BAQEFAASCAgCmvCYFW8BtOyYCTlyv48jup2q/VboqnxY/
-# DmbN10NClKhDiO6NQ1cp0xRs1PK8nHOmuq1rb3i3LXg77FFSLeHxbESDeJ3Kul2H
-# NASGg5BzUdfhrVAL6VyzQJgr6WXk2OqHO5gyxFUC8XMbr7arKZYNsLAmJRYR4xuo
-# FLnJDmRoyY+2iwye0WM0mMlRnq+ARYiJj0AyN58bEB6Q1+2qEbmnHdfpXUZcP5x6
-# Pdqmz2BqydUsvdckXcOQ2pq2otSrk+OWLqoGs5pxP/J82QY5p0AUeul35XBUXelG
-# jXynegl8fJC+B4NgCb4jjOIei09+MXqDshiImDJbCQ8DICsVVHEo1z0Be/B/GA/F
-# 9sRZv1dsESkjLT17KwKPhBGv8em3Pr/Gn2eaONiSPho6FaaXDYozxJlqTZfaf3Bh
-# GBFfDHuNoZ9iZSTxFGUHpGULBEt7Jts89DpJsFDqIdg4C9nW7Zy3WPOirK6Jufyt
-# kp5lMMV4LgPlZTQ2nJYKR9FlKA9K6lurP5nxKmGaQ9cakwPhXIMZgkaPWnf9gO9I
-# QZX7wN5s9wLazilkUOBS39vORdpNP1D4295MF1UxU0/hZzciLlhyJLU+igImXE9C
-# dBx2hdvoNqDcu7r/jdGpgLsPqZzDuxkucEtgCeIHRud3vosUMG2Dga3qVTAAX0eE
-# 0gfP3oY57w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMzQx
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCMMCb7aEqIWPaaNwb7tLn1Wy/JYE55hSFRuvf/
+# 5aYISjANBgkqhkiG9w0BAQEFAASCAgBzX2CEqo0EgF3AK4LP4dRmRO6IkUHMyWl3
+# DDLc8kjwGedbbx7qDS/fUbhJFb4ReWnjWCGRBTBIXIHBmlCTMUaCX0Kv65caw22f
+# dbtxAhin2wDzD5xXvG8s43/fEXDOem92bMy5hQa1MDnfVygcWYeen51pnqDU8VWZ
+# gkOOstRVntLCRKEkZJPEZSA5DWMGtZxXG8D16bzB4W3BpAjle4b94x6fOfEblS/H
+# WifWlnyUomH4s1vHrShIxdTXzQ/esnqxhyMqkDctZotIg8h6ojKSdAc3/k/t/j5u
+# V5UUvufNV20ZHrJ7pENaxuGbMrmLNOsDNU2js3+46cG+tMR66zjRe4YnjYVzKAEL
+# L58rsPcCTD4ATE1kPwULXd4ePBI0gOSRJ36zzXWVkmYl765EUjt57mkGWslVJIgu
+# 0lBoHoMmbWuOuEI+L5G/wa8YWpiIucugpkG+CPWssF+RADM0Sljv5URT3cIRxkvz
+# kYyGbetcq4Y016L+qmGA+B8F5iD/KByJvUV+rsnNL7uDG/CLRPKS08ffyz+Tq5NK
+# VKQuSMkxQE9KSr7g4geq9oBcKzDN378YzLuQ5rqR3njVEoPoQSvA4rQctM8UD1ew
+# tKBXLpSMi9C2XzToeMSevDoMDJflGQrJsWhPd/w0eTpW+w7nD4ONs9RJKh6v230V
+# CJp6Y2w2jQ==
 # SIG # End signature block

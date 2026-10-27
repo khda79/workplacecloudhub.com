@@ -1,0 +1,94 @@
+# Entra country contract — producer step
+
+Status: producer implementation and synthetic tests only. No real-data preparation,
+PBIP installation, refresh, deployment or publication is implied.
+
+## One reference
+
+`config/country-reference.json.txt` is the runtime authority for all country
+normalization in the PowerShell and Python preparation workers. It contains 249
+ISO alpha-2 codes, display names and explicit aliases, seeded from the existing
+frozen country reference. The old CSV and the embedded model reference remain
+historical/derived artifacts until the separately approved model migration; do not
+edit them independently or read the CSV from a producer.
+
+`CountryEvidence.psm1` and `workplace_country.py` perform trim and case-insensitive
+exact lookup. No fuzzy matching, DNS/SMTP inference, network lookup or operating
+system region database is used. Unknown values retain their raw text; an unknown
+ISO code does not become a known country. Alias collisions fail closed.
+
+## Country and licensing are distinct
+
+Entra `country` is exported as `CountryOrRegion`. Native contract **0.4.0** derives
+`DimUser.CountryCode` exclusively from that field. `CountryRaw`, `CountryName`,
+`CountrySource` and `UsageLocation` are additive native columns. `CountryStatus`
+distinguishes Reported, Not provided, Unknown and Unrecognized. `CountryLabel`
+retains its ISO-code/unknown shape for now; do not change its meaning independently
+of the later model key migration. The native audit carries the contract version
+and the country-reference SHA256, checked before and after building.
+
+For a linked Entra user, a missing directory country stays Unknown even when
+licensing usage location or AD country is available. Devices inherit only their
+resolved primary user's Entra country; this is not device geolocation. Mailbox
+hosting inherits country through the existing native identity links. Identity
+matching, collection scope and mailbox risk rules are unchanged.
+
+PowerShell producers continue to emit their existing display-name Country column,
+now normalized by the common reference. An AD-only account can retain its explicit
+AD country, qualified as AD-only. The existing tenant-configured AD computer rules
+retain their explicit provenance and conflict handling; no new domain inference
+is introduced. Their code/name validation now uses the same JSON reference.
+
+## Personas
+
+Removing the Usage location fallback affects country-specific persona decisions
+only where directory country was missing. Shared normalization is a separate
+potential effect: recognized aliases, previously unsupported country names and
+unrecognized values can also change which country-specific rule matches. Measure
+these two effects separately on authorized private inputs. Keep country-independent
+rules, HQ precedence and explicit exclusions unchanged. Do not interpret an
+export-wide count as the number of workforce personas actually changed.
+
+## Legacy batches and model migration (not installed in this step)
+
+Readers must distinguish the native contract before using its country semantics.
+For a batch before 0.4.0, or missing the country-version evidence, the display status
+must be exactly **Entra country unavailable (legacy batch)**. Its old CountryCode
+must never be presented as Entra country, and no reader may fill it from current
+DATA-LAST, SMTP, AD domain or licensing usage location. Missing required provenance
+in a supposedly new batch is a contract error, not a healthy country.
+
+The later PBIP step must consume one canonical ISO key for country relationships
+and TREATAS, derive its reference from the same reviewed JSON, preserve Unknown
+rows and attribution counts, and review all geographic breakdowns. The recovery
+map explicitly marks the additive fields as awaiting that reader migration.
+The public and private PBIP definitions are deliberately unchanged in this step.
+
+## Gates
+
+1. Repository producers, shared reference and synthetic tests.
+2. Separate approval: isolated preparation and before/after comparison using
+   captured inputs. Record raw-country, fallback-removal and normalization effects,
+   including personas. Keep private identities outside the repository.
+3. Separate approval: private-master copy and model readers/keys/legacy behavior.
+4. Separate approval: installation with verified SHA256 backup.
+5. Separate approval: neutral public PBIP port, with no private data or connections.
+
+Deploy the new JSON, both country helpers, changed producers and matching native
+contracts together only after those gates. Modified signed scripts require the
+normal signing/release qualification; source tests are not deployment approval.
+
+## Offline checks
+
+- `python -B -m unittest test_country_evidence test_native_evidence.NativeEvidenceTests`
+  from `scripts`: all reference aliases agree across Python/PowerShell; native
+  directory country, retained usage location, mailbox/device propagation, source
+  hashes, native keys, contract mapping and reference-change rejection.
+- `Test-CountryProducers.ps1`: AST-only execution of real Workforce country/persona
+  functions and device-country assignment, using fictitious Contoso identities.
+- `Test-EnterpriseEstateEvidence.ps1`, `Test-DeviceSystemEvidence.ps1`,
+  `Test-AdCountryEvidence.ps1`: synthetic integrations, no tenant connections.
+
+Test staging must be writable local scratch space outside active data and PBIP.
+All test identities are fictitious. Real-account checks belong only in private
+validation outputs after approval of step 2.

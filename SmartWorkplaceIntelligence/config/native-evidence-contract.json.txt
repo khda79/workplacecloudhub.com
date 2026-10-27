@@ -1,5 +1,5 @@
 {
-  "version": "0.3.9",
+  "version": "0.4.0",
   "tables": [
     {
       "name": "EntraGroupMembership",
@@ -555,6 +555,10 @@
         "CountryCode",
         "CountryLabel",
         "CountryStatus",
+        "CountryRaw",
+        "CountryName",
+        "CountrySource",
+        "UsageLocation",
         "LastSignInDateTime",
         "LastNonInteractiveSignInDateTime",
         "LastSuccessfulSignInDateTime",
@@ -1706,5 +1710,12 @@
       "maxAgeHours": 240,
       "maxCollectionSpanHours": 240
     }
-  ]
+  ],
+  "countrySemantics": {
+    "source": "Entra country (CountryOrRegion)",
+    "reference": "country-reference.json.txt",
+    "legacyStatus": "Entra country unavailable (legacy batch)",
+    "introducedIn": "0.4.0",
+    "usageLocationFallback": false
+  }
 }

@@ -12,6 +12,7 @@ from pathlib import Path
 import workplace_native_sources as sources
 from workplace_native_tables import build_tables, log_timing
 import workplace_teams_sites as teams_sites
+import workplace_country as country
 
 
 def identity_from_receipts(source, tenant):
@@ -35,7 +36,8 @@ def validate(source, tenant, now=None, expected_identity=None):
     evidence = sources.validate_sources(source, contract, tenant, now=reference, identity=identity)
     log_timing('source validation', started)
     return {'Version': 1, 'Identity': identity, 'ReferenceUtc': reference.isoformat(),
-            'ContractSHA256': sources.sha(sources.CONTRACT), 'Evidence': evidence,
+            'ContractSHA256': sources.sha(sources.CONTRACT), 'NativeContractVersion': contract['version'],
+            'CountryReferenceSHA256': country.reference()[1], 'Evidence': evidence,
             'TeamsSites': teams_sites.validate(source, identity, reference)}
 
 
@@ -46,6 +48,8 @@ def build(source, output, audit):
     contract = sources.load_json(sources.CONTRACT)
     if audit['Version'] != 1 or audit['ContractSHA256'] != sources.sha(sources.CONTRACT):
         raise ValueError('Native source validation contract changed')
+    if audit.get('CountryReferenceSHA256') != sources.sha(country.REFERENCE):
+        raise ValueError('Country reference changed after source validation')
     started = time.perf_counter()
     sources.recheck_sources(source, audit['Evidence'], contract)
     log_timing('source recheck before build', started)
@@ -70,6 +74,8 @@ def build(source, output, audit):
     started = time.perf_counter()
     collaboration_counts = teams_sites.build(source, output, audit['Identity']['TenantKey'], audit['TeamsSites'])
     log_timing('Teams and sites', started)
+    if audit.get('CountryReferenceSHA256') != sources.sha(country.REFERENCE):
+        raise ValueError('Country reference changed after source validation')
     started = time.perf_counter()
     sources.recheck_sources(source, audit['Evidence'], contract)
     log_timing('source recheck after build', started)
