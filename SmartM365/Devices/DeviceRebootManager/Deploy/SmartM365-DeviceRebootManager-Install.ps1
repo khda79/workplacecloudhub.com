@@ -39,32 +39,75 @@ function Test-IsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Remove-DirectoryWithoutFollowingLinks {
-    param([Parameter(Mandatory = $true)][string]$Path)
+function Remove-LegacyInstallation {
+    <#
+    Removes the files written by a pre-1.1.0 installation, by exact name only, then the
+    folder when it is left empty. The folder is never walked: standard users can create
+    entries under ProgramData, so a recursive SYSTEM deletion could be redirected by a
+    junction swapped in between the link check and the delete. Nothing is removed unless
+    the folder and its parent are owned by SYSTEM or Administrators, which keeps users
+    from renaming or replacing them while the named files are deleted.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string[]]$TrustedOwnerSids = @('S-1-5-18', 'S-1-5-32-544')
+    )
 
-    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
-    if ($null -eq $item) { return }
+    $legacyFileNames = @(
+        'SmartM365-DeviceRebootManager.version.json.txt'
+        'SmartM365-DeviceRebootManager.installation.json'
+        'SmartM365-DeviceRebootManager-GUI.ps1'
+        'SmartM365-DeviceRebootManager-Demo.ps1'
+        'Start-SmartM365-DeviceRebootManager-Demo.cmd'
+        'SmartM365-DeviceRebootManager-GUI.strings.psd1'
+        'SmartM365-DeviceRebootManager-GUI.config.json'
+        'SmartM365-DeviceRebootManager-GUI.config.json.template'
+        'SmartM365-DeviceRebootManager-GalleryUpdate.ps1'
+        'SmartM365.GuiSplash.ps1'
+        'WorkplaceCloudHub.ico'
+        'WorkplaceCloudHub-lockup-WPF.png'
+        'Start-SmartM365-DeviceRebootManager-GUI.cmd'
+        'Start-SmartM365-DeviceRebootManager-GUI-Test.cmd'
+    )
 
-    # Explicit walk: links (junctions, symlinks) are removed, never traversed, so a
-    # user-created junction cannot redirect a SYSTEM deletion. Remove-Item -Recurse
-    # follows junctions in PS 5.1 and Directory.Delete(recursive) is not portable here.
-    if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        foreach ($child in $item.GetFileSystemInfos()) {
-            $isLink = [bool]($child.Attributes -band [IO.FileAttributes]::ReparsePoint)
-            if ($child -is [IO.DirectoryInfo] -and -not $isLink) {
-                Remove-DirectoryWithoutFollowingLinks -Path $child.FullName
-            }
-            elseif ($child -is [IO.DirectoryInfo]) {
-                [IO.Directory]::Delete($child.FullName, $false)
-            }
-            else {
-                $child.Attributes = [IO.FileAttributes]::Normal
-                [IO.File]::Delete($child.FullName)
-            }
+    $root = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $root) { return 'Absent' }
+    if ($root -isnot [IO.DirectoryInfo]) { return 'Skipped: not a directory' }
+    if ($root.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        # A single non-recursive call on the link removes the link itself, never its target.
+        [IO.Directory]::Delete($root.FullName, $false)
+        return 'Removed: legacy path was a link'
+    }
+
+    foreach ($directory in @($root, $root.Parent)) {
+        if ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            return ("Skipped: {0} is a link" -f $directory.FullName)
+        }
+        $owner = (Get-Acl -LiteralPath $directory.FullName).GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if ($TrustedOwnerSids -notcontains $owner) {
+            return ("Skipped: {0} is owned by {1}" -f $directory.FullName, $owner)
         }
     }
 
-    [IO.Directory]::Delete($item.FullName, $false)
+    $removedCount = 0
+    foreach ($fileName in $legacyFileNames) {
+        $file = Get-Item -LiteralPath (Join-Path -Path $root.FullName -ChildPath $fileName) -Force -ErrorAction SilentlyContinue
+        if ($null -eq $file -or $file -isnot [IO.FileInfo]) { continue }
+        if (-not ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $file.IsReadOnly) {
+            $file.IsReadOnly = $false
+        }
+        # Deleting a file link or hard link removes that name only.
+        [IO.File]::Delete($file.FullName)
+        $removedCount++
+    }
+
+    try {
+        [IO.Directory]::Delete($root.FullName, $false)
+        return ("Removed: {0} files and the empty folder" -f $removedCount)
+    }
+    catch {
+        return ("Partially removed: {0} files; other entries were left in place" -f $removedCount)
+    }
 }
 
 function Add-MissingTemplateProperties {
@@ -171,8 +214,8 @@ if ($normalizedLegacyPath -and $normalizedLegacyPath -ne $normalizedInstallPath 
     # Its configuration is not migrated: the folder may have been modified by a standard user.
     # A failed cleanup must not block the install; the scheduled task no longer points there.
     try {
-        Remove-DirectoryWithoutFollowingLinks -Path $normalizedLegacyPath
-        Write-Output ("Legacy installation removed: {0}" -f $normalizedLegacyPath)
+        $legacyResult = Remove-LegacyInstallation -Path $normalizedLegacyPath
+        Write-Output ("Legacy installation {0}: {1}" -f $normalizedLegacyPath, $legacyResult)
     }
     catch {
         Write-Warning ("Unable to remove legacy installation {0}: {1}" -f $normalizedLegacyPath, $_.Exception.Message)
@@ -217,8 +260,8 @@ Write-Output ("SmartM365 Device Reboot Manager {0} installed to: {1} (source={2}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAuWHQJ7xMd/lGR
-# 1ijRGpNSxsyjZU/txYIiNm/KHYgaE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBXBFisA7UPxDAV
+# rY81N2hJH7X/R2fLPjF++5hZHQ9XKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -351,31 +394,31 @@ Write-Output ("SmartM365 Device Reboot Manager {0} installed to: {1} (source={2}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJcelPtc2XDnk/JPo2JgK0xFfTLP12zGNizh7z+0pXCBMA0GCSqG
-# SIb3DQEBAQUABIIBgAKNE0g2rnVncGsKq4pXS89MfPH4Z+gVZipEBePyayRzLmLN
-# f0TygZn0SAHg1XaqbUBJ7e3k87yPlV++1OcFF7iaTICJet5ZpoyselWx9BORtPF8
-# FdEQ/h1b3winLgzWq6Iflh4rL3crxic7a8nhEItC8h5c+dss6FgO7igvGLuvceY8
-# gcme1NhQYcN9Ye6OrhEVE867PrIpoUPe/6VKpNEDUtDLGOc2MPYe0VV0Rx0MRmer
-# SusurAMKvqoSn16LH8VGYrTIdOfnIBLeWmw6uOMIMxIjQ42rKp3hqd/ImAbiF0JJ
-# +73DTOrHSiqxhBT6Z7XmtTfoOlJcI/mxSfzI6ON1Qi7AMt5WdTCjUjS6tYir/2S1
-# evKxSMw01AixiZSvkp7KsdRu8WLlPzrS1lAeCdJdp+PWxK7E+i247wIFYcHzTATq
-# evCwGg30WA68IUWl8Ixr5NSj1kDzbEdf6lys/ZyW2KnsDza/wqXjv3F+MeuGaOr7
-# EzCfHc+P8er8um7/nqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMvTtofx/l+57Ks6ziX+kj12+HC5EblJP16N6DkZ8974MA0GCSqG
+# SIb3DQEBAQUABIIBgH/bHy+uWXyzz9x19OHRs6iOfLA2mAkSqd/rDbHE/oSUp+YX
+# eER8W3kTwUOT6JS63Kf16x0c+Q3RtpeILsvYZfA9a5Vo+qN0rnZ1ylwZF9DwypNZ
+# 28a0tjUcy8zQT0P0xEg+I3qhXpQT5G8sqUm3W2TB+JSIY4WVRHsDDVchjGPuTlAM
+# Ntii2eNvLawOntSk43t/4r/waXH072anuq2Sj5JaEgG+mJS+1X+psPF5YciQFPlp
+# wDcjhhrkSKJxq3L1LiDRgkXdtmiwWfiYvxuuhgJ7QNrof47JZzZvAy04+KRxg5eI
+# X9dDxqx+k6A5mK7Nz2CvObUmahlOvz9VK27X7qpsMUH9IJYmVBzGrkOL+GNQJBR4
+# OaaEA+mkzS7fshxvzoax4dYjwqujY6YpDbmF121Fyp45875ER75tkwe5G77+50bq
+# 0XXB07c/Rt+uJTSG1C/zKH7Hw4whKdK8QQV23jrFaEtsLepgMZAcruoDB+YPbKFk
+# FSbceU03l3xwDlVarKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjQy
-# MjFaMC8GCSqGSIb3DQEJBDEiBCC+MYP069+YQhMA9OhQjHHReI5f1Fz6ZIAufllO
-# rVJ7VDANBgkqhkiG9w0BAQEFAASCAgBCmxb2a/Ylfjo7nAiCUCYQ/TWuM79SJ3eT
-# CXxliDtU4msRiuFD5yCPt7bIHUA570u7a/1gTxxeauzt6yARqBiCgD+S917IvFJ3
-# 9pZDMDpuwin61Y933TRCAZ2ikilAh9SjVYM49z+/AoRpBM8XVrH1vnvfkL+E5kfp
-# WR+pDlC8Ge/3jxInoFj5GRE1oYWSz76CUE8Fa1Gp5DYak2txZTi0Ql0m2z3s+Pzn
-# /fRi8HbnyA5LLBUbvrtyKbBENGmC8CRb8E1ge7svzWuDdtYJIFMfKloZktjvkG2o
-# kFS0fGASnKFM61rOfS7JAYesHTJNyil/wNWFsogwHAmwQtmRBmsZ2SmgWutWvy5G
-# ag4+P6WiZ3np9ffMOgYGwxh6w2gkNkDgVTJ0AlWEkPLVtqS4BitbGN8j+/pOWGfs
-# I098BTeZhH7x38yN5EQWqmBudCvG0pX1WYc7D+MucPo/eB4evQbyTtw+3wUBJeFB
-# WW1mwDgnImrMZdNlf2huLIuRbRvPEak31Cygtr5WogWstN9tGnrHL/NSIyvU9abP
-# 7gbTUMIskr2Ea2NKgEblx61cp9e4WKRKutapYDwOFM64k5iGdj3JEgUfYzsbpFDA
-# JAFDKr1idqQuO2UJaXR2ZlvBfMWLgKUT8J1dsoQsdF5ST/gNKY3sX9gcGb+md4L+
-# xXSDP/Xq7Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMjU2
+# NTZaMC8GCSqGSIb3DQEJBDEiBCAxGIYRtuYNMDYjbzubIw1XP51TBwaWKwfjhh3K
+# /c8QjDANBgkqhkiG9w0BAQEFAASCAgCszLfZepwmsOClKgUbIqT2MFNjdYv6VMLN
+# 1MlmTl/cq5HV55k5wR7QDRp60ldOaGYiBbMQ5Xq8+/+NNnTWFGdNLJkxPVgrIWbd
+# ipPzNNuUA4vJ4R3yagkUOfKm5V26aB9CxdgTwEhjBWSHTIta2okhDAGXRKay9eMj
+# gyfmWMptCRGGD2355vhUFA3c9L/FNceUiwiqgr9ZliB8/U7R7H9sWEPmE1M3l6Jp
+# g1XRc9ol3RIPYFmE4wEwrueFK+/8OwyzoLAMYKqhXGoZV0EWZHY7gGBDHYYLNI+I
+# S2SSswionW20WkSEEX/bGqejPaqn8Ok4PqhiRBU13ZvfPwnmgMojm54X0iSDxtyi
+# 3OTyUpYv0FXwdZnotq+bIArQJaeG+ZiDnTB+TQlugnHgrbEhlx6viW6+jQf75NBO
+# uDHj41YQVpMWcVAq1eh4UUTOvj7Z3PD59yCJ4hmNrjALixHDtsZbkFXzJ+kVnTDP
+# 6ia0YrR6aM7nEcsd29LeAWbrIXwfKNu1HRIyBpreLVLlIyJlozf1IcwnfUUZ4Tmh
+# Ybsvq/M3Qfs2HbPskUDGy73jZLlcnlQsfi5Bf5/l9MiAIWb6ZboIHO1LcMn4jycS
+# Z9/kwNZj2/5s5L1eTUUbNMnZ1wgNOLTNKtGA4/KJTjMTaQHvtgp3aX9MoVjkji71
+# +3ZImHbVFQ==
 # SIG # End signature block

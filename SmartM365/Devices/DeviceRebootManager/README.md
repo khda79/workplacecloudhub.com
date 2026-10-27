@@ -121,9 +121,14 @@ Only administrators and `SYSTEM` can write there, so a standard user cannot
 modify code that runs in other users' sessions or, for the Gallery updater, as
 `SYSTEM`. Versions before 1.1.0 installed into
 `C:\ProgramData\SmartM365\DeviceRebootManager`, where standard users can
-create files and folders. The 1.1.0 installer and uninstaller remove that
-legacy folder without following links and do not migrate its configuration:
-deploy a custom configuration again with `-ConfigSourcePath`. Per-user log,
+create files and folders. The 1.1.0 installer and uninstaller never walk that
+legacy folder, because a junction swapped in during a recursive `SYSTEM` deletion
+could redirect it. They delete only the files the previous installer wrote, by
+exact name, and then the folder if it is empty; they act only when the folder and
+its parent are owned by `SYSTEM` or Administrators, and leave any other entry in
+place. Nothing runs from that folder any more, because the scheduled task now
+starts the Program Files copy. Its configuration is not migrated: deploy a
+custom configuration again with `-ConfigSourcePath`. Per-user log,
 reminder state and language preference stay under
 `%APPDATA%\SmartM365\DeviceRebootManager`.
 
