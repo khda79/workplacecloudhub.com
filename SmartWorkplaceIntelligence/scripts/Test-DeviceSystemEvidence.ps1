@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 # Synthetic-only tests. No collection, Power BI, client CSVs or publication.
 [CmdletBinding()]
 param()
@@ -19,6 +19,11 @@ function Invoke-Synthetic([object[]]$System=@((New-SyntheticSystem)),[object[]]$
 }
 $base=Invoke-Synthetic
 Assert-Test ($base.Count -eq 1 -and $base[0].Country -eq 'Germany') 'Primary-user CountryOrRegion is not preferred.'
+foreach($value in @('', 'Unknown', 'Not a country')) {
+    $user.CountryOrRegion=$value
+    Assert-Test ((Invoke-Synthetic)[0].Country -eq 'Unknown') 'Missing or invalid country fell back to usage location.'
+}
+$user.CountryOrRegion='Germany'
 Assert-Test ($base[0].'Device System Key' -eq 'synthetic|device-one') 'Tenant key is not part of identity.'
 Assert-Test ($base[0].'Expected AV Name' -eq 'Example AV') 'Expected product name was replaced.'
 Assert-Test ($base[0].Freshness -eq 'Within policy' -and [double]$base[0].'Observation Age Hours' -eq 24) 'Configured freshness is incorrect.'
@@ -139,8 +144,8 @@ foreach($case in $schemaCases) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD4SMkK7MjI9jGR
-# gWuT2kF9eKn+rObIjx0IA8QV2Hlg4KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBIS9nPcPuqBOM5
+# TDGtOOXKPbxOKpkM3BBPdeAYRve0AaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -273,31 +278,31 @@ foreach($case in $schemaCases) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBAe7WJ0E76mRvuGSfIirVkE7jHuiMzwlGAZLr5qkbe4MA0GCSqG
-# SIb3DQEBAQUABIIBgI8afJWdUHGwsenbwd1Qom+eQ2BT6Fy/xAkr2OZ6z3348aNW
-# lKyqHpF+l8/JlDM1btNPyRkOOIvGX6qndXlNbXz2S8DvFjVG/sNfwLd0mQyN8t4R
-# EmrnWPFjrAtuqC4NgkX+tbHtNwZNhNf9ZAAFWlY1sR9VXKC6E037rvPkWVsu3vny
-# d27mYuw9i2dBgsaqwehvjTYPPVE2NfIRwTJBgeTUL0X3VMJTqhGeUOKcAxXWAR4S
-# iymMjgHI8doJA7+mwc5u5tcV4kV/5IDAWz2MgNNVt3qpUqbjtas3vmc0OiQe5J8y
-# +cqsKo0A4za/rDR0fTDACOh3GTDVB4D9wsaKrMvpt96uNcPbYJ3e+VKA5uLUZqCu
-# ohve1Hx9iVDoQSD0tVTDDbfMALh/KsSGvrlyi0aKFu/UFhv2KITwgsfgfGGopIJI
-# uAhJ/SF0fJL6YUhc54V7ZHbUmXxrufDDSBrWwHXOnZtUi1/sWJhYMDUBgyGRY++7
-# phLpOY9BFxXfTpjN1qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDxffGoJU6Up972895r1F3Nqg4/H42OduJs/+WWlcDc7MA0GCSqG
+# SIb3DQEBAQUABIIBgFAA+GA2tqi9BG1U9Kt2u80pGTT7i1QowLMZLJXX550Kcwzz
+# 2Wbqy6VyPk4qGtbOzcd5Ai1rEFVexGBM85gWG1s5g7H6rWx4vLvCcfS0/Iv4Az3J
+# YIIUpOFy3XOfFGeIcNEG+DuJ/ihxaTRlDypb0V8R+OJopdcQRmpAHZqgazCiLAum
+# OnPQFj5oOBALVIbvOA8VFgoIYBYIG69sp16B9zWHN8uca7XRhsnfNTap8xqxmelP
+# cEtGY4ubdRQSweypnTehHJlUZVYHZeGEdvIJ909eda/LptMEJ8W6rq3uedG/gf9e
+# kJqdV5LeFH1iEiwCVa/YIL7Q9xjZgaGAXOnSSZKUkfEWtwwYZKJlPT+DveMpHPkD
+# MeUoSWK4x+NYjI3CsO2uzDyBSlctMOdFJ4ySOIAG44fOGGykPEsgKuMDaWJQ2twc
+# NYL8aVaOG1PTYTvTVRlpfXcmtg9fZLmLDPpc3qLCz42fohmvkAqB0HlEOBkXB73Z
+# p54tNF28gOe0CZWc0aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTMxNzMx
-# MzhaMC8GCSqGSIb3DQEJBDEiBCDibiwLjc/jw23w4h6oGwuXiKa4Kx30bkfFNH3y
-# P3uD7TANBgkqhkiG9w0BAQEFAASCAgAS5l2i04btgeBfTcQOTFgAIbvYGnxERnA8
-# d91mHf6rqDnYRtRYSIHtaLdiAJhblJyDRvUaoHD/B5A6hF7Wv1b07IpiMxNUnYLh
-# FzYJ6t/rqpsd9WYnEGhRTr/3QRw1XNms1F6zErrpBAnZ0ic3eEWDaF7eWhElGR4e
-# qGqRQ3+/z6zBGD0kpBfXxvJIhR9XDmAngfNxRfhz4Q1Ya9C7mUjoMSXUD0rKxD2H
-# F+aboL8abVLto821O7FWrjvUPeocS/XpcFbEPTZpE1Ah5jn53z4blKSbqedoV0Y+
-# /ZRJ8BPnCM4nCKhPcPM3Uu3i6FZnglCTqF1gmvLhVz2rrYllu3HMjOWHuBXYFXh+
-# 6fJKwnz+3nzkLJihRXxERrunZksIpzZck3YMS3hFKu7hYCCWKfoXslAtiyGyUNy6
-# E74JzvIvcsznXnbj8KppcUFfIGmNjMaa1NqNwcEDrhCSkRlkRuHnT21gNToo1Hxy
-# qRnJr39PlI3U0agMcU6Ec1MQCxseZ7bkVk2hTqaiOGerqRT1Zfs5OI09PSpVRvRT
-# ejoo3xkOYOgD9mwiibQCrwMbL2UOpblmh6FQa/x5inkOYoGIhbo3x0Di92LI5Srv
-# SFm+cJNH5mFjQUiVs85AWo/sPwo2bJFIJg3cpNqyfoWlvdtyzK95QJzd0K0J3fzi
-# q/A0NBJ6bA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMzQx
+# MDVaMC8GCSqGSIb3DQEJBDEiBCBa5cnIPdEBkcPHmAGjQaukFX4CsLuPCCIXq78N
+# vgBzEzANBgkqhkiG9w0BAQEFAASCAgCitvGM/xbMrIxv9yCvb6U600G26wJdTPqj
+# BYVPy77GhGD5oA3D+eKVOVruCDdvwRV0rM7tOtdxOhXKBEBW5vevJWfpOwo7MJ7G
+# XfC9tErv4KKUuAjKZlV5/iEC9D0T3WSIRyWxggqdj3Poao3VkEEOF+q5HqVPuir8
+# 9JQOUTcNLqOW8USIAdWO9Jr4kPJV2gVQjP0kVAY0MVykT7r1heMFS+VI+Fsw8z9b
+# MLKfxTIVhzLVeUAC8IQKxs9HyrlGdr1cpucuLrDhCqRHcVABTN1qqAF0pibHXcRb
+# uSJUXjS95eUOEBe9970zDff88s/YsPPosNVUTttoLkSP8wvZU1z1XpFzIbeAf9o1
+# ql9/NNvibrzNP01UBt59X7RHQEWejvROpT8llWE4+47LrOHMjXKiRjtO7BBgBPn5
+# 5IuVKjnOZovRfFRG5lzQrIHEYmIr5XTVZmhQjhNBkqFSUowHYETZLqwN+z2O1y9m
+# 5HWZD4v7tC4SGaDRyYkKmq5d+iBYGs8mFag/e2hz2UbqjnLg1CdttBh+snD2Vcrq
+# tW2J3G5qywHi8SIV5KFuHM/1JlAIKNEujD4demDOS/jWuswqKdKDtWs8XkgyJ3e9
+# cF9w941qIru6IWtplqb74Y5wsV78AUBoGWtXiAq54SRxqoGSwffF5/9roSOXDx9J
+# 8LhMijuI3w==
 # SIG # End signature block

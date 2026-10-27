@@ -1921,6 +1921,22 @@
           "type": "string"
         },
         {
+          "name": "CountryRaw",
+          "type": "string"
+        },
+        {
+          "name": "CountryName",
+          "type": "string"
+        },
+        {
+          "name": "CountrySource",
+          "type": "string"
+        },
+        {
+          "name": "UsageLocation",
+          "type": "string"
+        },
+        {
           "name": "LastSignInDateTime",
           "type": "dateTime"
         },

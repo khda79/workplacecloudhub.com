@@ -37,6 +37,7 @@ param(
 )
 
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'CountryEvidence.psm1') -Force -ErrorAction Stop
 $ErrorActionPreference = 'Stop'
 $referenceUtc = if ($null -ne $AsOfUtc) { $AsOfUtc.ToUniversalTime() } else { [datetimeoffset]::UtcNow }
 $referenceDate = if ($null -ne $AsOfUtc) { $referenceUtc.UtcDateTime.Date } else { (Get-Date).Date }
@@ -149,7 +150,7 @@ function Convert-ToSearchText {
 
 function Get-PersonaClassification {
     param([string]$JobTitle, [string]$Description, [string]$Country, [string]$SiteType)
-    $countryCode = if ($script:personaCountryCodes.ContainsKey($Country)) { $script:personaCountryCodes[$Country] } else { $Country.ToUpperInvariant() }
+    $countryCode = (Resolve-DirectoryCountry $Country).Code
     $titleText = Convert-ToSearchText $JobTitle
     $descriptionText = Convert-ToSearchText $Description
     foreach ($rule in $script:personaExclusions) {
@@ -296,21 +297,8 @@ function Convert-ToIntOrNull {
 }
 
 function Convert-ToCountryName {
-    param(
-        [AllowNull()][object]$Country,
-        [AllowNull()][object]$UsageLocation
-    )
-
-    $countryText = ([string]$Country).Trim()
-    if ($countryText) { return $countryText }
-
-    $usageText = ([string]$UsageLocation).Trim().ToUpperInvariant()
-    if (-not $usageText) { return 'Unknown' }
-    try {
-        return ([Globalization.RegionInfo]::new($usageText)).EnglishName
-    } catch {
-        return $usageText
-    }
+    param([AllowNull()][object]$Country)
+    return (Resolve-DirectoryCountry $Country).Name
 }
 
 function Get-UniqueIndex {
@@ -660,7 +648,7 @@ foreach ($activation in $officeActivationByUpn.Values) {
 $officeActivationWarning = Get-OfficeActivationFreshnessWarning -AcquiredUtc (Get-Item -LiteralPath $officeActivationsPath).LastWriteTimeUtc -LatestReportDate $latestOfficeActivationReportDate -ReferenceUtc $referenceUtc -WarningAgeHours $OfficeActivationWarningAgeHours
 if ($officeActivationWarning) { Write-Warning $officeActivationWarning }
 Write-WorkforceDiagnostic 'Load persona classification'
-$personaCountryCodes = @{ France = 'FR'; Germany = 'DE'; Spain = 'ES'; Belgium = 'BE'; Poland = 'PL'; Switzerland = 'CH'; Portugal = 'PT'; Italy = 'IT'; Austria = 'AT'; Ireland = 'IE'; Luxembourg = 'LU'; Netherlands = 'NL' }
+# Country normalization uses config/country-reference.json.txt.
 $personaCache = @{}
 $personaTextCache = @{}
 $personaNames = @{}
@@ -867,7 +855,7 @@ foreach ($user in $enabledWorkforceUsers) {
     if (-not $jobTitle -and $null -ne $matchedAd) { $jobTitle = ([string](Get-PropertyValue $matchedAd 'JobTitle')).Trim() }
     $jobTitleState = if ($jobTitle) { 'Observed' } else { 'Missing' }
     if (-not $jobTitle) { $jobTitle = 'Unknown' }
-    $country = Convert-ToCountryName (Get-PropertyValue $user 'CountryOrRegion') (Get-PropertyValue $user 'Usage location')
+    $country = Convert-ToCountryName (Get-PropertyValue $user 'CountryOrRegion')
     $siteCode = ([string](Get-PropertyValue $matchedAd $siteAttribute)).Trim()
     $site = if ($siteCode -and $siteByCode.ContainsKey($siteCode)) { $siteByCode[$siteCode] } else { $null }
     $siteType = if ($null -ne $site) { $site.Type } else { 'UNKNOWN' }
@@ -1266,8 +1254,8 @@ $summary | ConvertTo-Json -Depth 4
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA4kDRZyfAVhiIq
-# kep5G0vT5lt8SjZ9Go/d6Ib8C8gXh6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBWq11+wVqvSwPi
+# zEYXTmWTaujt9t7Oq2/dBU0HRv7UA6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1400,31 +1388,31 @@ $summary | ConvertTo-Json -Depth 4
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIETtiKZPITz55WFy15+0C9zvRfzGBAMhHtjLRrmMV9DuMA0GCSqG
-# SIb3DQEBAQUABIIBgH43P2Hsqbbl9ESZ46dz66Cq6yyD0Z4XxP0zQ4yofBBAye+H
-# 5SIwVGnpYaip8yMt/S3ZxFqEk9zCFCIQ07MUV2kewuieXSRRyzg5/CwhtNiGjS/E
-# UMHKLii3oHerfhDLD+kigWEPMOaVdGzHTQpyJr1sB3qhmwuwiOuD0d9Ab8A5gHci
-# xpaWNsX6OYKhUXnGFGnVSLk3WZCYFKbl9Dc815ku7ysiff0kbFvExUnwLy1ESR85
-# GvbqAdmhugNq3rZSv4D8A24d3WhoOjY4uPoEsJsS9piXvWIyvsSvg+gb1cFWyzO2
-# Q4bdaW2JeGjKVIYhVsD2G0pDovEHUzrtFi/N2yB4h3NCVelnl7SL/h1XlTbHWJSf
-# ByjUQ1rT2hDoRaEWAjGoPz/sS7uZaQBqV/rUT1tu3/8o6YHsKNPL9Qzuy5Hwsxej
-# xfpR4YQYdlo3PVpBDChqmn6WyOvxDWJ9TmaWGMcPWxsIqus0Ev4sfHqZmj+JzEPP
-# NvsfCR/vU908YecR16GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBovq3FEpmd/OgHIByubG920jGF9QY7gQBZdGK6Y7dr8MA0GCSqG
+# SIb3DQEBAQUABIIBgBGHuqEpvGZTU6L0uri1ElNVtXmGLI9aIF/Srwyx5JJCsD7c
+# RO6R1BR3YxDCJkiwbpMPeDplMYKThE/vH/lQ0ZDDLVZiDG0LtSOiSVsrKisgVqJ8
+# SW5rk6xVgxdAmylNuuy+zWNzTq6VcaAuLIYRpW+oc6NfAxSa0SUJj7GbQ3Z/w0yO
+# itvBi2yt0Pnj/Z0CezPZnZKx0rMSUSt5EOXAZyqJaZ2TJRKigtOOSogoDXt+mHNB
+# 2S2UG9zH+BXtZXLKH66Iwy2hdQHgr1XZJiBCnivLs8gmcdWdhC1XlNRnFEarYSzj
+# NE5J3fveiP736r+2d54kHkuPqS6H4TQKna19kCiGVwMRmsO0GfafO8ki282AEifV
+# O7uYDE+GmRjSlx6L+KFfk2X9HuzUzKdIgHi+vtz2noMc0ycCe3q5gof1AbOY/PWE
+# rBIt1LzwH/1hRfdOszdhQq1X+KCwb9O4MaGNO40g5A9OSLzKCiKb4clTmj0RWKvO
+# O1XC/N83H0t1V9u2D6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjUxMjU3
-# NTRaMC8GCSqGSIb3DQEJBDEiBCDhddK8IiUCJUz6ytuTwYwNurjUPVc+/pVtgT4p
-# vuLE4TANBgkqhkiG9w0BAQEFAASCAgAFJS7j0mjupres26Q+rZovnmkXTCHCIdgS
-# 1V1fufWwu3ToSs1rTuEOzoPEL2aZEOJKCsC/69rCUekgeKD09yfJa/3/pzc4zV3J
-# m8JHu1YNCoXLt+vpnKoC2oIIl8pA60P93QiWjz7DapzcnEHTEw8SxzzZWfsdgLTv
-# FIck7EdJKDI1Rofac8pW8POSF4Boo9c+6tFDbYGZXGGdneALZPt3t+X4ov0XlVNm
-# gLHwWiAn7/BgBr9hprgf78y/ICaMFjGwCJET8IOZ55uKYTOyrcAaR9b+t6bDePXj
-# HxU2BRPqVRWvQh9q+9yYLR5aSs8eCy82cCq429s7Ef6tmfMQ08i6S4lzVkvY5fMN
-# 1dL4h5h3RaKyRf7RIF78BCqKh4iTvhTqwXcTEHQWDMBjpUhY4DKkMfbhuDxv4uTk
-# /7Ssts2MJdRnzz00veL6ZdU2hYpypiD14B8GaI+bcNW0ZOKu6oLpl4skZtxQN/4W
-# YM/l0fPejRyqznoUPYTvpnmXx+/ixGDWasLT/dimbdudcRsr4IznA6+iFu6qhc1+
-# uWZoS4rB4OgxFEFlUkzP44ygqgSoksQm+VD49hoO6oSGq79eECLCotjHRUNRdlLL
-# YVP/ZzgjzytAUszBHdhuSqLNqBgx7iAq+avBgtNsMR66Hzf6aNV3ZvMPUOTCxqu3
-# 4jS8Z1YY8A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMzQx
+# MDRaMC8GCSqGSIb3DQEJBDEiBCCWHaqpvBADeDTlmIxD9X1FaoVxuEDaFUT51k6+
+# kN0MxjANBgkqhkiG9w0BAQEFAASCAgCqqyGnSkrRXjW3Afw8hMH/MYKJC/dwsz1w
+# InQDeY+RLWELfmC2qCHkq5bXkyWec7HHBudM0eL8pEbS4Ec+b8pE+tsFAinQMdep
+# 1ezbxXK+x8UhYCy7EU9h60xT+zsl5coTzMywF1yRpsHxxisvx7Vj/zeivBptqOAt
+# 1QW/TxFcrKqDzkJJwmPa1L2D9kqvqh8qZbFLRBt93CRSD0zGSvuQHRoQfN2sYUDs
+# ipI0/YlXGlhvEHXsm+vvOTxywziPLAm3UvaxWopefZgBPJx9ocfjZCq6uh0So+yM
+# XhpbuuN/4ydPCyR1b0Rj/w//XauZdqxphp41A+7HSuCHXs+JjVhbzXVaTvbj1YnY
+# oGVQ24bOTOAkADE03QWr3FIrCHyx8tsbjmAwJgfHFh6gLiqLFIOOcpzVBWNpoaMG
+# kAI75RQZGN3OehFQcN7NUrlWcP0u9DtzbNMhWJnNxIqW243qePPTZOTk7KJkGpet
+# Gdj57FJeuR/aSM4bsvRqecQOhsNftEY8JVVTuknxO59rkeAKSi+GzeJGwm/84Y3R
+# BQn1rDM112TehKS6/yCyr+GgTsRYf9uQnwmcvBUfbRu5aB+QDHBbdf4F/KxB5iAe
+# jtIu9/nsxIMgFu1dZNakNgvapva7pJ0kZaHMB5c7Yy57sFrmKgDtePVEkGRlF6FO
+# jF60IVvp/g==
 # SIG # End signature block
