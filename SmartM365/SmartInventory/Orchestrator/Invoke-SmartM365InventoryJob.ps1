@@ -35,7 +35,7 @@ The exit code of the launched script is returned. Preparation errors return 1.
 .\Invoke-SmartM365InventoryJob.ps1 AD-Inventory -Request -IncludeDependencies
 
 .VERSION
-1.3.0
+1.3.1
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -53,7 +53,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.3.0'
+$ScriptVersion = '1.3.1'
 
 function Write-Host {
     param([Parameter(Position = 0)][AllowEmptyString()][string]$Object = '', [ConsoleColor]$ForegroundColor = 'Gray')
@@ -66,12 +66,12 @@ function Resolve-InventoryJobsManifestPath {
     <# Runtime jobs manifest that overrides job Arguments: the central manifest, else the local one. #>
     param([Parameter(Mandatory)]$Catalog, [Parameter(Mandatory)][string]$TenantValue)
     $orchestratorFolder = Join-Path $Catalog.SmartInventoryRoot 'Orchestrator'
-    $localConfigPath = Get-SmartM365JsonReadPath -Path (Join-Path $orchestratorFolder 'SmartM365-Inventory-Orchestrator.local.json') -Optional
+    $localConfigPath = Get-SmartM365JsonReadPath -Path (ConvertTo-SmartM365InventoryConfigLocation -Path (Join-Path $orchestratorFolder 'SmartM365-Inventory-Orchestrator.local.json')) -Optional
     if (-not $localConfigPath) { $localConfigPath = Join-Path $orchestratorFolder 'SmartM365-Inventory-Orchestrator.local.json.template' }
     $localConfig = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($localConfigPath, [Text.Encoding]::UTF8))
     $centralValue = $localConfig.PSObject.Properties['CentralConfigurationEnabled']
     $centralEnabled = ($null -eq $centralValue) -or ([string]$centralValue.Value -in @('True', 'true', '1'))
-    if (-not $centralEnabled) { return (Get-SmartM365JsonReadPath -Path (Join-Path $orchestratorFolder 'Orchestrator-Jobs.json') -Optional) }
+    if (-not $centralEnabled) { return (Get-SmartM365JsonReadPath -Path (ConvertTo-SmartM365InventoryConfigLocation -Path (Join-Path $orchestratorFolder 'Orchestrator-Jobs.json')) -Optional) }
 
     $dataFolder = '{{DataAllRootPath}}\Orchestrator'
     $dataFolderValue = $localConfig.PSObject.Properties['OrchestratorDataFolderPath']

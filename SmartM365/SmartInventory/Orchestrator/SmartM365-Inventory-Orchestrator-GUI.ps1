@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.3
+1.6.4
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.3'
+$script:AppVersion = '1.6.4'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -2721,7 +2721,7 @@ $script:EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -Sta
 Import-Module (Join-Path $smartM365Root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.87' -ErrorAction Stop
 $localConfigPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-Inventory-Orchestrator.local.json'; $localConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $localConfigPath
 if (-not (Test-Path -LiteralPath $localConfigPath)) {
-    Copy-Item -LiteralPath ($localConfigPath + '.template') -Destination $localConfigPath -ErrorAction Stop
+    Copy-Item -LiteralPath (Get-SmartM365JsonTemplateName -Path $localConfigPath) -Destination $localConfigPath -ErrorAction Stop
 }
 $localConfig = Get-Content -LiteralPath $localConfigPath -Raw | ConvertFrom-Json -Depth 100
 if (Get-Command Sync-SmartM365JsonConfigWithTemplate -ErrorAction SilentlyContinue) {
@@ -2746,9 +2746,9 @@ $startupLogMs = $script:StartupClock.ElapsedMilliseconds
 $script:MailFolderPath = Join-Path -Path (Resolve-ConfigTokens -Value (Get-ConfigValue -Config $localConfig -Name 'LogAllRootPath' -DefaultValue (Join-Path $PSScriptRoot 'Logs'))) -ChildPath 'SmartM365-Orchestrator'
 Write-GuiActivity -Message ("GUI session started. Version={0}; Tenant={1}; User={2}; Computer={3}; SharedDataFolderPath={4}; LogPath={5}" -f $script:AppVersion, $Tenant, [Security.Principal.WindowsIdentity]::GetCurrent().Name, $env:COMPUTERNAME, $script:SharedDataFolderPath, $script:GuiLogPath)
 
-$bootstrapJobsPath = Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json'
+$bootstrapJobsPath = ConvertTo-SmartM365InventoryConfigLocation -Path (Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json')
 $selectedBootstrap=Get-SmartM365JsonReadPath $bootstrapJobsPath -Optional
-if ($selectedBootstrap) { $bootstrapJobsPath=$selectedBootstrap } else { $bootstrapJobsPath += '.template' }
+if ($selectedBootstrap) { $bootstrapJobsPath=$selectedBootstrap } else { $bootstrapJobsPath = Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json.template' }
 $bootstrapCluster = [pscustomobject][ordered]@{
     SchemaVersion = 1
     ExpectedOrchestratorServers = @(Get-ConfigValue -Config $localConfig -Name 'ExpectedOrchestratorServers' -DefaultValue @())

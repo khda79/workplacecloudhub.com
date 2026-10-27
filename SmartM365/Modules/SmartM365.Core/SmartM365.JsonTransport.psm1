@@ -563,7 +563,84 @@ function Complete-SmartM365JsonConsumption {
 function Get-SmartM365JsonTemplateName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
-    return (Get-SmartM365JsonNames $Path).Legacy + '.template'
+    # Committed templates stay next to the script, even when the private file lives in the SmartInventory configuration root.
+    return (Get-SmartM365JsonNames (ConvertFrom-SmartM365InventoryConfigLocation -Path $Path)).Legacy + '.template'
+}
+
+function Get-SmartM365InventoryCodeRoot {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    # The SmartInventory folder of the deployment holding this module (a launcher cache maps to its own copy).
+    return [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\SmartInventory')).TrimEnd('\')
+}
+
+<#
+.SYNOPSIS
+Optional root for the private SmartInventory files: SmartInventoryConfigRootPath of the global file.
+Empty or absent keeps every file next to its script. Deployment setting: tenant overlays never move it.
+Only {{WorkspaceRootPath}} and {{SmartM365RootPath}} are resolved, so a root below WorkspaceRootPath stays qualified.
+#>
+function Get-SmartM365InventoryConfigRoot {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $globalPath = Join-Path $PSScriptRoot '..\..\Config\SmartM365.global.local.json'
+    if (-not (Get-SmartM365JsonReadPath -Path $globalPath -Optional)) { return '' }
+    $globalConfig = (Read-SmartM365JsonDocument -Path $globalPath).Document
+    if ($globalConfig -isnot [pscustomobject]) { return '' }
+    $property = $globalConfig.PSObject.Properties['SmartInventoryConfigRootPath']
+    if ($null -eq $property) { return '' }
+    $value = [string]$property.Value
+    if ([string]::IsNullOrWhiteSpace($value) -or $value -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { return '' }
+    $resolved = Resolve-SmartM365JsonQualifiedUncToken -Value $value
+    if ([string]::IsNullOrWhiteSpace($resolved) -or $resolved -match '[*?]' -or -not [IO.Path]::IsPathRooted($resolved) -or
+        @($resolved.Split('\') | Where-Object { $_ -in @('.', '..') }).Count) {
+        throw "SmartInventoryConfigRootPath must resolve to an absolute folder: $value"
+    }
+    $root = [IO.Path]::GetFullPath($resolved).TrimEnd('\')
+    $codeRoot = Get-SmartM365InventoryCodeRoot
+    if (($root + '\').StartsWith($codeRoot + '\', [StringComparison]::OrdinalIgnoreCase) -or
+        ($codeRoot + '\').StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "SmartInventoryConfigRootPath must be outside the SmartInventory code folder: $root"
+    }
+    return $root
+}
+
+<#
+.SYNOPSIS
+Maps a private JSON file of the SmartInventory code folder to the configuration root, same relative path.
+Other paths, and an empty SmartInventoryConfigRootPath, are returned unchanged. Fails closed when the file
+still exists only next to the script: the files must be moved first, never read from a second source.
+#>
+function ConvertTo-SmartM365InventoryConfigLocation {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$Path)
+    $full = [IO.Path]::GetFullPath($Path)
+    $codeRoot = Get-SmartM365InventoryCodeRoot
+    if (-not $full.StartsWith($codeRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { return $Path }
+    $configRoot = Get-SmartM365InventoryConfigRoot
+    if (-not $configRoot) { return $Path }
+    $target = Join-Path $configRoot $full.Substring($codeRoot.Length + 1)
+    if (-not (Get-SmartM365JsonReadPath -Path $target -Optional) -and (Get-SmartM365JsonReadPath -Path $full -Optional)) {
+        throw ("SmartInventory private file still in the code folder: {0}. SmartInventoryConfigRootPath is {1}; move the private files there before running." -f $full, $configRoot)
+    }
+    $parent = Split-Path -Path $target -Parent
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop | Out-Null }
+    return $target
+}
+
+function ConvertFrom-SmartM365InventoryConfigLocation {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$Path)
+    # Inverse mapping, used to find the committed template of a relocated file.
+    $configRoot = Get-SmartM365InventoryConfigRoot
+    if (-not $configRoot) { return $Path }
+    $full = [IO.Path]::GetFullPath($Path)
+    if (-not $full.StartsWith($configRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { return $Path }
+    return (Join-Path (Get-SmartM365InventoryCodeRoot) $full.Substring($configRoot.Length + 1))
 }
 
 function Publish-SmartM365RegeneratedJsonBytes {
@@ -701,11 +778,12 @@ function Resolve-SmartM365WeeklyManifestPaths {
 function Resolve-SmartM365JsonConfigurationPath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
+    $Path = ConvertTo-SmartM365InventoryConfigLocation -Path $Path
     $validate = { param($document) if ($document -isnot [System.Management.Automation.PSCustomObject]) { throw 'Configuration must be a JSON object.' } }
     Resolve-SmartM365OwnedJsonPath -Path $Path -Owner ('Configuration:' + [IO.Path]::GetFileName($Path)) -Validate $validate
 }
 
-Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath, Read-SmartM365JsonDocument, Move-SmartM365OwnedJsonFile, Resolve-SmartM365JsonConfigurationPath, Get-SmartM365JsonTransportPolicy, Get-SmartM365JsonTemplateName, Resolve-SmartM365OwnedJsonPath, Write-SmartM365JsonBytesAtomically, Resolve-SmartM365WeeklyManifestPaths, Publish-SmartM365RegeneratedJsonBytes, Complete-SmartM365JsonConsumption, Get-SmartM365SiblingTemporaryPath
+Export-ModuleMember -Function Get-SmartM365JsonNames, Get-SmartM365JsonReadPath, Read-SmartM365JsonDocument, Move-SmartM365OwnedJsonFile, Resolve-SmartM365JsonConfigurationPath, Get-SmartM365JsonTransportPolicy, Get-SmartM365JsonTemplateName, Resolve-SmartM365OwnedJsonPath, Write-SmartM365JsonBytesAtomically, Resolve-SmartM365WeeklyManifestPaths, Publish-SmartM365RegeneratedJsonBytes, Complete-SmartM365JsonConsumption, Get-SmartM365SiblingTemporaryPath, Get-SmartM365InventoryConfigRoot, ConvertTo-SmartM365InventoryConfigLocation, ConvertFrom-SmartM365InventoryConfigLocation
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

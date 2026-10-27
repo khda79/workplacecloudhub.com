@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.4.8
+    0.4.9
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -348,7 +348,7 @@ try {
     if ($params.MailboxMigrationExceptionsEnabled) {
         $bindingPath=[string](ConfigValue 'PreparedMailboxMigrationBindingsPath')
         if ([string]::IsNullOrWhiteSpace($bindingPath)) {
-            $bindingPath=Join-Path $PSScriptRoot 'SmartM365-WorkplaceEvidence-Prepare.MailboxMigrationBindings.local.json'
+            $bindingPath=ConvertTo-SmartM365InventoryConfigLocation -Path (Join-Path $PSScriptRoot 'SmartM365-WorkplaceEvidence-Prepare.MailboxMigrationBindings.local.json')
             # An absent default registry leaves address-only rows as candidates, never approved.
             $bindingPath=[string](Get-SmartM365JsonReadPath -Path $bindingPath -Optional)
         } else {

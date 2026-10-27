@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.63
+1.5.64
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.63"
+$ScriptVersion = "1.5.64"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -7044,7 +7044,7 @@ try {
     $effectiveMaxLifetimeHours = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'MaxLifetimeHours' -DefaultValue 24
     if ($MaxLifetimeHours -gt 0) { $effectiveMaxLifetimeHours = $MaxLifetimeHours }
 
-    $effectiveManifestPath = Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json'
+    $effectiveManifestPath = ConvertTo-SmartM365InventoryConfigLocation -Path (Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json')
     if (-not [string]::IsNullOrWhiteSpace($JobsManifestPath)) { $effectiveManifestPath = $JobsManifestPath }
     $effectiveStatePath = Join-Path -Path $dataFolder -ChildPath 'Orchestrator-State.json'
     if (-not [string]::IsNullOrWhiteSpace($StatePath)) { $effectiveStatePath = $StatePath }

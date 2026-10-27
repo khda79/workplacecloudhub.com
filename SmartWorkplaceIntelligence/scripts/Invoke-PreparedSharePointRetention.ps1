@@ -2,7 +2,7 @@
 .SYNOPSIS
     Inspect or apply qualified server/SharePoint retention without preparing evidence.
 .VERSION
-    1.2.0
+    1.2.1
 #>
 [CmdletBinding()]
 param([string]$Tenant='test',[ValidateSet('Configured','Preview','Apply')][string]$Mode='Preview',
@@ -19,7 +19,8 @@ Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1'
 Import-Module (Join-Path $PSScriptRoot 'PreparedSharePointTransfer.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PreparedSharePointRetention.psm1') -Force
 if(-not $ConfigurationPath){$ConfigurationPath=Join-Path $smartRoot 'SmartInventory/PreparedEvidence/SmartM365-WorkplaceEvidence-Prepare.local.json'}
-$ConfigurationPath=Get-SmartM365JsonReadPath $ConfigurationPath
+# The private wrapper configuration follows SmartInventoryConfigRootPath when it is set.
+$ConfigurationPath=Get-SmartM365JsonReadPath (ConvertTo-SmartM365InventoryConfigLocation -Path $ConfigurationPath)
 # The matching wrapper template adds missing runtime parameters without replacing local values.
 $config=Read-SmartM365JsonConfig -Path $ConfigurationPath -Required
 function Get-Setting([string]$Name){

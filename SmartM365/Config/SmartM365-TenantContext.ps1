@@ -1,4 +1,4 @@
-Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.8' -Global -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.1.0' -Global -ErrorAction Stop
 <#
 .SYNOPSIS
 Loads SmartM365 global and tenant configuration context.
@@ -7,7 +7,7 @@ Loads SmartM365 global and tenant configuration context.
 Merges global and tenant local JSON configuration, resolves workspace paths, and exposes the effective tenant context used by SmartM365 scripts.
 
 .VERSION
-1.0.13
+1.0.14
 #>
 function Write-SmartM365StartupBanner {
     [CmdletBinding()]
@@ -193,7 +193,8 @@ function Get-SmartM365JsonTemplatePath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
 
-    $Path = (Get-SmartM365JsonNames $Path).Legacy
+    # Templates are committed next to the script, also for a file relocated to the SmartInventory configuration root.
+    $Path = (Get-SmartM365JsonNames (ConvertFrom-SmartM365InventoryConfigLocation -Path $Path)).Legacy
     $legacyTemplate = if ($Path -like '*Config\Tenants\*.mail.local.json') {
         Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath 'tenant.mail.local.json.template'
     }

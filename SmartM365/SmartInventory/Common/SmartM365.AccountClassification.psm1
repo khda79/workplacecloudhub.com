@@ -2,6 +2,9 @@
 # Config/AccountClassification.local.json(.txt); only the neutral .template is published.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$jsonTransportManifest = Join-Path $PSScriptRoot '..\..\Modules\SmartM365.Core\SmartM365.JsonTransport.psd1'
+# A standalone copy (test harness) has no SmartM365 deployment around it: paths are then used as given.
+if (Test-Path -LiteralPath $jsonTransportManifest -PathType Leaf) { Import-Module $jsonTransportManifest -MinimumVersion '1.1.0' -ErrorAction Stop }
 
 function Get-SmartM365AccountClassificationDefaultPath {
     [CmdletBinding()]
@@ -15,6 +18,10 @@ function Resolve-SmartM365AccountClassificationPath {
     [CmdletBinding()]
     param([string]$Path = (Get-SmartM365AccountClassificationDefaultPath))
 
+    # The private file follows SmartInventoryConfigRootPath when it is set; the template stays in the code folder.
+    if ($Path -match '\.json(\.txt)?$' -and (Get-Command ConvertTo-SmartM365InventoryConfigLocation -ErrorAction SilentlyContinue)) {
+        $Path = ConvertTo-SmartM365InventoryConfigLocation -Path $Path
+    }
     $candidates = if ($Path -match '\.json$') { @("$Path.txt", $Path) } else { @($Path) }
     foreach ($candidate in $candidates) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { return (Resolve-Path -LiteralPath $candidate).ProviderPath }

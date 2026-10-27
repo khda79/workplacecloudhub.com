@@ -20,7 +20,7 @@ orchestrator applies the job's scheduled dependency rule to them (for example Fr
 Add -IncludeDependencies to run the enabled dependencies in the same request.
 
 .VERSION
-1.2.0
+1.2.1
 
 .EXAMPLE
 ./SmartM365-Inventory-Pipeline.ps1 -Tenant test -Cancel -BatchId '<active-batch-id>' -Reason 'Controlled direct collection' -ValidateOnly
@@ -166,7 +166,7 @@ try {
             $JobsManifestPath = (Get-SmartM365OrchestratorConfigurationPaths -SharedDataFolderPath $SharedDataFolderPath).JobsPath
         }
         else {
-            $JobsManifestPath = Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json'
+            $JobsManifestPath = ConvertTo-SmartM365InventoryConfigLocation -Path (Join-Path -Path $PSScriptRoot -ChildPath 'Orchestrator-Jobs.json')
         }
     }
 

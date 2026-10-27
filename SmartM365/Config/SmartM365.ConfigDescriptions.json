@@ -22,6 +22,7 @@
       "OnPremExecutionMode": "How on-premises jobs run: LocalCache, Direct or Auto.",
       "SmartM365RootPath": "SmartM365 root folder; '.' means the folder that holds Config.",
       "WorkspaceRootPath": "Root of the data workspace; tokens such as {{SmartM365RootPath}} are resolved.",
+      "SmartInventoryConfigRootPath": "Optional root for private SmartInventory JSON files, e.g. {{WorkspaceRootPath}}\\SmartInventory\\Config. Empty keeps them next to the scripts.",
       "DataAllRootPath": "Historical data root (DATA-ALL) per tenant profile.",
       "OrchestratorSharedDataFolderPath": "Shared orchestrator folder (configuration, election, heartbeats, pipeline runs).",
       "LatestCsvFolderPath": "Latest CSV folder (DATA-LAST) per tenant profile.",

@@ -1,4 +1,4 @@
-Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.0' -Global -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.1.0' -Global -ErrorAction Stop
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -57,7 +57,8 @@ function Get-SmartM365EvidenceConfig {
     $localPath = Join-Path $folder "$base.local.json"; $localPath = Resolve-SmartM365JsonConfigurationPath -Path $localPath
     $sourcePath = $localPath
     if (-not (Test-Path -LiteralPath $localPath -PathType Leaf -ErrorAction Stop)) {
-        $names = Get-SmartM365JsonNames -Path $localPath
+        # Templates stay next to the script when SmartInventoryConfigRootPath relocates the private file.
+        $names = Get-SmartM365JsonNames -Path (ConvertFrom-SmartM365InventoryConfigLocation -Path $localPath)
         $templatePaths = @(($names.Preferred + '.template'), (Get-SmartM365JsonTemplateName -Path $localPath))
         $sourcePath = $null
         foreach ($candidate in $templatePaths) {

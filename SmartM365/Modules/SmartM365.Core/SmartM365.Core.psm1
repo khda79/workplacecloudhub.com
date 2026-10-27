@@ -1,12 +1,12 @@
 ﻿Import-Module (Join-Path $PSScriptRoot 'SmartM365.SharePointJsonTransition.psd1') -MinimumVersion '1.0.4' -Global -ErrorAction Stop
-Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.8' -Global -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumVersion '1.1.0' -Global -ErrorAction Stop
 . (Join-Path $PSScriptRoot 'SmartM365-DailyCaptureRetention.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-CmdbReceipt.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-MailMaintenance.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-ImportExcelHealth.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-InventoryLifecycle.ps1')
 # SmartM365.Core.psm1
-# Version: 1.0.109
+# Version: 1.0.110
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
 function Get-ModuleLocalConfig {
@@ -184,6 +184,7 @@ function Get-SmartM365CallerLocalConfig {
         $scriptPath = $frame.ScriptName
         if ([string]::IsNullOrWhiteSpace($scriptPath) -or $scriptPath -notmatch '\.ps1$') { continue }
         $configPath = Join-Path -Path (Split-Path -Path $scriptPath -Parent) -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($scriptPath))
+        $configPath = ConvertTo-SmartM365InventoryConfigLocation -Path $configPath
         # A caller without a local JSON under either name has nothing to read: skip it before any JSON activation, so an
         # unqualified caller folder (for example another product on a UNC share) is never resolved. An existing file
         # keeps the full resolution below, including the UNC qualification check.

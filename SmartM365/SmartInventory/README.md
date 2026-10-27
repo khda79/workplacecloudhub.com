@@ -181,6 +181,25 @@ For one version, the former launcher names stay as one-line aliases, for example
 
 The Secure Score, authentication-method registration, Conditional Access, Intune endpoint-security, and governed public-France license-pricing collectors are enabled once daily in `Orchestrator/Orchestrator-Jobs.json.template`. Microsoft 365 Backup collectors remain scheduled but disabled until their service-app/controller prerequisite is available. `Policy.Read.All` and `SecurityEvents.Read.All` are new bootstrap permissions. Authentication registration and Microsoft 365 Backup reuse `AuditLog.Read.All` and `BackupRestore-Configuration.Read.All`. Intune endpoint-security reports reuse the temporary export-job permission `DeviceManagementManagedDevices.ReadWrite.All`.
 
+## Private configuration root (SmartInventoryConfigRootPath)
+
+By default the private files of SmartInventory stay next to their scripts, in the code folder: the `*.local.json(.txt)` configurations, `Config\AccountClassification.local.json.txt`, script registries such as `<script>.<Registry>.local.json`, `PreparedEvidence\SmartM365-WorkplaceEvidence-Prepare.consumers.json.txt`, a local `Orchestrator\Orchestrator-Jobs.json`, and their `.transport.lock` and `.migration.log` files. Set `SmartInventoryConfigRootPath` in `Config\SmartM365.global.local.json` to keep them outside the Git working copy, for example `{{WorkspaceRootPath}}\SmartInventory\Config`.
+
+- Empty or absent: unchanged behavior.
+- Set: every SmartInventory script, the orchestrator and SmartWorkplaceIntelligence read and write these files under the root, at the same relative path (`M365Inventory\Licensing\SmartM365-Licences-Inventory.local.json.txt`, `Config\AccountClassification.local.json.txt`, ...). The committed `.template` files stay in the code folder and keep creating and enriching the private files. LocalCache runs read the root directly, not the cached copy.
+- Only `{{WorkspaceRootPath}}` and `{{SmartM365RootPath}}` are resolved; the result must be an absolute folder outside the SmartInventory code folder. A UNC root must be qualified for the JSON transport: a root below `WorkspaceRootPath` is when `QualifiedUncRoots` lists `{{WorkspaceRootPath}}`. The run account needs read and write access.
+- Fail-closed: when the setting is set, a private file still present only next to its script stops the run with an explicit error instead of being read from a second place.
+- The setting belongs to the deployment: tenant profiles do not change it. `SmartM365\Config` (global, tenant and transport policy files) is not moved.
+
+Switch an existing deployment with `Maintenance\SmartM365-Move-InventoryConfigToRoot.ps1` (temporary tool), on one server, elevated:
+
+1. Disable the orchestrator scheduled task on every server, stop the orchestrators and wait until no SmartInventory run is in progress.
+2. Preview: `SmartM365-Move-InventoryConfigToRoot.ps1 -Tenant prod`. It lists the files to move, the obsolete configurations (no owner script and no template) and manual backups (`.bak`, `.backup-`, `.before-`) to archive, and the interrupted `.pending`/`.previous` files it only reports.
+3. Switch: `SmartM365-Move-InventoryConfigToRoot.ps1 -Tenant prod -Apply -OtherServersStopped`. It writes and verifies a ZIP backup of every listed file in `{{WorkspaceRootPath}}\SmartInventory\Archive` (`-ArchiveDirectory`), copies the files with a SHA256 check, renames each original to `<name>.moved-<timestamp>`, removes the archived files, then sets `SmartInventoryConfigRootPath` (`-ConfigRootPath`) and checks the mapping. A failure before the activation restores the renamed originals.
+4. Enable the orchestrator task again and check the first runs.
+
+Return with `-Rollback -OtherServersStopped`: the `.moved-*` originals get their name back and the setting is cleared; changes made under the root after the switch are reported, not copied back.
+
 ## License pricing
 
 `SmartM365-LicensePricing-Inventory.ps1` 1.1.1 publishes `M365_License_Prices.csv`
