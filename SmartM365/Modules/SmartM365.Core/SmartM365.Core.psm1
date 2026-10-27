@@ -6,6 +6,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumV
 . (Join-Path $PSScriptRoot 'SmartM365-ImportExcelHealth.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-InventoryLifecycle.ps1')
 # SmartM365.Core.psm1
+# Version: 1.0.107
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
 function Get-ModuleLocalConfig {
@@ -1117,7 +1118,17 @@ function Complete-SmartM365ExecutionContext {
     $cmdbReceiptPath=$null
     if(Get-Command Complete-SmartM365CmdbSourceReceipt -ErrorAction SilentlyContinue){
         try{$receiptStatus=if($hasFailure){'Failed'}else{$Status};$cmdbReceiptPath=Complete-SmartM365CmdbSourceReceipt -Status $receiptStatus -ErrorCount $errorCount}
-        catch{WriteLog -Message ('Source completion proof failed; native CSVs are preserved: {0}' -f $_.Exception.Message) -Level WARNING}
+        catch{
+            if($Status -ne 'Cancelled'){$Status='Failed';$global:SmartM365ExecutionStatus='Failed'}
+            $proofFailureLevel=if($Status -eq 'Cancelled'){'WARNING'}else{'ERROR'}
+            WriteLog -Message ('Source completion proof failed; native CSVs are preserved: {0}' -f $_.Exception.Message) -Level $proofFailureLevel
+        }
+    }
+    # Qualification can fail after collection succeeded. Propagate it to legacy callers
+    # and the inventory lifecycle, which derive the process exit code from this status.
+    $errorCount = [int]$global:SmartM365ErrorCount
+    if($Status -ne 'Cancelled' -and ($global:SmartM365ExecutionStatus -eq 'Failed' -or $errorCount -gt 0)){
+        $Status='Failed';$global:SmartM365ExecutionStatus='Failed'
     }
     $warningCount = [int]$global:SmartM365WarningCount
     if($automaticStatus -and $Status -eq 'Success' -and $warningCount -gt 0){$Status='CompletedWithWarnings';$global:SmartM365ExecutionStatus=$Status}
@@ -6751,8 +6762,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1TX9YH9Sksi5V
-# qey65oJSwsNy3F/ZKNGzWeqXbI02DaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkoa1isPnnlIYO
+# unsL/cLcfCyoTLXuBbqh/MbxIpgZw6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6885,31 +6896,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICvWeqgb+rkpqK/if92nq9NJN10L/8xpkmAkKMptG7lOMA0GCSqG
-# SIb3DQEBAQUABIIBgDiSb+UjhtHEI4C8h7C/NvycpIWMyFB3KrhuainOMBj9OMDQ
-# 1T3D8RH1p6l7pSf3B5Np7fwrrEiaJjqihG5+JR/WBW7P1jAQ5wEVrT/5aA3Z3q63
-# 11npDQoHYn8UA+/qS4sUnggiBXFyA236bF4UJ8v6DvmfYoryfg0IoUlX1Qx+gZPh
-# TtMIwZvAgixODuZjDNXJwVv+lQOyt0iW3gMna2vNs+DBCadlj5bMpcRdtmQeqLga
-# M4Cuc7D5lYQa5vSJW9f9cwKtQqrs6/n/rRxO0V6yq4kQbTN+q97U4zvrOsaroNZ+
-# 9OqwDSnktAC6riAuVxZBqlnQ5zQyTRjv0+7exn+D8Gf/YpkE848b/Uhc6d8B9GOa
-# MgtoLc8kH8Txv0Zq9465Ll5A+XJ3U6783pqlahS0sFey7seSe0u5FDNiMRsp7n2s
-# ZyVwRLOL111ddWzONuokkM2/epSgNdiDsLMadqNP+jaN5jGIQzhEoeaZ9GNsmiSF
-# 03JdsJ1vuEhu4D/DiaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINyIHxi+j2vXVA6I62vRPobc3akPSmT5Q0HISOcR15QPMA0GCSqG
+# SIb3DQEBAQUABIIBgD5pJWsFdt/4x47SkehDwikIU+ufv/NWcIXKLa9S3KwZq9fJ
+# XptcYDY5h67PU6+0xzyPkj7z+Nughl92H8tTOwPRbwQ2gTVcFqxGcMgOqCjF7l4w
+# K0G7VpP95GajNNYV+M7Sg+hxUEs/3KP54IOd/KEmczrv3RlcC9AD0KhVvSYHWisX
+# FuyabiOrnHe/ZcDfh1hfcinUYDWK2oaKjQRyVkDzrBa7jkOSNCRq/K3Pc3x/8HLL
+# 2kk1hnEdCEBKSgnCgRxzzwvx+UijJo7J28nVh+uqQe3COHqfai9lkee53WnJj+A9
+# uvS+Q7MYma3womKdJfAVRr+gw5MfU4YXw48YXnEaBz3RawtZdOOfzYKW91RNmF+C
+# v/3RFgIyYQBSEATYnX6ETYDvn5gaJQR5CyRe98u/8+fbmN14usDx0Xrsz2EnQYBC
+# 4IwSt1t6ZRpBbko9bon7s4xhzx6yxHlj8fc4T1MOhimm53dJSYodia7+5WA7aMJD
+# lu2j588zeYzQE1olAKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjYyMjQ4
-# NDlaMC8GCSqGSIb3DQEJBDEiBCD++r8oiEeNccBrvTny3LwA9cI9BtPYxrr9u/bY
-# fq9c5jANBgkqhkiG9w0BAQEFAASCAgCCPgckT5CHI2ghZOM5A94B49S3l+tWDBTf
-# /KvqTi5ODPy8ok97020/esz/FcKMjUg5os8XEblUb1085hsBH+RjwE6r9K9GoKyO
-# z9CuakqumPaSZKc7WtXdMPUFkJ/pfFRuP9Edp/eM3QheOZpqNzmSAubQhQFUyIfw
-# YQf2vncd4v51b1L0J8wxfvQ6hWVK8K7oIftSK5+ACRUfzQJgyArukbL4oty1MWti
-# +RW5w9N0LNC+pvJOGMBC7fCLggAutTNhx3+JQikEBusu74QDPFV7RDw+JF/4eQPS
-# esX1jRTgWvUpW6II/uwAjPbJuwYTHFWpaMYYbYY+TcKzcmccaMu0JlNr6xysx/Cx
-# vk8w4P6K4jC1C8iq8+XAhoI1F0yyTnDV9qcMvJD+F+Oka/F/kovbV+sOmc9iAXYE
-# QGw5xOPq2s/xiWui2wAstw6oCmvzT6PTJ3R4va+4ysi/yoNVg7r5o4bC4cDg0UTx
-# rlcl9+SjWhoLxkFyXq/vtgMFcrY7Zg5EZanFPeQaYgaD8S5pxI5ltZAFS7x5ZCsz
-# +56GwPp9a+5Mj5xncvBphyYOVs+F0CkSOR3tOHKKxtz/G9MT2jIpEyR2W2cT77lG
-# Fi79HhfYjPH89VKstKa5MDMvcFrbAbmJv9RAagDMBAkpZh8H5yGbXSQ7meqtmFr9
-# oLRQal7hVg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMDQ3
+# MzBaMC8GCSqGSIb3DQEJBDEiBCC0+slxaXhNHyZRWC6tab6cOPJWqRTBjCP8SWp+
+# 2kHUxzANBgkqhkiG9w0BAQEFAASCAgAYkYyt3ZqwACiT9nEFhnPG3VMZLL7oT0eL
+# cNqaepMA06rCheD9lygjTtv287epi7DlQ1kjqUdGdu2RJofVTbF5mDXy/R7kRhMu
+# /4SVDClUO9HD9Orw700dEx60R0z5rqdDJNrrpLTcuDQ6noC5SrxuZKKsh7JaN+we
+# mgYIcnfPQ79LMR7uBh/cge2IN/a+2BXVRxYh6e60S7akWUDf2JKA7zIDENaC8z12
+# /NdWeNCYZ0Tr3zCEm4Q1tZaHCvLa25DN9m4QtjutgfPNgyuLMm9GGBarj3riHYta
+# TTqbR3vdmYImgfg7paTOllifMAvJLGtMLBl5Rbr0LGj0eQ1s733qDSf1wdo6+3hs
+# LWkPBXulTUguGpWT8OJScLqfVL0a18JuH4TpayOarVfqYQGBttCgjL3dnm7ZNIHQ
+# 94mLfUABPrYDCMMFWsWUncVwG/yohtvoKIVdjh8uPmiy7AqA8eyw4fYZpNWTh/29
+# 50D6mkgufnRqAT4eKQm8JI2GMAWpeclvHirnndOJ1UNqPTpkhufSPbztDqdaNWnQ
+# ZUUaFRJYLwidSFmFEvtlmAzoNj2X7vaITV6a3Cznxc/5qAy8PO90WFLtoUm2iDg3
+# irMi50rkrmDqpOprEK1V33DPg9RWVM+tTwp1TMloKEH4DcOxXxWC47OZUqv9IePu
+# 0L3L/Gjyww==
 # SIG # End signature block

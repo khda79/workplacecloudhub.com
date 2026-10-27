@@ -1,8 +1,8 @@
-<#
+﻿<#
 .SYNOPSIS
 Producer-owned, current-only SmartInventory source receipts. Dot-sourced helper.
 .VERSION
-1.4.3
+1.4.4
 .NOTES
 Compatible with Windows PowerShell 5.1. Optional daily capture maintenance is
 delegated to Core only for explicitly opted-in producers; no collection or report refresh.
@@ -236,6 +236,33 @@ function Remove-SmartM365SourceStaging {
 }
 
 # Moves every staged CSV over its canonical file. The caller writes the receipt afterwards.
+function Move-SmartM365StagedSourceFile {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SourcePath,[Parameter(Mandatory)][string]$DestinationPath)
+    # Six attempts; only sharing/lock violations are retried (60 seconds of total backoff).
+    $delays=@(2,4,8,16,30)
+    for($attempt=1;$attempt -le 6;$attempt++){
+        try{
+            if((Test-Path -LiteralPath $DestinationPath) -and ((Get-Item -LiteralPath $DestinationPath -ErrorAction Stop).Attributes -band [IO.FileAttributes]::ReparsePoint)){
+                throw "Linked publication destination is not accepted: $DestinationPath"
+            }
+            if(Test-Path -LiteralPath $DestinationPath){[IO.File]::Replace($SourcePath,$DestinationPath,[Management.Automation.Language.NullString]::Value,$true)}
+            else{[IO.File]::Move($SourcePath,$DestinationPath)}
+            return
+        }catch{
+            $cause=$_.Exception
+            while($cause.InnerException){$cause=$cause.InnerException}
+            $win32=$cause.HResult -band 0xffff
+            $isLock=$cause -is [IO.IOException] -and $cause.HResult -in @(-2147024864,-2147024863)
+            $detail="source='$SourcePath'; destination='$DestinationPath'; attempt=$attempt/6; HResult=$($cause.HResult); Win32=$win32; $($cause.Message)"
+            if(-not $isLock -or $attempt -eq 6){throw [IO.IOException]::new("Source publication failed: $detail",$cause)}
+            $delay=$delays[$attempt-1]
+            WriteLog -Message "Source publication locked; retry in ${delay}s: $detail" -Level WARNING
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
 function Publish-SmartM365StagedSourceSet {
     param([Parameter(Mandatory)]$Context,[Parameter(Mandatory)][object[]]$Records)
     $Context.PublicationStarted=$true;$Context.UnqualifiedPublication=$true
@@ -245,7 +272,7 @@ function Publish-SmartM365StagedSourceSet {
         if(-not $Context.StagedFiles.ContainsKey($canonical)){continue}
         $staged=$Context.StagedFiles[$canonical]
         if((Test-Path -LiteralPath $canonical) -and ((Get-Item -LiteralPath $canonical).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw "Linked canonical CSV is not accepted: $canonical"}
-        if(Test-Path -LiteralPath $canonical){[IO.File]::Replace($staged,$canonical,[Management.Automation.Language.NullString]::Value,$true)}else{[IO.File]::Move($staged,$canonical)}
+        Move-SmartM365StagedSourceFile -SourcePath $staged -DestinationPath $canonical
         if((Get-FileHash -LiteralPath $canonical -Algorithm SHA256).Hash -cne $record.SHA256){throw "Promoted CSV differs from its staged copy: $canonical"}
         WriteLog -Message "CSV latest copy written to: $canonical (promoted from source staging)" -Level INFO
     }
@@ -255,7 +282,7 @@ function Publish-SmartM365StagedSourceSet {
         if(-not(Test-Path -LiteralPath $staged -PathType Leaf)){continue}
         if((Test-Path -LiteralPath $canonical) -and ((Get-Item -LiteralPath $canonical).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw "Linked canonical artifact is not accepted: $canonical"}
         $hash=(Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash
-        if(Test-Path -LiteralPath $canonical){[IO.File]::Replace($staged,$canonical,[Management.Automation.Language.NullString]::Value,$true)}else{[IO.File]::Move($staged,$canonical)}
+        Move-SmartM365StagedSourceFile -SourcePath $staged -DestinationPath $canonical
         if((Get-FileHash -LiteralPath $canonical -Algorithm SHA256).Hash -cne $hash){throw "Promoted artifact differs from its staged copy: $canonical"}
         WriteLog -Message "Artifact latest copy written to: $canonical (promoted from source staging)" -Level INFO
     }
@@ -441,7 +468,14 @@ function Complete-SmartM365CmdbSourceReceipt {
             catch { WriteLog -Message ('Daily capture retention refused; source CSVs and receipt preserved: {0}' -f $_.Exception.Message) -Level WARNING }
         }
         if($complete -and $context.StagedPublication){Invoke-SmartM365StagedPublicationFollowUp -Context $context}
-        if(-not $complete){WriteLog -Message "Source qualification rejected for '$($context.Producer)': $reason Native CSVs remain preserved." -Level WARNING}
+        if(-not $complete){
+            if($Status -eq 'Cancelled'){
+                WriteLog -Message "Source qualification rejected for '$($context.Producer)': $reason Native CSVs remain preserved." -Level WARNING
+            }else{
+                $global:SmartM365ExecutionStatus='Failed'
+                WriteLog -Message "Source qualification rejected for '$($context.Producer)': $reason Native CSVs remain preserved." -Level ERROR
+            }
+        }
         if($complete){return $context.ReceiptPath}else{return $context.RunPath}
     }finally{Remove-SmartM365SourceStaging -Context $context;if($context.Lock){$context.Lock.Dispose()};$script:SmartM365CmdbSourceContext=$null}
 }
@@ -449,8 +483,8 @@ function Complete-SmartM365CmdbSourceReceipt {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCXutk/aFitL5dl
-# w1C8UGks9xj3zJd9wvTHO+c35JMzdKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAjMmCp6hP86x8P
+# Y34HpJX2B7HXK3wOdQhbSx4q8qi5FqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -583,31 +617,31 @@ function Complete-SmartM365CmdbSourceReceipt {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMu4BCAPfl1K6oxChDTPS2isq5Knrl78AWNLzjNXP5X4MA0GCSqG
-# SIb3DQEBAQUABIIBgFmKNEPrTWbITMry/PC3Dy4ffBAHB/ki6ZFFuTX3lwd+y5tT
-# tQ5/a2Y5Vc5Yp+DKr4RmZW6ZKgbnYENAm91C2jnFkXa+/G8zToFJcX2QqDPFiG3J
-# rqwFw4M5iYYFEe4sMycZyFja51Bm+xRw8aMC3/h8YEuyWirkySZcOsi70ObNYkP4
-# gPFOtgNRIN6t7C9m1yYw5tnxNZggcf9E7+4du+IyzG7x4RE9Iu7Wchr30Cp5jPWS
-# lBSNNuRd/jZvo8kQop+KTF1UnrXccNer9FfxILqeAqL7rDMWvC0ioCA42W/+KxUN
-# gWY5Rv+WSE6N8Y13f2QlPdkcvLNxNGKCrK4JHRdRpvlqQcJo5SsMj2x+QcyLxVkC
-# ILSfHr5hPAqaWvpib2UAR6z6Mm1sO47FiKpu9wrICH1EVra7JOGOYVORx/ZY/Isr
-# HhC3D9Nfwb6QUx/M2nQP0OdMrNUGVCDh8+LPZLaz6/pruKGTIRzzl8xp5CEA/hJ7
-# cGFVlHu1g5SJMwpc+aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM1o6uDltHvpJMkaEOLx6kS6dl8EYBE+kwgM2/Yub4zSMA0GCSqG
+# SIb3DQEBAQUABIIBgLAPn2S6gm4GVU4J0bRg0cqjxV7SSKWkLkGUmM6+ewmYyaCp
+# /ns7759iYXSXUyaUhA4TT24F8rMN2ivtnHj+u85941dnhobXcM/cocJLWi1yqys+
+# XaUbedZBFB9BKcWpd7U3VLjmRhP0hGvc+RnYOhoHrIYxL3bd+Ni63jF99SaypFQa
+# TUUhRL0+ful8itBM5+/d4/YZH3hwRjNJ9wrsI3K7cYc8GELZEgKG3+OSODTaBoEW
+# KKMjWjK71hKFmbAoi/3iEMn0BMQkw8r9Gdutlfk/8qKn+QWbseb+D/3AcTXjFa6s
+# divtwEpsj0X0lt9Hu0GhgOAgM5tAdTLtSHUlx9uZaRKNg7nuib2SKyIMJqeYAPy9
+# jFoiANGlwXmmTzq6Ap1A6d6ew1SqlrE+RyXQna19oi5L5dcsY/wzipXkfKZ0nx5Y
+# kCmS87asbuq+ytLno8qA20oRfcjdsWAOtkKWRm1dq+Y+URAGyTl1qzVoKrIP8HtU
+# tWS0+U2Pyk7QWwHhqaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNDIy
-# NDlaMC8GCSqGSIb3DQEJBDEiBCAHP3RCJzC5ZDES0tF02TYQIW1d4NCQuv47BEba
-# U59xqjANBgkqhkiG9w0BAQEFAASCAgBv0B/oeE9/b7UEfmXYoQ7LBvbhJM03SfjN
-# nCXV3vLwTs4S9x5K45q7iUXQkoCeSVoyAjks3mMqt1kcNm4/wl73TIxm+Ap4NTak
-# 9CMjDvTSYHrIBAYYvK0Ih7FR8rzIpzHuSIS1SUateWmofXz0gZVx+D4Sbq0Uq2Zx
-# 74E7v6YwiNy3XeTxY2qj6j1jzdvshT6bY65rHj0AZUeIIPr159ceWu3RmRN/Q4A0
-# sMLMNxk0FVth3rEBTc9A0Sc05kgqZCQ8xNtId6aTK00yvjWMaWkixi5M0RjPF/T0
-# WqNk+KyvOazYZjjlBYTW5HWezzhFOmWDbsaRlo3HNS2Oc8tc9Lm6hU622I2pfSpu
-# YW+PEwTWKRxwnKR2zQrPdV5QAcn6uaq0UKyDL7zYF8L8ZU3/x2VATb8tjdz/d0rt
-# tJb544odkm1o3dnEQl49/vigFir/xobXagk2GLsbTr7yIyECl4XpcQeVgi4Yar++
-# +GyhkupRXwz+Ovt97uRguf4haD7l7tfovroJET0YlnSsi8HJ5ml7ceBSmpgF5AOb
-# L17v/wE4YYNyDDomZ45D4ThL+Uls6T/Y187xcElAzZWMoxNGM3hmDRK4fxlqaRC7
-# ZGLxKpG3Z5ttlMNz7yzLM8uS+G+E52w/qbTXSnfkz4TsvFyT7/twXWhO1y+INg/3
-# +R7j2IlY9g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMDQ3
+# MzBaMC8GCSqGSIb3DQEJBDEiBCCCXl0dEQE+euSileA+Ay7Og6fZnUgONtgQPtVU
+# E5aFSTANBgkqhkiG9w0BAQEFAASCAgAXqMVsbSHap3aQVhN4X86xbstWQnoSFdyq
+# fAPcygZxfRuRvQ0gIm9NDGxKHLCeRih7t+dd76Q+5t4imz6J2pC3UMSpseznmldi
+# rXCZTqOWq2p3UOO/OAmLgsXxYaExx2enYm6qFEOm8ewe4jgG2+sQXjEgTbAV9kqv
+# VyUrJz0JJ1YO/yQhknUVXeWaso+52esPdtkA0a01DziGAL/OX4FBT3YE3ELgG8Og
+# HCtUBZALYqMr0fwqjVqsFdhX17sdGrQwJhAMlKTS0BoufVf3U2r5NJHhz9klJnbG
+# AbYaSuDPA1TZkf5ZWGTbp/+IuUtpND4PwbIoEO6VzHSv850Yj8Wgb3t9UakEsA6B
+# ZKGmS+jymXotO+ywh7CrGEKdl+2dLCVU/yoS/D7ow85txHASfMnQQODb0sxPFv1t
+# xgGMPhENnN7Ajt49XzfrVxkBY8/4ao+POMAmqQtLowS2kjNefRRMxvL5X1QVn6vp
+# 6zCzPFVx+lCY334ujpKC2TApIZwJO4gYg1bio0LaqC12vl92Wy2irNlgGvrGmBxi
+# E4IWvz9SlSEoVQ9+I73AUv8wy5QN+APgT/Tqc3FqSLwoxd3fiid9zqnK8XG5dkQe
+# NGm+27rE6xI0ABG8ynwPZfxFLdWK4SdIoKR9eCUopGQnY+j/h05FvMTKNY+C6ldq
+# x7vxKbX8rg==
 # SIG # End signature block

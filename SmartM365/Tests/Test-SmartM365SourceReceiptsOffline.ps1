@@ -1,9 +1,9 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
 Synthetic shared source-receipt qualification. No tenant, API, mail or synchronized data access.
 .VERSION
-1.0.6
+1.0.7
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored in finally.')]
@@ -259,7 +259,7 @@ try {
     Check ($rejected -and (Get-FileHash $legacyPath).Hash -eq $hash) 'Foreign metadata was overwritten.'
     $cmdb=Get-Content (Join-Path (Split-Path $helper) 'SmartM365-CmdbSources.json.txt') -Raw | ConvertFrom-Json
     $scripts=@($cmdb.Producers.Script)+@($registry.Producers.Script)
-    Check ($scripts.Count -eq 51 -and @($scripts | Select-Object -Unique).Count -eq 51) 'DATA-LAST receipt coverage is not 51 distinct producers.'
+    Check ($scripts.Count -eq 49 -and @($scripts | Select-Object -Unique).Count -eq 49) 'DATA-LAST receipt coverage is not 49 distinct producers after legacy readiness retirement.'
     "PASS: $script:checks shared receipt checks; PowerShell $($PSVersionTable.PSVersion). No production access."
 } finally {
     & $mock {if($script:SmartM365CmdbSourceContext -and $script:SmartM365CmdbSourceContext.Lock){$script:SmartM365CmdbSourceContext.Lock.Dispose()}}
@@ -272,8 +272,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCsVWvZFNdDprSX
-# /Of57EWzQhVGJuPzsi758mYyFFlNx6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAjcuWSxR9Ga2FQ
+# me06j++2jcymhh8DooQO4xtqYBx6JaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -406,31 +406,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHI980HB/AMdrdAIsDdw17OxIfHGCgelpAft5PWwAMaWMA0GCSqG
-# SIb3DQEBAQUABIIBgKgcG+So5bNgqVjzan7flxYjdHBHv+4CuOLNqG1nZ11QU+Ux
-# 2Di3pk+ew789FlhZW6j3WyUMKhovZIRuI5lisGq4Bjg1fHKpnNZx3WX1z+3X+uix
-# 66w6wESTt3l8UqLONvVzoJMgSaKgiZRbnF/E0yTtJwLrU0YJrgWyN0pFbK4DP+B8
-# f5rjdz9KjNTkbX60hijoWQBWkXmm7vsDrmRIXcoI6w26tDtK+quaNiBh2FXYsrKH
-# hafScniiAph7VgwcZn4H3zgzxQNd3SnR3+EmyBIRUxMei/zo9T4kkBj7CV8A2n0s
-# g/rF/9pdxu75nH5+v9a5cKl53n8/4EBCWZBeHcGpEZDzqvSzIuiV7ybi5OvU18QG
-# CyrdWlvvLsNiqhAzSRPRW72NIPf19ysVwylLNaHFve/+eXzcYyclfw2Ob5/3DkEW
-# +KRJgPnZ9yamfraat9TUzDzBjIGzLRBihtlsyWP3LfINOjhFP0ZD69ntluZWaGVg
-# 74rSLXIBwLDBsAN23aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFaCwbRxX0vZMYOpRxtkwPhSP6uhs/JlPl5oslcKn6EfMA0GCSqG
+# SIb3DQEBAQUABIIBgH2AfxVRB9uIZbWHEeGprv430Ys9lBeEYC8BSu/3XWpExm5R
+# ddqepjQYI1p2eOWcIYMIgBIIksqGIB0iB94dqsKth7/URHiGGfyKgO17gOGXv1B8
+# 5HnIFX0Pac++VpxhOwjgCGD8h06gqrWzgZ8f1EsL3OSluReRoqQo4Zva7GgiHeDk
+# c/U3XRnnRjGaj4Kkkff4tprCLOTinoSOUDs7O/Xvf4lm4f6Vex0QOw1M+OqmBSyw
+# OfX5/OJeOSGtlpiS6es6WRbhO7UUTOoecOY7yRwVO15s097prOdGasgYg07n4zRp
+# M8Xh5e+ebcoGiyb3RMLdC5HkXyVXPW8I2l7ttKM100EWZaVLngZnk2h2XYeNjCX7
+# IxNWfhPt0BIkzbgIk0FerRCXGQ18el1pjzjnZFc+kBt0lL/GILSCcZS9ujRZqcaD
+# vYCY4QD5gCD8svtY5GGxtxmxP2R/42YGQG3xqm5FU7RNAKATFc3PbGbSRCz3EkVb
+# ulHuthZeVSKcQuowm6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjQxNDIy
-# NTFaMC8GCSqGSIb3DQEJBDEiBCDza4ZMKgyj2rfl6vaJ65TEvWDgXzwUzujdioAw
-# 71/TRjANBgkqhkiG9w0BAQEFAASCAgCgpQromGR0bBFejSS5J0tDmaxGQPCJhnct
-# ZXokwbsrC49awkYnWActbEPA3QiKL0NbZc3pgSRUtuO72cEf7WksUWYiVp291Qz3
-# 8Ejuc2NZS2IoiEvC/TAHXvtqRM/J4G5DgwQxeCKBnWJh1FsTTOKEsAlCWpINVajW
-# kHD4vpBxoQ2FhbiWhbvQ6Z+7hCPI9iFHL9bMLZljSmuyxzJwVz5y5n9uS2ISDpx/
-# nO6vHi5KkalrCWCOwhrelPuESoMx5Tlc+Cv42ArmaxAVEy5XiT+bJHXqns5T8IFr
-# cjnwih6k23zCmce6m4Nsl8LWymPY3quc1/WMt6Sd/BmqxtfJK84dlwcda+wjtYHO
-# GoVJRkLv3zTMVF2HfTwOLq8z/AVepBj2u+HYvDOAlwOgLErw0s5DTp7C6YWS4xa6
-# Me0GFi+/qCLTDe8DZLEUDS6oY+VSLfGZI5qdgqzyDo6NuVprMHw6Ov4RWu+l8efx
-# 16HWKjmjNrO58+t/wC9m2TIfxqy7IrpwiLwiYJVQ4oGsT1wtWIJ5a1yqb635XqCw
-# SoCInNag8y9DzLLrgzcZUCsb1ySN+rML0r4SsWtXjRM0Et8n1eNYg6VRDFbeop5w
-# z23vqwtRA8t02dAQaLMSqt+CjBnj4Hpjz2fWXXMGUZhCc/oD3d4Hr2m8hpcwFnUx
-# 7DA8Su2IKA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMDQ3
+# MzFaMC8GCSqGSIb3DQEJBDEiBCDbfMD4tNleM64QNMFYiqP5YVfFK4dnrBCPmKM5
+# iXp7qzANBgkqhkiG9w0BAQEFAASCAgAj7sqsBHq3mUo5aGUuibw+ZtgDJyWQ9eFb
+# ytSEt0twIHanbfr3VmKxQVJbEJv5S74galPKajhcT9IbaHBrs6B2hAPwYn2PccC8
+# xtE0+V3V+//G/cQO9PUD3bHnOy12n3U1zG8ZRvNx4mmIKqXvZfOSbN7w+HYr/rf1
+# V7irPuS/T3M6VR4mGwkNuQLVaVvomQm1Qgtr5PZBuvJD0WJnC/slCrpSkCtBCAlX
+# oisZ3y6NRj8aA67+pvR1NZyhkCmn3fq32TQClKfgjjPfh8IUtgt7lAejb9bzGgXK
+# 4v4BiN/Wdw+UnO+/u7LNnW+yTzNkapobQ/zbEZLwcgVdlYdBRKtCw317RfG9aj2A
+# yypHoOkjlLq1haBHr+alY8nUTJHJYds39xKWYLJOQ/E1urHfRgcxIK3hGwWUvidu
+# iJtNISr9oLHMH00ZOqzZy4/gMxca9gzIY8wd4OWNMruKAa0FgB5yk3Prg42UY7nc
+# JIDxTMTv/D9S3nUA5rETY08Mm+/y+CHIhhIPqqcPFx4SG7jI6InhO1w24l2ZKwK7
+# CBMl8KwlF6scvNu5+HnjXVXs8nfQ2C+0aE+I2NThKocY3f5g1cCOEGHpXqiITeel
+# lR1aqZTSZiW7scpxG0nPlP3fLEssTbkze5ftwMLmo/80ZFlhdfcjIhY0W1sR6KVz
+# NeDtBwd9wQ==
 # SIG # End signature block
