@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.10
+1.6.11
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.10'
+$script:AppVersion = '1.6.11'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -2425,7 +2425,10 @@ function Get-GuiRefreshWork {
                     try { $dashboardEvents = Get-SmartM365OrchestratorLogEvents -LogFolderPath $InputData.MailFolderPath -Server @($publishedCluster.ExpectedOrchestratorServers) -Hours 24 -Cache $InputData.LogEventsCache } catch { $dashboardEvents = $null }
                 }
                 $dashboardRuns = if ($InputData.Mode -eq 'Full') { @($recentRuns) } else { $null }
-                $dashboard = Get-SmartM365OrchestratorDashboardData -SharedDataFolderPath $root -JobsDocument $jobsDocument -Operations $operations -Runs $dashboardRuns -Requests $requests -LogEvents $dashboardEvents
+                # Live refreshes reuse the SWI rows of the last full refresh, so blocking jobs stay listed.
+                $swiOption = $InputData.PSObject.Properties['SwiRows']
+                $dashboardSwi = if ($null -ne $swiValidity) { @($swiValidity.Rows) } elseif ($null -ne $swiOption) { @($swiOption.Value) } else { @() }
+                $dashboard = Get-SmartM365OrchestratorDashboardData -SharedDataFolderPath $root -JobsDocument $jobsDocument -Operations $operations -Runs $dashboardRuns -Requests $requests -LogEvents $dashboardEvents -SwiRows $dashboardSwi
             }
             catch { $dashboardError = $_.Exception.Message }
         }
@@ -2488,6 +2491,7 @@ function Start-GuiRefresh {
         ConfigRootPath = $script:SmartM365RootPath; ConfigViewModulePath = (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ConfigView.psm1')
         SmartInventoryRoot = $script:SmartInventoryRoot; JobsTemplatePath = (Join-Path $PSScriptRoot 'Orchestrator-Jobs.json.template'); ScriptVersionCache = $script:ScriptVersionCache
         SmartM365RootPath = $script:SmartM365RootPath
+        SwiRows = @($script:SwiByName.Values | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Swi = $_.Swi; Blocks = [bool](Get-OrchestratorGuiPropertyValue -Object $_ -Name 'Blocks' -DefaultValue $false); Detail = $_.Detail } })
     }
     $script:RefreshContext.Input = $inputData
     $script:RefreshContext.Progress.Message = ''
@@ -2629,7 +2633,7 @@ function Refresh-AllViewsSync {
         $operations = Refresh-OperationsView
         Refresh-RequestsView
         if ($null -ne $operations) {
-            Set-GuiDashboard -Dashboard (Get-SmartM365OrchestratorDashboardData -SharedDataFolderPath $script:SharedDataFolderPath -JobsDocument $script:DraftJobs -Operations $operations -Runs $script:RecentRuns -Requests $script:RequestRows)
+            Set-GuiDashboard -Dashboard (Get-SmartM365OrchestratorDashboardData -SharedDataFolderPath $script:SharedDataFolderPath -JobsDocument $script:DraftJobs -Operations $operations -Runs $script:RecentRuns -Requests $script:RequestRows -SwiRows @($script:SwiByName.Values))
         }
         $script:Controls.VersionsGrid.ItemsSource = @(Get-SmartM365OrchestratorConfigurationVersions -SharedDataFolderPath $script:SharedDataFolderPath)
         $script:Controls.ConnectionText.Text = "Tenant: $Tenant"

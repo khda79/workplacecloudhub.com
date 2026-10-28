@@ -460,6 +460,7 @@ function Get-SmartM365OrchestratorDashboard {
         [Parameter(Mandatory)]$JobsDocument, [Parameter(Mandatory)]$Operations,
         [AllowEmptyCollection()][object[]]$Health = @(), [AllowEmptyCollection()][object[]]$Runs = @(),
         [AllowNull()]$Plan = $null, [AllowEmptyCollection()][object[]]$Requests = @(), [AllowNull()]$LogEvents = $null,
+        [AllowEmptyCollection()][object[]]$SwiRows = @(),
         [datetime]$Now = (Get-Date), [int]$CertificateWarningDays = 30, [int]$RequestStaleHours = 6, [int]$TimelineHours = 24
     )
     $actions = [Collections.Generic.List[object]]::new()
@@ -506,6 +507,10 @@ function Get-SmartM365OrchestratorDashboard {
         Add-DashboardAction 'Warning' 'Election' $groupName ('Unassigned: ' + $reason) 'Servers and versions'
     }
     foreach ($incident in @($Operations.Incidents)) { Add-DashboardAction 'Warning' 'Peer monitoring' ([string]$incident.ObservedBy) ([string]$incident.Issue) 'Operations' }
+    # A required SWI input that WorkplaceEvidence-Prepare would refuse (Get-SmartM365OrchestratorSwiValidity).
+    foreach ($swi in @($SwiRows | Where-Object { [bool](Get-InsightsProperty $_ 'Blocks' $false) })) {
+        Add-DashboardAction 'Critical' 'SWI validity' ([string]$swi.Name) ('{0}. {1}' -f [string]$swi.Swi, [string](Get-InsightsProperty $swi 'Detail' '')) 'Planning'
+    }
     # Queued requests are not stale: their wait starts when the residents activate them.
     foreach ($request in @($Requests | Where-Object { $_.Status -in @('Running', 'Cancelling') })) {
         $created = [datetime]::MinValue
@@ -611,12 +616,13 @@ function Get-SmartM365OrchestratorDashboardData {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$SharedDataFolderPath, [Parameter(Mandatory)]$JobsDocument, [Parameter(Mandatory)]$Operations,
-        [AllowNull()][object[]]$Runs = $null, [AllowEmptyCollection()][object[]]$Requests = @(), [AllowNull()]$LogEvents = $null, [datetime]$Now = (Get-Date)
+        [AllowNull()][object[]]$Runs = $null, [AllowEmptyCollection()][object[]]$Requests = @(), [AllowNull()]$LogEvents = $null,
+        [AllowEmptyCollection()][object[]]$SwiRows = @(), [datetime]$Now = (Get-Date)
     )
     if ($null -eq $Runs) { $Runs = @(Get-SmartM365OrchestratorRecentRuns -SharedDataFolderPath $SharedDataFolderPath -Days 21 -Now $Now) }
     $health = @(Get-SmartM365OrchestratorJobHealth -JobsDocument $JobsDocument -Runs $Runs -Now $Now)
     $plan = Read-InsightsJson -Path (Join-Path $SharedDataFolderPath 'Election\Orchestrator-ElectionPlan.json')
-    Get-SmartM365OrchestratorDashboard -JobsDocument $JobsDocument -Operations $Operations -Health $health -Runs $Runs -Plan $plan -Requests $Requests -LogEvents $LogEvents -Now $Now
+    Get-SmartM365OrchestratorDashboard -JobsDocument $JobsDocument -Operations $Operations -Health $health -Runs $Runs -Plan $plan -Requests $Requests -LogEvents $LogEvents -SwiRows $SwiRows -Now $Now
 }
 
 # Resident log lines kept as events. ERROR/WARN lines are always kept; INFO lines only when

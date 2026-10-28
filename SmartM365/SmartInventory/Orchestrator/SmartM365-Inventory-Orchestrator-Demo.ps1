@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.3
+1.4.4
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -189,6 +189,7 @@ function New-OrchestratorDemoDashboard {
     $failed = @($Data.History | Where-Object { $_.Status -eq 'Failed' -and [datetime]$_.EventTime -ge $clock.AddHours(-24) })
     foreach ($row in $failed | Select-Object -First 3) { $actions.Add([pscustomobject]@{ Severity = 'Critical'; Area = 'Job Failing'; Item = $row.JobName; Detail = 'Sample failure at {0}.' -f $row.EventTime; Target = 'Planning' }) }
     foreach ($job in @($Data.Jobs | Where-Object Health -eq 'Stale')) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Job Stale'; Item = $job.Name; Detail = ('Last sample success {0} ({1} h).' -f $job.LastSuccess, $job.SuccessAgeHours); Target = 'Planning' }) }
+    foreach ($job in @($Data.Jobs | Where-Object SwiBlocks)) { $actions.Add([pscustomobject]@{ Severity = 'Critical'; Area = 'SWI validity'; Item = $job.Name; Detail = ('{0}. DEMO - Sample required SWI input expired.' -f $job.Swi); Target = 'Planning' }) }
     foreach ($incident in @($Data.Incidents)) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Peer monitoring'; Item = $incident.ObservedBy; Detail = $incident.Issue; Target = 'Operations' }) }
     if ($Data.Maintenance) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Maintenance'; Item = 'Scheduling'; Detail = 'Sample maintenance is ON: scheduled launches are suspended.'; Target = 'Operations' }) }
     foreach ($logEvent in @($Data.LogEvents | Where-Object { $_.Level -eq 'ERROR' })) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Log ' + $logEvent.Category; Item = $logEvent.Server; Detail = $logEvent.Message; Target = 'Events' }) }
