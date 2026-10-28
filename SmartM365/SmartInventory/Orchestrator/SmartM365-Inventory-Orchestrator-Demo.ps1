@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.1
+1.4.2
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -67,6 +67,10 @@ function New-OrchestratorDemoData {
                 DependsOn=(@($source.DependsOn) -join ', ')
                 DependencyMode=[string](Get-OrchestratorGuiPropertyValue $source 'DependencyMode' 'LatestOccurrence')
                 DependencyMaxAgeHours=[int](Get-OrchestratorGuiPropertyValue $source 'DependencyMaxAgeHours' 0)
+                # Fictional SWI validity (the real one reads DATA-LAST, receipts and the SWI contracts).
+                Swi=$(if(-not $source.Enabled){'Not used by SWI'}elseif($Scenario -eq 'Issues' -and $i % 17 -eq 4){'Expired - blocks SWI'}elseif($Scenario -ne 'Healthy' -and $i % 13 -eq 5){'Expires < 24 h'}else{'Valid'})
+                SwiDaysLeft=$(if(-not $source.Enabled){$null}elseif($Scenario -eq 'Issues' -and $i % 17 -eq 4){-0.4}elseif($Scenario -ne 'Healthy' -and $i % 13 -eq 5){0.6}else{[math]::Round(1.4 + ($i % 6) * 2.3, 1)})
+                SwiDetail=('DEMO - Sample SWI validity of {0}; the limiting input and its rule are shown here.' -f $source.Name)
             }
             $row.NextRun=Get-OrchestratorDemoNextRun -Job $row -Clock $clock
             $row

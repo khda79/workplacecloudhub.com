@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.8
+1.6.9
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.8'
+$script:AppVersion = '1.6.9'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -78,6 +78,9 @@ $script:HistoryRows = @()
 $script:InitialHistoryLoaded = $false
 $script:RecentRuns = @()
 $script:HealthByName = @{}
+# SWI validity per job, computed in the Full refresh worker (Get-SmartM365OrchestratorSwiValidityForRoot).
+$script:SwiByName = @{}
+$script:SwiValidityError = ''
 # Job script .VERSION read in the Full refresh worker; the cache keeps unchanged files from being re-read.
 $script:ScriptVersions = @{}
 $script:ScriptVersionCache = [hashtable]::Synchronized(@{})
@@ -444,6 +447,15 @@ $xaml = @'
                                         <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="85"/>
                                         <DataGridTextColumn Header="Mode source" Binding="{Binding ModeSource}" Width="180"/>
                                         <DataGridTextColumn Header="Draft mode" Binding="{Binding DraftMode}" Width="90"/>
+                                        <DataGridTextColumn Header="Last success" Binding="{Binding LastSuccess}" Width="125"/>
+                                        <DataGridTextColumn Header="SWI validity" Binding="{Binding Swi}" Width="150">
+                                            <DataGridTextColumn.ElementStyle>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="ToolTip" Value="{Binding SwiDetail}"/>
+                                                </Style>
+                                            </DataGridTextColumn.ElementStyle>
+                                        </DataGridTextColumn>
+                                        <DataGridTextColumn Header="SWI days left" Binding="{Binding SwiDaysLeft}" Width="85"/>
                                         <DataGridTextColumn Header="Cache" Binding="{Binding CacheName}" Width="*"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
@@ -533,6 +545,14 @@ $xaml = @'
                             <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="70"/>
                             <DataGridTextColumn Header="Arguments" Binding="{Binding Arguments}" Width="180"/>
                             <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="70"/>
+                            <DataGridTextColumn Header="SWI validity" Binding="{Binding Swi}" Width="150">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="ToolTip" Value="{Binding SwiDetail}"/>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Header="SWI days left" Binding="{Binding SwiDaysLeft}" Width="85"/>
                             <DataGridTextColumn Header="Frequency" Binding="{Binding Frequency}" Width="90"/>
                             <DataGridTextColumn Header="Times" Binding="{Binding Times}" Width="155"/>
                             <DataGridTextColumn Header="Days" Binding="{Binding Days}" Width="150"/>
@@ -1289,6 +1309,7 @@ function Refresh-PlanningView {
             default { $allowedServers -join ', ' }
         }
         $health = if ($script:HealthByName.ContainsKey([string]$job.Name)) { $script:HealthByName[[string]$job.Name] } else { $null }
+        $swi = Get-GuiSwiRow -JobName ([string]$job.Name)
         [pscustomobject]@{
             Name = [string]$job.Name
             Version = Get-GuiJobScriptVersion -Job $job
@@ -1307,6 +1328,7 @@ function Refresh-PlanningView {
             SuccessAgeHours = if ($health) { $health.SuccessAgeHours } else { $null }
             ExpectedMaxAgeHours = if ($health) { $health.ExpectedMaxAgeHours } else { $null }
             AverageDurationMinutes = if ($health) { $health.AverageDurationMinutes } else { $null }
+            Swi = $swi.Swi; SwiDaysLeft = $swi.DaysLeft; SwiDetail = $swi.Detail
         }
     }
     $script:PlanningRows = @($rows | Sort-Object -Property Name)
@@ -1325,6 +1347,28 @@ function Refresh-ServersView {
 
 function Refresh-HistoryView {
     Start-GuiRefresh -Mode History
+}
+
+function Set-GuiSwiValidity {
+    # Keeps the previous values when a refresh cannot read the SWI inputs; one message per new error.
+    param([AllowNull()]$Validity, [string]$ErrorText = '')
+    if ($null -ne $Validity) {
+        $byName = @{}
+        foreach ($row in @($Validity.Rows)) { $byName[[string]$row.Name] = $row }
+        $script:SwiByName = $byName
+        if (@($Validity.Unmapped).Count) { Write-GuiActivity -Level WARN -Message ("SWI inputs without a producer job: {0}" -f (@($Validity.Unmapped) -join ', ')) }
+        $script:SwiValidityError = ''
+        return
+    }
+    if ($ErrorText -and $ErrorText -ne $script:SwiValidityError) { Write-GuiActivity -Level WARN -Message "SWI validity unavailable: $ErrorText" }
+    $script:SwiValidityError = $ErrorText
+}
+
+function Get-GuiSwiRow {
+    param([string]$JobName)
+    if ($script:SwiByName.ContainsKey($JobName)) { return $script:SwiByName[$JobName] }
+    $text = if ($script:SwiValidityError) { 'Unavailable' } else { '' }
+    return [pscustomobject]@{ Swi = $text; DaysLeft = $null; Detail = $(if ($script:SwiValidityError) { "SWI validity unavailable: $($script:SwiValidityError)" } else { '' }) }
 }
 
 function Update-JobHealth {
@@ -1945,6 +1989,8 @@ function Refresh-LaunchView {
             $mode = Resolve-SmartM365InventoryExecutionMode -Entry $entry -Catalog $catalog -DefaultOnPremExecutionMode $globalMode
             $draftJob = if ($draft.ContainsKey($entry.Name)) { $draft[$entry.Name] } else { $null }
             $draftMode = [string](Get-OrchestratorGuiPropertyValue -Object (Get-OrchestratorGuiPropertyValue -Object $draftJob -Name 'Execution' -DefaultValue $null) -Name 'Mode' -DefaultValue '')
+            $health = if ($script:HealthByName.ContainsKey([string]$entry.Name)) { $script:HealthByName[[string]$entry.Name] } else { $null }
+            $swi = Get-GuiSwiRow -JobName ([string]$entry.Name)
             [pscustomobject]@{
                 Name = $entry.Name
                 Version = Get-GuiJobScriptVersion -Job $definition
@@ -1957,6 +2003,8 @@ function Refresh-LaunchView {
                 DraftMode = if ($null -eq $execution) { '' } elseif ($draftMode) { $draftMode } else { '(default)' }
                 CacheName = [string](Get-OrchestratorGuiPropertyValue -Object $execution -Name 'CacheName' -DefaultValue '')
                 InManifest = $null -ne $draftJob
+                LastSuccess = if ($health) { $health.LastSuccess } else { '' }
+                Swi = $swi.Swi; SwiDaysLeft = $swi.DaysLeft; SwiDetail = $swi.Detail
             }
         }
         # HideInGui entries (orchestrator actions already offered as buttons, setup tools) stay in SmartInventory.cmd only.
@@ -2294,7 +2342,7 @@ function Get-GuiRefreshWork {
             return [pscustomobject]@{ Mode = 'History'; History = $rows; ReadAt = Get-Date }
         }
         $snapshot = $null; $recentRuns = @(); $servers = @(); $history = @(); $versions = @(); $owners = @{}
-        $scriptVersions = $null; $scriptVersionsError = ''
+        $scriptVersions = $null; $scriptVersionsError = ''; $swiValidity = $null; $swiValidityError = ''
         if ($InputData.Mode -eq 'Full') {
             $Progress.Message = 'Reading configuration and history...'
             $snapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $root
@@ -2316,6 +2364,10 @@ function Get-GuiRefreshWork {
                 $scriptVersions = Get-SmartM365OrchestratorScriptVersion -SmartInventoryRoot $InputData.SmartInventoryRoot -ScriptPath @($paths) -Cache $InputData.ScriptVersionCache
             }
             catch { $scriptVersionsError = $_.Exception.Message }
+            # SWI validity of the latest collections (DATA-LAST, receipts, SWI contracts): read-only, isolated.
+            $Progress.Message = 'Checking SWI validity of the latest collections...'
+            try { $swiValidity = Get-SmartM365OrchestratorSwiValidityForRoot -SharedDataFolderPath $root -SmartM365RootPath $InputData.SmartM365RootPath -JobsDocument $snapshot.Jobs }
+            catch { $swiValidityError = $_.Exception.Message }
         }
         $Progress.Message = 'Reading live operations and requests...'
         $publishedCluster = Read-SmartM365OrchestratorJson -Path (Join-Path $root 'Config/Orchestrator-Cluster.json')
@@ -2362,7 +2414,8 @@ function Get-GuiRefreshWork {
             Requests = $requests; LogEvents = $logEvents; LogEventsError = $logEventsError
             Dashboard = $dashboard; DashboardError = $dashboardError
             Configuration = $configuration; ConfigurationError = $configurationError
-            ScriptVersions = $scriptVersions; ScriptVersionsError = $scriptVersionsError; ReadAt = Get-Date
+            ScriptVersions = $scriptVersions; ScriptVersionsError = $scriptVersionsError
+            SwiValidity = $swiValidity; SwiValidityError = $swiValidityError; ReadAt = Get-Date
         }
     }
 }
@@ -2402,6 +2455,7 @@ function Start-GuiRefresh {
         ConfigurationProfile = $(if ($Mode -ne 'History' -and (Test-GuiConfigurationTabVisible)) { [string]$script:EffectiveConfig.ProfileKey } else { '' })
         ConfigRootPath = $script:SmartM365RootPath; ConfigViewModulePath = (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ConfigView.psm1')
         SmartInventoryRoot = $script:SmartInventoryRoot; JobsTemplatePath = (Join-Path $PSScriptRoot 'Orchestrator-Jobs.json.template'); ScriptVersionCache = $script:ScriptVersionCache
+        SmartM365RootPath = $script:SmartM365RootPath
     }
     $script:RefreshContext.Input = $inputData
     $script:RefreshContext.Progress.Message = ''
@@ -2448,6 +2502,7 @@ function Receive-GuiRefresh {
             if ($null -ne $scriptVersionsProperty -and $scriptVersionsProperty.Value -is [hashtable]) { $script:ScriptVersions = $scriptVersionsProperty.Value }
             $scriptVersionsErrorProperty = $result.PSObject.Properties['ScriptVersionsError']
             if ($null -ne $scriptVersionsErrorProperty -and $scriptVersionsErrorProperty.Value) { Write-GuiActivity -Level WARN -Message "Job script versions unavailable: $($scriptVersionsErrorProperty.Value)" }
+            Set-GuiSwiValidity -Validity $(if ($result.PSObject.Properties['SwiValidity']) { $result.SwiValidity } else { $null }) -ErrorText $(if ($result.PSObject.Properties['SwiValidityError']) { [string]$result.SwiValidityError } else { '' })
             Refresh-PlanningView -Owners $result.Owners
             Refresh-LaunchView
             $servers = @(Refresh-ServersView -Servers $result.Servers)
@@ -2524,6 +2579,8 @@ function Refresh-AllViewsSync {
             $script:ScriptVersions = Get-SmartM365OrchestratorScriptVersion -SmartInventoryRoot $script:SmartInventoryRoot -ScriptPath (@(Get-GuiJobScriptPaths -JobsDocument $script:DraftJobs) + @($templatePaths)) -Cache $script:ScriptVersionCache
         }
         catch { Write-GuiActivity -Level WARN -Message "Job script versions unavailable: $($_.Exception.Message)" }
+        try { Set-GuiSwiValidity -Validity (Get-SmartM365OrchestratorSwiValidityForRoot -SharedDataFolderPath $script:SharedDataFolderPath -SmartM365RootPath $script:SmartM365RootPath -JobsDocument $script:DraftJobs) }
+        catch { Set-GuiSwiValidity -Validity $null -ErrorText $_.Exception.Message }
         Refresh-PlanningView
         Refresh-LaunchView
         $servers = @(Refresh-ServersView)

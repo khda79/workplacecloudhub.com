@@ -810,13 +810,292 @@ function Get-SmartM365OrchestratorScriptVersion {
     return $versions
 }
 
+# Producer script of every SWI input without its own source receipt. Receipt producers come from
+# the CMDB source registry and the Intune operational contract. Test-SmartM365OrchestratorSwiValidityOffline
+# keeps this map aligned with the SWI contracts and the jobs template.
+$script:SwiFileProducers = [ordered]@{
+    'SmartM365-ActiveDirectory-HealthCheck.ps1' = @('AD_HealthCheck.csv')
+    'SmartM365-ActiveDirectory-Inventory.ps1' = @('AD_Users_DuplicateSMTP.csv', 'AD_Users_DuplicateUPN.csv')
+    'SmartM365-AuthenticationMethodsRegistration-Inventory.ps1' = @('M365_Entra_AuthenticationMethodsRegistration.csv')
+    'SmartM365-AzureADConnect-SyncHealth-Inventory.ps1' = @('M365_Entra_AzureADConnect_SyncHealth.csv')
+    'SmartM365-ConditionalAccess-Inventory.ps1' = @('M365_Entra_ConditionalAccessPolicies.csv', 'M365_Entra_ConditionalAccessPolicyTargets.csv')
+    'SmartM365-CopilotUsage-Inventory.ps1' = @('M365_Copilot_UserCountTrend.csv', 'M365_Copilot_UserUsage.csv')
+    'SmartM365-Device-System-Inventory.ps1' = @('Intune_Devices_LocalSystem.csv')
+    'SmartM365-Devices-Compliance-Inventory.ps1' = @('Intune_Devices_Compliance_Policies.csv')
+    'SmartM365-Devices-Inventory.ps1' = @('Intune_Devices_Inventory.csv')
+    'SmartM365-EXO-AcceptedDomains-Inventory.ps1' = @('Exchange_EXO_AcceptedDomains.csv')
+    'SmartM365-EXO-Mailboxes-Inventory.ps1' = @('Exchange_EXO_Mailboxes_AllDomains_Archive.csv', 'Exchange_EXO_Mailboxes_AllDomains_Permissions.csv', 'Exchange_EXO_Mailboxes_AllDomains_Stats.csv')
+    'SmartM365-EXO-MigJob-Inventory.ps1' = @('Exchange_EXO_MigrationJobs.csv')
+    'SmartM365-EndpointAnalytics-Inventory.ps1' = @('Intune_EndpointAnalytics_StartupDevices.csv')
+    'SmartM365-EntraDevices-Inventory.ps1' = @('M365_Entra_Devices.csv', 'M365_Entra_Devices_HardwareIdConflicts.csv', 'M365_Entra_Devices_RemovalCandidates.csv')
+    'SmartM365-Exchange-Hybrid-FreeBusy-Inventory.ps1' = @('Exchange_Hybrid_FreeBusy_Findings.csv', 'Exchange_Hybrid_FreeBusy_Summary.csv')
+    'SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1' = @('Exchange_OnPrem_HealthChecker_Findings.csv', 'Exchange_OnPrem_HealthChecker_Summary.csv', 'Exchange_OnPrem_Infrastructure_PerServerSummary.csv', 'Exchange_OnPrem_MailboxDatabases_Paths.csv', 'Exchange_OnPrem_MigrationReadiness_Config.csv', 'Exchange_OnPrem_Servers_Compute.csv', 'Exchange_OnPrem_Servers_DiskDrives.csv', 'Exchange_OnPrem_Servers_Inventory.csv', 'Exchange_OnPrem_Servers_Inventory_Summary.csv', 'Exchange_OnPrem_Servers_LogicalDisks.csv', 'Exchange_OnPrem_Servers_RemoteAccess.csv', 'Exchange_OnPrem_Servers_ServiceHealth.csv')
+    'SmartM365-Intune-EndpointSecurityHealth-Inventory.ps1' = @('Intune_EndpointSecurity_DefenderAgents.csv', 'Intune_EndpointSecurity_FirewallStatus.csv')
+    'SmartM365-Licences-Inventory.ps1' = @('M365_Licenses_ReportAssignmentIssues.csv', 'M365_Licenses_ReportCandidates.csv', 'M365_Licenses_ReportGaps.csv', 'M365_Licenses_ReportSkuCandidates.csv', 'M365_Licenses_ReportSkuCapacity.csv', 'M365_Licenses_ReportSnapshot.json.txt', 'M365_Licenses_ReportSources.csv', 'M365_Licenses_ReportSummary.csv')
+    'SmartM365-LicensePricing-Inventory.ps1' = @('M365_License_Prices.csv')
+    'SmartM365-M365-BackupPolicyScope-Inventory.ps1' = @('M365_BackupPolicyScope_GroupMembers.csv', 'M365_BackupPolicyScope_MailboxCoverage.csv')
+    'SmartM365-M365-BackupProtectedMailboxes-Inventory.ps1' = @('M365_Backup_ProtectedMailboxes.csv')
+    'SmartM365-M365-BackupProtectedSitesAndDrives-Inventory.ps1' = @('M365_Backup_ProtectedOneDriveAccounts.csv', 'M365_Backup_ProtectedSharePointSites.csv')
+    'SmartM365-M365UserActivity-Inventory.ps1' = @('M365_Apps_Activations.csv', 'M365_Apps_Usage_180D.csv', 'M365_Apps_Usage_30D.csv', 'M365_Email_Activity.csv', 'M365_Email_AppUsage.csv', 'M365_Groups_Activity.csv', 'M365_Mailbox_Usage.csv', 'M365_OneDrive_Usage.csv', 'M365_OneDrive_UserActivity.csv', 'M365_SharePoint_UserActivity.csv', 'M365_Teams_UserActivity.csv')
+    'SmartM365-Mailboxes-AllSources-PermissionsByUserReport.ps1' = @('Exchange_Mailboxes_AllSources_PermissionsByUser.csv')
+    'SmartM365-SPO-Inventory.ps1' = @('M365_SPO_Tenant.csv')
+    'SmartM365-SecureScore-Inventory.ps1' = @('M365_Security_SecureScore.csv')
+    'SmartM365-SharePoint-OnPrem-Content-Inventory.ps1' = @('SharePoint_OnPrem_CollectionCoverage.csv', 'SharePoint_OnPrem_SiteAdministrators.csv', 'SharePoint_OnPrem_SiteCollections.csv', 'SharePoint_OnPrem_Webs.csv')
+    'SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.ps1' = @('SharePoint_OnPrem_ContentDatabases.csv', 'SharePoint_OnPrem_Farms.csv', 'SharePoint_OnPrem_Servers.csv', 'SharePoint_OnPrem_ServiceApplications.csv', 'SharePoint_OnPrem_WebApplicationZones.csv', 'SharePoint_OnPrem_WebApplications.csv')
+    'SmartM365-Teams-Inventory.ps1' = @('M365_Teams_Channels.csv')
+    'SmartM365-WinUpdate_Status_From_Intune.ps1' = @('Intune_WindowsUpdate_Status.csv')
+}
+
+function Get-SmartM365OrchestratorLatestFolderPath {
+    <# DATA-LAST beside the shared DATA-ALL\Orchestrator folder, as the producer receipts use it. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath)
+    $shared = $SharedDataFolderPath.TrimEnd([char[]]'\/')
+    $dataAll = Split-Path -Path $shared -Parent
+    if ([IO.Path]::GetFileName($shared) -ne 'Orchestrator' -or [IO.Path]::GetFileName($dataAll) -ne 'DATA-ALL') {
+        throw "DATA-LAST cannot be located: the shared folder is not <tenant>\DATA-ALL\Orchestrator ($SharedDataFolderPath)."
+    }
+    return (Join-Path (Split-Path -Path $dataAll -Parent) 'DATA-LAST')
+}
+
+function Get-InsightsSwiPrepareSettings {
+    # Same values as WorkplaceEvidence-Prepare: its local configuration, else its template.
+    param([string]$ConfigPath, [string]$TemplatePath)
+    $maximum = 0; $overrides = @{}; $source = ''
+    foreach ($candidate in @(@{ Path = $ConfigPath; Name = 'Prepare configuration' }, @{ Path = $TemplatePath; Name = 'Prepare template (no local configuration found)' })) {
+        if ([string]::IsNullOrWhiteSpace([string]$candidate.Path)) { continue }
+        if ($candidate.Path -like '*.template') {
+            # The committed template is plain JSON outside the owned .json/.json.txt transport.
+            if (-not (Test-Path -LiteralPath $candidate.Path -PathType Leaf)) { continue }
+            $document = Get-Content -LiteralPath $candidate.Path -Raw | ConvertFrom-Json
+        }
+        else {
+            if (-not (Get-SmartM365JsonReadPath $candidate.Path -Optional)) { continue }
+            $document = (Read-SmartM365JsonDocument -Path $candidate.Path).Document
+        }
+        $value = Get-InsightsProperty $document 'PreparedMaxSourceAgeHours' $null
+        $hours = 0
+        if (-not [int]::TryParse([string]$value, [ref]$hours) -or $hours -lt 1 -or $hours -gt 8760) { continue }
+        $maximum = $hours; $source = [string]$candidate.Name
+        $table = Get-InsightsProperty $document 'PreparedSourceAgeOverrides' $null
+        if ($null -ne $table) {
+            foreach ($property in $table.PSObject.Properties) {
+                $limit = 0
+                if ([int]::TryParse([string]$property.Value, [ref]$limit) -and $limit -ge 1 -and $limit -le 8760) { $overrides[[string]$property.Name] = $limit }
+            }
+        }
+        break
+    }
+    if ($maximum -eq 0) { $maximum = 168; $source = 'Prepare code default (no configuration or template found)' }
+    [pscustomobject]@{ MaxSourceAgeHours = $maximum; AgeOverrides = $overrides; Source = $source }
+}
+
+function Read-InsightsSwiReceipt {
+    param([string]$LatestFolderPath, [string]$ReceiptName, [hashtable]$Cache)
+    if ($Cache.ContainsKey($ReceiptName)) { return $Cache[$ReceiptName] }
+    $basePath = Join-Path $LatestFolderPath ($ReceiptName -replace '\.txt$', '')
+    $receipt = $null
+    if (Get-SmartM365JsonReadPath $basePath -Optional) {
+        try { $receipt = (Read-SmartM365JsonDocument -Path $basePath).Document } catch { $receipt = 'Unreadable' }
+    }
+    $Cache[$ReceiptName] = $receipt
+    return $receipt
+}
+
+function Get-SmartM365OrchestratorSwiValidity {
+    <#
+    Read-only SWI validity of each job's latest collection, with the same publication-age rules as
+    WorkplaceEvidence-Prepare: DATA-LAST file write time (PreparedMaxSourceAgeHours and its
+    overrides, or the optional file limit), producer receipt start time for native sources
+    (native evidence contract) and receipt completion time for the Intune operational groups.
+    A job's validity is the earliest expiry among its required inputs.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$LatestFolderPath,
+        [Parameter(Mandatory)]$JobsDocument,
+        [Parameter(Mandatory)][string]$SwiConfigRoot,
+        [Parameter(Mandatory)][string]$RegistryPath,
+        [string]$PrepareConfigPath = '',
+        [string]$PrepareTemplatePath = '',
+        [datetimeoffset]$NowUtc = [datetimeoffset]::UtcNow
+    )
+    $readContract = { param($Name) (Read-SmartM365JsonDocument -Path (Join-Path $SwiConfigRoot $Name)).Document }
+    $source = & $readContract 'prepared-source-contract.json.txt'
+    $artifact = & $readContract 'prepared-artifact-contract.json.txt'
+    $native = & $readContract 'native-evidence-contract.json.txt'
+    $intune = & $readContract 'intune-operational-contract.json.txt'
+    $registry = (Read-SmartM365JsonDocument -Path $RegistryPath).Document
+    $settings = Get-InsightsSwiPrepareSettings -ConfigPath $PrepareConfigPath -TemplatePath $PrepareTemplatePath
+
+    # Producer script of each input file.
+    $producerByFile = @{}
+    foreach ($script in $script:SwiFileProducers.Keys) { foreach ($file in $script:SwiFileProducers[$script]) { $producerByFile[$file] = [string]$script } }
+    $receiptByFile = @{}
+    foreach ($producer in @($registry.Producers)) {
+        foreach ($file in @($producer.Files)) { $producerByFile[[string]$file] = [string]$producer.Script; $receiptByFile[[string]$file] = [string]$producer.Receipt }
+    }
+    foreach ($group in @($intune.groups)) { foreach ($entry in @($group.files)) { $producerByFile[[string]$entry.file] = [string]$group.producer } }
+
+    # Rules, as Get-PreparedSourcePlan, the native freshness policy and the Intune source groups apply them.
+    $rules = [Collections.Generic.List[object]]::new()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $limitFor = { param($File) if ($settings.AgeOverrides.ContainsKey($File)) { [int]$settings.AgeOverrides[$File] } else { [int]$settings.MaxSourceAgeHours } }
+    foreach ($file in @(@($source.currentFiles) + @($artifact.currentFiles))) {
+        if ($seen.Add('File|' + $file)) { $rules.Add([pscustomobject]@{ File = [string]$file; Kind = 'File'; LimitHours = (& $limitFor $file); WarningHours = $null; Optional = $false; Group = '' }) }
+    }
+    foreach ($entry in @(@(Get-InsightsProperty $source 'optionalCurrentFiles' @()) + @(Get-InsightsProperty $artifact 'optionalCurrentFiles' @()))) {
+        if ($seen.Add('File|' + $entry.file)) { $rules.Add([pscustomobject]@{ File = [string]$entry.file; Kind = 'File'; LimitHours = [int]$entry.maxAgeHours; WarningHours = $null; Optional = $true; Group = '' }) }
+    }
+    $freshnessGroup = @{}
+    foreach ($group in @(Get-InsightsProperty $native 'freshnessGroups' @())) { foreach ($file in @($group.sources)) { $freshnessGroup[[string]$file] = $group } }
+    foreach ($entry in @($native.sources)) {
+        $file = [string]$entry.file
+        $group = if ($freshnessGroup.ContainsKey($file)) { $freshnessGroup[$file] } else { $null }
+        $limit = if ($group) { [double]$group.maxAgeHours } else { [double]$native.maxAgeHours }
+        $warning = if ($group) { [double]$group.warningAgeHours } else { $null }
+        $rules.Add([pscustomobject]@{ File = $file; Kind = 'Receipt'; LimitHours = $limit; WarningHours = $warning; Optional = $false; Group = $(if ($group) { [string]$group.name } else { 'Core' }) })
+    }
+    foreach ($group in @($intune.groups)) {
+        foreach ($entry in @($group.files)) {
+            $rules.Add([pscustomobject]@{ File = [string]$entry.file; Kind = 'IntuneReceipt'; LimitHours = (& $limitFor ([string]$entry.file)); WarningHours = $null; Optional = $false; Group = [string]$group.name })
+        }
+    }
+
+    # Evaluation of each rule against DATA-LAST and the receipts.
+    $receipts = @{}
+    $intuneGroups = @{}
+    foreach ($group in @($intune.groups)) {
+        $receipt = Read-InsightsSwiReceipt -LatestFolderPath $LatestFolderPath -ReceiptName ([string]$group.receipt) -Cache $receipts
+        $present = @($group.files | Where-Object { Test-Path -LiteralPath (Join-Path $LatestFolderPath $_.file) -PathType Leaf }).Count
+        $intuneGroups[[string]$group.name] = [pscustomobject]@{ Receipt = $receipt; Present = $present; Expected = @($group.files).Count }
+    }
+    $evaluations = foreach ($rule in $rules) {
+        $timestamp = $null; $problem = ''; $basis = ''; $optional = $rule.Optional
+        switch ($rule.Kind) {
+            'File' {
+                $basis = 'DATA-LAST file time'
+                $item = Get-Item -LiteralPath (Join-Path $LatestFolderPath $rule.File) -ErrorAction SilentlyContinue
+                if ($null -eq $item -or $item.PSIsContainer) { $problem = 'Missing' }
+                elseif ($item.Length -eq 0) { $problem = 'Empty' }
+                else { $timestamp = [datetimeoffset]$item.LastWriteTimeUtc }
+            }
+            'Receipt' {
+                $basis = 'collector receipt start'
+                $name = if ($receiptByFile.ContainsKey($rule.File)) { $receiptByFile[$rule.File] } else { '' }
+                $receipt = if ($name) { Read-InsightsSwiReceipt -LatestFolderPath $LatestFolderPath -ReceiptName $name -Cache $receipts } else { $null }
+                if ($null -eq $receipt) { $problem = 'Missing receipt' }
+                elseif ($receipt -is [string]) { $problem = 'Unreadable receipt' }
+                elseif ([string](Get-InsightsProperty $receipt 'Status' '') -ne 'Completed' -or [int](Get-InsightsProperty $receipt 'Errors' 1) -ne 0) { $problem = 'Receipt not completed' }
+                else {
+                    $record = @(Get-InsightsProperty $receipt 'Files' @() | Where-Object { [string](Get-InsightsProperty $_ 'File' '') -eq $rule.File } | Select-Object -First 1)
+                    $started = if ($record.Count -and (Get-InsightsProperty $record[0] 'StartedAtUtc' $null)) { Get-InsightsProperty $record[0] 'StartedAtUtc' $null } else { Get-InsightsProperty $receipt 'StartedAtUtc' $null }
+                    if ($record.Count -eq 0) { $problem = 'File absent from receipt' }
+                    elseif ($null -eq $started) { $problem = 'Receipt without start time' }
+                    else { $timestamp = [datetimeoffset]::Parse((ConvertTo-InsightsSwiTimeText $started), [Globalization.CultureInfo]::InvariantCulture) }
+                }
+            }
+            'IntuneReceipt' {
+                $basis = 'collector receipt completion'
+                $state = $intuneGroups[$rule.Group]
+                if ($null -eq $state.Receipt -and $state.Present -eq 0) { $problem = 'Not collected'; $optional = $true }
+                elseif ($null -eq $state.Receipt -or $state.Receipt -is [string] -or $state.Present -ne $state.Expected) { $problem = 'Incomplete group' }
+                elseif ([string](Get-InsightsProperty $state.Receipt 'Status' '') -ne 'Completed' -or [int](Get-InsightsProperty $state.Receipt 'Errors' 1) -ne 0) { $problem = 'Receipt not completed' }
+                else { $timestamp = [datetimeoffset]::Parse((ConvertTo-InsightsSwiTimeText (Get-InsightsProperty $state.Receipt 'CompletedAtUtc' '')), [Globalization.CultureInfo]::InvariantCulture) }
+            }
+        }
+        if ($null -ne $timestamp -and $timestamp -gt $NowUtc.AddMinutes(5)) { $problem = 'Future timestamp'; $timestamp = $null }
+        $expires = if ($null -ne $timestamp) { $timestamp.AddHours([double]$rule.LimitHours) } else { $null }
+        $hoursLeft = if ($null -ne $expires) { ($expires - $NowUtc).TotalHours } else { $null }
+        $state = if ($problem) { $problem }
+            elseif ($hoursLeft -lt 0) { 'Expired' }
+            elseif ($null -ne $rule.WarningHours -and ($NowUtc - $timestamp).TotalHours -gt $rule.WarningHours) { 'Aging' }
+            else { 'Valid' }
+        [pscustomobject]@{
+            File = $rule.File; Kind = $rule.Kind; Basis = $basis; LimitHours = $rule.LimitHours; Optional = [bool]$optional
+            Producer = if ($producerByFile.ContainsKey($rule.File)) { $producerByFile[$rule.File] } else { '' }
+            TimestampUtc = $timestamp; ExpiresAtUtc = $expires; HoursLeft = $hoursLeft; State = $state
+            Blocks = -not $optional -and $state -notin @('Valid', 'Aging')
+        }
+    }
+
+    # One row per job: its scripts' inputs, the most urgent required one decides.
+    $jobsByScript = @{}
+    foreach ($job in @($JobsDocument.Jobs)) {
+        $scriptName = [IO.Path]::GetFileName([string](Get-InsightsProperty $job 'ScriptPath' ''))
+        if (-not $jobsByScript.ContainsKey($scriptName)) { $jobsByScript[$scriptName] = [Collections.Generic.List[string]]::new() }
+        $jobsByScript[$scriptName].Add([string]$job.Name)
+    }
+    $rows = foreach ($job in @($JobsDocument.Jobs)) {
+        $scriptName = [IO.Path]::GetFileName([string](Get-InsightsProperty $job 'ScriptPath' ''))
+        $inputs = @($evaluations | Where-Object Producer -eq $scriptName)
+        if ($inputs.Count -eq 0) {
+            [pscustomobject]@{ Name = [string]$job.Name; Swi = 'Not used by SWI'; DaysLeft = $null; ExpiresAt = ''; Detail = 'No SWI input is produced by this job.'; Inputs = @() }
+            continue
+        }
+        $required = @($inputs | Where-Object { -not $_.Optional })
+        $pool = if ($required.Count) { $required } else { $inputs }
+        $limiting = @($pool | Sort-Object @{ Expression = { if ($_.Blocks -or ($_.Optional -and $_.State -notin @('Valid', 'Aging'))) { 0 } else { 1 } } }, @{ Expression = { if ($null -ne $_.HoursLeft) { $_.HoursLeft } else { [double]::MinValue } } } | Select-Object -First 1)[0]
+        $status = if ($limiting.State -in @('Valid', 'Aging')) {
+                if ($limiting.HoursLeft -lt 24) { 'Expires < 24 h' } elseif ($limiting.State -eq 'Aging') { 'Aging (accepted)' } else { 'Valid' }
+            }
+            elseif ($limiting.Optional) { '{0} (optional)' -f $limiting.State }
+            else { '{0} - blocks SWI' -f $limiting.State }
+        $expiresText = if ($null -ne $limiting.ExpiresAtUtc) { $limiting.ExpiresAtUtc.LocalDateTime.ToString('yyyy-MM-dd HH:mm') } else { '' }
+        $shared = if ($jobsByScript[$scriptName].Count -gt 1) { (' Shared output of {0} ({1}).' -f $scriptName, ($jobsByScript[$scriptName] -join ', ')) } else { '' }
+        $otherIssues = @($inputs | Where-Object { $_ -ne $limiting -and $_.State -notin @('Valid', 'Aging') } | ForEach-Object { '{0}: {1}{2}' -f $_.File, $_.State, $(if ($_.Optional) { ' (optional)' } else { '' }) })
+        $detail = ('Limiting input: {0}; rule: {1} + {2} h{3}; expires {4}.{5}' -f $limiting.File, $limiting.Basis, $limiting.LimitHours, $(if ($limiting.Optional) { ' (optional input)' } else { '' }), $(if ($expiresText) { $expiresText } else { 'n/a' }), $shared)
+        if ($otherIssues.Count) { $detail += ' Other inputs: ' + ($otherIssues -join '; ') + '.' }
+        [pscustomobject]@{
+            Name = [string]$job.Name; Swi = $status
+            DaysLeft = if ($null -ne $limiting.HoursLeft) { [math]::Round($limiting.HoursLeft / 24, 1) } else { $null }
+            ExpiresAt = $expiresText; Detail = $detail; Inputs = $inputs
+        }
+    }
+    [pscustomobject]@{
+        Rows = @($rows); Inputs = @($evaluations)
+        Unmapped = @($evaluations | Where-Object { -not $_.Producer -or -not $jobsByScript.ContainsKey($_.Producer) } | ForEach-Object File | Sort-Object -Unique)
+        MaxSourceAgeHours = $settings.MaxSourceAgeHours; SettingsSource = $settings.Source
+        LatestFolderPath = $LatestFolderPath; EvaluatedAtUtc = $NowUtc
+    }
+}
+
+function Get-SmartM365OrchestratorSwiValidityForRoot {
+    <# Resolves the deployed inputs as WorkplaceEvidence-Prepare does, then evaluates the validity. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath, [Parameter(Mandatory)][string]$SmartM365RootPath, [Parameter(Mandatory)]$JobsDocument)
+    $prepareFolder = Join-Path $SmartM365RootPath 'SmartInventory/PreparedEvidence'
+    $prepareConfig = Join-Path $prepareFolder 'SmartM365-WorkplaceEvidence-Prepare.local.json'
+    # Prepare's WorkplaceIntelligenceRootPath when it is a plain path, else the sibling SmartWorkplaceIntelligence.
+    $product = Join-Path (Split-Path -Path $SmartM365RootPath -Parent) 'SmartWorkplaceIntelligence'
+    try {
+        if (Get-SmartM365JsonReadPath $prepareConfig -Optional) {
+            $configured = [string](Get-InsightsProperty (Read-SmartM365JsonDocument -Path $prepareConfig).Document 'WorkplaceIntelligenceRootPath' '')
+            if ($configured -and $configured -notmatch '\{\{|USE_GLOBAL') { $product = $configured }
+        }
+    }
+    catch { Write-Verbose ("Prepare configuration unreadable; default SmartWorkplaceIntelligence location used: {0}" -f $_.Exception.Message) }
+    Get-SmartM365OrchestratorSwiValidity -LatestFolderPath (Get-SmartM365OrchestratorLatestFolderPath -SharedDataFolderPath $SharedDataFolderPath) `
+        -JobsDocument $JobsDocument -SwiConfigRoot (Join-Path $product 'config') `
+        -RegistryPath (Join-Path $SmartM365RootPath 'Modules/SmartM365.Core/SmartM365-CmdbSources.json.txt') `
+        -PrepareConfigPath $prepareConfig -PrepareTemplatePath (Join-Path $prepareFolder 'SmartM365-WorkplaceEvidence-Prepare.local.json.template')
+}
+
+function ConvertTo-InsightsSwiTimeText {
+    param([AllowNull()]$Value)
+    if ($Value -is [datetime]) { return ([datetime]$Value).ToUniversalTime().ToString('o') }
+    if ($Value -is [datetimeoffset]) { return ([datetimeoffset]$Value).UtcDateTime.ToString('o') }
+    [string]$Value
+}
+
 Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorScheduleOccurrences', 'Get-SmartM365OrchestratorExpectedMaxAgeHours', 'Get-SmartM365OrchestratorRecentRuns',
     'Get-SmartM365OrchestratorJobHealth', 'Get-SmartM365OrchestratorDependents', 'Get-SmartM365OrchestratorDependencyReadiness',
     'Get-SmartM365OrchestratorOperations', 'Get-SmartM365OrchestratorRecentPipelineRuns', 'New-SmartM365OrchestratorJobRunRequest',
     'Get-SmartM365OrchestratorLogEventCategory', 'Get-SmartM365OrchestratorLogEvents', 'Select-SmartM365OrchestratorLogEvents',
     'Get-SmartM365OrchestratorDashboard', 'Get-SmartM365OrchestratorDashboardData',
-    'Get-SmartM365OrchestratorScriptVersion'
+    'Get-SmartM365OrchestratorScriptVersion', 'Get-SmartM365OrchestratorLatestFolderPath', 'Get-SmartM365OrchestratorSwiValidity',
+    'Get-SmartM365OrchestratorSwiValidityForRoot'
 )
 
 # SIG # Begin signature block
