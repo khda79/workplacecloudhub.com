@@ -26,7 +26,8 @@ the same history columns as the normal export.
 pwsh -STA -NoProfile -ExecutionPolicy Bypass -File .\SmartM365-Inventory-Orchestrator-GUI.ps1 -Demo -DemoScenario Issues -DemoView Operations
 ```
 
-Scenes: `Overview` (default), `Issues`, `Maintenance`. Initial views: `Dashboard`,
+Scenes: `Overview` (default), `Issues`, `Maintenance`, `Healthy` (since GUI 1.6.7: no failed
+run, stale job, incident or log error; the Dashboard has nothing to review). Initial views: `Dashboard`,
 `Operations`, `Planning`, `History`, `Requests` (opens `Operations` > `Requests`), `Servers and versions`, `Activity`,
 `Events` (fictional log events; no resident log is read in demo mode), `Configuration`
 (fictional Contoso files built from the shipped templates; no runtime configuration is read).

@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.6
+1.6.7
 #>
 [CmdletBinding()]
 param(
@@ -44,7 +44,7 @@ param(
     [switch]$ValidateOnly,
     [switch]$SmokeTest,
     [switch]$Demo,
-    [ValidateSet('Overview','Issues','Maintenance')]
+    [ValidateSet('Overview','Issues','Maintenance','Healthy')]
     [string]$DemoScenario = 'Overview',
     [ValidateSet('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity','Events','Configuration')]
     [string]$DemoView = 'Dashboard',
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.6'
+$script:AppVersion = '1.6.7'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null

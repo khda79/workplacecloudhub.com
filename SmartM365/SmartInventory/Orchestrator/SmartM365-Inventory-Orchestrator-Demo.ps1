@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.3.3
+1.4.0
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -29,7 +29,7 @@ function Get-OrchestratorDemoNextRun {
 }
 
 function New-OrchestratorDemoData {
-    param([ValidateSet('Overview','Issues','Maintenance')][string]$Scenario)
+    param([ValidateSet('Overview','Issues','Maintenance','Healthy')][string]$Scenario)
     $clock = [datetime]'2026-10-18T09:30:00'
     $servers = @(
         foreach ($i in 1..3) {
@@ -77,7 +77,8 @@ function New-OrchestratorDemoData {
             for ($i=0; $i -lt $jobs.Count; $i++) {
                 $start = $clock.Date.AddDays(-$day).AddHours(1).AddMinutes([math]::Floor(360*$i/[double]$jobs.Count))
                 $duration=3+($i%18)
-                $status = if (($day+$i) % 19 -eq 0) {'Failed'} elseif (($day+$i) % 11 -eq 0) {'CompletedWithWarnings'} else {'Success'}
+                # The Healthy scene keeps every sample run successful.
+                $status = if ($Scenario -eq 'Healthy') {'Success'} elseif (($day+$i) % 19 -eq 0) {'Failed'} elseif (($day+$i) % 11 -eq 0) {'CompletedWithWarnings'} else {'Success'}
                 [pscustomobject]@{
                     EventTime=$start.AddMinutes($duration).ToString('yyyy-MM-dd HH:mm:ss')
                     StartTime=$start.ToString('yyyy-MM-dd HH:mm:ss'); Server=$jobs[$i].Server
@@ -105,7 +106,7 @@ function New-OrchestratorDemoData {
         $logEvents.Add([pscustomobject]@{Time='2026-10-18 05:59:58';Server=$server.Server;Level='INFO';Category='Lifecycle';Count=1;First='2026-10-18 05:59:58';Message='SmartM365-Inventory-Orchestrator exiting normally (exit code 0).';Source='Demo/Logs/Orchestrator.log'})
         $logEvents.Add([pscustomobject]@{Time='2026-10-18 07:15:00';Server=$server.Server;Level='INFO';Category='Maintenance';Count=1;First='2026-10-18 07:15:00';Message='Maintenance control applied: revision=3; enabled=False; catchUpAll=True; reason=Sample planning resumed.';Source='Demo/Logs/Orchestrator.log'})
     }
-    $logEvents.Add([pscustomobject]@{Time='2026-10-18 08:41:12';Server='CTSO-INV-02';Level='WARN';Category='Warning';Count=2;First='2026-10-18 08:12:40';Message='Capability TeamsPowerShell unavailable on the sample server.';Source='Demo/Logs/Orchestrator.log'})
+    if ($Scenario -ne 'Healthy') { $logEvents.Add([pscustomobject]@{Time='2026-10-18 08:41:12';Server='CTSO-INV-02';Level='WARN';Category='Warning';Count=2;First='2026-10-18 08:12:40';Message='Capability TeamsPowerShell unavailable on the sample server.';Source='Demo/Logs/Orchestrator.log'}) }
     if ($Scenario -eq 'Issues') {
         $logEvents.Add([pscustomobject]@{Time='2026-10-18 09:24:31';Server='CTSO-INV-03';Level='WARN';Category='Heartbeat';Count=14;First='2026-10-18 09:11:02';Message='Failed to write heartbeat: sample shared folder write timeout.';Source='Demo/Logs/Orchestrator.log'})
         $logEvents.Add([pscustomobject]@{Time='2026-10-18 09:24:30';Server='CTSO-INV-03';Level='ERROR';Category='StatePersistence';Count=3;First='2026-10-18 09:12:30';Message='State persistence unavailable after 60 second(s) of UNC write retries; the scheduler remains alive but new job launches are paused (sample).';Source='Demo/Logs/Orchestrator.log'})
@@ -463,7 +464,7 @@ function Invoke-OrchestratorDemo {
     [System.Windows.Controls.DockPanel]::SetDock($bar,'Top')
     $label=[System.Windows.Controls.TextBlock]::new();$label.Text='DEMO - Sample data | Scene';$label.VerticalAlignment='Center';$label.Margin='0,0,12,0'
     [void]$bar.Children.Add($label)
-    $combo=[System.Windows.Controls.ComboBox]::new();$combo.Width=170;$combo.ItemsSource=@('Overview','Issues','Maintenance');$combo.SelectedItem=$Scenario
+    $combo=[System.Windows.Controls.ComboBox]::new();$combo.Width=170;$combo.ItemsSource=@('Overview','Issues','Maintenance','Healthy');$combo.SelectedItem=$Scenario
     $c.DemoScenarioCombo=$combo
     [void]$bar.Children.Add($combo);[void]$dock.Children.Add($bar);[void]$dock.Children.Add($body);$window.Content=$dock
     $combo.Add_SelectionChanged({
@@ -475,7 +476,7 @@ function Invoke-OrchestratorDemo {
     $c.SharedPathText.Text='Contoso | DEMO - Sample data | All actions are simulated'
     $c.ConnectionText.Text='Offline demo'; $c.LastRefreshText.Text='2026-10-18 09:30 (frozen)'
     $c.FooterText.Text='DEMO - Sample data. Exports use a separate temporary demo folder.'
-    $c.VersionText.Text='v1.6.3 | DEMO'
+    $c.VersionText.Text='v1.6.7 | DEMO'
     $c.AutoRefreshCheck.IsChecked=$false; $c.AutoRefreshCheck.IsEnabled=$false
     # Keep both running sample rows visible at the default capture size.
     $operationsLayout=$c.OperationsServersGrid.Parent

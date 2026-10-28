@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercises the two pilot demos with WPF events and forbidden operational commands.
 .VERSION
-1.0.5
+1.0.6
 .NOTES
 Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
 #>
@@ -208,6 +208,15 @@ try {
         Assert-Demo ($s.Data.Jobs[0].Times -eq $originalTimes -and $s.Data.Jobs.Count -eq $expectedJobs) 'Demo reset failed.'
         Assert-Demo ((New-OrchestratorDemoData -Scenario Issues).Incidents.Count -gt 0) 'Issues scene missing.'
         Assert-Demo (New-OrchestratorDemoData -Scenario Maintenance).Maintenance 'Maintenance scene missing.'
+        $healthy=New-OrchestratorDemoData -Scenario Healthy
+        Assert-Demo (@($healthy.History | Where-Object Status -NE 'Success').Count -eq 0 -and @($healthy.LogEvents | Where-Object Level -NE 'INFO').Count -eq 0 -and $healthy.Incidents.Count -eq 0 -and -not $healthy.Maintenance) 'Healthy scene contains issues.'
+        Assert-Demo ($healthy.Running.Count -gt 0 -and $healthy.Pending.Count -gt 0) 'Healthy scene lost its running and pending samples.'
+        $healthyDashboard=New-OrchestratorDemoDashboard -Data $healthy
+        Assert-Demo ($healthyDashboard.Banner.Level -eq 'Normal' -and @($healthyDashboard.Actions).Count -eq 0 -and @($healthyDashboard.Tiles | Where-Object Level -In @('Warning','Critical')).Count -eq 0 -and @($healthyDashboard.Tiles | Where-Object Label -EQ 'Failures 24 h')[0].Value -eq '0') 'Healthy dashboard is not clean.'
+        $c.DemoScenarioCombo.SelectedItem='Healthy'
+        Assert-Demo ($s.Data.Scenario -eq 'Healthy' -and $c.DashboardBannerText.Text -like 'Everything looks healthy. DEMO*' -and @($c.DashboardActionsGrid.ItemsSource).Count -eq 0) 'Healthy selector failed.'
+        $c.MainTabs.SelectedIndex=0
+        Export-DemoPreview $s.Window 'orchestrator-dashboard-healthy'
         $c.DemoScenarioCombo.SelectedItem='Issues'
         Assert-Demo ($c.OperationsIncidentsGrid.Items.Count -eq 1) 'Issues selector failed.'
         Assert-Demo ($c.EventsGrid.Items.Count -eq 14) 'Issues events missing.'
