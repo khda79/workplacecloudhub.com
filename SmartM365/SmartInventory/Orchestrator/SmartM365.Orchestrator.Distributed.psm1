@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.16'
+$script:DistributedModuleVersion = '1.1.17'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -1588,19 +1588,24 @@ function Get-SmartM365OrchestratorDependencyActivity {
             # An expired non-terminal claim belongs to a lost owner; claim takeover handles it.
             $safeUntil = [datetimeoffset]::MinValue
             if ([datetimeoffset]::TryParse([string]$claim.SafeUntilUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$safeUntil) -and $safeUntil.UtcDateTime -lt $nowUtc) { continue }
-            if ($null -eq $active -or $occurrenceUtc -gt $active.OccurrenceUtc) { $active = [pscustomobject]@{ OccurrenceUtc = $occurrenceUtc; Status = [string]$claim.Status } }
+            if ($null -eq $active -or $occurrenceUtc -gt $active.OccurrenceUtc) {
+                # JSON readers may return the claim time as a DateTime: keep a culture-neutral text.
+                $claimedAt = if ($claim.PSObject.Properties['CreatedAtUtc']) { $claim.CreatedAtUtc } else { '' }
+                if ($claimedAt -is [datetime]) { $claimedAt = $claimedAt.ToUniversalTime().ToString('o') }
+                $active = [pscustomobject]@{ OccurrenceUtc = $occurrenceUtc; Status = [string]$claim.Status; OwnerServer = [string]$claim.OwnerServer; ClaimedAtUtc = [string]$claimedAt }
+            }
         }
     }
     if ($null -ne $active) {
         $label = '{0} for occurrence {1}' -f $active.Status, $active.OccurrenceUtc.ToLocalTime().ToString('yyyy-MM-dd HH:mm')
         if ($active.OccurrenceUtc.AddMinutes($estimate) -le $downstreamUtc) {
-            return [pscustomobject]@{ State = 'Waiting'; Detail = "$label, expected to finish before this occurrence" }
+            return [pscustomobject]@{ State = 'Waiting'; Detail = "$label, expected to finish before this occurrence"; OwnerServer = $active.OwnerServer; ClaimedAtUtc = $active.ClaimedAtUtc; Status = $active.Status }
         }
         if ($null -ne $RunState -and $RunState.Known -and $RunState.StagedPublication -and $RunState.Status -ne 'Publishing') {
             return [pscustomobject]@{ State = 'Clear'; Detail = "$label, staged publication leaves DATA-LAST unchanged" }
         }
         $reason = if ($null -ne $RunState -and $RunState.Known -and $RunState.Status -eq 'Publishing') { 'promoting its CSVs' } else { 'may rewrite DATA-LAST during the run' }
-        return [pscustomobject]@{ State = 'Waiting'; Detail = "$label, $reason" }
+        return [pscustomobject]@{ State = 'Waiting'; Detail = "$label, $reason"; OwnerServer = $active.OwnerServer; ClaimedAtUtc = $active.ClaimedAtUtc; Status = $active.Status }
     }
     if ($null -ne $LatestPastOccurrence) {
         $dueUtc = ([datetime]$LatestPastOccurrence).ToUniversalTime()

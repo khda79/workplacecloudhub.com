@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline maintenance, scheduler admission and GUI contract tests using synthetic shared data.
 .VERSION
-1.0.7
+1.0.8
 #>
 [CmdletBinding()]
 param([string]$Tenant = 'test')
@@ -108,7 +108,7 @@ try {
     Assert-Case ($audit.Count -eq 4 -and @($audit | Where-Object Outcome -eq Published).Count -eq 2) 'Transitions were not audited.'
     Assert-Case ((Get-FileHash (Join-Path $root 'Config/Orchestrator-Cluster.json.txt')).Hash -eq $clusterHash) 'Maintenance modified cluster configuration.'
     # Real runtime functions, isolated state and no process/tenant connections.
-    $definitions=Load-Functions (Join-Path $orchFolder 'SmartM365-Inventory-Orchestrator.ps1') @('Update-OrchestratorMaintenance','Get-OrchestratorPipelineWaitStartUtc','ConvertTo-StateTime','ConvertFrom-StateTime','Get-JobState','Get-LatestPastOccurrence','Get-JobOccurrencesInWindow','Get-DueOccurrence','Get-MaintenanceCatchUpOccurrence','Complete-MaintenanceCatchUpOccurrence','Invoke-LaunchPhase','Test-OrchestratorLocalConcurrencyBlocked','Get-OrchestratorPendingJobSnapshot')
+    $definitions=Load-Functions (Join-Path $orchFolder 'SmartM365-Inventory-Orchestrator.ps1') @('Update-OrchestratorMaintenance','Get-OrchestratorPipelineWaitStartUtc','Get-OrchestratorDependencyActivityText','Get-OrchestratorPipelineDependencyWaitText','Set-OrchestratorPipelineDependencyWait','ConvertTo-StateTime','ConvertFrom-StateTime','Get-JobState','Get-LatestPastOccurrence','Get-JobOccurrencesInWindow','Get-DueOccurrence','Get-MaintenanceCatchUpOccurrence','Complete-MaintenanceCatchUpOccurrence','Invoke-LaunchPhase','Test-OrchestratorLocalConcurrencyBlocked','Get-OrchestratorPendingJobSnapshot')
     $runtime=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
     $runtimeResult=& $runtime {
         param($Root,$Cutoff)
@@ -118,7 +118,7 @@ try {
         $job2=$job.PSObject.Copy(); $job2.Name='ManualRetry'
         $script:Manifest=@{OrderedJobs=@($job,$job2)}
         $script:MaintenanceControl=$null;$script:MaintenanceHealthy=$false;$script:MaintenanceError='';$script:StatePersistenceHealthy=$true
-        $script:Saved=0;$script:Starts=0;$script:ForcedPending=@();$script:PipelinePending=@{};$script:PipelineBatchJobNames=@{}
+        $script:Saved=0;$script:Starts=0;$script:ForcedPending=@();$script:PipelinePending=@{};$script:PipelineBatchJobNames=@{};$script:DependencyWaitReason=@{};$script:PipelineWaitState=@{}
         function script:Write-OrchestratorLog { param($Message,$Level) }
         function script:Invoke-SmartM365OrchestratorMaintenanceNotification { param($SharedDataFolderPath,$Now,$SendAction,[switch]$Initialize) [pscustomobject]@{Status='Completed';Sent=0} }
         function script:Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now,$Level) }
@@ -192,8 +192,10 @@ try {
         $script:Manifest.JobsByName.Parent=[pscustomobject]@{ContinueOnError=$false}
         $script:PipelineBatchJobNames.synthetic.Add('Parent') | Out-Null
         function script:Get-OrchestratorPipelineDependencyStatus {param($BatchId,$JobName) $script:ParentStatus}
+        function script:Set-OrchestratorPipelineJobStatus {param($BatchId,$JobName,$Status,$Attempt,$Detail) $script:WaitDetail=$Detail}
         $script:PipelinePending=@{ManualRetry=@{Occurrence=(Get-Date);CreatedAtUtc=[datetime]::UtcNow;Attempt=0;BatchId='synthetic';StatusPath='synthetic'}}
         Invoke-LaunchPhase (Get-Date); $waiting=$script:Starts
+        Assert-Case ($script:WaitDetail -eq 'Waiting for 1 dependency: Parent (not finished).') "A waiting request job must record its reason: $script:WaitDetail"
         $script:ParentStatus='Success';Invoke-LaunchPhase (Get-Date);$ready=$script:Starts
         $job.DependsOn=@();$script:PipelinePending=@{};$s.PendingRetry=$null
         # Activation after the tick read must stop the due launch before any shared claim.

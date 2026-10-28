@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline pipeline and production-manifest contract tests for the SmartM365 orchestrator.
 .VERSION
-1.2.0
+1.2.1
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -205,7 +205,7 @@ try {
     $parseErrors = $null
     $ast = [Management.Automation.Language.Parser]::ParseFile($orchestratorPath, [ref]$tokens, [ref]$parseErrors)
     Assert-True (@($parseErrors).Count -eq 0) 'Orchestrator source failed parser validation.'
-    $scanDefinitions = foreach ($functionName in @('Update-OrchestratorPipelineRequests', 'Get-OrchestratorPipelineDependencyStatus', 'Get-OrchestratorExternalDependencyStatus', 'Repair-OrchestratorPipelineOrphanStatus', 'ConvertFrom-StateTime', 'Get-OrchestratorPipelineWaitStartUtc', 'Get-OrchestratorEffectiveDependencyMode')) {
+    $scanDefinitions = foreach ($functionName in @('Update-OrchestratorPipelineRequests', 'Get-OrchestratorPipelineDependencyStatus', 'Get-OrchestratorExternalDependencyStatus', 'Repair-OrchestratorPipelineOrphanStatus', 'ConvertFrom-StateTime', 'Get-OrchestratorPipelineWaitStartUtc', 'Get-OrchestratorEffectiveDependencyMode', 'Get-OrchestratorDependencyActivityText', 'Get-OrchestratorPipelineDependencyWaitText', 'Set-OrchestratorPipelineDependencyWait')) {
         $node = $ast.Find({ param($candidate) $candidate -is [Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq $functionName }, $true)
         if ($null -eq $node) { throw "Missing orchestrator function: $functionName" }
         $node.Extent.Text
@@ -224,6 +224,7 @@ try {
         $script:Settings = @{ SharedDataFolderPath = $Root; JobsManifestPath = $ManifestPath }
         $script:Manifest = @{ JobsByName = @{ Parent = $JobsDocument.Jobs[0]; Child = $JobsDocument.Jobs[1] } }
         $script:PipelinePending = @{}
+        $script:DependencyWaitReason = @{}; $script:PipelineWaitState = @{}
         $script:Tenant = 'test'
         function script:Write-OrchestratorRuntimeUpdateWarning { param($Key, $Message) }
         function script:Set-OrchestratorPipelineJobStatus { param($BatchId, $JobName, $Status, $Detail) throw "Unexpected rejection: $JobName/$Status/$Detail" }

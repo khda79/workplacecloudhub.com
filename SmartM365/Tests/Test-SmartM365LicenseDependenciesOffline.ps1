@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic licensing dependency policy checks. No scheduler entry point or collector is executed.
 .VERSION
-1.0.1
+1.0.2
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -16,7 +16,7 @@ Import-Module (Join-Path $base 'SmartM365.Orchestrator.Insights.psm1') -Force
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $base 'SmartM365-Inventory-Orchestrator.ps1'),[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Orchestrator parse failed.'}
-$names=@('Get-OrchestratorEffectiveDependencyMode','Get-OrchestratorExternalDependencyStatus','Get-OrchestratorSharedDependencyStatus','Get-LatestPastOccurrence','Get-JobOccurrencesInWindow','ConvertTo-NormalizedJob')
+$names=@('Get-OrchestratorEffectiveDependencyMode','Get-OrchestratorExternalDependencyStatus','Get-OrchestratorSharedDependencyStatus','Get-LatestPastOccurrence','Get-JobOccurrencesInWindow','ConvertTo-NormalizedJob','Get-OrchestratorDependencyActivityText')
 $defs=foreach($name in $names){$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true).Extent.Text}
 # Real latest-occurrence claim reader; the independent freshness gate is a stand-in.
 $defs+=@'
@@ -26,6 +26,7 @@ function Get-OrchestratorDependencyMaxAge { return 48 }
 function Get-OrchestratorDependencyActivity { [pscustomobject]@{State='Clear'} }
 function Get-OrchestratorDependencyFreshStatus { $script:FreshCalls++; return 'Ready' }
 function Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now) throw $Message }
+$script:DependencyWaitReason = @{}
 '@
 $gate=New-Module -ScriptBlock ([scriptblock]::Create($defs -join "`n"))
 $root=Join-Path $env:TEMP ('SmartM365-LicenseDeps-'+[guid]::NewGuid().ToString('N'))

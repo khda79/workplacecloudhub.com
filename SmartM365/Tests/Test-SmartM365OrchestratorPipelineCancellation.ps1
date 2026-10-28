@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline cancellation tests. Synthetic temporary shared state; no collectors or tenant calls.
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 param()
@@ -164,7 +164,7 @@ try {
     $tokens = $null; $parseErrors = $null
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $folder 'SmartM365-Inventory-Orchestrator.ps1'), [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count) { throw 'Resident parser errors.' }
-    $definitions = foreach ($name in @('Invoke-LaunchPhase', 'Test-OrchestratorLocalConcurrencyBlocked', 'Complete-JobRun', 'ConvertFrom-StateTime', 'ConvertTo-StateTime')) {
+    $definitions = foreach ($name in @('Invoke-LaunchPhase', 'Test-OrchestratorLocalConcurrencyBlocked', 'Complete-JobRun', 'ConvertFrom-StateTime', 'ConvertTo-StateTime', 'Get-OrchestratorDependencyActivityText', 'Get-OrchestratorPipelineDependencyWaitText', 'Set-OrchestratorPipelineDependencyWait')) {
         $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
         if ($null -eq $node) { throw "Missing resident function: $name" }
         $node.Extent.Text
@@ -183,6 +183,7 @@ try {
             $script:LocalState = @{ PendingRetry = $null; LastScheduledOccurrence = ''; Running = $null }
             $script:PipelinePending = @{ Retry = @{ BatchId = $Batch; Occurrence = (Get-Date); Attempt = 0; CreatedAtUtc = [datetime]::UtcNow; StatusPath = 'synthetic' } }
             $script:PipelineBatchJobNames = @{}
+            $script:DependencyWaitReason = @{}; $script:PipelineWaitState = @{}
             function script:Get-JobState { param($JobName) $script:LocalState }
             function script:Test-JobSelected { param($JobName) $true }
             function script:Test-JobAllowedOnServer { param($Job,[switch]$AllowManual) $true }

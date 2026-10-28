@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.66
+1.5.67
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.66"
+$ScriptVersion = "1.5.67"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2514,6 +2514,21 @@ function Get-OrchestratorPendingJobSnapshot {
         if ($script:RunningJobs.ContainsKey($name)) { continue }
 
         $state = Get-JobState -JobName $name
+        if ($script:PipelineWaitState.ContainsKey($name) -and ($null -ne $state.PendingRetry -or ($null -ne $script:PipelinePending -and $script:PipelinePending.ContainsKey($name)))) {
+            $wait = $script:PipelineWaitState[$name]
+            $pending.Add([pscustomobject]@{
+                Name = $name
+                ScheduledOccurrence = ''
+                Reason = 'WaitingDependencies'
+                FirstSeen = ConvertTo-StateTime -Value $wait.FirstSeen
+                Details = ('Request {0}: {1}' -f $wait.BatchId, $wait.Text)
+                ConcurrencyKey = [string]$job.ConcurrencyKey
+                BlockingJob = ''
+                BlockingServer = ''
+                BlockSafeUntilUtc = ''
+            })
+            continue
+        }
         if (-not $script:MaintenanceHealthy -or ($null -ne $script:MaintenanceControl -and $script:MaintenanceControl.Enabled)) {
             $pipelineRetry = $null -ne $state.PendingRetry -and $state.PendingRetry.ContainsKey('PipelineBatchId') -and $state.PendingRetry.PipelineBatchId
             if (-not $pipelineRetry) {
@@ -4929,6 +4944,7 @@ function Get-OrchestratorExternalDependencyStatus {
         [Parameter(Mandatory = $true)][datetime]$Now
     )
 
+    $script:DependencyWaitReason.Remove($DependencyName)
     if (-not $script:Manifest.JobsByName.ContainsKey($DependencyName)) { return 'Failed' }
     $dependencyJob = $script:Manifest.JobsByName[$DependencyName]
     # The scheduled gate ignores disabled and manual dependencies.
@@ -4939,11 +4955,18 @@ function Get-OrchestratorExternalDependencyStatus {
         $maxAgeHours = Get-OrchestratorDependencyMaxAge -DependencyJob $dependencyJob -OverrideHours ([int]$Job.DependencyMaxAgeHours) -Now $Now
         try {
             # A request starts now: a dependency that should already have finished must not be running.
-            if ([string]$dependencyJob.AssignmentMode -eq 'Elected' -and
-                (Get-OrchestratorDependencyActivity -DependencyJob $dependencyJob -DownstreamOccurrence $Now -Now $Now).State -ne 'Clear') { return 'Waiting' }
+            if ([string]$dependencyJob.AssignmentMode -eq 'Elected') {
+                $activity = Get-OrchestratorDependencyActivity -DependencyJob $dependencyJob -DownstreamOccurrence $Now -Now $Now
+                if ($activity.State -ne 'Clear') {
+                    $script:DependencyWaitReason[$DependencyName] = Get-OrchestratorDependencyActivityText -Activity $activity
+                    return 'Waiting'
+                }
+            }
             if ((Get-OrchestratorDependencyFreshStatus -DependencyJob $dependencyJob -MaxAgeHours $maxAgeHours -Now $Now) -eq 'Ready') { return 'Ready' }
+            $script:DependencyWaitReason[$DependencyName] = "no successful run in the last $maxAgeHours h"
         }
         catch {
+            $script:DependencyWaitReason[$DependencyName] = 'freshness could not be read'
             Write-OrchestratorRuntimeUpdateWarning -Key ("external-fresh-dependency:{0}:{1}" -f $Job.Name, $DependencyName) -Message ("Job {0}: freshness of external dependency {1} could not be read; waiting: {2}" -f $Job.Name, $DependencyName, $_.Exception.Message) -Now $Now
         }
         return 'Waiting'
@@ -4952,24 +4975,75 @@ function Get-OrchestratorExternalDependencyStatus {
         $sharedStatus = Get-OrchestratorSharedDependencyStatus -Job $dependencyJob -Now $Now
         if ($sharedStatus -eq 'Ready') { return 'Ready' }
         if ($sharedStatus -eq 'Failed' -and -not $dependencyJob.ContinueOnError) { return 'Failed' }
+        $script:DependencyWaitReason[$DependencyName] = 'latest scheduled run not completed'
         return 'Waiting'
     }
     # Legacy dependencies are only known by their own server; elsewhere the scheduled gate ignores them.
     if (-not (Test-JobAllowedOnServer -Job $dependencyJob)) { return 'Ready' }
-    if ($script:RunningJobs.ContainsKey($DependencyName)) { return 'Waiting' }
+    if ($script:RunningJobs.ContainsKey($DependencyName)) {
+        $script:DependencyWaitReason[$DependencyName] = 'Running on {0} since {1}' -f $env:COMPUTERNAME, ([datetime]$script:RunningJobs[$DependencyName].StartTime).ToString('yyyy-MM-dd HH:mm')
+        return 'Waiting'
+    }
     $dependencyState = Get-JobState -JobName $DependencyName
-    if ($null -ne $dependencyState.PendingRetry) { return 'Waiting' }
+    if ($null -ne $dependencyState.PendingRetry) { $script:DependencyWaitReason[$DependencyName] = 'retry pending'; return 'Waiting' }
     if ([string]$dependencyState.LastStatus -in @('Success', 'CompletedWithWarnings')) { return 'Ready' }
     if ([string]$dependencyState.LastStatus -in @('Failed', 'TimedOut', 'Interrupted', 'Cancelled') -and -not $dependencyJob.ContinueOnError) { return 'Failed' }
+    $script:DependencyWaitReason[$DependencyName] = 'no successful run yet'
     return 'Waiting'
+}
+
+function Get-OrchestratorDependencyActivityText {
+    # 'Running on SERVER since yyyy-MM-dd HH:mm' when the active claim names them, else its detail.
+    param([Parameter(Mandatory = $true)]$Activity)
+    $owner = if ($Activity.PSObject.Properties['OwnerServer']) { [string]$Activity.OwnerServer } else { '' }
+    if ([string]::IsNullOrWhiteSpace($owner)) { return [string]$Activity.Detail }
+    $since = [datetimeoffset]::MinValue
+    $sinceText = if ([datetimeoffset]::TryParse([string]$Activity.ClaimedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$since)) { ' since ' + $since.LocalDateTime.ToString('yyyy-MM-dd HH:mm') } else { '' }
+    return '{0} on {1}{2}' -f $Activity.Status, $owner, $sinceText
+}
+
+function Get-OrchestratorPipelineDependencyWaitText {
+    # Operator text of a request job that waits: each blocking dependency with its reason.
+    param([Parameter(Mandatory = $true)][string[]]$BlockingDependencies)
+    $parts = foreach ($entry in @($BlockingDependencies)) {
+        # The pipeline gate marks dependencies that are not part of the request.
+        $dependency = $entry -replace ' \(outside request\)$', ''
+        $reason = if ($script:DependencyWaitReason.ContainsKey($dependency)) { [string]$script:DependencyWaitReason[$dependency] } else { 'not finished' }
+        if ($dependency -ne $entry) { $reason = 'outside request: ' + $reason }
+        '{0} ({1})' -f $dependency, $reason
+    }
+    return 'Waiting for {0} dependenc{1}: {2}.' -f @($parts).Count, $(if (@($parts).Count -eq 1) { 'y' } else { 'ies' }), (@($parts) -join '; ')
+}
+
+function Set-OrchestratorPipelineDependencyWait {
+    # Records the wait for the heartbeat and writes it to the request job when it changes. A
+    # scheduled retry keeps its RetryScheduled status and NotBeforeUtc.
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)]$PipelineInfo,
+        [Parameter(Mandatory = $true)][string]$Text,
+        [int]$Attempt = 0,
+        [switch]$IsRetry,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+    $batchId = [string]$PipelineInfo.BatchId
+    $previous = if ($script:PipelineWaitState.ContainsKey($JobName)) { $script:PipelineWaitState[$JobName] } else { $null }
+    if ($null -ne $previous -and $previous.BatchId -eq $batchId -and $previous.Text -eq $Text) { return }
+    $firstSeen = if ($null -ne $previous -and $previous.BatchId -eq $batchId) { $previous.FirstSeen } else { $Now }
+    $script:PipelineWaitState[$JobName] = [pscustomobject]@{ BatchId = $batchId; FirstSeen = $firstSeen; Text = $Text }
+    if (-not $IsRetry) { Set-OrchestratorPipelineJobStatus -BatchId $batchId -JobName $JobName -Status Pending -Attempt $Attempt -Detail $Text }
 }
 
 function Get-OrchestratorPipelineDependencyStatus {
     param([Parameter(Mandatory = $true)][string]$BatchId, [Parameter(Mandatory = $true)][string]$JobName)
     $path = Get-SmartM365OrchestratorPipelineJobStatusPath -SharedDataFolderPath $script:Settings.SharedDataFolderPath -BatchId $BatchId -JobName $JobName
+    $script:DependencyWaitReason.Remove($JobName)
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return 'MissingStatus' }
-    try { return [string]((Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -Depth 20 -ErrorAction Stop).Status) }
+    try { $document = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -Depth 20 -ErrorAction Stop }
     catch { return 'MissingStatus' }
+    $owner = if ($document.PSObject.Properties['OwnerServer']) { [string]$document.OwnerServer } else { '' }
+    $script:DependencyWaitReason[$JobName] = if ($owner) { 'in request: {0} on {1}' -f $document.Status, $owner } else { 'in request: {0}' -f $document.Status }
+    return [string]$document.Status
 }
 
 function Test-JobSelected {
@@ -6041,6 +6115,7 @@ function Invoke-LaunchPhase {
                 $pipelineBlockingDependencies.Add($dep)
             }
             if (-not [string]::IsNullOrWhiteSpace($pipelineBlockedDependency)) {
+                $script:PipelineWaitState.Remove($name)
                 Set-OrchestratorPipelineJobStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $name -Status BlockedDependencyFailed -Detail ("Dependency '{0}' failed and ContinueOnError is false." -f $pipelineBlockedDependency)
                 continue
             }
@@ -6049,13 +6124,16 @@ function Invoke-LaunchPhase {
                 if ($dependencyWaitTimeout -le 0) { $dependencyWaitTimeout = [int]$script:Settings.DependencyWaitTimeoutMinutes }
                 $waitMinutes = [int]([datetime]::UtcNow - (Get-OrchestratorPipelineWaitStartUtc -PipelineInfo $pipelineInfo)).TotalMinutes
                 if ($dependencyWaitTimeout -gt 0 -and $waitMinutes -ge $dependencyWaitTimeout) {
-                    Set-OrchestratorPipelineJobStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $name -Status BlockedDependencyTimeout -Detail ("Dependencies still blocking after {0} min: {1}" -f $waitMinutes, (@($pipelineBlockingDependencies) -join ', '))
+                    $script:PipelineWaitState.Remove($name)
+                    Set-OrchestratorPipelineJobStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $name -Status BlockedDependencyTimeout -Detail ("Dependencies still blocking after {0} min: {1}" -f $waitMinutes, (Get-OrchestratorPipelineDependencyWaitText -BlockingDependencies @($pipelineBlockingDependencies)))
                 }
                 else {
                     Write-DependencyWaitLog -JobName $name -BlockingDependencies @($pipelineBlockingDependencies) -Now $Now
+                    Set-OrchestratorPipelineDependencyWait -JobName $name -PipelineInfo $pipelineInfo -Text (Get-OrchestratorPipelineDependencyWaitText -BlockingDependencies @($pipelineBlockingDependencies)) -Attempt $attempt -IsRetry:($reason -eq 'retry') -Now $Now
                 }
                 continue
             }
+            $script:PipelineWaitState.Remove($name)
             Clear-DependencyWaitLog -JobName $name
         }
 
@@ -7001,6 +7079,10 @@ $script:ForcedPending = @()
 $script:PipelinePending = @{}
 # Job names of each active pipeline request, to tell request dependencies from external ones.
 $script:PipelineBatchJobNames = @{}
+# Request jobs waiting for dependencies on this server: BatchId, FirstSeen and the wait text.
+$script:PipelineWaitState = @{}
+# Last known reason why a dependency is not ready (operator text, read by the wait text).
+$script:DependencyWaitReason = @{}
 $script:SmtpEndpoint = ''
 $script:Manifest = $null
 $script:State = $null

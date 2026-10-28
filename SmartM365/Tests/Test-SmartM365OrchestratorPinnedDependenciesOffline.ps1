@@ -2,7 +2,7 @@
 .SYNOPSIS
 Offline checks for pinned FreshSuccess dependencies across runtime, pipeline and GUI.
 .VERSION
-1.0.1
+1.0.2
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -14,7 +14,7 @@ Import-Module (Join-Path $base 'SmartM365.Orchestrator.Insights.psm1') -Force
 $parseErrors=$null; $tokens=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $base 'SmartM365-Inventory-Orchestrator.ps1'),[ref]$tokens,[ref]$parseErrors)
 if ($parseErrors.Count) { throw 'Orchestrator does not parse.' }
-$definitions=foreach($name in @('Get-OrchestratorEffectiveDependencyMode','Get-OrchestratorDependencyFreshStatus','Get-OrchestratorExternalDependencyStatus','Get-OrchestratorDependencyMaxAge','Get-JobOccurrencesInWindow')) {
+$definitions=foreach($name in @('Get-OrchestratorEffectiveDependencyMode','Get-OrchestratorDependencyFreshStatus','Get-OrchestratorExternalDependencyStatus','Get-OrchestratorDependencyMaxAge','Get-JobOccurrencesInWindow','Get-OrchestratorDependencyActivityText')) {
     $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true).Extent.Text
 }
 # Execute the real scheduled branch in a minimal loop; never execute the entry script.
@@ -22,6 +22,7 @@ $scheduled=$ast.Find({param($n) $n -is [Management.Automation.Language.IfStateme
 if (-not $scheduled) { throw 'Pinned scheduled dependency gate is absent.' }
 $definitions += 'function ScheduledStatus($job,$depJob,$Now) { $deferred=$false; $blockingDependencies=[Collections.Generic.List[string]]::new(); foreach($dep in @($depJob.Name)) { $dependencyMode=Get-OrchestratorEffectiveDependencyMode -Job $job -DependencyName $dep; ' + $scheduled.Extent.Text + ' }; if($deferred){"Waiting"}else{"Ready"} }'
 $definitions += 'function Write-OrchestratorRuntimeUpdateWarning { param($Key,$Message,$Now) throw $Message }'
+$definitions += '$script:DependencyWaitReason = @{}'
 $gate=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
 $root=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-PinnedDeps-'+[guid]::NewGuid().ToString('N'))
 $shared=Join-Path $root 'DATA-ALL/Orchestrator'
