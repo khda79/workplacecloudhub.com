@@ -3,7 +3,7 @@
 .SYNOPSIS
 Fictional migration portfolio, all dashboard panels, batch UI, wizard and reports.
 .VERSION
-1.0.3
+1.0.4
 #>
 function script:Switch-SharePointDemoPanel {
     param([string]$Name)
@@ -153,7 +153,7 @@ function script:Invoke-SmartM365DemoProfileAction {
     return $false
 }
 function script:Save-SharePointDemoReport {
-    param([string]$Name,[string]$Title,[string]$Kind,[hashtable]$Metrics,[object[]]$Rows)
+    param([string]$Name,[string]$Title,[string]$Kind,[Collections.IDictionary]$Metrics,[object[]]$Rows)
     $s=$script:SmartM365Demo
     # Reuse the shipped report renderer's HTML shell and CSS. Do not load branding config.
     $source=[IO.File]::ReadAllText((Join-Path $s.AppRoot 'Scripts/Compare/report_html.py'))
@@ -178,14 +178,14 @@ function script:Export-SmartM365DemoProfileOutputs {
     $files=@([pscustomobject]@{Library='Documents';Source=1200;Target=1188;Matched=1180;Missing=20;Extra=8;ChangedVersion=5;TargetOlder=3;Success='98.33%'})
     $permissions=@([pscustomobject]@{Scope='Documents';SourcePermissions=500;TargetPermissions=495;Matched=490;Missing=10;Extra=5;Success='98.0%'})
     $definitions=@(
-        @('Complexity','Complexity-DEMO.html','Contoso-HR source migration complexity','Source complexity',@{Level=$s.Data.Complexity.Level;Score=$s.Data.Complexity.Score;Coverage=('{0}%' -f $s.Data.Complexity.CoveragePercent);Criteria=13},@($s.Rows.gridWorkflowComplexity|Select-Object Criterion,Value,Points,Weighted,Detail)),
-        @('Files','Files-Comparison-DEMO.html','Contoso-HR file comparison','File comparison',@{Matched=1180;Missing=20;Extra=8;'Changed version'=5;'Target older'=3;'Success rate'='98.33%'},$files),
-        @('Permissions','Permissions-Comparison-DEMO.html','Contoso-HR permissions comparison','Permission comparison',@{Matched=490;Missing=10;Extra=5;'Success rate'='98.0%'},$permissions),
-        @('FileHistory','File-History-DEMO.html','Contoso-HR file scan history','File history',@{Previous=1150;Current=1200;Added=60;Removed=10;Changed=25},$files),
-        @('PermissionHistory','Permission-History-DEMO.html','Contoso-HR permissions history','Permission history',@{Previous=480;Current=500;Added=25;Removed=5;Changed=12},$permissions),
-        @('GlobalFiles','Global-Files-DEMO.html','Contoso migration portfolio - files','Global file comparison',@{Migrations=3;Source=3600;Matched=3514;Missing=86;Extra=24},@($s.Rows.gridSummary|Select-Object Migration,Source,Destination,FilesComparison,PermissionsComparison)),
-        @('GlobalPermissions','Global-Permissions-DEMO.html','Contoso migration portfolio - permissions','Global permission comparison',@{Migrations=3;Source=1500;Matched=1470;Missing=30;Extra=15},$permissions),
-        @('Diagnostics','MigrationDiagnostics-Report-DEMO.html','Contoso-HR migration diagnostics','ShareGate diagnostics',@{Lines=1445;Success=1400;Warnings=30;Errors=15;'Residual items'=2},$s.Rows.gridDiagPatterns)
+        @('Complexity','Complexity-DEMO.html','Contoso-HR source migration complexity','Source complexity',[ordered]@{Score=$s.Data.Complexity.Score;Criteria=13;Coverage=('{0}%' -f $s.Data.Complexity.CoveragePercent);Level=$s.Data.Complexity.Level},@($s.Rows.gridWorkflowComplexity|Select-Object Criterion,Value,Points,Weighted,Detail)),
+        @('Files','Files-Comparison-DEMO.html','Contoso-HR file comparison','File comparison',[ordered]@{Matched=1180;Missing=20;Extra=8;'Changed version'=5;'Target older'=3;'Success rate'='98.33%'},$files),
+        @('Permissions','Permissions-Comparison-DEMO.html','Contoso-HR permissions comparison','Permission comparison',[ordered]@{Matched=490;Missing=10;Extra=5;'Success rate'='98.0%'},$permissions),
+        @('FileHistory','File-History-DEMO.html','Contoso-HR file scan history','File history',[ordered]@{Previous=1150;Current=1200;Added=60;Removed=10;Changed=25},$files),
+        @('PermissionHistory','Permission-History-DEMO.html','Contoso-HR permissions history','Permission history',[ordered]@{Previous=480;Current=500;Added=25;Removed=5;Changed=12},$permissions),
+        @('GlobalFiles','Global-Files-DEMO.html','Contoso migration portfolio - files','Global file comparison',[ordered]@{Migrations=3;Source=3600;Matched=3514;Missing=86;Extra=24},@($s.Rows.gridSummary|Select-Object Migration,Source,Destination,FilesComparison,PermissionsComparison)),
+        @('GlobalPermissions','Global-Permissions-DEMO.html','Contoso migration portfolio - permissions','Global permission comparison',[ordered]@{Migrations=3;Source=1500;Matched=1470;Missing=30;Extra=15},$permissions),
+        @('Diagnostics','MigrationDiagnostics-Report-DEMO.html','Contoso-HR migration diagnostics','ShareGate diagnostics',[ordered]@{Lines=1445;Success=1400;Warnings=30;Errors=15;'Residual items'=2},$s.Rows.gridDiagPatterns)
     )
     foreach($definition in $definitions){$path=Save-SharePointDemoReport -Name $definition[1] -Title $definition[2] -Kind $definition[3] -Metrics $definition[4] -Rows $definition[5];$s.Reports[$definition[0]]=$path;[void]$paths.Add($path)}
     # Use the actual farm HTML writer, without its collection/startup functions.
@@ -204,48 +204,3 @@ function script:Export-SmartM365DemoProfileOutputs {
     return $paths.ToArray()
 }
 
-# SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
-# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWkj1Ss45b9CUz
-# x59SP0V/X3RWy3lfHUlr9zRuoqXnqKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
-# s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
-# b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
-# ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
-# VQQDDBV3b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRh
-# Y3RAd29ya3BsYWNlY2xvdWRodWIuY29tMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
-# MIIBigKCAYEAse6XztERSyHn9DVqj8Rdv0qjc5owqvgAIGaYxBmfiQuoM48Fo4Xt
-# 1ovi9brLUtf55G4XgthNPCoanxfCRRg30IVRxaDfdPXJzYmgsM5tXlsuNU49lE7E
-# PJk3+jEOgSCt8NKzmVPKpNRG0NmK0a8wm12cceYZOZlSYE0+ZtT6wy5PQQjMUqIx
-# XnGjt4H0nfgZZa7D4FyARKOVg/Xr9sUq5jIn3zszvg4jjeb4b0DKJtfbHukhWc2Y
-# oVFgswxVBXCWIaBnfF/cjqMfK/CaToT2trVb4hG4qcQ31s1nR4keoRaOw/vyd6ap
-# rEtCsT22N/Jx0dz7fIo1tVyvIaVcHdN9LW3chn0en0OKZ6Ke1OH9wf2prl4KA6Ww
-# VzrAZrOlXTAItdK7D9kKO/HeJd4PZvO53oy1LdmMGLSz3OLB9e5q7yo8rfqi5Ka9
-# KzM2CrSzz1yphn/H90wz7Q2pm4FIlWdcj86A/0kmhYg+5Wqqbg1drrPXu4nEBwWN
-# /dzoGtKZKHTdAgMBAAGjgZYwgZMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoG
-# CCsGAQUFBwMDMD8GA1UdEQQ4MDaBHWNvbnRhY3RAd29ya3BsYWNlY2xvdWRodWIu
-# Y29tghV3b3JrcGxhY2VjbG91ZGh1Yi5jb20wDAYDVR0TAQH/BAIwADAdBgNVHQ4E
-# FgQUXIOOADQM78XfPAncirgCECedg9gwDQYJKoZIhvcNAQELBQADggGBADhZUB2R
-# 5J/Jw030xodhEWeCQ0vnJRaiEsjOxuArQREKH3lCrQ3UsUVl292d6LnQUSTH/jF7
-# rovEZ+JN2GQ/LCrXRaCuwCEGZKzlSEbtYWhfwDyj6GpIPq8Y4SeXyjdq4/rrI1bm
-# iTK4Sq7EoBlGJuX6l2nfvx1tTioSr11FoDfllJR7EYawRj9hBFJ0gG0b2SuYZMgW
-# gaDKefcnJDmOwcRNAZUII0ss8EeyANukWSkNN5ILZ+iKDpQgZxgDLPTiRguCyx45
-# PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
-# Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
-# dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDhTCR+4Q1ZA1R53a0nr7uu
-# 7C/S6KiO+4Bm4sEEFnqUozANBgkqhkiG9w0BAQEFAASCAYAeqiwl9J//cfNDUOM+
-# F/z/RnsCypNAirrr6lgldI2jglt8xTECXyGuV/Q8H+OfNQE6/WTiRR1jkyVBZ/sA
-# fLbCnPOUGtTNlIKGUunglb+40hkOaf0Cw3X/RwQLPoYiwqsxjTtSdSucZCfWZAQe
-# zL1w4I/tYaT/NTEifaB+QCBLWGNpLGTd/BcmOZQE69iX9B/QcUFbTI6RcPTnhEPy
-# bWeEQ55JR4PS+zhV3UANfKVGqRBPfVmjvQJrRbMBhuSy6ycxRX2WopJxRVv1RC9T
-# ncuncCzvh1QpKEJ1xoTGK+7hc7hZVpdgRJZB3seFMzOY0JR2aWFUOd5ecst7G19T
-# K+XjM2lET7TrXYMBYByYWMbCLtHWS9DV4vqlCndR++YdSyeobuY+wpWiKzyUOJRO
-# RxvzufaO6MZeS7apExoBnQjv9/LEIwp9ge/UbCTReB/r41dT+aDHf8VVuAHkmtGU
-# iOU8zHHDM7l3bJVWoFWBGdR4fo9+nYj/hcuDsP/a1s40tmc=
-# SIG # End signature block
