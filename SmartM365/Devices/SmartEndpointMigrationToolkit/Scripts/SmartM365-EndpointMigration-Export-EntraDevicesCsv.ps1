@@ -123,11 +123,11 @@ function Enable-Tls12 {
 function Install-GraphModuleIfMissing {
     param([switch]$SkipInstall)
 
-    $module = Get-Module -ListAvailable -Name Microsoft.Graph.Authentication | Sort-Object Version -Descending | Select-Object -First 1
+    $module = Find-SemtGraphAuthenticationModule
     if ($module) { return $module }
 
     if ($SkipInstall) {
-        throw "Microsoft.Graph.Authentication module is not installed. Install it with: Install-Module Microsoft.Graph.Authentication -Scope CurrentUser"
+        throw ('SEMT_GRAPH_MODULE_NOT_FOUND: Microsoft.Graph.Authentication is not installed. {0}' -f (Get-SemtGraphModuleDiagnostic))
     }
 
     Write-Host "Microsoft.Graph.Authentication module not found. Installing Microsoft.Graph.Authentication for current user..." -ForegroundColor Yellow
@@ -145,14 +145,14 @@ function Install-GraphModuleIfMissing {
     }
 
     Install-Module Microsoft.Graph.Authentication -Scope CurrentUser -Force -AllowClobber -Repository PSGallery -ErrorAction Stop
-    $module = Get-Module -ListAvailable -Name Microsoft.Graph.Authentication | Sort-Object Version -Descending | Select-Object -First 1
-    if (-not $module) { throw "Microsoft.Graph.Authentication installation completed but the module was not found." }
+    $module = Find-SemtGraphAuthenticationModule
+    if (-not $module) { throw ('SEMT_GRAPH_MODULE_NOT_FOUND: Microsoft.Graph.Authentication was installed for the current user but cannot be found. {0}' -f (Get-SemtGraphModuleDiagnostic)) }
     return $module
 }
 
 function Import-GraphAuthenticationModule {
     $module = Install-GraphModuleIfMissing -SkipInstall:$SkipModuleInstall
-    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+    Import-Module -Name $module.Path -ErrorAction Stop
     Write-Host ("Graph module : Microsoft.Graph.Authentication {0}" -f $module.Version) -ForegroundColor DarkCyan
 }
 

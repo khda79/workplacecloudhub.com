@@ -44,6 +44,9 @@ $script:CampaignTitles = [ordered]@{ HybridJoin = 'Hybrid Join and Intune enroll
 $script:CategoryOrder = @('Mode','Actions','Setup','Safety','Schedule','Parallelism','Network','Inventory','Evidence')
 $script:InventoryRefresh = $null
 $script:GuiClosing = $false
+$script:AllAdDomainsLabel = '(All domains)'
+$script:AdDomains = @()
+$script:AdDomainStamp = $null
 $script:RunModes = [ordered]@{ 'Loop' = @('Loop',$false); 'Once' = @('Once',$false); 'Loop - ignore run guard (first cycle)' = @('Loop',$true); 'Once - ignore run guard' = @('Once',$true) }
 
 #region Testable helpers (no UI)
@@ -243,6 +246,7 @@ function Get-AutomaticWaveCommandText {
         $items = @($Filters[$pair[1]] | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         if ($items.Count -gt 0) { $parts += @(('-{0}' -f $pair[0]),('@({0})' -f (($items | ForEach-Object { ConvertTo-PowerShellLiteral $_ }) -join ','))) }
     }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Filters.AdDomain)) { $parts += @('-AdDomainFilter',('@({0})' -f (ConvertTo-PowerShellLiteral ([string]$Filters.AdDomain)))) }
     if ($Filters.ExcludeStaleAd) { $parts += @('-ExcludeStaleAd','-AdLastLogonMaxAgeDays',[string][int]$Filters.LastLogonDays) }
     if ($Campaign -eq 'Windows11Upgrade') {
         $parts += @('-Source',$Filters.Source)
@@ -273,7 +277,36 @@ function Get-InventoryRefreshCommandText {
 
 function Get-AutomaticFilterSignature {
     param([Parameter(Mandatory = $true)][string]$Campaign,[Parameter(Mandatory = $true)][hashtable]$Filters)
-    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}' -f $Campaign,$Filters.WaveName,(@($Filters.Prefixes) -join ';'),(@($Filters.Contains) -join ';'),$Filters.ExcludeStaleAd,$Filters.LastLogonDays,$Filters.Source,$Filters.ExcludeIntunePresent)
+    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}' -f $Campaign,$Filters.WaveName,(@($Filters.Prefixes) -join ';'),(@($Filters.Contains) -join ';'),$Filters.ExcludeStaleAd,$Filters.LastLogonDays,$Filters.Source,$Filters.ExcludeIntunePresent,$Filters.AdDomain)
+}
+
+function Get-AdInventoryDomains {
+    <#
+    Distinct ADDomain values of an AD inventory CSV, read with a streaming CSV parser. Empty when the
+    file or the column is missing.
+    #>
+    param([AllowNull()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @() }
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    $domains = New-Object 'System.Collections.Generic.SortedSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $parser = New-Object Microsoft.VisualBasic.FileIO.TextFieldParser($Path, [Text.Encoding]::UTF8, $true)
+    try {
+        $parser.SetDelimiters(',')
+        $parser.HasFieldsEnclosedInQuotes = $true
+        if ($parser.EndOfData) { return @() }
+        $index = [Array]::IndexOf([string[]]@($parser.ReadFields() | ForEach-Object { $_.Trim() }), 'ADDomain')
+        if ($index -lt 0) { return @() }
+        while (-not $parser.EndOfData) {
+            $fields = $parser.ReadFields()
+            if ($null -ne $fields -and $fields.Count -gt $index) {
+                $value = ([string]$fields[$index]).Trim().Trim('.').ToLowerInvariant()
+                if ($value) { [void]$domains.Add($value) }
+            }
+        }
+    }
+    finally { $parser.Close() }
+    return @($domains)
 }
 
 function Split-GuiList {
@@ -585,6 +618,8 @@ $xaml = @'
                                 <TextBox x:Name="AutomaticNamePrefixText"/>
                                 <TextBlock Text="Computer name contains (separated by ;)"/>
                                 <TextBox x:Name="AutomaticNameContainsText"/>
+                                <TextBlock Text="AD domain (from the shared AD inventory)"/>
+                                <ComboBox x:Name="AutomaticAdDomainCombo"/>
                                 <StackPanel x:Name="AutomaticSourcePanel">
                                     <TextBlock Text="Inventory source"/>
                                     <ComboBox x:Name="AutomaticSourceCombo"/>
@@ -960,6 +995,19 @@ function Update-AutomaticView {
         '{0}: {1}' -f $kind,$(if ($null -ne $check.AgeHours) { '{0} ({1} h)' -f $check.Reason,$check.AgeHours } else { $check.Reason })
     }
     $controls.AutomaticInventoryStatusText.Text = 'Shared inventories - ' + ($parts -join '; ')
+    # AD domain list: read again only when the shared AD inventory file changed.
+    $adPath = Get-SemtSharedInventoryPath -PackageRoot $script:PackageRoot -Kind AD
+    $adFile = Get-Item -LiteralPath $adPath -ErrorAction SilentlyContinue
+    $adStamp = if ($adFile) { '{0}|{1}' -f $adFile.LastWriteTimeUtc.Ticks,$adFile.Length } else { '' }
+    if ($adStamp -ne $script:AdDomainStamp) {
+        $script:AdDomains = @(Get-AdInventoryDomains -Path $adPath)
+        $script:AdDomainStamp = $adStamp
+    }
+    $previousDomain = if ($controls.AutomaticAdDomainCombo.SelectedIndex -gt 0) { [string]$controls.AutomaticAdDomainCombo.SelectedItem } else { '' }
+    $controls.AutomaticAdDomainCombo.Items.Clear()
+    [void]$controls.AutomaticAdDomainCombo.Items.Add($script:AllAdDomainsLabel)
+    foreach ($domain in @($script:AdDomains)) { [void]$controls.AutomaticAdDomainCombo.Items.Add($domain) }
+    $controls.AutomaticAdDomainCombo.SelectedIndex = [Math]::Max(0, $controls.AutomaticAdDomainCombo.Items.IndexOf($previousDomain))
     if ([string]::IsNullOrWhiteSpace($controls.AutomaticWaveNameText.Text) -or $controls.AutomaticWaveNameText.Text -like 'WAVE-AUTO-*') {
         $prefix = if ($isWindows11) { 'W10' } else { 'HJ' }
         $controls.AutomaticWaveNameText.Text = 'WAVE-AUTO-{0}-{1}' -f $prefix,(Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -1027,6 +1075,7 @@ function Invoke-AutomaticWave {
         ExcludeStaleAd = [bool]$controls.AutomaticExcludeStaleAdCheck.IsChecked
         LastLogonDays = [int]$controls.AutomaticLastLogonDaysText.Text
         Source = [string]$controls.AutomaticSourceCombo.SelectedItem
+        AdDomain = if ($controls.AutomaticAdDomainCombo.SelectedIndex -gt 0) { [string]$controls.AutomaticAdDomainCombo.SelectedItem } else { '' }
         ExcludeIntunePresent = [bool]$controls.AutomaticExcludeIntuneCheck.IsChecked
     }
     if (-not (Test-SemtWaveName -Name $filters.WaveName)) { throw ("'{0}' is not a valid Wave name." -f $filters.WaveName) }
@@ -1261,7 +1310,7 @@ $controls.CreateWaveButton.Add_Click({
 $controls.OpenNewWaveComputersButton.Add_Click({ Open-TextFile $controls.NewWavePathText.Text })
 foreach ($name in @('AutomaticWaveNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticLastLogonDaysText')) { $controls[$name].Add_TextChanged({ if ($script:AutomaticPreviewSignature) { $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false } }) }
 foreach ($name in @('AutomaticExcludeStaleAdCheck','AutomaticExcludeIntuneCheck')) { $controls[$name].Add_Click({ $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false }) }
-$controls.AutomaticSourceCombo.Add_SelectionChanged({ $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false })
+foreach ($name in @('AutomaticSourceCombo','AutomaticAdDomainCombo')) { $controls[$name].Add_SelectionChanged({ $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false }) }
 $controls.AutomaticPreviewButton.Add_Click({ try { Invoke-AutomaticWave } catch { Show-GuiError $_.Exception.Message; $controls.AutomaticPreviewButton.IsEnabled = $true } })
 $controls.AutomaticCreateButton.Add_Click({ try { Invoke-AutomaticWave -Create } catch { Show-GuiError $_.Exception.Message; $controls.AutomaticPreviewButton.IsEnabled = $true } })
 $controls.AutomaticOpenEvidenceButton.Add_Click({ Open-ShellPath $controls.AutomaticEvidencePathText.Text })

@@ -46,7 +46,8 @@ DirectSetup et *Allow controlled reboots* désactivé, aucun redémarrage n'est 
 ## 3. Préparer la Wave
 
 - **Automatic Wave** : rafraîchir les inventaires partagés AD et Intune, choisir la source
-  (`Both`, `AD`, `Intune`), les préfixes, l'ancienneté de logon AD et, si besoin,
+  (`Both`, `AD`, `Intune`), le domaine AD (l'inventaire partagé couvre toute la forêt ;
+  *(All domains)* par défaut), les préfixes, l'ancienneté de logon AD et, si besoin,
   *Exclude devices present in Intune*, cliquer **Preview**, contrôler la sélection et les
   exclusions, puis **Create Wave**.
 - **New Wave** : coller les noms de postes, **Create Wave**.

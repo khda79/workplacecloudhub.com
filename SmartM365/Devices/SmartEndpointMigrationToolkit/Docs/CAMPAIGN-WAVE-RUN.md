@@ -44,7 +44,11 @@ PowerShell 5.1 with the engine. `Update-WaveCmdWrappers.cmd` regenerates them fo
 1. Refresh the shared inventories if needed (AD; Intune and Entra with delegated sign-in). The
    exports run in a hidden process; their output is shown live in a GUI window and kept in
    `Runs\<Campaign>\_InventoryRefresh\<timestamp>\InventoryRefresh.log`. Closing the window
-   while the refresh runs only hides it; the button shows it again.
+   while the refresh runs only hides it; the button shows it again. The shared AD inventory
+   always covers every domain of the forest (an export with `-Domain` cannot replace it); the
+   **AD domain** list of the Automatic Wave view chooses one domain for the Wave. Computers of
+   other domains are filter exclusions `AD_DOMAIN_NOT_MATCHED`; devices without an AD record
+   (Intune only) are `AD_DOMAIN_UNKNOWN`.
 2. **Preview** runs the Automatic Wave engine without `-Create`: it writes evidence under
    `Runs\<Campaign>\_AutomaticWave\` (selected, excluded with reason code, summary) and creates
    nothing.

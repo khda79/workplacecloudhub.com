@@ -26,6 +26,12 @@ Smart Endpoint Migration Toolkit package root. Defaults to the package that cont
 .PARAMETER WaveName
 Wave name. Defaults to WAVE-AUTO-HJ-<prefix>-<yyyyMMdd-HHmmss>.
 
+.PARAMETER AdDomainFilter
+Optional AD domain DNS names (for example contoso.local). Only computers with an AD record in one of
+these domains are kept; the others are listed in AutomaticWaveFilterExclusions.csv with
+AD_DOMAIN_NOT_MATCHED, or AD_DOMAIN_UNKNOWN when they have no AD record or no domain. Each domain must
+exist in the AD inventory. The shared AD inventory always covers the whole forest.
+
 .PARAMETER Create
 Creates the Wave (Computers.txt, Wave.local.json, wrappers). Without it, only evidence is written.
 
@@ -47,6 +53,7 @@ param(
     [string]$WaveName,
     [string[]]$ComputerNamePrefix,
     [string[]]$ComputerNameContains,
+    [string[]]$AdDomainFilter,
     [switch]$ExcludeStaleAd,
     [ValidateRange(1, 3650)][int]$AdLastLogonMaxAgeDays = 45,
     [scriptblock]$ProgressCallback,
@@ -239,6 +246,55 @@ function Test-AutomaticWaveNameContains {
     return $false
 }
 
+function Get-AutomaticWaveAdDomains {
+    param([AllowNull()][string[]]$Domains)
+
+    $normalized = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Domains)) {
+        foreach ($candidate in @(([string]$item) -split ';')) {
+            $value = $candidate.Trim().Trim([char]34).Trim('.').ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($value)) { continue }
+            if ($value -notmatch '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$') {
+                throw "Invalid AD domain '$candidate'. Use the DNS name of the domain, for example contoso.local."
+            }
+            if (-not $normalized.Contains($value)) { $normalized.Add($value) }
+        }
+    }
+    return @($normalized.ToArray())
+}
+
+function Get-AutomaticWaveAdDomainFilterReason {
+    <#
+    Empty when the computer has an AD record in one of the selected domains (or no domain filter).
+    A computer without an AD record or without a domain value never matches a domain filter.
+    #>
+    param(
+        [object[]]$AdRecords,
+        [string[]]$Domains
+    )
+
+    if (@($Domains).Count -eq 0) { return '' }
+    $recordDomains = @(@($AdRecords) | Where-Object { $null -ne $_ } | ForEach-Object { ([string]$_.Domain).Trim().Trim('.').ToLowerInvariant() } | Where-Object { $_ })
+    if ($recordDomains.Count -eq 0) { return 'AD_DOMAIN_UNKNOWN' }
+    foreach ($domain in $recordDomains) { if ($Domains -contains $domain) { return '' } }
+    return 'AD_DOMAIN_NOT_MATCHED'
+}
+
+function Assert-AutomaticWaveAdDomainsInInventory {
+    param(
+        [string[]]$Domains,
+        [object[]]$AdRecords,
+        [string]$InventoryPath
+    )
+
+    if (@($Domains).Count -eq 0) { return }
+    $known = @(@($AdRecords) | ForEach-Object { ([string]$_.Domain).Trim().Trim('.').ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
+    $missing = @($Domains | Where-Object { $known -notcontains $_ })
+    if ($missing.Count -gt 0) {
+        throw ("SEMT_AD_DOMAIN_NOT_IN_INVENTORY: AD domain(s) {0} not found in the AD inventory {1}. Domains in the inventory: {2}." -f ($missing -join ', '),$InventoryPath,$(if ($known.Count -gt 0) { $known -join ', ' } else { 'none' }))
+    }
+}
+
 function Get-WindowsClientClassification {
     param(
         [AllowNull()][string]$OperatingSystem
@@ -379,6 +435,9 @@ $namePrefixes = @(Get-AutomaticWaveNamePrefixes -Prefixes $ComputerNamePrefix)
 $nameContainsValues = @(Get-AutomaticWaveNameContainsValues -ContainsValues $ComputerNameContains)
 $namePrefixDisplay = $namePrefixes -join ';'
 $nameContainsDisplay = $nameContainsValues -join ';'
+$adDomains = @(Get-AutomaticWaveAdDomains -Domains $AdDomainFilter)
+$adDomainDisplay = $adDomains -join ';'
+Assert-AutomaticWaveAdDomainsInInventory -Domains $adDomains -AdRecords $adRecords -InventoryPath $AdInventoryCsv
 $adLastLogonCutoffUtc = [datetime]::UtcNow.AddDays(-$AdLastLogonMaxAgeDays)
 $selected = New-Object System.Collections.Generic.List[object]
 $excluded = New-Object System.Collections.Generic.List[object]
@@ -402,6 +461,12 @@ foreach ($key in @($adByKey.Keys | Sort-Object)) {
         $filterTypes.Add('ComputerNameContains')
         $filterValues.Add($nameContainsDisplay)
         $filterReasons.Add('COMPUTER_NAME_CONTAINS_NOT_MATCHED')
+    }
+    $adDomainReason = Get-AutomaticWaveAdDomainFilterReason -AdRecords $keyAdRecords -Domains $adDomains
+    if (-not [string]::IsNullOrWhiteSpace($adDomainReason)) {
+        $filterTypes.Add('ADDomain')
+        $filterValues.Add($adDomainDisplay)
+        $filterReasons.Add($adDomainReason)
     }
     $validLastSeen = @($keyAdRecords | Where-Object { $_.LastSeenUtc -ne [datetime]::MinValue } | Sort-Object LastSeenUtc -Descending)
     $latestLastSeen = if ($validLastSeen.Count -gt 0) { [datetime]$validLastSeen[0].LastSeenUtc } else { [datetime]::MinValue }
@@ -529,7 +594,7 @@ if (-not $NoEvidence) {
 
 $availableSourcesText = if ($entraAvailable) { 'AD+Intune+Entra' } else { 'AD+Intune' }
 if ($Create) {
-    $description = 'Automatic HybridJoin Wave; Sources={0}; ComputerNamePrefix={1}; ComputerNameContains={2}; ExcludeIntunePresent=True; ExcludeStaleAd={3}; ADLastLogonMaxAgeDays={4}; Selected={5}' -f $availableSourcesText, $namePrefixDisplay, $nameContainsDisplay, [bool]$ExcludeStaleAd, $AdLastLogonMaxAgeDays, $selected.Count
+    $description = 'Automatic HybridJoin Wave; Sources={0}; ComputerNamePrefix={1}; ComputerNameContains={2}; ADDomain={6}; ExcludeIntunePresent=True; ExcludeStaleAd={3}; ADLastLogonMaxAgeDays={4}; Selected={5}' -f $availableSourcesText, $namePrefixDisplay, $nameContainsDisplay, [bool]$ExcludeStaleAd, $AdLastLogonMaxAgeDays, $selected.Count, $adDomainDisplay
     Publish-AutomaticWaveProgress -Stage 'Creating the automatic Wave...' -Detail ("Wave: {0}; selected devices: {1}" -f $safeWaveName, $selected.Count)
     $waveComputers = @($selected | Sort-Object ComputerName | Select-Object -ExpandProperty ComputerName)
     $wave = New-SemtWave -PackageRoot $effectivePackageRoot -Campaign $script:AutomaticWaveCampaign -Name $safeWaveName -Computers $waveComputers -Source Automatic -Description $description -EvidencePath $evidencePath
@@ -544,6 +609,7 @@ $summary = [pscustomobject]@{
     EntraInventoryAvailable = $entraAvailable
     ComputerNamePrefixes = $namePrefixDisplay
     ComputerNameContains = $nameContainsDisplay
+    ADDomainFilter = $adDomainDisplay
     ExcludeIntunePresent = $true
     ExcludeStaleAd = [bool]$ExcludeStaleAd
     ADLastLogonMaxAgeDays = $AdLastLogonMaxAgeDays
@@ -565,6 +631,7 @@ $summary = [pscustomobject]@{
     ADNameCollisions = @($excluded | Where-Object { $_.ExclusionReason -match 'AD_NAME_COLLISION' }).Count
     EntraAmbiguousExcluded = @($excluded | Where-Object { $_.ExclusionReason -match 'ENTRA_SERVERAD_' }).Count
     ADLastLogonFilterExcluded = @($filterExcluded | Where-Object { $_.FilterReason -match 'AD_LAST_LOGON_' }).Count
+    ADDomainFilterExcluded = @($filterExcluded | Where-Object { $_.FilterReason -match 'AD_DOMAIN_' }).Count
     WaveCreated = [bool]$Create
     WaveName = $safeWaveName
     WavePath = $wavePath

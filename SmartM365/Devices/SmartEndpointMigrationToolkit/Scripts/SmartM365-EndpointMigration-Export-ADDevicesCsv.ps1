@@ -5,7 +5,8 @@ Exports Active Directory computer objects to DevicesAD.csv for the Smart Endpoin
 .DESCRIPTION
 Uses the ActiveDirectory PowerShell module to read computer objects.
 Without -Domain, the script exports all domains in the current AD forest.
-With -Domain, the script exports only that domain.
+With -Domain, the script exports only that domain, and only to -OutputPath or a -ComputerListPath
+folder: the shared cache always covers the whole forest.
 Without -OutputPath, an unscoped export writes the shared cache <Package>\Inventory\DevicesAD.csv
 and a -ComputerListPath export writes DevicesAD.csv next to that Computers.txt. A scoped export
 never overwrites the shared cache. The columns cover both the HybridJoin and the Windows11Upgrade
@@ -19,7 +20,7 @@ Destination CSV path. Defaults to the shared cache for unscoped exports, or Devi
 Computers.txt path. When provided, only those AD computers are queried.
 
 .PARAMETER Domain
-Optional AD domain/controller passed to Get-ADComputer -Server. Use this for per-Wave domain selection.
+Optional AD domain/controller passed to Get-ADComputer -Server. Refused for the shared cache.
 When omitted, all domains in the current AD forest are exported.
 
 .PARAMETER ForceRefresh
@@ -82,6 +83,10 @@ if (-not $OutputPathWasProvided) {
 $OutputIsSharedInventory = ([System.IO.Path]::GetFullPath($OutputPath) -ieq $SharedInventoryPath)
 if ($ComputerListPathWasProvided -and $OutputIsSharedInventory) {
     throw "SEMT_SCOPED_INVENTORY_TARGETS_SHARED_CACHE: a -ComputerListPath export cannot overwrite the shared inventory $SharedInventoryPath."
+}
+# The shared inventory always covers the whole forest: a domain is chosen per Wave (Automatic Wave AD domain filter).
+if (-not [string]::IsNullOrWhiteSpace($Domain) -and $OutputIsSharedInventory) {
+    throw "SEMT_SHARED_AD_INVENTORY_DOMAIN_SCOPED: the shared inventory $SharedInventoryPath covers the whole AD forest. Run without -Domain, or pass -OutputPath for a single-domain export."
 }
 
 if (-not $ForceRefresh -and -not $ComputerListPathWasProvided -and $OutputIsSharedInventory -and (Test-Path -LiteralPath $OutputPath -PathType Leaf)) {
@@ -248,6 +253,8 @@ $export = if ($requestedComputers.Count -gt 0) {
     foreach ($domainTarget in $domainTargets) {
         Write-Host ("Reading selected AD computers from domain: {0}" -f $domainTarget.DNSRoot) -ForegroundColor DarkCyan
         foreach ($requestedComputer in $requestedComputers) {
+            # Only the first match is kept, so a computer already found is not queried in the next domains.
+            if ($foundByComputer.ContainsKey($requestedComputer.ComputerName)) { continue }
             $nameLiteral = ConvertTo-AdFilterStringLiteral -Value $requestedComputer.ComputerName
             $requestedLiteral = ConvertTo-AdFilterStringLiteral -Value $requestedComputer.RequestedComputerName
             $queryParams = @{

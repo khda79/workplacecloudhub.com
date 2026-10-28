@@ -63,17 +63,17 @@ function Enable-Tls12 {
 }
 
 function Import-GraphAuthentication {
-    $module = Get-Module -ListAvailable -Name Microsoft.Graph.Authentication |
-        Sort-Object Version -Descending |
-        Select-Object -First 1
+    $module = Find-SemtGraphAuthenticationModule
     if (-not $module) {
         if ($SkipModuleInstall) {
-            throw 'Microsoft.Graph.Authentication is not installed.'
+            throw ('SEMT_GRAPH_MODULE_NOT_FOUND: Microsoft.Graph.Authentication is not installed. {0}' -f (Get-SemtGraphModuleDiagnostic))
         }
         Enable-Tls12
         Install-Module Microsoft.Graph.Authentication -Scope CurrentUser -Force -AllowClobber -Repository PSGallery -ErrorAction Stop
+        $module = Find-SemtGraphAuthenticationModule
+        if (-not $module) { throw ('SEMT_GRAPH_MODULE_NOT_FOUND: Microsoft.Graph.Authentication was installed for the current user but cannot be found. {0}' -f (Get-SemtGraphModuleDiagnostic)) }
     }
-    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+    Import-Module -Name $module.Path -ErrorAction Stop
 }
 
 $scriptsRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }

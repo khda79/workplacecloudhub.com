@@ -47,7 +47,7 @@ Defaults were taken from the real behaviour of the two previous toolkits, then r
 | `GlobalWorkerLimit` | 15 | Shared by both Campaigns on the technician computer; 0 disables the shared cap. |
 ## Option reference
 
-Generated from catalog SHA256 `77D67304200CB1AA6E2CDE36FBBCE0160556662EBFA0FA2906AABF2698524C98`.
+Generated from catalog SHA256 `A587713B499D1D85BB1B3A3352BB1BDCD41D8CD26CD83A0AD88ED7ADB0ECA331`.
 
 ### Common options
 

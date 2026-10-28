@@ -99,6 +99,7 @@ function script:Initialize-SmartM365DemoProfile {
     Set-SmartM365DemoCombo WaveModeCombo $modes
     Set-SmartM365DemoCombo SingleModeCombo $modes 1
     Set-SmartM365DemoCombo AutomaticSourceCombo @('Both','AD','Intune')
+    Set-SmartM365DemoCombo AutomaticAdDomainCombo @('(All domains)','contoso.example','emea.contoso.example')
     $c.SingleComputerText.Text = 'CTSO-LAP-0142'
     $c.NewWaveNameText.Text = 'WAVE-CONTOSO-DEMO'
     $c.NewWaveComputersText.Text = ((1..6 | ForEach-Object { 'CTSO-LAP-{0:0000}' -f $_ }) -join "`r`n")

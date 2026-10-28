@@ -301,6 +301,31 @@ try {
     [pscustomobject]@{ DeviceName = 'PC-1'; InventoryTenantId = 't1'; InventoryAuthenticationMode = 'DelegatedInteractive'; InventoryScope = 'AllManagedDevices' } | Export-Csv -LiteralPath $sharedIntune -NoTypeInformation -Encoding UTF8
     Test-Step 'fresh Intune inventory with verified provenance is reused' { (Test-SemtSharedInventoryUsable -Path $sharedIntune -Kind Intune -MaxAgeHours 2).Usable }
     Test-Throws 'a scoped export never overwrites a shared inventory' { Invoke-SemtInventoryExport -Kind AD -ExportScriptPath (Join-Path $tempRoot 'none.ps1') -OutputPath $sharedAd -LogPath (Join-Path $tempRoot 'inv.log') -ScopedComputers @('PC-1') -PackageRoot $inventoryPackage } '.'
+    # The shared AD inventory always covers the forest; the refusal happens before any AD query.
+    $adExport = Join-Path $script:PackageRoot 'Scripts\SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1'
+    Test-Throws 'a single-domain AD export never writes the shared AD inventory' { & $adExport -Domain 'contoso.test' -ForceRefresh } 'SEMT_SHARED_AD_INVENTORY_DOMAIN_SCOPED'
+    $engineText = [IO.File]::ReadAllText((Join-Path $script:PackageRoot 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'))
+    # Graph module installed by PowerShellGet in a folder missing from PSModulePath (redirected Documents).
+    $fakeModules = Join-Path $tempRoot 'Redirected Documents\WindowsPowerShell\Modules'
+    $fakeLocation = Join-Path $fakeModules 'Microsoft.Graph.Authentication\9.9.9'
+    New-Item -ItemType Directory -Path $fakeLocation -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $fakeLocation 'Microsoft.Graph.Authentication.psd1') -Value "@{ ModuleVersion = '9.9.9'; GUID = '00000000-0000-4000-8000-000000000099' }" -Encoding ASCII
+    $savedModulePath = $env:PSModulePath
+    $coreModule = Get-Module SmartEndpointMigration.Core
+    try {
+        $env:PSModulePath = Join-Path $PSHOME 'Modules'
+        & $coreModule { param($Location) $script:FakeGraphLocation = $Location; function script:Get-InstalledModule { param($Name,[switch]$AllVersions,$ErrorAction) if ($script:FakeGraphLocation) { [pscustomobject]@{ Name = $Name; Version = [version]'9.9.9'; InstalledLocation = $script:FakeGraphLocation } } } } $fakeLocation
+        $found = Find-SemtGraphAuthenticationModule
+        Test-Step 'Graph module installed outside PSModulePath is found through its install record' { $null -ne $found -and [string]$found.Version -eq '9.9.9' -and @($env:PSModulePath -split ';') -contains $fakeModules }
+        $env:PSModulePath = Join-Path $PSHOME 'Modules'
+        & $coreModule { $script:FakeGraphLocation = Join-Path $env:TEMP ('missing-' + [guid]::NewGuid().ToString('N')) }
+        Test-Step 'Graph module with a stale install record is reported missing, with a diagnostic' { $null -eq (Find-SemtGraphAuthenticationModule) -and (Get-SemtGraphModuleDiagnostic) -match 'PSModulePath: .*Install-Module Microsoft\.Graph\.Authentication -Scope AllUsers' }
+    }
+    finally {
+        $env:PSModulePath = $savedModulePath
+        & $coreModule { Remove-Item -Path Function:\Get-InstalledModule -ErrorAction SilentlyContinue; $script:FakeGraphLocation = $null }
+    }
+    Test-Step 'Run inventory refresh searches every forest domain (AdDomain is a DNS suffix only)' { $engineText -match 'Invoke-SemtInventoryExport -Kind \$Kind' -and $engineText -notmatch "-Domain \(Opt 'AdDomain'\)" }
     #endregion
 
     #region Paths

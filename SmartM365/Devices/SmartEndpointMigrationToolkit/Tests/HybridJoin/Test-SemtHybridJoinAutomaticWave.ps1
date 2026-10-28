@@ -165,6 +165,23 @@ try {
     $stale = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-STALE' -ExcludeStaleAd -AdLastLogonMaxAgeDays 45 -NoEvidence
     Assert-Equal $stale.Summary.ADLastLogonFilterExcluded 1 'stale AD device is excluded by the optional 45-day filter'
 
+    # AD domain filter: the inventory covers the forest, the Wave keeps one domain.
+    $frOnly = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-FR' -AdDomainFilter 'FR.test.' -NoEvidence
+    Assert-Equal $frOnly.Summary.SelectedDevices 3 'AD domain filter keeps the safe clients of that domain only'
+    Assert-Equal $frOnly.Summary.ADDomainFilter 'fr.test' 'AD domain filter is normalized (case, trailing dot) and reported'
+    Assert-Equal @($frOnly.FilterExcludedDevices | Where-Object { $_.FilterReason -eq 'AD_DOMAIN_NOT_MATCHED' -and $_.FilterType -eq 'ADDomain' } | ForEach-Object { $_.ComputerKey }) -join ',' 'BE-OLD-A-01' 'computer of another domain is a visible filter exclusion'
+    Assert-Equal $frOnly.Summary.ADDomainFilterExcluded 1 'summary counts AD domain filter exclusions'
+    Assert-True (@($frOnly.ExcludedDevices | Where-Object { $_.ComputerKey -eq 'FR-COLLIDE' -and $_.ExclusionReason -match 'AD_NAME_COLLISION' }).Count -eq 1) 'a name present in the selected and another domain stays a collision exclusion'
+    $beOnly = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-BE' -AdDomainFilter 'be.test' -NoEvidence
+    Assert-Equal (@($beOnly.SelectedDevices | ForEach-Object { $_.ComputerKey }) -join ',') 'BE-OLD-A-01' 'AD domain filter selects the other domain on request'
+    $noDomainFilter = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-ALL' -AdDomainFilter '' -NoEvidence
+    Assert-Equal $noDomainFilter.Summary.SelectedDevices 4 'empty AD domain filter keeps every domain'
+    foreach ($case in @(@('xx.test','SEMT_AD_DOMAIN_NOT_IN_INVENTORY'),@('fr test','Invalid AD domain'))) {
+        $failure = ''
+        try { [void](& $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-BAD' -AdDomainFilter $case[0] -NoEvidence) } catch { $failure = $_.Exception.Message }
+        Assert-True ($failure -match [regex]::Escape($case[1])) ("AD domain filter '{0}' is refused ({1})" -f $case[0],$case[1])
+    }
+
     # Entra is optional (the shared Entra cache of the test package does not exist).
     $withoutEntra = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -WaveName 'WAVE-AUTO-HJ-NO-ENTRA' -NoEvidence
     Assert-Equal $withoutEntra.Summary.EntraInventoryAvailable $false 'Entra is optional'

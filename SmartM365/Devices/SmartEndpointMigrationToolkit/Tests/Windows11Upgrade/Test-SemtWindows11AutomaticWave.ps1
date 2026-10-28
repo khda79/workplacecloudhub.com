@@ -164,6 +164,15 @@ try {
     Assert-True ($selectedNames -contains 'PC5') 'Intune-only PC5 is selected'
     Assert-True ($selectedNames -contains 'stalead.one.example') 'stale AD Windows 10 remains selected'
 
+    # AD domain filter: AD records of the domain are kept; Intune-only devices have no AD domain.
+    $domainPreview = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -WaveName 'WAVE-AUTO-DOMAIN' -AdDomainFilter 'ONE.example' -NoEvidence
+    Assert-Equal (@($domainPreview.SelectedDevices | Select-Object -ExpandProperty ComputerName | Sort-Object) -join ',') 'fr-pc1.one.example,stalead.one.example' 'AD domain filter keeps the Windows 10 devices of that domain'
+    Assert-True (@($domainPreview.FilterExcludedDevices | Where-Object { $_.ComputerKey -eq 'PC5' -and $_.FilterReason -eq 'AD_DOMAIN_UNKNOWN' }).Count -eq 1) 'Intune-only device is filtered out as AD_DOMAIN_UNKNOWN'
+    Assert-True ([bool]$domainPreview.Summary.NameFilterEnabled -and $domainPreview.Summary.ADDomainFilter -eq 'one.example' -and $domainPreview.Summary.ADDomainFilterExcluded -gt 0) 'AD domain filter is reported in the summary'
+    Assert-True (@($domainPreview.ExcludedDevices | Where-Object { $_.ComputerKey -eq 'DUP' -and $_.ExclusionReason -match 'AD_NAME_COLLISION' }).Count -eq 1) 'a name in the selected and another domain stays a collision exclusion'
+    Assert-Throws { & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -WaveName 'WAVE-AUTO-DOMAIN' -AdDomainFilter 'missing.example' -NoEvidence } 'SEMT_AD_DOMAIN_NOT_IN_INVENTORY' 'AD domain absent from the inventory is refused'
+    Assert-Throws { & $engine -Source Intune -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -WaveName 'WAVE-AUTO-DOMAIN' -AdDomainFilter 'one.example' -NoEvidence } 'requires an available AD inventory source' 'AD domain filter requires the AD source'
+
     # Prefix filter.
     $filteredPreview = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -WaveName 'WAVE-AUTO-FILTER-PREVIEW' -EvidenceRoot $evidenceRoot -ComputerNamePrefix 'fr-'
     Assert-True ([bool]$filteredPreview.Summary.NameFilterEnabled) 'prefix filter is enabled'

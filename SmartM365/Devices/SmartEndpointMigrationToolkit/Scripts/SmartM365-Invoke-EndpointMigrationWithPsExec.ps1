@@ -323,7 +323,7 @@ function Update-CycleInventory {
     Write-SemtTextLinesAtomic -Path $scopePath -Lines @(Get-SemtComputerList -Path $computerListPath)
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     Write-Host ("Cycle {0}: refreshing {1} inventory scoped to the Wave ({2} computer(s)); shared cache {3}." -f $CycleNumber,$Kind,$currentKeys.Count,$shared.Reason) -ForegroundColor Yellow
-    $export = Invoke-SemtInventoryExport -Kind $Kind -ExportScriptPath $script:ExportScripts.$Kind -OutputPath (Join-Path $script:RunContext.InventoryRoot ('Devices{0}_Cycle{1}_{2}.csv' -f $Kind,$CycleNumber,$stamp)) -LogPath (Join-Path $script:RunContext.InventoryRoot ('Devices{0}_Cycle{1}_{2}.log' -f $Kind,$CycleNumber,$stamp)) -ComputerListPath $scopePath -Domain (Opt 'AdDomain') -TenantId (Opt 'IntuneTenantId') -PageSize (Opt 'IntuneInventoryPageSize') -SharedInventoryPath $state.SharedPath
+    $export = Invoke-SemtInventoryExport -Kind $Kind -ExportScriptPath $script:ExportScripts.$Kind -OutputPath (Join-Path $script:RunContext.InventoryRoot ('Devices{0}_Cycle{1}_{2}.csv' -f $Kind,$CycleNumber,$stamp)) -LogPath (Join-Path $script:RunContext.InventoryRoot ('Devices{0}_Cycle{1}_{2}.log' -f $Kind,$CycleNumber,$stamp)) -ComputerListPath $scopePath -TenantId (Opt 'IntuneTenantId') -PageSize (Opt 'IntuneInventoryPageSize') -SharedInventoryPath $state.SharedPath
     if ($export.Success) {
         $state.Map = $export.Map
         $state.CsvPath = $export.CsvPath

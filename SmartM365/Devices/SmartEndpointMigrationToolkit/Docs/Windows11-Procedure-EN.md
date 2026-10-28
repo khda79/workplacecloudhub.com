@@ -44,7 +44,8 @@ only when no user is connected, **except** when uptime exceeds
 ## 3. Prepare the Wave
 
 - **Automatic Wave**: refresh the shared AD and Intune inventories, choose the source
-  (`Both`, `AD`, `Intune`), prefixes, AD logon age and *Exclude devices present in Intune* if
+  (`Both`, `AD`, `Intune`), the AD domain (the shared inventory covers the whole forest;
+  *(All domains)* by default), prefixes, AD logon age and *Exclude devices present in Intune* if
   needed, click **Preview**, review the selection and exclusions, then **Create Wave**.
 - **New Wave**: paste the computer names, **Create Wave**.
 - Devices already on Windows 11 in AD or Intune are skipped at each cycle and archived in

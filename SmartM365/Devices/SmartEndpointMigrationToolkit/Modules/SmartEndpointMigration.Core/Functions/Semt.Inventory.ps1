@@ -32,6 +32,39 @@ function Get-SemtInventoryFieldNames {
     return @($script:SemtInventoryFields[$Kind])
 }
 
+function Find-SemtGraphAuthenticationModule {
+    <#
+    Newest Microsoft.Graph.Authentication visible to this process. When PSModulePath misses the folder
+    that Install-Module -Scope CurrentUser wrote to (redirected Documents, PSModulePath set by policy),
+    the PowerShellGet install record gives that folder; it is added to PSModulePath for this process only.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $name = 'Microsoft.Graph.Authentication'
+    $module = Get-Module -ListAvailable -Name $name | Sort-Object Version -Descending | Select-Object -First 1
+    if ($module) { return $module }
+    if (-not (Get-Command -Name Get-InstalledModule -ErrorAction SilentlyContinue)) { return $null }
+    $installed = @(Get-InstalledModule -Name $name -AllVersions -ErrorAction SilentlyContinue | Sort-Object Version -Descending)
+    foreach ($item in $installed) {
+        $location = [string]$item.InstalledLocation
+        if ([string]::IsNullOrWhiteSpace($location) -or -not (Test-Path -LiteralPath (Join-Path $location ($name + '.psd1')) -PathType Leaf)) { continue }
+        $modulesRoot = Split-Path -Path (Split-Path -Path $location -Parent) -Parent
+        if (@($env:PSModulePath -split ';' | ForEach-Object { $_.TrimEnd('\') }) -notcontains $modulesRoot.TrimEnd('\')) { $env:PSModulePath = $modulesRoot + ';' + $env:PSModulePath }
+        $module = Get-Module -ListAvailable -Name $name | Sort-Object Version -Descending | Select-Object -First 1
+        if ($module) { return $module }
+    }
+    return $null
+}
+
+function Get-SemtGraphModuleDiagnostic {
+    [CmdletBinding()]
+    param()
+
+    $installed = @(if (Get-Command -Name Get-InstalledModule -ErrorAction SilentlyContinue) { Get-InstalledModule -Name 'Microsoft.Graph.Authentication' -AllVersions -ErrorAction SilentlyContinue | ForEach-Object { '{0} in {1}' -f $_.Version,$_.InstalledLocation } })
+    return ('Documents folder: {0}. PSModulePath: {1}. PowerShellGet install record: {2}. Install it for all users from an elevated Windows PowerShell: Install-Module Microsoft.Graph.Authentication -Scope AllUsers' -f [Environment]::GetFolderPath('MyDocuments'),$env:PSModulePath,$(if ($installed.Count -gt 0) { $installed -join '; ' } else { 'none' }))
+}
+
 function Get-SemtSharedInventoryPath {
     [CmdletBinding()]
     param(
