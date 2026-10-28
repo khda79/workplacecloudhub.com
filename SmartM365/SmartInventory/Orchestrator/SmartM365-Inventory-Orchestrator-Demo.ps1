@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.0
+1.4.1
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -476,7 +476,9 @@ function Invoke-OrchestratorDemo {
     $c.SharedPathText.Text='Contoso | DEMO - Sample data | All actions are simulated'
     $c.ConnectionText.Text='Offline demo'; $c.LastRefreshText.Text='2026-10-18 09:30 (frozen)'
     $c.FooterText.Text='DEMO - Sample data. Exports use a separate temporary demo folder.'
-    $c.VersionText.Text='v1.6.7 | DEMO'
+    # The GUI dot-sources this helper after setting its version: the label never lags behind it.
+    $guiVersion=Get-Variable -Name AppVersion -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    $c.VersionText.Text=$(if($guiVersion){"v$guiVersion | DEMO"}else{'DEMO'})
     $c.AutoRefreshCheck.IsChecked=$false; $c.AutoRefreshCheck.IsEnabled=$false
     # Keep both running sample rows visible at the default capture size.
     $operationsLayout=$c.OperationsServersGrid.Parent
