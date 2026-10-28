@@ -694,6 +694,7 @@ The full job can declare `DependsOn` on its fast prerequisite when a quick CSV m
 | `WorkingDirectory` | Current directory of the script, relative to SmartInventory (replaces `pushd`). |
 | `Interactive` | The entry needs a user console (interactive sign-in or prompts); it is refused unattended. |
 | `RequiresConfirmation` | The user must type `WRITE` before the script starts; refused unattended. |
+| `Detached` | Manual window applications only (`Orchestrator-GUI`): the script starts with a hidden console and `SmartInventory.cmd` returns at once, so its cmd window closes; a startup failure is shown in a message box (`SMARTM365_GUI_DETACHED=1`). |
 | `Tokens` | `{ "Name": { "Value": "...", "MustExist": true } }`, used as `{{Name}}` in `Arguments`; `{{ScriptDirectory}}`, `{{SmartInventoryRoot}}` and `{{Tenant}}` are built in. |
 | `PassTenant` | `false` when the script asks for its tenant itself; otherwise `-Tenant` is passed when the script declares it. |
 | `LegacyLaunchers` | Former `.cmd` files that this entry replaces; their one-line aliases are generated from it. |

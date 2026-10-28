@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.5
+1.6.6
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.5'
+$script:AppVersion = '1.6.6'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -3264,6 +3264,14 @@ $window.Add_Closing({
     $smartM365RunGuard.ReturnedNormally=$true
 } catch {
     if ($smartM365RunGuard -and $_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord=$_ }
+    # Started by SmartInventory.cmd with a hidden console: the error would otherwise be invisible.
+    if ($env:SMARTM365_GUI_DETACHED -eq '1' -and $_.Exception -isnot [Management.Automation.PipelineStoppedException]) {
+        try {
+            Add-Type -AssemblyName PresentationFramework -ErrorAction Stop
+            [System.Windows.MessageBox]::Show(("The orchestrator GUI could not start.`n`n{0}" -f $_.Exception.Message), 'SmartM365 Orchestrator GUI', 'OK', 'Error') | Out-Null
+        }
+        catch { Write-Verbose ("Startup error message box unavailable: {0}" -f $_.Exception.Message) }
+    }
     throw
 } finally {
     if ($smartM365RunGuard) {

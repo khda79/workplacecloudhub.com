@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate offline the SmartInventory launch engine and its catalog against the legacy .cmd launchers.
 .VERSION
-1.4.1
+1.5.0
 .NOTES
 Runs under Windows PowerShell 5.1 and PowerShell 7. Nothing is executed outside a fictional fixture.
 Checks:
@@ -189,6 +189,7 @@ try {
     $adItems = @($domains[0].Items)
     Assert-True ($adItems[0].Kind -eq 'Job' -and $adItems[-1].Kind -eq 'Manual') 'Jobs come before manual entries in a domain.'
     Assert-True ((Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice ' 2 ').Domain -eq 'Exchange Online' -and (Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice 'workplaceevidence-convertmetadata').Name -eq 'WorkplaceEvidence-ConvertMetadata' -and $null -eq (Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice '99')) 'A choice resolves by number, or by name even for an advanced entry.'
+    Assert-True ((Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'Orchestrator-GUI').Detached -and -not (Resolve-SmartM365InventoryLaunch -Catalog $catalog -Name 'Orchestrator-Start').Detached) 'Only the orchestrator GUI starts detached (no cmd window kept open).'
     $hiddenInGui = @($catalog.Entries | Where-Object { $_.Definition.PSObject.Properties['HideInGui'] -and $_.Definition.HideInGui } | ForEach-Object { $_.Name })
     Assert-True ($hiddenInGui.Count -eq 8 -and $hiddenInGui -contains 'Orchestrator-GUI' -and $hiddenInGui -contains 'Exchange-HealthChecker-ScheduledTask-Installer') 'The orchestrator entries and the installers are hidden in the GUI.'
 
@@ -255,7 +256,7 @@ try {
     $probe = @'
 param([string]$Tenant = 'none', [int]$ExitCode = 0, [string]$Marker = 'probe', [string]$OutputPath = '', [string]$Value = '', [switch]$Flag)
 $markerFolder = $env:SMARTM365_TEST_MARKERS
-$data = [ordered]@{ ScriptRoot = $PSScriptRoot; Tenant = $Tenant; Edition = $PSVersionTable.PSEdition; Major = $PSVersionTable.PSVersion.Major; Value = $Value; Flag = [bool]$Flag; CurrentDirectory = [Environment]::CurrentDirectory }
+$data = [ordered]@{ ScriptRoot = $PSScriptRoot; Tenant = $Tenant; Edition = $PSVersionTable.PSEdition; Major = $PSVersionTable.PSVersion.Major; Value = $Value; Flag = [bool]$Flag; CurrentDirectory = [Environment]::CurrentDirectory; Detached = [string]$env:SMARTM365_GUI_DETACHED }
 [IO.File]::WriteAllText((Join-Path $markerFolder ($Marker + '.json')), ($data | ConvertTo-Json))
 exit $ExitCode
 '@
@@ -276,7 +277,8 @@ exit $ExitCode
         )
         Launches = @(
             [ordered]@{ Name = 'Probe-Manual'; Manual = $true; Group = 'Fixture'; Advanced = $true; Description = 'Fixture manual entry.'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-Marker manual -Value {{PriceList}}'; WorkingDirectory = 'Fixture'; Tokens = [ordered]@{ PriceList = [ordered]@{ Value = '{{ScriptDirectory}}\prices.csv'; MustExist = $true } } },
-            [ordered]@{ Name = 'Probe-Write'; Manual = $true; Group = 'Fixture'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-Marker write'; RequiresConfirmation = $true; Interactive = $true }
+            [ordered]@{ Name = 'Probe-Write'; Manual = $true; Group = 'Fixture'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-Marker write'; RequiresConfirmation = $true; Interactive = $true },
+            [ordered]@{ Name = 'Probe-Detached'; Manual = $true; Group = 'Fixture'; Advanced = $true; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-Marker detached -ExitCode 9'; Detached = $true }
         )
     }
     Write-FixtureFile -Path (Join-Path $fixtureInventory 'Orchestrator\Orchestrator-Jobs.json.template') -Content ($fixtureCatalog | ConvertTo-Json -Depth 10)
@@ -288,7 +290,7 @@ exit $ExitCode
     Write-FixtureFile -Path (Join-Path $cacheRoot 'Unwritable') -Content 'not a folder'
 
     # Catalog validation: unknown parameter, missing script, undefined token (checked by AST, nothing runs).
-    $broken = [ordered]@{ Jobs = @([ordered]@{ Name = 'Broken'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-NoSuchParameter -Value {{Undefined}}'; HideInGui = $true }, [ordered]@{ Name = 'Gone'; ScriptPath = 'Fixture\Absent.ps1' }) }
+    $broken = [ordered]@{ Jobs = @([ordered]@{ Name = 'Broken'; ScriptPath = 'Fixture\SmartM365-Fixture-Probe.ps1'; Arguments = '-NoSuchParameter -Value {{Undefined}}'; HideInGui = $true; Detached = $true }, [ordered]@{ Name = 'Gone'; ScriptPath = 'Fixture\Absent.ps1' }) }
     $brokenRoot = Join-Path $fixtureBase 'Broken\SmartInventory'
     Write-FixtureFile -Path (Join-Path $brokenRoot 'Orchestrator\Orchestrator-Jobs.json.template') -Content ($broken | ConvertTo-Json -Depth 10)
     Copy-Item -LiteralPath (Join-Path $fixtureInventory 'Fixture') -Destination (Join-Path $brokenRoot 'Fixture') -Recurse
@@ -297,6 +299,7 @@ exit $ExitCode
     Assert-True ($brokenErrors -match 'Gone : script not found') 'Catalog check must report a missing script.'
     Assert-True ($brokenErrors -match '\{\{Undefined\}\} is not defined') 'Catalog check must report an undefined token.'
     Assert-True ($brokenErrors -match 'Broken : HideInGui must be') 'HideInGui is reserved for manual entries.'
+    Assert-True ($brokenErrors -match 'Broken : Detached must be') 'Detached is reserved for manual entries.'
 
     # Tenant: parameter, then SMARTM365_ORCHESTRATOR_TENANT, then DefaultTenant.
     $env:SMARTM365_ORCHESTRATOR_TENANT = ''
@@ -339,6 +342,19 @@ exit $ExitCode
     $exitCode = Invoke-SmartM365InventoryLaunch -Plan (Resolve-SmartM365InventoryLaunch -Catalog $fixture -Name 'Probe-Desktop') -Catalog $fixture
     $marker = Read-Marker -Name 'desktop'
     Assert-True ($exitCode -eq 5 -and $marker.Edition -eq 'Desktop' -and $marker.Major -eq 5) 'WindowsPowerShell runtime must run powershell.exe 5.1 and return its exit code.'
+
+    # Detached window application: started with a hidden console, the launcher returns 0 at once.
+    $env:SMARTM365_GUI_DETACHED = ''
+    $detachedPlan = Resolve-SmartM365InventoryLaunch -Catalog $fixture -Name 'Probe-Detached'
+    Assert-True ($detachedPlan.Detached -and (Format-SmartM365InventoryPlan -Plan $detachedPlan -Catalog $fixture) -match 'Detached: yes') 'A Detached manual entry must resolve as detached.'
+    Assert-True (-not (Resolve-SmartM365InventoryLaunch -Catalog $fixture -Name 'Probe-Manual').Detached) 'An entry without Detached must stay attached.'
+    $exitCode = Invoke-SmartM365InventoryLaunch -Plan $detachedPlan -Catalog $fixture
+    $deadline = [datetime]::UtcNow.AddSeconds(60)
+    while (-not (Test-Path -LiteralPath (Join-Path $markerFolder 'detached.json')) -and [datetime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 200 }
+    Start-Sleep -Milliseconds 300
+    $marker = Read-Marker -Name 'detached'
+    Assert-True ($exitCode -eq 0 -and $null -ne $marker -and $marker.Detached -eq '1' -and $marker.Edition -eq 'Core') 'A detached entry must start pwsh 7 with SMARTM365_GUI_DETACHED=1 and return 0 without waiting for its exit code.'
+    Assert-True ([string]::IsNullOrEmpty($env:SMARTM365_GUI_DETACHED)) 'The launcher must restore SMARTM365_GUI_DETACHED.'
 
     # Manual entry: working directory, token resolved and checked.
     $exitCode = Invoke-SmartM365InventoryLaunch -Plan (Resolve-SmartM365InventoryLaunch -Catalog $fixture -Name 'Probe-Manual') -Catalog $fixture
@@ -469,7 +485,7 @@ exit $ExitCode
     Assert-True ($menuOutput -match 'Domains' -and $menuOutput -match '\s1\s+Fixture \(1\)' -and $menuOutput -match '\s3\s+Probe-Direct' -and $menuOutput -match 'Command: ' -and $menuOutput -notmatch 'Probe-Manual') "The menu must list the domains and entries, hide advanced entries and show the command: $menuOutput"
     Remove-Item -LiteralPath (Join-Path $markerFolder 'direct.json') -ErrorAction SilentlyContinue
     $quitOutput = "A`nQ`n" | & $powershell5 -NoProfile -ExecutionPolicy Bypass -File $engineScript -Menu 2>&1 | Out-String
-    Assert-True ($quitOutput -match 'advanced entries shown' -and $quitOutput -match 'Fixture \(2\)') 'A must show the advanced entries.'
+    Assert-True ($quitOutput -match 'advanced entries shown' -and $quitOutput -match 'Fixture \(3\)') 'A must show the advanced entries.'
     Assert-True ($LASTEXITCODE -eq 0 -and $null -eq (Read-Marker -Name 'direct')) 'Quitting the menu must run nothing.'
     & $powershell5 -NoProfile -ExecutionPolicy Bypass -File $engineScript 'No-Such-Job' *> $null
     Assert-True ($LASTEXITCODE -eq 1) 'An unknown entry must return 1.'

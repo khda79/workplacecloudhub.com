@@ -35,7 +35,7 @@ The exit code of the launched script is returned. Preparation errors return 1.
 .\Invoke-SmartM365InventoryJob.ps1 AD-Inventory -Request -IncludeDependencies
 
 .VERSION
-1.3.1
+1.3.2
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -53,7 +53,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.3.1'
+$ScriptVersion = '1.3.2'
 
 function Write-Host {
     param([Parameter(Position = 0)][AllowEmptyString()][string]$Object = '', [ConsoleColor]$ForegroundColor = 'Gray')
@@ -238,9 +238,10 @@ try {
     }
     $exitCode = Invoke-SmartM365InventoryLaunch -Plan $plan -Catalog $catalog
     if ($exitCode -ne 0) { Write-Host ('{0} ended with exit code {1}.' -f $plan.Name, $exitCode) -ForegroundColor Yellow }
-    elseif ($menuMode) { Write-Host ('{0} ended with exit code 0.' -f $plan.Name) }
+    elseif ($menuMode -and -not $plan.Detached) { Write-Host ('{0} ended with exit code 0.' -f $plan.Name) }
     # Started from the menu (often by a double-click): keep the window open on the result.
-    if ($menuMode) { Wait-InventoryLauncherKey }
+    # A detached window application has no result here: the window closes at once.
+    if ($menuMode -and -not $plan.Detached) { Wait-InventoryLauncherKey }
 }
 catch {
     Write-Host ('[ERROR] {0}' -f $_.Exception.Message) -ForegroundColor Red

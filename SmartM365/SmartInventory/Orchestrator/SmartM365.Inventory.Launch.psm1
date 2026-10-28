@@ -24,6 +24,9 @@ Launch fields of an entry:
 - Group (manual entries too): domain of the SmartInventory.cmd menu.
 - Advanced: true for a manual tool that is rarely used (migration, repair, diagnostic, setup);
   the menu shows it only on request, its name always works.
+- Detached: true for a manual window application (WPF GUI): it starts with a hidden console and
+  the launcher returns at once, so the cmd window closes; SMARTM365_GUI_DETACHED=1 tells the
+  application to report a startup failure in a message box.
 
 LocalCache reproduces the legacy on-premises launchers: first usable folder among
 ProgramData\SmartM365\LauncherCache\<CacheName>, Windows\Temp, C:\Temp and %TEMP% (the orchestrator
@@ -38,11 +41,11 @@ emptied; right before the launch, every code file of the cache must be byte-iden
 Compatible with Windows PowerShell 5.1 and PowerShell 7.
 
 .VERSION
-1.5.0
+1.6.0
 #>
 Set-StrictMode -Version 2.0
 
-$script:LaunchModuleVersion = '1.5.0'
+$script:LaunchModuleVersion = '1.6.0'
 $script:ValidRuntimes = @('PowerShell7', 'WindowsPowerShell')
 $script:ValidModes = @('Direct', 'LocalCache', 'Auto')
 # Test hook: replaced by the offline tests to simulate the zone of a share.
@@ -345,7 +348,7 @@ function Resolve-SmartM365InventoryLaunch {
             Arguments = $arguments; ExtraArguments = $extra
             Tenant = $tenantInfo.Value; TenantSource = $tenantInfo.Source; PassTenant = $true
             WorkingDirectory = ''; Mode = 'Direct'; ModeInfo = $null; CacheName = ''; Include = @()
-            Interactive = $false; RequiresConfirmation = $false; Description = 'Request through the resident orchestrators.'
+            Interactive = $false; RequiresConfirmation = $false; Detached = $false; Description = 'Request through the resident orchestrators.'
             Tokens = @{}; Entry = $null
         }
     }
@@ -400,6 +403,7 @@ function Resolve-SmartM365InventoryLaunch {
         Mode = $modeInfo.Mode; ModeInfo = $modeInfo; CacheName = $cacheName; Include = $include
         Interactive = [bool](Get-SmartM365InventoryProperty -Object $definition -Name 'Interactive' -Default $false)
         RequiresConfirmation = [bool](Get-SmartM365InventoryProperty -Object $definition -Name 'RequiresConfirmation' -Default $false)
+        Detached = ($entry.Kind -eq 'Manual' -and [bool](Get-SmartM365InventoryProperty -Object $definition -Name 'Detached' -Default $false))
         Description = [string](Get-SmartM365InventoryProperty -Object $definition -Name 'Description' -Default '')
         Tokens = $tokens; Entry = $entry
     }
@@ -557,6 +561,29 @@ function Invoke-SmartM365InventoryProcess {
     $process = [System.Diagnostics.Process]::Start($startInfo)
     try { $process.WaitForExit(); return $process.ExitCode }
     finally { $process.Dispose() }
+}
+
+function Start-SmartM365InventoryDetachedProcess {
+    <# Starts a window application with a hidden console, without waiting; returns its process id. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$FilePath, [AllowEmptyCollection()][string[]]$Arguments = @(), [string]$WorkingDirectory = '')
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $FilePath
+    $startInfo.Arguments = Join-SmartM365InventoryCommandLine -Arguments $Arguments
+    # Same as the installed GUI shortcut: the console exists but is never shown.
+    $startInfo.UseShellExecute = $true
+    $startInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) { $startInfo.WorkingDirectory = $WorkingDirectory }
+    elseif ((Get-Location).Provider.Name -eq 'FileSystem') { $startInfo.WorkingDirectory = (Get-Location).ProviderPath }
+    # Inherited by the child: with no visible console it reports startup failures in a message box.
+    $previous = $env:SMARTM365_GUI_DETACHED
+    $env:SMARTM365_GUI_DETACHED = '1'
+    try {
+        $process = [System.Diagnostics.Process]::Start($startInfo)
+        try { return $process.Id }
+        finally { $process.Dispose() }
+    }
+    finally { $env:SMARTM365_GUI_DETACHED = $previous }
 }
 
 function Invoke-SmartM365InventoryRobocopy {
@@ -782,6 +809,7 @@ function Format-SmartM365InventoryPlan {
         $lines.Add(('Execution mode: Direct (requested {0}, source {1}{2})' -f $Plan.ModeInfo.Requested, $Plan.ModeInfo.Source, $(if ($Plan.ModeInfo.Zone) { ', zone ' + $Plan.ModeInfo.Zone } else { '' })))
     }
     if ($Plan.Interactive) { $lines.Add('Interactive: yes (needs a user console)') }
+    if ($Plan.Detached) { $lines.Add('Detached: yes (hidden console; the launcher returns at once)') }
     if ($Plan.RequiresConfirmation) { $lines.Add('Confirmation: the user must type WRITE') }
     try {
         $command = Get-SmartM365InventoryCommand -Plan $Plan -EnginePath $enginePath -ScriptPath $scriptPath -SmartInventoryRoot $inventoryRoot
@@ -805,6 +833,11 @@ function Invoke-SmartM365InventoryLaunch {
     )
     $command = Initialize-SmartM365InventoryLaunch -Plan $Plan -Catalog $Catalog -CacheBaseCandidates $CacheBaseCandidates
     if ($null -eq $command) { return 1 }
+    if ($Plan.Detached) {
+        $processId = Start-SmartM365InventoryDetachedProcess -FilePath $command.EnginePath -Arguments $command.Arguments -WorkingDirectory $command.WorkingDirectory
+        Write-SmartM365InventoryLaunchMessage -Message ("{0} started without a console window (process {1}); this window closes." -f $Plan.Name, $processId)
+        return 0
+    }
     return (Invoke-SmartM365InventoryProcess -FilePath $command.EnginePath -Arguments $command.Arguments -WorkingDirectory $command.WorkingDirectory)
 }
 
@@ -1001,7 +1034,7 @@ function Test-SmartM365InventoryCatalog {
                 if (-not (Test-Path -LiteralPath (Join-Path $Catalog.SmartM365Root ([string]$item)))) { $errors.Add("$name : Include not found: $item") }
             }
         }
-        foreach ($flag in @('HideInGui', 'Advanced')) {
+        foreach ($flag in @('HideInGui', 'Advanced', 'Detached')) {
             $flagValue = Get-SmartM365InventoryProperty -Object $definition -Name $flag
             if ($null -ne $flagValue -and ($flagValue -isnot [bool] -or $entry.Kind -ne 'Manual')) { $errors.Add("$name : $flag must be true or false, on manual entries only.") }
         }
