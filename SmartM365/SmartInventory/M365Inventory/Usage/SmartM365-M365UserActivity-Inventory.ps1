@@ -13,9 +13,11 @@ left out of the source receipt, and the run completes with warnings.
 Each empty answer logs the size and header Graph returned. Once a kept CSV is
 older than CarriedOverReportAlertAgeHours (default 72), an alert is sent to the
 Teams Alerts channel.
+Since 1.34, -Reports All also collects email client usage, OneDrive user activity
+and Microsoft 365 groups activity.
 
 .VERSION
-1.33
+1.34
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
@@ -32,7 +34,7 @@ param(
     [string]$Tenant = 'test',
     [ValidateSet('D7', 'D30', 'D90', 'D180')]
     [string]$Period = 'D180',
-    [ValidateSet('All', 'Office365ActiveUserDetail', 'MailboxUsageDetail', 'OneDriveUsageAccountDetail', 'SharePointSiteUsageDetail', 'SharePointActivityUserDetail', 'Office365ActivationUserDetail', 'M365AppUserDetailD30', 'M365AppUserDetailD180', 'TeamsUserActivityUserDetail', 'TeamsDeviceUsageUserDetail', 'EmailActivityUserDetail')]
+    [ValidateSet('All', 'Office365ActiveUserDetail', 'MailboxUsageDetail', 'OneDriveUsageAccountDetail', 'SharePointSiteUsageDetail', 'SharePointActivityUserDetail', 'Office365ActivationUserDetail', 'M365AppUserDetailD30', 'M365AppUserDetailD180', 'TeamsUserActivityUserDetail', 'TeamsDeviceUsageUserDetail', 'EmailActivityUserDetail', 'EmailAppUsageUserDetail', 'OneDriveActivityUserDetail', 'Office365GroupsActivityDetail')]
     [string[]]$Reports = @('Office365ActiveUserDetail', 'M365AppUserDetailD30', 'M365AppUserDetailD180'),
     [string]$OutputPath,
     [string]$LatestCsvFolderPath,
@@ -54,7 +56,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.33"
+$ScriptVersion = "1.34"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -332,6 +334,33 @@ function Get-M365UsageReportDefinition {
             SupportsPeriod = $true
             Normalize = 'Generic'
             Description = 'Email activity user detail, including send/read/receive counts.'
+        }
+        EmailAppUsageUserDetail = [pscustomobject]@{
+            Name = 'EmailAppUsageUserDetail'
+            Command = 'Get-MgReportEmailAppUsageUserDetail'
+            Endpoint = 'getEmailAppUsageUserDetail'
+            BaseFileName = 'M365_Email_AppUsage'
+            SupportsPeriod = $true
+            Normalize = 'Generic'
+            Description = 'Email clients used by user: Outlook for Windows, Mac, mobile and web, POP3, IMAP4 and SMTP.'
+        }
+        OneDriveActivityUserDetail = [pscustomobject]@{
+            Name = 'OneDriveActivityUserDetail'
+            Command = 'Get-MgReportOneDriveActivityUserDetail'
+            Endpoint = 'getOneDriveActivityUserDetail'
+            BaseFileName = 'M365_OneDrive_UserActivity'
+            SupportsPeriod = $true
+            Normalize = 'Generic'
+            Description = 'OneDrive file view/edit, sync and internal/external sharing activity by user.'
+        }
+        Office365GroupsActivityDetail = [pscustomobject]@{
+            Name = 'Office365GroupsActivityDetail'
+            Command = 'Get-MgReportOffice365GroupActivityDetail'
+            Endpoint = 'getOffice365GroupsActivityDetail'
+            BaseFileName = 'M365_Groups_Activity'
+            SupportsPeriod = $true
+            Normalize = 'Generic'
+            Description = 'Microsoft 365 group mail, SharePoint and Viva Engage activity, owner and storage by group.'
         }
     }
 }

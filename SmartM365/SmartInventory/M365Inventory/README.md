@@ -374,6 +374,9 @@ Supported report selections:
 | `TeamsUserActivityUserDetail` | `M365_Teams_UserActivity.csv` | Detailed Teams user activity. |
 | `TeamsDeviceUsageUserDetail` | `M365_Teams_DeviceUsage.csv` | Teams client device and operating system usage by user. |
 | `EmailActivityUserDetail` | `M365_Email_Activity.csv` | Exchange email send/read/receive activity. |
+| `EmailAppUsageUserDetail` | `M365_Email_AppUsage.csv` | Email clients used by user: Outlook for Windows, Mac, mobile and web, other mobile apps, POP3, IMAP4 and SMTP (1.34). |
+| `OneDriveActivityUserDetail` | `M365_OneDrive_UserActivity.csv` | OneDrive files viewed/edited, synced, shared internally and externally by user (1.34). |
+| `Office365GroupsActivityDetail` | `M365_Groups_Activity.csv` | Microsoft 365 group mail, SharePoint and Viva Engage activity, owner, member counts and storage by group (1.34). |
 
 Examples:
 
@@ -386,8 +389,10 @@ Examples:
 
 Required Microsoft Graph permission: `Reports.Read.All`.
 
-`SharePointActivityUserDetail` and `TeamsDeviceUsageUserDetail` use the same existing
-`Reports.Read.All` permission. They do not require another app registration,
+`SharePointActivityUserDetail`, `TeamsDeviceUsageUserDetail` and the three 1.34 reports use the same existing
+`Reports.Read.All` permission. The scheduled job runs `-Reports All`, so it collects the 1.34 reports
+without a manifest change; like every report except `Office365ActiveUserDetail`, an empty answer keeps
+the previous CSV. They do not require another app registration,
 permission, or local configuration value.
 
 For multi-report runs, DATA-ALL and DATA-LAST files are uploaded per report. A
@@ -468,7 +473,9 @@ The aggregate contains only principals for which an event was returned. After Sm
 
 It publishes `M365_Copilot_UserUsage.csv` to the tenant `DATA-LAST` folder and keeps timestamped DATA-ALL plus weekly history copies. Report version `v2` is the default because it adds active usage days, prompt counters for all apps and Copilot Chat work/web, and the Microsoft 365 app, Edge, agent, and Copilot Chat work/web last-activity dates. The script falls back to `v1` only when `v2` is unavailable or when `D30` is explicitly requested, because Microsoft documents `D30` for `v1` and `D28` for `v2`. For compatibility with tenants where the versioned route is not yet recognized, the v1 fallback omits the optional `version` function parameter and therefore uses the documented v1 default.
 
-The API returns only users who have a Microsoft 365 Copilot license. The collector never requests or exports prompt text. Version `v1` does not expose prompt counters or active usage days, so the stable v2-oriented CSV columns remain empty after a v1 fallback.
+Since 1.1.0 it also publishes `M365_Copilot_UserCountTrend.csv` from `GET /copilot/reports/getMicrosoft365CopilotUserCountTrend`: one row per report date with enabled and active users for any app, Microsoft 365 Copilot, Teams, Word, Excel, PowerPoint, Outlook, OneNote, Loop, Edge and Copilot Chat (total, work and web), plus prompts submitted. It uses the report version of the run's user detail; v2-only columns stay empty after a v1 fallback. A failed or empty trend keeps the previous CSV and completes the run with warnings. The trend is skipped in `-MaxItems` mode. The summary and per-date user detail functions of the same API repeat these figures and are not collected.
+
+The user detail API returns only users who have a Microsoft 365 Copilot license. The collector never requests or exports prompt text. Version `v1` does not expose prompt counters or active usage days, so the stable v2-oriented CSV columns remain empty after a v1 fallback.
 
 Examples:
 
@@ -486,6 +493,7 @@ Required Microsoft Graph permission: `Reports.Read.All`.
 Official documentation:
 
 - [Microsoft 365 Copilot usage user detail API](https://learn.microsoft.com/microsoft-365/copilot/extensibility/api/admin-settings/reports/copilotreportroot-getmicrosoft365copilotusageuserdetail)
+- [Microsoft 365 Copilot user count trend API](https://learn.microsoft.com/microsoft-365/copilot/extensibility/api/admin-settings/reports/copilotreportroot-getmicrosoft365copilotusercounttrend)
 - [Microsoft 365 Copilot usage report](https://learn.microsoft.com/microsoft-365/admin/activity-reports/microsoft-365-copilot-usage)
 
 ## SharePoint Online Inventory

@@ -8,6 +8,11 @@ the v2 and v1 schemas into a stable SmartFinOps-oriented CSV, and publishes the
 result to tenant-isolated DATA-ALL, DATA-LAST, WeeklyHistory, and SharePoint when
 enabled.
 
+Since 1.1.0 it also publishes M365_Copilot_UserCountTrend.csv from the daily user
+count trend report (enabled and active users per app), with the same report
+version as the user detail. A failed or empty trend keeps the previous CSV and
+completes the run with warnings.
+
 Version v2 is preferred. A compatibility fallback to v1 is used only when v2 is
 not available for the requested period or Microsoft Graph rejects the v2 report
 version. Version v1 does not expose prompt counters, active usage days, Microsoft
@@ -17,7 +22,7 @@ columns remain empty after a v1 fallback.
 This collector never requests or exports prompt text.
 
 .VERSION
-1.0.5
+1.1.0
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -65,7 +70,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0.5'
+$ScriptVersion = '1.1.0'
 $TaskName = "SmartM365-CopilotUsage-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 $rawReportPath = $null
@@ -327,14 +332,109 @@ function ConvertFrom-CopilotUsageReport {
     }
 }
 
+function Get-CopilotUserCountTrendColumns {
+    [CmdletBinding()]
+    param()
+
+    return @(
+        'RunId',
+        'ReportVersion',
+        'ReportPeriod',
+        'ReportRefreshDate',
+        'ReportDate',
+        'AnyAppEnabledUsers',
+        'AnyAppActiveUsers',
+        'Microsoft365CopilotEnabledUsers',
+        'Microsoft365CopilotActiveUsers',
+        'TeamsEnabledUsers',
+        'TeamsActiveUsers',
+        'WordEnabledUsers',
+        'WordActiveUsers',
+        'ExcelEnabledUsers',
+        'ExcelActiveUsers',
+        'PowerPointEnabledUsers',
+        'PowerPointActiveUsers',
+        'OutlookEnabledUsers',
+        'OutlookActiveUsers',
+        'OneNoteEnabledUsers',
+        'OneNoteActiveUsers',
+        'LoopEnabledUsers',
+        'LoopActiveUsers',
+        'EdgeEnabledUsers',
+        'EdgeActiveUsers',
+        'CopilotChatEnabledUsers',
+        'CopilotChatActiveUsers',
+        'CopilotChatWorkEnabledUsers',
+        'CopilotChatWorkActiveUsers',
+        'CopilotChatWebEnabledUsers',
+        'CopilotChatWebActiveUsers',
+        'PromptsSubmitted'
+    )
+}
+
+function ConvertFrom-CopilotUserCountTrendReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
+        [Parameter(Mandatory)][ValidateSet('v1', 'v2')][string]$EffectiveReportVersion
+    )
+
+    # Source header per stable column; v1 has no Edge, Microsoft 365 Copilot, Chat work/web or prompt columns.
+    $sourceNames = [ordered]@{
+        AnyAppEnabledUsers = @('Any App Enabled Users', 'anyAppEnabledUsers')
+        AnyAppActiveUsers = @('Any App Active Users', 'anyAppActiveUsers')
+        Microsoft365CopilotEnabledUsers = @('Microsoft 365 Copilot Enabled Users', 'microsoft365CopilotEnabledUsers')
+        Microsoft365CopilotActiveUsers = @('Microsoft 365 Copilot Active Users', 'microsoft365CopilotActiveUsers')
+        TeamsEnabledUsers = @('Microsoft Teams Enabled Users', 'microsoftTeamsEnabledUsers')
+        TeamsActiveUsers = @('Microsoft Teams Active Users', 'microsoftTeamsActiveUsers')
+        WordEnabledUsers = @('Word Enabled Users', 'wordEnabledUsers')
+        WordActiveUsers = @('Word Active Users', 'wordActiveUsers')
+        ExcelEnabledUsers = @('Excel Enabled Users', 'excelEnabledUsers')
+        ExcelActiveUsers = @('Excel Active Users', 'excelActiveUsers')
+        PowerPointEnabledUsers = @('PowerPoint Enabled Users', 'powerPointEnabledUsers')
+        PowerPointActiveUsers = @('PowerPoint Active Users', 'powerPointActiveUsers')
+        OutlookEnabledUsers = @('Outlook Enabled Users', 'outlookEnabledUsers')
+        OutlookActiveUsers = @('Outlook Active Users', 'outlookActiveUsers')
+        OneNoteEnabledUsers = @('OneNote Enabled Users', 'oneNoteEnabledUsers')
+        OneNoteActiveUsers = @('OneNote Active Users', 'oneNoteActiveUsers')
+        LoopEnabledUsers = @('Loop Enabled Users', 'loopEnabledUsers')
+        LoopActiveUsers = @('Loop Active Users', 'loopActiveUsers')
+        EdgeEnabledUsers = @('Edge Enabled Users', 'Microsoft Edge Enabled Users', 'edgeEnabledUsers')
+        EdgeActiveUsers = @('Edge Active Users', 'Microsoft Edge Active Users', 'edgeActiveUsers')
+        CopilotChatEnabledUsers = @('Copilot Chat Enabled Users', 'copilotChatEnabledUsers')
+        CopilotChatActiveUsers = @('Copilot Chat Active Users', 'copilotChatActiveUsers')
+        CopilotChatWorkEnabledUsers = @('Copilot Chat (work) Enabled Users', 'Copilot Chat Work Enabled Users', 'copilotChatWorkEnabledUsers')
+        CopilotChatWorkActiveUsers = @('Copilot Chat (work) Active Users', 'Copilot Chat Work Active Users', 'copilotChatWorkActiveUsers')
+        CopilotChatWebEnabledUsers = @('Copilot Chat (web) Enabled Users', 'Copilot Chat Web Enabled Users', 'copilotChatWebEnabledUsers')
+        CopilotChatWebActiveUsers = @('Copilot Chat (web) Active Users', 'Copilot Chat Web Active Users', 'copilotChatWebActiveUsers')
+        PromptsSubmitted = @('Prompts submitted', 'Prompts Submitted', 'promptsSubmitted')
+    }
+
+    foreach ($row in $Rows) {
+        $ordered = [ordered]@{
+            RunId = $runId
+            ReportVersion = $EffectiveReportVersion
+            ReportPeriod = $Period
+            ReportRefreshDate = ConvertTo-CopilotDateText (Get-SourcePropertyValue -Row $row -Names @('Report Refresh Date', 'reportRefreshDate'))
+            ReportDate = ConvertTo-CopilotDateText (Get-SourcePropertyValue -Row $row -Names @('Report Date', 'reportDate'))
+        }
+        foreach ($column in $sourceNames.Keys) {
+            $ordered[$column] = ConvertTo-CopilotCounter (Get-SourcePropertyValue -Row $row -Names $sourceNames[$column])
+        }
+        [pscustomobject]$ordered
+    }
+}
+
 function Get-CopilotUsageReportUri {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][ValidateSet('v1', 'v2')][string]$Version,
-        [Parameter(Mandatory)][string]$RequestedPeriod
+        [Parameter(Mandatory)][string]$RequestedPeriod,
+        [ValidateSet('getMicrosoft365CopilotUsageUserDetail', 'getMicrosoft365CopilotUserCountTrend')]
+        [string]$FunctionName = 'getMicrosoft365CopilotUsageUserDetail'
     )
 
-    $reportFunction = 'https://graph.microsoft.com/v1.0/copilot/reports/getMicrosoft365CopilotUsageUserDetail'
+    $reportFunction = "https://graph.microsoft.com/v1.0/copilot/reports/$FunctionName"
     if ($Version -eq 'v1') {
         return "$reportFunction(period='$RequestedPeriod')?`$format=text/csv"
     }
@@ -412,6 +512,42 @@ function Invoke-CopilotUsageReportDownload {
     return $effectiveVersion
 }
 
+function Invoke-CopilotUserCountTrendExport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [Parameter(Mandatory)][ValidateSet('v1', 'v2')][string]$Version,
+        [Parameter(Mandatory)][string[]]$Columns
+    )
+
+    # Same version as the user detail of this run, so both CSVs share one schema generation.
+    # The trend is secondary: a failure keeps the previous DATA-LAST CSV and only raises a warning.
+    $uri = Get-CopilotUsageReportUri -Version $Version -RequestedPeriod $Period -FunctionName 'getMicrosoft365CopilotUserCountTrend'
+    try {
+        WriteLog ("Downloading Microsoft 365 Copilot user count trend. Version={0}; Period={1}" -f $Version, $Period) 'INFO'
+        Invoke-MgGraphRequest -Method GET -Uri $uri -OutputFilePath $DestinationPath -ProgressAction SilentlyContinue -ErrorAction Stop | Out-Null
+    }
+    catch {
+        $statusCode = Get-GraphHttpStatusCode -ErrorRecord $_
+        WriteLog ("Microsoft 365 Copilot user count trend download failed; previous M365_Copilot_UserCountTrend.csv kept unchanged. Status={0}; Error={1}" -f $statusCode, $_.Exception.Message) 'WARNING'
+        return $null
+    }
+
+    $trendRows = @(if (Test-Path -LiteralPath $DestinationPath) { Import-Csv -LiteralPath $DestinationPath })
+    if ($trendRows.Count -eq 0) {
+        WriteLog 'Microsoft 365 Copilot user count trend is empty; previous M365_Copilot_UserCountTrend.csv kept unchanged.' 'WARNING'
+        return $null
+    }
+    $normalizedTrend = @(ConvertFrom-CopilotUserCountTrendReport -Rows $trendRows -EffectiveReportVersion $Version)
+    $trendExport = Export-SmartM365Csv `
+        -BaseFileName 'M365_Copilot_UserCountTrend' `
+        -OutputPath $runOutputRoot `
+        -GlobalPath $LatestCsvFolderPath `
+        -Data $normalizedTrend `
+        -Columns $Columns
+    return [pscustomobject]@{ Rows = $normalizedTrend.Count; LatestPath = $trendExport.LatestPath }
+}
+
 function Test-CopilotEmptyCsvSchema {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string[]]$Columns)
@@ -452,6 +588,7 @@ $logFileBaseName = 'SmartM365-CopilotUsage-Inventory'
 $logFolder = Join-Path -Path $logAllRoot -ChildPath $logFileBaseName
 $logPath = Join-Path -Path $logFolder -ChildPath ("{0}_{1}.log" -f $logFileBaseName, $runId)
 $rawReportPath = Join-Path -Path $runOutputRoot -ChildPath ("M365_Copilot_UserUsage_Source_{0}.csv" -f $runId)
+$rawTrendPath = Join-Path -Path $runOutputRoot -ChildPath ("M365_Copilot_UserCountTrend_Source_{0}.csv" -f $runId)
 
 $modulePath = Join-Path -Path ([string](Get-SmartM365ConfigValue -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $PSScriptRoot -Parent))) -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
 Import-Module -Name $modulePath -MinimumVersion '1.0.92' -Force -ErrorAction Stop
@@ -492,6 +629,12 @@ Add-SmartM365CsvValidationRule `
     -CriticalFields @('TenantKey', 'RunId', 'ReportVersion', 'ReportPeriod', 'ReportRefreshDate', 'UserPrincipalName') `
     -RequiredColumns @($copilotColumns) `
     -AllowEmptyDataset
+$trendColumns = @(Get-CopilotUserCountTrendColumns)
+Add-SmartM365CsvValidationRule `
+    -Rules $global:SmartM365CsvValidationRules `
+    -BaseFileName 'M365_Copilot_UserCountTrend' `
+    -CriticalFields @('TenantKey', 'RunId', 'ReportVersion', 'ReportPeriod', 'ReportRefreshDate', 'ReportDate') `
+    -RequiredColumns @($trendColumns)
 
 function Stop-SmartM365CopilotUsageTranscript {
     [CmdletBinding()]
@@ -531,8 +674,10 @@ try {
             -OutputPaths @($runOutputRoot, $LatestCsvFolderPath) | Out-Null
 
         $null = Get-CopilotUsageReportUri -Version $initialReportVersion -RequestedPeriod $Period
+        $null = Get-CopilotUsageReportUri -Version $initialReportVersion -RequestedPeriod $Period -FunctionName 'getMicrosoft365CopilotUserCountTrend'
         Test-CopilotEmptyCsvSchema -Columns (@('TenantKey') + $copilotColumns)
-        $validationSummary = "Tenant=$Tenant; Period=$Period; RequestedVersion=$ReportVersion; InitialVersion=$initialReportVersion; EmptySchemaColumns=$($copilotColumns.Count + 1); GraphPermission=Reports.Read.All; No cloud request performed"
+        Test-CopilotEmptyCsvSchema -Columns (@('TenantKey') + $trendColumns)
+        $validationSummary = "Tenant=$Tenant; Period=$Period; RequestedVersion=$ReportVersion; InitialVersion=$initialReportVersion; EmptySchemaColumns=$($copilotColumns.Count + 1); TrendSchemaColumns=$($trendColumns.Count + 1); GraphPermission=Reports.Read.All; No cloud request performed"
         WriteLog ("Validation completed. {0}" -f $validationSummary) 'SUCCESS'
         Stop-SmartM365CopilotUsageTranscript
         Complete-SmartM365ExecutionContext -Status Auto
@@ -581,10 +726,20 @@ try {
         -Data $normalizedRows `
         -Columns $copilotColumns
 
-    $summary = "Tenant=$Tenant; Period=$Period; ReportVersion=$effectiveReportVersion; Users=$($normalizedRows.Count); LatestCsv=$($exportResult.LatestPath)"
-    WriteLog ("Microsoft 365 Copilot usage inventory completed. {0}" -f $summary) 'SUCCESS'
+    $trendResult = if (Test-SmartM365MaxItemsMode) {
+        WriteLog 'Microsoft 365 Copilot user count trend skipped in MaxItems mode.' 'INFO'
+        $null
+    }
+    else {
+        Invoke-CopilotUserCountTrendExport -DestinationPath $rawTrendPath -Version $effectiveReportVersion -Columns $trendColumns
+    }
+    $trendDays = if ($trendResult) { $trendResult.Rows } elseif (Test-SmartM365MaxItemsMode) { 'skipped' } else { 'kept previous' }
+    $completionLevel = if ($null -eq $trendResult -and -not (Test-SmartM365MaxItemsMode)) { 'WARNING' } else { 'SUCCESS' }
+
+    $summary = "Tenant=$Tenant; Period=$Period; ReportVersion=$effectiveReportVersion; Users=$($normalizedRows.Count); TrendDays=$trendDays; LatestCsv=$($exportResult.LatestPath)"
+    WriteLog ("Microsoft 365 Copilot usage inventory completed. {0}" -f $summary) $completionLevel
     Send-SmartM365TeamsNotification `
-        -Level SUCCESS `
+        -Level $completionLevel `
         -Channel Infos `
         -Title 'SmartM365 Microsoft 365 Copilot usage inventory completed' `
         -Message $summary `
@@ -594,6 +749,7 @@ try {
             Period = $Period
             ReportVersion = $effectiveReportVersion
             Users = $normalizedRows.Count
+            TrendDays = $trendDays
             LatestCsv = $exportResult.LatestPath
             RunId = $runId
         } | Out-Null
@@ -634,8 +790,10 @@ catch {
 finally {
     $smartM365RunGuard.InCleanup=$true
 
-    if ($rawReportPath -and (Test-Path -LiteralPath $rawReportPath)) {
-        try { Remove-Item -LiteralPath $rawReportPath -Force -ErrorAction Stop } catch { Write-Warning "Raw report cleanup failed: $($_.Exception.Message)" }
+    foreach ($rawPath in @($rawReportPath, $rawTrendPath)) {
+        if ($rawPath -and (Test-Path -LiteralPath $rawPath)) {
+            try { Remove-Item -LiteralPath $rawPath -Force -ErrorAction Stop } catch { Write-Warning "Raw report cleanup failed: $($_.Exception.Message)" }
+        }
     }
     try { Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -RequireCurrentRunPublication -LogFile $global:LogTextFile } catch {}
     try { RemoveOldFiles -Path $logFolder -Filter '*.log' -KeepCount $global:RetentionMaxLogs -LogFile $global:LogTextFile } catch {}
