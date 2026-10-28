@@ -1,4 +1,4 @@
-# Version 1.3.0: optional Microsoft 365 usage reports are reported Not collected instead of Blocked; 1.2.0: qualified device identity conflicts remain usable with explicit warnings.
+# Version 1.3.1: an absent Intune inventory no longer stops Data Trust; 1.3.0: optional Microsoft 365 usage reports are reported Not collected instead of Blocked; 1.2.0: qualified device identity conflicts remain usable with explicit warnings.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -104,7 +104,8 @@ $sources = @(
 $lastRoot = Join-Path $DataRoot 'DATA-LAST'
 $evidence = [System.Collections.Generic.List[object]]::new()
 Import-Module (Join-Path $PSScriptRoot 'DeviceIdentityEvidence.psm1') -Force -ErrorAction Stop
-$deviceRows=if(Test-Path -LiteralPath (Join-Path $lastRoot 'Intune_Devices_Inventory.csv')){@(Import-Csv -LiteralPath (Join-Path $lastRoot 'Intune_Devices_Inventory.csv'))}else{@()}
+# @() outside the if: an if that yields an empty array yields nothing, and a null row breaks the qualification.
+$deviceRows=@(if(Test-Path -LiteralPath (Join-Path $lastRoot 'Intune_Devices_Inventory.csv')){Import-Csv -LiteralPath (Join-Path $lastRoot 'Intune_Devices_Inventory.csv')})
 $deviceIdentity=Get-DeviceIdentityQualification -LastRoot $lastRoot -IntuneRows $deviceRows
 
 foreach ($source in $sources) {
