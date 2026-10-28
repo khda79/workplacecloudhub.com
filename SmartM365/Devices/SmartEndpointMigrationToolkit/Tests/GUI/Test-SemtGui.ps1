@@ -69,7 +69,7 @@ try {
     Test-Step 'Launch All is labelled as limited to the selected Campaign in its confirmation' { [IO.File]::ReadAllText($guiPath) -match 'Launch All Waves of this Campaign only' }
     Test-Step 'stop states remote endpoints are reported separately' { [IO.File]::ReadAllText($guiPath) -match 'Remote endpoints may continue and must be verified' }
     $guiText = [IO.File]::ReadAllText($guiPath)
-    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile')) {
+    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile','Get-InventoryRefreshCommandText')) {
         $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
         . ([scriptblock]::Create($definition.Extent.Text))
     }
@@ -96,6 +96,26 @@ try {
     $run = Get-GuiRunCommand -Campaign Windows11Upgrade -WavePath 'C:\Waves\W 1' -RunMode Once -IgnoreRunGuard $true -SelectionPath 'C:\Sel\s.json'
     Test-Step 'Run command uses Windows PowerShell 5.1, the engine, the GUI selection and the run mode' { $run -match 'WindowsPowerShell\\v1\.0\\powershell\.exe' -and $run -match 'SmartM365-Invoke-EndpointMigrationWithPsExec\.ps1' -and $run -match '-GuiSelectionPath' -and $run -match '-RunMode Once' -and $run -match '-IgnoreRunGuard' -and $run -match '"C:\\Waves\\W 1"' }
     Test-Step 'Single PC command passes -ComputerName and no Wave' { $fictionalComputer = 'PC-1'; $c = Get-GuiRunCommand -Campaign HybridJoin -ComputerName $fictionalComputer -RunMode Once -IgnoreRunGuard $false -SelectionPath 'C:\s.json'; $c -match '-ComputerName PC-1' -and $c -notmatch '-WavePath' -and $c -notmatch '-IgnoreRunGuard' -and $c -match '-GuiSelectionPath' }
+    $refreshHandler = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Start-InventoryRefresh' }, $true)
+    Test-Step 'inventory refresh runs in a hidden process, never in a visible console' { $null -ne $refreshHandler -and $refreshHandler.Extent.Text -match '-WindowStyle Hidden' -and $guiText -notmatch '-NoExit' }
+    $refreshAssignment = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$inventoryRefreshXaml' }, $true)
+    $refreshXaml = [string]$refreshAssignment.Right.Expression.Value
+    Test-Step 'inventory refresh window shows the output, stops and closes' { foreach ($name in 'InventoryRefreshStateText','InventoryRefreshOutputText','InventoryRefreshStopButton','InventoryRefreshCloseButton','InventoryRefreshOpenFolderButton') { if ($refreshXaml -notmatch ('x:Name="{0}"' -f $name)) { return $false } }; $true }
+    # Fictional export scripts: AD writes output, Intune fails; both must run and reach the log.
+    $fakeRoot = Join-Path $tempRoot 'InventoryFake'
+    New-Item -ItemType Directory -Path (Join-Path $fakeRoot 'Scripts') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $fakeRoot 'Scripts\SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1') -Value "param([switch]`$ForceRefresh) Write-Host ('FAKE-AD force=' + `$ForceRefresh); Write-Output 'FAKE-AD output'" -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $fakeRoot 'Scripts\SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1') -Value "param([switch]`$ForceRefresh) `$ErrorActionPreference = 'Stop'; throw 'FAKE-INTUNE failure'" -Encoding ASCII
+    $savedRoot = $script:PackageRoot; $script:PackageRoot = $fakeRoot
+    $refreshLog = Join-Path $fakeRoot "Run's log\InventoryRefresh.log"
+    New-Item -ItemType Directory -Path (Split-Path $refreshLog -Parent) -Force | Out-Null
+    $refreshCommand = Get-InventoryRefreshCommandText -Kinds @('AD','Intune') -LogPath $refreshLog
+    $script:PackageRoot = $savedRoot
+    $refreshProcess = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($refreshCommand))) -WindowStyle Hidden -PassThru -Wait
+    $refreshText = if (Test-Path -LiteralPath $refreshLog) { Get-Content -LiteralPath $refreshLog -Raw } else { '' }
+    Test-Step 'inventory refresh passes -ForceRefresh and logs Write-Host and output' { $refreshText -match 'FAKE-AD force=True' -and $refreshText -match 'FAKE-AD output' }
+    Test-Step 'inventory refresh runs every export after a failure and logs it with a timestamp' { $refreshText -match '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} Intune export failed: FAKE-INTUNE failure' -and $refreshText -match 'failed exports: 1\.' }
+    Test-Step 'inventory refresh exit code is 1 when an export failed' { $refreshProcess.ExitCode -eq 1 }
     $catalog = Import-SemtOptionCatalog -PackageRoot $packageRoot
     $values = @{ ThrottleLimit = 4; 'Windows11Upgrade.SetupSourcePath' = ''; DryRun = $true }
     $selection = New-GuiSelectionFile -Catalog $catalog -Campaign Windows11Upgrade -Values $values
@@ -115,6 +135,18 @@ try {
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $validate = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -ValidateOnly 2>&1 | ForEach-Object { [string]$_ })
     Test-Step 'GUI -ValidateOnly loads under Windows PowerShell 5.1 STA for both Campaigns' { $LASTEXITCODE -eq 0 -and @($validate | Where-Object { $_ -match '^ValidateOnly: GUI 1\.0\.0 loaded; campaign=(HybridJoin|Windows11Upgrade); options=\d+' }).Count -eq 2 }
+    $popupScript = Join-Path $tempRoot 'popup-check.ps1'
+    @'
+param($Gui)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName PresentationFramework
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Gui, [ref]$null, [ref]$null)
+$assignment = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$inventoryRefreshXaml' }, $true)
+$popup = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new([string]$assignment.Right.Expression.Value)))
+'POPUP=' + ($null -ne $popup.FindName('InventoryRefreshOutputText') -and $popup.FindName('InventoryRefreshOutputText').IsReadOnly)
+'@ | Set-Content -LiteralPath $popupScript -Encoding ASCII
+    $popupCheck = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $popupScript -Gui $guiPath 2>&1 | ForEach-Object { [string]$_ })
+    Test-Step 'inventory refresh window loads under Windows PowerShell 5.1 STA' { ($popupCheck -join "`n") -match 'POPUP=True' }
     Test-Step 'GUI -ValidateOnly writes no GUI state file' { @(Get-ChildItem -LiteralPath (Join-Path $packageRoot 'Config') -Filter 'GuiState.*' -File).Count -eq 0 }
     $demoScript = Join-Path $tempRoot 'demo-check.ps1'
     @'

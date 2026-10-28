@@ -42,6 +42,8 @@ $script:PackageRoot = Split-Path -Path $PSScriptRoot -Parent
 Import-Module (Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
 $script:CampaignTitles = [ordered]@{ HybridJoin = 'Hybrid Join and Intune enrollment'; Windows11Upgrade = 'Windows 11 upgrade' }
 $script:CategoryOrder = @('Mode','Actions','Setup','Safety','Schedule','Parallelism','Network','Inventory','Evidence')
+$script:InventoryRefresh = $null
+$script:GuiClosing = $false
 $script:RunModes = [ordered]@{ 'Loop' = @('Loop',$false); 'Once' = @('Once',$false); 'Loop - ignore run guard (first cycle)' = @('Loop',$true); 'Once - ignore run guard' = @('Once',$true) }
 
 #region Testable helpers (no UI)
@@ -248,6 +250,25 @@ function Get-AutomaticWaveCommandText {
     }
     if ($Create) { $parts += '-Create' }
     return ($parts -join ' ')
+}
+
+function Get-InventoryRefreshCommandText {
+    <#
+    Command of the hidden Windows PowerShell started by "Refresh shared inventories": every export
+    runs even when a previous one fails, all output streams go to the log shown in the GUI window,
+    and the exit code is 1 when at least one export failed.
+    #>
+    param([Parameter(Mandatory = $true)][string[]]$Kinds,[Parameter(Mandatory = $true)][string]$LogPath)
+
+    $lines = @('$ErrorActionPreference = ''Continue''','$semtFailed = 0','. {')
+    foreach ($kind in $Kinds) {
+        $export = Join-Path $script:PackageRoot ("Scripts\SmartM365-EndpointMigration-Export-{0}DevicesCsv.ps1" -f $kind)
+        $lines += ("    try {{ & {0} -ForceRefresh }} catch {{ `$semtFailed++; Write-Host ('{{0:yyyy-MM-dd HH:mm:ss}} {1} export failed: {{1}}' -f (Get-Date),`$_.Exception.Message) }}" -f (ConvertTo-PowerShellLiteral $export),$kind)
+    }
+    $lines += '    Write-Host (''{0:yyyy-MM-dd HH:mm:ss} Inventory refresh finished; failed exports: {1}.'' -f (Get-Date),$semtFailed)'
+    $lines += ('}} *> {0}' -f (ConvertTo-PowerShellLiteral $LogPath))
+    $lines += 'exit ([int]($semtFailed -gt 0))'
+    return ($lines -join [Environment]::NewLine)
 }
 
 function Get-AutomaticFilterSignature {
@@ -1057,6 +1078,101 @@ function Invoke-AutomaticWave {
     $script:AutomaticTimer.Start()
 }
 
+$inventoryRefreshXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Refresh shared inventories" Width="980" Height="560" MinWidth="600" MinHeight="320"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock x:Name="InventoryRefreshStateText" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,8"/>
+        <TextBox x:Name="InventoryRefreshOutputText" Grid.Row="1" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                 Background="#0C0C0C" Foreground="#CCCCCC" Padding="6" TextWrapping="NoWrap"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+        <WrapPanel Grid.Row="2" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="InventoryRefreshOpenFolderButton" Content="Open log folder" Padding="12,4" Margin="0,0,8,0"/>
+            <Button x:Name="InventoryRefreshStopButton" Content="Stop refresh" Padding="12,4" Margin="0,0,8,0"/>
+            <Button x:Name="InventoryRefreshCloseButton" Content="Close" Padding="12,4" IsCancel="True"/>
+        </WrapPanel>
+    </Grid>
+</Window>
+'@
+
+function Update-InventoryRefreshWindow {
+    $state = $script:InventoryRefresh
+    if ($null -eq $state) { return }
+    $text = ''
+    if (Test-Path -LiteralPath $state.LogPath -PathType Leaf) {
+        try {
+            $stream = [IO.FileStream]::new($state.LogPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]'ReadWrite, Delete')
+            try { $text = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true).ReadToEnd() } finally { $stream.Dispose() }
+        }
+        catch { $text = $state.Output.Text }
+    }
+    if ($text -ne $state.Output.Text) { $state.Output.Text = $text; $state.Output.ScrollToEnd() }
+    if (-not $state.Process.HasExited) { return }
+    $state.Timer.Stop()
+    $state.Finished = $true
+    $state.StopButton.IsEnabled = $false
+    $exitCode = $state.Process.ExitCode
+    if ($exitCode -eq 0) { $state.StateText.Text = ('Finished at {0:HH:mm:ss}. The shared inventories were refreshed.' -f (Get-Date)); Add-Status -Title 'Inventories refreshed' -Message 'Shared inventory refresh finished.' }
+    else { $state.StateText.Text = ('Finished at {0:HH:mm:ss} with errors (exit code {1}). Review the output above.' -f (Get-Date),$exitCode); Add-Status -Title 'Inventory refresh failed' -Message ('See {0}' -f $state.LogPath) }
+    try { Update-AutomaticView } catch { }
+}
+
+function Stop-InventoryRefresh {
+    $state = $script:InventoryRefresh
+    if ($null -eq $state -or $state.Process.HasExited) { return }
+    try { Stop-Process -Id $state.Process.Id -Force -ErrorAction Stop } catch { }
+    Add-Status -Title 'Inventory refresh stopped' -Message ('Stopped by the operator. See {0}' -f $state.LogPath)
+}
+
+function Start-InventoryRefresh {
+    <#
+    Runs the shared inventory exports in a hidden Windows PowerShell and shows their output in a
+    GUI window. Closing the window while the refresh runs only hides it; the button shows it again.
+    #>
+    param([Parameter(Mandatory = $true)][string[]]$Kinds)
+
+    $evidence = Join-Path $script:PackageRoot ("Runs\{0}\_InventoryRefresh\{1}" -f $script:CurrentCampaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
+    New-SemtDirectory -Path $evidence
+    $logPath = Join-Path $evidence 'InventoryRefresh.log'
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-InventoryRefreshCommandText -Kinds $Kinds -LogPath $logPath)))
+    $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru
+    $null = $process.Handle  # keeps ExitCode readable after the process exits
+
+    $popup =[Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new($inventoryRefreshXaml)))
+    $popup.Owner = $window
+    if ($window.Icon) { $popup.Icon = $window.Icon }
+    $script:InventoryRefresh = [pscustomobject]@{
+        Process = $process; LogPath = $logPath; Evidence = $evidence; Window = $popup; Finished = $false
+        StateText = $popup.FindName('InventoryRefreshStateText'); Output = $popup.FindName('InventoryRefreshOutputText')
+        StopButton = $popup.FindName('InventoryRefreshStopButton'); Timer = New-Object System.Windows.Threading.DispatcherTimer
+    }
+    $script:InventoryRefresh.StateText.Text = ('Running since {0:HH:mm:ss}: {1}. AD needs the ActiveDirectory module; Intune and Entra may open a Microsoft Graph sign-in window.' -f (Get-Date),($Kinds -join ', '))
+    $popup.FindName('InventoryRefreshOpenFolderButton').Add_Click({ Open-ShellPath $script:InventoryRefresh.Evidence })
+    $script:InventoryRefresh.StopButton.Add_Click({
+        if (Show-GuiQuestion -Message 'Stop the inventory refresh? The export in progress is interrupted.' -Title 'Stop refresh') { Stop-InventoryRefresh }
+    })
+    $popup.FindName('InventoryRefreshCloseButton').Add_Click({ $script:InventoryRefresh.Window.Close() })
+    $popup.Add_Closing({
+        param($eventSource,$cancelEventArgs)
+        if ($script:GuiClosing -or $script:InventoryRefresh.Finished) { return }
+        $cancelEventArgs.Cancel = $true
+        $eventSource.Hide()
+        Add-Status -Message 'Inventory refresh continues in the background. Click "Refresh shared inventories" to show its output.'
+    })
+    $script:InventoryRefresh.Timer.Interval = [TimeSpan]::FromSeconds(1)
+    $script:InventoryRefresh.Timer.Add_Tick({ try { Update-InventoryRefreshWindow } catch { } })
+    $script:InventoryRefresh.Timer.Start()
+    $popup.Show()
+    Add-Status -Message ('Inventory refresh started: {0}.' -f ($Kinds -join ', '))
+}
+
 #region Events
 
 $controls.HeaderLogoLink.Add_MouseLeftButtonUp({ try { Start-Process 'https://workplacecloudhub.com' | Out-Null } catch { } })
@@ -1151,14 +1267,11 @@ $controls.AutomaticCreateButton.Add_Click({ try { Invoke-AutomaticWave -Create }
 $controls.AutomaticOpenEvidenceButton.Add_Click({ Open-ShellPath $controls.AutomaticEvidencePathText.Text })
 $controls.AutomaticRefreshInventoryButton.Add_Click({
     try {
+        if ($script:InventoryRefresh -and -not $script:InventoryRefresh.Finished) { $script:InventoryRefresh.Window.Show(); [void]$script:InventoryRefresh.Window.Activate(); return }
         $kinds = if ($script:CurrentCampaign -eq 'Windows11Upgrade') { @('AD','Intune') } else { @('AD','Intune','Entra') }
-        if (-not (Show-GuiQuestion -Message ('Refresh the shared {0} inventories in a new console? AD needs the ActiveDirectory module; Intune and Entra open an interactive Microsoft Graph sign-in.' -f ($kinds -join ', ')) -Title 'Refresh shared inventories')) { return }
-        $lines = @('$ErrorActionPreference = ''Continue''')
-        foreach ($kind in $kinds) { $lines += ("& {0} -ForceRefresh" -f (ConvertTo-PowerShellLiteral (Join-Path $script:PackageRoot ("Scripts\SmartM365-EndpointMigration-Export-{0}DevicesCsv.ps1" -f $kind)))) }
-        $lines += 'Write-Host ''Done. Close this window and click Refresh in the GUI.'''
-        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(($lines -join '; ')))
-        Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-EncodedCommand',$encoded) | Out-Null
-        Add-Status -Message 'Inventory refresh started in a new console.'
+        if (-not (Show-GuiQuestion -Message ('Refresh the shared {0} inventories? The output is shown in a window of the GUI. AD needs the ActiveDirectory module; Intune and Entra open an interactive Microsoft Graph sign-in.' -f ($kinds -join ', ')) -Title 'Refresh shared inventories')) { return }
+        if ($script:InventoryRefresh) { $script:InventoryRefresh.Window.Close() }
+        Start-InventoryRefresh -Kinds $kinds
     }
     catch { Show-GuiError $_.Exception.Message }
 })
@@ -1198,10 +1311,16 @@ $controls.ResetOptionsButton.Add_Click({
 $window.Add_Closing({
     param($eventSource,$routedEventArgs)
     [void](Save-CurrentCampaignState -Quiet)
+    if ($script:InventoryRefresh -and -not $script:InventoryRefresh.Process.HasExited) {
+        $choice = [System.Windows.MessageBox]::Show($window, "The shared inventory refresh is still running in the background.`n`nYes: stop it, then close.`nNo: close and let it finish (its log stays in the Runs folder).`nCancel: keep the GUI open.", 'Inventory refresh', 'YesNoCancel', 'Warning')
+        if ($choice -eq [System.Windows.MessageBoxResult]::Cancel) { $routedEventArgs.Cancel = $true; return }
+        if ($choice -eq [System.Windows.MessageBoxResult]::Yes) { Stop-InventoryRefresh }
+    }
+    $script:GuiClosing = $true
     $active = @(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') | Where-Object { $_.Alive })
     if ($active.Count -eq 0) { return }
     $choice = [System.Windows.MessageBox]::Show($window, ("{0} Run(s) are still active.`n`nYes: request a controlled stop, then close.`nNo: close and leave them running.`nCancel: keep the GUI open." -f $active.Count), 'Active Runs', 'YesNoCancel', 'Warning')
-    if ($choice -eq [System.Windows.MessageBoxResult]::Cancel) { $routedEventArgs.Cancel = $true; return }
+    if ($choice -eq [System.Windows.MessageBoxResult]::Cancel) { $script:GuiClosing = $false; $routedEventArgs.Cancel = $true; return }
     if ($choice -eq [System.Windows.MessageBoxResult]::Yes) { foreach ($run in $active) { try { [void](Request-SemtRunStop -ActiveRun $run) } catch { } } }
 })
 

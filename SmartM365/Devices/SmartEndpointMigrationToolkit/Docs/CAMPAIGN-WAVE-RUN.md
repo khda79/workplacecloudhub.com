@@ -41,7 +41,10 @@ PowerShell 5.1 with the engine. `Update-WaveCmdWrappers.cmd` regenerates them fo
 
 ### Automatic Wave
 
-1. Refresh the shared inventories if needed (AD; Intune and Entra with delegated sign-in).
+1. Refresh the shared inventories if needed (AD; Intune and Entra with delegated sign-in). The
+   exports run in a hidden process; their output is shown live in a GUI window and kept in
+   `Runs\<Campaign>\_InventoryRefresh\<timestamp>\InventoryRefresh.log`. Closing the window
+   while the refresh runs only hides it; the button shows it again.
 2. **Preview** runs the Automatic Wave engine without `-Create`: it writes evidence under
    `Runs\<Campaign>\_AutomaticWave\` (selected, excluded with reason code, summary) and creates
    nothing.
