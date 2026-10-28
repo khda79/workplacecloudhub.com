@@ -100,7 +100,9 @@ function Copy-PreparedStableSource {
             if ($before.Length -eq 0) { throw 'Empty input file.' }
             if ($Entry.Kind -eq 'Current') {
                 $limit = if ($optional) { [int]$Entry.MaxAgeHours } elseif ($AgeOverrides.ContainsKey($before.Name)) { [int]$AgeOverrides[$before.Name] } else { $MaxSourceAgeHours }
-                if ($limit -lt 1 -or ([datetime]::UtcNow-$before.LastWriteTimeUtc).TotalHours -gt $limit -or $before.LastWriteTimeUtc -gt [datetime]::UtcNow.AddMinutes(5)) { throw 'Input publication-age limit or future timestamp violated.' }
+                if ($before.LastWriteTimeUtc -gt [datetime]::UtcNow.AddMinutes(5)) { throw 'Input publication-age limit or future timestamp violated.' }
+                # An optional source older than its limit is still captured (already recorded as stale at selection).
+                if ($limit -lt 1 -or (-not $optional -and ([datetime]::UtcNow-$before.LastWriteTimeUtc).TotalHours -gt $limit)) { throw 'Input publication-age limit or future timestamp violated.' }
             }
             # Do not lock out raw collectors. Verify the bytes against a fresh source
             # read after copying; retry only this file if it changed during capture.
@@ -147,6 +149,16 @@ function Add-PreparedOptionalSourceIssue {
         $Issues.Add([pscustomobject]@{Relative=$Relative;Phase=$Phase;Reason=$Reason;Utc=[datetime]::UtcNow.ToString('O')})
     }
     Write-Warning "Optional monitoring unavailable: $Relative ($Phase): $Reason. Other evidence can continue."
+}
+
+function Add-PreparedStaleOptionalSource {
+    # The source stays in the batch; the record tells readers its data is older than the target age.
+    param([Collections.Generic.List[object]]$Issues, [string]$Relative, [int]$LimitHours, [double]$AgeHours)
+    $reason = 'Older than its {0} h target (age {1:N1} h); used as the latest available data.' -f $LimitHours, $AgeHours
+    if ($null -ne $Issues) {
+        $Issues.Add([pscustomobject]@{Relative=$Relative;Phase='StaleUsed';Reason=$reason;Utc=[datetime]::UtcNow.ToString('O')})
+    }
+    Write-Warning "Optional source used although stale: $Relative. $reason"
 }
 
 function Remove-PreparedMappingWorkbooks([Alias('DataRoot')][string]$WorkRoot, [string]$MappingRoot) {
@@ -413,9 +425,14 @@ function Get-PreparedSourcePlan {
             # Transport freshness only; business report timestamps remain in Data Trust.
             if ($item.Kind -eq 'Current') {
                 $limit = if ($optional) { [int]$item.MaxAgeHours } elseif ($AgeOverrides.ContainsKey($file.Name)) { [int]$AgeOverrides[$file.Name] } else { $MaxSourceAgeHours }
-                if ($limit -lt 1 -or ([datetime]::UtcNow - $file.LastWriteTimeUtc).TotalHours -gt $limit) {
-                    throw "Input exceeds configured publication-age limit: $($item.Relative)" }
                 if ($file.LastWriteTimeUtc -gt [datetime]::UtcNow.AddMinutes(5)) { throw "Future input timestamp: $($item.Relative)" }
+                $age = ([datetime]::UtcNow - $file.LastWriteTimeUtc).TotalHours
+                if ($limit -lt 1 -or $age -gt $limit) {
+                    # Optional sources keep their latest available publication, however old: it is
+                    # used and recorded as stale. Required sources keep their hard age limit.
+                    if (-not $optional -or $limit -lt 1) { throw "Input exceeds configured publication-age limit: $($item.Relative)" }
+                    Add-PreparedStaleOptionalSource $OptionalSourceIssues $item.Relative $limit $age
+                }
             }
             [pscustomobject]@{Relative=$item.Relative;SourcePath=$file.FullName;Kind=$item.Kind;Bytes=$file.Length;ModifiedUtc=$file.LastWriteTimeUtc.ToString('O');SHA256=$(if($MetadataOnly){$null}else{(Get-FileHash -LiteralPath $path).Hash});IsOptional=[bool]$optional;MaxAgeHours=$(if($optional){$item.MaxAgeHours}else{$null})}
         } catch {

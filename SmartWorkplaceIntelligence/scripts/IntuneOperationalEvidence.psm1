@@ -86,7 +86,11 @@ function Get-IntuneOperationalSourceGroups {
                 $entry.Producer -ne $receipt.Producer -or $entry.ScriptVersion -ne $receipt.ScriptVersion -or
                 $entry.SHA256 -notmatch '^[A-Fa-f0-9]{64}$' -or -not [long]::TryParse([string]$entry.Rows,[ref]$rows) -or $rows -lt 0) { throw "Unqualified receipt file: $($file.file)." }
             $limit=if($AgeOverrides.ContainsKey($file.file)){[int]$AgeOverrides[$file.file]}else{$MaxSourceAgeHours}
-            if ($limit -lt 1 -or $limit -gt 8760 -or ($AsOfUtc-[datetimeoffset]$completed.UTC).TotalHours -gt $limit) { throw "Intune source group exceeds configured receipt-age limit: $($file.file)." }
+            if ($limit -lt 1 -or $limit -gt 8760) { throw "Invalid Intune receipt-age limit: $($file.file)." }
+            # Optional group: an old complete collection is still the latest available data. It is used
+            # and reported; only incomplete or unqualified groups are refused.
+            $receiptAge=($AsOfUtc-[datetimeoffset]$completed.UTC).TotalHours
+            if ($receiptAge -gt $limit) { Write-Warning ("Intune source group used although stale: {0} ({1}). Older than its {2} h target (age {3:N1} h); used as the latest available data." -f $group.name, $file.file, $limit, $receiptAge) }
             $files.Add([pscustomobject]@{Spec=$file;Path=(Join-Path $LastRoot $file.file);Rows=$rows;SHA256=$entry.SHA256;Stats=$null})
         }
         [pscustomobject]@{Spec=$group;Available=$true;Receipt=$receipt;ReceiptPath=$receiptPath;ReceiptSHA256=(Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash;Files=$files.ToArray();BusinessRunId=''}

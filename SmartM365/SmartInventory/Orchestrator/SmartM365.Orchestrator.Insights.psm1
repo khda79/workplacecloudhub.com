@@ -964,7 +964,7 @@ function Get-SmartM365OrchestratorSwiValidity {
     }
     foreach ($group in @($intune.groups)) {
         foreach ($entry in @($group.files)) {
-            $rules.Add([pscustomobject]@{ File = [string]$entry.file; Kind = 'IntuneReceipt'; LimitHours = (& $limitFor ([string]$entry.file)); WarningHours = $null; Optional = $false; Group = [string]$group.name })
+            $rules.Add([pscustomobject]@{ File = [string]$entry.file; Kind = 'IntuneReceipt'; LimitHours = (& $limitFor ([string]$entry.file)); WarningHours = $null; Optional = $true; Group = [string]$group.name })
         }
     }
 
@@ -1013,15 +1013,17 @@ function Get-SmartM365OrchestratorSwiValidity {
         if ($null -ne $timestamp -and $timestamp -gt $NowUtc.AddMinutes(5)) { $problem = 'Future timestamp'; $timestamp = $null }
         $expires = if ($null -ne $timestamp) { $timestamp.AddHours([double]$rule.LimitHours) } else { $null }
         $hoursLeft = if ($null -ne $expires) { ($expires - $NowUtc).TotalHours } else { $null }
+        # Prepare keeps an optional source past its limit as the latest available data (stale, still used).
         $state = if ($problem) { $problem }
-            elseif ($hoursLeft -lt 0) { 'Expired' }
+            elseif ($hoursLeft -lt 0) { if ($optional) { 'Old' } else { 'Expired' } }
             elseif ($null -ne $rule.WarningHours -and ($NowUtc - $timestamp).TotalHours -gt $rule.WarningHours) { 'Aging' }
             else { 'Valid' }
         [pscustomobject]@{
             File = $rule.File; Kind = $rule.Kind; Basis = $basis; LimitHours = $rule.LimitHours; Optional = [bool]$optional
             Producer = if ($producerByFile.ContainsKey($rule.File)) { $producerByFile[$rule.File] } else { '' }
             TimestampUtc = $timestamp; ExpiresAtUtc = $expires; HoursLeft = $hoursLeft; State = $state
-            Blocks = -not $optional -and $state -notin @('Valid', 'Aging')
+            # An incomplete or unqualified Intune group is still refused although the group is optional.
+            Blocks = ((-not $optional -and $state -notin @('Valid', 'Aging')) -or ($rule.Kind -eq 'IntuneReceipt' -and $state -in @('Incomplete group', 'Receipt not completed')))
         }
     }
 
@@ -1041,12 +1043,13 @@ function Get-SmartM365OrchestratorSwiValidity {
         }
         $required = @($inputs | Where-Object { -not $_.Optional })
         $pool = if ($required.Count) { $required } else { $inputs }
-        $limiting = @($pool | Sort-Object @{ Expression = { if ($_.Blocks -or ($_.Optional -and $_.State -notin @('Valid', 'Aging'))) { 0 } else { 1 } } }, @{ Expression = { if ($null -ne $_.HoursLeft) { $_.HoursLeft } else { [double]::MinValue } } } | Select-Object -First 1)[0]
+        $limiting = @($pool | Sort-Object @{ Expression = { if ($_.Blocks) { 0 } elseif ($_.State -notin @('Valid', 'Aging')) { 1 } else { 2 } } }, @{ Expression = { if ($null -ne $_.HoursLeft) { $_.HoursLeft } else { [double]::MinValue } } } | Select-Object -First 1)[0]
         $status = if ($limiting.State -in @('Valid', 'Aging')) {
                 if ($limiting.HoursLeft -lt 24) { 'Expires < 24 h' } elseif ($limiting.State -eq 'Aging') { 'Aging (accepted)' } else { 'Valid' }
             }
-            elseif ($limiting.Optional) { '{0} (optional)' -f $limiting.State }
-            else { '{0} - blocks SWI' -f $limiting.State }
+            elseif ($limiting.Blocks) { '{0} - blocks SWI' -f $limiting.State }
+            elseif ($limiting.State -eq 'Old') { 'Old - still used (optional)' }
+            else { '{0} (optional)' -f $limiting.State }
         $expiresText = if ($null -ne $limiting.ExpiresAtUtc) { $limiting.ExpiresAtUtc.LocalDateTime.ToString('yyyy-MM-dd HH:mm') } else { '' }
         $shared = if ($jobsByScript[$scriptName].Count -gt 1) { (' Shared output of {0} ({1}).' -f $scriptName, ($jobsByScript[$scriptName] -join ', ')) } else { '' }
         $otherIssues = @($inputs | Where-Object { $_ -ne $limiting -and $_.State -notin @('Valid', 'Aging') } | ForEach-Object { '{0}: {1}{2}' -f $_.File, $_.State, $(if ($_.Optional) { ' (optional)' } else { '' }) })

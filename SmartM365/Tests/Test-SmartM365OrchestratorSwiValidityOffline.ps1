@@ -4,7 +4,7 @@
 Offline tests of the SWI validity shown in the orchestrator GUI (Jobs and Planning). Real SWI
 contracts, CMDB source registry and jobs template; synthetic DATA-LAST files and receipts only.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param()
@@ -87,6 +87,7 @@ try {
     Assert-Case ((Get-Row $empty 'M365-SecureScore-Inventory').Swi -eq 'Missing - blocks SWI') 'A missing required file does not block SWI.'
     Assert-Case ((Get-Row $empty 'AD-HealthCheck').Swi -eq 'Missing (optional)') 'A missing optional-only input blocks SWI.'
     Assert-Case ((Get-Row $empty 'Intune-Configurations-Inventory').Swi -eq 'Not collected (optional)') 'An absent Intune group is not optional.'
+    Assert-Case ((Get-Row $empty 'SharePointOnPrem-Content-Inventory').Swi -eq 'Missing (optional)' -and (Get-Row $empty 'SharePointOnPrem-Infrastructure-Inventory').Swi -eq 'Missing (optional)') 'SharePoint on-premises inputs are not optional for SWI.'
     Assert-Case ((Get-Row $empty 'M365-ActiveUsers-Inventory').Swi -like 'Missing* - blocks SWI') 'A native source without file or receipt does not block SWI.'
     $unused = @($empty.Rows | Where-Object Swi -eq 'Not used by SWI')
     Assert-Case ($unused.Count -gt 0 -and $null -eq $unused[0].DaysLeft) 'Jobs without SWI input are not reported.'
@@ -121,7 +122,7 @@ try {
     Assert-Case ((Get-Row (Invoke-Validity) 'AD-HealthCheck').Swi -eq 'Expires < 24 h') 'The optional 48 h limit was not applied.'
     Write-DataFile 'AD_HealthCheck.csv' 60
     $optionalRow = Get-Row (Invoke-Validity) 'AD-HealthCheck'
-    Assert-Case ($optionalRow.Swi -eq 'Expired (optional)' -and -not $optionalRow.Blocks) 'An expired optional input blocks SWI.'
+    Assert-Case ($optionalRow.Swi -eq 'Old - still used (optional)' -and -not $optionalRow.Blocks -and $optionalRow.DaysLeft -lt 0) 'An old optional input is not shown as still used by SWI.'
 
     # 5. Native receipt rule: start time of the file record, 48 h; DiscoveredApps 240 h with warning at 168 h.
     $activeUsers = @($registry.Producers | Where-Object Script -eq 'SmartM365-ActiveUsers-Inventory.ps1')[0]
@@ -146,9 +147,13 @@ try {
     Write-Receipt $group.receipt 30 @($group.files.file) -CompletedAgeHours 20
     $row = Get-Row (Invoke-Validity) 'Intune-EnrollmentFailures-Inventory'
     Assert-Case ($row.Swi -eq 'Valid' -and [math]::Abs($row.DaysLeft - [math]::Round((336 - 20) / 24, 1)) -le 0.1) "Intune group rule is wrong: $($row.Swi) $($row.DaysLeft)"
+    Write-Receipt $group.receipt 400 @($group.files.file) -CompletedAgeHours 390
+    $row = Get-Row (Invoke-Validity) 'Intune-EnrollmentFailures-Inventory'
+    Assert-Case ($row.Swi -eq 'Old - still used (optional)' -and -not $row.Blocks) "An old complete Intune group is not used: $($row.Swi)"
     $managed = @($intune.groups | Where-Object name -eq 'ManagedApps')[0]
     Write-DataFile $managed.files[0].file 1
-    Assert-Case ((Get-Row (Invoke-Validity) 'Intune-ManagedApps-Inventory').Swi -eq 'Incomplete group - blocks SWI') 'A partial Intune group was accepted.'
+    $partial = Get-Row (Invoke-Validity) 'Intune-ManagedApps-Inventory'
+    Assert-Case ($partial.Swi -eq 'Incomplete group - blocks SWI' -and $partial.Blocks) 'A partial Intune group was accepted.'
 
     # 7. Local Prepare configuration wins over the template; shared outputs name every job.
     $configPath = Join-Path $root 'Prepare.local.json'

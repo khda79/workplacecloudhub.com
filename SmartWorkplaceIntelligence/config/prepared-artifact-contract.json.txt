@@ -7,16 +7,6 @@
     "M365_Licenses_ReportSources.csv",
     "M365_Licenses_ReportAssignmentIssues.csv",
     "M365_Licenses_ReportSnapshot.json.txt",
-    "SharePoint_OnPrem_Farms.csv",
-    "SharePoint_OnPrem_Servers.csv",
-    "SharePoint_OnPrem_ServiceApplications.csv",
-    "SharePoint_OnPrem_WebApplications.csv",
-    "SharePoint_OnPrem_WebApplicationZones.csv",
-    "SharePoint_OnPrem_ContentDatabases.csv",
-    "SharePoint_OnPrem_SiteCollections.csv",
-    "SharePoint_OnPrem_SiteAdministrators.csv",
-    "SharePoint_OnPrem_Webs.csv",
-    "SharePoint_OnPrem_CollectionCoverage.csv",
     "Exchange_EXO_MigrationJobs.csv",
     "Exchange_Mailboxes_AllSources_PermissionsByUser.csv",
     "Exchange_OnPrem_Mailboxes_AllDomains.csv"
@@ -99,6 +89,56 @@
       "file": "Exchange_Hybrid_FreeBusy_Findings.csv",
       "maxAgeHours": 192,
       "delimiter": ";"
+    },
+    {
+      "file": "SharePoint_OnPrem_Farms.csv",
+      "maxAgeHours": 336,
+      "delimiter": ";"
+    },
+    {
+      "file": "SharePoint_OnPrem_Servers.csv",
+      "maxAgeHours": 336,
+      "delimiter": ";"
+    },
+    {
+      "file": "SharePoint_OnPrem_ServiceApplications.csv",
+      "maxAgeHours": 336,
+      "delimiter": ";"
+    },
+    {
+      "file": "SharePoint_OnPrem_WebApplications.csv",
+      "maxAgeHours": 336,
+      "delimiter": ";"
+    },
+    {
+      "file": "SharePoint_OnPrem_WebApplicationZones.csv",
+      "maxAgeHours": 336,
+      "delimiter": ";"
+    },
+    {
+      "file": "SharePoint_OnPrem_ContentDatabases.csv",
+      "maxAgeHours": 336,
+      "delimiter": ";"
+    },
+    {
+      "file": "SharePoint_OnPrem_SiteCollections.csv",
+      "maxAgeHours": 336,
+      "delimiter": ";"
+    },
+    {
+      "file": "SharePoint_OnPrem_SiteAdministrators.csv",
+      "maxAgeHours": 336,
+      "delimiter": ";"
+    },
+    {
+      "file": "SharePoint_OnPrem_Webs.csv",
+      "maxAgeHours": 336,
+      "delimiter": ";"
+    },
+    {
+      "file": "SharePoint_OnPrem_CollectionCoverage.csv",
+      "maxAgeHours": 336,
+      "delimiter": ";"
     }
   ],
   "licenseReport": {
@@ -124,7 +164,8 @@
     "19AA5A0D3D6FFAED0E3FFF2A16B2A4FF4D269C65221DB1BB2BB0139B729B87B4",
     "A007FF4C64A313913B4024BEE28D3AFF2DB9E952B6406EF3FF5E1FA5CE8CDABE",
     "A8532B4125A081A9F3A74EC597B1EA82F86266CB62A2F143D7E56F5A90918D77",
-    "97A0C153710D5E026F4097E377047562E472E8876F8C0674D012C5D6500B2EBA"
+    "97A0C153710D5E026F4097E377047562E472E8876F8C0674D012C5D6500B2EBA",
+    "E46B2D4E62AC18939DD49DB01AC3365E3731BA7A7283164B57F761E7C5F440B9"
   ],
   "history": [
     {

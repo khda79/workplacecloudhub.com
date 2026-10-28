@@ -17,8 +17,9 @@ reports added in SmartInventory UserActivity 1.34 and CopilotUsage 1.1.0. It run
 The four CSVs are `optionalCurrentFiles` in `config/prepared-source-contract.json.txt` with a
 744-hour publication-age limit, the same limit as the other Microsoft 365 usage reports. The
 limit of an optional file comes from the contract, not from `PreparedSourceAgeOverrides`. A file
-that is absent, older than 744 hours, empty or unreadable is recorded in the capture's
-`OptionalSourceIssues` and the batch continues.
+older than 744 hours is still captured as the latest available data and recorded as `StaleUsed`
+in the capture's `OptionalSourceIssues`. A file that is absent, empty or unreadable is recorded
+there too and left out; the batch continues.
 
 Without a usable source the generator never writes zeros:
 
