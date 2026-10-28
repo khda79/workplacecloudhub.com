@@ -330,32 +330,27 @@ function New-ManagedDeviceExportRow {
 }
 
 function Invoke-GraphPagedRequest {
-    param([Parameter(Mandatory=$true)][string]$Uri)
+    param([Parameter(Mandatory=$true)][string]$Uri,[switch]$Quiet)
 
-    $items = @()
+    # One short progress line per page (the page URL with its skip token is not useful to read).
+    $items = New-Object System.Collections.Generic.List[object]
     $nextUri = $Uri
-
+    $page = 0
     while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
-        Write-Host "Reading Graph page: $nextUri" -ForegroundColor DarkCyan
+        $page++
         $response = Invoke-MgGraphRequest -Method GET -Uri $nextUri -ErrorAction Stop
-
         $pageItems = Get-GraphProperty -InputObject $response -Name "value"
         if ($pageItems) {
             foreach ($item in @($pageItems)) {
-                if ($null -ne $item) {
-                    $items += $item
-                }
+                if ($null -ne $item) { $items.Add($item) }
             }
         }
-
+        if (-not $Quiet) { Write-Host ("Graph page {0}: {1} device(s) read so far." -f $page,$items.Count) -ForegroundColor DarkCyan }
         $nextUri = ""
         $nextLink = Get-GraphProperty -InputObject $response -Name "@odata.nextLink"
-        if (-not [string]::IsNullOrWhiteSpace([string]$nextLink)) {
-            $nextUri = [string]$nextLink
-        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$nextLink)) { $nextUri = [string]$nextLink }
     }
-
-    return @($items)
+    return @($items.ToArray())
 }
 
 Import-GraphAuthenticationModule
@@ -431,9 +426,10 @@ if ($requestedComputers.Count -gt 0) {
             $filter = "deviceName eq {0}" -f (ConvertTo-ODataStringLiteral -Value ([string]$candidateName))
             $encodedFilter = [System.Uri]::EscapeDataString($filter)
             $uri = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?`$select=$select&`$filter=$encodedFilter&`$top=$PageSize"
-            $devices += @(Invoke-GraphPagedRequest -Uri $uri)
+            $devices += @(Invoke-GraphPagedRequest -Uri $uri -Quiet)
         }
     }
+    Write-Host ("Graph lookups: {0} computer(s) queried; {1} Intune device(s) found." -f $requestedComputers.Count,@($devices).Count) -ForegroundColor DarkCyan
 }
 else {
     $uri = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?`$select=$select&`$top=$PageSize"

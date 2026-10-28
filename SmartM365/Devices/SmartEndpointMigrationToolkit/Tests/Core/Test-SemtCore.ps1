@@ -325,6 +325,30 @@ try {
         $env:PSModulePath = $savedModulePath
         & $coreModule { Remove-Item -Path Function:\Get-InstalledModule -ErrorAction SilentlyContinue; $script:FakeGraphLocation = $null }
     }
+    # Graph paging (fictional 3-page response): one short progress line per page, never the page URL.
+    foreach ($exporterName in @('Intune','Entra')) {
+        $exporterPath = Join-Path $script:PackageRoot ("Scripts\SmartM365-EndpointMigration-Export-{0}DevicesCsv.ps1" -f $exporterName)
+        $pagingCheck = [scriptblock]::Create((@(Get-FunctionText -Path $exporterPath -Names @('Get-GraphProperty','Invoke-GraphPagedRequest')) -join "`n") + @'
+
+$script:HostLines = New-Object System.Collections.Generic.List[string]
+function Write-Host { param([object]$Object,$ForegroundColor) $script:HostLines.Add([string]$Object) }
+function Invoke-MgGraphRequest {
+    param($Method,$Uri,$ErrorAction)
+    $page = if ($Uri -match 'skiptoken=(\d+)') { [int]$Matches[1] } else { 1 }
+    $result = @{ value = @(1..3 | ForEach-Object { @{ id = ('{0}-{1}' -f $page,$_) } }) }
+    if ($page -lt 3) { $result['@odata.nextLink'] = 'https://graph.microsoft.com/v1.0/x?$select=a%2cb&$skiptoken=' + ($page + 1) }
+    return $result
+}
+$all = @(Invoke-GraphPagedRequest -Uri 'https://graph.microsoft.com/v1.0/x?$top=3')
+$loud = @($script:HostLines)
+$script:HostLines.Clear()
+[void](Invoke-GraphPagedRequest -Uri 'https://graph.microsoft.com/v1.0/x?$top=3' -Quiet)
+[pscustomobject]@{ Count = $all.Count; Lines = $loud; QuietLines = $script:HostLines.Count }
+'@)
+        $paging = & $pagingCheck
+        Test-Step ("{0} export: every Graph page is read and reported on one short line without its URL" -f $exporterName) { $paging.Count -eq 9 -and ($paging.Lines -join '|') -eq 'Graph page 1: 3 device(s) read so far.|Graph page 2: 6 device(s) read so far.|Graph page 3: 9 device(s) read so far.' }
+        Test-Step ("{0} export: per-computer lookups are quiet" -f $exporterName) { $paging.QuietLines -eq 0 }
+    }
     Test-Step 'Run inventory refresh searches every forest domain (AdDomain is a DNS suffix only)' { $engineText -match 'Invoke-SemtInventoryExport -Kind \$Kind' -and $engineText -notmatch "-Domain \(Opt 'AdDomain'\)" }
     #endregion
 

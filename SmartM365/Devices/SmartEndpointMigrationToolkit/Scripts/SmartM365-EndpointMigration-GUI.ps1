@@ -292,7 +292,8 @@ function Get-InventoryRefreshCommandText {
         $lines += ("    try {{ {0} }} catch {{ `$semtFailed++; Write-Host ('{{0:yyyy-MM-dd HH:mm:ss}} {1} export failed: {{1}}' -f (Get-Date),`$_.Exception.Message) }}" -f $call,$export.Label)
     }
     $lines += '    Write-Host (''{0:yyyy-MM-dd HH:mm:ss} Inventory refresh finished; failed exports: {1}.'' -f (Get-Date),$semtFailed)'
-    $lines += ('}} *> {0}' -f (ConvertTo-PowerShellLiteral $LogPath))
+    # Out-File -Width: a redirection to a file would wrap the lines at the width of the hidden console.
+    $lines += ('}} *>&1 | ForEach-Object {{ [string]$_ }} | Out-File -LiteralPath {0} -Encoding utf8 -Width 8192' -f (ConvertTo-PowerShellLiteral $LogPath))
     $lines += 'exit ([int]($semtFailed -gt 0))'
     return ($lines -join [Environment]::NewLine)
 }

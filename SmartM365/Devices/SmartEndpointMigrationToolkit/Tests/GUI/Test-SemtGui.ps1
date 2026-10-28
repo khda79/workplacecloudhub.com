@@ -107,7 +107,7 @@ try {
     # Fictional export scripts: AD writes output, Intune fails; both must run and reach the log.
     $fakeRoot = Join-Path $tempRoot 'InventoryFake'
     New-Item -ItemType Directory -Path (Join-Path $fakeRoot 'Scripts') -Force | Out-Null
-    Set-Content -LiteralPath (Join-Path $fakeRoot 'Scripts\SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1') -Value "param([switch]`$ForceRefresh) Write-Host ('FAKE-AD force=' + `$ForceRefresh); Write-Output 'FAKE-AD output'" -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $fakeRoot 'Scripts\SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1') -Value "param([switch]`$ForceRefresh) Write-Host ('FAKE-AD force=' + `$ForceRefresh); Write-Host ('FAKE-AD-LONG ' + ('x' * 200)); Write-Output 'FAKE-AD output'" -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $fakeRoot 'Scripts\SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1') -Value "param([switch]`$ForceRefresh) `$ErrorActionPreference = 'Stop'; throw 'FAKE-INTUNE failure'" -Encoding ASCII
     $savedRoot = $script:PackageRoot; $script:PackageRoot = $fakeRoot
     $refreshLog = Join-Path $fakeRoot "Run's log\InventoryRefresh.log"
@@ -119,6 +119,7 @@ try {
     Test-Step 'inventory refresh passes -ForceRefresh and logs Write-Host and output' { $refreshText -match 'FAKE-AD force=True' -and $refreshText -match 'FAKE-AD output' }
     Test-Step 'inventory refresh runs every export after a failure and logs it with a timestamp' { $refreshText -match '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} Intune export failed: FAKE-INTUNE failure' -and $refreshText -match 'failed exports: 1\.' }
     Test-Step 'inventory refresh exit code is 1 when an export failed' { $refreshProcess.ExitCode -eq 1 }
+    Test-Step 'inventory refresh log keeps long lines whole (no wrap at the hidden console width)' { $refreshText -match ('FAKE-AD-LONG ' + ('x' * 200)) }
     # Parallel plan: AD and Graph streams; Graph uses one sign-in (combined exporter for HybridJoin).
     $hjPlan = @(Get-InventoryRefreshPlan -Campaign HybridJoin)
     $w11Plan = @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade)
