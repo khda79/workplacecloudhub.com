@@ -258,6 +258,8 @@ SmartFinOps/Data/**
 # SmartWorkplaceIntelligence private, locally consolidated evidence.
 SmartWorkplaceIntelligence/_private/**
 SmartWorkplaceIntelligence/_review/**
+# SmartWorkplaceIntelligence demo screenshots, gallery and manifest (synthetic Contoso data, local only).
+/SmartWorkplaceIntelligence/DemoAssets/
 SmartWorkplaceIntelligence/**/.pbi/**
 SmartWorkplaceIntelligence/**/*.abf
 SmartWorkplaceIntelligence/**/*.pbix
