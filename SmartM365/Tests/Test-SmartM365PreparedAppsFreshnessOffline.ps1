@@ -1,9 +1,9 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-Test the Intelligence publication-age defaults (14 days, prices and Office activations 744h) without operational imports.
+Test the Intelligence publication-age defaults (14 days, prices and M365 usage reports 744h) without operational imports.
 .VERSION
-1.2.0
+1.3.0
 .NOTES
 Synthetic temporary files only. No collectors, tenant configuration or notifications.
 #>
@@ -29,30 +29,39 @@ foreach($property in $template.PreparedSourceAgeOverrides.PSObject.Properties){$
 $apps=@('Intune_DiscoveredApps_Summary.csv','Intune_DiscoveredApps_AppDeviceRelations.csv')
 $defaultLimit=[int]$template.PreparedMaxSourceAgeHours
 $activations='M365_Apps_Activations.csv'
-if($defaultLimit -ne 336 -or $overrides['M365_License_Prices.csv'] -ne 744 -or $overrides[$activations] -ne 744){throw 'Publication-age defaults changed.'}
+$usersActivity='M365_Users_Activity.csv'
+# Every Graph usage report CSV (UserActivity and Copilot collectors) gets 744h.
+$m365Reports=@('M365_Apps_Activations','M365_Apps_Usage_180D','M365_Apps_Usage_30D','M365_Copilot_UserUsage','M365_Email_Activity',
+    'M365_Email_AppUsage','M365_Groups_Activity','M365_Mailbox_Usage','M365_OneDrive_Usage','M365_OneDrive_UserActivity',
+    'M365_SharePoint_SiteUsage','M365_SharePoint_UserActivity','M365_Teams_DeviceUsage','M365_Teams_UserActivity','M365_Users_Activity') | ForEach-Object {"$_.csv"}
+if($defaultLimit -ne 336 -or $overrides['M365_License_Prices.csv'] -ne 744){throw 'Publication-age defaults changed.'}
+foreach($name in $m365Reports){if($overrides[$name] -ne 744){throw "M365 usage report override is not 744h: $name"}}
+if($overrides.Count -ne $m365Reports.Count+1){throw 'Unexpected publication-age overrides.'}
+$collector=Get-Content -LiteralPath (Join-Path $repository 'SmartM365/SmartInventory/M365Inventory/Usage/SmartM365-M365UserActivity-Inventory.ps1') -Raw
+foreach($match in [regex]::Matches($collector,"BaseFileName = '([A-Za-z0-9_]+)'")){if("$($match.Groups[1].Value).csv" -notin $m365Reports){throw "UserActivity report without a 744h override: $($match.Groups[1].Value)"}}
 foreach($name in $apps){if($overrides.ContainsKey($name)){throw "Apps override stricter than the 14-day default: $name"}}
 $temporary=Join-Path ([IO.Path]::GetTempPath()) ('prepared-apps-freshness-'+[guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path (Join-Path $temporary 'DATA-LAST')
 try{
-    # A carried-over activations CSV past the 336h default but within its override stays publishable.
-    $sourceNames=$apps+@('M365_Users_Active.csv',$activations)
+    # M365 usage CSVs past the 336h default but within their override stay publishable.
+    $sourceNames=$apps+@('M365_Users_Active.csv',$activations,$usersActivity)
     $contractFile=Join-Path $temporary 'sources.json.txt'
     @{currentFiles=$sourceNames;mappingFiles=@();dailyFiles=@();history=@()} | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $contractFile -Encoding utf8
     foreach($name in $sourceNames){
         $path=Join-Path $temporary "DATA-LAST/$name"
         [IO.File]::WriteAllText($path,"TenantKey,Value`nsynthetic,1`n")
         if($name -in $apps){[IO.File]::SetLastWriteTimeUtc($path,[datetime]::UtcNow.AddHours(-216))}
-        if($name -eq $activations){[IO.File]::SetLastWriteTimeUtc($path,[datetime]::UtcNow.AddHours(-400))}
+        if($name -in $activations,$usersActivity){[IO.File]::SetLastWriteTimeUtc($path,[datetime]::UtcNow.AddHours(-400))}
     }
     $parameters=@{DataRoot=$temporary;SourceContractPath=$contractFile;MaxSourceAgeHours=$defaultLimit;AgeOverrides=$overrides;MetadataOnly=$true}
     $plan=@(Get-PreparedSourcePlan @parameters)
-    if($plan.Count -ne 4){throw 'Unexpected source plan.'}
+    if($plan.Count -ne 5){throw 'Unexpected source plan.'}
     $snapshot=Join-Path $temporary 'snapshot'
     foreach($entry in $plan){
         $captured=Copy-PreparedStableSource -Entry $entry -SnapshotRoot $snapshot -MaxSourceAgeHours $defaultLimit -AgeOverrides $overrides -Attempts 1 -RetryDelayMs 0
         if(-not $captured.SHA256){throw 'Stable capture did not qualify bytes.'}
     }
-    $checks=4
+    $checks=5
     foreach($name in $sourceNames){
         $path=Join-Path $temporary "DATA-LAST/$name"
         $original=(Get-Item -LiteralPath $path).LastWriteTimeUtc
@@ -69,7 +78,7 @@ try{
         }
         [IO.File]::SetLastWriteTimeUtc($path,$original)
     }
-    Write-Output "PASS: $checks source plan/capture freshness checks; default 336h (Apps included), prices and Office activations 744h. Offline only."
+    Write-Output "PASS: $checks source plan/capture freshness checks; default 336h (Apps included), prices and $($m365Reports.Count) M365 usage reports 744h. Offline only."
 }finally{
     $target=[IO.Path]::GetFullPath($temporary)
     $parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
