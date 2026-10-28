@@ -17,7 +17,8 @@
   "PreparedHybridAllowedTargetDomains": [],
   "PreparedMaxSourceAgeHours": 336,
   "PreparedSourceAgeOverrides": {
-    "M365_License_Prices.csv": 744
+    "M365_License_Prices.csv": 744,
+    "M365_Apps_Activations.csv": 744
   },
   "PreparedAllowLegacyTenantless": false,
   "PreparedAllowEmptyTables": [],
