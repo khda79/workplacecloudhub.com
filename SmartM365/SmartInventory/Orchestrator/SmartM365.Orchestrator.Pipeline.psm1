@@ -286,6 +286,8 @@ function Get-SmartM365OrchestratorPipelineRunStatus {
         Pipeline = [string]$request.Pipeline
         Tenant = [string]$request.Tenant
         CreatedAtUtc = ConvertTo-SmartM365OrchestratorPipelineTimestampText $request.CreatedAtUtc
+        ActivatedAtUtc = if ($request.PSObject.Properties['ActivatedAtUtc']) { ConvertTo-SmartM365OrchestratorPipelineTimestampText $request.ActivatedAtUtc } else { '' }
+        QueuePosition = 0
         ManifestHash = [string]$request.ManifestHash
         OverallStatus = $overallStatus
         IsTerminal = ($pending.Count -eq 0)
@@ -307,7 +309,7 @@ function Get-SmartM365OrchestratorActivePipelineRuns {
 
     $paths = Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath
     if (-not (Test-Path -LiteralPath $paths.RootPath -PathType Container)) { return @() }
-    @(
+    $active = @(
         foreach ($folder in @(Get-ChildItem -LiteralPath $paths.RootPath -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
             $requestPath = (Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath -BatchId $folder.Name).RequestPath
             if (-not (Test-Path -LiteralPath $requestPath -PathType Leaf)) { continue }
@@ -318,6 +320,67 @@ function Get-SmartM365OrchestratorActivePipelineRuns {
             catch { throw "Invalid pipeline request '$($folder.Name)': $($_.Exception.Message)" }
         }
     )
+    # Residents process only the oldest active request (FIFO); the others wait in the queue.
+    $ordered = @($active | Sort-Object CreatedAtUtc, BatchId)
+    for ($index = 0; $index -lt $ordered.Count; $index++) {
+        $ordered[$index].QueuePosition = $index
+        if ($index -gt 0 -and $ordered[$index].OverallStatus -eq 'Running') { $ordered[$index].OverallStatus = 'Queued' }
+    }
+    $ordered
+}
+
+function Get-SmartM365OrchestratorPipelineQueueReadiness {
+    # Queueing needs every expected resident to measure waits from activation (protocol 1);
+    # an older resident would time out a queued request against its creation time.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath)
+    $clusterPath = Join-Path $SharedDataFolderPath 'Config/Orchestrator-Cluster.json'
+    try { $cluster = (Read-SmartM365JsonDocument -Path $clusterPath).Document }
+    catch { return [pscustomobject]@{ Ready = $false; Detail = 'the published cluster configuration could not be read.' } }
+    $servers = @($cluster.ExpectedOrchestratorServers | Where-Object { $_ })
+    if ($servers.Count -eq 0) { return [pscustomobject]@{ Ready = $false; Detail = 'no expected orchestrator server is published.' } }
+    $issues = @(foreach ($server in $servers) {
+        if ([string]$server -notmatch '^[A-Za-z0-9_-]+$') { "invalid server name '$server'"; continue }
+        try {
+            $heartbeat = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath "$server/Orchestrator-Heartbeat.json")).Document
+            if (-not $heartbeat.PSObject.Properties['PipelineQueueProtocol'] -or [int]$heartbeat.PipelineQueueProtocol -lt 1) {
+                $version = if ($heartbeat.PSObject.Properties['ScriptVersion']) { [string]$heartbeat.ScriptVersion } else { 'unknown' }
+                "$server runs v$version without queue protocol 1"
+            }
+        }
+        catch { "${server}: heartbeat unreadable" }
+    })
+    [pscustomobject]@{ Ready = ($issues.Count -eq 0); Detail = ($issues -join '; ') }
+}
+
+function Set-SmartM365OrchestratorPipelineActivation {
+    # Records once when a resident starts processing the request; dependency and prerequisite
+    # wait timeouts count from this time instead of the time spent in the queue.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SharedDataFolderPath,
+        [Parameter(Mandatory)][string]$BatchId,
+        [string]$ActivatedBy = ([Environment]::MachineName),
+        [int]$LockTimeoutSeconds = 15
+    )
+    $paths = Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId
+    $lock = Enter-SmartM365OrchestratorPipelineLock -Path $paths.ControlLockPath -TimeoutSeconds $LockTimeoutSeconds
+    try {
+        $request = Read-SmartM365OrchestratorPipelineJson -Path $paths.RequestPath
+        if ($request.PSObject.Properties['ActivatedAtUtc'] -and -not [string]::IsNullOrWhiteSpace((ConvertTo-SmartM365OrchestratorPipelineTimestampText $request.ActivatedAtUtc))) {
+            return (ConvertTo-SmartM365OrchestratorPipelineTimestampText $request.ActivatedAtUtc)
+        }
+        if ($request.PSObject.Properties['Cancellation']) { return '' }
+        $activatedUtc = [datetime]::UtcNow.ToString('o')
+        $request | Add-Member -NotePropertyName ActivatedAtUtc -NotePropertyValue $activatedUtc -Force
+        $request | Add-Member -NotePropertyName ActivatedBy -NotePropertyValue $ActivatedBy -Force
+        Write-SmartM365OrchestratorPipelineJsonAtomically -Path $paths.RequestPath -Document $request
+        return $activatedUtc
+    }
+    finally {
+        if ($null -ne $lock) { $lock.Dispose() }
+        Remove-Item -LiteralPath $paths.ControlLockPath -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function New-SmartM365OrchestratorPipelineRequest {
@@ -330,6 +393,7 @@ function New-SmartM365OrchestratorPipelineRequest {
         [Parameter(Mandatory)][string]$ManifestHash,
         [string]$RequestedBy = '',
         [string]$RequestedFrom = '',
+        [ValidateRange(1, 50)][int]$MaxActiveRequests = 5,
         [int]$LockTimeoutSeconds = 15
     )
 
@@ -339,11 +403,29 @@ function New-SmartM365OrchestratorPipelineRequest {
     $lock = Enter-SmartM365OrchestratorPipelineLock -Path $basePaths.SubmissionLockPath -TimeoutSeconds $LockTimeoutSeconds
     try {
         $active = @(Get-SmartM365OrchestratorActivePipelineRuns -SharedDataFolderPath $SharedDataFolderPath)
+        $createdUtc = [datetime]::UtcNow
         if ($active.Count -gt 0) {
-            throw "An active pipeline request already exists: $($active[0].BatchId) ($($active[0].OverallStatus))."
+            $head = $active[0]
+            $readiness = Get-SmartM365OrchestratorPipelineQueueReadiness -SharedDataFolderPath $SharedDataFolderPath
+            if (-not $readiness.Ready) {
+                throw "An active pipeline request already exists: $($head.BatchId) ($($head.OverallStatus)). Queueing is unavailable: $($readiness.Detail)"
+            }
+            if ($active.Count -ge $MaxActiveRequests) {
+                throw "The pipeline request queue is full: $($active.Count) request(s) active or queued (limit $MaxActiveRequests). Running: $($head.BatchId)."
+            }
+            $requestedNames = @($Selection.SelectedJobs | ForEach-Object { ([string]$_.Name).ToUpperInvariant() } | Sort-Object -Unique) -join '|'
+            foreach ($run in $active) {
+                if ($run.CancellationRequested) { continue }
+                $runNames = @($run.Jobs | ForEach-Object { ([string]$_.JobName).ToUpperInvariant() } | Sort-Object -Unique) -join '|'
+                if ($runNames -ceq $requestedNames) {
+                    throw "An identical pipeline request is already $(if ($run.QueuePosition -eq 0) { 'running' } else { 'queued' }): $($run.BatchId)."
+                }
+            }
+            # Queue order follows CreatedAtUtc: never sort before an existing request on clock skew.
+            $latest = @($active | ForEach-Object { [datetime]::Parse([string]$_.CreatedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime() } | Sort-Object -Descending)[0]
+            if ($createdUtc -le $latest) { $createdUtc = $latest.AddMilliseconds(1) }
         }
 
-        $createdUtc = [datetime]::UtcNow
         $batchId = '{0}-{1}' -f $createdUtc.ToString('yyyyMMddTHHmmssfffZ'), [guid]::NewGuid().ToString('N').Substring(0, 8)
         $paths = Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath -BatchId $batchId
         New-Item -ItemType Directory -Path $paths.JobsFolderPath -Force | Out-Null
@@ -378,7 +460,11 @@ function New-SmartM365OrchestratorPipelineRequest {
             Write-SmartM365OrchestratorPipelineJsonAtomically -Path $statusPath -Document $jobStatus -CreateNew
         }
         Write-SmartM365OrchestratorPipelineJsonAtomically -Path $paths.RequestPath -Document $request -CreateNew
-        Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $batchId
+        $result = Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $batchId
+        $result.QueuePosition = $active.Count
+        if ($active.Count -gt 0) { $result.OverallStatus = 'Queued' }
+        $result | Add-Member -NotePropertyName QueuedBehind -NotePropertyValue @($active | ForEach-Object { [string]$_.BatchId })
+        $result
     }
     finally {
         if ($null -ne $lock) { $lock.Dispose() }
@@ -581,6 +667,8 @@ Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorPipelineSelection',
     'Get-SmartM365OrchestratorPipelineRunStatus',
     'Get-SmartM365OrchestratorActivePipelineRuns',
+    'Get-SmartM365OrchestratorPipelineQueueReadiness',
+    'Set-SmartM365OrchestratorPipelineActivation',
     'New-SmartM365OrchestratorPipelineRequest',
     'Set-SmartM365OrchestratorPipelineJobStatus'
 )

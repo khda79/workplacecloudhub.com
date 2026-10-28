@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline tests of the Operations launch features of the orchestrator GUI.
 .VERSION
-1.1.2
+1.1.3
 .NOTES
 GUI functions are extracted by AST and bound to the real XAML. The catalog is the committed
 template (read only); the published configuration is a copy of its jobs. No orchestrator, request
@@ -129,7 +129,7 @@ try {
     function Refresh-RequestsView {}
     function Get-PublishedJobsPath { 'published.json' }
     function Test-JobDraftChanged { param($JobName) $false }
-    function New-SmartM365OrchestratorJobRunRequest { param($SharedDataFolderPath, $JobsPath, $JobName, $Tenant, [switch]$IncludeDependencies) $script:RequestCalls.Add([pscustomobject]@{ Jobs = @($JobName); Tenant = $Tenant; Dependencies = [bool]$IncludeDependencies }); [pscustomobject]@{ BatchId = 'Batch1'; TotalCount = 1 } }
+    function New-SmartM365OrchestratorJobRunRequest { param($SharedDataFolderPath, $JobsPath, $JobName, $Tenant, [switch]$IncludeDependencies) $script:RequestCalls.Add([pscustomobject]@{ Jobs = @($JobName); Tenant = $Tenant; Dependencies = [bool]$IncludeDependencies }); [pscustomobject]@{ BatchId = 'Batch1'; TotalCount = 1; QueuePosition = 0 } }
     $script:SharedDataFolderPath = $root
     $script:Controls.IncludeDependenciesCheck.IsChecked = $false
     [void](Request-SelectedJobRun -SkipConfirmation -JobName 'AD-Inventory' -IncludeDependencies $true)

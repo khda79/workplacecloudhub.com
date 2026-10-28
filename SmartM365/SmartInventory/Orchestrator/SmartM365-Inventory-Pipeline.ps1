@@ -5,7 +5,9 @@ Submits a distributed SmartInventory pipeline request to resident orchestrators.
 .DESCRIPTION
 Builds a plan from the effective central jobs manifest. ValidateOnly is read-only. Collect
 publishes one atomic shared request that resident orchestrators consume while preserving
-ownership, capability, dependency, claim, lock and concurrency controls.
+ownership, capability, dependency, claim, lock and concurrency controls. When another request is
+active and every resident advertises the queue protocol, the request is queued (FIFO) and starts
+when the earlier requests have finished.
 
 .EXAMPLE
 ./SmartM365-Inventory-Pipeline.ps1 -Tenant prod -Pipeline Full -ValidateOnly
@@ -20,7 +22,7 @@ orchestrator applies the job's scheduled dependency rule to them (for example Fr
 Add -IncludeDependencies to run the enabled dependencies in the same request.
 
 .VERSION
-1.2.1
+1.2.2
 
 .EXAMPLE
 ./SmartM365-Inventory-Pipeline.ps1 -Tenant test -Cancel -BatchId '<active-batch-id>' -Reason 'Controlled direct collection' -ValidateOnly
@@ -237,6 +239,9 @@ try {
 
     $request = New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $SharedDataFolderPath -Tenant $Tenant -Pipeline $selectionName -Selection $selection -ManifestHash ((Get-FileHash -LiteralPath $JobsManifestPath -Algorithm SHA256).Hash) -RequestedBy ([Environment]::UserName) -RequestedFrom ([Environment]::MachineName)
     Write-Host ("Pipeline request submitted: BatchId={0}; request={1}" -f $request.BatchId, $request.RequestPath) -ForegroundColor Green
+    if ($request.QueuePosition -gt 0) {
+        Write-Host ("Queued at position {0} behind {1}; it starts automatically when they have finished." -f $request.QueuePosition, (@($request.QueuedBehind) -join ', ')) -ForegroundColor Yellow
+    }
     if ($NoWait) {
         Complete-PipelineScript -Status Success
         $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(0); exit $smartM365RunGuard.ExitCode

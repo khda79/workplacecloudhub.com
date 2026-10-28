@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.4
+1.6.5
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.4'
+$script:AppVersion = '1.6.5'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -1430,7 +1430,7 @@ function Update-SelectedPipelineRequest {
     $jobRows = @()
     if ($null -ne $row) { $jobRows = @($row.JobRows) }
     $script:Controls.RequestJobsGrid.ItemsSource = $jobRows
-    $script:Controls.CancelRequestButton.IsEnabled = -not $script:CancellationBusy -and -not $script:RequestSubmitBusy -and $null -ne $row -and $row.Status -in @('Running', 'Cancelling')
+    $script:Controls.CancelRequestButton.IsEnabled = -not $script:CancellationBusy -and -not $script:RequestSubmitBusy -and $null -ne $row -and $row.Status -in @('Running', 'Queued', 'Cancelling')
 }
 
 function Set-GuiRequestRows {
@@ -1441,7 +1441,7 @@ function Set-GuiRequestRows {
     $selectedRow = @($script:RequestRows | Where-Object { [string]$_.BatchId -eq $selectedBatch })
     if ($selectedRow.Count) { $script:Controls.RequestsGrid.SelectedItem = $selectedRow[0] }
     Update-SelectedPipelineRequest
-    $script:Controls.CancelAllRequestsButton.IsEnabled = -not $script:CancellationBusy -and -not $script:RequestSubmitBusy -and @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling')).Count -gt 0
+    $script:Controls.CancelAllRequestsButton.IsEnabled = -not $script:CancellationBusy -and -not $script:RequestSubmitBusy -and @($script:RequestRows | Where-Object Status -in @('Running', 'Queued', 'Cancelling')).Count -gt 0
 }
 
 function Refresh-RequestsView {
@@ -1524,7 +1524,7 @@ function Set-GuiCancellationBusy {
         $script:CancellationContext.Clock.Stop()
         foreach ($name in $script:CancellationUiState.Keys) { $script:Controls[$name].IsEnabled = $script:CancellationUiState[$name] }
         Update-SelectedPipelineRequest
-        $script:Controls.CancelAllRequestsButton.IsEnabled = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling')).Count -gt 0
+        $script:Controls.CancelAllRequestsButton.IsEnabled = @($script:RequestRows | Where-Object Status -in @('Running', 'Queued', 'Cancelling')).Count -gt 0
     }
 }
 
@@ -1554,7 +1554,7 @@ function Start-GuiPipelineCancellation {
 function Stop-SelectedPipelineRequest {
     if ($script:CancellationBusy) { return }
     $row = $script:Controls.RequestsGrid.SelectedItem
-    if ($null -eq $row -or $row.Status -notin @('Running', 'Cancelling')) { throw 'Select an active request.' }
+    if ($null -eq $row -or $row.Status -notin @('Running', 'Queued', 'Cancelling')) { throw 'Select an active request.' }
     Start-GuiPipelineCancellation -BatchId $row.BatchId
 }
 
@@ -1661,25 +1661,22 @@ function Request-SelectedJobRun {
     $includeDependencies = if ($null -ne $IncludeDependencies) { [bool]$IncludeDependencies } else { [bool]$script:Controls.IncludeDependenciesCheck.IsChecked }
     if ($SkipConfirmation) {
         # Non-interactive path (smoke test): synchronous, same API and contract.
-        # Fast pre-check; New-SmartM365OrchestratorPipelineRequest repeats it under the submission lock.
-        Refresh-RequestsView
-        $activeRequest = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling') | Select-Object -First 1)
-        if ($activeRequest.Count) { throw "An active pipeline request already exists: $($activeRequest[0].BatchId) (created $($activeRequest[0].Created), $($activeRequest[0].Pending) job(s) not finished). See Operations > Requests." }
+        # Queueing, duplicate and queue-limit rules are applied under the shared submission lock.
         $request = New-SmartM365OrchestratorJobRunRequest -SharedDataFolderPath $script:SharedDataFolderPath -JobsPath (Get-PublishedJobsPath) -JobName @($jobName) -Tenant $Tenant -IncludeDependencies:$includeDependencies
-        Write-GuiActivity -Message ("Run request recorded. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}" -f $jobName, $includeDependencies, $request.BatchId, $request.TotalCount) -Level SUCCESS
+        Write-GuiActivity -Message ("Run request recorded. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}; QueuePosition={4}" -f $jobName, $includeDependencies, $request.BatchId, $request.TotalCount, $request.QueuePosition) -Level SUCCESS
         $script:Controls.StatusText.Text = "Run request recorded: $($request.BatchId)"
         Refresh-RequestsView
         return $request
     }
-    # Pre-check on the displayed rows only: no shared read on the WPF thread. The submission
-    # API repeats it under the shared submission lock.
-    $activeRequest = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling') | Select-Object -First 1)
-    if ($activeRequest.Count) { throw "An active pipeline request already exists: $($activeRequest[0].BatchId) (created $($activeRequest[0].Created), $($activeRequest[0].Pending) job(s) not finished). See Operations > Requests." }
+    # Displayed rows only: no shared read on the WPF thread. The submission API decides under
+    # the shared submission lock (queue, duplicate, queue limit, resident queue protocol).
+    $activeRequests = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling', 'Queued'))
     $message = "Ask the orchestrators to run '$jobName' now?"
     if ($includeDependencies) { $message += "`n`nIts enabled dependencies are included and run first." }
     else { $message += "`n`nDependencies are not run; the job starts on its elected server when its dependency rule allows it." }
     if (Test-JobDraftChanged -JobName $jobName) { $message += "`n`nThis job has unpublished draft changes. The request uses the PUBLISHED configuration." }
-    $message += "`n`nOnly one request can be active at a time."
+    if ($activeRequests.Count) { $message += "`n`n$($activeRequests.Count) request(s) are active or queued (last refresh): this request is queued and starts automatically when they have finished." }
+    else { $message += "`n`nIf another request becomes active first, this one is queued behind it." }
     if (-not (Confirm-GuiJobRunRequest -Message $message)) { return $null }
     [void](Start-GuiJobRunSubmission -JobName $jobName -IncludeDependencies $includeDependencies)
     return $null
@@ -1737,12 +1734,12 @@ function Get-GuiJobRunSubmissionWork {
             return [pscustomobject]@{ Outcome = 'Failed'; Error = $failure; NewBatchIds = $newBatchIds; CheckError = $checkError }
         }
         $Progress.Stage = 'Recorded'
-        Write-SubmissionLog -Level SUCCESS -Message ("Run request recorded. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}" -f $InputData.JobName, [bool]$InputData.IncludeDependencies, $request.BatchId, $request.TotalCount)
+        Write-SubmissionLog -Level SUCCESS -Message ("Run request recorded. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}; QueuePosition={4}" -f $InputData.JobName, [bool]$InputData.IncludeDependencies, $request.BatchId, $request.TotalCount, $request.QueuePosition)
         $Progress.Message = 'Refreshing request states...'
         $rows = @(); $refreshError = ''
         try { $rows = @(Get-SmartM365OrchestratorRecentPipelineRuns -SharedDataFolderPath $InputData.Root -Count 30) }
         catch { $refreshError = $_.Exception.Message; Write-SubmissionLog -Level WARN -Message "Requests refresh failed: $refreshError" }
-        [pscustomobject]@{ Outcome = 'Recorded'; BatchId = [string]$request.BatchId; TotalCount = [int]$request.TotalCount; Rows = $rows; RefreshError = $refreshError }
+        [pscustomobject]@{ Outcome = 'Recorded'; BatchId = [string]$request.BatchId; TotalCount = [int]$request.TotalCount; QueuePosition = [int]$request.QueuePosition; QueuedBehind = @($request.QueuedBehind); Rows = $rows; RefreshError = $refreshError }
     }
 }
 
@@ -1823,7 +1820,7 @@ function Set-GuiRequestSubmitBusy {
             $script:Controls.RequestJobButton.IsEnabled = $null -ne $launchRow -and [bool]$launchRow.InManifest
         }
         Update-SelectedPipelineRequest
-        $script:Controls.CancelAllRequestsButton.IsEnabled = -not $script:CancellationBusy -and @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling')).Count -gt 0
+        $script:Controls.CancelAllRequestsButton.IsEnabled = -not $script:CancellationBusy -and @($script:RequestRows | Where-Object Status -in @('Running', 'Queued', 'Cancelling')).Count -gt 0
     }
 }
 
@@ -1872,8 +1869,14 @@ function Receive-GuiJobRunSubmission {
     if ($null -ne $result -and [string]$result.Outcome -eq 'Recorded') {
         if (-not $result.RefreshError) { Set-GuiRequestRows -Rows @($result.Rows) }
         Write-GuiActivity -Level SUCCESS -DisplayOnly -Message ("Run request recorded. Job={0}; IncludeDependencies={1}; BatchId={2}; Jobs={3}" -f $jobName, [bool]$context.Input.IncludeDependencies, $result.BatchId, $result.TotalCount)
-        $script:Controls.StatusText.Text = "Run request recorded: $($result.BatchId) (not started yet)"
-        $message = "Request submitted.`nBatch: $($result.BatchId)`nJobs: $($result.TotalCount)`n`nThe request is recorded; no job has started yet. The orchestrators start it on its elected server when its dependency rule allows it.`n`nFollow it in Operations > Requests."
+        if ($result.QueuePosition -gt 0) {
+            $script:Controls.StatusText.Text = "Run request queued: $($result.BatchId) (position $($result.QueuePosition))"
+            $message = "Request queued.`nBatch: $($result.BatchId)`nJobs: $($result.TotalCount)`nQueue position: $($result.QueuePosition), behind $(@($result.QueuedBehind) -join ', ')`n`nThe request is recorded and starts automatically when the earlier requests have finished. Its dependency and prerequisite waits count from that start.`n`nFollow it in Operations > Requests."
+        }
+        else {
+            $script:Controls.StatusText.Text = "Run request recorded: $($result.BatchId) (not started yet)"
+            $message = "Request submitted.`nBatch: $($result.BatchId)`nJobs: $($result.TotalCount)`n`nThe request is recorded; no job has started yet. The orchestrators start it on its elected server when its dependency rule allows it.`n`nFollow it in Operations > Requests."
+        }
         if ($result.RefreshError) { $message += "`n`nThe Requests list could not be refreshed ($($result.RefreshError)). Refresh it before relying on it." }
         $title = 'Run requested'; $icon = 'Information'
     }
@@ -2032,7 +2035,7 @@ function Get-GuiOrchestratorActionCommand {
         'Restart' { [pscustomobject]@{ Title = 'Restart the orchestrator'; ScriptPath = (Join-Path $folder 'Restart-SmartM365-Inventory-Orchestrator.ps1'); Arguments = @('-Tenant', $Tenant); Icon = 'Warning'; KeepOpen = $true
                 Message = "Restart the orchestrator of this computer ($env:COMPUTERNAME)?`n`nIt is stopped cleanly, then its scheduled task is started." } }
         'FullCollect' { [pscustomobject]@{ Title = 'Full collect'; ScriptPath = (Join-Path $folder 'SmartM365-Inventory-Pipeline.ps1'); Arguments = @('-Tenant', $Tenant, '-Pipeline', 'Full', '-Collect'); Icon = 'Warning'; KeepOpen = $true
-                Message = "Request the full pipeline from the resident orchestrators?`n`nEvery enabled job runs on its elected server with the shared locks and dependency rules. Only one request can be active; follow it in the new console or Operations > Requests." } }
+                Message = "Request the full pipeline from the resident orchestrators?`n`nEvery enabled job runs on its elected server with the shared locks and dependency rules. If another request is active, this one is queued behind it; follow it in the new console or Operations > Requests." } }
         'SendSummary' { [pscustomobject]@{ Title = 'Send summary'; ScriptPath = $orchestrator; Arguments = @('-Tenant', $Tenant, '-SendExecutionSummary'); Icon = 'Question'; KeepOpen = $true
                 Message = 'Send the execution summary email now? The resident orchestrator and its jobs are not affected.' } }
     }
@@ -3164,27 +3167,25 @@ if ($SmokeTest) {
     $operations = Refresh-OperationsView
     if ($null -eq $operations -or @($operations.Servers).Count -ne @($script:DraftCluster.ExpectedOrchestratorServers).Count) { throw 'Operations view did not return one row per expected server.' }
     $smokeOwners = Get-ElectionOwners
-    $activeRequests = @($script:RequestRows | Where-Object Status -in @('Running', 'Cancelling'))
+    $activeRequests = @($script:RequestRows | Where-Object Status -in @('Running', 'Queued', 'Cancelling'))
     $publishedRunnable = @($script:Snapshot.Jobs.Jobs | Where-Object {
         $smokeMode = [string](Get-OrchestratorGuiPropertyValue -Object $_ -Name 'AssignmentMode' -DefaultValue 'Legacy')
         [bool]$_.Enabled -and @(Get-OrchestratorGuiPropertyValue -Object $_ -Name 'DependsOn' -DefaultValue @()).Count -eq 0 -and
         ($smokeMode -in @('Legacy', 'Pinned') -or ($smokeMode -eq 'Elected' -and $smokeOwners.ContainsKey([string]$_.Name)))
     } | Select-Object -First 1)
     if ($activeRequests.Count) {
-        $blockedRejected = $false
-        $script:Controls.PlanningGrid.SelectedItem = $script:PlanningRows[0]
-        try { [void](Request-SelectedJobRun -SkipConfirmation) } catch { $blockedRejected = $_.Exception.Message -like '*active pipeline request already exists*' }
-        if (-not $blockedRejected) { throw 'A run request was accepted while another request is active.' }
-        Write-GuiActivity -Message ("SMOKE_TEST_RUN_REQUEST_BLOCKED_OK ActiveBatch={0}" -f $activeRequests[0].BatchId) -Level SUCCESS
+        # A smoke test never adds work to a live queue.
+        Write-GuiActivity -Message ("SMOKE_TEST_RUN_REQUEST_SKIPPED Active or queued request(s): {0}" -f (@($activeRequests | ForEach-Object BatchId) -join ', ')) -Level WARN
     }
     elseif ($publishedRunnable.Count) {
         $script:Controls.PlanningGrid.SelectedItem = @($script:PlanningRows | Where-Object Name -eq $publishedRunnable[0].Name)[0]
         $script:Controls.IncludeDependenciesCheck.IsChecked = $false
         $runRequest = Request-SelectedJobRun -SkipConfirmation
         if (-not @($script:RequestRows | Where-Object BatchId -eq $runRequest.BatchId).Count) { throw 'The run request is missing from the Requests view.' }
+        # The same job again is an identical request: refused, whether queueing is available or not.
         $duplicateRejected = $false
-        try { [void](Request-SelectedJobRun -SkipConfirmation) } catch { $duplicateRejected = $_.Exception.Message -like '*active pipeline request already exists*' }
-        if (-not $duplicateRejected) { throw 'A second run request was accepted while the first one is active.' }
+        try { [void](Request-SelectedJobRun -SkipConfirmation) } catch { $duplicateRejected = $_.Exception.Message -like '*identical pipeline request*' -or $_.Exception.Message -like '*active pipeline request already exists*' }
+        if (-not $duplicateRejected) { throw 'An identical run request was accepted while the first one is active.' }
         Write-GuiActivity -Message ("SMOKE_TEST_RUN_REQUEST_OK Job={0}; BatchId={1}" -f $publishedRunnable[0].Name, $runRequest.BatchId) -Level SUCCESS
     }
     else { Write-GuiActivity -Message 'SMOKE_TEST_RUN_REQUEST_SKIPPED No enabled runnable job without dependency in the published configuration.' -Level WARN }

@@ -390,7 +390,7 @@ function Get-SmartM365OrchestratorRecentPipelineRuns {
     if (-not (Test-Path -LiteralPath $root)) { return @() }
     # Direct read-only reads: the pipeline module resolves and validates request.json once per
     # job status, which costs about one second per batch on a shared folder.
-    foreach ($folder in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First $Count)) {
+    $rows = @(foreach ($folder in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First $Count)) {
         $request = Read-InsightsJson -Path (Join-Path $folder.FullName 'request.json')
         if ($null -eq $request -or [string](Get-InsightsProperty $request 'BatchId' '') -ne $folder.Name) {
             [pscustomobject]@{ BatchId = $folder.Name; Selection = ''; Created = ''; Status = 'Unreadable'; Jobs = 0; Pending = 0; Failed = 0; RequestedBy = ''; JobRows = @() }
@@ -414,15 +414,25 @@ function Get-SmartM365OrchestratorRecentPipelineRuns {
         if (-not $cancellationRequested) { $failedCount += $cancelledCount }
         $warningCount = @($jobRows | Where-Object { $_.Status -eq 'CompletedWithWarnings' }).Count
         $created = ConvertTo-InsightsUtc (Get-InsightsProperty $request 'CreatedAtUtc' $null)
+        $activated = ConvertTo-InsightsUtc (Get-InsightsProperty $request 'ActivatedAtUtc' $null)
         [pscustomobject]@{
             BatchId = $folder.Name; Selection = [string](Get-InsightsProperty $request 'Pipeline' '')
             Created = if ($null -ne $created) { $created.ToLocalTime().ToString('yyyy-MM-dd HH:mm') } else { '' }
+            Activated = if ($null -ne $activated) { $activated.ToLocalTime().ToString('yyyy-MM-dd HH:mm') } else { '' }
             Status = if ($pendingCount -gt 0) { if ($cancellationRequested) { 'Cancelling' } else { 'Running' } } elseif ($failedCount -gt 0) { 'Failed' } elseif ($cancellationRequested) { 'Cancelled' } elseif ($warningCount -gt 0) { 'CompletedWithWarnings' } else { 'Success' }
             Cancelled = $cancelledCount
             Jobs = $jobRows.Count; Pending = $pendingCount; Failed = $failedCount
             RequestedBy = [string](Get-InsightsProperty $request 'RequestedBy' ''); JobRows = $jobRows
+            QueuePosition = 0; CreatedSortKey = if ($null -ne $created) { $created.ToString('o') } else { '' }
         }
+    })
+    # Same FIFO order as the residents: the oldest active request runs, the others are queued.
+    $active = @($rows | Where-Object { $_.Status -in @('Running', 'Cancelling') } | Sort-Object CreatedSortKey, BatchId)
+    for ($index = 1; $index -lt $active.Count; $index++) {
+        $active[$index].QueuePosition = $index
+        if ($active[$index].Status -eq 'Running') { $active[$index].Status = 'Queued' }
     }
+    $rows
 }
 
 function New-SmartM365OrchestratorJobRunRequest {
@@ -496,9 +506,11 @@ function Get-SmartM365OrchestratorDashboard {
         Add-DashboardAction 'Warning' 'Election' $groupName ('Unassigned: ' + $reason) 'Servers and versions'
     }
     foreach ($incident in @($Operations.Incidents)) { Add-DashboardAction 'Warning' 'Peer monitoring' ([string]$incident.ObservedBy) ([string]$incident.Issue) 'Operations' }
+    # Queued requests are not stale: their wait starts when the residents activate them.
     foreach ($request in @($Requests | Where-Object { $_.Status -in @('Running', 'Cancelling') })) {
         $created = [datetime]::MinValue
-        if ([datetime]::TryParseExact([string]$request.Created, 'yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$created) -and ($Now - $created).TotalHours -gt $RequestStaleHours) {
+        $since = if ($request.PSObject.Properties['Activated'] -and [string]$request.Activated) { [string]$request.Activated } else { [string]$request.Created }
+        if ([datetime]::TryParseExact($since, 'yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$created) -and ($Now - $created).TotalHours -gt $RequestStaleHours) {
             Add-DashboardAction 'Warning' 'Pipeline request' ([string]$request.BatchId) ('{0} for {1:0} h; {2} job(s) not finished.' -f $request.Status, ($Now - $created).TotalHours, $request.Pending) 'Requests'
         }
     }

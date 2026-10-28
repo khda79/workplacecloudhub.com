@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.65
+1.5.66
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -119,7 +119,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.59
+    Version : 1.5.66
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.65"
+$ScriptVersion = "1.5.66"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2636,6 +2636,7 @@ function Write-OrchestratorHeartbeat {
         MaintenanceProtocol = 1
         MaintenanceCatchUpProtocol = 1
         PipelineCancellationProtocol = 1
+        PipelineQueueProtocol = 1
         JobStopProtocol = 1
         MaintenanceHealthy = [bool]$script:MaintenanceHealthy
         MaintenanceRevision = if ($null -ne $script:MaintenanceControl) { $script:MaintenanceControl.Revision } else { -1 }
@@ -4826,11 +4827,12 @@ function Update-OrchestratorPipelineRequests {
         $script:PipelinePending = $pending
         return
     }
+    # FIFO queue: only the oldest active request is processed; the next one starts when it ends.
+    $run = @($activeRuns | Sort-Object CreatedAtUtc, BatchId | Select-Object -First 1)[0]
     if ($activeRuns.Count -gt 1) {
-        Write-OrchestratorRuntimeUpdateWarning -Key 'pipeline-multiple-active' -Message ("Multiple active pipeline requests were found ({0}); only the oldest request is processed." -f (@($activeRuns.BatchId) -join ', '))
+        Write-OrchestratorRuntimeUpdateWarning -Level INFO -Key ("pipeline-queue:{0}:{1}" -f $run.BatchId, $activeRuns.Count) -Message ("Pipeline {0} is processed; {1} request(s) queued behind it: {2}." -f $run.BatchId, ($activeRuns.Count - 1), (@($activeRuns | Where-Object { $_.BatchId -ne $run.BatchId } | ForEach-Object BatchId) -join ', '))
     }
 
-    $run = @($activeRuns | Sort-Object CreatedAtUtc | Select-Object -First 1)[0]
     $batchJobNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($batchJob in @($run.Jobs)) { [void]$batchJobNames.Add([string]$batchJob.JobName) }
     $script:PipelineBatchJobNames = @{ ([string]$run.BatchId) = $batchJobNames }
@@ -4866,6 +4868,16 @@ function Update-OrchestratorPipelineRequests {
     }
 
     $createdUtc = [datetime]::Parse([string]$run.CreatedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    # A queued request starts when it becomes the oldest active one: its wait timeouts count from then.
+    $activatedText = [string]$run.ActivatedAtUtc
+    if ([string]::IsNullOrWhiteSpace($activatedText)) {
+        try { $activatedText = Set-SmartM365OrchestratorPipelineActivation -SharedDataFolderPath $script:Settings.SharedDataFolderPath -BatchId $run.BatchId -ActivatedBy $env:COMPUTERNAME }
+        catch {
+            Write-OrchestratorRuntimeUpdateWarning -Key ("pipeline-activation:{0}" -f $run.BatchId) -Message ("Pipeline {0}: activation time could not be recorded; wait timeouts count from creation until it is: {1}" -f $run.BatchId, $_.Exception.Message) -Now (Get-Date)
+            $activatedText = ''
+        }
+    }
+    $activatedUtc = if ([string]::IsNullOrWhiteSpace($activatedText)) { $createdUtc } else { [datetime]::Parse($activatedText, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime() }
     foreach ($jobStatus in @($run.Jobs)) {
         if ($jobStatus.Status -notin @('Pending', 'RetryScheduled')) { continue }
         $name = [string]$jobStatus.JobName
@@ -4886,11 +4898,19 @@ function Update-OrchestratorPipelineRequests {
             BatchId = [string]$run.BatchId
             Occurrence = $occurrence
             CreatedAtUtc = $createdUtc
+            ActivatedAtUtc = $activatedUtc
             StatusPath = [string]$jobStatus.Path
             Attempt = [int]$jobStatus.Attempt
         }
     }
     $script:PipelinePending = $pending
+}
+
+function Get-OrchestratorPipelineWaitStartUtc {
+    # Pipeline wait timeouts count from activation; retries and older entries fall back to creation.
+    param([Parameter(Mandatory = $true)]$PipelineInfo)
+    if ($PipelineInfo.ContainsKey('ActivatedAtUtc') -and $null -ne $PipelineInfo.ActivatedAtUtc) { return [datetime]$PipelineInfo.ActivatedAtUtc }
+    return [datetime]$PipelineInfo.CreatedAtUtc
 }
 
 function Get-OrchestratorEffectiveDependencyMode {
@@ -5248,7 +5268,7 @@ function Test-OrchestratorLaunchPrerequisiteGate {
     if ($null -ne $PipelineInfo) {
         $waitTimeout = [int]$Job.DependencyWaitTimeoutMinutes
         if ($waitTimeout -le 0) { $waitTimeout = [int]$script:Settings.DependencyWaitTimeoutMinutes }
-        $waitMinutes = [int]([datetime]::UtcNow - [datetime]$PipelineInfo.CreatedAtUtc).TotalMinutes
+        $waitMinutes = [int]([datetime]::UtcNow - (Get-OrchestratorPipelineWaitStartUtc -PipelineInfo $PipelineInfo)).TotalMinutes
         if ($waitTimeout -gt 0 -and $waitMinutes -ge $waitTimeout) {
             Set-OrchestratorPipelineJobStatus -BatchId ([string]$PipelineInfo.BatchId) -JobName $name -Status BlockedPrerequisite -Attempt $Attempt -Detail ("Launch prerequisites still missing on {0} after {1} min: {2}" -f $env:COMPUTERNAME, $waitMinutes, $detail)
         }
@@ -6027,7 +6047,7 @@ function Invoke-LaunchPhase {
             if ($pipelineDeferred) {
                 $dependencyWaitTimeout = [int]$job.DependencyWaitTimeoutMinutes
                 if ($dependencyWaitTimeout -le 0) { $dependencyWaitTimeout = [int]$script:Settings.DependencyWaitTimeoutMinutes }
-                $waitMinutes = [int]([datetime]::UtcNow - [datetime]$pipelineInfo.CreatedAtUtc).TotalMinutes
+                $waitMinutes = [int]([datetime]::UtcNow - (Get-OrchestratorPipelineWaitStartUtc -PipelineInfo $pipelineInfo)).TotalMinutes
                 if ($dependencyWaitTimeout -gt 0 -and $waitMinutes -ge $dependencyWaitTimeout) {
                     Set-OrchestratorPipelineJobStatus -BatchId ([string]$pipelineInfo.BatchId) -JobName $name -Status BlockedDependencyTimeout -Detail ("Dependencies still blocking after {0} min: {1}" -f $waitMinutes, (@($pipelineBlockingDependencies) -join ', '))
                 }

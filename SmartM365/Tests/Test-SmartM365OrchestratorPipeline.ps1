@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline pipeline and production-manifest contract tests for the SmartM365 orchestrator.
 .VERSION
-1.1.9
+1.2.0
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -126,8 +126,62 @@ try {
     try {
         New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $temporaryRoot -Tenant test -Pipeline Intune -Selection $selection -ManifestHash 'ABC123' | Out-Null
     }
-    catch { $concurrentRejected = $_.Exception.Message -like '*active pipeline request already exists*' }
-    Assert-True $concurrentRejected 'A concurrent active pipeline request was accepted.'
+    catch { $concurrentRejected = $_.Exception.Message -like '*active pipeline request already exists*Queueing is unavailable*' }
+    Assert-True $concurrentRejected 'A second request was accepted although no resident advertises the queue protocol.'
+
+    # FIFO queue: accepted only when every expected resident advertises PipelineQueueProtocol 1.
+    $queueRoot = Join-Path -Path $temporaryRoot -ChildPath 'Queue'
+    $writeFixture = {
+        param([string]$Path, $Fixture)
+        New-Item -ItemType Directory -Path (Split-Path $Path -Parent) -Force | Out-Null
+        $null = Write-SmartM365JsonBytesAtomically -Path $Path -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($Fixture | ConvertTo-Json -Depth 20))) -Validate { param($value) $null = $value }
+    }
+    & $writeFixture (Join-Path $queueRoot 'Config/Orchestrator-Cluster.json.txt') ([pscustomobject]@{ ExpectedOrchestratorServers = @('WorkerA', 'WorkerB') })
+    & $writeFixture (Join-Path $queueRoot 'WorkerA/Orchestrator-Heartbeat.json.txt') ([pscustomobject]@{ Lifecycle = 'Running'; ScriptVersion = '1.5.66'; PipelineQueueProtocol = 1 })
+    & $writeFixture (Join-Path $queueRoot 'WorkerB/Orchestrator-Heartbeat.json.txt') ([pscustomobject]@{ Lifecycle = 'Running'; ScriptVersion = '1.5.65' })
+    $parentSelection = Get-SmartM365OrchestratorPipelineSelection -JobsDocument $document -JobName Parent
+    $childSelection = Get-SmartM365OrchestratorPipelineSelection -JobsDocument $document -JobName Child
+    $queueHead = New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $queueRoot -Tenant test -Pipeline Jobs -Selection $parentSelection -ManifestHash 'ABC123'
+    Assert-True ($queueHead.QueuePosition -eq 0 -and $queueHead.OverallStatus -eq 'Running') 'The first request was not the running head of the queue.'
+    $oldResidentRefused = $false
+    try { New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $queueRoot -Tenant test -Pipeline Jobs -Selection $childSelection -ManifestHash 'ABC123' | Out-Null }
+    catch { $oldResidentRefused = $_.Exception.Message -like '*Queueing is unavailable*WorkerB runs v1.5.65*' }
+    Assert-True $oldResidentRefused 'A request was queued although a resident lacks the queue protocol.'
+    Assert-True (@(Get-ChildItem -LiteralPath (Join-Path $queueRoot 'PipelineRuns') -Directory).Count -eq 1) 'A refused queued request left a batch folder.'
+    & $writeFixture (Join-Path $queueRoot 'WorkerB/Orchestrator-Heartbeat.json.txt') ([pscustomobject]@{ Lifecycle = 'Running'; ScriptVersion = '1.5.66'; PipelineQueueProtocol = 1 })
+    $queued = New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $queueRoot -Tenant test -Pipeline Jobs -Selection $childSelection -ManifestHash 'ABC123'
+    Assert-True ($queued.QueuePosition -eq 1 -and $queued.OverallStatus -eq 'Queued' -and (@($queued.QueuedBehind) -join ',') -eq $queueHead.BatchId) 'The second request was not queued behind the first one.'
+    Assert-True ([string]$queued.CreatedAtUtc -gt [string]$queueHead.CreatedAtUtc) 'Queue order does not follow creation time.'
+    foreach ($duplicate in @($parentSelection, $childSelection)) {
+        $duplicateRefused = $false
+        try { New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $queueRoot -Tenant test -Pipeline Jobs -Selection $duplicate -ManifestHash 'ABC123' | Out-Null }
+        catch { $duplicateRefused = $_.Exception.Message -like '*identical pipeline request is already*' }
+        Assert-True $duplicateRefused 'An identical running or queued request was accepted.'
+    }
+    $fullSelection = Get-SmartM365OrchestratorPipelineSelection -JobsDocument $document -Pipeline Full
+    $limitRefused = $false
+    try { New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $queueRoot -Tenant test -Pipeline Full -Selection $fullSelection -ManifestHash 'ABC123' -MaxActiveRequests 2 | Out-Null }
+    catch { $limitRefused = $_.Exception.Message -like '*queue is full*limit 2*' }
+    Assert-True $limitRefused 'The queue limit was not enforced.'
+    $activeQueue = @(Get-SmartM365OrchestratorActivePipelineRuns -SharedDataFolderPath $queueRoot)
+    Assert-True ($activeQueue.Count -eq 2 -and $activeQueue[0].BatchId -eq $queueHead.BatchId -and $activeQueue[0].OverallStatus -eq 'Running' -and $activeQueue[1].OverallStatus -eq 'Queued' -and $activeQueue[1].QueuePosition -eq 1) 'Active runs do not report the FIFO queue.'
+
+    # Activation is recorded once, by the first resident, then kept.
+    $activated = Set-SmartM365OrchestratorPipelineActivation -SharedDataFolderPath $queueRoot -BatchId $queueHead.BatchId -ActivatedBy WorkerA
+    $activatedAgain = Set-SmartM365OrchestratorPipelineActivation -SharedDataFolderPath $queueRoot -BatchId $queueHead.BatchId -ActivatedBy WorkerB
+    $headStatus = Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $queueRoot -BatchId $queueHead.BatchId
+    Assert-True (-not [string]::IsNullOrWhiteSpace($activated) -and $activatedAgain -eq $activated -and $headStatus.ActivatedAtUtc -eq $activated -and [string]$headStatus.Request.ActivatedBy -eq 'WorkerA') 'Activation was not recorded exactly once.'
+    Assert-True ([string]::IsNullOrWhiteSpace((Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $queueRoot -BatchId $queued.BatchId).ActivatedAtUtc)) 'A queued request was activated before it reached the head.'
+
+    # Cancelling a queued request finishes it at once; finishing the head promotes the next one.
+    $cancelQueued = New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $queueRoot -Tenant test -Pipeline Full -Selection $fullSelection -ManifestHash 'ABC123'
+    Assert-True ($cancelQueued.QueuePosition -eq 2) 'The third request was not queued at position 2.'
+    foreach ($queuedJob in @($cancelQueued.Jobs)) {
+        Set-SmartM365OrchestratorPipelineJobStatus -SharedDataFolderPath $queueRoot -BatchId $cancelQueued.BatchId -JobName $queuedJob.JobName -Status Cancelled -OwnerServer '' | Out-Null
+    }
+    Set-SmartM365OrchestratorPipelineJobStatus -SharedDataFolderPath $queueRoot -BatchId $queueHead.BatchId -JobName Parent -Status Success -OwnerServer WorkerA | Out-Null
+    $promoted = @(Get-SmartM365OrchestratorActivePipelineRuns -SharedDataFolderPath $queueRoot)
+    Assert-True ($promoted.Count -eq 1 -and $promoted[0].BatchId -eq $queued.BatchId -and $promoted[0].OverallStatus -eq 'Running' -and $promoted[0].QueuePosition -eq 0) 'The queued request was not promoted when the head finished.'
 
     Set-SmartM365OrchestratorPipelineJobStatus -SharedDataFolderPath $temporaryRoot -BatchId $request.BatchId -JobName Parent -Status Success -Attempt 0 -OwnerServer SERVER-A | Out-Null
     $retryNotBefore = [datetime]::UtcNow.AddMinutes(5).ToString('o')
@@ -151,7 +205,7 @@ try {
     $parseErrors = $null
     $ast = [Management.Automation.Language.Parser]::ParseFile($orchestratorPath, [ref]$tokens, [ref]$parseErrors)
     Assert-True (@($parseErrors).Count -eq 0) 'Orchestrator source failed parser validation.'
-    $scanDefinitions = foreach ($functionName in @('Update-OrchestratorPipelineRequests', 'Get-OrchestratorPipelineDependencyStatus', 'Get-OrchestratorExternalDependencyStatus', 'Repair-OrchestratorPipelineOrphanStatus', 'ConvertFrom-StateTime')) {
+    $scanDefinitions = foreach ($functionName in @('Update-OrchestratorPipelineRequests', 'Get-OrchestratorPipelineDependencyStatus', 'Get-OrchestratorExternalDependencyStatus', 'Repair-OrchestratorPipelineOrphanStatus', 'ConvertFrom-StateTime', 'Get-OrchestratorPipelineWaitStartUtc', 'Get-OrchestratorEffectiveDependencyMode')) {
         $node = $ast.Find({ param($candidate) $candidate -is [Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq $functionName }, $true)
         if ($null -eq $node) { throw "Missing orchestrator function: $functionName" }
         $node.Extent.Text
@@ -178,11 +232,44 @@ try {
             PendingNames = @($script:PipelinePending.Keys)
             ParentStatus = Get-OrchestratorPipelineDependencyStatus -BatchId $BatchId -JobName Parent
             BatchJobNames = @($script:PipelineBatchJobNames[$BatchId])
+            ParentActivatedAtUtc = $script:PipelinePending['Parent'].ActivatedAtUtc
+            ParentWaitStartUtc = Get-OrchestratorPipelineWaitStartUtc -PipelineInfo $script:PipelinePending['Parent']
         }
     } $scanRoot $scanManifestPath $document $scanRequest.BatchId
     Assert-True ($scanResult.PendingNames.Count -eq 1 -and $scanResult.PendingNames[0] -eq 'Parent') 'A retry was made runnable before NotBeforeUtc.'
     Assert-True ($scanResult.ParentStatus -eq 'Pending') 'Shared dependency status was not read from the batch.'
     Assert-True ((@($scanResult.BatchJobNames | Sort-Object) -join ',') -eq 'Child,Parent') 'The request job names were not recorded for the dependency gate.'
+    $scanActivated = (Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $scanRoot -BatchId $scanRequest.BatchId).ActivatedAtUtc
+    Assert-True (-not [string]::IsNullOrWhiteSpace($scanActivated) -and $scanResult.ParentWaitStartUtc -eq $scanResult.ParentActivatedAtUtc -and $scanResult.ParentActivatedAtUtc -eq ([datetime]::Parse($scanActivated, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime())) 'The resident did not record the activation or does not count waits from it.'
+
+    # Waits count from activation; retries without it keep their creation time.
+    $waitStarts = & $scanModule {
+        $created = [datetime]'2026-10-28T08:00:00Z'
+        $activatedAt = [datetime]'2026-10-28T11:00:00Z'
+        @((Get-OrchestratorPipelineWaitStartUtc -PipelineInfo @{ CreatedAtUtc = $created; ActivatedAtUtc = $activatedAt }), (Get-OrchestratorPipelineWaitStartUtc -PipelineInfo @{ CreatedAtUtc = $created }))
+    }
+    Assert-True ($waitStarts[0] -eq [datetime]'2026-10-28T11:00:00Z' -and $waitStarts[1] -eq [datetime]'2026-10-28T08:00:00Z') 'Pipeline wait start does not prefer the activation time.'
+
+    # Two active requests: the resident processes and activates only the oldest one.
+    $fifoRoot = Join-Path -Path $temporaryRoot -ChildPath 'Fifo'
+    & $writeFixture (Join-Path $fifoRoot 'Config/Orchestrator-Cluster.json.txt') ([pscustomobject]@{ ExpectedOrchestratorServers = @('WorkerA') })
+    & $writeFixture (Join-Path $fifoRoot 'WorkerA/Orchestrator-Heartbeat.json.txt') ([pscustomobject]@{ Lifecycle = 'Running'; ScriptVersion = '1.5.66'; PipelineQueueProtocol = 1 })
+    $scanHash = (Get-FileHash -LiteralPath $scanManifestPath -Algorithm SHA256).Hash
+    $fifoHead = New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $fifoRoot -Tenant test -Pipeline Jobs -Selection $parentSelection -ManifestHash $scanHash
+    $fifoNext = New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $fifoRoot -Tenant test -Pipeline Jobs -Selection $childSelection -ManifestHash $scanHash
+    $fifoResult = & $scanModule {
+        param($Root, $ManifestPath, $JobsDocument)
+        $script:Settings = @{ SharedDataFolderPath = $Root; JobsManifestPath = $ManifestPath }
+        $script:Manifest = @{ JobsByName = @{ Parent = $JobsDocument.Jobs[0]; Child = $JobsDocument.Jobs[1] } }
+        $script:PipelinePending = @{}
+        $script:Logged = [Collections.Generic.List[string]]::new()
+        function script:Write-OrchestratorRuntimeUpdateWarning { param($Key, $Message, $Now, $Level) $null = $Now; $script:Logged.Add("$Level|$Message") }
+        Update-OrchestratorPipelineRequests
+        [pscustomobject]@{ PendingNames = @($script:PipelinePending.Keys); BatchIds = @($script:PipelinePending.Values | ForEach-Object { $_.BatchId } | Sort-Object -Unique); Logged = $script:Logged.ToArray() }
+    } $fifoRoot $scanManifestPath $document
+    Assert-True ((@($fifoResult.PendingNames) -join ',') -eq 'Parent' -and (@($fifoResult.BatchIds) -join ',') -eq $fifoHead.BatchId) 'The resident did not process only the oldest active request.'
+    Assert-True (@($fifoResult.Logged | Where-Object { $_ -like 'INFO|*1 request(s) queued behind it*' }).Count -eq 1) 'The queued request was not logged at INFO.'
+    Assert-True ([string]::IsNullOrWhiteSpace((Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $fifoRoot -BatchId $fifoNext.BatchId).ActivatedAtUtc)) 'The queued request was activated by the resident.'
 
     # A Starting/Running status whose final shared write failed is reconciled by its own server only
     # once the job is no longer supervised, from the recorded result of the request occurrence.
@@ -313,7 +400,7 @@ try {
     }
     Assert-True (@($missingExternalActionOptIns).Count -eq 0) ("Jobs declaring EnableConfiguredExternalActions must opt in explicitly: {0}" -f (@($missingExternalActionOptIns) -join ', '))
     $productionSelection = Get-SmartM365OrchestratorPipelineSelection -JobsDocument $productionDocument -Pipeline Full
-    Assert-True ($productionSelection.SelectedCount -eq 51) 'Template Full selection must contain the 51 enabled non-manual jobs.'
+    Assert-True ($productionSelection.SelectedCount -eq 49) 'Template Full selection must contain the 49 enabled non-manual jobs.'
     Assert-True ($productionSelection.ExcludedCount -eq 6) 'Full selection must exclude the four disabled jobs and the two manual SharePoint on-premises jobs.'
     Assert-True (@($productionSelection.ExcludedJobs | Where-Object { $_.Name -like 'SharePointOnPrem-*' -and $_.Reason -eq 'Manual' }).Count -eq 2) 'Manual SharePoint on-premises jobs must be excluded from Full pipelines.'
     Assert-True (@($productionDocument.Jobs | Where-Object Name -eq 'CmdbEvidence-Prepare').Count -eq 0) 'Retired CMDB preparation must not remain in the template.'

@@ -4,7 +4,7 @@
 Offline WPF tests of the asynchronous run request submission: wait window, slow, success,
 error, uncertain result, double click and auto-refresh during the wait. No job is launched.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -50,7 +50,7 @@ function New-SmartM365OrchestratorJobRunRequest {
     $batch='Batch'+(Get-Date -Format 'HHmmssfff')
     $null=New-Item -ItemType Directory -Path (Join-Path (Join-Path $SharedDataFolderPath 'PipelineRuns') $batch) -Force
     if($state.Fail -eq 'After'){throw 'Synthetic failure after writing'}
-    [pscustomobject]@{BatchId=$batch;TotalCount=2}
+    [pscustomobject]@{BatchId=$batch;TotalCount=2;QueuePosition=[int]$state.Queue;QueuedBehind=@(if($state.Queue){'Active1'})}
 }
 function Get-SmartM365OrchestratorRecentPipelineRuns {
     param($SharedDataFolderPath,$Count)
@@ -71,7 +71,7 @@ function Assert-Case {param([bool]$Condition,[string]$Message) $script:Cases++;i
 function Write-GuiException {param($Context,$ErrorRecord) $script:Exceptions+="$Context : $($ErrorRecord.Exception.Message)"}
 function Write-GuiActivity {param($Message,$Level='INFO',[switch]$DisplayOnly) Assert-Case ([bool]$DisplayOnly) 'Persistent log written on the WPF thread.';$script:Activity+="$Level|$Message"}
 function Show-GuiJobRunRequestResult {param($Message,$Title,$Icon) $script:Results+=[pscustomobject]@{Message=$Message;Title=$Title;Icon=$Icon;DialogOpen=($null -ne $script:RequestSubmitDialog);Busy=$script:RequestSubmitBusy}}
-function Confirm-GuiJobRunRequest {param($Message) $script:ConfirmCalls++;$script:ConfirmResult}
+function Confirm-GuiJobRunRequest {param($Message) $script:ConfirmCalls++;$script:LastConfirmMessage=$Message;$script:ConfirmResult}
 function Test-JobDraftChanged {param($JobName) $false}
 function Start-GuiRefresh {param($Mode) $script:RefreshCalls++}
 function Get-SmartM365OrchestratorRecentPipelineRuns {param($SharedDataFolderPath,$Count) $script:SharedReads++;@()}
@@ -82,8 +82,8 @@ function Start-SmartM365OrchestratorGuiWorker {
 }
 function Save-State {param([hashtable]$State) [IO.File]::WriteAllText((Join-Path $root 'state.json.txt'),($State|ConvertTo-Json),[Text.UTF8Encoding]::new($false))}
 function Reset-Case {
-    param([int]$Delay=0,[string]$Fail='',[bool]$FailRefresh=$false,[bool]$MissingJobs=$false)
-    Save-State @{DelayMs=$Delay;Fail=$Fail;FailRefresh=$FailRefresh;MissingJobs=$MissingJobs}
+    param([int]$Delay=0,[string]$Fail='',[bool]$FailRefresh=$false,[bool]$MissingJobs=$false,[int]$Queue=0)
+    Save-State @{DelayMs=$Delay;Fail=$Fail;FailRefresh=$FailRefresh;MissingJobs=$MissingJobs;Queue=$Queue}
     [IO.File]::WriteAllText((Join-Path $root 'calls.txt'),'')
     $runs=Join-Path $root 'PipelineRuns';if(Test-Path $runs){Remove-Item -LiteralPath $runs -Recurse -Force}
     $script:Activity=@();$script:Results=@();$script:Exceptions=@();$script:ConfirmCalls=0;$script:ConfirmResult=$true;$script:RefreshCalls=0;$script:SharedReads=0;$script:ModuleOverride=$null
@@ -206,13 +206,14 @@ try{
     Reset-Case -FailRefresh $true
     [void](Request-SelectedJobRun -JobName 'Synthetic-Job');Wait-Submission
     Assert-Case ($script:Results[0].Title -eq 'Run requested' -and $script:Results[0].Message -match 'could not be refreshed') 'Refresh failure confused with submission failure.'
-    # 7. Declined confirmation, active request and running cancellation: nothing starts.
+    # 7. Declined confirmation and running cancellation: nothing starts. An active request no longer blocks: the new one is queued.
     Reset-Case;$script:ConfirmResult=$false
     [void](Request-SelectedJobRun -JobName 'Synthetic-Job')
     Assert-Case ($script:ConfirmCalls -eq 1 -and -not $script:RequestSubmitBusy -and $null -eq $script:RequestSubmitDialog -and @(Get-Calls).Count -eq 0) 'Declining started a submission.'
-    Reset-Case;Set-GuiRequestRows -Rows @([pscustomobject]@{BatchId='Active1';Status='Running';Created='';Pending=1;JobRows=@()})
-    $failure='';try{[void](Request-SelectedJobRun -JobName 'Synthetic-Job')}catch{$failure=$_.Exception.Message}
-    Assert-Case ($failure -like '*active pipeline request already exists*' -and $script:ConfirmCalls -eq 0 -and -not $script:RequestSubmitBusy) 'Active request pre-check bypassed.'
+    Reset-Case -Queue 1;Set-GuiRequestRows -Rows @([pscustomobject]@{BatchId='Active1';Status='Running';Created='';Pending=1;JobRows=@()})
+    [void](Request-SelectedJobRun -JobName 'Synthetic-Job');Wait-Submission
+    Assert-Case ($script:ConfirmCalls -eq 1 -and $script:LastConfirmMessage -match '1 request\(s\) are active or queued' -and @(Get-Calls).Count -eq 1) 'An active request blocked the submission instead of queueing it.'
+    Assert-Case ($script:Results[0].Title -eq 'Run requested' -and $script:Results[0].Message -match 'Request queued' -and $script:Results[0].Message -match 'Queue position: 1, behind Active1') "Queued result not reported: $($script:Results[0].Message)"
     Reset-Case;$script:CancellationBusy=$true
     $failure='';try{[void](Request-SelectedJobRun -JobName 'Synthetic-Job')}catch{$failure=$_.Exception.Message}
     $script:CancellationBusy=$false

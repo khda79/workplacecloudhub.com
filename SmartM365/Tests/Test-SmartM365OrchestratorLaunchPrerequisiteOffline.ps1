@@ -4,7 +4,7 @@ Offline tests for the orchestrator launch prerequisites: application certificate
 without private key, expiring soon), runtime and tenant data shares, cache, capability withdrawal,
 election exclusion, alerts, recovery and no impact when everything is ready.
 .VERSION
-1.1
+1.2
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -146,7 +146,7 @@ try {
     Check ($gateIndex -gt 0 -and $gateIndex -lt $launchPhase.IndexOf('Enter-SmartM365OrchestratorMaintenanceGate') -and $gateIndex -lt $launchPhase.IndexOf('Enter-SmartM365OrchestratorConcurrencyLease') -and $gateIndex -lt $launchPhase.IndexOf('Enter-SmartM365OrchestratorOccurrenceClaim') -and $gateIndex -lt $launchPhase.IndexOf('Start-InventoryJob')) 'The prerequisite gate does not run before the gate, lease, claim and launch.'
     Check ((Get-Content -LiteralPath $orchestratorPath -Raw).Contains('Invoke-OrchestratorPrerequisiteMonitoring -Now $now')) 'Prerequisite monitoring is not wired in the scheduler loop.'
 
-    $names = @('Get-OrchestratorPrerequisiteBlockTable', 'Get-OrchestratorTenantDataPathCheck', 'Get-OrchestratorJobPrerequisitePathCheck', 'Test-OrchestratorJobLaunchPrerequisite', 'Register-OrchestratorPrerequisiteFailure', 'Publish-OrchestratorEffectiveCapability', 'Test-OrchestratorLaunchPrerequisiteGate', 'Send-OrchestratorPrerequisiteAlert', 'Update-OrchestratorCertificateExpiryWarning', 'Invoke-OrchestratorPrerequisiteMonitoring', 'ConvertTo-OrchestratorUtcTime', 'Resolve-OrchestratorJobPath', 'Resolve-OrchestratorJobArguments')
+    $names = @('Get-OrchestratorPipelineWaitStartUtc', 'Get-OrchestratorPrerequisiteBlockTable', 'Get-OrchestratorTenantDataPathCheck', 'Get-OrchestratorJobPrerequisitePathCheck', 'Test-OrchestratorJobLaunchPrerequisite', 'Register-OrchestratorPrerequisiteFailure', 'Publish-OrchestratorEffectiveCapability', 'Test-OrchestratorLaunchPrerequisiteGate', 'Send-OrchestratorPrerequisiteAlert', 'Update-OrchestratorCertificateExpiryWarning', 'Invoke-OrchestratorPrerequisiteMonitoring', 'ConvertTo-OrchestratorUtcTime', 'Resolve-OrchestratorJobPath', 'Resolve-OrchestratorJobArguments')
     $stubs = @'
 function Write-OrchestratorLog { param([string]$Message, [string]$Level = 'INFO') $script:Logs.Add([pscustomobject]@{ Level = $Level; Message = $Message }) }
 function Add-JobRunCsvRow { param($JobName, $ScheduledTime, $StartTime, $EndTime, $DurationSec, $ExitCode, $Status, $RetryCount, $LogPath) $script:Rows.Add([pscustomobject]@{ JobName = $JobName; Status = $Status; ScheduledTime = $ScheduledTime }) }
