@@ -1,4 +1,4 @@
-# Version 1.4.0: optional M365 usage signals generator after Collaboration; 1.3.0: HybridIdentity generator after Workforce with its own classification checkpoint; 1.2.0: native-stage warning prefix.
+# Version 1.5.0: directory cleanup generator after Workforce and Estate with its own classification checkpoint; 1.4.0: optional M365 usage signals generator after Collaboration; 1.3.0: HybridIdentity generator after Workforce with its own classification checkpoint; 1.2.0: native-stage warning prefix.
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
 # Runs the real build dispatcher with simulated generators only; no production preparation.
@@ -32,7 +32,7 @@ Write-Host "stub output $name"
 [IO.File]::WriteAllText((Join-Path $root "$name.end"), [string][datetime]::UtcNow.Ticks)
 if ($control.Fail -eq $name) { exit 3 }
 '@
-$generators = @('New-EnterpriseEstateEvidence','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-M365UsageSignalsEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-HybridIdentityEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
+$generators = @('New-EnterpriseEstateEvidence','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-M365UsageSignalsEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-HybridIdentityEvidence','New-DirectoryCleanupEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
 foreach ($name in $generators) { [IO.File]::WriteAllText((Join-Path $scripts ($name + '.ps1')), $stub) }
 [IO.File]::WriteAllText((Join-Path $scripts 'New-MailboxMigrationExceptions.ps1'), $stub)
 [IO.File]::WriteAllText((Join-Path $scripts 'NativeEvidence.psm1'),@'
@@ -53,13 +53,14 @@ Export-ModuleMember -Function Invoke-NativeEvidenceStage
 $valid = '{"SchemaVersion":"1.0","RuleVersion":"SYNTHETIC_DO_NOT_LOG","Population":{"Human":["human-a"],"NonHuman":[]}}'
 $changed = $valid.Replace('human-a','human-b')
 $shell = (Get-Process -Id $PID).Path
-$sequentialOrder = @('New-EnterpriseEstateEvidence','Native','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-M365UsageSignalsEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-HybridIdentityEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
+$sequentialOrder = @('New-EnterpriseEstateEvidence','Native','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-M365UsageSignalsEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-HybridIdentityEvidence','New-DirectoryCleanupEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
 $dependencies = @{
     'New-WorkforceIdentityEvidence'=@('New-DeviceInventoryEvidence')
     'New-EndpointProtectionEvidence'=@('New-DeviceInventoryEvidence')
     'New-WindowsMigrationEvidence'=@('New-DeviceInventoryEvidence')
     'New-MailboxEvidence'=@('New-WorkforceIdentityEvidence')
     'New-HybridIdentityEvidence'=@('New-WorkforceIdentityEvidence')
+    'New-DirectoryCleanupEvidence'=@('New-WorkforceIdentityEvidence','New-EnterpriseEstateEvidence')
     'New-SecurityEvidence'=@('New-WorkforceIdentityEvidence','New-DeviceInventoryEvidence')
     'New-DataTrustEvidence'=@('New-IntuneOperationalEvidence')
     'New-SharePointMigrationEvidence'=@('Native')
@@ -113,6 +114,7 @@ try {
     Check ($sequential.Output -match 'stage=BuildStart;' -and $sequential.Output -match 'stage=BeforeWorkforce;' -and $sequential.Output -match 'stage=BeforeHybridIdentity;') 'Sequential classification checkpoints missing'
     Check ($sequential.Outputs['New-HybridIdentityEvidence'] -match [regex]::Escape('-UserEvidencePath|<case>') -and $sequential.Outputs['New-HybridIdentityEvidence'] -match 'HybridIdentityFindings\.csv' -and $sequential.Outputs['New-HybridIdentityEvidence'] -match '-AccountClassificationConfigPath') 'HybridIdentity arguments changed'
     Check ($sequential.Outputs['New-DeviceInventoryEvidence'] -match 'DeviceReadinessGapEvidence\.csv') 'DeviceInventory gap output argument missing'
+    Check ($sequential.Output -match 'stage=BeforeDirectoryCleanup;' -and $sequential.Outputs['New-DirectoryCleanupEvidence'] -match [regex]::Escape('-TenantKey|synthetic-test') -and $sequential.Outputs['New-DirectoryCleanupEvidence'] -match 'AllDevicesEvidence\.csv' -and $sequential.Outputs['New-DirectoryCleanupEvidence'] -match 'DirectoryCleanupSourceQualification\.csv' -and $sequential.Outputs['New-DirectoryCleanupEvidence'] -match '-AccountClassificationConfigPath') 'DirectoryCleanup arguments or classification checkpoint changed'
 
     # Parallel: same generators and outputs, dependencies respected, at most three at a time.
     $parallel = Invoke-Case 'parallel' 3 @{}
@@ -159,6 +161,8 @@ try {
     Check ($hybridTampered.ExitCode -ne 0 -and $hybridTampered.Output -match 'BeforeHybridIdentity' -and -not $hybridTampered.Spans.ContainsKey('New-HybridIdentityEvidence')) 'HybridIdentity started on changed rules'
     $hybridOnly = Invoke-Case 'only-hybrid' 3 @{} @('-Only','HybridIdentity','-HybridAllowedTargetDomains','partner.example,other.example')
     Check ($hybridOnly.ExitCode -eq 0 -and $hybridOnly.Spans.Count -eq 1 -and $hybridOnly.Output -match 'stage=BeforeHybridIdentity;' -and $hybridOnly.Outputs['New-HybridIdentityEvidence'] -match [regex]::Escape('-AllowedTargetDomains|partner.example,other.example')) 'HybridIdentity only mode or allowed domains changed'
+    $cleanupOnly = Invoke-Case 'only-cleanup' 3 @{} @('-Only','DirectoryCleanup')
+    Check ($cleanupOnly.ExitCode -eq 0 -and $cleanupOnly.Spans.Count -eq 1 -and $cleanupOnly.Spans.ContainsKey('New-DirectoryCleanupEvidence') -and $cleanupOnly.Output -match 'stage=BeforeDirectoryCleanup;') 'DirectoryCleanup only mode changed'
     Write-Host "PASS: $script:checks build scheduler checks (sequential order, dependencies, concurrency, failures, classification checkpoint). Simulated generators only."
 } finally {
     Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue

@@ -1,4 +1,4 @@
-# Version 1.1.0: HybridIdentity reads the captured rules after Workforce; 1.0.1: SharePointMigration fixture generator.
+# Version 1.2.0: DirectoryCleanup reads the captured rules after Workforce and the M365 usage signals generator is stubbed; 1.1.0: HybridIdentity reads the captured rules after Workforce; 1.0.1: SharePointMigration fixture generator.
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
 # Synthetic rules and simulated child generators only; no production preparation.
@@ -108,11 +108,15 @@ if ($control.Mode -eq 'Tamper') { [IO.File]::WriteAllText($control.Path,$control
 param($DataRoot,$UserEvidencePath,$OutputPath,$AccountClassificationConfigPath)
 [IO.File]::WriteAllText((Join-Path (Split-Path $OutputPath -Parent) 'HybridIdentity.started'),[string]$AccountClassificationConfigPath)
 '@)
+[IO.File]::WriteAllText((Join-Path $scripts 'New-DirectoryCleanupEvidence.ps1'),@'
+param($DataRoot,$TenantKey,$UserInventoryPath,$AllDevicesPath,$UserOutputPath,$ComputerOutputPath,$MailboxOutputPath,$QualificationOutputPath,$AccountClassificationConfigPath)
+[IO.File]::WriteAllText((Join-Path (Split-Path $UserOutputPath -Parent) 'DirectoryCleanup.started'),[string]$AccountClassificationConfigPath)
+'@)
 [IO.File]::WriteAllText((Join-Path $scripts 'New-WorkforceIdentityEvidence.ps1'),@'
 param($DataRoot,$UserOutputPath,$HistoryOutputPath,$TrendOutputPath,$IdentityOutputPath,$SignalsOutputPath,$SystemEvidencePath,$AccountClassificationConfigPath)
 [IO.File]::WriteAllText((Join-Path (Split-Path $UserOutputPath -Parent) 'Workforce.started'),'synthetic')
 '@)
-foreach ($name in @('New-SharePointMigrationEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-DailyTrendsEvidence','New-LicensingEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')) {
+foreach ($name in @('New-SharePointMigrationEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-M365UsageSignalsEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-DailyTrendsEvidence','New-LicensingEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')) {
     [IO.File]::WriteAllText((Join-Path $scripts ($name + '.ps1')),'exit 0')
 }
 $shell = (Get-Process -Id $PID).Path
@@ -134,10 +138,12 @@ foreach ($mode in @('Valid','MissingAtStart','TamperedAtStart','Delete','Tamper'
         Check (Test-Path -LiteralPath (Join-Path $staging 'Workforce.started')) 'Valid capture never reached Workforce'
         Check ($output -match 'stage=BuildStart;' -and $output -match 'stage=BeforeWorkforce;' -and $output -match 'stage=BeforeHybridIdentity;') 'Dispatcher checkpoints missing'
         Check ((Get-Content -LiteralPath (Join-Path $staging 'HybridIdentity.started') -Raw) -eq $rules) 'HybridIdentity did not receive the captured rules'
+        Check ($output -match 'stage=BeforeDirectoryCleanup;' -and (Get-Content -LiteralPath (Join-Path $staging 'DirectoryCleanup.started') -Raw) -eq $rules) 'DirectoryCleanup did not receive the captured rules after its checkpoint'
     } else {
         Check ($exitCode -ne 0) "Invalid capture accepted: $mode"
         Check (-not (Test-Path -LiteralPath (Join-Path $staging 'Workforce.started'))) "Workforce started after capture loss: $mode"
         Check (-not (Test-Path -LiteralPath (Join-Path $staging 'HybridIdentity.started'))) "HybridIdentity started after capture loss: $mode"
+        Check (-not (Test-Path -LiteralPath (Join-Path $staging 'DirectoryCleanup.started'))) "DirectoryCleanup started after capture loss: $mode"
         if ($mode -in @('MissingAtStart','TamperedAtStart')) {
             Check ($output -match 'BuildStart') 'Initial failure stage missing'
             Check (-not (Test-Path -LiteralPath (Join-Path $staging 'Estate.started'))) 'Initial check ran after heavy work'

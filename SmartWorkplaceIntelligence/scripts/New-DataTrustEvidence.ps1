@@ -1,4 +1,4 @@
-# Version 1.3.1: an absent Intune inventory no longer stops Data Trust; 1.3.0: optional Microsoft 365 usage reports are reported Not collected instead of Blocked; 1.2.0: qualified device identity conflicts remain usable with explicit warnings.
+# Version 1.4.0: mailbox inventories, mailbox usage and all-platform Intune devices used by directory cleanup are listed; 1.3.1: an absent Intune inventory no longer stops Data Trust; 1.3.0: optional Microsoft 365 usage reports are reported Not collected instead of Blocked; 1.2.0: qualified device identity conflicts remain usable with explicit warnings.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -61,6 +61,7 @@ $sources = @(
     New-SourceDefinition 'Endpoint' 'Intune managed-device inventory' 'Intune_Devices_Inventory.csv' @('Device ID', 'Device name')
     New-SourceDefinition 'Identity' 'Entra active-user inventory' 'M365_Users_Active.csv' @('Object Id', 'User principal name')
     New-SourceDefinition 'Endpoint' 'Entra device inventory' 'M365_Entra_Devices.csv' @('ObjectId', 'DeviceId')
+    New-SourceDefinition 'Endpoint' 'Intune managed devices (all platforms)' 'Intune_ManagedDevices_All.csv' @('ManagedDeviceId', 'AzureADDeviceId')
     New-SourceDefinition 'Endpoint' 'AD computer inventory' 'AD_Computers_AllDomains.csv' @('DistinguishedName', 'Name')
     New-SourceDefinition 'Endpoint' 'Windows 11 readiness assessment' 'Intune_Devices_UpgradeEligibility.csv' @('GraphId', 'UpgradeEligibility') @('ExportDateTime')
     New-SourceDefinition 'Endpoint' 'Windows Update status' 'Intune_WindowsUpdate_Status.csv' @('DeviceId', 'ExportDateTime') @('ExportDateTime')
@@ -80,6 +81,9 @@ $sources = @(
     New-SourceDefinition 'Collaboration' 'Microsoft 365 groups activity' 'M365_Groups_Activity.csv' @('Group Id', 'Report Refresh Date') @('Report Refresh Date') -Optional $true
     New-SourceDefinition 'Content' 'OneDrive user activity' 'M365_OneDrive_UserActivity.csv' @('User Principal Name', 'Report Refresh Date') @('Report Refresh Date') -Optional $true
     New-SourceDefinition 'Messaging' 'Email client usage' 'M365_Email_AppUsage.csv' @('User Principal Name', 'Report Refresh Date') @('Report Refresh Date') -Optional $true
+    New-SourceDefinition 'Messaging' 'Exchange Online mailbox inventory' 'Exchange_EXO_Mailboxes_AllDomains.csv' @('MailboxGuid', 'RecipientTypeDetails')
+    New-SourceDefinition 'Messaging' 'On-premises mailbox inventory' 'Exchange_OnPrem_Mailboxes_AllDomains.csv' @('ExchangeGuid', 'RecipientType')
+    New-SourceDefinition 'Messaging' 'Mailbox usage' 'M365_Mailbox_Usage.csv' @('User Principal Name', 'Report Refresh Date') @('Report Refresh Date') -Optional $true
     New-SourceDefinition 'Identity' 'M365 user activity' 'M365_Users_Activity.csv' @('UserPrincipalName', 'ReportRefreshDate') @('ReportRefreshDate')
     New-SourceDefinition 'Identity' 'AD user inventory' 'AD_Users_AllDomains.csv' @('DistinguishedName', 'SamAccountName')
     New-SourceDefinition 'Identity' 'AD duplicate UPN findings' 'AD_Users_DuplicateUPN.csv' @('UserPrincipalName') @() $true

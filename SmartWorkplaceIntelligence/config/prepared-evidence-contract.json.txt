@@ -2266,6 +2266,813 @@
       ]
     },
     {
+      "table": "User Cleanup Evidence",
+      "file": "UserCleanupEvidence.csv",
+      "uniqueKey": ["User Cleanup Key"],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "User Cleanup Key",
+          "type": "string"
+        },
+        {
+          "name": "AD Object GUID",
+          "type": "string"
+        },
+        {
+          "name": "Entra Object ID",
+          "type": "string"
+        },
+        {
+          "name": "AD Domain",
+          "type": "string"
+        },
+        {
+          "name": "SamAccountName",
+          "type": "string"
+        },
+        {
+          "name": "User Principal Name",
+          "type": "string"
+        },
+        {
+          "name": "Display Name",
+          "type": "string"
+        },
+        {
+          "name": "Enabled",
+          "type": "string"
+        },
+        {
+          "name": "When Created",
+          "type": "dateTime"
+        },
+        {
+          "name": "Password Last Set",
+          "type": "dateTime"
+        },
+        {
+          "name": "Password Never Expires",
+          "type": "string"
+        },
+        {
+          "name": "Identity Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Identity Match Method",
+          "type": "string"
+        },
+        {
+          "name": "Classification Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "Country Basis",
+          "type": "string"
+        },
+        {
+          "name": "Account Type",
+          "type": "string"
+        },
+        {
+          "name": "Account Population",
+          "type": "string"
+        },
+        {
+          "name": "Account Population Source",
+          "type": "string"
+        },
+        {
+          "name": "Account Classification Rule Version",
+          "type": "string"
+        },
+        {
+          "name": "User Type",
+          "type": "string"
+        },
+        {
+          "name": "Workforce Persona",
+          "type": "string"
+        },
+        {
+          "name": "Has Mailbox",
+          "type": "string"
+        },
+        {
+          "name": "Hosting Location",
+          "type": "string"
+        },
+        {
+          "name": "Litigation Hold",
+          "type": "string"
+        },
+        {
+          "name": "Retention Hold",
+          "type": "string"
+        },
+        {
+          "name": "In-Place Holds",
+          "type": "string"
+        },
+        {
+          "name": "Hold State",
+          "type": "string"
+        },
+        {
+          "name": "AD Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "AD Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "Entra Last Sign-In",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Last Sign-In Quality",
+          "type": "string"
+        },
+        {
+          "name": "Entra Last Non-Interactive Sign-In",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Last Non-Interactive Sign-In Quality",
+          "type": "string"
+        },
+        {
+          "name": "Entra Last Successful Sign-In",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Last Successful Sign-In Quality",
+          "type": "string"
+        },
+        {
+          "name": "EXO Last User Action",
+          "type": "dateTime"
+        },
+        {
+          "name": "EXO Last User Action Quality",
+          "type": "string"
+        },
+        {
+          "name": "EXO Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "EXO Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "On-Prem Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "On-Prem Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Usage Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "Mailbox Usage Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "M365 Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "M365 Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "Console Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "Console Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "Entra Match Status",
+          "type": "string"
+        },
+        {
+          "name": "M365 Report Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Usage Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Last Activity Source",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Inactivity Bucket",
+          "type": "string"
+        },
+        {
+          "name": "Bucket Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Cleanup State",
+          "type": "string"
+        },
+        {
+          "name": "State Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Decision Reason",
+          "type": "string"
+        },
+        {
+          "name": "Secondary Reasons",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "AD Source Status",
+          "type": "string"
+        },
+        {
+          "name": "AD Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Entra Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "EXO Source Status",
+          "type": "string"
+        },
+        {
+          "name": "EXO Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "On-Prem Source Status",
+          "type": "string"
+        },
+        {
+          "name": "On-Prem Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "M365 Activity Source Status",
+          "type": "string"
+        },
+        {
+          "name": "M365 Activity Report Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Reference UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Computer Cleanup Evidence",
+      "file": "ComputerCleanupEvidence.csv",
+      "uniqueKey": ["Computer Cleanup Key"],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "Computer Cleanup Key",
+          "type": "string"
+        },
+        {
+          "name": "AD Object GUID",
+          "type": "string"
+        },
+        {
+          "name": "Entra Device ID",
+          "type": "string"
+        },
+        {
+          "name": "Intune Device ID",
+          "type": "string"
+        },
+        {
+          "name": "AD Domain",
+          "type": "string"
+        },
+        {
+          "name": "Computer Name",
+          "type": "string"
+        },
+        {
+          "name": "Enabled",
+          "type": "string"
+        },
+        {
+          "name": "Operating System",
+          "type": "string"
+        },
+        {
+          "name": "Scope State",
+          "type": "string"
+        },
+        {
+          "name": "In Disabled OU",
+          "type": "string"
+        },
+        {
+          "name": "When Created",
+          "type": "dateTime"
+        },
+        {
+          "name": "Password Last Set",
+          "type": "dateTime"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "Country Basis",
+          "type": "string"
+        },
+        {
+          "name": "Account Type",
+          "type": "string"
+        },
+        {
+          "name": "Account Population",
+          "type": "string"
+        },
+        {
+          "name": "Workforce Persona",
+          "type": "string"
+        },
+        {
+          "name": "Entra Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Intune Match Status",
+          "type": "string"
+        },
+        {
+          "name": "AD Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "AD Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "Entra Last Sign-In",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Last Sign-In Quality",
+          "type": "string"
+        },
+        {
+          "name": "Intune Last Sync",
+          "type": "dateTime"
+        },
+        {
+          "name": "Intune Last Sync Quality",
+          "type": "string"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Last Activity Source",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Inactivity Bucket",
+          "type": "string"
+        },
+        {
+          "name": "Bucket Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Cleanup State",
+          "type": "string"
+        },
+        {
+          "name": "State Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Decision Reason",
+          "type": "string"
+        },
+        {
+          "name": "Secondary Reasons",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "AD Source Status",
+          "type": "string"
+        },
+        {
+          "name": "AD Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Entra Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Entra Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Intune Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Intune Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Reference UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Mailbox Cleanup Evidence",
+      "file": "MailboxCleanupEvidence.csv",
+      "uniqueKey": ["Mailbox Cleanup Key"],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "Mailbox Cleanup Key",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Identity Basis",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox GUID",
+          "type": "string"
+        },
+        {
+          "name": "Primary SMTP Address",
+          "type": "string"
+        },
+        {
+          "name": "Hosting Location",
+          "type": "string"
+        },
+        {
+          "name": "Recipient Type",
+          "type": "string"
+        },
+        {
+          "name": "Scope State",
+          "type": "string"
+        },
+        {
+          "name": "When Mailbox Created",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner AD Object GUID",
+          "type": "string"
+        },
+        {
+          "name": "Owner Entra Object ID",
+          "type": "string"
+        },
+        {
+          "name": "Owner Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Owner Account State",
+          "type": "string"
+        },
+        {
+          "name": "AD Domain",
+          "type": "string"
+        },
+        {
+          "name": "Country",
+          "type": "string"
+        },
+        {
+          "name": "Country Basis",
+          "type": "string"
+        },
+        {
+          "name": "Account Type",
+          "type": "string"
+        },
+        {
+          "name": "Account Population",
+          "type": "string"
+        },
+        {
+          "name": "Account Population Source",
+          "type": "string"
+        },
+        {
+          "name": "Account Classification Rule Version",
+          "type": "string"
+        },
+        {
+          "name": "User Type",
+          "type": "string"
+        },
+        {
+          "name": "Workforce Persona",
+          "type": "string"
+        },
+        {
+          "name": "Classification Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Litigation Hold",
+          "type": "string"
+        },
+        {
+          "name": "Retention Hold",
+          "type": "string"
+        },
+        {
+          "name": "In-Place Holds",
+          "type": "string"
+        },
+        {
+          "name": "Hold State",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Size GB",
+          "type": "double"
+        },
+        {
+          "name": "EXO Last User Action",
+          "type": "dateTime"
+        },
+        {
+          "name": "EXO Last User Action Quality",
+          "type": "string"
+        },
+        {
+          "name": "EXO Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "EXO Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "On-Prem Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "On-Prem Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Usage Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "Mailbox Usage Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "Owner AD Last Logon",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner AD Last Logon Quality",
+          "type": "string"
+        },
+        {
+          "name": "Owner Entra Last Sign-In",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner Entra Last Sign-In Quality",
+          "type": "string"
+        },
+        {
+          "name": "Owner M365 Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner M365 Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "Owner Console Last Activity",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner Console Last Activity Quality",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Usage Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Owner M365 Report Match Status",
+          "type": "string"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Last Activity Source",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Inactivity Bucket",
+          "type": "string"
+        },
+        {
+          "name": "Bucket Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Cleanup State",
+          "type": "string"
+        },
+        {
+          "name": "State Sort",
+          "type": "int64"
+        },
+        {
+          "name": "Decision Reason",
+          "type": "string"
+        },
+        {
+          "name": "Secondary Reasons",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "EXO Source Status",
+          "type": "string"
+        },
+        {
+          "name": "EXO Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "On-Prem Source Status",
+          "type": "string"
+        },
+        {
+          "name": "On-Prem Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Mailbox Usage Source Status",
+          "type": "string"
+        },
+        {
+          "name": "Mailbox Usage Report Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Reference UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Directory Cleanup Source Qualification",
+      "file": "DirectoryCleanupSourceQualification.csv",
+      "uniqueKey": ["Source"],
+      "columns": [
+        {
+          "name": "Source",
+          "type": "string"
+        },
+        {
+          "name": "File",
+          "type": "string"
+        },
+        {
+          "name": "Producer",
+          "type": "string"
+        },
+        {
+          "name": "Status",
+          "type": "string"
+        },
+        {
+          "name": "Reason",
+          "type": "string"
+        },
+        {
+          "name": "Rows",
+          "type": "int64"
+        },
+        {
+          "name": "Collected UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Report Refresh Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Out Of Scope Rows",
+          "type": "int64"
+        },
+        {
+          "name": "Unkeyable Rows",
+          "type": "int64"
+        },
+        {
+          "name": "Reference UTC",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Date",
+          "type": "dateTime"
+        }
+      ]
+    },
+    {
       "table": "Content Storage Evidence",
       "file": "ContentStorageEvidence.csv",
       "uniqueKey": [],

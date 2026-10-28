@@ -164,6 +164,7 @@ SmartM365/SharePointMigration/Tools/Python/**
 !/SmartWorkplaceIntelligence/README.md
 !/SmartWorkplaceIntelligence/docs/MAILBOX-MIGRATION-EXCEPTIONS.md
 !/SmartWorkplaceIntelligence/docs/M365-USAGE-SIGNALS.md
+!/SmartWorkplaceIntelligence/docs/DIRECTORY-CLEANUP.md
 !/SmartWorkplaceIntelligence/docs/PREPARED-LATEST.md
 
 # Local agent notes and memories stay private even when Markdown is re-included above.

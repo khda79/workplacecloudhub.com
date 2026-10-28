@@ -1,9 +1,9 @@
-# Version 1.8.0: optional Microsoft 365 usage signals (email clients, OneDrive activity, groups, Copilot daily); earlier: hybrid identity findings and device readiness gap facts.
+# Version 1.9.0: directory cleanup candidates (AD users, AD workstations, user mailboxes); earlier: optional Microsoft 365 usage signals, hybrid identity findings and device readiness gap facts.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DataRoot,
     [Parameter(Mandatory)][string]$OutputRoot,
-    [ValidateSet('All','Estate','Workforce','Devices','Applications','IntuneOperations','Collaboration','Content','Mailbox','HybridIdentity','DailyTrends','Security','Backup','Trust','Executive','SharePointMigration')]
+    [ValidateSet('All','Estate','Workforce','Devices','Applications','IntuneOperations','Collaboration','Content','Mailbox','HybridIdentity','DirectoryCleanup','DailyTrends','Security','Backup','Trust','Executive','SharePointMigration')]
     [string]$Only = 'All',
     [switch]$SkipWorkforceHistory,
     [switch]$ReuseStagedWorkforce,
@@ -75,7 +75,7 @@ $classificationStart = $null
 if (($AccountClassificationExpectedSHA256 -or $null -ne $AccountClassificationExpectedBytes) -and -not $AccountClassificationConfigPath) {
     throw 'An expected account classification capture requires its explicit file path.'
 }
-if ($Only -in @('All','Workforce','HybridIdentity') -and -not $ReuseStagedWorkforce -and $AccountClassificationConfigPath) {
+if ($Only -in @('All','Workforce','HybridIdentity','DirectoryCleanup') -and -not $ReuseStagedWorkforce -and $AccountClassificationConfigPath) {
     Import-Module (Join-Path $PSScriptRoot 'PreparedClassification.psm1')
     $classificationCheck = @{Path=$AccountClassificationConfigPath;Stage='BuildStart'}
     if ($AccountClassificationExpectedSHA256) { $classificationCheck.ExpectedSHA256=$AccountClassificationExpectedSHA256 }
@@ -129,6 +129,15 @@ if ($null -ne $classificationStart) {
     $beforeHybrid = { $null = Test-PreparedClassificationCapture -Path $AccountClassificationConfigPath -Stage 'BeforeHybridIdentity' -ExpectedSHA256 $classificationStart.SHA256 -ExpectedBytes $classificationStart.Bytes }
 }
 Add-Task 'HybridIdentity' 'HybridIdentity' 'New-HybridIdentityEvidence.ps1' $hybridArgs -DependsOn 'Workforce' -BeforeStart $beforeHybrid
+$cleanupArgs=@('-DataRoot',$DataRoot,'-TenantKey',$TenantKey,'-UserInventoryPath',(OutPath 'UserInventoryEvidence'),'-AllDevicesPath',(OutPath 'AllDevicesEvidence'),
+    '-UserOutputPath',(OutPath 'UserCleanupEvidence'),'-ComputerOutputPath',(OutPath 'ComputerCleanupEvidence'),'-MailboxOutputPath',(OutPath 'MailboxCleanupEvidence'),'-QualificationOutputPath',(OutPath 'DirectoryCleanupSourceQualification'))
+if ($AccountClassificationConfigPath) { $cleanupArgs+=@('-AccountClassificationConfigPath',$AccountClassificationConfigPath) }
+$cleanupArgs+=$clockArgs
+$beforeCleanup = $null
+if ($null -ne $classificationStart) {
+    $beforeCleanup = { $null = Test-PreparedClassificationCapture -Path $AccountClassificationConfigPath -Stage 'BeforeDirectoryCleanup' -ExpectedSHA256 $classificationStart.SHA256 -ExpectedBytes $classificationStart.Bytes }
+}
+Add-Task 'DirectoryCleanup' 'DirectoryCleanup' 'New-DirectoryCleanupEvidence.ps1' $cleanupArgs -DependsOn 'Workforce','Estate' -BeforeStart $beforeCleanup
 if ($MailboxMigrationExceptionsEnabled) {
     $exceptionArgs=@('-DataRoot',$DataRoot,'-OutputRoot',$OutputRoot,'-TenantKey',$TenantKey,'-NativeEvidenceAuditPath',$NativeEvidenceAuditPath,'-PythonCommand',$PythonCommand,'-Enabled')
     if ($MailboxMigrationBindingsPath) { $exceptionArgs+=@('-BindingsPath',$MailboxMigrationBindingsPath) }
@@ -187,7 +196,7 @@ if ($MaxParallelGenerators -le 1) {
 } else {
     # Parallel: ready tasks start in the order below (critical path and longest generators first);
     # each runs in its own child process and its log is printed in one block when it completes.
-    $priority = @('DeviceInventory','Workforce','Native','IntuneOperations','Applications','DeviceLifecycle','Estate','Trust','Mailbox','HybridIdentity','Security','WindowsMigration','EndpointProtection','Executive','Backup','Collaboration','M365UsageSignals','Content','DailyTrends')
+    $priority = @('DeviceInventory','Workforce','Native','IntuneOperations','Applications','DeviceLifecycle','Estate','Trust','Mailbox','HybridIdentity','DirectoryCleanup','Security','WindowsMigration','EndpointProtection','Executive','Backup','Collaboration','M365UsageSignals','Content','DailyTrends')
     $taskIds = @($script:tasks.Id)
     $pending = [Collections.Generic.List[object]]::new()
     foreach ($id in $priority) { foreach ($task in $script:tasks) { if ($task.Id -ceq $id) { $pending.Add($task) } } }
