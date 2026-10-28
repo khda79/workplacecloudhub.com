@@ -1030,7 +1030,7 @@ function Get-SmartM365OrchestratorSwiValidity {
         $scriptName = [IO.Path]::GetFileName([string](Get-InsightsProperty $job 'ScriptPath' ''))
         $inputs = @($evaluations | Where-Object Producer -eq $scriptName)
         if ($inputs.Count -eq 0) {
-            [pscustomobject]@{ Name = [string]$job.Name; Swi = 'Not used by SWI'; DaysLeft = $null; ExpiresAt = ''; Detail = 'No SWI input is produced by this job.'; Inputs = @() }
+            [pscustomobject]@{ Name = [string]$job.Name; Swi = 'Not used by SWI'; Blocks = $false; DaysLeft = $null; ExpiresAt = ''; Detail = 'No SWI input is produced by this job.'; Inputs = @() }
             continue
         }
         $required = @($inputs | Where-Object { -not $_.Optional })
@@ -1047,7 +1047,7 @@ function Get-SmartM365OrchestratorSwiValidity {
         $detail = ('Limiting input: {0}; rule: {1} + {2} h{3}; expires {4}.{5}' -f $limiting.File, $limiting.Basis, $limiting.LimitHours, $(if ($limiting.Optional) { ' (optional input)' } else { '' }), $(if ($expiresText) { $expiresText } else { 'n/a' }), $shared)
         if ($otherIssues.Count) { $detail += ' Other inputs: ' + ($otherIssues -join '; ') + '.' }
         [pscustomobject]@{
-            Name = [string]$job.Name; Swi = $status
+            Name = [string]$job.Name; Swi = $status; Blocks = [bool]$limiting.Blocks
             DaysLeft = if ($null -ne $limiting.HoursLeft) { [math]::Round($limiting.HoursLeft / 24, 1) } else { $null }
             ExpiresAt = $expiresText; Detail = $detail; Inputs = $inputs
         }

@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.9
+1.6.10
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.9'
+$script:AppVersion = '1.6.10'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -438,6 +438,13 @@ $xaml = @'
                                     </StackPanel>
                                 </StackPanel>
                                 <DataGrid x:Name="LaunchJobsGrid" Grid.Row="1">
+                                    <DataGrid.RowStyle>
+                                        <Style TargetType="DataGridRow">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SwiBlocks}" Value="True"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGrid.RowStyle>
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="Job" Binding="{Binding Name}" Width="290"/>
                                         <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="70"/>
@@ -452,6 +459,9 @@ $xaml = @'
                                             <DataGridTextColumn.ElementStyle>
                                                 <Style TargetType="TextBlock">
                                                     <Setter Property="ToolTip" Value="{Binding SwiDetail}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding SwiBlocks}" Value="True"><Setter Property="Foreground" Value="#A4262C"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
+                                                </Style.Triggers>
                                                 </Style>
                                             </DataGridTextColumn.ElementStyle>
                                         </DataGridTextColumn>
@@ -540,6 +550,13 @@ $xaml = @'
                         <ColumnDefinition Width="360"/>
                     </Grid.ColumnDefinitions>
                     <DataGrid x:Name="PlanningGrid" SelectionMode="Single">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SwiBlocks}" Value="True"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.RowStyle>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Job" Binding="{Binding Name}" SortMemberPath="Name" SortDirection="Ascending" Width="250"/>
                             <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="70"/>
@@ -549,6 +566,9 @@ $xaml = @'
                                 <DataGridTextColumn.ElementStyle>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="ToolTip" Value="{Binding SwiDetail}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SwiBlocks}" Value="True"><Setter Property="Foreground" Value="#A4262C"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
+                                    </Style.Triggers>
                                     </Style>
                                 </DataGridTextColumn.ElementStyle>
                             </DataGridTextColumn>
@@ -1328,7 +1348,7 @@ function Refresh-PlanningView {
             SuccessAgeHours = if ($health) { $health.SuccessAgeHours } else { $null }
             ExpectedMaxAgeHours = if ($health) { $health.ExpectedMaxAgeHours } else { $null }
             AverageDurationMinutes = if ($health) { $health.AverageDurationMinutes } else { $null }
-            Swi = $swi.Swi; SwiDaysLeft = $swi.DaysLeft; SwiDetail = $swi.Detail
+            Swi = $swi.Swi; SwiDaysLeft = $swi.DaysLeft; SwiDetail = $swi.Detail; SwiBlocks = [bool]$swi.Blocks
         }
     }
     $script:PlanningRows = @($rows | Sort-Object -Property Name)
@@ -1368,7 +1388,7 @@ function Get-GuiSwiRow {
     param([string]$JobName)
     if ($script:SwiByName.ContainsKey($JobName)) { return $script:SwiByName[$JobName] }
     $text = if ($script:SwiValidityError) { 'Unavailable' } else { '' }
-    return [pscustomobject]@{ Swi = $text; DaysLeft = $null; Detail = $(if ($script:SwiValidityError) { "SWI validity unavailable: $($script:SwiValidityError)" } else { '' }) }
+    return [pscustomobject]@{ Swi = $text; DaysLeft = $null; Blocks = $false; Detail = $(if ($script:SwiValidityError) { "SWI validity unavailable: $($script:SwiValidityError)" } else { '' }) }
 }
 
 function Update-JobHealth {
@@ -1412,6 +1432,15 @@ function Request-SelectedRunningJobStop {
     [System.Windows.MessageBox]::Show("Stop request $($request.RequestId) was submitted. The owning orchestrator will process it on its next cycle. Refresh Operations or History to verify the final status.", 'Stop requested', 'OK', 'Information') | Out-Null
 }
 
+function Set-GuiMaintenanceBannerStyle {
+    # Normal = scheduling runs normally (muted); Attention = paused or in transition (amber); Error = control unreadable (red).
+    param([ValidateSet('Normal', 'Attention', 'Error')][string]$Level)
+    $banner = $script:Controls.MaintenanceBannerText
+    $color = switch ($Level) { 'Normal' { '#5D6B78' } 'Attention' { '#92400E' } 'Error' { '#A4262C' } }
+    $banner.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString($color)
+    $banner.FontWeight = if ($Level -eq 'Normal') { [System.Windows.FontWeights]::Normal } else { [System.Windows.FontWeights]::SemiBold }
+}
+
 function Refresh-MaintenanceView {
     param($Operations = $null)
     try {
@@ -1434,7 +1463,9 @@ function Refresh-MaintenanceView {
         $stateText = if ($control.Enabled) { if ($applied) { 'ACTIVE' } elseif ($activationReady) { "ACTIVE ($offlineCount offline server(s) apply it on return)" } else { 'ACTIVATION REQUESTED' } }
             elseif ($applied) { 'INACTIVE' } elseif ($activationReady) { "INACTIVE ($offlineCount offline server(s))" } else { 'ACKNOWLEDGEMENT PENDING' }
         $script:Controls.MaintenanceBannerText.Text = "Maintenance: $stateText | revision $($control.Revision) | scheduled launches only; manual Pipeline requests remain available"
-        $running = ($servers | Measure-Object Running -Sum).Sum
+        # Normal scheduling is not a problem: neutral when inactive, amber only while it pauses or is in transition.
+        Set-GuiMaintenanceBannerStyle -Level $(if (-not $control.Enabled -and $activationReady) { 'Normal' } else { 'Attention' })
+        $running =($servers | Measure-Object Running -Sum).Sum
         $stamp = if ($control.ChangedAtUtc) { ([datetimeoffset]::Parse($control.ChangedAtUtc)).LocalDateTime.ToString('yyyy-MM-dd HH:mm:ss') } else { 'not changed' }
         $script:Controls.MaintenanceDetailText.Text = "Changed: $stamp | By: $($control.ChangedBy) | Reason: $($control.Reason) | Running jobs: $running`n" + (($servers | ForEach-Object { "$($_.Server): $($_.Status)" }) -join ' | ')
     }
@@ -1443,6 +1474,7 @@ function Refresh-MaintenanceView {
         $script:Controls.EnableMaintenanceButton.IsEnabled = $false
         $script:Controls.DisableMaintenanceButton.IsEnabled = $false
         $script:Controls.MaintenanceBannerText.Text = 'Maintenance: CONTROL UNAVAILABLE - do not assume scheduling is paused or resumed'
+        Set-GuiMaintenanceBannerStyle -Level 'Error'
         $script:Controls.MaintenanceDetailText.Text = $_.Exception.Message
     }
 }
@@ -2004,7 +2036,7 @@ function Refresh-LaunchView {
                 CacheName = [string](Get-OrchestratorGuiPropertyValue -Object $execution -Name 'CacheName' -DefaultValue '')
                 InManifest = $null -ne $draftJob
                 LastSuccess = if ($health) { $health.LastSuccess } else { '' }
-                Swi = $swi.Swi; SwiDaysLeft = $swi.DaysLeft; SwiDetail = $swi.Detail
+                Swi = $swi.Swi; SwiDaysLeft = $swi.DaysLeft; SwiDetail = $swi.Detail; SwiBlocks = [bool]$swi.Blocks
             }
         }
         # HideInGui entries (orchestrator actions already offered as buttons, setup tools) stay in SmartInventory.cmd only.

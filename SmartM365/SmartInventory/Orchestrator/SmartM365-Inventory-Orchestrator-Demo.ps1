@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.2
+1.4.3
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -71,6 +71,7 @@ function New-OrchestratorDemoData {
                 Swi=$(if(-not $source.Enabled){'Not used by SWI'}elseif($Scenario -eq 'Issues' -and $i % 17 -eq 4){'Expired - blocks SWI'}elseif($Scenario -ne 'Healthy' -and $i % 13 -eq 5){'Expires < 24 h'}else{'Valid'})
                 SwiDaysLeft=$(if(-not $source.Enabled){$null}elseif($Scenario -eq 'Issues' -and $i % 17 -eq 4){-0.4}elseif($Scenario -ne 'Healthy' -and $i % 13 -eq 5){0.6}else{[math]::Round(1.4 + ($i % 6) * 2.3, 1)})
                 SwiDetail=('DEMO - Sample SWI validity of {0}; the limiting input and its rule are shown here.' -f $source.Name)
+                SwiBlocks=($source.Enabled -and $Scenario -eq 'Issues' -and $i % 17 -eq 4)
             }
             $row.NextRun=Get-OrchestratorDemoNextRun -Job $row -Clock $clock
             $row
@@ -304,6 +305,9 @@ function Update-OrchestratorDemoViews {
     $s.Dashboard=New-OrchestratorDemoDashboard -Data $d
     Set-OrchestratorDashboardView -Controls $c -Dashboard $s.Dashboard
     $c.MaintenanceBannerText.Text=if($d.Maintenance){'DEMO - Scheduling maintenance enabled'}else{'DEMO - Scheduling active'}
+    # Same colours as the live banner: normal scheduling is muted, a pause is amber.
+    $c.MaintenanceBannerText.Foreground=[System.Windows.Media.BrushConverter]::new().ConvertFromString($(if($d.Maintenance){'#92400E'}else{'#5D6B78'}))
+    $c.MaintenanceBannerText.FontWeight=if($d.Maintenance){[System.Windows.FontWeights]::SemiBold}else{[System.Windows.FontWeights]::Normal}
     $c.MaintenanceDetailText.Text=if($d.Maintenance){'Contoso demo maintenance window. Running sample jobs remain visible.'}else{'All three sample residents are ready. Actions affect this demonstration only.'}
     $c.EnableMaintenanceButton.IsEnabled=-not $d.Maintenance
     $c.DisableMaintenanceButton.IsEnabled=$d.Maintenance
