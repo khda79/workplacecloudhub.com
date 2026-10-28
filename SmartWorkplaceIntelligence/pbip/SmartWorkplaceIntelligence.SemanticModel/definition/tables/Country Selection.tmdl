@@ -42,27 +42,7 @@ table 'Country Selection'
 				                    _countryCode,
 				                    "", "Unknown",
 				                    "UNKNOWN", "Unknown",
-				                    "AT", "Austria",
-				                    "BE", "Belgium",
-				                    "BR", "Brazil",
-				                    "CH", "Switzerland",
-				                    "CN", "China",
-				                    "HR", "Croatia",
-				                    "DE", "Germany",
-				                    "ES", "Spain",
-				                    "FR", "France",
-				                    "IE", "Ireland",
-				                    "IT", "Italy",
-				                    "LU", "Luxembourg",
-				                    "MX", "Mexico",
-				                    "NL", "Netherlands",
-				                    "PL", "Poland",
-				                    "PT", "Portugal",
-				                    "SI", "Slovenia",
-				                    "AE", "United Arab Emirates",
-				                    "GB", "United Kingdom",
 				                    "UK", "United Kingdom",
-				                    "US", "United States",
-				                    TRIM ( _rawCountry )
+				                    COALESCE ( LOOKUPVALUE ( 'Country Reference'[Country Name], 'Country Reference'[Country Code], _countryCode ), TRIM ( _rawCountry ) )
 				                )
 				    )

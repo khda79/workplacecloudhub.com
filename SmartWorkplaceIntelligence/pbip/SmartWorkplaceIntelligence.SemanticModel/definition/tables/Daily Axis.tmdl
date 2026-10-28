@@ -148,4 +148,4 @@ table 'Daily Axis'
 
 	partition 'Daily Axis' = calculated
 		mode: import
-		source = SELECTCOLUMNS(CALENDAR(DATE(2025,6,23), DATE(2027,11,9)), "Axis Date", [Date])
+		source = VAR _first = MINX({MIN('Daily Directory Trends'[Date]), MIN('Daily Mailbox Trends'[Date])}, [Value]) VAR _last = MAXX({MAX('Daily Directory Trends'[Date]), MAX('Daily Mailbox Trends'[Date])}, [Value]) VAR _start = COALESCE(_first, TODAY()) VAR _monday = _start - WEEKDAY(_start, 2) + 1 RETURN SELECTCOLUMNS(CALENDAR(_monday, MAX(COALESCE(_last, _start), _start)), "Axis Date", [Date])

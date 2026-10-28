@@ -16,7 +16,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
 
-VERSION = '1.0.2'
+VERSION = '1.0.3'
+DISABLED_PROJECT_KEY = 'Not configured'
 CONTRACT = Path(__file__).resolve().parents[1] / 'config/sharepoint-migration-contract.json.txt'
 UTC = dt.timezone.utc
 TABLES = {'MigrationSP': 'tblMigrationSP', 'MigrationSharedFolders': 'tblMigrationSharedFolders',
@@ -608,7 +609,8 @@ def build(args):
             raise ValueError('Use a dedicated output directory, never the raw source root')
     if not args.enabled:
         output = {t['projection']: [] for t in json.loads(CONTRACT.read_text(encoding='utf-8'))['tables']}
-        output['SourceSummary'] = [{'TenantKey': args.tenant, 'Project Key': '', 'Snapshot ID': token(args.tenant, 'disabled'), 'Snapshot Date': asof.date().isoformat(),
+        # Every uniqueKey part must be non-blank: the prepared batch validator rejects an empty key part.
+        output['SourceSummary'] = [{'TenantKey': args.tenant, 'Project Key': DISABLED_PROJECT_KEY, 'Snapshot ID': token(args.tenant, 'disabled'), 'Snapshot Date': asof.date().isoformat(),
                                    'Source': 'Migration workbook', 'Qualification': 'Not configured', 'Coverage State': 'Not configured', 'Captured UTC': asof.isoformat()}]
         if args.previous_history:
             output['History'] = read_csv(args.previous_history)

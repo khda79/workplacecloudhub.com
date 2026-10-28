@@ -68,11 +68,11 @@ table 'Report Metadata'
 			VAR _missing = COUNTROWS(FILTER(_all, [Loaded Rows] > 0 && ISBLANK([Loaded Batch ID])))
 			RETURN
 			IF(COUNTROWS(_ids) > 1, "Mixed batches | Majority: " & _majority & " | Other tables: " & FORMAT(_other,"0"),
-			   IF(COUNTROWS(_ids) = 1, "Loaded batch: " & _majority, "Loaded batch: Not observed"))
-			& " | Empty tables (batch unobservable): " & FORMAT(COALESCE(_empty,0),"0")
+			   IF(COUNTROWS(_ids) = 1, "Batch: " & _majority, "Batch: Not observed"))
+			& " | Empty tables: " & FORMAT(COALESCE(_empty,0),"0")
 			& IF(_missing > 0, " | Missing provenance: " & FORMAT(_missing,"0"), "")
-			& " | Readiness sources unavailable: " & FORMAT(COALESCE(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Availability]="Not available"),0),"0")
-			& " | Readiness sources valid empty: " & FORMAT(COALESCE(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Availability]="Valid empty"),0),"0")
+			& " | Readiness unavailable: " & FORMAT(COALESCE(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Availability]="Not available"),0),"0")
+			& " | Valid empty: " & FORMAT(COALESCE(CALCULATE(COUNTROWS('Readiness Source Status'), REMOVEFILTERS('Readiness Source Status'), 'Readiness Source Status'[Availability]="Valid empty"),0),"0")
 		formatString: @
 		lineageTag: da192672-ca2e-42ed-aec6-10f2888f8c89
 

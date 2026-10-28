@@ -215,6 +215,9 @@ class MigrationTests(unittest.TestCase):
             for spec in contract['tables']:
                 with (root/spec['file']).open(encoding='utf-8-sig') as stream:
                     self.assertEqual(next(m.csv.reader(stream)), [c['name'] for c in spec['columns']])
+                # The batch validator rejects a blank key part, so a disabled feature must still publish valid keys.
+                for row in m.read_csv(root/spec['file']):
+                    self.assertTrue(all(row[k].strip() for k in spec['uniqueKey']), spec['file'])
 
 
 class InventoryReceiptTests(unittest.TestCase):
