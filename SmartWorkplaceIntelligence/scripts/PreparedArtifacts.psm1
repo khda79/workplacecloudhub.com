@@ -1,4 +1,4 @@
-# Version 1.2.1: receipt-bound native semantic artifacts and explicit historical cohorts.
+# Version 1.2.2: receipt-bound native semantic artifacts and explicit historical cohorts.
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 
@@ -236,11 +236,12 @@ function Assert-PreparedLicenseSnapshotSource {
     param([Parameter(Mandatory)][string]$Last,[Parameter(Mandatory)][string]$TenantKey,
         [Parameter(Mandatory)]$Snapshot)
     function Read-Utc($Value) {
-        # PowerShell 7.5+ may deserialize ISO timestamps directly to UTC DateTime.
+        # ConvertFrom-Json yields Utc for 'Z', Local for an explicit offset such as '+00:00'
+        # and Unspecified when no timezone is written; only the last one is ambiguous.
         if ($Value -is [datetimeoffset]) { return $Value.ToUniversalTime() }
         if ($Value -is [datetime]) {
-            if ($Value.Kind -ne [DateTimeKind]::Utc) { throw 'License source timestamp is not UTC.' }
-            return [datetimeoffset]::new($Value)
+            if ($Value.Kind -eq [DateTimeKind]::Unspecified) { throw 'License source timestamp has no explicit timezone.' }
+            return [datetimeoffset]::new($Value.ToUniversalTime())
         }
         if ($Value -notmatch '(Z|[+-]\d{2}:\d{2})$') { throw 'License source timestamp has no explicit timezone.' }
         [datetimeoffset]::Parse($Value,[Globalization.CultureInfo]::InvariantCulture).ToUniversalTime()

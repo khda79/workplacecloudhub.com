@@ -1,4 +1,4 @@
-# Version 1.2.0
+# Version 1.2.1
 #Requires -Version 7.0
 [CmdletBinding()]
 param()
@@ -150,6 +150,16 @@ try {
     # Frozen-source matching: a valid report must not be reused after its dependencies change.
     $q=Get-Qualification (New-Capture 'strict-valid' -WithDecisions) -RequireCurrentSources
     Check ($q.Result.State -eq 'Qualified') ('Current qualified dependency snapshot refused: '+$q.Result.Reason)
+    # Licences writes GeneratedAtUtc with '+00:00'; any explicit offset is the same instant.
+    foreach($offsetCase in @(@{Name='strict-plus00';Value='2026-10-17T23:00:00+00:00'},@{Name='strict-plus02';Value='2026-10-18T01:00:00+02:00'})) {
+        $current=New-Capture $offsetCase.Name -WithDecisions
+        $snapshotPath=Join-Path (Join-Path $current 'DATA-LAST') $license.snapshot
+        $snapshot=Get-Content -LiteralPath $snapshotPath -Raw | ConvertFrom-Json
+        $snapshot.GeneratedAtUtc=$offsetCase.Value
+        Json $snapshotPath $snapshot
+        $q=Get-Qualification $current -RequireCurrentSources
+        Check ($q.Result.State -eq 'Qualified') ('Explicit offset refused: '+$offsetCase.Name+' '+$q.Result.Reason)
+    }
     $strictCases=@(
         @{Name='source-unqualified';Change={$snapshot.Sources[0].Ready=$false}},
         @{Name='source-string-ready';Change={$snapshot.Sources[0].Ready='true'}},
