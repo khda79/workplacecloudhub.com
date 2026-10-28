@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.11
+1.6.12
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,8 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.11'
+$script:AppVersion = '1.6.12'
+$script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -107,7 +108,9 @@ $script:RequestSubmitTimer = $null
 $script:RequestSubmitBusy = $false
 $script:RequestSubmitUiState = @{}
 $script:RequestSubmitDialog = $null
-$script:RequestSubmitDialogClosing = $false
+$script:SendSummaryTimer = $null
+$script:SendSummaryRun = $null
+$script:SendSummaryTimeoutMinutes = 10
 $script:RequestSubmitContext = [pscustomobject]@{
     Worker = $null; Progress = [hashtable]::Synchronized(@{ Message = ''; Stage = ''; LogError = '' })
     Input = $null; Clock = [Diagnostics.Stopwatch]::new()
@@ -140,18 +143,91 @@ $xaml = @'
         <SolidColorBrush x:Key="MutedBrush" Color="#5D6B78"/>
         <SolidColorBrush x:Key="PanelBrush" Color="White"/>
         <SolidColorBrush x:Key="BorderBrushSoft" Color="#D5DEE8"/>
+        <SolidColorBrush x:Key="ControlBorderBrush" Color="#C3CFDC"/>
+        <SolidColorBrush x:Key="HoverBrush" Color="#EAF1F8"/>
+        <!-- Flat rounded button; a dark overlay gives hover and pressed states to any background colour. -->
         <Style TargetType="Button">
-            <Setter Property="Padding" Value="13,7"/>
+            <Setter Property="Padding" Value="14,7"/>
             <Setter Property="Margin" Value="4,0"/>
             <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="{StaticResource DarkBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ControlBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6"/>
+                            <Border x:Name="Overlay" Background="#17324D" Opacity="0" CornerRadius="6"/>
+                            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Overlay" Property="Opacity" Value="0.07"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Overlay" Property="Opacity" Value="0.15"/></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource AccentBrush}"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/><Setter Property="Cursor" Value="Arrow"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="Padding" Value="6,4"/>
             <Setter Property="Margin" Value="0,3,0,8"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ControlBorderBrush}"/>
         </Style>
         <Style TargetType="ComboBox">
             <Setter Property="Padding" Value="5,3"/>
             <Setter Property="Margin" Value="0,3,0,8"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ControlBorderBrush}"/>
+        </Style>
+        <!-- Tabs: header row on a separator line, content on a rounded white card. -->
+        <Style TargetType="TabControl">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid KeyboardNavigation.TabNavigation="Local">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <Border BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,0,0,1" Margin="0,0,0,8">
+                                <TabPanel x:Name="HeaderPanel" IsItemsHost="True" Background="Transparent" KeyboardNavigation.TabIndex="1"/>
+                            </Border>
+                            <Border Grid.Row="1" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="8">
+                                <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent" Margin="{TemplateBinding Padding}"/>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="Black"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder" Background="Transparent" BorderBrush="Transparent" BorderThickness="0,0,0,2" CornerRadius="6,6,0,0" Margin="0,0,2,0" Cursor="Hand">
+                            <ContentPresenter x:Name="TabHeader" ContentSource="Header" Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True" TextElement.Foreground="{StaticResource MutedBrush}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource HoverBrush}"/>
+                                <Setter TargetName="TabHeader" Property="TextElement.Foreground" Value="{StaticResource DarkBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="TabBorder" Property="Background" Value="White"/>
+                                <Setter TargetName="TabHeader" Property="TextElement.Foreground" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="DataGrid">
             <Setter Property="AutoGenerateColumns" Value="False"/>
@@ -162,12 +238,35 @@ $xaml = @'
             <Setter Property="HeadersVisibility" Value="Column"/>
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrushSoft}"/>
             <Setter Property="AlternatingRowBackground" Value="#F7FAFD"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="#E6EDF4"/>
+            <Setter Property="Background" Value="White"/>
             <Setter Property="RowHeaderWidth" Value="0"/>
         </Style>
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#F3F6FA"/>
+            <Setter Property="Foreground" Value="{StaticResource DarkBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrushSoft}"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+        </Style>
+        <!-- Frames: rounded card with a bold header. -->
         <Style TargetType="GroupBox">
             <Setter Property="Margin" Value="0,0,0,12"/>
-            <Setter Property="Padding" Value="10"/>
+            <Setter Property="Padding" Value="12,6,12,12"/>
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrushSoft}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="GroupBox">
+                        <Border Background="White" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8">
+                            <DockPanel>
+                                <ContentPresenter DockPanel.Dock="Top" ContentSource="Header" Margin="12,10,12,0" RecognizesAccessKey="True" TextElement.FontWeight="SemiBold" TextElement.Foreground="{StaticResource DarkBrush}"/>
+                                <ContentPresenter Margin="{TemplateBinding Padding}"/>
+                            </DockPanel>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
 
@@ -212,7 +311,8 @@ $xaml = @'
                 <Button x:Name="RefreshButton" Content="Refresh"/>
                 <Button x:Name="ValidateButton" Content="Validate draft"/>
                 <Button x:Name="RebalanceButton" Content="Rebalance now" Background="#FFF4CE"/>
-                <Button x:Name="PublishButton" Content="Publish changes" Background="{StaticResource AccentBrush}" Foreground="White" FontWeight="SemiBold"/>
+                <Button x:Name="RequestPrepareButton" Content="Request Prepare" Background="#FFF4CE" IsEnabled="False" ToolTip="Asks the orchestrators to run WorkplaceEvidence-Prepare (published configuration; its dependencies are not run)."/>
+                <Button x:Name="PublishButton" Content="Publish changes" Background="{StaticResource AccentBrush}" BorderBrush="{StaticResource AccentBrush}" Foreground="White" FontWeight="SemiBold"/>
             </StackPanel>
         </Grid>
 
@@ -1037,7 +1137,7 @@ $script:SmartInventoryRoot = Split-Path -Path $PSScriptRoot -Parent
 
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
-    foreach ($controlName in @('MainTabs', 'PlanningGrid', 'JobArgumentsBox', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
+    foreach ($controlName in @('MainTabs', 'PlanningGrid', 'JobArgumentsBox', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'RequestPrepareButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
         'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
@@ -1590,7 +1690,7 @@ function Set-GuiCancellationBusy {
     param([bool]$Busy)
     $script:CancellationBusy = $Busy
     $names = @('RefreshButton','ValidateButton','RebalanceButton','PublishButton','HistoryRefreshButton',
-        'RequestRunButton','EnableMaintenanceButton','DisableMaintenanceButton','RollbackButton',
+        'RequestRunButton','RequestPrepareButton','EnableMaintenanceButton','DisableMaintenanceButton','RollbackButton',
         'CancelRequestButton','CancelAllRequestsButton','CancellationReasonBox')
     if ($Busy) {
         $script:CancellationUiState = @{}
@@ -1825,19 +1925,18 @@ function Get-GuiJobRunSubmissionWork {
     }
 }
 
-function Show-GuiRequestSubmitDialog {
-    param([string]$JobName)
-    Close-GuiRequestSubmitDialog
+function New-GuiWaitDialog {
     # Modeless and owned: the WPF thread stays free, so the indeterminate bar keeps moving.
+    param([string]$Title, [string]$Message, [string]$Detail)
     $dialogXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Submitting run request" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Title="Please wait" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         ResizeMode="NoResize" SizeToContent="WidthAndHeight" ShowInTaskbar="False" FontFamily="Segoe UI" UseLayoutRounding="True">
     <Border Margin="18" Background="White" BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="10" Padding="28,20">
         <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.25"/></Border.Effect>
         <StackPanel Width="380">
-            <TextBlock Text="Run request" FontSize="16" FontWeight="SemiBold" Foreground="#17324D" HorizontalAlignment="Center"/>
+            <TextBlock x:Name="WaitTitleText" FontSize="16" FontWeight="SemiBold" Foreground="#17324D" HorizontalAlignment="Center"/>
             <TextBlock x:Name="SubmitMessageText" Margin="0,8,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
             <Border x:Name="SubmitProgressTrack" Height="6" Margin="0,12,0,8" CornerRadius="3" Background="#E6EDF4" ClipToBounds="True">
                 <Border x:Name="SubmitProgressBar" Width="110" HorizontalAlignment="Left" CornerRadius="3" Background="#0078D4">
@@ -1850,8 +1949,9 @@ function Show-GuiRequestSubmitDialog {
 </Window>
 '@
     $dialog = ConvertFrom-OrchestratorGuiXaml -Text $dialogXaml
-    $dialog.FindName('SubmitMessageText').Text = 'Submitting request for {0}{1} Please wait.' -f $JobName, [char]0x2026
-    $dialog.FindName('SubmitDetailText').Text = 'Recording the request in the shared folder. The job starts later, on its orchestrator.'
+    $dialog.FindName('WaitTitleText').Text = $Title
+    $dialog.FindName('SubmitMessageText').Text = $Message
+    $dialog.FindName('SubmitDetailText').Text = $Detail
     # Explicit animation: the theme's indeterminate ProgressBar stays still when Windows
     # client-area animations are off (common on servers and remote sessions).
     $sweep = [System.Windows.Media.Animation.DoubleAnimation]::new(-110, 380, [System.Windows.Duration]::new([TimeSpan]::FromMilliseconds(1400)))
@@ -1862,26 +1962,44 @@ function Show-GuiRequestSubmitDialog {
         $dialog.Owner = $owner
         $dialog.WindowStartupLocation = 'CenterOwner'
     } else { $dialog.WindowStartupLocation = 'CenterScreen' }
-    # No cancel: a request may already be recorded when the operator would press it.
-    $dialog.Add_Closing({ param($sender, $eventArgs) if (-not $script:RequestSubmitDialogClosing) { $eventArgs.Cancel = $true } })
-    $script:RequestSubmitDialogClosing = $false
-    $script:RequestSubmitDialog = $dialog
+    # No cancel: the work may already be done when the operator would press it. Only Close-GuiWaitDialog closes it.
+    $dialog.Add_Closing({ param($sender, $eventArgs) if ([string]$sender.Tag -ne 'Closing') { $eventArgs.Cancel = $true } })
     $dialog.Show()
+    return $dialog
+}
+
+function Close-GuiWaitDialog {
+    param($Dialog)
+    if ($null -eq $Dialog) { return }
+    $Dialog.Tag = 'Closing'
+    $Dialog.Close()
+}
+
+function Show-GuiRequestSubmitDialog {
+    param([string]$JobName)
+    Close-GuiRequestSubmitDialog
+    $script:RequestSubmitDialog = New-GuiWaitDialog -Title 'Run request' -Message ('Submitting request for {0}{1} Please wait.' -f $JobName, [char]0x2026) -Detail 'Recording the request in the shared folder. The job starts later, on its orchestrator.'
 }
 
 function Close-GuiRequestSubmitDialog {
     $dialog = $script:RequestSubmitDialog
-    if ($null -eq $dialog) { return }
     $script:RequestSubmitDialog = $null
-    $script:RequestSubmitDialogClosing = $true
-    try { $dialog.Close() } finally { $script:RequestSubmitDialogClosing = $false }
+    Close-GuiWaitDialog -Dialog $dialog
+}
+
+function Update-GuiPrepareRequestButton {
+    # Header shortcut: enabled only when Prepare is in the published configuration.
+    if (-not $script:Controls['RequestPrepareButton']) { return }
+    $rows = if (Test-Path -LiteralPath 'variable:script:LaunchJobRows') { @($script:LaunchJobRows) } else { @() }
+    $prepare = @($rows | Where-Object { $null -ne $_ -and [string]$_.Name -eq $script:PrepareJobName -and [bool]$_.InManifest })
+    $script:Controls.RequestPrepareButton.IsEnabled = $prepare.Count -gt 0 -and -not $script:RequestSubmitBusy -and -not $script:CancellationBusy
 }
 
 function Set-GuiRequestSubmitBusy {
     param([bool]$Busy, [string]$JobName = '')
     $script:RequestSubmitBusy = $Busy
     # Both request entries, plus the actions that would read or change requests concurrently.
-    $names = @('RequestRunButton', 'RequestJobButton', 'RefreshButton', 'CancelRequestButton', 'CancelAllRequestsButton')
+    $names = @('RequestRunButton', 'RequestJobButton', 'RequestPrepareButton', 'RefreshButton', 'CancelRequestButton', 'CancelAllRequestsButton')
     if ($Busy) {
         $script:RequestSubmitUiState = @{}
         foreach ($name in $names) {
@@ -1901,6 +2019,7 @@ function Set-GuiRequestSubmitBusy {
             $launchRow = $script:Controls.LaunchJobsGrid.SelectedItem
             $script:Controls.RequestJobButton.IsEnabled = $null -ne $launchRow -and [bool]$launchRow.InManifest
         }
+        Update-GuiPrepareRequestButton
         Update-SelectedPipelineRequest
         $script:Controls.CancelAllRequestsButton.IsEnabled = -not $script:CancellationBusy -and @($script:RequestRows | Where-Object Status -in @('Running', 'Queued', 'Cancelling')).Count -gt 0
     }
@@ -2058,6 +2177,7 @@ function Refresh-LaunchView {
         $script:Controls.ManualLaunchesGrid.ItemsSource = $script:ManualLaunchRows
         Update-SelectedLaunchPreview -Kind Job
         Update-SelectedLaunchPreview -Kind Manual
+        Update-GuiPrepareRequestButton
     }
     catch { Write-GuiException -Context 'Launch catalog refresh failed' -ErrorRecord $_ }
 }
@@ -2127,11 +2247,54 @@ function Get-GuiOrchestratorActionCommand {
     }
 }
 
+function Start-GuiSendSummary {
+    # Hidden console: a wait window replaces it until the process ends (Receive-GuiSendSummary).
+    param([Parameter(Mandatory = $true)]$Command)
+    $process = Start-GuiConsoleProcess -Runtime PowerShell7 -ScriptPath $Command.ScriptPath -Arguments $Command.Arguments -WindowStyle Hidden
+    $null = $process.Handle  # keeps the exit code readable after the process ends
+    $script:SendSummaryRun = [pscustomobject]@{ Process = $process; Clock = [Diagnostics.Stopwatch]::StartNew(); Dialog = $null }
+    $script:Controls.SendSummaryButton.IsEnabled = $false
+    $script:SendSummaryRun.Dialog = New-GuiWaitDialog -Title 'Send summary' -Message ('Sending the execution summary email{0} Please wait.' -f [char]0x2026) -Detail 'Reading the job runs of this tenant. The resident orchestrator and its jobs are not affected.'
+    $script:Controls.StatusText.Text = 'Send summary: sending in the background.'
+}
+
+function Receive-GuiSendSummary {
+    $run = $script:SendSummaryRun
+    if ($null -eq $run) { return }
+    $process = $run.Process
+    $timedOut = $run.Clock.Elapsed.TotalMinutes -ge $script:SendSummaryTimeoutMinutes
+    if (-not $process.HasExited -and -not $timedOut) {
+        if ($null -ne $run.Dialog) { $run.Dialog.FindName('SubmitDetailText').Text = 'Reading the job runs and sending the email ({0:N0} s). The resident orchestrator and its jobs are not affected.' -f $run.Clock.Elapsed.TotalSeconds }
+        return
+    }
+    $script:SendSummaryRun = $null
+    Close-GuiWaitDialog -Dialog $run.Dialog
+    $script:Controls.SendSummaryButton.IsEnabled = $true
+    if (-not $process.HasExited) {
+        Write-GuiActivity -Message ("Send summary still running after {0} minutes (PID {1}); the GUI stops waiting." -f $script:SendSummaryTimeoutMinutes, $process.Id) -Level WARN
+        $script:Controls.StatusText.Text = 'Send summary: still running in the background.'
+        Show-GuiJobRunRequestResult -Message ("The execution summary is still being sent after {0} minutes (PID {1}).`n`nIt continues in the background; check the orchestrator log of this computer." -f $script:SendSummaryTimeoutMinutes, $process.Id) -Title 'Send summary' -Icon Warning
+        return
+    }
+    $exitCode = $process.ExitCode
+    if ($exitCode -eq 0) {
+        Write-GuiActivity -Message ("Execution summary email sent ({0:N0} s)." -f $run.Clock.Elapsed.TotalSeconds) -Level SUCCESS
+        $script:Controls.StatusText.Text = 'Send summary: email sent.'
+        Show-GuiJobRunRequestResult -Message 'The execution summary email was sent.' -Title 'Send summary' -Icon Information
+    } else {
+        Write-GuiActivity -Message ("Execution summary failed (exit code {0})." -f $exitCode) -Level ERROR
+        $script:Controls.StatusText.Text = 'Send summary: failed.'
+        Show-GuiJobRunRequestResult -Message ("The execution summary email could not be sent (exit code {0}).`n`nCheck the mail settings and the orchestrator log of this computer." -f $exitCode) -Title 'Send summary' -Icon Error
+    }
+}
+
 function Invoke-GuiOrchestratorAction {
     param([Parameter(Mandatory = $true)][string]$Action)
     $command = Get-GuiOrchestratorActionCommand -Action $Action
     $preview = (@($command.ScriptPath) + @($command.Arguments) | ForEach-Object { ConvertTo-SmartM365InventoryCommandLineArgument -Value $_ }) -join ' '
+    if ($Action -eq 'SendSummary' -and $null -ne $script:SendSummaryRun) { throw 'The execution summary is already being sent. Wait for its result.' }
     if ([System.Windows.MessageBox]::Show(("{0}`n`nCommand (PowerShell 7):`n{1}" -f $command.Message, $preview), $command.Title, 'YesNo', $command.Icon) -ne 'Yes') { return }
+    if ($Action -eq 'SendSummary') { Start-GuiSendSummary -Command $command; return }
     [void](Start-GuiConsoleProcess -Runtime PowerShell7 -ScriptPath $command.ScriptPath -Arguments $command.Arguments -KeepOpen:([bool]$command.KeepOpen))
     $script:Controls.StatusText.Text = "$($command.Title): started in a new console."
 }
@@ -2872,7 +3035,7 @@ Write-GuiActivity -Message ('Startup timing (ms): splash={0}; context={1}; log={
 $window = ConvertFrom-OrchestratorGuiXaml -Text $xaml
 $script:Controls = @{}
 foreach ($name in @(
-    'MainTabs', 'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'ValidateButton', 'RebalanceButton', 'PublishButton',
+    'MainTabs', 'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'ValidateButton', 'RebalanceButton', 'RequestPrepareButton', 'PublishButton',
     'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
     'PlanningGrid', 'SelectedJobText', 'JobArgumentsBox', 'JobEnabledCheck', 'ScheduleTypeCombo', 'TimesBox', 'DaysPanel',
     'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck', 'MissedPolicyCombo',
@@ -3085,6 +3248,10 @@ $script:Controls.OrchestratorStopButton.Add_Click({ try { Invoke-GuiOrchestrator
 $script:Controls.OrchestratorRestartButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action Restart } catch { Write-GuiException -Context 'Orchestrator action Restart failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
 $script:Controls.FullCollectButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action FullCollect } catch { Write-GuiException -Context 'Orchestrator action FullCollect failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
 $script:Controls.SendSummaryButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action SendSummary } catch { Write-GuiException -Context 'Orchestrator action SendSummary failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
+$script:Controls.RequestPrepareButton.Add_Click({
+    try { [void](Request-SelectedJobRun -JobName $script:PrepareJobName -IncludeDependencies $false) }
+    catch { Write-GuiException -Context 'Prepare request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Prepare request failed', 'OK', 'Error') | Out-Null }
+})
 $script:Controls.RequestRunButton.Add_Click({
     try { [void](Request-SelectedJobRun) }
     catch { Write-GuiException -Context 'Run request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Run request failed', 'OK', 'Error') | Out-Null }
@@ -3320,6 +3487,10 @@ $script:RequestSubmitTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:RequestSubmitTimer.Interval = [TimeSpan]::FromMilliseconds(150)
 $script:RequestSubmitTimer.Add_Tick({ try { Receive-GuiJobRunSubmission } catch { Write-GuiException -Context 'Run request result handling failed' -ErrorRecord $_ } })
 $script:RequestSubmitTimer.Start()
+$script:SendSummaryTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:SendSummaryTimer.Interval = [TimeSpan]::FromMilliseconds(500)
+$script:SendSummaryTimer.Add_Tick({ try { Receive-GuiSendSummary } catch { Write-GuiException -Context 'Send summary result handling failed' -ErrorRecord $_ } })
+$script:SendSummaryTimer.Start()
 $script:RefreshTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:RefreshTimer.Interval = [TimeSpan]::FromMilliseconds(150)
 $script:RefreshTimer.Add_Tick({ Receive-GuiRefresh; Update-GuiDashboardLoading })
@@ -3375,7 +3546,7 @@ $window.Add_Closing({
 } finally {
     if ($smartM365RunGuard) {
     Complete-SmartM365InventoryRun -State $smartM365RunGuard -Cleanup {
-        foreach($name in @('AutoRefreshTimer','RefreshTimer','CancellationTimer','RequestSubmitTimer','ConfigurationTimer')){
+        foreach($name in @('AutoRefreshTimer','RefreshTimer','CancellationTimer','RequestSubmitTimer','ConfigurationTimer','SendSummaryTimer')){
             $timer=Get-Variable $name -Scope Script -ValueOnly -ErrorAction SilentlyContinue
             if($timer){Invoke-SmartM365RunCleanup $smartM365RunGuard $name { $timer.Stop() }}
         }

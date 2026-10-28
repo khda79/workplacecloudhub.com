@@ -4,7 +4,7 @@
 Offline WPF tests of the asynchronous run request submission: wait window, slow, success,
 error, uncertain result, double click and auto-refresh during the wait. No job is launched.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param()
@@ -20,7 +20,7 @@ $guiPath=Join-Path $folder 'SmartM365-Inventory-Orchestrator-GUI.ps1'
 $ast=[Management.Automation.Language.Parser]::ParseFile($guiPath,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'GUI parsing failed.'}
 foreach($name in @('ConvertFrom-OrchestratorGuiXaml','Update-SelectedPipelineRequest','Set-GuiRequestRows','Refresh-RequestsView','Invoke-AutoRefresh','Start-GuiPipelineCancellation',
-    'Request-SelectedJobRun','Get-GuiJobRunSubmissionWork','Show-GuiRequestSubmitDialog','Close-GuiRequestSubmitDialog','Set-GuiRequestSubmitBusy','Start-GuiJobRunSubmission','Receive-GuiJobRunSubmission')){
+    'Request-SelectedJobRun','Get-GuiJobRunSubmissionWork','New-GuiWaitDialog','Close-GuiWaitDialog','Show-GuiRequestSubmitDialog','Close-GuiRequestSubmitDialog','Set-GuiRequestSubmitBusy','Update-GuiPrepareRequestButton','Start-GuiJobRunSubmission','Receive-GuiJobRunSubmission')){
     $definition=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
     if($null -eq $definition){throw "Missing GUI function: $name"}
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -28,7 +28,7 @@ foreach($name in @('ConvertFrom-OrchestratorGuiXaml','Update-SelectedPipelineReq
 $assignment=$ast.Find({param($node)$node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$xaml'},$true)
 $window=ConvertFrom-OrchestratorGuiXaml -Text $assignment.Right.Expression.Value
 $script:Controls=@{}
-foreach($name in @('RequestRunButton','RequestJobButton','RefreshButton','CancelRequestButton','CancelAllRequestsButton','RequestsGrid','RequestJobsGrid','StatusText','PlanningGrid',
+foreach($name in @('RequestRunButton','RequestJobButton','RequestPrepareButton','RefreshButton','CancelRequestButton','CancelAllRequestsButton','RequestsGrid','RequestJobsGrid','StatusText','PlanningGrid',
     'IncludeDependenciesCheck','LaunchJobsGrid','LaunchIncludeDependenciesCheck','CancellationReasonBox')){
     $script:Controls[$name]=$window.FindName($name)
     if(-not $script:Controls[$name]){throw "Missing XAML control: $name"}

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline tests of the Operations launch features of the orchestrator GUI.
 .VERSION
-1.1.4
+1.1.6
 .NOTES
 GUI functions are extracted by AST and bound to the real XAML. The catalog is the committed
 template (read only); the published configuration is a copy of its jobs. No orchestrator, request
@@ -29,7 +29,8 @@ $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $folder 'SmartM365-Inventory-Orchestrator-GUI.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'GUI parsing failed.' }
 foreach ($name in @('ConvertFrom-OrchestratorGuiXaml', 'Get-OrchestratorGuiPropertyValue', 'Set-JsonProperty', 'Copy-JsonDocument', 'Get-ComboText', 'Select-ComboText', 'Get-GuiLaunchCatalog', 'Get-GuiJobScriptVersion', 'Get-GuiSwiRow', 'Refresh-LaunchView',
-        'Get-GuiLaunchPlanText', 'Update-SelectedLaunchPreview', 'Start-GuiConsoleProcess', 'Get-GuiOrchestratorActionCommand', 'Set-GuiJobExecutionMode', 'Request-SelectedJobRun')) {
+        'Get-GuiLaunchPlanText', 'Update-SelectedLaunchPreview', 'Update-GuiPrepareRequestButton', 'Start-GuiConsoleProcess', 'Get-GuiOrchestratorActionCommand', 'Set-GuiJobExecutionMode', 'Request-SelectedJobRun',
+        'New-GuiWaitDialog', 'Close-GuiWaitDialog', 'Start-GuiSendSummary', 'Receive-GuiSendSummary')) {
     $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     if ($null -eq $definition) { throw "Missing GUI function: $name" }
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -37,7 +38,7 @@ foreach ($name in @('ConvertFrom-OrchestratorGuiXaml', 'Get-OrchestratorGuiPrope
 $assignment = $ast.Find({ param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$xaml' }, $true)
 $window = ConvertFrom-OrchestratorGuiXaml -Text $assignment.Right.Expression.Value
 $script:Controls = @{}
-foreach ($name in @('OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton',
+foreach ($name in @('OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'RequestPrepareButton',
         'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox', 'OrchestratorStartButton', 'OrchestratorStopButton',
         'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'StatusText', 'PlanningGrid', 'IncludeDependenciesCheck', 'OperationsRunningGrid')) {
     $script:Controls[$name] = $window.FindName($name)
@@ -47,6 +48,8 @@ foreach ($name in @('OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo',
 $script:Cases = 0
 $script:RequestSubmitBusy = $false; $script:CancellationBusy = $false; $script:ScriptVersions = @{}
 $script:HealthByName = @{}; $script:SwiByName = @{}; $script:SwiValidityError = ''
+$prepareName = $ast.Find({ param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$script:PrepareJobName' }, $true)
+$script:PrepareJobName = $prepareName.Right.Expression.Value
 function Assert-Case { param([bool]$Condition, [string]$Message) $script:Cases++; if (-not $Condition) { throw "FAIL: $Message" } }
 $script:Activity = [Collections.Generic.List[string]]::new()
 function Write-GuiActivity { param($Message, $Level = 'INFO', [switch]$DisplayOnly) $script:Activity.Add("$Level|$Message") }
@@ -66,6 +69,10 @@ try {
     # Lists, global mode and previews.
     Refresh-LaunchView
     Assert-Case (@($script:LaunchJobRows).Count -eq @($template.Jobs).Count) 'Every catalog job must be listed.'
+    Assert-Case ($script:PrepareJobName -eq 'WorkplaceEvidence-Prepare' -and $script:Controls.RequestPrepareButton.IsEnabled) 'Request Prepare is enabled when Prepare is in the published configuration.'
+    $script:RequestSubmitBusy = $true; Update-GuiPrepareRequestButton
+    Assert-Case (-not $script:Controls.RequestPrepareButton.IsEnabled) 'Request Prepare is disabled while a request is submitted.'
+    $script:RequestSubmitBusy = $false; Update-GuiPrepareRequestButton
     $visibleLaunches = @($template.Launches | Where-Object { -not ($_.PSObject.Properties['HideInGui'] -and $_.HideInGui) })
     Assert-Case (@($script:ManualLaunchRows).Count -eq $visibleLaunches.Count -and $visibleLaunches.Count -lt @($template.Launches).Count) 'Every visible manual entry must be listed separately.'
     Assert-Case (@($script:ManualLaunchRows | Where-Object { $_.Name -like 'Orchestrator-*' -or $_.Name -like '*-Installer' }).Count -eq 0) 'Orchestrator entries and installers must stay out of the GUI.'
@@ -135,6 +142,8 @@ try {
     $script:Controls.IncludeDependenciesCheck.IsChecked = $false
     [void](Request-SelectedJobRun -SkipConfirmation -JobName 'AD-Inventory' -IncludeDependencies $true)
     Assert-Case ($script:RequestCalls.Count -eq 1 -and $script:RequestCalls[0].Jobs[0] -eq 'AD-Inventory' -and $script:RequestCalls[0].Dependencies -and $script:RequestCalls[0].Tenant -eq 'demo') 'Request must submit the selected job with its dependency choice.'
+    $prepareClick = $ast.Find({ param($node) $node -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $node.Expression.Extent.Text -eq '$script:Controls.RequestPrepareButton' -and $node.Member.Extent.Text -eq 'Add_Click' }, $true)
+    Assert-Case ($null -ne $prepareClick -and $prepareClick.Extent.Text -match 'Request-SelectedJobRun -JobName \$script:PrepareJobName -IncludeDependencies \$false') 'Request Prepare must request Prepare alone, without its dependencies.'
 
     # Console start: arguments with spaces reach the script (hidden window, fictional script).
     $probe = Join-Path $root 'Probe Folder\SmartM365-Fixture-Probe.ps1'
@@ -144,6 +153,29 @@ try {
     $process = Start-GuiConsoleProcess -Runtime WindowsPowerShell -ScriptPath $probe -Arguments @('-Value', 'two words "quoted"', '-Marker', $marker) -WindowStyle Hidden
     if (-not $process.WaitForExit(60000)) { throw 'Console probe did not exit.' }
     Assert-Case ((Get-Content -LiteralPath $marker -Raw) -eq 'two words "quoted"|Desktop') 'The console must receive the exact arguments with the requested runtime.'
+
+    # Send summary: hidden process, wait window, result from the exit code (fictional script).
+    $script:Results = [Collections.Generic.List[object]]::new()
+    function Show-GuiJobRunRequestResult { param($Message, $Title, $Icon) $script:Results.Add([pscustomobject]@{ Message = $Message; Title = $Title; Icon = $Icon }) }
+    $script:SendSummaryRun = $null; $script:SendSummaryTimeoutMinutes = 10
+    $summaryAction = Get-GuiOrchestratorActionCommand -Action SendSummary
+    Assert-Case ($summaryAction.Arguments -contains '-SendExecutionSummary') 'Send summary runs the orchestrator with -SendExecutionSummary.'
+    foreach ($case in @(@{ Code = 0; Icon = 'Information' }, @{ Code = 3; Icon = 'Error' })) {
+        $fixture = Join-Path $root ('Send summary {0}.ps1' -f $case.Code)
+        [IO.File]::WriteAllText($fixture, ('Start-Sleep -Milliseconds 300; exit {0}' -f $case.Code), [Text.UTF8Encoding]::new($false))
+        Start-GuiSendSummary -Command ([pscustomobject]@{ ScriptPath = $fixture; Arguments = @() })
+        $run = $script:SendSummaryRun
+        Assert-Case ($null -ne $run -and $run.Dialog.IsVisible -and -not $script:Controls.SendSummaryButton.IsEnabled) 'Send summary shows the wait window and disables its button.'
+        Assert-Case ($run.Dialog.FindName('WaitTitleText').Text -eq 'Send summary') 'The wait window is titled Send summary.'
+        Receive-GuiSendSummary
+        Assert-Case ($null -ne $script:SendSummaryRun -and $script:Results.Count -eq 0) 'The wait window stays while the process runs.'
+        if (-not $run.Process.WaitForExit(60000)) { throw 'Send summary fixture did not exit.' }
+        Receive-GuiSendSummary
+        $result = $script:Results[$script:Results.Count - 1]
+        Assert-Case ($null -eq $script:SendSummaryRun -and -not $run.Dialog.IsVisible -and $script:Controls.SendSummaryButton.IsEnabled) 'The wait window closes and the button returns when the process ends.'
+        Assert-Case ($result.Icon -eq $case.Icon -and $result.Title -eq 'Send summary') "Exit code $($case.Code) gives a $($case.Icon) result."
+        $script:Results.Clear()
+    }
 
     # GUI shortcut of the scheduled task installer: hidden PowerShell 7, minimized, no console window.
     $installerAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $folder 'Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1'), [ref]$null, [ref]$null)

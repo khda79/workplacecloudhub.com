@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.4
+1.4.5
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -413,6 +413,10 @@ function Invoke-OrchestratorDemoAction {
             $d.Sequence++
             $d.Requests=@([pscustomobject]@{BatchId=('DEMO-REQUEST-{0:000}' -f $d.Sequence);Selection='Selected';Created='2026-10-18 09:30';Status='Pending';Jobs=1;Pending=1;Failed=0;Cancelled=0;RequestedBy='demo.operator@contoso.example';Rows=@([pscustomobject]@{JobName=$job.Name;Status='Pending';OwnerServer=$job.Server;UpdatedAtUtc='2026-10-18 07:30';Detail='Simulated request only.'})})+@($d.Requests)
         }
+        'RequestPrepareButton' {
+            $d.Sequence++
+            $d.Requests=@([pscustomobject]@{BatchId=('DEMO-REQUEST-{0:000}' -f $d.Sequence);Selection='Selected';Created='2026-10-18 09:30';Status='Pending';Jobs=1;Pending=1;Failed=0;Cancelled=0;RequestedBy='demo.operator@contoso.example';Rows=@([pscustomobject]@{JobName='WorkplaceEvidence-Prepare';Status='Pending';OwnerServer=$d.Servers[0].Server;UpdatedAtUtc='2026-10-18 07:30';Detail='Simulated request only.'})})+@($d.Requests)
+        }
         {$_ -in @('CancelRequestButton','CancelAllRequestsButton')} {
             $targets=if($Action -eq 'CancelAllRequestsButton'){@($d.Requests)}else{@($c.RequestsGrid.SelectedItem)}
             foreach($request in $targets){
@@ -526,10 +530,11 @@ function Invoke-OrchestratorDemo {
     $c.RequestsGrid.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$row=$c.RequestsGrid.SelectedItem;$c.RequestJobsGrid.ItemsSource=if($row){@($row.Rows)}else{@()}})
     $c.AssignmentCombo.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$c.PinnedServerCombo.IsEnabled=($c.AssignmentCombo.SelectedItem.Content -eq 'Pinned')})
     $c.ScheduleTypeCombo.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$c.DaysPanel.IsEnabled=($c.ScheduleTypeCombo.SelectedItem.Content -eq 'Weekly')})
-    foreach($name in @('RefreshButton','ValidateButton','RebalanceButton','PublishButton','ApplyJobButton','ApplyServerButton','HistoryRefreshButton','ExportHtmlButton','ExportCsvButton','Failures24hButton','EnableMaintenanceButton','DisableMaintenanceButton','StopRunningJobButton','RequestRunButton','CancelRequestButton','CancelAllRequestsButton','AddServerButton','RemoveServerButton','RollbackButton')){
+    foreach($name in @('RefreshButton','ValidateButton','RebalanceButton','PublishButton','ApplyJobButton','ApplyServerButton','HistoryRefreshButton','ExportHtmlButton','ExportCsvButton','Failures24hButton','EnableMaintenanceButton','DisableMaintenanceButton','StopRunningJobButton','RequestRunButton','RequestPrepareButton','CancelRequestButton','CancelAllRequestsButton','AddServerButton','RemoveServerButton','RollbackButton')){
         $c[$name].Tag=$name
         $c[$name].Add_Click({param($demoControl)try{Invoke-OrchestratorDemoAction -Action ([string]$demoControl.Tag)}catch{Write-OrchestratorDemoActivity $_.Exception.Message}})
     }
+    $c.RequestPrepareButton.IsEnabled=$true
     $c.HistoryGrid.Add_MouseDoubleClick({$c=$script:OrchestratorDemo.Controls;if($c.HistoryGrid.SelectedItem){$c.MainTabs.SelectedIndex=6;Write-OrchestratorDemoActivity ('Sample log: '+$c.HistoryGrid.SelectedItem.LogPath)}})
     $c.OperationsMailsGrid.Add_MouseDoubleClick({Write-OrchestratorDemoActivity 'Sample mail: Contoso inventory completed successfully. No email was sent.'})
     foreach($name in @('EventsServerCombo','EventsLevelCombo','EventsCategoryCombo','EventsPeriodCombo')){$c[$name].Add_SelectionChanged({Update-OrchestratorDemoEvents})}
