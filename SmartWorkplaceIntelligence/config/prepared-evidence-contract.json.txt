@@ -2024,6 +2024,248 @@
       ]
     },
     {
+      "table": "Email Client Usage Evidence",
+      "file": "EmailClientUsageEvidence.csv",
+      "uniqueKey": ["Client"],
+      "columns": [
+        {
+          "name": "Client",
+          "type": "string"
+        },
+        {
+          "name": "Client Family",
+          "type": "string"
+        },
+        {
+          "name": "Legacy Protocol",
+          "type": "string"
+        },
+        {
+          "name": "Users",
+          "type": "int64"
+        },
+        {
+          "name": "Email Client Users",
+          "type": "int64"
+        },
+        {
+          "name": "User Share (%)",
+          "type": "double"
+        },
+        {
+          "name": "Report Period Days",
+          "type": "int64"
+        },
+        {
+          "name": "Usage Refresh Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Freshness State",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "OneDrive Activity Evidence",
+      "file": "OneDriveActivityEvidence.csv",
+      "uniqueKey": ["Metric"],
+      "columns": [
+        {
+          "name": "Metric",
+          "type": "string"
+        },
+        {
+          "name": "Users",
+          "type": "int64"
+        },
+        {
+          "name": "Files",
+          "type": "int64"
+        },
+        {
+          "name": "Population Users",
+          "type": "int64"
+        },
+        {
+          "name": "User Rate (%)",
+          "type": "double"
+        },
+        {
+          "name": "Report Period Days",
+          "type": "int64"
+        },
+        {
+          "name": "Usage Refresh Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Freshness State",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Group Activity Evidence",
+      "file": "GroupActivityEvidence.csv",
+      "uniqueKey": ["Group ID"],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "Group ID",
+          "type": "string"
+        },
+        {
+          "name": "Group Name",
+          "type": "string"
+        },
+        {
+          "name": "Group Type",
+          "type": "string"
+        },
+        {
+          "name": "Teams State",
+          "type": "string"
+        },
+        {
+          "name": "Activity State",
+          "type": "string"
+        },
+        {
+          "name": "Days Since Last Activity",
+          "type": "int64"
+        },
+        {
+          "name": "Last Activity Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Owner State",
+          "type": "string"
+        },
+        {
+          "name": "Member Count",
+          "type": "int64"
+        },
+        {
+          "name": "External Member Count",
+          "type": "int64"
+        },
+        {
+          "name": "External Access State",
+          "type": "string"
+        },
+        {
+          "name": "Received Email Count",
+          "type": "int64"
+        },
+        {
+          "name": "SharePoint Active File Count",
+          "type": "int64"
+        },
+        {
+          "name": "Viva Engage Posted Message Count",
+          "type": "int64"
+        },
+        {
+          "name": "Storage Used GB",
+          "type": "double"
+        },
+        {
+          "name": "Risk Priority",
+          "type": "string"
+        },
+        {
+          "name": "Risk Signal",
+          "type": "string"
+        },
+        {
+          "name": "Recommended Action",
+          "type": "string"
+        },
+        {
+          "name": "Snapshot Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "table": "Copilot Daily Adoption Evidence",
+      "file": "CopilotDailyAdoptionEvidence.csv",
+      "uniqueKey": ["Date Key", "App"],
+      "allowEmpty": true,
+      "columns": [
+        {
+          "name": "Report Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Date Key",
+          "type": "int64"
+        },
+        {
+          "name": "App",
+          "type": "string"
+        },
+        {
+          "name": "Enabled Users",
+          "type": "int64"
+        },
+        {
+          "name": "Active Users",
+          "type": "int64"
+        },
+        {
+          "name": "Active User Rate (%)",
+          "type": "double"
+        },
+        {
+          "name": "Prompts Submitted",
+          "type": "int64"
+        },
+        {
+          "name": "Report Version",
+          "type": "string"
+        },
+        {
+          "name": "Usage Refresh Date",
+          "type": "dateTime"
+        },
+        {
+          "name": "Evidence Age Days",
+          "type": "int64"
+        },
+        {
+          "name": "Freshness State",
+          "type": "string"
+        },
+        {
+          "name": "Evidence Status",
+          "type": "string"
+        }
+      ]
+    },
+    {
       "table": "Content Storage Evidence",
       "file": "ContentStorageEvidence.csv",
       "uniqueKey": [],

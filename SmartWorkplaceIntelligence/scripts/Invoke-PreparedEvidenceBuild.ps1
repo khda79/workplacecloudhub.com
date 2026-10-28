@@ -1,4 +1,4 @@
-# Version 1.7.0: hybrid identity findings and device readiness gap facts; earlier: Office activation warning threshold.
+# Version 1.8.0: optional Microsoft 365 usage signals (email clients, OneDrive activity, groups, Copilot daily); earlier: hybrid identity findings and device readiness gap facts.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DataRoot,
@@ -117,6 +117,7 @@ Add-Task 'WindowsMigration' 'Devices' 'New-WindowsMigrationEvidence.ps1' (@('-Da
 Add-Task 'DeviceLifecycle' 'Devices' 'New-DeviceLifecycleExperienceTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-WindowsOutputPath',(OutPath 'WindowsLifecycleTrendEvidence'),'-EndpointOutputPath',(OutPath 'EndpointExperienceTrendEvidence'))
 Add-Task 'Applications' 'Applications' 'New-ApplicationInventoryEvidence.ps1' @('-DataRoot',$DataRoot,'-InventoryOutputPath',(OutPath 'ApplicationInventoryEvidence'),'-TrendOutputPath',(OutPath 'ApplicationTrendEvidence'))
 Add-Task 'Collaboration' 'Collaboration' 'New-CollaborationEvidence.ps1' (@('-DataRoot',$DataRoot,'-AdoptionOutputPath',(OutPath 'CollaborationAdoptionEvidence'),'-ObjectOutputPath',(OutPath 'CollaborationObjectEvidence'),'-TrendOutputPath',(OutPath 'CollaborationTrendEvidence'))+$clockArgs)
+Add-Task 'M365UsageSignals' 'Collaboration' 'New-M365UsageSignalsEvidence.ps1' (@('-DataRoot',$DataRoot,'-EmailClientOutputPath',(OutPath 'EmailClientUsageEvidence'),'-OneDriveActivityOutputPath',(OutPath 'OneDriveActivityEvidence'),'-GroupActivityOutputPath',(OutPath 'GroupActivityEvidence'),'-CopilotDailyOutputPath',(OutPath 'CopilotDailyAdoptionEvidence'))+$clockArgs)
 Add-Task 'Content' 'Content' 'New-ContentStorageEvidence.ps1' (@('-DataRoot',$DataRoot,'-ObjectOutputPath',(OutPath 'ContentStorageEvidence'),'-TrendOutputPath',(OutPath 'ContentStorageTrendEvidence'))+$clockArgs)
 Add-Task 'Mailbox' 'Mailbox' 'New-MailboxEvidence.ps1' @('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-OutputPath',(OutPath 'MailboxEvidence')) -DependsOn 'Workforce'
 $hybridArgs=@('-DataRoot',$last,'-UserEvidencePath',(OutPath 'UserInventoryEvidence'),'-OutputPath',(OutPath 'HybridIdentityFindings'))
@@ -186,7 +187,7 @@ if ($MaxParallelGenerators -le 1) {
 } else {
     # Parallel: ready tasks start in the order below (critical path and longest generators first);
     # each runs in its own child process and its log is printed in one block when it completes.
-    $priority = @('DeviceInventory','Workforce','Native','IntuneOperations','Applications','DeviceLifecycle','Estate','Trust','Mailbox','HybridIdentity','Security','WindowsMigration','EndpointProtection','Executive','Backup','Collaboration','Content','DailyTrends')
+    $priority = @('DeviceInventory','Workforce','Native','IntuneOperations','Applications','DeviceLifecycle','Estate','Trust','Mailbox','HybridIdentity','Security','WindowsMigration','EndpointProtection','Executive','Backup','Collaboration','M365UsageSignals','Content','DailyTrends')
     $taskIds = @($script:tasks.Id)
     $pending = [Collections.Generic.List[object]]::new()
     foreach ($id in $priority) { foreach ($task in $script:tasks) { if ($task.Id -ceq $id) { $pending.Add($task) } } }

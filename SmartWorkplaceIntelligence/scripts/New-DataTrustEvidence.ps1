@@ -1,4 +1,4 @@
-# Version 1.2.0: qualified device identity conflicts remain usable with explicit warnings.
+# Version 1.3.0: optional Microsoft 365 usage reports are reported Not collected instead of Blocked; 1.2.0: qualified device identity conflicts remain usable with explicit warnings.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -29,7 +29,9 @@ function New-SourceDefinition {
         [string[]]$ExpectedColumns,
         [string[]]$SnapshotColumns = @(),
         [bool]$EmptyAllowed = $false,
-        [int]$AcquisitionWarningAgeHours = 0
+        [int]$AcquisitionWarningAgeHours = 0,
+        # An optional source that is absent or empty is not collected, never Blocked.
+        [bool]$Optional = $false
     )
 
     [pscustomobject]@{
@@ -40,6 +42,7 @@ function New-SourceDefinition {
         SnapshotColumns = $SnapshotColumns
         EmptyAllowed = $EmptyAllowed
         AcquisitionWarningAgeHours = $AcquisitionWarningAgeHours
+        Optional = $Optional
     }
 }
 
@@ -73,6 +76,10 @@ $sources = @(
     New-SourceDefinition 'Content' 'SharePoint user activity' 'M365_SharePoint_UserActivity.csv' @('User Principal Name', 'Report Refresh Date') @('Report Refresh Date')
     New-SourceDefinition 'Content' 'OneDrive usage' 'M365_OneDrive_Usage.csv' @('Site Id', 'Report Refresh Date') @('Report Refresh Date')
     New-SourceDefinition 'Collaboration' 'Copilot user usage' 'M365_Copilot_UserUsage.csv' @('UserPrincipalName', 'ReportRefreshDate') @('ReportRefreshDate')
+    New-SourceDefinition 'Collaboration' 'Copilot user count trend' 'M365_Copilot_UserCountTrend.csv' @('ReportDate', 'ReportRefreshDate') @('ReportRefreshDate') -Optional $true
+    New-SourceDefinition 'Collaboration' 'Microsoft 365 groups activity' 'M365_Groups_Activity.csv' @('Group Id', 'Report Refresh Date') @('Report Refresh Date') -Optional $true
+    New-SourceDefinition 'Content' 'OneDrive user activity' 'M365_OneDrive_UserActivity.csv' @('User Principal Name', 'Report Refresh Date') @('Report Refresh Date') -Optional $true
+    New-SourceDefinition 'Messaging' 'Email client usage' 'M365_Email_AppUsage.csv' @('User Principal Name', 'Report Refresh Date') @('Report Refresh Date') -Optional $true
     New-SourceDefinition 'Identity' 'M365 user activity' 'M365_Users_Activity.csv' @('UserPrincipalName', 'ReportRefreshDate') @('ReportRefreshDate')
     New-SourceDefinition 'Identity' 'AD user inventory' 'AD_Users_AllDomains.csv' @('DistinguishedName', 'SamAccountName')
     New-SourceDefinition 'Identity' 'AD duplicate UPN findings' 'AD_Users_DuplicateUPN.csv' @('UserPrincipalName') @() $true
@@ -166,6 +173,14 @@ foreach ($source in $sources) {
             $freshnessState = 'Aging'
             if ($decisionReadiness -eq 'Ready') { $recommendedAction = 'Check the source producer: recent runs kept the previous export, so dependent states use its older report date.' }
         }
+    }
+
+    if ($source.Optional -and -not $readError -and (-not $fileExists -or $rows.Count -eq 0)) {
+        # Not yet collected, or kept empty by Microsoft: dependent views show Not collected, preparation continues.
+        $freshnessState = 'Unknown'
+        $decisionReadiness = 'Optional unavailable'
+        $evidenceStatus = 'Not collected'
+        $recommendedAction = 'Collect this optional usage report; dependent views show Not collected until it is available. Other evidence is not blocked.'
     }
 
     if ($source.FileName -eq 'AD_HealthCheck.csv') {

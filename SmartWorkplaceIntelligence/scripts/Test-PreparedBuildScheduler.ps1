@@ -1,4 +1,4 @@
-# Version 1.3.0: HybridIdentity generator after Workforce with its own classification checkpoint; 1.2.0: native-stage warning prefix.
+# Version 1.4.0: optional M365 usage signals generator after Collaboration; 1.3.0: HybridIdentity generator after Workforce with its own classification checkpoint; 1.2.0: native-stage warning prefix.
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$TestRoot)
 # Runs the real build dispatcher with simulated generators only; no production preparation.
@@ -32,7 +32,7 @@ Write-Host "stub output $name"
 [IO.File]::WriteAllText((Join-Path $root "$name.end"), [string][datetime]::UtcNow.Ticks)
 if ($control.Fail -eq $name) { exit 3 }
 '@
-$generators = @('New-EnterpriseEstateEvidence','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-HybridIdentityEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
+$generators = @('New-EnterpriseEstateEvidence','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-M365UsageSignalsEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-HybridIdentityEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
 foreach ($name in $generators) { [IO.File]::WriteAllText((Join-Path $scripts ($name + '.ps1')), $stub) }
 [IO.File]::WriteAllText((Join-Path $scripts 'New-MailboxMigrationExceptions.ps1'), $stub)
 [IO.File]::WriteAllText((Join-Path $scripts 'NativeEvidence.psm1'),@'
@@ -53,7 +53,7 @@ Export-ModuleMember -Function Invoke-NativeEvidenceStage
 $valid = '{"SchemaVersion":"1.0","RuleVersion":"SYNTHETIC_DO_NOT_LOG","Population":{"Human":["human-a"],"NonHuman":[]}}'
 $changed = $valid.Replace('human-a','human-b')
 $shell = (Get-Process -Id $PID).Path
-$sequentialOrder = @('New-EnterpriseEstateEvidence','Native','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-HybridIdentityEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
+$sequentialOrder = @('New-EnterpriseEstateEvidence','Native','New-DeviceInventoryEvidence','New-WorkforceIdentityEvidence','New-EndpointProtectionEvidence','New-WindowsMigrationEvidence','New-DeviceLifecycleExperienceTrendEvidence','New-ApplicationInventoryEvidence','New-CollaborationEvidence','New-M365UsageSignalsEvidence','New-ContentStorageEvidence','New-MailboxEvidence','New-HybridIdentityEvidence','New-DailyTrendsEvidence','New-SharePointMigrationEvidence','New-SecurityEvidence','New-BackupResilienceEvidence','New-IntuneOperationalEvidence','New-DataTrustEvidence','New-ExecutiveTrendEvidence')
 $dependencies = @{
     'New-WorkforceIdentityEvidence'=@('New-DeviceInventoryEvidence')
     'New-EndpointProtectionEvidence'=@('New-DeviceInventoryEvidence')
