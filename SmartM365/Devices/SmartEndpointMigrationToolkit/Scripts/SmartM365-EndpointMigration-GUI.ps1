@@ -298,6 +298,35 @@ function Get-InventoryRefreshCommandText {
     return ($lines -join [Environment]::NewLine)
 }
 
+function Get-AutomaticWaveProcessText {
+    <#
+    Hidden process command for Preview/Create: engine stages are written to the log (shown in the
+    waiting window), lines are not wrapped, and an error is logged before the exit code 1.
+    #>
+    param([Parameter(Mandatory = $true)][string]$CommandText,[Parameter(Mandatory = $true)][string]$LogPath)
+
+    $log = ConvertTo-PowerShellLiteral $LogPath
+    return (@(
+        '$ErrorActionPreference = ''Stop'''
+        '$semtProgress = { param($Stage,$Detail) Write-Host (''{0:yyyy-MM-dd HH:mm:ss} STAGE {1} {2}'' -f (Get-Date),$Stage,$Detail) }'
+        ('try {{ & {{ {0} -ProgressCallback $semtProgress }} *>&1 | ForEach-Object {{ [string]$_ }} | Out-File -LiteralPath {1} -Encoding utf8 -Width 8192 }}' -f $CommandText,$log)
+        ('catch {{ (''{{0:yyyy-MM-dd HH:mm:ss}} ERROR {{1}}'' -f (Get-Date),$_.Exception.Message) | Out-File -LiteralPath {0} -Encoding utf8 -Width 8192 -Append; exit 1 }}' -f $log)
+    ) -join [Environment]::NewLine)
+}
+
+function Get-AutomaticWaveLastStage {
+    param([AllowNull()][string]$Text)
+    $line = @(([string]$Text) -split '\r?\n' | Where-Object { $_ -match ' STAGE ' }) | Select-Object -Last 1
+    if (-not $line) { return '' }
+    return ($line -replace '^.*? STAGE ', '').Trim()
+}
+
+function Get-AutomaticWaveResultText {
+    param([Parameter(Mandatory = $true)]$Summary)
+    $filtered = Get-SemtPropertyValue -InputObject $Summary -Name 'FilterExcludedDevices' -Default (Get-SemtPropertyValue -InputObject $Summary -Name 'NameFilterExcludedDevices' -Default 0)
+    return ('Selected: {0}{3}Safety exclusions: {1}{3}Filtered out: {2}' -f (Get-SemtPropertyValue -InputObject $Summary -Name 'SelectedDevices' -Default 0),(Get-SemtPropertyValue -InputObject $Summary -Name 'ExcludedDevices' -Default 0),$filtered,[Environment]::NewLine)
+}
+
 function Get-AutomaticFilterSignature {
     param([Parameter(Mandatory = $true)][string]$Campaign,[Parameter(Mandatory = $true)][hashtable]$Filters)
     return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}' -f $Campaign,$Filters.WaveName,(@($Filters.Prefixes) -join ';'),(@($Filters.Contains) -join ';'),$Filters.ExcludeStaleAd,$Filters.LastLogonDays,$Filters.Source,$Filters.ExcludeIntunePresent,$Filters.AdDomain)
@@ -760,6 +789,15 @@ foreach ($match in [regex]::Matches($xaml, 'x:Name="(?<Name>[A-Za-z][A-Za-z0-9_]
     if ($control) { $controls[$name] = $control }
 }
 $controls.ProductVersionText.Text = 'v{0}' -f $script:GuiVersion
+# Use the full height of the screen work area; never ask for more than the screen can show.
+$workArea = [System.Windows.SystemParameters]::WorkArea
+$window.MinHeight = [Math]::Min($window.MinHeight, $workArea.Height)
+$window.MinWidth = [Math]::Min($window.MinWidth, $workArea.Width)
+$window.Height = $workArea.Height
+$window.Width = [Math]::Min($window.Width, $workArea.Width)
+$window.WindowStartupLocation = [System.Windows.WindowStartupLocation]::Manual
+$window.Top = $workArea.Top
+$window.Left = $workArea.Left + (($workArea.Width - $window.Width) / 2)
 
 $iconPath = Join-Path $script:PackageRoot 'Assets\WorkplaceCloudHub.ico'
 if (Test-Path -LiteralPath $iconPath -PathType Leaf) { try { $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]$iconPath) } catch { } }
@@ -1108,46 +1146,90 @@ function Invoke-AutomaticWave {
     $evidence = Join-Path $script:PackageRoot ("Runs\{0}\_AutomaticWave\{1}" -f $campaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
     New-SemtDirectory -Path $evidence
     $commandText = Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot $evidence -Create:$Create
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(("`$ErrorActionPreference='Stop'; {0} *> '{1}'" -f $commandText,(Join-Path $evidence 'GuiAutomaticWave.log').Replace("'","''"))))
+    $logFile = Join-Path $evidence 'GuiAutomaticWave.log'
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-AutomaticWaveProcessText -CommandText $commandText -LogPath $logFile)))
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $script:AutomaticProcess = Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru
+    $null = $script:AutomaticProcess.Handle  # keeps ExitCode readable after the process exits
     $controls.AutomaticPreviewButton.IsEnabled = $false
     $controls.AutomaticCreateButton.IsEnabled = $false
     $controls.AutomaticEvidencePathText.Text = $evidence
     $controls.AutomaticSummaryText.Text = if ($Create) { 'Creating the Wave...' } else { 'Previewing the selection...' }
     Add-Status -Title 'Automatic Wave' -Message $controls.AutomaticSummaryText.Text
-    $state = [pscustomobject]@{ Create = [bool]$Create; Evidence = $evidence; Signature = $signature; WaveName = $filters.WaveName }
+    $wait = Show-AutomaticWaveWait -Create:$Create -WaveName $filters.WaveName
+    $state = [pscustomobject]@{ Create = [bool]$Create; Evidence = $evidence; LogFile = $logFile; Signature = $signature; WaveName = $filters.WaveName; Wait = $wait; Started = Get-Date }
     $script:AutomaticTimer = New-Object System.Windows.Threading.DispatcherTimer
     $script:AutomaticTimer.Interval = [TimeSpan]::FromSeconds(1)
     $script:AutomaticTimer.Tag = $state
     $script:AutomaticTimer.Add_Tick({
         param($eventSource,$routedEventArgs)
-        if (-not $script:AutomaticProcess.HasExited) { return }
-        $eventSource.Stop()
         $info = $eventSource.Tag
+        if (-not $script:AutomaticProcess.HasExited) {
+            $stage = Get-AutomaticWaveLastStage -Text (Read-InventoryRefreshLog -Path $info.LogFile -Current '')
+            $info.Wait.StageText.Text = ('{0}  ({1:mm\:ss})' -f $(if ($stage) { $stage } else { 'Starting...' }),((Get-Date) - $info.Started))
+            return
+        }
+        $eventSource.Stop()
+        $info.Wait.Window.Tag = 'Done'
+        $info.Wait.Window.Close()
         $controls.AutomaticPreviewButton.IsEnabled = $true
         $summaryFile = Get-ChildItem -LiteralPath $info.Evidence -Filter 'AutomaticWaveSummary.json' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        $logFile = Join-Path $info.Evidence 'GuiAutomaticWave.log'
-        $logText = if (Test-Path -LiteralPath $logFile) { (Get-Content -LiteralPath $logFile -Raw -ErrorAction SilentlyContinue) } else { '' }
+        $logText = Read-InventoryRefreshLog -Path $info.LogFile -Current ''
         if ($script:AutomaticProcess.ExitCode -ne 0 -or -not $summaryFile) {
             $controls.AutomaticSummaryText.Text = ('Automatic Wave failed (exit code {0}).{1}{2}' -f $script:AutomaticProcess.ExitCode,[Environment]::NewLine,$logText)
-            Add-Status -Title 'Automatic Wave failed' -Message ('See {0}' -f $logFile)
+            Add-Status -Title 'Automatic Wave failed' -Message ('See {0}' -f $info.LogFile)
+            $lastLines = (@($logText -split '\r?\n' | Where-Object { $_.Trim() }) | Select-Object -Last 6) -join [Environment]::NewLine
+            Show-GuiError ('{0} failed (exit code {1}).{2}{2}{3}{2}{2}Log: {4}' -f $(if ($info.Create) { 'Create Wave' } else { 'Preview' }),$script:AutomaticProcess.ExitCode,[Environment]::NewLine,$lastLines,$info.LogFile)
             return
         }
         $summary = Get-Content -LiteralPath $summaryFile.FullName -Raw | ConvertFrom-Json
         $controls.AutomaticSummaryText.Text = ($summary | ConvertTo-Json -Depth 6)
+        $counts = Get-AutomaticWaveResultText -Summary $summary
         if ($info.Create) {
             Add-Status -Title 'Wave created' -Message ("Wave '{0}' created from the automatic selection. It was not launched." -f $info.WaveName)
             Update-WaveList -SelectName $info.WaveName
             Update-AutomaticView
+            [void][System.Windows.MessageBox]::Show($window, ("Wave '{0}' was created.{1}{1}{2}{1}{1}The Wave was NOT launched." -f $info.WaveName,[Environment]::NewLine,$counts), 'Create Wave', 'OK', 'Information')
         }
         else {
             $script:AutomaticPreviewSignature = $info.Signature
             $controls.AutomaticCreateButton.IsEnabled = $true
             Add-Status -Title 'Preview ready' -Message 'Review the selection, then Create the Wave or change the filters.'
+            [void][System.Windows.MessageBox]::Show($window, ("Preview ready.{0}{0}{1}{0}{0}Review the selection and its evidence, then click Create Wave, or change the filters and run Preview again." -f [Environment]::NewLine,$counts), 'Preview', 'OK', 'Information')
         }
     })
     $script:AutomaticTimer.Start()
+}
+
+$automaticWaitXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Automatic Wave" Width="520" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" WindowStyle="ToolWindow">
+    <StackPanel Margin="18">
+        <TextBlock x:Name="AutomaticWaitTitleText" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"/>
+        <TextBlock x:Name="AutomaticWaitHintText" Margin="0,6,0,12" TextWrapping="Wrap" Foreground="#5A6B7B"/>
+        <ProgressBar IsIndeterminate="True" Height="10"/>
+        <TextBlock x:Name="AutomaticWaitStageText" Margin="0,10,0,0" TextWrapping="Wrap"/>
+    </StackPanel>
+</Window>
+'@
+
+function Show-AutomaticWaveWait {
+    <#
+    Non-modal waiting window shown while the Automatic Wave engine runs; it cannot be closed by the
+    operator and is closed when the engine ends.
+    #>
+    param([switch]$Create,[string]$WaveName)
+
+    $wait = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new($automaticWaitXaml)))
+    $wait.Owner = $window
+    $wait.FindName('AutomaticWaitTitleText').Text = if ($Create) { "Creating Wave '{0}'..." -f $WaveName } else { 'Previewing the selection...' }
+    $wait.FindName('AutomaticWaitHintText').Text = 'Please wait: the inventories are read and the selection rules applied. This can take a few minutes with a large forest. Nothing is launched.'
+    $wait.FindName('AutomaticWaitStageText').Text = 'Starting...'
+    $wait.Add_Closing({ param($eventSource,$cancelEventArgs) if ([string]$eventSource.Tag -ne 'Done' -and -not $script:GuiClosing) { $cancelEventArgs.Cancel = $true } })
+    $wait.Show()
+    return [pscustomobject]@{ Window = $wait; StageText = $wait.FindName('AutomaticWaitStageText') }
 }
 
 $inventoryRefreshXaml = @'
@@ -1215,6 +1297,21 @@ function Update-InventoryRefreshWindow {
     if ($failed.Count -eq 0) { $state.StateText.Text = ('Finished at {0:HH:mm:ss}. The shared inventories were refreshed.' -f (Get-Date)); Add-Status -Title 'Inventories refreshed' -Message 'Shared inventory refresh finished.' }
     else { $state.StateText.Text = ('Finished at {0:HH:mm:ss} with errors: {1}. Review the output below.' -f (Get-Date),($failed -join ', ')); Add-Status -Title 'Inventory refresh failed' -Message ('{0}. See {1}' -f ($failed -join ', '),$state.Evidence) }
     try { Update-AutomaticView } catch { }
+    # End message; the output window closes, unless the operator keeps it open to review errors.
+    $owner = if ($state.Window.IsVisible) { $state.Window } else { $window }
+    $titles = (@($state.Streams) | ForEach-Object { $_.Title }) -join ', '
+    if ($failed.Count -eq 0) {
+        [void](Show-InventoryRefreshMessage -Owner $owner -Message ("The shared inventories are refreshed: {0}.`n`nLogs: {1}" -f $titles,$state.Evidence) -Buttons 'OK' -Icon 'Information')
+        $state.Window.Close()
+    }
+    elseif ((Show-InventoryRefreshMessage -Owner $owner -Message ("The inventory refresh finished with errors: {0}.`n`nClose the output window? Choose No to keep it open and review the errors.`n`nLogs: {1}" -f ($failed -join ', '),$state.Evidence) -Buttons 'YesNo' -Icon 'Warning') -eq [System.Windows.MessageBoxResult]::Yes) {
+        $state.Window.Close()
+    }
+}
+
+function Show-InventoryRefreshMessage {
+    param([Parameter(Mandatory = $true)]$Owner,[Parameter(Mandatory = $true)][string]$Message,[string]$Buttons = 'OK',[string]$Icon = 'Information')
+    return [System.Windows.MessageBox]::Show($Owner, $Message, 'Refresh shared inventories', $Buttons, $Icon)
 }
 
 function Stop-InventoryRefresh {
@@ -1236,6 +1333,7 @@ function Start-InventoryRefresh {
     $popup = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new($inventoryRefreshXaml)))
     $popup.Owner = $window
     if ($window.Icon) { $popup.Icon = $window.Icon }
+    $popup.Height = [Math]::Max([Math]::Min($popup.MinHeight, [System.Windows.SystemParameters]::WorkArea.Height), [System.Windows.SystemParameters]::WorkArea.Height * 0.9)
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $streams = foreach ($item in @(Get-InventoryRefreshPlan -Campaign $script:CurrentCampaign)) {
         $logPath = Join-Path $evidence ('InventoryRefresh-{0}.log' -f $item.Name)

@@ -64,12 +64,13 @@ try {
     foreach ($name in @('CampaignCombo','WaveCombo','WaveModeCombo','LaunchWaveButton','LaunchAllButton','StopAllButton','SingleComputerText','LaunchSingleButton','NewWaveNameText','CreateWaveButton','AutomaticPreviewButton','AutomaticCreateButton','AutomaticRefreshInventoryButton','RunsGrid','OpenRunReportButton','StopSelectedRunButton','ForceStopSelectedRunButton','OptionsHost','ResetOptionsButton','HeaderLogoImage')) {
         Write-TestResult -Condition ($xaml -match ('x:Name="{0}"' -f $name)) -Message ("control present: {0}" -f $name)
     }
+    Test-Step 'main window uses the full height of the screen work area and fits on small screens' { $sizeText = [IO.File]::ReadAllText($guiPath); $sizeText -match '\$window\.Height = \$workArea\.Height' -and $sizeText -match '\$window\.MinHeight = \[Math\]::Min\(\$window\.MinHeight, \$workArea\.Height\)' -and $sizeText -match '\$window\.Top = \$workArea\.Top' }
     Test-Step 'no Batch/LOT wording in the interface' { $xaml -notmatch '\b(LOT|LOTs|Lot|Batch|batch)\b' }
     Test-Step 'Preview and Create are separate controls; Create states it never launches' { $xaml -match 'AutomaticPreviewButton' -and $xaml -match 'never launches the Wave' }
     Test-Step 'Launch All is labelled as limited to the selected Campaign in its confirmation' { [IO.File]::ReadAllText($guiPath) -match 'Launch All Waves of this Campaign only' }
     Test-Step 'stop states remote endpoints are reported separately' { [IO.File]::ReadAllText($guiPath) -match 'Remote endpoints may continue and must be verified' }
     $guiText = [IO.File]::ReadAllText($guiPath)
-    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile','Get-InventoryRefreshCommandText','Get-AdInventoryDomains','Get-InventoryRefreshPlan')) {
+    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile','Get-InventoryRefreshCommandText','Get-AdInventoryDomains','Get-InventoryRefreshPlan','Get-AutomaticWaveProcessText','Get-AutomaticWaveLastStage','Get-AutomaticWaveResultText')) {
         $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
         . ([scriptblock]::Create($definition.Extent.Text))
     }
@@ -132,6 +133,8 @@ try {
         foreach ($argument in @($export.Arguments)) { if ($exportParameters -notcontains $argument.TrimStart('-')) { '{0} has no {1}' -f $export.Script,$argument } }
     }
     Test-Step 'every planned export exists and accepts its arguments' { @($planProblems).Count -eq 0 }
+    $refreshEnd = [string]($ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Update-InventoryRefreshWindow' }, $true).Extent.Text)
+    Test-Step 'inventory refresh ends with a message, then closes the window (errors: the operator may keep it open)' { $refreshEnd -match "Show-InventoryRefreshMessage[^\r\n]*-Buttons 'OK' -Icon 'Information'" -and $refreshEnd -match "-Buttons 'YesNo' -Icon 'Warning'" -and ([regex]::Matches($refreshEnd, '\$state\.Window\.Close\(\)')).Count -eq 2 }
     Test-Step 'every stream has its state and output areas in the window (case-sensitive names for FindName)' { foreach ($item in $hjPlan) { if ($refreshXaml -cnotmatch ('x:Name="InventoryRefresh{0}(Output|State)Text"' -f $item.Name)) { return $false } }; $true }
     $domainCsv = Join-Path $tempRoot 'DomainInventory.csv'
     [IO.File]::WriteAllText($domainCsv, ("ComputerName,ADDomain,DistinguishedName`r`nPC1,FR.example,""CN=PC1,DC=fr,DC=example""`r`nPC2,fr.example.,""CN=PC2,DC=fr""`r`nPC3,be.example,""x, y""`r`nPC4,,`r`n"), [Text.UTF8Encoding]::new($true))
@@ -139,6 +142,31 @@ try {
     Set-Content -LiteralPath $domainCsv -Value 'ComputerName,Enabled' -Encoding ASCII
     Test-Step 'AD domain list is empty without the ADDomain column or the file' { @(Get-AdInventoryDomains -Path $domainCsv).Count -eq 0 -and @(Get-AdInventoryDomains -Path (Join-Path $tempRoot 'missing.csv')).Count -eq 0 }
     Test-Step 'Automatic Wave view offers the AD domain choice' { $xaml -match 'x:Name="AutomaticAdDomainCombo"' -and $guiText -match "AllAdDomainsLabel = '\(All domains\)'" }
+    # Preview/Create: the real engine in a hidden process, as started by the GUI (fictional inventories).
+    $waitWindow = [string]$ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$automaticWaitXaml' }, $true).Right.Expression.Value
+    Test-Step 'Preview and Create show a waiting window with progress and the engine stage' { $waitWindow -match 'IsIndeterminate="True"' -and $waitWindow -match 'x:Name="AutomaticWaitStageText"' -and $guiText -match 'Show-AutomaticWaveWait -Create:\$Create' }
+    Test-Step 'Preview and Create end with a message (counts; Create states the Wave is not launched)' { $guiText -match "'Preview', 'OK', 'Information'" -and $guiText -match "The Wave was NOT launched\." -and $guiText -match "'Create Wave', 'OK', 'Information'" }
+    $powershell51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $runPreview = {
+        param([string]$Name)
+        $evidenceRoot = Join-Path $tempRoot ("AutoEvidence-{0}" -f $Name)
+        New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
+        $logPath = Join-Path $evidenceRoot 'GuiAutomaticWave.log'
+        $command = Get-AutomaticWaveCommandText -Campaign HybridJoin -Filters @{ WaveName = 'WAVE-AUTO-HJ-GUI'; Prefixes = @(); Contains = @(); ExcludeStaleAd = $false; LastLogonDays = 45; Source = 'Both'; ExcludeIntunePresent = $false; AdDomain = '' } -EvidenceRoot $evidenceRoot
+        $process = Start-Process -FilePath $powershell51 -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-AutomaticWaveProcessText -CommandText $command -LogPath $logPath)))) -WindowStyle Hidden -PassThru -Wait
+        [pscustomobject]@{ ExitCode = $process.ExitCode; Log = $(if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath -Raw } else { '' }); Summary = @(Get-ChildItem -LiteralPath $evidenceRoot -Filter 'AutomaticWaveSummary.json' -File -Recurse) }
+    }
+    $missing = & $runPreview 'Missing'
+    Test-Step 'Preview without inventory fails with exit code 1 and the error in the log' { $missing.ExitCode -eq 1 -and $missing.Log -match '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ERROR Required automatic Wave inventory not found' -and $missing.Summary.Count -eq 0 }
+    $inventoryRoot = Join-Path $packageRoot 'Inventory'
+    New-Item -ItemType Directory -Path $inventoryRoot -Force | Out-Null
+    [pscustomobject]@{ ComputerName = 'GUI-PC01'; Name = 'GUI-PC01'; ADInventoryPresent = $true; ADDomain = 'contoso.test'; Enabled = $true; DNSHostName = 'gui-pc01.contoso.test'; DistinguishedName = 'CN=GUI-PC01,DC=contoso,DC=test'; OperatingSystem = 'Windows 10 Enterprise'; OperatingSystemVersion = '10.0 (19045)'; LastLogonTimestampUtc = (Get-Date).ToUniversalTime().ToString('o') } | Export-Csv -LiteralPath (Join-Path $inventoryRoot 'DevicesAD.csv') -NoTypeInformation -Encoding UTF8
+    [pscustomobject]@{ ComputerName = 'OTHER'; DeviceName = 'OTHER'; IntuneInventoryPresent = $true; IntuneManagedDeviceId = 'x'; LastSyncDateTime = (Get-Date).ToUniversalTime().ToString('o') } | Export-Csv -LiteralPath (Join-Path $inventoryRoot 'DevicesIntune.csv') -NoTypeInformation -Encoding UTF8
+    $ok = & $runPreview 'Ok'
+    Test-Step 'Preview succeeds in the hidden process and writes its summary' { $ok.ExitCode -eq 0 -and $ok.Summary.Count -eq 1 }
+    Test-Step 'engine stages reach the log for the waiting window' { (Get-AutomaticWaveLastStage -Text $ok.Log) -match '^Automatic Wave preview ready\.' -and $ok.Log -match ' STAGE Loading inventory records\.\.\.' }
+    Test-Step 'end message counts read the HybridJoin and Windows 11 summaries' { (Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 3; ExcludedDevices = 2; FilterExcludedDevices = 1 })) -match 'Selected: 3' -and (Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 4; ExcludedDevices = 0; NameFilterExcludedDevices = 7 })) -match 'Filtered out: 7' }
+    Remove-Item -LiteralPath $inventoryRoot -Recurse -Force
     $catalog = Import-SemtOptionCatalog -PackageRoot $packageRoot
     $values = @{ ThrottleLimit = 4; 'Windows11Upgrade.SetupSourcePath' = ''; DryRun = $true }
     $selection = New-GuiSelectionFile -Catalog $catalog -Campaign Windows11Upgrade -Values $values
