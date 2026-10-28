@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline transcript lifecycle and truthful trace-publication status regression tests.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Isolated synthetic Core execution globals in this offline test process.')]
@@ -101,6 +101,7 @@ try {
                     if ($script:Case.RealTranscript) { Microsoft.PowerShell.Host\Stop-Transcript | Out-Null }
                     $script:Closed=$true
                 }
+                function Test-SmartM365SourceReceiptMirrorBlocked { param($Path) $false }
                 function Invoke-SmartM365SharePointCsvUpload {
                     param($LocalFilePath)
                     if (-not $global:EnableSharePointUpload) { return }

@@ -1146,6 +1146,7 @@ function Complete-SmartM365ExecutionContext {
     if ($Status -eq 'Cancelled') { $logUploadCandidates=@() }
     $logUploadStartCount = if ($global:SmartM365SharePointUploadedFiles) { @($global:SmartM365SharePointUploadedFiles).Count } else { 0 }
     foreach ($logUploadCandidate in $logUploadCandidates) {
+        if (Test-SmartM365SourceReceiptMirrorBlocked -Path $logUploadCandidate) { continue }
         Invoke-SmartM365SharePointCsvUpload -LocalFilePath $logUploadCandidate | Out-Null
     }
     $logUploadEndCount = if ($global:SmartM365SharePointUploadedFiles) { @($global:SmartM365SharePointUploadedFiles).Count } else { $logUploadStartCount }
@@ -4037,6 +4038,32 @@ function Get-SmartM365GraphRetryAfterSeconds {
     return [math]::Min([math]::Max(1, $DefaultSeconds), $MaximumSeconds)
 }
 
+# SharePoint maintenance answers 403 serviceReadOnly ("Database Is Read Only") for a few minutes; other 403s are final.
+function Test-SmartM365SharePointReadOnlyError {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$ErrorRecord,
+        [AllowNull()][Nullable[int]]$StatusCode
+    )
+
+    if ($StatusCode -ne 403) { return $false }
+    $details = [string]$ErrorRecord.Exception.Message
+    try {
+        if ($ErrorRecord.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$ErrorRecord.ErrorDetails.Message)) {
+            $details = $details + ' ' + [string]$ErrorRecord.ErrorDetails.Message
+        }
+    }
+    catch {}
+    try {
+        $response = $ErrorRecord.Exception.Response
+        if ($response -is [System.Net.Http.HttpResponseMessage] -and $null -ne $response.Content) {
+            $details = $details + ' ' + $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        }
+    }
+    catch {}
+    return ($details -match '(?i)serviceReadOnly')
+}
+
 function Invoke-SmartM365GraphRestWithRetry {
     [CmdletBinding()]
     param(
@@ -4071,7 +4098,7 @@ function Invoke-SmartM365GraphRestWithRetry {
             $statusCode = $null
             try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch {}
             $message = [string]$_.Exception.Message
-            $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable'
+            $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $message -match 'TooManyRequests|throttl|timeout|temporarily unavailable' -or (Test-SmartM365SharePointReadOnlyError -ErrorRecord $_ -StatusCode $statusCode)
             if (-not $isTransient -or $attempt -ge $MaxAttempts) {
                 $responseBody = $null
                 try {
@@ -4220,7 +4247,7 @@ function Invoke-SmartM365SharePointLargeFileUpload {
                             $responseBody = [string]$_.ErrorDetails.Message
                         }
                     } catch {}
-                    $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $_.Exception.Message -match 'timeout|temporarily unavailable|throttl'
+                    $isTransient = $statusCode -in @(429, 500, 502, 503, 504) -or $_.Exception.Message -match 'timeout|temporarily unavailable|throttl' -or (Test-SmartM365SharePointReadOnlyError -ErrorRecord $_ -StatusCode $statusCode)
                     if (-not $isTransient -or $attempt -ge 4) {
                         $statusText = if ($statusCode) { $statusCode } else { 'unknown' }
                         $rangeText = "bytes {0}-{1}/{2}" -f $offset, $rangeEnd, $fileSize
@@ -4334,6 +4361,7 @@ function Invoke-SmartM365SharePointCsvUpload {
         return
     }
     if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint)) {
+        Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath -Failed
         return
     }
 
@@ -4357,6 +4385,7 @@ function Invoke-SmartM365SharePointCsvUpload {
             if (-not $drive) {
                 $available = ($driveList | ForEach-Object { $_.name }) -join ' | '
                 WriteLog -Message "SharePoint upload skipped: document library '$LibraryDisplayName' not found. Available drives: $available" -Level "WARNING"
+                Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath -Failed
                 return
             }
             $driveId = $drive.id
@@ -4406,6 +4435,7 @@ function Invoke-SmartM365SharePointCsvUpload {
         }
 
         $record = Add-SmartM365SharePointUploadRecord -LocalFilePath $fileInfo.FullName -SharePointPath $sharePointPath -DriveId $driveId -DriveItem $uploadedItem
+        Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath
         if (-not [string]::IsNullOrWhiteSpace($record.WebUrl)) {
             WriteLog -Message ("SharePoint file uploaded: {0} ({1})" -f $record.SharePointPath, $record.WebUrl) -Level "INFO"
         }
@@ -4415,6 +4445,7 @@ function Invoke-SmartM365SharePointCsvUpload {
         return $record
     }
     catch {
+        Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath -Failed
         WriteLog -Message ("SharePoint upload failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
     }
 }

@@ -4,8 +4,10 @@
 Offline checks of the SharePoint upload time limits: a token request, an upload session and a chunk
 that never answer are bounded by their timeout, retried, and a later attempt succeeds; an endpoint
 that stays silent ends with a clear error, and the per-file limit stops the upload with a warning.
+A SharePoint maintenance 403 (serviceReadOnly) is retried while other 403s are final, and a source
+receipt and its run state are not mirrored when a file they reference failed to upload in the run.
 .VERSION
-1.0.0
+1.1.0
 .NOTES
 The silent endpoint is a local TCP listener on the loopback address that accepts connections and never
 answers. Every other Graph and SharePoint call is replaced by recorders. No tenant, Graph, SharePoint,
@@ -19,7 +21,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$core = Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.96' -Force -PassThru
+$core = Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.111' -Force -PassThru
 $script:checks = 0
 function Check { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message }; $script:checks++ }
 
@@ -72,13 +74,20 @@ New-Item -ItemType Directory -Path $dataAll | Out-Null
     function script:Get-SmartM365CertificateByThumbprint { param($Thumbprint) [pscustomobject]@{ Thumbprint = $Thumbprint } }
     function script:New-SmartM365GraphClientAssertion { param($TenantId, $ClientId, $Certificate) 'synthetic.assertion.value' }
     function script:Test-SmartM365InterruptedRun { $false }
+    # Graph error answer with its JSON body, as Invoke-RestMethod raises it.
+    function script:New-SyntheticGraphFailure {
+        param([int]$Status, [string]$Code, [string]$InnerCode)
+        $response = [Net.Http.HttpResponseMessage]::new([Net.HttpStatusCode]$Status)
+        $response.Content = [Net.Http.StringContent]::new((@{ error = @{ code = $Code; message = 'Synthetic'; innerError = @{ code = $InnerCode } } } | ConvertTo-Json -Depth 4))
+        [Microsoft.PowerShell.Commands.HttpResponseException]::new(("Response status code does not indicate success: {0} (Forbidden)." -f $Status), $response)
+    }
 } $silentUri
 function Reset-Recording([scriptblock]$Handler) {
     & $core {
         param($Handler)
         $script:Calls.Clear(); $script:Logs.Clear(); $script:Handler = $Handler
         $script:SmartM365GraphRestTokenCache = @{}; $script:SmartM365SharePointUploadConnectionKey = $null
-        $script:SmartM365SharePointDriveIdCache = @{}; $script:SmartM365NetworkDeadline = $null
+        $script:SmartM365SharePointDriveIdCache = @{}; $script:SmartM365NetworkDeadline = $null; $script:SmartM365SharePointFailedUploads = $null
     } $core.NewBoundScriptBlock($Handler)
 }
 function Get-RecordedCall { & $core { $script:Calls.ToArray() } }
@@ -197,6 +206,92 @@ try {
         @($records | ForEach-Object { Test-SmartM365GraphTransientError -ErrorRecord $_ -StatusCode $null }) -join ','
     }
     Check ($classification -eq 'False,True,True,False') "Transient classification changed: $classification"
+
+    # 7. SharePoint maintenance: a 403 serviceReadOnly is retried and the upload completes; any other 403 is final.
+    $readOnlyFile = New-SyntheticFile 'Synthetic_ReadOnly_20261028_002030.csv' 1024
+    Set-CachedToken
+    & $core {
+        $script:Calls.Clear(); $script:Logs.Clear(); $script:SmartM365SharePointUploadConnectionKey = $null
+        $script:SmartM365SharePointDriveIdCache = @{ 'contoso.test|/sites/synthetic|Documents' = 'drive-1' }
+        $script:Handler = {
+            param($call)
+            if ($call.Uri -like 'https://login.microsoftonline.com/*') { return [pscustomobject]@{ access_token = 'synthetic-token'; expires_in = 3600 } }
+            if ($call.Method -eq 'PUT' -and @($script:Calls | Where-Object Method -eq 'PUT').Count -eq 1) { throw (New-SyntheticGraphFailure -Status 403 -Code 'accessDenied' -InnerCode 'serviceReadOnly') }
+            [pscustomobject]@{ id = 'item-1'; webUrl = 'https://contoso.test/item-1' }
+        }
+    }
+    $record = & $core { param($Path) Invoke-SmartM365SharePointCsvUpload -LocalFilePath $Path } $readOnlyFile
+    Check ($record -and $record.ItemId -eq 'item-1' -and @(Get-RecordedCall | Where-Object Method -eq 'PUT').Count -eq 2) 'A SharePoint serviceReadOnly 403 was not retried to success.'
+    Check (@(Get-RecordedLog | Where-Object { $_.Level -eq 'WARNING' -and $_.Message -match '^Upload SharePoint file transient failure\. Status=403; attempt 1/4' }).Count -eq 1) 'The serviceReadOnly retry is not logged.'
+    $forbidden = & $core {
+        $readOnly = [Management.Automation.ErrorRecord]::new((New-SyntheticGraphFailure -Status 403 -Code 'accessDenied' -InnerCode 'serviceReadOnly'), 'x', 'InvalidOperation', $null)
+        $denied = [Management.Automation.ErrorRecord]::new((New-SyntheticGraphFailure -Status 403 -Code 'accessDenied' -InnerCode 'accessDenied'), 'x', 'InvalidOperation', $null)
+        @(
+            (Test-SmartM365GraphTransientError -ErrorRecord $readOnly -StatusCode 403),
+            (Test-SmartM365GraphTransientError -ErrorRecord $denied -StatusCode 403),
+            (Test-SmartM365GraphRetryableError -ErrorRecord $readOnly).Retry
+        ) -join ','
+    }
+    Check ($forbidden -eq 'True,False,False') "403 classification changed (serviceReadOnly, other 403, collector rule): $forbidden"
+    # Windows PowerShell 5.1 module: same rule, evaluated from its own definition.
+    $compatText = [IO.File]::ReadAllText((Join-Path $root 'Modules/SmartM365.Core/Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1'))
+    $compatAst = [Management.Automation.Language.Parser]::ParseInput($compatText, [ref]$null, [ref]$null)
+    $compatReadOnly = $compatAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-SmartM365SharePointReadOnlyError' }, $true)
+    Check ($null -ne $compatReadOnly) 'The 5.1 module has no serviceReadOnly rule.'
+    $compatClassification = & $core {
+        param($Definition)
+        . ([scriptblock]::Create($Definition))
+        @(
+            (Test-SmartM365SharePointReadOnlyError -ErrorRecord ([Management.Automation.ErrorRecord]::new((New-SyntheticGraphFailure -Status 403 -Code 'accessDenied' -InnerCode 'serviceReadOnly'), 'x', 'InvalidOperation', $null)) -StatusCode 403),
+            (Test-SmartM365SharePointReadOnlyError -ErrorRecord ([Management.Automation.ErrorRecord]::new((New-SyntheticGraphFailure -Status 403 -Code 'accessDenied' -InnerCode 'accessDenied'), 'x', 'InvalidOperation', $null)) -StatusCode 403),
+            (Test-SmartM365SharePointReadOnlyError -ErrorRecord ([Management.Automation.ErrorRecord]::new((New-SyntheticGraphFailure -Status 503 -Code 'serviceNotAvailable' -InnerCode 'serviceReadOnly'), 'x', 'InvalidOperation', $null)) -StatusCode 503)
+        ) -join ','
+    } $compatReadOnly.Extent.Text
+    Check ($compatClassification -eq 'True,False,False') "5.1 serviceReadOnly classification changed: $compatClassification"
+    Check (([regex]::Matches($compatText, 'Test-SmartM365SharePointReadOnlyError -ErrorRecord \$_ -StatusCode \$statusCode')).Count -eq 2) 'The 5.1 Graph request and chunk retries do not apply the serviceReadOnly rule.'
+
+    # 8. Mirror coherence: when a CSV of the receipt failed to upload, neither the receipt nor the run state
+    # is mirrored; a later successful upload of the same CSV lifts the block; files outside the receipt pass.
+    $dataLast = Join-Path $temporary 'DATA-LAST'
+    New-Item -ItemType Directory -Path $dataLast | Out-Null
+    $csv = Join-Path $dataLast 'Synthetic_Users_Active.csv'
+    [IO.File]::WriteAllText($csv, "Id`r`n1`r`n")
+    $receipt = Join-Path $dataLast 'SmartInventory_Synthetic-Producer.current.json.txt'
+    $runState = Join-Path $dataLast 'SmartInventory_Synthetic-Producer.run.json.txt'
+    [IO.File]::WriteAllText($receipt, (@{ Status = 'Completed'; Files = @(@{ File = 'Synthetic_Users_Active.csv'; SHA256 = (Get-FileHash -LiteralPath $csv -Algorithm SHA256).Hash }) } | ConvertTo-Json -Depth 4))
+    [IO.File]::WriteAllText($runState, '{"Status":"Completed"}')
+    $other = New-SyntheticFile 'Synthetic_Other.log' 16
+    Set-CachedToken
+    & $core {
+        $script:Calls.Clear(); $script:Logs.Clear(); $script:SmartM365SharePointFailedUploads = $null; $script:FailCsv = $true
+        $script:SmartM365SharePointDriveIdCache = @{ 'contoso.test|/sites/synthetic|Documents' = 'drive-1' }
+        $script:Handler = {
+            param($call)
+            if ($call.Uri -like 'https://login.microsoftonline.com/*') { return [pscustomobject]@{ access_token = 'synthetic-token'; expires_in = 3600 } }
+            if ($call.Method -eq 'PUT' -and $call.Uri -like '*Synthetic_Users_Active.csv*' -and $script:FailCsv) { throw (New-SyntheticGraphFailure -Status 403 -Code 'accessDenied' -InnerCode 'accessDenied') }
+            [pscustomobject]@{ id = 'item-2'; webUrl = 'https://contoso.test/item-2' }
+        }
+    }
+    $blocked = & $core {
+        param($Csv, $Receipt, $RunState, $Other)
+        $null = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $Csv
+        @((Test-SmartM365SourceReceiptMirrorBlocked -Path $Receipt), (Test-SmartM365SourceReceiptMirrorBlocked -Path $RunState), (Test-SmartM365SourceReceiptMirrorBlocked -Path $Other)) -join ','
+    } $csv $receipt $runState $other
+    Check ($blocked -eq 'True,True,False') "A receipt or run state referencing a failed upload was not held back: $blocked"
+    $mirrorWarnings = @(Get-RecordedLog | Where-Object { $_.Level -eq 'WARNING' -and $_.Message -like 'SharePoint mirror of SmartInventory_Synthetic-Producer.*skipped: referenced file(s) not uploaded in this run: Synthetic_Users_Active.csv.*' })
+    Check ($mirrorWarnings.Count -eq 2) 'The held-back receipt and run state are not reported as warnings.'
+    $released = & $core {
+        param($Csv, $Receipt, $RunState)
+        $script:FailCsv = $false
+        $null = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $Csv
+        @((Test-SmartM365SourceReceiptMirrorBlocked -Path $Receipt), (Test-SmartM365SourceReceiptMirrorBlocked -Path $RunState)) -join ','
+    } $csv $receipt $runState
+    Check ($released -eq 'False,False') "A successful re-upload did not release the receipt: $released"
+    # Both execution summaries check the guard before each run artifact upload, and every outcome is recorded.
+    $coreText = [IO.File]::ReadAllText((Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psm1'))
+    $guardPattern = 'foreach \(\$logUploadCandidate in \$logUploadCandidates\) \{\s+if \(Test-SmartM365SourceReceiptMirrorBlocked -Path \$logUploadCandidate\) \{ continue \}\s+Invoke-SmartM365SharePointCsvUpload'
+    Check ($coreText -match $guardPattern -and $compatText -match $guardPattern) 'A run artifact upload loop does not check the receipt mirror guard.'
+    Check (([regex]::Matches($compatText, 'Set-SmartM365SharePointUploadOutcome -Path \$LocalFilePath')).Count -eq 4 -and ([regex]::Matches($coreText, 'Set-SmartM365SharePointUploadOutcome -Path \$LocalFilePath')).Count -eq 5) 'An upload outcome is not recorded in Core or the 5.1 module.'
 
     # Static wiring: every raw network call of Core carries a time limit.
     $text = [IO.File]::ReadAllText((Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psm1'))

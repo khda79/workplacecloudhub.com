@@ -2,7 +2,7 @@
 .SYNOPSIS
 Producer-owned, current-only SmartInventory source receipts. Dot-sourced helper.
 .VERSION
-1.4.5
+1.4.6
 .NOTES
 Compatible with Windows PowerShell 5.1. Optional daily capture maintenance is
 delegated to Core only for explicitly opted-in producers; no collection or report refresh.
@@ -16,6 +16,7 @@ completes; DATA-LAST is untouched otherwise.
 param()
 $script:SmartM365CmdbSourceContext=$null
 $script:SmartM365SourceReceiptUploadPaths=@()
+$script:SmartM365SharePointFailedUploads=$null
 $script:SmartM365CmdbRegistryPath=Join-Path $PSScriptRoot 'SmartM365-CmdbSources.json.txt'
 if($PSScriptRoot -like '*WindowsPowerShell5'){$script:SmartM365CmdbRegistryPath=Join-Path $PSScriptRoot '../../SmartM365-CmdbSources.json.txt'}
 
@@ -93,6 +94,7 @@ function Start-SmartM365CmdbSourceReceipt {
     if($script:SmartM365CmdbSourceContext){throw 'A CMDB source receipt is already active in this module.'}
     if (Get-Command Test-SmartM365DailyCapturePath -ErrorAction SilentlyContinue) { $script:SmartM365DailyCapture=$null }
     $script:SmartM365SourceReceiptUploadPaths=@()
+    $script:SmartM365SharePointFailedUploads=$null
     if($ReadOnly -or (Test-SmartM365MaxItemsMode)){return}
     $registryPath=if($ConfiguredOutputs){Join-Path (Split-Path $script:SmartM365CmdbRegistryPath) 'SmartM365-SourceReceipts.json.txt'}else{$script:SmartM365CmdbRegistryPath}
     $registry=[IO.File]::ReadAllText($registryPath) | ConvertFrom-Json
@@ -301,6 +303,32 @@ function Invoke-SmartM365StagedPublicationFollowUp {
             if($action.Callback){$arguments=@($action.ArgumentList);& $action.Callback @arguments}
         }catch{WriteLog -Message ("Post-publication step failed for {0}; DATA-LAST and its receipt are published: {1}" -f $action.Path,$_.Exception.Message) -Level WARNING}
     }
+}
+
+# SharePoint mirror coherence: Invoke-SmartM365SharePointCsvUpload records each outcome, so a receipt
+# and its run state are not mirrored when a file they reference failed to reach SharePoint in this run.
+function Set-SmartM365SharePointUploadOutcome {
+    param([Parameter(Mandatory)][string]$Path,[switch]$Failed)
+    if($null -eq $script:SmartM365SharePointFailedUploads){$script:SmartM365SharePointFailedUploads=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)}
+    $full=[IO.Path]::GetFullPath($Path)
+    if($Failed){[void]$script:SmartM365SharePointFailedUploads.Add($full)}else{[void]$script:SmartM365SharePointFailedUploads.Remove($full)}
+}
+
+function Test-SmartM365SourceReceiptMirrorBlocked {
+    param([Parameter(Mandatory)][string]$Path)
+    if($Path -notmatch '(?i)\.(?:current|run)\.json\.txt$'){return $false}
+    $failed=$script:SmartM365SharePointFailedUploads
+    if(-not $failed -or $failed.Count -eq 0){return $false}
+    $receiptPath=[IO.Path]::GetFullPath(($Path -replace '(?i)\.run\.json\.txt$','.current.json.txt'))
+    if(-not(Test-Path -LiteralPath $receiptPath -PathType Leaf)){return $false}
+    $name=[IO.Path]::GetFileName($Path)
+    try{$files=@(([IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json).Files | ForEach-Object {[string]$_.File} | Where-Object {$_})}
+    catch{WriteLog -Message ("SharePoint mirror of {0} skipped: its receipt cannot be read after a failed upload: {1}" -f $name,$_.Exception.Message) -Level WARNING;return $true}
+    $root=[IO.Path]::GetDirectoryName($receiptPath)
+    $missing=@($files | Where-Object {$failed.Contains([IO.Path]::GetFullPath((Join-Path $root $_)))})
+    if(-not $missing.Count){return $false}
+    WriteLog -Message ("SharePoint mirror of {0} skipped: referenced file(s) not uploaded in this run: {1}. SharePoint keeps its previous file/receipt pair; the server copy is current." -f $name,($missing -join ', ')) -Level WARNING
+    return $true
 }
 
 # Read-only view of the active run: lets a producer derive outputs from its own current publication.

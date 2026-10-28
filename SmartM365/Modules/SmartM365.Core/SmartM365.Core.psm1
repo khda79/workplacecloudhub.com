@@ -6,7 +6,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumV
 . (Join-Path $PSScriptRoot 'SmartM365-ImportExcelHealth.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-InventoryLifecycle.ps1')
 # SmartM365.Core.psm1
-# Version: 1.0.110
+# Version: 1.0.111
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
 function Get-ModuleLocalConfig {
@@ -1207,6 +1207,7 @@ function Complete-SmartM365ExecutionContext {
     if ($Status -eq 'Cancelled') { $logUploadCandidates=@() }
     $logUploadStartCount = if ($global:SmartM365SharePointUploadedFiles) { @($global:SmartM365SharePointUploadedFiles).Count } else { 0 }
     foreach ($logUploadCandidate in $logUploadCandidates) {
+        if (Test-SmartM365SourceReceiptMirrorBlocked -Path $logUploadCandidate) { continue }
         Invoke-SmartM365SharePointCsvUpload -LocalFilePath $logUploadCandidate | Out-Null
     }
     $logUploadEndCount = if ($global:SmartM365SharePointUploadedFiles) { @($global:SmartM365SharePointUploadedFiles).Count } else { $logUploadStartCount }
@@ -4698,6 +4699,8 @@ function Test-SmartM365GraphTransientError {
     if ($StatusCode -eq 409 -and $details -match '(?i)resourceModified|eTag[^\r\n]*(?:mismatch|changed)|resource[^\r\n]*changed since the caller last read it') {
         return $true
     }
+    # SharePoint maintenance answers 403 serviceReadOnly ("Database Is Read Only") for a few minutes.
+    if ($StatusCode -eq 403 -and $details -match '(?i)serviceReadOnly') { return $true }
 
     return ($details -match '(?i)TooManyRequests|throttl|timeout|timed out|temporarily unavailable|An error occurred while sending the request|connection (?:was )?(?:reset|closed|aborted|forcibly closed)|SSL connection could not be established')
 }
@@ -5251,6 +5254,7 @@ function Invoke-SmartM365SharePointCsvUpload {
     }
     if (-not (Connect-SmartM365GraphForSharePointUpload -AppId $AppId -TenantId $TenantId -Thumbprint $Thumbprint)) {
         $script:SmartM365NetworkDeadline = $previousDeadline
+        Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath -Failed
         return
     }
 
@@ -5274,6 +5278,7 @@ function Invoke-SmartM365SharePointCsvUpload {
             if (-not $drive) {
                 $available = ($driveList | ForEach-Object { $_.name }) -join ' | '
                 WriteLog -Message "SharePoint upload skipped: document library '$LibraryDisplayName' not found. Available drives: $available" -Level "WARNING"
+                Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath -Failed
                 return
             }
             $driveId = $drive.id
@@ -5306,6 +5311,7 @@ function Invoke-SmartM365SharePointCsvUpload {
                 WriteLog -Message ("SharePoint JSON name transition: {0}; {1}" -f $transition.Status, $sharePointPath) -Level 'INFO'
             }
             if ($compareWeeklyManifest -and $transition.Status -eq 'NoLegacy' -and $transition.ContentMatchesLocal) {
+                Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath
                 return [pscustomobject]@{ SharePointPath = $sharePointPath; SkippedUnchanged = $true }
             }
         } elseif ($fileInfo.Extension -eq '.json' -and (Get-SmartM365JsonTransportPolicy).Mode -eq 'JsonText') {
@@ -5330,6 +5336,7 @@ function Invoke-SmartM365SharePointCsvUpload {
         }
 
         $record = Add-SmartM365SharePointUploadRecord -LocalFilePath $fileInfo.FullName -SharePointPath $sharePointPath -DriveId $driveId -DriveItem $uploadedItem
+        Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath
         if (-not [string]::IsNullOrWhiteSpace($record.WebUrl)) {
             WriteLog -Message ("SharePoint file uploaded: {0} ({1})" -f $record.SharePointPath, $record.WebUrl) -Level "INFO"
         }
@@ -5339,6 +5346,7 @@ function Invoke-SmartM365SharePointCsvUpload {
         return $record
     }
     catch {
+        Set-SmartM365SharePointUploadOutcome -Path $LocalFilePath -Failed
         WriteLog -Message ("SharePoint upload failed but script continues: {0}" -f $_.Exception.Message) -Level "WARNING"
     }
     finally {

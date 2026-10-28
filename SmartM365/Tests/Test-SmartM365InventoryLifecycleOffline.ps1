@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline lifecycle regression: no collector, tenant initialization, preparation or provider request.
 .VERSION
-    1.0.4
+    1.0.5
 #>
 [CmdletBinding()]
 param([switch]$ReceiptOnly)
@@ -40,6 +40,7 @@ $script:SmartM365SourceReceiptUploadPaths=@()
 function WriteLog {param([string]$Message,[string]$Level) if($Level -eq 'WARNING'){$global:SmartM365WarningCount++};if($Level -eq 'ERROR'){$global:SmartM365ErrorCount++}}
 function Complete-SmartM365CmdbSourceReceipt {param([string]$Status,[int]$ErrorCount) $script:Events.Add('Receipt:'+ $Status)}
 function Invoke-SmartM365SharePointCsvUpload {param([string]$LocalFilePath) if(Test-SmartM365InterruptedRun){throw 'Upload after cancellation'}; $script:Events.Add('Upload')}
+function Test-SmartM365SourceReceiptMirrorBlocked {param([string]$Path) $false}
 function Write-SmartM365CompletionBanner {
     param([string]$Status,[string]$ScriptName,$StartedAt,$EndedAt,[int]$WarningCount,[int]$ErrorCount,[int]$GeneratedCsvFiles,[string]$LogPath,[string]$ClosedTranscriptPath,[switch]$Force,[switch]$NoConsole,[switch]$ConsoleOnly)
     $status=Get-SmartM365InventoryCompletionStatus -Status $Status -ErrorRecord $null
