@@ -1,6 +1,6 @@
 # Microsoft 365 usage signals
 
-`scripts/New-M365UsageSignalsEvidence.ps1` (1.0.0) prepares four optional evidence families from
+`scripts/New-M365UsageSignalsEvidence.ps1` (1.0.1) prepares four optional evidence families from
 reports added in SmartInventory UserActivity 1.34 and CopilotUsage 1.1.0. It runs in the
 `Collaboration` domain of `Invoke-PreparedEvidenceBuild.ps1` (1.8.0), after
 `New-CollaborationEvidence.ps1`, and does not change the collaboration tables or their history.
@@ -34,7 +34,9 @@ Data Trust (1.3.0) lists the four sources. An absent or empty optional source is
 ## Rules
 
 - Deleted users and deleted groups are excluded. A group repeated by Graph is kept once.
-- Email clients: a client counts a user when its column is `Yes`, `True` or `1`. `User Share (%)` is
+- Email clients: Graph writes the client version in each column (for example `ProPlus`,
+  `Outlook 2016` or `Undetermined`) and leaves unused clients empty, so any non-empty value counts
+  the user. `User Share (%)` is
   the share of users with at least one client. POP3, IMAP4 and SMTP are flagged `Legacy Protocol`.
   Only aggregates are published; no per-user list.
 - OneDrive: `Users` counts users with a non-zero count over the report period, `Files` sums the

@@ -1,4 +1,4 @@
-# Version 1.0.0
+# Version 1.0.1: email clients use the client-version values Graph returns.
 [CmdletBinding()]
 param([string]$TestRoot = (Join-Path ([IO.Path]::GetTempPath()) 'SmartM365-OfflineTests'))
 # Synthetic local files only. No collectors, tenant calls, production data or uploads.
@@ -111,13 +111,13 @@ try {
     # 3. Populated reports.
     $refresh = '2026-10-26'
     $mail = { param($Upn, $Deleted, $Flags) $row = [ordered]@{ TenantKey = 'synthetic-test'; 'Report Refresh Date' = $refresh; 'User Principal Name' = $Upn; 'Display Name' = 'Contoso user'; 'Is Deleted' = $Deleted; 'Deleted Date' = ''; 'Last Activity Date' = $refresh }
-        foreach ($column in @('Mail For Mac', 'Outlook For Mac', 'Outlook For Windows', 'Outlook For Mobile', 'Other For Mobile', 'Outlook For Web', 'POP3 App', 'IMAP4 App', 'SMTP App')) { $row[$column] = if ($column -in $Flags) { 'Yes' } else { '' } }
+        foreach ($column in @('Mail For Mac', 'Outlook For Mac', 'Outlook For Windows', 'Outlook For Mobile', 'Other For Mobile', 'Outlook For Web', 'POP3 App', 'IMAP4 App', 'SMTP App')) { $row[$column] = if ($Flags.Contains($column)) { $Flags[$column] } else { '' } }
         $row['Report Period'] = '180'; [pscustomobject]$row }
     Write-Source 'M365_Email_AppUsage.csv' @(
-        (& $mail 'a@contoso.example' 'False' @('Outlook For Windows', 'Outlook For Web')),
-        (& $mail 'b@contoso.example' 'False' @('Outlook For Mobile', 'IMAP4 App')),
-        (& $mail 'c@contoso.example' 'False' @()),
-        (& $mail 'd@contoso.example' 'True' @('POP3 App'))
+        (& $mail 'a@contoso.example' 'False' @{ 'Outlook For Windows' = 'ProPlus'; 'Outlook For Web' = 'Undetermined' }),
+        (& $mail 'b@contoso.example' 'False' @{ 'Outlook For Mobile' = 'Undetermined'; 'IMAP4 App' = 'Undetermined' }),
+        (& $mail 'c@contoso.example' 'False' @{}),
+        (& $mail 'd@contoso.example' 'True' @{ 'POP3 App' = 'Undetermined' })
     )
     $drive = { param($Upn, $Deleted, $Last, $Viewed, $Synced, $Internal, $External) [pscustomobject][ordered]@{ TenantKey = 'synthetic-test'; 'Report Refresh Date' = $refresh; 'User Principal Name' = $Upn; 'Is Deleted' = $Deleted; 'Deleted Date' = ''; 'Last Activity Date' = $Last
         'Viewed Or Edited File Count' = $Viewed; 'Synced File Count' = $Synced; 'Shared Internally File Count' = $Internal; 'Shared Externally File Count' = $External; 'Assigned Products' = 'MICROSOFT 365 E3'; 'Report Period' = '180' } }

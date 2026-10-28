@@ -1,4 +1,4 @@
-# Version 1.0.0
+# Version 1.0.1: an email client is used when Graph names its version (ProPlus, Outlook 2016, Undetermined), not only Yes.
 # Email client usage, OneDrive user activity, Microsoft 365 group activity and the daily
 # Copilot user count trend. Every source is optional: an absent, empty or drifted CSV is
 # reported as not collected and never becomes a zero or a failed preparation.
@@ -50,6 +50,12 @@ function Get-Field {
     $property = $Row.PSObject.Properties[$Name]
     if ($null -eq $property) { return $null }
     return $property.Value
+}
+
+function Test-ClientUsed {
+    # Graph writes the client version (for example ProPlus, Outlook 2016 or Undetermined) and leaves unused clients empty.
+    param([AllowNull()][object]$Value)
+    return -not [string]::IsNullOrWhiteSpace([string]$Value)
 }
 
 function Test-Flag {
@@ -120,12 +126,12 @@ $emailClients = @(
 )
 $email = Read-OptionalSource -FileName 'M365_Email_AppUsage.csv' -RequiredColumns (@('Report Refresh Date', 'User Principal Name', 'Is Deleted') + @($emailClients | ForEach-Object { $_.Column }))
 $emailUsers = @($email.Rows | Where-Object { -not (Test-Flag $_.'Is Deleted') })
-$emailClientUsers = @($emailUsers | Where-Object { $row = $_; @($emailClients | Where-Object { Test-Flag (Get-Field $row $_.Column) }).Count -gt 0 })
+$emailClientUsers = @($emailUsers | Where-Object { $row = $_; @($emailClients | Where-Object { Test-ClientUsed (Get-Field $row $_.Column) }).Count -gt 0 })
 $emailRefresh = if ($email.Status -eq 'Observed') { Get-RefreshDate -Rows $email.Rows -Column 'Report Refresh Date' } else { $null }
 $emailFreshness = Get-Freshness $emailRefresh
 $emailPeriod = if ($email.Status -eq 'Observed') { Get-ReportPeriodLength -Rows $email.Rows } else { $null }
 $emailRows = foreach ($client in $emailClients) {
-    $users = if ($email.Status -eq 'Observed') { @($emailUsers | Where-Object { Test-Flag (Get-Field $_ $client.Column) }).Count } else { $null }
+    $users = if ($email.Status -eq 'Observed') { @($emailUsers | Where-Object { Test-ClientUsed (Get-Field $_ $client.Column) }).Count } else { $null }
     [pscustomobject][ordered]@{
         Client = $client.Client; 'Client Family' = $client.Family; 'Legacy Protocol' = $client.Legacy
         Users = $users; 'Email Client Users' = if ($email.Status -eq 'Observed') { $emailClientUsers.Count } else { $null }
