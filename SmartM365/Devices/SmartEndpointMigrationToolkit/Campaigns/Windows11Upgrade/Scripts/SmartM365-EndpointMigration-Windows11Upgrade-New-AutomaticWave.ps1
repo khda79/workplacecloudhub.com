@@ -34,6 +34,12 @@ Each domain must exist in the AD inventory. The shared AD inventory always cover
 .PARAMETER Create
 Creates the Wave (Computers.txt, Wave.local.json, wrappers). Without it, only evidence is written.
 
+.PARAMETER PreviewEvidencePath
+Evidence folder of a Preview (run without -Create). With -Create, the Wave is created from that
+previewed selection without analyzing the inventories again, when the Preview used the same filters,
+the inventory files have not changed since, and it is less than 24 hours old. Otherwise the selection
+is computed again.
+
 .VERSION
 1.0.0
 
@@ -61,6 +67,7 @@ param(
     [scriptblock]$ProgressCallback,
     [string]$EvidenceRoot,
     [switch]$Create,
+    [string]$PreviewEvidencePath,
     [switch]$AllowPartialSource,
     [switch]$NoEvidence
 )
@@ -102,7 +109,7 @@ function Get-AutomaticWaveSafeName {
     )
 
     if ([string]::IsNullOrWhiteSpace($Name)) {
-        $nameSegments = New-Object System.Collections.Generic.List[string]
+        $nameSegments = [System.Collections.Generic.List[string]]::new()
         foreach ($prefix in @($NamePrefixes)) {
             $segment = [regex]::Replace(([string]$prefix).ToUpperInvariant(), '[^A-Z0-9_-]+', '-').Trim('-_')
             if (-not [string]::IsNullOrWhiteSpace($segment) -and -not $nameSegments.Contains($segment)) {
@@ -194,7 +201,7 @@ function Get-InventoryShortName {
 function Get-AutomaticWaveNamePrefixes {
     param([AllowNull()][string[]]$Prefixes)
 
-    $normalized = New-Object System.Collections.Generic.List[string]
+    $normalized = [System.Collections.Generic.List[string]]::new()
     foreach ($item in @($Prefixes)) {
         foreach ($candidate in @(([string]$item) -split ';')) {
             $value = $candidate.Trim().Trim([char]34)
@@ -227,7 +234,7 @@ function Test-AutomaticWaveNamePrefix {
 function Get-AutomaticWaveNameContainsValues {
     param([AllowNull()][string[]]$ContainsValues)
 
-    $normalized = New-Object System.Collections.Generic.List[string]
+    $normalized = [System.Collections.Generic.List[string]]::new()
     foreach ($item in @($ContainsValues)) {
         foreach ($candidate in @(([string]$item) -split ';')) {
             $value = $candidate.Trim().Trim([char]34).ToUpperInvariant()
@@ -258,7 +265,7 @@ function Test-AutomaticWaveNameContains {
 function Get-AutomaticWaveAdDomains {
     param([AllowNull()][string[]]$Domains)
 
-    $normalized = New-Object System.Collections.Generic.List[string]
+    $normalized = [System.Collections.Generic.List[string]]::new()
     foreach ($item in @($Domains)) {
         foreach ($candidate in @(([string]$item) -split ';')) {
             $value = $candidate.Trim().Trim([char]34).Trim('.').ToLowerInvariant()
@@ -283,9 +290,15 @@ function Get-AutomaticWaveAdDomainFilterReason {
     )
 
     if (@($Domains).Count -eq 0) { return '' }
-    $recordDomains = @(@($AdRecords) | Where-Object { $null -ne $_ } | ForEach-Object { ([string]$_.Domain).Trim().Trim('.').ToLowerInvariant() } | Where-Object { $_ })
-    if ($recordDomains.Count -eq 0) { return 'AD_DOMAIN_UNKNOWN' }
-    foreach ($domain in $recordDomains) { if ($Domains -contains $domain) { return '' } }
+    $hasDomain = $false
+    foreach ($record in @($AdRecords)) {
+        if ($null -eq $record) { continue }
+        $domain = ([string]$record.Domain).Trim().Trim('.').ToLowerInvariant()
+        if (-not $domain) { continue }
+        $hasDomain = $true
+        if ($Domains -contains $domain) { return '' }
+    }
+    if (-not $hasDomain) { return 'AD_DOMAIN_UNKNOWN' }
     return 'AD_DOMAIN_NOT_MATCHED'
 }
 
@@ -297,7 +310,12 @@ function Assert-AutomaticWaveAdDomainsInInventory {
     )
 
     if (@($Domains).Count -eq 0) { return }
-    $known = @(@($AdRecords) | ForEach-Object { ([string]$_.Domain).Trim().Trim('.').ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
+    $knownSet = @{}
+    foreach ($record in @($AdRecords)) {
+        $domain = ([string]$record.Domain).Trim().Trim('.').ToLowerInvariant()
+        if ($domain) { $knownSet[$domain] = $true }
+    }
+    $known = @($knownSet.Keys | Sort-Object)
     $missing = @($Domains | Where-Object { $known -notcontains $_ })
     if ($missing.Count -gt 0) {
         throw ("SEMT_AD_DOMAIN_NOT_IN_INVENTORY: AD domain(s) {0} not found in the AD inventory {1}. Domains in the inventory: {2}." -f ($missing -join ', '),$InventoryPath,$(if ($known.Count -gt 0) { $known -join ', ' } else { 'none' }))
@@ -327,36 +345,87 @@ function Get-InventoryWindowsClassification {
     return 'Unknown'
 }
 
+function Resolve-InventoryColumn {
+    <#
+    First of Names present in the inventory rows. CSV rows share one header, so the column is resolved
+    once per file instead of once per row (tens of thousands of rows in a large forest).
+    #>
+    param(
+        [object[]]$Rows,
+        [Parameter(Mandatory = $true)][string[]]$Names
+    )
+
+    if (@($Rows).Count -eq 0 -or $null -eq $Rows[0]) { return $null }
+    $first = $Rows[0]
+    foreach ($name in $Names) {
+        if ($first -is [System.Collections.IDictionary]) {
+            if ($first.Contains($name)) { return $name }
+            continue
+        }
+        if ($first.PSObject.Properties[$name]) { return $name }
+    }
+    return $null
+}
+
 function Get-AdAutomaticWaveRecord {
     param([object[]]$Rows)
 
-    foreach ($row in @($Rows)) {
-        $computerName = [string](Get-InventoryValue -Row $row -Names @('ComputerName', 'Name'))
-        $dnsHostName = [string](Get-InventoryValue -Row $row -Names @('DNSHostName'))
+    # Inline conversions (same rules as Get-InventoryShortName, ConvertTo-InventoryBoolean with a
+    # default of $true, and ConvertTo-InventoryDate): one function call per row costs minutes here.
+    $rows = @($Rows)
+    $colName = Resolve-InventoryColumn -Rows $rows -Names @('ComputerName', 'Name')
+    $colDns = Resolve-InventoryColumn -Rows $rows -Names @('DNSHostName')
+    $colOs = Resolve-InventoryColumn -Rows $rows -Names @('OperatingSystem')
+    $colOsVersion = Resolve-InventoryColumn -Rows $rows -Names @('OperatingSystemVersion', 'OSVersion')
+    $colPresent = Resolve-InventoryColumn -Rows $rows -Names @('ADInventoryPresent')
+    $colEnabled = Resolve-InventoryColumn -Rows $rows -Names @('Enabled')
+    $colLastSeen = Resolve-InventoryColumn -Rows $rows -Names @('LastLogonTimestampUtc')
+    $colDomain = Resolve-InventoryColumn -Rows $rows -Names @('ADDomain')
+    $classificationCache = @{}
+    $staleCutoffUtc = [datetime]::UtcNow.AddDays(-90)
+    $invariant = [System.Globalization.CultureInfo]::InvariantCulture
+    $dateStyles = [System.Globalization.DateTimeStyles]::AllowWhiteSpaces -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
+
+    foreach ($row in $rows) {
+        if ($null -eq $row) { continue }
+        $computerName = if ($colName) { [string]$row.$colName } else { '' }
+        $dnsHostName = if ($colDns) { [string]$row.$colDns } else { '' }
         $identity = if (-not [string]::IsNullOrWhiteSpace($dnsHostName)) { $dnsHostName } else { $computerName }
-        $key = Get-InventoryShortName -Name $identity
+        if ([string]::IsNullOrWhiteSpace($identity)) { continue }
+        $key = $identity.Trim().Trim([char]34).Split('.')[0].ToUpperInvariant()
         if ([string]::IsNullOrWhiteSpace($key)) { continue }
 
-        $operatingSystem = [string](Get-InventoryValue -Row $row -Names @('OperatingSystem'))
-        $operatingSystemVersion = [string](Get-InventoryValue -Row $row -Names @('OperatingSystemVersion', 'OSVersion'))
-        $present = ConvertTo-InventoryBoolean -Value (Get-InventoryValue -Row $row -Names @('ADInventoryPresent')) -Default $true
-        $enabled = ConvertTo-InventoryBoolean -Value (Get-InventoryValue -Row $row -Names @('Enabled')) -Default $true
-        $classification = Get-InventoryWindowsClassification -OperatingSystem $operatingSystem -Version $operatingSystemVersion
-        $lastSeen = ConvertTo-InventoryDate -Value (Get-InventoryValue -Row $row -Names @('LastLogonTimestampUtc'))
+        $operatingSystem = if ($colOs) { [string]$row.$colOs } else { '' }
+        $operatingSystemVersion = if ($colOsVersion) { [string]$row.$colOsVersion } else { '' }
+        $present = $true
+        if ($colPresent) { $text = [string]$row.$colPresent; if (-not [string]::IsNullOrWhiteSpace($text) -and $text.Trim() -match '^(?i:false|0|no|disabled)$') { $present = $false } }
+        $enabled = $true
+        if ($colEnabled) { $text = [string]$row.$colEnabled; if (-not [string]::IsNullOrWhiteSpace($text) -and $text.Trim() -match '^(?i:false|0|no|disabled)$') { $enabled = $false } }
+        $classificationKey = $operatingSystem + [char]0 + $operatingSystemVersion
+        if (-not $classificationCache.ContainsKey($classificationKey)) { $classificationCache[$classificationKey] = Get-InventoryWindowsClassification -OperatingSystem $operatingSystem -Version $operatingSystemVersion }
+        $classification = $classificationCache[$classificationKey]
+        $lastSeen = [datetime]::MinValue
+        if ($colLastSeen) {
+            $text = [string]$row.$colLastSeen
+            if (-not [string]::IsNullOrWhiteSpace($text)) {
+                $parsed = [datetime]::MinValue
+                if ([datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed) -or [datetime]::TryParse($text, [ref]$parsed)) { $lastSeen = $parsed.ToUniversalTime() }
+            }
+        }
 
         [pscustomobject]@{
             Key             = $key
             Name            = $computerName
             DNSHostName     = $dnsHostName
             PreferredName   = $identity
-            Domain          = [string](Get-InventoryValue -Row $row -Names @('ADDomain'))
+            Domain          = if ($colDomain) { [string]$row.$colDomain } else { '' }
             Present         = $present
             Enabled         = $enabled
             Classification  = $classification
             OperatingSystem = $operatingSystem
             OSVersion       = $operatingSystemVersion
             LastSeenUtc     = $lastSeen
-            IsStale         = ($lastSeen -ne [datetime]::MinValue -and $lastSeen -lt [datetime]::UtcNow.AddDays(-90))
+            IsStale         = ($lastSeen -ne [datetime]::MinValue -and $lastSeen -lt $staleCutoffUtc)
             Eligible        = ($present -and $enabled -and $classification -eq 'Windows10')
         }
     }
@@ -365,27 +434,53 @@ function Get-AdAutomaticWaveRecord {
 function Get-IntuneAutomaticWaveRecord {
     param([object[]]$Rows)
 
-    foreach ($row in @($Rows)) {
-        $deviceName = [string](Get-InventoryValue -Row $row -Names @('DeviceName', 'ManagedDeviceName', 'ComputerName'))
-        $computerName = [string](Get-InventoryValue -Row $row -Names @('ComputerName'))
+    $rows = @($Rows)
+    $colDeviceName = Resolve-InventoryColumn -Rows $rows -Names @('DeviceName', 'ManagedDeviceName', 'ComputerName')
+    $colComputerName = Resolve-InventoryColumn -Rows $rows -Names @('ComputerName')
+    $colOs = Resolve-InventoryColumn -Rows $rows -Names @('OperatingSystem')
+    $colOsVersion = Resolve-InventoryColumn -Rows $rows -Names @('OSVersion', 'OperatingSystemVersion')
+    $colPresent = Resolve-InventoryColumn -Rows $rows -Names @('IntuneInventoryPresent')
+    $colState = Resolve-InventoryColumn -Rows $rows -Names @('ManagementState')
+    $colLastSync = Resolve-InventoryColumn -Rows $rows -Names @('LastSyncDateTime')
+    $colId = Resolve-InventoryColumn -Rows $rows -Names @('IntuneManagedDeviceId', 'Id')
+    $classificationCache = @{}
+    $staleCutoffUtc = [datetime]::UtcNow.AddDays(-30)
+    $invariant = [System.Globalization.CultureInfo]::InvariantCulture
+    $dateStyles = [System.Globalization.DateTimeStyles]::AllowWhiteSpaces -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
+
+    foreach ($row in $rows) {
+        if ($null -eq $row) { continue }
+        $deviceName = if ($colDeviceName) { [string]$row.$colDeviceName } else { '' }
+        $computerName = if ($colComputerName) { [string]$row.$colComputerName } else { '' }
         $identity = if (-not [string]::IsNullOrWhiteSpace($deviceName)) { $deviceName } else { $computerName }
-        $key = Get-InventoryShortName -Name $identity
+        if ([string]::IsNullOrWhiteSpace($identity)) { continue }
+        $key = $identity.Trim().Trim([char]34).Split('.')[0].ToUpperInvariant()
         if ([string]::IsNullOrWhiteSpace($key)) { continue }
 
-        $operatingSystem = [string](Get-InventoryValue -Row $row -Names @('OperatingSystem'))
-        $operatingSystemVersion = [string](Get-InventoryValue -Row $row -Names @('OSVersion', 'OperatingSystemVersion'))
-        $present = ConvertTo-InventoryBoolean -Value (Get-InventoryValue -Row $row -Names @('IntuneInventoryPresent')) -Default $true
-        $managementState = [string](Get-InventoryValue -Row $row -Names @('ManagementState'))
+        $operatingSystem = if ($colOs) { [string]$row.$colOs } else { '' }
+        $operatingSystemVersion = if ($colOsVersion) { [string]$row.$colOsVersion } else { '' }
+        $present = $true
+        if ($colPresent) { $text = [string]$row.$colPresent; if (-not [string]::IsNullOrWhiteSpace($text) -and $text.Trim() -match '^(?i:false|0|no|disabled)$') { $present = $false } }
+        $managementState = if ($colState) { [string]$row.$colState } else { '' }
         $stateExcluded = (-not [string]::IsNullOrWhiteSpace($managementState) -and $managementState -match '(?i)(retire|wipe|delete)')
-        $classification = Get-InventoryWindowsClassification -OperatingSystem $operatingSystem -Version $operatingSystemVersion
-        $lastSync = ConvertTo-InventoryDate -Value (Get-InventoryValue -Row $row -Names @('LastSyncDateTime'))
+        $classificationKey = $operatingSystem + [char]0 + $operatingSystemVersion
+        if (-not $classificationCache.ContainsKey($classificationKey)) { $classificationCache[$classificationKey] = Get-InventoryWindowsClassification -OperatingSystem $operatingSystem -Version $operatingSystemVersion }
+        $classification = $classificationCache[$classificationKey]
+        $lastSync = [datetime]::MinValue
+        if ($colLastSync) {
+            $text = [string]$row.$colLastSync
+            if (-not [string]::IsNullOrWhiteSpace($text)) {
+                $parsed = [datetime]::MinValue
+                if ([datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed) -or [datetime]::TryParse($text, [ref]$parsed)) { $lastSync = $parsed.ToUniversalTime() }
+            }
+        }
 
         [pscustomobject]@{
             Key             = $key
             DeviceName      = $deviceName
             ComputerName    = $computerName
             PreferredName   = $identity
-            ManagedDeviceId = [string](Get-InventoryValue -Row $row -Names @('IntuneManagedDeviceId', 'Id'))
+            ManagedDeviceId = if ($colId) { [string]$row.$colId } else { '' }
             Present         = $present
             ManagementState = $managementState
             StateExcluded   = $stateExcluded
@@ -393,7 +488,7 @@ function Get-IntuneAutomaticWaveRecord {
             OperatingSystem = $operatingSystem
             OSVersion       = $operatingSystemVersion
             LastSyncUtc     = $lastSync
-            IsStale         = ($lastSync -ne [datetime]::MinValue -and $lastSync -lt [datetime]::UtcNow.AddDays(-30))
+            IsStale         = ($lastSync -ne [datetime]::MinValue -and $lastSync -lt $staleCutoffUtc)
             Eligible        = ($present -and -not $stateExcluded -and $classification -eq 'Windows10')
         }
     }
@@ -406,30 +501,157 @@ function Get-AutomaticWaveExclusionReason {
         [bool]$AdCollision
     )
 
-    $AdRecords = @($AdRecords | Where-Object { $null -ne $_ })
-    $IntuneRecords = @($IntuneRecords | Where-Object { $null -ne $_ })
-    $reasons = New-Object System.Collections.Generic.List[string]
+    $windows11 = $false; $adDisabled = $false; $stateExcluded = $false; $notPresent = $false; $unknownOs = $false
+    foreach ($record in @($AdRecords)) {
+        if ($null -eq $record) { continue }
+        if ($record.Classification -eq 'Windows11') { $windows11 = $true }
+        if ($record.Classification -eq 'Unknown') { $unknownOs = $true }
+        if (-not $record.Present) { $notPresent = $true }
+        elseif (-not $record.Enabled) { $adDisabled = $true }
+    }
+    foreach ($record in @($IntuneRecords)) {
+        if ($null -eq $record) { continue }
+        if ($record.Classification -eq 'Windows11') { $windows11 = $true }
+        if ($record.Classification -eq 'Unknown') { $unknownOs = $true }
+        if ($record.StateExcluded) { $stateExcluded = $true }
+        if (-not $record.Present) { $notPresent = $true }
+    }
+    $reasons = [System.Collections.Generic.List[string]]::new()
     if ($AdCollision) { $reasons.Add('AD_NAME_COLLISION') }
-    if (@($AdRecords | Where-Object { $_.Classification -eq 'Windows11' }).Count -gt 0 -or
-        @($IntuneRecords | Where-Object { $_.Classification -eq 'Windows11' }).Count -gt 0) {
-        $reasons.Add('WINDOWS11_REPORTED')
-    }
-    if (@($AdRecords | Where-Object { $_.Present -and -not $_.Enabled }).Count -gt 0) {
-        $reasons.Add('AD_DISABLED')
-    }
-    if (@($IntuneRecords | Where-Object { $_.StateExcluded }).Count -gt 0) {
-        $reasons.Add('INTUNE_MANAGEMENT_STATE_EXCLUDED')
-    }
-    if (@($AdRecords | Where-Object { -not $_.Present }).Count -gt 0 -or
-        @($IntuneRecords | Where-Object { -not $_.Present }).Count -gt 0) {
-        $reasons.Add('INVENTORY_NOT_PRESENT')
-    }
-    if (@($AdRecords | Where-Object { $_.Classification -eq 'Unknown' }).Count -gt 0 -or
-        @($IntuneRecords | Where-Object { $_.Classification -eq 'Unknown' }).Count -gt 0) {
-        $reasons.Add('OS_UNKNOWN_OR_UNSUPPORTED')
-    }
+    if ($windows11) { $reasons.Add('WINDOWS11_REPORTED') }
+    if ($adDisabled) { $reasons.Add('AD_DISABLED') }
+    if ($stateExcluded) { $reasons.Add('INTUNE_MANAGEMENT_STATE_EXCLUDED') }
+    if ($notPresent) { $reasons.Add('INVENTORY_NOT_PRESENT') }
+    if ($unknownOs) { $reasons.Add('OS_UNKNOWN_OR_UNSUPPORTED') }
     if ($reasons.Count -eq 0) { $reasons.Add('NOT_ELIGIBLE_WINDOWS10') }
-    return @($reasons | Select-Object -Unique) -join ';'
+    return $reasons.ToArray() -join ';'
+}
+
+function Get-AutomaticWaveInventoryFingerprint {
+    <#
+    Identity of the inventory files read by a selection (full path, size, last write time). Create
+    reuses a Preview only when these files have not changed since that Preview.
+    #>
+    param([string[]]$Paths)
+
+    $parts = [System.Collections.Generic.List[string]]::new()
+    foreach ($path in @($Paths)) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        $item = Get-Item -LiteralPath $path
+        $parts.Add(('{0}|{1}|{2}' -f $item.FullName.ToLowerInvariant(), $item.Length, $item.LastWriteTimeUtc.Ticks))
+    }
+    return ($parts.ToArray() -join ';')
+}
+
+function Get-AutomaticWavePreviewReuse {
+    <#
+    Checks whether Create can reuse a Preview instead of computing the selection again: same campaign,
+    engine version and filters, unchanged inventory files, less than 24 hours old, selection report
+    present. Returns the preview summary (or $null) and the reason it cannot be reused.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$SelectionSignature,
+        [Parameter(Mandatory = $true)][string]$InventoryFingerprint
+    )
+
+    $summaryPath = Join-Path $Path 'AutomaticWaveSummary.json'
+    if (-not (Test-Path -LiteralPath $summaryPath -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $Path 'AutomaticWaveSelection.csv') -PathType Leaf)) {
+        return [pscustomobject]@{ Summary = $null; Reason = 'the preview evidence is incomplete' }
+    }
+    $summary = Get-Content -LiteralPath $summaryPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $generatedValue = Get-SemtPropertyValue -InputObject $summary -Name 'GeneratedUtc' -Default $null
+    $generatedUtc = [datetime]::MinValue
+    if ($generatedValue -is [datetime]) { $generatedUtc = $generatedValue.ToUniversalTime() }
+    elseif ([datetime]::TryParse([string]$generatedValue, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$generatedUtc)) { $generatedUtc = $generatedUtc.ToUniversalTime() }
+
+    $reason = ''
+    if ([string](Get-SemtPropertyValue -InputObject $summary -Name 'Campaign') -ne $script:AutomaticWaveCampaign -or [string](Get-SemtPropertyValue -InputObject $summary -Name 'Version') -ne $script:AutomaticWaveVersion) { $reason = 'it was written for another campaign or engine version' }
+    elseif ([bool](Get-SemtPropertyValue -InputObject $summary -Name 'WaveCreated' -Default $true)) { $reason = 'the evidence is not a preview' }
+    elseif ([string](Get-SemtPropertyValue -InputObject $summary -Name 'SelectionSignature') -ne $SelectionSignature) { $reason = 'the filters changed since the preview' }
+    elseif ([string](Get-SemtPropertyValue -InputObject $summary -Name 'InventoryFingerprint') -ne $InventoryFingerprint) { $reason = 'an inventory changed since the preview' }
+    elseif ($generatedUtc -lt [datetime]::UtcNow.AddHours(-24)) { $reason = 'the preview is older than 24 hours' }
+    if ($reason) { return [pscustomobject]@{ Summary = $null; Reason = $reason } }
+    return [pscustomobject]@{ Summary = $summary; Reason = '' }
+}
+
+function Assert-AutomaticWaveCreatable {
+    param(
+        [Parameter(Mandatory = $true)][int]$SelectedCount,
+        [Parameter(Mandatory = $true)][string]$WaveName,
+        [Parameter(Mandatory = $true)][string]$PackageRoot,
+        [Parameter(Mandatory = $true)][string]$EmptySelectionMessage
+    )
+
+    if ($SelectedCount -eq 0) { throw $EmptySelectionMessage }
+    if (-not (Test-SemtWaveName -Name $WaveName)) { throw ("SEMT_WAVE_NAME_INVALID: '{0}' is not a valid Wave name." -f $WaveName) }
+    $plannedWavePath = Join-Path (Get-SemtWaveRoot -PackageRoot $PackageRoot -Campaign $script:AutomaticWaveCampaign) $WaveName
+    if (Test-Path -LiteralPath $plannedWavePath) { throw ("SEMT_WAVE_EXISTS: Wave '{0}' already exists for {1}: {2}" -f $WaveName, $script:AutomaticWaveCampaign, $plannedWavePath) }
+}
+
+function New-AutomaticWaveFromPreview {
+    <#
+    Create from a reusable Preview: the Wave gets exactly the previewed selection without reading and
+    analyzing the inventories again (minutes in a large forest). The preview reports and inventory
+    copies are copied to the Create evidence.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$PreviewPath,
+        [Parameter(Mandatory = $true)]$PreviewSummary,
+        [Parameter(Mandatory = $true)][string]$WaveName,
+        [Parameter(Mandatory = $true)][string]$PackageRoot,
+        [Parameter(Mandatory = $true)][string]$DescriptionBase,
+        [Parameter(Mandatory = $true)][string]$EmptySelectionMessage,
+        [string]$EvidenceRoot,
+        [switch]$NoEvidence
+    )
+
+    Publish-AutomaticWaveProgress -Stage 'Reusing the previewed selection...' -Detail $PreviewPath
+    $selected = @(Import-Csv -LiteralPath (Join-Path $PreviewPath 'AutomaticWaveSelection.csv'))
+    $excluded = @()
+    $filterExcluded = @()
+    if (Test-Path -LiteralPath (Join-Path $PreviewPath 'AutomaticWaveExclusions.csv') -PathType Leaf) { $excluded = @(Import-Csv -LiteralPath (Join-Path $PreviewPath 'AutomaticWaveExclusions.csv')) }
+    if (Test-Path -LiteralPath (Join-Path $PreviewPath 'AutomaticWaveFilterExclusions.csv') -PathType Leaf) { $filterExcluded = @(Import-Csv -LiteralPath (Join-Path $PreviewPath 'AutomaticWaveFilterExclusions.csv')) }
+    Assert-AutomaticWaveCreatable -SelectedCount $selected.Count -WaveName $WaveName -PackageRoot $PackageRoot -EmptySelectionMessage $EmptySelectionMessage
+
+    $evidencePath = ''
+    if (-not $NoEvidence) {
+        if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
+            $EvidenceRoot = Join-Path $PackageRoot ('Runs\{0}\_AutomaticWave' -f $script:AutomaticWaveCampaign)
+        }
+        $evidencePath = Join-Path $EvidenceRoot (Get-Date -Format 'yyyyMMdd-HHmmssfff')
+        Publish-AutomaticWaveProgress -Stage 'Copying the preview evidence...' -Detail $evidencePath
+        New-SemtDirectory -Path $evidencePath
+        foreach ($file in @(Get-ChildItem -LiteralPath $PreviewPath -Filter '*.csv' -File)) {
+            Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $evidencePath $file.Name) -Force
+        }
+    }
+
+    Publish-AutomaticWaveProgress -Stage 'Creating the automatic Wave...' -Detail ("Wave: {0}; selected devices: {1}" -f $WaveName, $selected.Count)
+    $waveComputers = @($selected | Sort-Object ComputerName | Select-Object -ExpandProperty ComputerName)
+    $wave = New-SemtWave -PackageRoot $PackageRoot -Campaign $script:AutomaticWaveCampaign -Name $WaveName -Computers $waveComputers -Source Automatic -Description ('{0}; Selected={1}' -f $DescriptionBase, $selected.Count) -EvidencePath $evidencePath
+
+    $values = [ordered]@{}
+    foreach ($property in $PreviewSummary.PSObject.Properties) { $values[$property.Name] = $property.Value }
+    $values['GeneratedUtc'] = [datetime]::UtcNow.ToString('o')
+    $values['WaveCreated'] = $true
+    $values['WaveName'] = $WaveName
+    $values['WavePath'] = [string]$wave.Path
+    $values['ComputersPath'] = [string]$wave.ComputersPath
+    $values['EvidencePath'] = $evidencePath
+    $values['PreviewEvidencePath'] = $PreviewPath
+    $summary = [pscustomobject]$values
+    if (-not $NoEvidence) {
+        Write-SemtJsonFileAtomic -Path (Join-Path $evidencePath 'AutomaticWaveSummary.json') -InputObject $summary -Depth 5
+    }
+    Publish-AutomaticWaveProgress -Stage 'Automatic Wave created.' -Detail ([string]$wave.Path)
+
+    return [pscustomobject]@{
+        Summary = $summary
+        SelectedDevices = $selected
+        ExcludedDevices = $excluded
+        FilterExcludedDevices = $filterExcluded
+    }
 }
 
 function Export-AutomaticWaveCsv {
@@ -458,8 +680,8 @@ $requiredSources = switch ($Source) {
     default { @('AD', 'Intune') }
 }
 
-$availableSources = New-Object System.Collections.Generic.List[string]
-$missingSources = New-Object System.Collections.Generic.List[string]
+$availableSources = [System.Collections.Generic.List[string]]::new()
+$missingSources = [System.Collections.Generic.List[string]]::new()
 if ('AD' -in $requiredSources) {
     if (-not [string]::IsNullOrWhiteSpace($AdInventoryCsv) -and (Test-Path -LiteralPath $AdInventoryCsv -PathType Leaf)) {
         $availableSources.Add('AD')
@@ -490,6 +712,27 @@ if ($ExcludeStaleAd -and 'AD' -notin $availableSources) {
     throw 'ExcludeStaleAd requires an available AD inventory source.'
 }
 
+$namePrefixes = @(Get-AutomaticWaveNamePrefixes -Prefixes $ComputerNamePrefix)
+$namePrefixDisplay = $namePrefixes -join ';'
+$nameContainsValues = @(Get-AutomaticWaveNameContainsValues -ContainsValues $ComputerNameContains)
+$nameContainsDisplay = $nameContainsValues -join ';'
+$adDomains = @(Get-AutomaticWaveAdDomains -Domains $AdDomainFilter)
+$adDomainDisplay = $adDomains -join ';'
+$safeWaveName = Get-AutomaticWaveSafeName -Name $WaveName -NamePrefixes $namePrefixes
+$emptySelectionMessage = 'No eligible Windows 10 device was selected; the Wave was not created.'
+$descriptionBase = 'Automatic Windows11Upgrade Wave; Source={0}; AvailableSources={1}; ComputerNamePrefix={2}; ComputerNameContains={3}; ADDomain={7}; ExcludeIntunePresent={4}; ExcludeStaleAd={5}; ADLastLogonMaxAgeDays={6}' -f $Source,($availableSources.ToArray() -join '+'),$namePrefixDisplay,$nameContainsDisplay,[bool]$ExcludeIntunePresent,[bool]$ExcludeStaleAd,$AdLastLogonMaxAgeDays,$adDomainDisplay
+$selectionSignature = @($script:AutomaticWaveCampaign, $script:AutomaticWaveVersion, "Source=$Source", "AvailableSources=$($availableSources.ToArray() -join '+')", "ComputerNamePrefix=$namePrefixDisplay", "ComputerNameContains=$nameContainsDisplay", "ADDomain=$adDomainDisplay", "ExcludeIntunePresent=$([bool]$ExcludeIntunePresent)", "ExcludeStaleAd=$([bool]$ExcludeStaleAd)", "ADLastLogonMaxAgeDays=$AdLastLogonMaxAgeDays") -join '|'
+$inventoryFingerprint = Get-AutomaticWaveInventoryFingerprint -Paths @($(if ('AD' -in $availableSources) { $AdInventoryCsv } else { '' }), $(if ('Intune' -in $availableSources) { $IntuneInventoryCsv } else { '' }))
+
+if ($Create -and -not [string]::IsNullOrWhiteSpace($PreviewEvidencePath)) {
+    $previewReuse = Get-AutomaticWavePreviewReuse -Path $PreviewEvidencePath -SelectionSignature $selectionSignature -InventoryFingerprint $inventoryFingerprint
+    if ($previewReuse.Summary) {
+        New-AutomaticWaveFromPreview -PreviewPath $PreviewEvidencePath -PreviewSummary $previewReuse.Summary -WaveName $safeWaveName -PackageRoot $effectivePackageRoot -DescriptionBase $descriptionBase -EmptySelectionMessage $emptySelectionMessage -EvidenceRoot $EvidenceRoot -NoEvidence:$NoEvidence
+        return
+    }
+    Publish-AutomaticWaveProgress -Stage 'Computing the selection again...' -Detail ('The preview cannot be reused: {0}.' -f $previewReuse.Reason)
+}
+
 Publish-AutomaticWaveProgress -Stage 'Loading inventory records...' -Detail ("Available sources: {0}" -f ($availableSources.ToArray() -join ' + '))
 $adRows = if ('AD' -in $availableSources) { @(Import-Csv -LiteralPath $AdInventoryCsv) } else { @() }
 $intuneRows = if ('Intune' -in $availableSources) { @(Import-Csv -LiteralPath $IntuneInventoryCsv) } else { @() }
@@ -501,7 +744,7 @@ $intuneRecords = @(Get-IntuneAutomaticWaveRecord -Rows $intuneRows)
 $adByKey = @{}
 foreach ($record in $adRecords) {
     if (-not $adByKey.ContainsKey($record.Key)) {
-        $adByKey[$record.Key] = New-Object System.Collections.Generic.List[object]
+        $adByKey[$record.Key] = [System.Collections.Generic.List[object]]::new()
     }
     $adByKey[$record.Key].Add($record)
 }
@@ -509,33 +752,40 @@ foreach ($record in $adRecords) {
 $intuneByKey = @{}
 $intuneAllByKey = @{}
 $intuneDuplicateCount = 0
-foreach ($group in @($intuneRecords | Group-Object -Property Key)) {
-    $ordered = @($group.Group | Sort-Object -Property @{ Expression = 'LastSyncUtc'; Descending = $true })
+# Hashtable grouping instead of Group-Object (slow with tens of thousands of rows); a key with
+# several Intune rows keeps the newest sync first, as before.
+$intuneGroups = @{}
+foreach ($record in $intuneRecords) {
+    if (-not $intuneGroups.ContainsKey($record.Key)) { $intuneGroups[$record.Key] = [System.Collections.Generic.List[object]]::new() }
+    $intuneGroups[$record.Key].Add($record)
+}
+foreach ($groupKey in @($intuneGroups.Keys)) {
+    $group = $intuneGroups[$groupKey]
+    $ordered = @(if ($group.Count -eq 1) { $group.ToArray() } else { $group.ToArray() | Sort-Object -Property @{ Expression = 'LastSyncUtc'; Descending = $true } })
     if ($ordered.Count -gt 1) { $intuneDuplicateCount += ($ordered.Count - 1) }
-    $intuneAllByKey[$group.Name] = $ordered
-    $intuneByKey[$group.Name] = $ordered[0]
+    $intuneAllByKey[$groupKey] = $ordered
+    $intuneByKey[$groupKey] = $ordered[0]
 }
 
-$allKeys = @(@($adByKey.Keys) + @($intuneByKey.Keys) | Sort-Object -Unique)
-$namePrefixes = @(Get-AutomaticWaveNamePrefixes -Prefixes $ComputerNamePrefix)
-$namePrefixDisplay = $namePrefixes -join ';'
-$nameContainsValues = @(Get-AutomaticWaveNameContainsValues -ContainsValues $ComputerNameContains)
-$nameContainsDisplay = $nameContainsValues -join ';'
-$adDomains = @(Get-AutomaticWaveAdDomains -Domains $AdDomainFilter)
-$adDomainDisplay = $adDomains -join ';'
+$allKeySet = @{}
+foreach ($keyName in $adByKey.Keys) { $allKeySet[$keyName] = $true }
+foreach ($keyName in $intuneByKey.Keys) { $allKeySet[$keyName] = $true }
+$allKeys = @($allKeySet.Keys | Sort-Object)
 Assert-AutomaticWaveAdDomainsInInventory -Domains $adDomains -AdRecords $adRecords -InventoryPath $AdInventoryCsv
 $adLastLogonCutoffUtc = [datetime]::UtcNow.AddDays(-$AdLastLogonMaxAgeDays)
-$selected = New-Object System.Collections.Generic.List[object]
-$excluded = New-Object System.Collections.Generic.List[object]
-$filterExcluded = New-Object System.Collections.Generic.List[object]
+$selected = [System.Collections.Generic.List[object]]::new()
+$excluded = [System.Collections.Generic.List[object]]::new()
+$filterExcluded = [System.Collections.Generic.List[object]]::new()
 $matchedKeyLookup = @{}
 
+# Per-computer checks use plain loops: Where-Object/Sort-Object pipelines per computer took minutes
+# with tens of thousands of computers.
 foreach ($key in $allKeys) {
     $keyAdRecords = @()
     if ($adByKey.ContainsKey($key)) {
         $keyAdRecords = $adByKey[$key].ToArray()
     }
-    $keyIntuneRecords = if ($intuneAllByKey.ContainsKey($key)) { @($intuneAllByKey[$key]) } else { @() }
+    $keyIntuneRecords = @(if ($intuneAllByKey.ContainsKey($key)) { $intuneAllByKey[$key] })
     $intuneRecord = if ($intuneByKey.ContainsKey($key)) { $intuneByKey[$key] } else { $null }
 
     $filterName = if ($keyAdRecords.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$keyAdRecords[0].PreferredName)) {
@@ -547,35 +797,43 @@ foreach ($key in $allKeys) {
     else {
         $key
     }
-    $filterTypes = New-Object System.Collections.Generic.List[string]
-    $filterValues = New-Object System.Collections.Generic.List[string]
-    $filterReasons = New-Object System.Collections.Generic.List[string]
-    if (-not (Test-AutomaticWaveNamePrefix -ComputerKey $key -Prefixes $namePrefixes)) {
+    $filterTypes = [System.Collections.Generic.List[string]]::new()
+    $filterValues = [System.Collections.Generic.List[string]]::new()
+    $filterReasons = [System.Collections.Generic.List[string]]::new()
+    if ($namePrefixes.Count -gt 0 -and -not (Test-AutomaticWaveNamePrefix -ComputerKey $key -Prefixes $namePrefixes)) {
         $filterTypes.Add('ComputerNamePrefix')
         $filterValues.Add($namePrefixDisplay)
         $filterReasons.Add('COMPUTER_NAME_PREFIX_NOT_MATCHED')
     }
-    if (-not (Test-AutomaticWaveNameContains -ComputerKey $key -ContainsValues $nameContainsValues)) {
+    if ($nameContainsValues.Count -gt 0 -and -not (Test-AutomaticWaveNameContains -ComputerKey $key -ContainsValues $nameContainsValues)) {
         $filterTypes.Add('ComputerNameContains')
         $filterValues.Add($nameContainsDisplay)
         $filterReasons.Add('COMPUTER_NAME_CONTAINS_NOT_MATCHED')
     }
-    $adDomainReason = Get-AutomaticWaveAdDomainFilterReason -AdRecords $keyAdRecords -Domains $adDomains
+    $adDomainReason = if ($adDomains.Count -gt 0) { Get-AutomaticWaveAdDomainFilterReason -AdRecords $keyAdRecords -Domains $adDomains } else { '' }
     if (-not [string]::IsNullOrWhiteSpace($adDomainReason)) {
         $filterTypes.Add('ADDomain')
         $filterValues.Add($adDomainDisplay)
         $filterReasons.Add($adDomainReason)
     }
 
-    $intunePresent = (@($keyIntuneRecords | Where-Object { $_.Present }).Count -gt 0)
+    $intunePresent = $false
+    $intuneWindows11 = $false
+    $intuneStateExcluded = $false
+    $intuneNotPresent = $false
+    foreach ($record in $keyIntuneRecords) {
+        if ($record.Present) { $intunePresent = $true } else { $intuneNotPresent = $true }
+        if ($record.Classification -eq 'Windows11') { $intuneWindows11 = $true }
+        if ($record.StateExcluded) { $intuneStateExcluded = $true }
+    }
     if ($ExcludeIntunePresent -and $intunePresent) {
         $filterTypes.Add('IntunePresence')
         $filterValues.Add('Present=True')
         $filterReasons.Add('INTUNE_DEVICE_PRESENT')
     }
 
-    $validAdLastSeen = @($keyAdRecords | Where-Object { $_.LastSeenUtc -ne [datetime]::MinValue } | Sort-Object -Property LastSeenUtc -Descending)
-    $latestAdLastSeen = if ($validAdLastSeen.Count -gt 0) { [datetime]$validAdLastSeen[0].LastSeenUtc } else { [datetime]::MinValue }
+    $latestAdLastSeen = [datetime]::MinValue
+    foreach ($record in $keyAdRecords) { if ($record.LastSeenUtc -gt $latestAdLastSeen) { $latestAdLastSeen = [datetime]$record.LastSeenUtc } }
     if ($ExcludeStaleAd) {
         if ($latestAdLastSeen -eq [datetime]::MinValue) {
             $filterTypes.Add('ADLastLogon')
@@ -603,19 +861,26 @@ foreach ($key in $allKeys) {
     }
     $matchedKeyLookup[$key] = $true
 
-    $adFqdns = @($keyAdRecords | ForEach-Object { ([string]$_.DNSHostName).Trim().ToLowerInvariant() } | Where-Object { $_ -match '\.' } | Sort-Object -Unique)
+    $fqdnSet = @{}
+    $adWindows11 = $false
+    $adDisabledEvidence = $false
+    $adNotPresent = $false
+    $adStale = $false
+    $eligibleAdRecords = [System.Collections.Generic.List[object]]::new()
+    foreach ($record in $keyAdRecords) {
+        $fqdn = ([string]$record.DNSHostName).Trim().ToLowerInvariant()
+        if ($fqdn -match '\.') { $fqdnSet[$fqdn] = $true }
+        if ($record.Classification -eq 'Windows11') { $adWindows11 = $true }
+        if (-not $record.Present) { $adNotPresent = $true }
+        elseif (-not $record.Enabled) { $adDisabledEvidence = $true }
+        if ($record.IsStale) { $adStale = $true }
+        if ($record.Eligible) { $eligibleAdRecords.Add($record) }
+    }
+    $adFqdns = @($fqdnSet.Keys | Sort-Object)
     $adCollision = ($adFqdns.Count -gt 1)
-    $windows11Evidence = (
-        @($keyAdRecords | Where-Object { $_.Classification -eq 'Windows11' }).Count -gt 0 -or
-        @($keyIntuneRecords | Where-Object { $_.Classification -eq 'Windows11' }).Count -gt 0
-    )
-    $adDisabledEvidence = (@($keyAdRecords | Where-Object { $_.Present -and -not $_.Enabled }).Count -gt 0)
-    $intuneStateExcluded = (@($keyIntuneRecords | Where-Object { $_.StateExcluded }).Count -gt 0)
-    $inventoryNotPresent = (
-        @($keyAdRecords | Where-Object { -not $_.Present }).Count -gt 0 -or
-        @($keyIntuneRecords | Where-Object { -not $_.Present }).Count -gt 0
-    )
-    $eligibleAd = @($keyAdRecords | Where-Object { $_.Eligible } | Sort-Object -Property DNSHostName | Select-Object -First 1)
+    $windows11Evidence = ($adWindows11 -or $intuneWindows11)
+    $inventoryNotPresent = ($adNotPresent -or $intuneNotPresent)
+    $eligibleAd = @(if ($eligibleAdRecords.Count -le 1) { $eligibleAdRecords.ToArray() } else { $eligibleAdRecords.ToArray() | Sort-Object -Property DNSHostName | Select-Object -First 1 })
     $adEligible = ($eligibleAd.Count -gt 0)
     $intuneEligible = ($null -ne $intuneRecord -and $intuneRecord.Eligible)
     $unsafeInventoryState = ($adDisabledEvidence -or $intuneStateExcluded -or $inventoryNotPresent)
@@ -635,7 +900,7 @@ foreach ($key in $allKeys) {
             ADOperatingSystem  = if ($keyAdRecords.Count -gt 0) { [string]$keyAdRecords[0].OperatingSystem } else { '' }
             ADOSVersion        = if ($keyAdRecords.Count -gt 0) { [string]$keyAdRecords[0].OSVersion } else { '' }
             ADEnabled          = if ($keyAdRecords.Count -gt 0) { [string]$keyAdRecords[0].Enabled } else { '' }
-            ADLastLogonStale   = (@($keyAdRecords | Where-Object { $_.IsStale }).Count -gt 0)
+            ADLastLogonStale   = $adStale
             IntuneOperatingSystem = if ($null -ne $intuneRecord) { [string]$intuneRecord.OperatingSystem } else { '' }
             IntuneOSVersion    = if ($null -ne $intuneRecord) { [string]$intuneRecord.OSVersion } else { '' }
             IntuneManagementState = if ($null -ne $intuneRecord) { [string]$intuneRecord.ManagementState } else { '' }
@@ -667,14 +932,10 @@ foreach ($key in $allKeys) {
 }
 
 Publish-AutomaticWaveProgress -Stage 'Applying selection and safety filters...' -Detail ("Selected: {0}; safety exclusions: {1}; filtered out: {2}" -f $selected.Count,$excluded.Count,$filterExcluded.Count)
-$safeWaveName = Get-AutomaticWaveSafeName -Name $WaveName -NamePrefixes $namePrefixes
 $wavePath = ''
 $computersPath = ''
 if ($Create) {
-    if ($selected.Count -eq 0) { throw 'No eligible Windows 10 device was selected; the Wave was not created.' }
-    if (-not (Test-SemtWaveName -Name $safeWaveName)) { throw ("SEMT_WAVE_NAME_INVALID: '{0}' is not a valid Wave name." -f $safeWaveName) }
-    $plannedWavePath = Join-Path (Get-SemtWaveRoot -PackageRoot $effectivePackageRoot -Campaign $script:AutomaticWaveCampaign) $safeWaveName
-    if (Test-Path -LiteralPath $plannedWavePath) { throw ("SEMT_WAVE_EXISTS: Wave '{0}' already exists for {1}: {2}" -f $safeWaveName,$script:AutomaticWaveCampaign,$plannedWavePath) }
+    Assert-AutomaticWaveCreatable -SelectedCount $selected.Count -WaveName $safeWaveName -PackageRoot $effectivePackageRoot -EmptySelectionMessage $emptySelectionMessage
 }
 
 $evidencePath = ''
@@ -714,7 +975,7 @@ if (-not $NoEvidence) {
 }
 
 if ($Create) {
-    $description = 'Automatic Windows11Upgrade Wave; Source={0}; AvailableSources={1}; ComputerNamePrefix={2}; ComputerNameContains={3}; ADDomain={8}; ExcludeIntunePresent={4}; ExcludeStaleAd={5}; ADLastLogonMaxAgeDays={6}; Selected={7}' -f $Source,($availableSources.ToArray() -join '+'),$namePrefixDisplay,$nameContainsDisplay,[bool]$ExcludeIntunePresent,[bool]$ExcludeStaleAd,$AdLastLogonMaxAgeDays,$selected.Count,$adDomainDisplay
+    $description = '{0}; Selected={1}' -f $descriptionBase,$selected.Count
     Publish-AutomaticWaveProgress -Stage 'Creating the automatic Wave...' -Detail ("Wave: {0}; selected devices: {1}" -f $safeWaveName,$selected.Count)
     $waveComputers = @($selected | Sort-Object ComputerName | Select-Object -ExpandProperty ComputerName)
     $wave = New-SemtWave -PackageRoot $effectivePackageRoot -Campaign $script:AutomaticWaveCampaign -Name $safeWaveName -Computers $waveComputers -Source Automatic -Description $description -EvidencePath $evidencePath
@@ -725,6 +986,9 @@ if ($Create) {
 $summary = [pscustomobject]@{
     Version                    = $script:AutomaticWaveVersion
     Campaign                   = $script:AutomaticWaveCampaign
+    GeneratedUtc               = [datetime]::UtcNow.ToString('o')
+    SelectionSignature         = $selectionSignature
+    InventoryFingerprint       = $inventoryFingerprint
     RequestedSource            = $Source
     AvailableSources           = $availableSources.ToArray() -join '+'
     MissingSources             = $missingSources.ToArray() -join ','
@@ -739,26 +1003,26 @@ $summary = [pscustomobject]@{
     UniqueInventoryDevices     = $allKeys.Count
     NameFilterMatchedDevices   = $matchedKeyLookup.Count
     NameFilterExcludedDevices  = $filterExcluded.Count
-    PrefixFilterExcluded       = @($filterExcluded | Where-Object { $_.FilterReason -match 'COMPUTER_NAME_PREFIX_NOT_MATCHED' }).Count
-    ContainsFilterExcluded     = @($filterExcluded | Where-Object { $_.FilterReason -match 'COMPUTER_NAME_CONTAINS_NOT_MATCHED' }).Count
-    IntunePresentFilterExcluded = @($filterExcluded | Where-Object { $_.FilterReason -match 'INTUNE_DEVICE_PRESENT' }).Count
-    ADLastLogonFilterExcluded  = @($filterExcluded | Where-Object { $_.FilterReason -match 'AD_LAST_LOGON_' }).Count
-    ADLastLogonUnknownExcluded = @($filterExcluded | Where-Object { $_.FilterReason -match 'AD_LAST_LOGON_UNKNOWN' }).Count
-    ADDomainFilterExcluded     = @($filterExcluded | Where-Object { $_.FilterReason -match 'AD_DOMAIN_' }).Count
+    PrefixFilterExcluded       = $filterExcluded.Where({ $_.FilterReason -match 'COMPUTER_NAME_PREFIX_NOT_MATCHED' }).Count
+    ContainsFilterExcluded     = $filterExcluded.Where({ $_.FilterReason -match 'COMPUTER_NAME_CONTAINS_NOT_MATCHED' }).Count
+    IntunePresentFilterExcluded = $filterExcluded.Where({ $_.FilterReason -match 'INTUNE_DEVICE_PRESENT' }).Count
+    ADLastLogonFilterExcluded  = $filterExcluded.Where({ $_.FilterReason -match 'AD_LAST_LOGON_' }).Count
+    ADLastLogonUnknownExcluded = $filterExcluded.Where({ $_.FilterReason -match 'AD_LAST_LOGON_UNKNOWN' }).Count
+    ADDomainFilterExcluded     = $filterExcluded.Where({ $_.FilterReason -match 'AD_DOMAIN_' }).Count
     ADRows                     = $adRows.Count
     IntuneRows                 = $intuneRows.Count
-    ADWindows10Candidates      = @($adRecords | Where-Object { $_.Eligible -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
-    IntuneWindows10Candidates  = @($intuneRecords | Where-Object { $_.Eligible -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
+    ADWindows10Candidates      = $adRecords.Where({ $_.Eligible -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
+    IntuneWindows10Candidates  = $intuneRecords.Where({ $_.Eligible -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
     SelectedDevices            = $selected.Count
     ExcludedDevices            = $excluded.Count
-    Windows11Excluded          = @($excluded | Where-Object { $_.ExclusionReason -match 'WINDOWS11_REPORTED' }).Count
-    ADDisabledExcluded         = @($excluded | Where-Object { $_.ExclusionReason -match 'AD_DISABLED' }).Count
-    IntuneStateExcluded        = @($excluded | Where-Object { $_.ExclusionReason -match 'INTUNE_MANAGEMENT_STATE_EXCLUDED' }).Count
-    UnknownOSExcluded          = @($excluded | Where-Object { $_.ExclusionReason -match 'OS_UNKNOWN_OR_UNSUPPORTED' }).Count
-    ADNameCollisions           = @($excluded | Where-Object { $_.ExclusionReason -match 'AD_NAME_COLLISION' }).Count
+    Windows11Excluded          = $excluded.Where({ $_.ExclusionReason -match 'WINDOWS11_REPORTED' }).Count
+    ADDisabledExcluded         = $excluded.Where({ $_.ExclusionReason -match 'AD_DISABLED' }).Count
+    IntuneStateExcluded        = $excluded.Where({ $_.ExclusionReason -match 'INTUNE_MANAGEMENT_STATE_EXCLUDED' }).Count
+    UnknownOSExcluded          = $excluded.Where({ $_.ExclusionReason -match 'OS_UNKNOWN_OR_UNSUPPORTED' }).Count
+    ADNameCollisions           = $excluded.Where({ $_.ExclusionReason -match 'AD_NAME_COLLISION' }).Count
     IntuneDuplicateRowsIgnored = $intuneDuplicateCount
-    ADStaleWarnings            = @($adRecords | Where-Object { $_.IsStale -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
-    IntuneStaleWarnings        = @($intuneRecords | Where-Object { $_.IsStale -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
+    ADStaleWarnings            = $adRecords.Where({ $_.IsStale -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
+    IntuneStaleWarnings        = $intuneRecords.Where({ $_.IsStale -and $matchedKeyLookup.ContainsKey($_.Key) }).Count
     WaveCreated                = [bool]$Create
     WaveName                   = $safeWaveName
     WavePath                   = $wavePath

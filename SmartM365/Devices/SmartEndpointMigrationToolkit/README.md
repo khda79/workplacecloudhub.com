@@ -71,7 +71,8 @@ Offline demonstration with fictional Contoso data (nothing is launched or querie
 Start-SmartEndpointMigrationToolkit-Demo.cmd
 ```
 
-GUI tabs: **Waves** (select, Launch Wave, launchers, Wave options), **Single PC**, **New Wave**,
+GUI tabs: **Waves** (select, Launch Wave, launchers; on the right, the Wave **Options** tab, which edits
+Wave.local.json with inheritance, then **Activity**), **Single PC**, **New Wave**,
 **Automatic Wave** (Preview, then Create: Create never launches), **Runs** (reports, controlled
 stop, forced local stop) and **Options** (generated from the option catalog, saved per Campaign).
 **Launch All Waves** launches the launchable Waves of the selected Campaign only, one every

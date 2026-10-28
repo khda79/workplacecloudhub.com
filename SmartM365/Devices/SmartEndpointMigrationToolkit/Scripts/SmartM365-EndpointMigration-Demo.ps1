@@ -15,6 +15,7 @@ Import-Module (Join-Path $script:SemtDemoPackageRoot 'Modules\SmartEndpointMigra
 foreach ($functionText in @(Get-SmartM365DemoFunctionText -Path $script:SmartM365Demo.GuiPath -Names @('Register-NumericStepper','Add-SemtGuiOptionControls'))) { . ([scriptblock]::Create(([regex]::Replace($functionText, '^function\s+', 'function script:')))) }
 $script:window = $script:SmartM365Demo.Window
 $script:CategoryOrder = @('Mode','Actions','Setup','Safety','Schedule','Parallelism','Network','Inventory','Evidence')
+$script:InheritChoiceLabel = '(inherit)'
 $script:SemtDemoCatalog = Import-SemtOptionCatalog -PackageRoot $script:SemtDemoPackageRoot
 $script:SemtDemoCampaigns = [ordered]@{ HybridJoin = 'Hybrid Join and Intune enrollment'; Windows11Upgrade = 'Windows 11 upgrade' }
 
@@ -71,6 +72,9 @@ function script:Update-SemtDemoCampaign {
     }
     $s.Data.Editors = Add-SemtGuiOptionControls -OptionsHost $c.OptionsHost -Catalog $script:SemtDemoCatalog -Campaign $campaign -Values $values
     $c.OptionsCampaignText.Text = 'Options - ' + $script:SemtDemoCampaigns[$campaign]
+    # Wave options of the fictional Wave: two options set on the Wave, the others inherit.
+    $s.Data.WaveEditors = Add-SemtGuiOptionControls -OptionsHost $c.WaveOptionsHost -Catalog $script:SemtDemoCatalog -Campaign $campaign -Values @{ ThrottleLimit = 5; NightPauseEnabled = $true } -AllowInherit
+    $c.WaveOptionsTitleText.Text = 'Wave options - ' + $(if ($isWindows11) { 'WAVE-CONTOSO-W11-PILOT' } else { 'WAVE-CONTOSO-HJ-PILOT' })
     Set-SmartM365DemoCombo WaveCombo @(Get-SemtDemoWaves -Campaign $campaign | ForEach-Object { '{0}  ({1} computer(s))' -f $_,$(if ($_ -like '*PILOT*') { 4 } else { 12 }) })
     $c.WaveDeviceCountText.Text = '4'
     $c.WaveSourceText.Text = 'Manual - Contoso pilot'
@@ -148,7 +152,7 @@ function script:Invoke-SmartM365DemoProfileAction {
         '^(StopAllButton|StopSelectedRunButton)$' { Write-SmartM365DemoActivity 'Controlled stop simulated: no new computer starts; running workers finish. No real process was contacted.'; return $true }
         '^ForceStopSelectedRunButton$' { Write-SmartM365DemoActivity 'Forced local stop simulated. Remote endpoints are reported separately and must be verified before relaunch.'; return $true }
         '^(OpenWaveComputersButton|OpenNewWaveComputersButton)$' { [void](Show-SmartM365DemoDetail -Title 'Computers.txt' -Text ((1..12 | ForEach-Object { 'CTSO-LAP-{0:0000}' -f $_ }) -join [Environment]::NewLine)); return $true }
-        '^OpenWaveConfigButton$' { [void](Show-SmartM365DemoDetail -Title 'Wave.local.json' -Text ('{ "SchemaVersion": 1, "Product": "SmartEndpointMigrationToolkit", "Campaign": "' + (Get-SemtDemoCampaign) + '", "Source": "Manual", "Options": { "ThrottleLimit": 5 } }')); return $true }
+        '^(SaveWaveOptionsButton|InheritWaveOptionsButton)$' { if ($Name -eq 'InheritWaveOptionsButton') { Update-SemtDemoCampaign }; Write-SmartM365DemoActivity ($Name + ' simulated. Wave.local.json was not written.'); return $true }
         '^(AutomaticOpenEvidenceButton|OpenWaveFolderButton|OpenRunFolderButton|OpenSingleRunFolderButton)$' { [void](Show-SmartM365DemoDetail -Title 'Fictional evidence' -Text $c.AutomaticSummaryText.Text); return $true }
         '^(SaveOptionsButton|ResetOptionsButton|RefreshWrappersButton)$' { if ($Name -eq 'ResetOptionsButton') { Update-SemtDemoCampaign }; Write-SmartM365DemoActivity ($Name + ' simulated. No configuration file was written.'); return $true }
         '^HeaderLogoLink$' { return $true }

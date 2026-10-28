@@ -42,6 +42,7 @@ $script:PackageRoot = Split-Path -Path $PSScriptRoot -Parent
 Import-Module (Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
 $script:CampaignTitles = [ordered]@{ HybridJoin = 'Hybrid Join and Intune enrollment'; Windows11Upgrade = 'Windows 11 upgrade' }
 $script:CategoryOrder = @('Mode','Actions','Setup','Safety','Schedule','Parallelism','Network','Inventory','Evidence')
+$script:InheritChoiceLabel = '(inherit)'
 $script:InventoryRefresh = $null
 $script:GuiClosing = $false
 $script:AllAdDomainsLabel = '(All domains)'
@@ -237,7 +238,8 @@ function Get-AutomaticWaveCommandText {
         [Parameter(Mandatory = $true)][string]$Campaign,
         [Parameter(Mandatory = $true)][hashtable]$Filters,
         [Parameter(Mandatory = $true)][string]$EvidenceRoot,
-        [switch]$Create
+        [switch]$Create,
+        [AllowEmptyString()][string]$PreviewEvidencePath
     )
 
     $script = Join-Path $script:PackageRoot ("Campaigns\{0}\Scripts\SmartM365-EndpointMigration-{0}-New-AutomaticWave.ps1" -f $Campaign)
@@ -252,7 +254,11 @@ function Get-AutomaticWaveCommandText {
         $parts += @('-Source',$Filters.Source)
         if ($Filters.ExcludeIntunePresent) { $parts += '-ExcludeIntunePresent' }
     }
-    if ($Create) { $parts += '-Create' }
+    if ($Create) {
+        $parts += '-Create'
+        # The engine reuses the previewed selection when the filters and inventories are unchanged.
+        if (-not [string]::IsNullOrWhiteSpace($PreviewEvidencePath)) { $parts += @('-PreviewEvidencePath',(ConvertTo-PowerShellLiteral $PreviewEvidencePath)) }
+    }
     return ($parts -join ' ')
 }
 
@@ -584,20 +590,36 @@ $xaml = @'
                             <WrapPanel Grid.Row="4" VerticalAlignment="Bottom">
                                 <Button x:Name="OpenWaveFolderButton" Content="Folder"/>
                                 <Button x:Name="OpenWaveComputersButton" Content="Computers.txt"/>
-                                <Button x:Name="OpenWaveConfigButton" Content="Wave options"/>
                                 <Button x:Name="RefreshWrappersButton" Content="Refresh launchers"/>
                             </WrapPanel>
                         </Grid>
                     </Border>
-                    <Border Grid.Column="1" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="8,0,0,0">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*"/>
-                            </Grid.RowDefinitions>
-                            <TextBlock Text="Activity" Foreground="{StaticResource TextBrush}" FontSize="18" FontWeight="SemiBold"/>
-                            <TextBox Grid.Row="1" x:Name="ActivityText" Margin="0,14,0,0" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
-                        </Grid>
+                    <Border Grid.Column="1" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="12" Margin="8,0,0,0">
+                        <TabControl x:Name="WaveSideTabs" BorderThickness="0" Background="Transparent">
+                            <TabItem x:Name="WaveOptionsTab" Header="Options" IsSelected="True">
+                                <Grid Margin="4,10,4,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <StackPanel>
+                                        <TextBlock x:Name="WaveOptionsTitleText" Text="Wave options" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                                        <TextBlock Text="Saved in Wave.local.json and used by the Start-Wave-*.cmd launchers of this Wave. An empty field, a check box showing a square (not set) or (inherit) keeps the global configuration or the default. A launch from this GUI uses the choices of the Options tab, which win over these values." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,8"/>
+                                    </StackPanel>
+                                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                        <StackPanel x:Name="WaveOptionsHost"/>
+                                    </ScrollViewer>
+                                    <WrapPanel Grid.Row="2" Margin="0,8,0,0">
+                                        <Button x:Name="SaveWaveOptionsButton" Content="Save Wave options"/>
+                                        <Button x:Name="InheritWaveOptionsButton" Content="Inherit all"/>
+                                    </WrapPanel>
+                                </Grid>
+                            </TabItem>
+                            <TabItem x:Name="ActivityTab" Header="Activity">
+                                <TextBox x:Name="ActivityText" Margin="4,10,4,0" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                            </TabItem>
+                        </TabControl>
                     </Border>
                 </Grid>
             </TabItem>
@@ -871,8 +893,10 @@ function Add-SemtGuiOptionControls {
     Builds one editor per GUI-visible option of the Campaign, grouped by category: check box
     for booleans, numeric stepper for integers, combo box for choices, text box for strings and
     paths. The demo profile reuses this function so demonstrations show the real options.
+    With -AllowInherit (Wave options), an option can also inherit the next layer: check box not set,
+    empty number or text, or '(inherit)'; missing and __INHERIT__ values are shown that way.
     #>
-    param([Parameter(Mandatory = $true)]$OptionsHost,[Parameter(Mandatory = $true)]$Catalog,[Parameter(Mandatory = $true)][string]$Campaign,[hashtable]$Values = @{})
+    param([Parameter(Mandatory = $true)]$OptionsHost,[Parameter(Mandatory = $true)]$Catalog,[Parameter(Mandatory = $true)][string]$Campaign,[hashtable]$Values = @{},[switch]$AllowInherit)
 
     $OptionsHost.Children.Clear()
     $editors = @{}
@@ -889,8 +913,10 @@ function Add-SemtGuiOptionControls {
         foreach ($definition in $items) {
             $name = [string]$definition.Name
             $default = Get-SemtOptionDefault -Definition $definition -Campaign $Campaign
-            $value = if ($Values.ContainsKey($name)) { $Values[$name] } else { $default }
+            $inherit = ($AllowInherit -and (-not $Values.ContainsKey($name) -or (Test-SemtInheritValue -Value $Values[$name])))
+            $value = if ($inherit) { '' } elseif ($Values.ContainsKey($name)) { $Values[$name] } else { $default }
             $tip = '{0}{1}Default: {2}{3}{1}Option: {4}; environment: {5}' -f $definition.Description,[Environment]::NewLine,$default,$(if ($definition.Unit) { ' ' + $definition.Unit } else { '' }),$name,$definition.EnvVar
+            if ($AllowInherit) { $tip += [Environment]::NewLine + 'Check box showing a square (not set), empty field or (inherit): the global configuration or the default applies.' }
             $cell = New-Object System.Windows.Controls.StackPanel
             $cell.Width = 340
             $cell.Margin = [System.Windows.Thickness]::new(0,0,14,6)
@@ -900,7 +926,8 @@ function Add-SemtGuiOptionControls {
                 'Boolean' {
                     $control = New-Object System.Windows.Controls.CheckBox
                     $control.Content = [string]$definition.Label
-                    $control.IsChecked = [bool]$value
+                    if ($AllowInherit) { $control.IsThreeState = $true }
+                    $control.IsChecked = if ($inherit) { $null } else { [bool]$value }
                     $control.ToolTip = $tip
                     [void]$cell.Children.Add($control)
                 }
@@ -927,8 +954,9 @@ function Add-SemtGuiOptionControls {
                 'Choice' {
                     $label = New-Object System.Windows.Controls.TextBlock; $label.Text = [string]$definition.Label; [void]$cell.Children.Add($label)
                     $control = New-Object System.Windows.Controls.ComboBox
+                    if ($AllowInherit) { [void]$control.Items.Add($script:InheritChoiceLabel) }
                     foreach ($choice in @($definition.Choices)) { [void]$control.Items.Add([string]$choice) }
-                    $control.SelectedItem = [string]$value
+                    $control.SelectedItem = if ($inherit) { $script:InheritChoiceLabel } else { [string]$value }
                     [void]$cell.Children.Add($control)
                 }
                 default {
@@ -948,15 +976,23 @@ function Add-SemtGuiOptionControls {
 }
 
 function Get-SemtGuiOptionValues {
-    param([Parameter(Mandatory = $true)][hashtable]$Editors)
+    <#
+    Validated values of the editors. With -AllowInherit (Wave options), an inheriting editor returns
+    __INHERIT__ (the marker of the Wave.local.json template).
+    #>
+    param([Parameter(Mandatory = $true)][hashtable]$Editors,[switch]$AllowInherit)
     $values = @{}
     foreach ($entry in $Editors.GetEnumerator()) {
         $definition = $entry.Value.Definition
         $control = $entry.Value.Control
         $raw = switch ([string]$definition.Type) {
-            'Boolean' { [bool]$control.IsChecked }
-            'Choice' { [string]$control.SelectedItem }
+            'Boolean' { if ($AllowInherit -and $null -eq $control.IsChecked) { $null } else { [bool]$control.IsChecked } }
+            'Choice' { if ($AllowInherit -and [string]$control.SelectedItem -eq $script:InheritChoiceLabel) { $null } else { [string]$control.SelectedItem } }
             default { [string]$control.Text }
+        }
+        if ($AllowInherit -and ($null -eq $raw -or ($raw -is [string] -and [string]::IsNullOrWhiteSpace($raw)))) {
+            $values[$entry.Key] = '__INHERIT__'
+            continue
         }
         $values[$entry.Key] = ConvertTo-SemtOptionValue -Definition $definition -Value $raw -Source ('GUI field "{0}"' -f $definition.Label)
     }
@@ -967,12 +1003,14 @@ function Get-SemtGuiOptionValues {
 
 $script:Catalog = Import-SemtOptionCatalog -PackageRoot $script:PackageRoot
 $script:Editors = @{}
+$script:WaveEditors = @{}
 $script:CurrentCampaign = ''
 $script:Waves = @()
 $script:SelectedWave = $null
 $script:LaunchQueue = New-Object System.Collections.Queue
 $script:LaunchTimer = $null
 $script:AutomaticPreviewSignature = ''
+$script:AutomaticPreviewEvidence = ''
 $script:AutomaticProcess = $null
 $script:AutomaticTimer = $null
 
@@ -1008,6 +1046,7 @@ function Update-WaveView {
     if ($null -eq $wave) {
         foreach ($name in @('WaveDeviceCountText','WaveSourceText','WaveWrappersText','WaveLastRunText')) { $controls[$name].Text = '-' }
         $controls.LaunchWaveButton.IsEnabled = $false
+        Update-WaveOptionsView
         return
     }
     $controls.WaveDeviceCountText.Text = [string]$wave.ComputerCount
@@ -1022,6 +1061,60 @@ function Update-WaveView {
     $last = @(Get-SemtRuns -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Last 200 | Where-Object { $_.WaveName -eq $wave.Name } | Select-Object -First 1)
     $controls.WaveLastRunText.Text = if ($last.Count -gt 0) { '{0} ({1})' -f $last[0].Status,$last[0].UpdatedUtc } else { 'Never' }
     $controls.LaunchWaveButton.IsEnabled = [bool]$wave.Launchable
+    Update-WaveOptionsView
+}
+
+function Update-WaveOptionsView {
+    <#
+    Wave options tab: one editor per option of the selected Wave.local.json, with inheritance
+    (the replacement of the former "Wave options" button that opened the file in Notepad).
+    #>
+    $controls.WaveOptionsHost.Children.Clear()
+    $script:WaveEditors = @{}
+    $wave = $script:SelectedWave
+    $controls.SaveWaveOptionsButton.IsEnabled = $false
+    $controls.InheritWaveOptionsButton.IsEnabled = $false
+    if ($null -eq $wave) { $controls.WaveOptionsTitleText.Text = 'Wave options'; return }
+    $controls.WaveOptionsTitleText.Text = 'Wave options - {0}' -f $wave.Name
+    try {
+        $config = Read-SemtJsonFile -Path (Join-Path $wave.Path 'Wave.local.json') -Required
+    }
+    catch {
+        $controls.WaveOptionsTitleText.Text = 'Wave options - {0}: Wave.local.json unreadable ({1})' -f $wave.Name,$_.Exception.Message
+        return
+    }
+    $values = @{}
+    $options = Get-SemtPropertyValue -InputObject $config -Name 'Options' -Default $null
+    if ($null -ne $options) { foreach ($property in $options.PSObject.Properties) { $values[$property.Name] = $property.Value } }
+    $script:WaveEditors = Add-SemtGuiOptionControls -OptionsHost $controls.WaveOptionsHost -Catalog $script:Catalog -Campaign $script:CurrentCampaign -Values $values -AllowInherit
+    $controls.SaveWaveOptionsButton.IsEnabled = $true
+    $controls.InheritWaveOptionsButton.IsEnabled = $true
+}
+
+function Save-WaveOptions {
+    <#
+    Writes the Wave options into Wave.local.json (atomic write). Only the edited options are
+    replaced; the other properties and options of the file are kept.
+    #>
+    param([switch]$InheritAll)
+
+    $wave = $script:SelectedWave
+    if ($null -eq $wave) { return }
+    $values = @{}
+    if ($InheritAll) { foreach ($key in @($script:WaveEditors.Keys)) { $values[$key] = '__INHERIT__' } }
+    else { $values = Get-SemtGuiOptionValues -Editors $script:WaveEditors -AllowInherit }
+    $path = Join-Path $wave.Path 'Wave.local.json'
+    $config = Read-SemtJsonFile -Path $path -Required
+    $options = [ordered]@{}
+    $existing = Get-SemtPropertyValue -InputObject $config -Name 'Options' -Default $null
+    if ($null -ne $existing) { foreach ($property in $existing.PSObject.Properties) { $options[$property.Name] = $property.Value } }
+    foreach ($key in @($values.Keys | Sort-Object)) { $options[$key] = $values[$key] }
+    if ($config.PSObject.Properties['Options']) { $config.Options = [pscustomobject]$options }
+    else { $config | Add-Member -NotePropertyName 'Options' -NotePropertyValue ([pscustomobject]$options) }
+    Write-SemtJsonFileAtomic -Path $path -InputObject $config -Depth 6
+    $explicit = @($values.Values | Where-Object { -not (Test-SemtInheritValue -Value $_) }).Count
+    Add-Status -Title 'Wave options saved' -Message ("Wave '{0}': {1} option(s) set on the Wave, the others inherit. File: {2}" -f $wave.Name,$explicit,$path)
+    Update-WaveOptionsView
 }
 
 function Update-WaveList {
@@ -1145,7 +1238,7 @@ function Invoke-AutomaticWave {
     if ($Create -and -not (Show-GuiQuestion -Message ("Create Wave '{0}' from the previewed selection?{1}{1}The Wave is created but NOT launched." -f $filters.WaveName,[Environment]::NewLine) -Title 'Create Wave')) { return }
     $evidence = Join-Path $script:PackageRoot ("Runs\{0}\_AutomaticWave\{1}" -f $campaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
     New-SemtDirectory -Path $evidence
-    $commandText = Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot $evidence -Create:$Create
+    $commandText = Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot $evidence -Create:$Create -PreviewEvidencePath $(if ($Create) { $script:AutomaticPreviewEvidence } else { '' })
     $logFile = Join-Path $evidence 'GuiAutomaticWave.log'
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-AutomaticWaveProcessText -CommandText $commandText -LogPath $logFile)))
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -1193,6 +1286,7 @@ function Invoke-AutomaticWave {
         }
         else {
             $script:AutomaticPreviewSignature = $info.Signature
+            $script:AutomaticPreviewEvidence = [string](Get-SemtPropertyValue -InputObject $summary -Name 'EvidencePath')
             $controls.AutomaticCreateButton.IsEnabled = $true
             Add-Status -Title 'Preview ready' -Message 'Review the selection, then Create the Wave or change the filters.'
             [void][System.Windows.MessageBox]::Show($window, ("Preview ready.{0}{0}{1}{0}{0}Review the selection and its evidence, then click Create Wave, or change the filters and run Preview again." -f [Environment]::NewLine,$counts), 'Preview', 'OK', 'Information')
@@ -1225,7 +1319,12 @@ function Show-AutomaticWaveWait {
     $wait = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new($automaticWaitXaml)))
     $wait.Owner = $window
     $wait.FindName('AutomaticWaitTitleText').Text = if ($Create) { "Creating Wave '{0}'..." -f $WaveName } else { 'Previewing the selection...' }
-    $wait.FindName('AutomaticWaitHintText').Text = 'Please wait: the inventories are read and the selection rules applied. This can take a few minutes with a large forest. Nothing is launched.'
+    $wait.FindName('AutomaticWaitHintText').Text = if ($Create) {
+        'Please wait: the Wave is created from the previewed selection (the selection is computed again only if an inventory changed since the preview). Nothing is launched.'
+    }
+    else {
+        'Please wait: the inventories are read and the selection rules applied. Nothing is launched.'
+    }
     $wait.FindName('AutomaticWaitStageText').Text = 'Starting...'
     $wait.Add_Closing({ param($eventSource,$cancelEventArgs) if ([string]$eventSource.Tag -ne 'Done' -and -not $script:GuiClosing) { $cancelEventArgs.Cancel = $true } })
     $wait.Show()
@@ -1422,7 +1521,13 @@ $controls.StopAllButton.Add_Click({
 })
 $controls.OpenWaveFolderButton.Add_Click({ if ($script:SelectedWave) { Open-ShellPath $script:SelectedWave.Path } })
 $controls.OpenWaveComputersButton.Add_Click({ if ($script:SelectedWave) { Open-TextFile $script:SelectedWave.ComputersPath } })
-$controls.OpenWaveConfigButton.Add_Click({ if ($script:SelectedWave) { Open-TextFile (Join-Path $script:SelectedWave.Path 'Wave.local.json') } })
+$controls.SaveWaveOptionsButton.Add_Click({ try { Save-WaveOptions } catch { Show-GuiError $_.Exception.Message } })
+$controls.InheritWaveOptionsButton.Add_Click({
+    try {
+        if ($script:SelectedWave -and (Show-GuiQuestion -Message ("Set every option of Wave '{0}' to inherit the global configuration or the default?" -f $script:SelectedWave.Name) -Title 'Inherit all')) { Save-WaveOptions -InheritAll }
+    }
+    catch { Show-GuiError $_.Exception.Message }
+})
 $controls.RefreshWrappersButton.Add_Click({
     try {
         if ($null -eq $script:SelectedWave) { return }

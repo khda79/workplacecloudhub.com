@@ -277,6 +277,32 @@ try {
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $waveRoot 'WAVE-EMPTY'))) 'refused empty Wave leaves no folder'
     Assert-Equal @(Get-SemtWaves -PackageRoot $packageRoot -Campaign Windows11Upgrade | Where-Object { $_.Launchable }).Count 2 'created Waves are listed as launchable by the engine'
 
+    $reuseInventory = $adCsv
+    # Create reuses a matching Preview instead of analyzing the inventories again; other filters or a
+    # changed inventory are analyzed again. The Waves of this block are removed afterwards.
+    $reusePreview = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -EvidenceRoot $evidenceRoot -WaveName 'WAVE-AUTO-W11-REUSE'
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$reusePreview.Summary.SelectionSignature) -and -not [string]::IsNullOrWhiteSpace([string]$reusePreview.Summary.InventoryFingerprint)) 'preview records the selection signature and the inventory fingerprint'
+    $reuseStages = [System.Collections.Generic.List[string]]::new()
+    $reuseCallback = { param($stage, $detail) [void]$reuseStages.Add(('{0} {1}' -f $stage, $detail)) }.GetNewClosure()
+    $reused = & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -EvidenceRoot $evidenceRoot -WaveName 'WAVE-AUTO-W11-REUSE' -Create -PreviewEvidencePath $reusePreview.Summary.EvidencePath -ProgressCallback $reuseCallback
+    Assert-True (@($reuseStages | Where-Object { $_ -like 'Reusing the previewed selection*' }).Count -eq 1 -and @($reuseStages | Where-Object { $_ -like 'Loading inventory records*' }).Count -eq 0) 'Create reuses a matching preview without loading the inventories'
+    Assert-Equal $reused.Summary.PreviewEvidencePath $reusePreview.Summary.EvidencePath 'the Create summary records the reused preview'
+    Assert-Equal @(Get-Content -LiteralPath $reused.Summary.ComputersPath).Count ([int]$reusePreview.Summary.SelectedDevices) 'the Wave contains the previewed selection'
+    Assert-True (Test-Path -LiteralPath (Join-Path $reused.Summary.EvidencePath 'AutomaticWaveSelection.csv') -PathType Leaf) 'the preview reports are copied to the Create evidence'
+    Assert-True ([string](Get-Content -LiteralPath (Join-Path $reused.Summary.WavePath 'Wave.local.json') -Raw | ConvertFrom-Json).Description -match ('Selected={0}$' -f $reusePreview.Summary.SelectedDevices)) 'the reused Create keeps the Wave description format'
+    $reuseStages.Clear()
+    try { [void](& $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -EvidenceRoot $evidenceRoot -WaveName 'WAVE-AUTO-W11-REUSE-FILTER' -AdLastLogonMaxAgeDays 400 -Create -PreviewEvidencePath $reusePreview.Summary.EvidencePath -ProgressCallback $reuseCallback) } catch { }
+    Assert-True (@($reuseStages | Where-Object { $_ -like 'Computing the selection again*filters changed*' }).Count -eq 1 -and @($reuseStages | Where-Object { $_ -like 'Loading inventory records*' }).Count -eq 1) 'Create with other filters computes the selection again'
+    $reuseStages.Clear()
+    $inventoryItem = Get-Item -LiteralPath $reuseInventory
+    $inventoryItem.LastWriteTimeUtc = $inventoryItem.LastWriteTimeUtc.AddMinutes(1)
+    try { [void](& $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -EvidenceRoot $evidenceRoot -WaveName 'WAVE-AUTO-W11-REUSE-INVENTORY' -Create -PreviewEvidencePath $reusePreview.Summary.EvidencePath -ProgressCallback $reuseCallback) } catch { }
+    Assert-True (@($reuseStages | Where-Object { $_ -like 'Computing the selection again*inventory changed*' }).Count -eq 1) 'Create after an inventory change computes the selection again'
+    foreach ($reuseWave in @('WAVE-AUTO-W11-REUSE', 'WAVE-AUTO-W11-REUSE-FILTER', 'WAVE-AUTO-W11-REUSE-INVENTORY')) {
+        $reuseWavePath = Join-Path $waveRoot $reuseWave
+        if (Test-Path -LiteralPath $reuseWavePath) { Remove-Item -LiteralPath $reuseWavePath -Recurse -Force }
+    }
+
     # Default inputs are the shared caches of the package.
     New-Item -ItemType Directory -Path (Join-Path $packageRoot 'Inventory') -Force | Out-Null
     Copy-Item -LiteralPath $adCsv -Destination (Get-SemtSharedInventoryPath -PackageRoot $packageRoot -Kind AD) -Force

@@ -54,9 +54,13 @@ PowerShell 5.1 with the engine. `Update-WaveCmdWrappers.cmd` regenerates them fo
 2. **Preview** runs the Automatic Wave engine without `-Create`: it writes evidence under
    `Runs\<Campaign>\_AutomaticWave\` (selected, excluded with reason code, summary) and creates
    nothing.
-3. **Create** is enabled only while the filters are those of the last preview. It runs the same
-   selection with `-Create` and creates the Wave (`Source=Automatic`, the filters in its
-   description and the evidence path). It never launches the Wave.
+3. **Create** is enabled only while the filters are those of the last preview. It runs the engine
+   with `-Create -PreviewEvidencePath <preview evidence>` and creates the Wave (`Source=Automatic`,
+   the filters in its description and the evidence path). It never launches the Wave. The engine
+   reuses the previewed selection (a few seconds) when the preview has the same filters, the
+   inventory files have not changed since (path, size and last write time recorded in the preview
+   summary) and it is less than 24 hours old; otherwise it computes the selection again and the
+   waiting window shows why. The preview reports are copied to the Create evidence.
 
 Default names: `WAVE-AUTO-HJ-<timestamp>`, `WAVE-AUTO-W10-<timestamp>`.
 

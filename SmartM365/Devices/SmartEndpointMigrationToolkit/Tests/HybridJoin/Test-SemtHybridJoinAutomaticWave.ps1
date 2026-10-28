@@ -235,6 +235,32 @@ try {
     Assert-Throws { & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -WaveName 'WAVE-INVALID' -ComputerNamePrefix 'FR-*' -NoEvidence } 'Invalid computer name prefix' 'wildcard prefix is rejected'
     Assert-Throws { & $engine -AdInventoryCsv (Join-Path $dataRoot 'Missing.csv') -IntuneInventoryCsv $intunePath -NoEvidence } 'Required automatic Wave inventory not found' 'missing AD inventory is refused'
 
+    $reuseInventory = $adPath
+    # Create reuses a matching Preview instead of analyzing the inventories again; other filters or a
+    # changed inventory are analyzed again. The Waves of this block are removed afterwards.
+    $reusePreview = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-REUSE'
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$reusePreview.Summary.SelectionSignature) -and -not [string]::IsNullOrWhiteSpace([string]$reusePreview.Summary.InventoryFingerprint)) 'preview records the selection signature and the inventory fingerprint'
+    $reuseStages = [System.Collections.Generic.List[string]]::new()
+    $reuseCallback = { param($stage, $detail) [void]$reuseStages.Add(('{0} {1}' -f $stage, $detail)) }.GetNewClosure()
+    $reused = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-REUSE' -Create -PreviewEvidencePath $reusePreview.Summary.EvidencePath -ProgressCallback $reuseCallback
+    Assert-True (@($reuseStages | Where-Object { $_ -like 'Reusing the previewed selection*' }).Count -eq 1 -and @($reuseStages | Where-Object { $_ -like 'Loading inventory records*' }).Count -eq 0) 'Create reuses a matching preview without loading the inventories'
+    Assert-Equal $reused.Summary.PreviewEvidencePath $reusePreview.Summary.EvidencePath 'the Create summary records the reused preview'
+    Assert-Equal @(Get-Content -LiteralPath $reused.Summary.ComputersPath).Count ([int]$reusePreview.Summary.SelectedDevices) 'the Wave contains the previewed selection'
+    Assert-True (Test-Path -LiteralPath (Join-Path $reused.Summary.EvidencePath 'AutomaticWaveSelection.csv') -PathType Leaf) 'the preview reports are copied to the Create evidence'
+    Assert-True ([string](Get-Content -LiteralPath (Join-Path $reused.Summary.WavePath 'Wave.local.json') -Raw | ConvertFrom-Json).Description -match ('Selected={0}$' -f $reusePreview.Summary.SelectedDevices)) 'the reused Create keeps the Wave description format'
+    $reuseStages.Clear()
+    try { [void](& $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-REUSE-FILTER' -AdLastLogonMaxAgeDays 400 -Create -PreviewEvidencePath $reusePreview.Summary.EvidencePath -ProgressCallback $reuseCallback) } catch { }
+    Assert-True (@($reuseStages | Where-Object { $_ -like 'Computing the selection again*filters changed*' }).Count -eq 1 -and @($reuseStages | Where-Object { $_ -like 'Loading inventory records*' }).Count -eq 1) 'Create with other filters computes the selection again'
+    $reuseStages.Clear()
+    $inventoryItem = Get-Item -LiteralPath $reuseInventory
+    $inventoryItem.LastWriteTimeUtc = $inventoryItem.LastWriteTimeUtc.AddMinutes(1)
+    try { [void](& $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-REUSE-INVENTORY' -Create -PreviewEvidencePath $reusePreview.Summary.EvidencePath -ProgressCallback $reuseCallback) } catch { }
+    Assert-True (@($reuseStages | Where-Object { $_ -like 'Computing the selection again*inventory changed*' }).Count -eq 1) 'Create after an inventory change computes the selection again'
+    foreach ($reuseWave in @('WAVE-AUTO-HJ-REUSE', 'WAVE-AUTO-HJ-REUSE-FILTER', 'WAVE-AUTO-HJ-REUSE-INVENTORY')) {
+        $reuseWavePath = Join-Path $waveRoot $reuseWave
+        if (Test-Path -LiteralPath $reuseWavePath) { Remove-Item -LiteralPath $reuseWavePath -Recurse -Force }
+    }
+
     # Update-WaveCmdWrappers restores wrappers and removes obsolete ones.
     Remove-Item -LiteralPath (Join-Path $created.Summary.WavePath 'Start-Wave-Once.cmd') -Force
     Set-Content -LiteralPath (Join-Path $created.Summary.WavePath 'Start-Wave-Obsolete.cmd') -Value '@echo off' -Encoding ASCII

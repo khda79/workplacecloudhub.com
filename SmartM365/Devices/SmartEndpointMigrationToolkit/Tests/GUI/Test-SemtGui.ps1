@@ -76,6 +76,63 @@ try {
     }
     $script:PackageRoot = $packageRoot
     Import-Module (Join-Path $packageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
+    # Wave options tab (replaces the "Wave options" button): Options first, then Activity; editors read and
+    # write Wave.local.json with inheritance. A fictional Wave in a temporary folder; nothing is launched.
+    Test-Step 'Waves view: Options tab first (selected), then Activity; no Wave options button' {
+        $xaml -notmatch 'OpenWaveConfigButton' -and $xaml -match '(?s)x:Name="WaveSideTabs".*?x:Name="WaveOptionsTab" Header="Options" IsSelected="True".*?x:Name="ActivityTab" Header="Activity".*?x:Name="ActivityText"' -and $xaml -match 'x:Name="WaveOptionsHost"' -and $xaml -match 'x:Name="SaveWaveOptionsButton"'
+    }
+    foreach ($functionName in @('Register-NumericStepper','Add-SemtGuiOptionControls','Get-SemtGuiOptionValues','Update-WaveOptionsView','Save-WaveOptions')) {
+        $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+        . ([scriptblock]::Create($definition.Extent.Text))
+    }
+    Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+    $script:CategoryOrder = @('Mode','Actions','Setup','Safety','Schedule','Parallelism','Network','Inventory','Evidence')
+    $script:InheritChoiceLabel = '(inherit)'
+    $script:Catalog = Import-SemtOptionCatalog -PackageRoot $packageRoot
+    $script:CurrentCampaign = 'HybridJoin'
+    $window = New-Object System.Windows.Window
+    $savedStatus = [System.Collections.Generic.List[string]]::new()
+    function Add-Status { param([string]$Message,[string]$Title = 'Ready') $savedStatus.Add($Title) }
+    $controls = @{ WaveOptionsHost = (New-Object System.Windows.Controls.StackPanel); WaveOptionsTitleText = (New-Object System.Windows.Controls.TextBlock); SaveWaveOptionsButton = (New-Object System.Windows.Controls.Button); InheritWaveOptionsButton = (New-Object System.Windows.Controls.Button) }
+    $optionsWave = Join-Path ([IO.Path]::GetTempPath()) ('SEMT-WaveOptions-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    New-Item -ItemType Directory -Path $optionsWave -Force | Out-Null
+    try {
+        $waveFile = Join-Path $optionsWave 'Wave.local.json'
+        Copy-Item -LiteralPath (Join-Path $packageRoot 'Campaigns\HybridJoin\Templates\Wave\Wave.local.json.template') -Destination $waveFile
+        $template = Get-Content -LiteralPath $waveFile -Raw | ConvertFrom-Json
+        $template.Description = 'Fictional Wave'
+        $template.Options.ThrottleLimit = 5
+        $template | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $waveFile -Encoding UTF8
+        $script:SelectedWave = [pscustomobject]@{ Name = 'WAVE-OPTIONS-TEST'; Path = $optionsWave }
+        Update-WaveOptionsView
+        $editors = $script:WaveEditors
+        Test-Step 'Wave options: one editor per visible option; the Wave value and inheritance are shown' {
+            $editors.Count -gt 10 -and [string]$editors['ThrottleLimit'].Control.Text -eq '5' -and $null -eq $editors['DryRun'].Control.IsChecked -and $editors['DryRun'].Control.IsThreeState -and [string]$editors['DelayBetweenCyclesMinutes'].Control.Text -eq '' -and $controls.SaveWaveOptionsButton.IsEnabled
+        }
+        $choice = @($editors.Values | Where-Object { [string]$_.Definition.Type -eq 'Choice' } | Select-Object -First 1)
+        Test-Step 'Wave options: a choice offers (inherit), selected while the Wave inherits' { $choice.Count -eq 0 -or ([string]$choice[0].Control.Items[0] -eq '(inherit)' -and [string]$choice[0].Control.SelectedItem -eq '(inherit)') }
+        $editors['ThrottleLimit'].Control.Text = '7'
+        $editors['DryRun'].Control.IsChecked = $true
+        Save-WaveOptions
+        $saved = Get-Content -LiteralPath $waveFile -Raw | ConvertFrom-Json
+        Test-Step 'Save Wave options writes the set values and keeps inheritance and the other properties' {
+            [int]$saved.Options.ThrottleLimit -eq 7 -and $saved.Options.DryRun -eq $true -and [string]$saved.Options.DelayBetweenCyclesMinutes -eq '__INHERIT__' -and [string]$saved.Description -eq 'Fictional Wave' -and [string]$saved.Campaign -eq 'HybridJoin' -and $savedStatus -contains 'Wave options saved'
+        }
+        $effective = Resolve-SemtEffectiveOptions -Catalog $script:Catalog -Campaign HybridJoin -WaveLayer $saved.Options
+        Test-Step 'saved Wave options are used by the option resolution (Wave layer)' { $effective['ThrottleLimit'].Value -eq 7 -and $effective['ThrottleLimit'].Source -eq 'Wave' -and $effective['DelayBetweenCyclesMinutes'].Source -ne 'Wave' }
+        $script:WaveEditors['ThrottleLimit'].Control.Text = '9999'
+        Test-Step 'an invalid Wave option is refused and the file is unchanged' { $failed = $false; try { Save-WaveOptions } catch { $failed = $_.Exception.Message -match 'SEMT_OPTION_INVALID' }; $failed -and [int]((Get-Content -LiteralPath $waveFile -Raw | ConvertFrom-Json).Options.ThrottleLimit) -eq 7 }
+        Save-WaveOptions -InheritAll
+        $inherited = Get-Content -LiteralPath $waveFile -Raw | ConvertFrom-Json
+        Test-Step 'Inherit all sets every visible option to __INHERIT__' { [string]$inherited.Options.ThrottleLimit -eq '__INHERIT__' -and [string]$inherited.Options.DryRun -eq '__INHERIT__' }
+        $script:SelectedWave = $null
+        Update-WaveOptionsView
+        Test-Step 'without a selected Wave the options are empty and Save is disabled' { $controls.WaveOptionsHost.Children.Count -eq 0 -and -not $controls.SaveWaveOptionsButton.IsEnabled }
+    }
+    finally {
+        Remove-Item -LiteralPath $optionsWave -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path Function:\Add-Status -ErrorAction SilentlyContinue
+    }
     $filters = @{ WaveName = 'WAVE-AUTO-TEST'; Prefixes = @('CTSO-'); Contains = @("O'Brien"); ExcludeStaleAd = $true; LastLogonDays = 30; Source = 'Both'; ExcludeIntunePresent = $true; AdDomain = 'fr.example' }
     foreach ($campaign in @('HybridJoin','Windows11Upgrade')) {
         $engine = Join-Path $packageRoot ("Campaigns\{0}\Scripts\SmartM365-EndpointMigration-{0}-New-AutomaticWave.ps1" -f $campaign)
@@ -88,6 +145,9 @@ try {
         Write-TestResult -Condition ($unknown.Count -eq 0) -Message ("{0}: Automatic Wave command uses only engine parameters" -f $campaign) -Detail ($unknown -join ', ')
         Write-TestResult -Condition ($preview -notmatch '-Create\b' -and $create -match '-Create$') -Message ("{0}: Preview never passes -Create; Create does" -f $campaign)
         Write-TestResult -Condition ($create -match "'O''Brien'") -Message ("{0}: filter values are quoted as PowerShell literals" -f $campaign)
+        $reuseCreate = Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot 'C:\Evidence' -Create -PreviewEvidencePath 'C:\Evidence\Preview'
+        $reuseUsed = @([regex]::Matches($reuseCreate, '(?<=\s)-(?<Name>[A-Za-z]+)') | ForEach-Object { $_.Groups['Name'].Value } | Where-Object { $engineParameters -notcontains $_ })
+        Write-TestResult -Condition ($reuseCreate -match "-Create -PreviewEvidencePath 'C:\\Evidence\\Preview'$" -and $reuseUsed.Count -eq 0 -and (Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot 'C:\Evidence' -PreviewEvidencePath 'C:\Evidence\Preview') -notmatch 'PreviewEvidencePath') -Message ("{0}: Create passes the previewed evidence to the engine (Preview never does)" -f $campaign)
         $allDomains = $filters.Clone(); $allDomains.AdDomain = ''
         Write-TestResult -Condition ($preview -match "-AdDomainFilter @\('fr\.example'\)" -and (Get-AutomaticWaveCommandText -Campaign $campaign -Filters $allDomains -EvidenceRoot 'C:\Evidence') -notmatch 'AdDomainFilter') -Message ("{0}: AD domain is passed only when a domain is chosen" -f $campaign)
     }
@@ -145,6 +205,7 @@ try {
     # Preview/Create: the real engine in a hidden process, as started by the GUI (fictional inventories).
     $waitWindow = [string]$ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$automaticWaitXaml' }, $true).Right.Expression.Value
     Test-Step 'Preview and Create show a waiting window with progress and the engine stage' { $waitWindow -match 'IsIndeterminate="True"' -and $waitWindow -match 'x:Name="AutomaticWaitStageText"' -and $guiText -match 'Show-AutomaticWaveWait -Create:\$Create' }
+    Test-Step 'a successful Preview keeps its evidence; Create passes it to the engine' { $guiText -match "AutomaticPreviewEvidence = \[string\]\(Get-SemtPropertyValue -InputObject \`$summary -Name 'EvidencePath'\)" -and $guiText -match '-PreviewEvidencePath \$\(if \(\$Create\) \{ \$script:AutomaticPreviewEvidence \}' }
     Test-Step 'Preview and Create end with a message (counts; Create states the Wave is not launched)' { $guiText -match "'Preview', 'OK', 'Information'" -and $guiText -match "The Wave was NOT launched\." -and $guiText -match "'Create Wave', 'OK', 'Information'" }
     $powershell51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $runPreview = {
