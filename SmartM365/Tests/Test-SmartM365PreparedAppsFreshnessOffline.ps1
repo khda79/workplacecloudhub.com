@@ -1,9 +1,9 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-Test the Intelligence Apps publication-age overrides without operational imports.
+Test the Intelligence publication-age defaults (14 days, prices 744h) without operational imports.
 .VERSION
-1.0.0
+1.1.0
 .NOTES
 Synthetic temporary files only. No collectors, tenant configuration or notifications.
 #>
@@ -27,8 +27,9 @@ $template=Get-Content -LiteralPath $templateFile -Raw | ConvertFrom-Json
 $overrides=@{}
 foreach($property in $template.PreparedSourceAgeOverrides.PSObject.Properties){$overrides[$property.Name]=[int]$property.Value}
 $apps=@('Intune_DiscoveredApps_Summary.csv','Intune_DiscoveredApps_AppDeviceRelations.csv')
-if($template.PreparedMaxSourceAgeHours -ne 168 -or $overrides['M365_License_Prices.csv'] -ne 744){throw 'Unrelated defaults changed.'}
-foreach($name in $apps){if($overrides[$name] -ne 240){throw "Missing Apps override: $name"}}
+$defaultLimit=[int]$template.PreparedMaxSourceAgeHours
+if($defaultLimit -ne 336 -or $overrides['M365_License_Prices.csv'] -ne 744){throw 'Publication-age defaults changed.'}
+foreach($name in $apps){if($overrides.ContainsKey($name)){throw "Apps override stricter than the 14-day default: $name"}}
 $temporary=Join-Path ([IO.Path]::GetTempPath()) ('prepared-apps-freshness-'+[guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path (Join-Path $temporary 'DATA-LAST')
 try{
@@ -40,23 +41,23 @@ try{
         [IO.File]::WriteAllText($path,"TenantKey,Value`nsynthetic,1`n")
         if($name -in $apps){[IO.File]::SetLastWriteTimeUtc($path,[datetime]::UtcNow.AddHours(-216))}
     }
-    $parameters=@{DataRoot=$temporary;SourceContractPath=$contractFile;MaxSourceAgeHours=[int]$template.PreparedMaxSourceAgeHours;AgeOverrides=$overrides;MetadataOnly=$true}
+    $parameters=@{DataRoot=$temporary;SourceContractPath=$contractFile;MaxSourceAgeHours=$defaultLimit;AgeOverrides=$overrides;MetadataOnly=$true}
     $plan=@(Get-PreparedSourcePlan @parameters)
     if($plan.Count -ne 3){throw 'Unexpected source plan.'}
     $snapshot=Join-Path $temporary 'snapshot'
     foreach($entry in $plan){
-        $captured=Copy-PreparedStableSource -Entry $entry -SnapshotRoot $snapshot -MaxSourceAgeHours 168 -AgeOverrides $overrides -Attempts 1 -RetryDelayMs 0
+        $captured=Copy-PreparedStableSource -Entry $entry -SnapshotRoot $snapshot -MaxSourceAgeHours $defaultLimit -AgeOverrides $overrides -Attempts 1 -RetryDelayMs 0
         if(-not $captured.SHA256){throw 'Stable capture did not qualify bytes.'}
     }
     $checks=3
     foreach($name in $sourceNames){
         $path=Join-Path $temporary "DATA-LAST/$name"
         $original=(Get-Item -LiteralPath $path).LastWriteTimeUtc
-        $limit=if($name -in $apps){240}else{168}
+        $limit=$defaultLimit
         [IO.File]::SetLastWriteTimeUtc($path,[datetime]::UtcNow.AddHours(-($limit+1)))
         foreach($action in @(
             {Get-PreparedSourcePlan @parameters | Out-Null},
-            {Copy-PreparedStableSource -Entry ($plan | Where-Object Relative -eq "DATA-LAST/$name") -SnapshotRoot $snapshot -MaxSourceAgeHours 168 -AgeOverrides $overrides -Attempts 1 -RetryDelayMs 0 | Out-Null}
+            {Copy-PreparedStableSource -Entry ($plan | Where-Object Relative -eq "DATA-LAST/$name") -SnapshotRoot $snapshot -MaxSourceAgeHours $defaultLimit -AgeOverrides $overrides -Attempts 1 -RetryDelayMs 0 | Out-Null}
         )){
             $rejected=$false
             try{& $action}catch{if($_.Exception.Message -notmatch 'age limit|publication-age'){throw};$rejected=$true}
@@ -65,7 +66,7 @@ try{
         }
         [IO.File]::SetLastWriteTimeUtc($path,$original)
     }
-    Write-Output "PASS: $checks source plan/capture freshness checks; Apps 240h, unrelated 168h, price 744h. Offline only."
+    Write-Output "PASS: $checks source plan/capture freshness checks; default 336h (Apps included), price 744h. Offline only."
 }finally{
     $target=[IO.Path]::GetFullPath($temporary)
     $parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
