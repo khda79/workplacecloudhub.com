@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.68
+1.5.69
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.68"
+$ScriptVersion = "1.5.69"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -890,7 +890,7 @@ function Write-FileAtomically {
     if ($Path -match '(?i)\.json(?:\.txt)?$') {
         $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Content)
         $validate = { param($document) if ($document -isnot [pscustomobject]) { throw 'Orchestrator JSON must be an object.' } }
-        if ([IO.Path]::GetFileName($Path) -match '^Orchestrator-(Heartbeat|Capabilities|ElectionPlan)\.json(?:\.txt)?$') {
+        if ([IO.Path]::GetFileName($Path) -match '^Orchestrator-(Heartbeat|Capabilities|ElectionPlan|Metrics)\.json(?:\.txt)?$') {
             $null = Publish-SmartM365RegeneratedJsonBytes -Path $Path -Owner 'Orchestrator operational snapshot' -Bytes $bytes -Validate $validate
         } else {
             $null = Write-SmartM365JsonBytesAtomically -Path $Path -Bytes $bytes -Validate $validate -LockTimeoutSeconds $script:Settings.AtomicWriteRetrySeconds
@@ -2643,6 +2643,69 @@ function Get-OrchestratorSystemInfo {
     return [pscustomobject]$info
 }
 
+function Get-OrchestratorMetricsPath {
+    return Join-Path -Path (Split-Path -Path $script:Settings.HeartbeatPath -Parent) -ChildPath 'Orchestrator-Metrics.json'
+}
+
+function Get-OrchestratorResourceSample {
+    # Instant CPU load (average of the processors) and memory in use, in percent.
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+    $processors = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop)
+    $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop | Select-Object -First 1
+    $cpu = ($processors | Measure-Object -Property LoadPercentage -Average).Average
+    $total = [double]$os.TotalVisibleMemorySize
+    return [pscustomobject]@{
+        TimeUtc = $Now.ToUniversalTime().ToString('o')
+        Cpu = if ($null -ne $cpu) { [math]::Round([double]$cpu, 1) } else { $null }
+        Memory = if ($total -gt 0) { [math]::Round(($total - [double]$os.FreePhysicalMemory) * 100 / $total, 1) } else { $null }
+    }
+}
+
+function Remove-OrchestratorExpiredResourceSamples {
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+    $limit = $Now.ToUniversalTime().AddHours(-1 * $script:ResourceRetentionHours)
+    $kept = @($script:ResourceSamples | Where-Object {
+        $time = [datetimeoffset]::MinValue
+        [datetimeoffset]::TryParse([string]$_.TimeUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$time) -and $time.UtcDateTime -ge $limit -and $time.UtcDateTime -le $Now.ToUniversalTime().AddMinutes(5)
+    })
+    $script:ResourceSamples = [System.Collections.Generic.List[object]]::new()
+    foreach ($sample in $kept) { $script:ResourceSamples.Add($sample) }
+}
+
+function Import-OrchestratorResourceMetrics {
+    # The curve continues after a restart; only the last 12 hours are kept.
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+    $selected = Get-SmartM365JsonReadPath (Get-OrchestratorMetricsPath) -Optional
+    if (-not $selected) { return }
+    try {
+        $document = (Read-SmartM365JsonDocument -Path $selected).Document
+        foreach ($sample in @($document.Samples)) {
+            $time = $sample.TimeUtc
+            if ($time -is [datetime]) { $time = $time.ToUniversalTime().ToString('o') }
+            $script:ResourceSamples.Add([pscustomobject]@{ TimeUtc = [string]$time; Cpu = $sample.Cpu; Memory = $sample.Memory })
+        }
+        Remove-OrchestratorExpiredResourceSamples -Now $Now
+    }
+    catch { Write-OrchestratorRuntimeUpdateWarning -Key 'resource-metrics-import' -Message ("Previous CPU and memory samples could not be read; the 12-hour curve restarts: {0}" -f $_.Exception.Message) -Now $Now }
+}
+
+function Update-OrchestratorResourceMetrics {
+    # Every 5 minutes: sample, drop what is older than 12 hours and rewrite the small shared file.
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+    if ($script:LastResourceSampleAt -ne [datetime]::MinValue -and ($Now - $script:LastResourceSampleAt).TotalMinutes -lt $script:ResourceSampleMinutes) { return }
+    $script:LastResourceSampleAt = $Now
+    try {
+        $script:ResourceSamples.Add((Get-OrchestratorResourceSample -Now $Now))
+        Remove-OrchestratorExpiredResourceSamples -Now $Now
+        $document = [ordered]@{
+            SchemaVersion = 1; Server = $env:COMPUTERNAME; SampleMinutes = $script:ResourceSampleMinutes; RetentionHours = $script:ResourceRetentionHours
+            UpdatedAtUtc = $Now.ToUniversalTime().ToString('o'); Samples = @($script:ResourceSamples)
+        }
+        Write-FileAtomically -Path (Get-OrchestratorMetricsPath) -Content ($document | ConvertTo-Json -Depth 5)
+    }
+    catch { Write-OrchestratorRuntimeUpdateWarning -Key ("resource-metrics:{0}" -f $_.Exception.Message) -Message ("CPU and memory sample could not be recorded: {0}" -f $_.Exception.Message) -Now $Now }
+}
+
 function Write-OrchestratorHeartbeat {
     $now = Get-Date
     $running = @()
@@ -2669,6 +2732,7 @@ function Write-OrchestratorHeartbeat {
         LifetimeDeadline = ConvertTo-StateTime -Value $script:LifetimeDeadline
         RunningJobs = $running
         SystemInfo = $script:SystemInfo
+        ResourceUsage = if ($script:ResourceSamples.Count) { $script:ResourceSamples[$script:ResourceSamples.Count - 1] } else { $null }
         PendingJobs = $pending
         ReadyCapabilities = if ($null -ne $script:ServerCapabilities) { @($script:ServerCapabilities.ReadyCapabilities) } else { @() }
         CapabilityGeneratedAtUtc = if ($null -ne $script:ServerCapabilities) { [string]$script:ServerCapabilities.GeneratedAtUtc } else { '' }
@@ -7117,6 +7181,11 @@ $script:PipelineWaitState = @{}
 $script:DependencyWaitReason = @{}
 # OS, CPU, memory and system drive, read once at startup and published in the heartbeat.
 $script:SystemInfo = $null
+# CPU and memory use sampled every 5 minutes; samples older than 12 hours are not kept.
+$script:ResourceSamples = [System.Collections.Generic.List[object]]::new()
+$script:LastResourceSampleAt = [datetime]::MinValue
+$script:ResourceSampleMinutes = 5
+$script:ResourceRetentionHours = 12
 $script:SmtpEndpoint = ''
 $script:Manifest = $null
 $script:State = $null
@@ -7537,6 +7606,7 @@ try {
     Write-OrchestratorLog -Message ("{0} v{1} starting (PID {2}, tenant {3}, MaxConcurrency {4}, MaxLifetimeHours {5})." -f $ScriptName, $ScriptVersion, $PID, $Tenant, $script:Settings.MaxConcurrency, $script:Settings.MaxLifetimeHours)
     Write-OrchestratorLog -Message ("Runtime context: server={0}; user={1}; pid={2}; PowerShell={3}; edition={4}; process64bit={5}." -f $env:COMPUTERNAME, (Get-OrchestratorRunUserName), $PID, $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, [Environment]::Is64BitProcess)
     $script:SystemInfo = Get-OrchestratorSystemInfo
+    Import-OrchestratorResourceMetrics -Now (Get-Date)
     Write-OrchestratorLog -Message ("System info: os={0}; cpu={1}; logicalProcessors={2}; memoryGB={3}; C: sizeGB={4}, free={5}%.{6}" -f $script:SystemInfo.Os, $script:SystemInfo.Cpu, $script:SystemInfo.LogicalProcessors, $script:SystemInfo.MemoryGB, $script:SystemInfo.SystemDriveSizeGB, $script:SystemInfo.SystemDriveFreePercent, $(if ($script:SystemInfo.Error) { ' Unavailable: ' + $script:SystemInfo.Error } else { '' })) -Level $(if ($script:SystemInfo.Error) { 'WARN' } else { 'INFO' })
     Write-OrchestratorLog -Message ("Paths: scriptRoot={0}; currentDirectory={1}; data={2}; log={3}; jobLogs={4}; state={5}; heartbeat={6}; stopRequest={7}; runCsv={8}." -f $PSScriptRoot, (Get-Location).Path, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.StatePath, $script:Settings.HeartbeatPath, $script:Settings.StopRequestPath, $script:Settings.OrchestratorRunsCsvPath)
     Write-OrchestratorLog -Message ("Mail context: enabled={0}; mode={1}; graphConfigured={2}; smtpConfigured={3}; fromConfigured={4}; recipientConfigured={5}; jobMailMode={6}; dailySummary={7}." -f $script:Settings.MailEnabled, $script:Settings.SendMailMode, $script:Settings.GraphMailConfigured, $script:Settings.SmtpMailConfigured, (-not [string]::IsNullOrWhiteSpace($script:Settings.MailFrom)), (-not [string]::IsNullOrWhiteSpace($script:Settings.MailTo)), $script:Settings.JobMailMode, $script:Settings.SendDailySummaryEmail)
@@ -7677,6 +7747,7 @@ try {
             Write-OrchestratorLog -Message ("Launch prerequisite monitoring failed without stopping the scheduler: {0}" -f $_.Exception.Message) -Level ERROR
         }
         Send-DailySummaryIfDue -Now $now
+        Update-OrchestratorResourceMetrics -Now $now
         Write-OrchestratorHeartbeat
         try {
             Invoke-OrchestratorPeerMonitoring -Now $now

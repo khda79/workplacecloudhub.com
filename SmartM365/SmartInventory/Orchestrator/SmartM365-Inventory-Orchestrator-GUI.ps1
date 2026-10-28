@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.13
+1.6.14
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.13'
+$script:AppVersion = '1.6.14'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -319,7 +319,7 @@ $xaml = @'
         <TabControl x:Name="MainTabs" Grid.Row="2">
             <TabItem Header="Dashboard">
                 <Grid Margin="12">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="98"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="98"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                     <Border x:Name="DashboardBannerBorder" Background="#F3F6FA" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="7" Padding="12,8" Margin="4,0,4,8">
                         <TextBlock x:Name="DashboardBannerText" FontWeight="SemiBold" TextWrapping="Wrap" Text="Loading dashboard..."/>
                     </Border>
@@ -373,6 +373,8 @@ $xaml = @'
                                     <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="125"/>
                                     <DataGridTextColumn Header="State" Binding="{Binding State}" Width="Auto"/>
                                     <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="Auto"/>
+                                    <DataGridTextColumn Header="CPU %" Binding="{Binding CpuPercent}" Width="Auto"/>
+                                    <DataGridTextColumn Header="RAM %" Binding="{Binding MemoryPercent}" Width="Auto"/>
                                     <DataGridTextColumn Header="Running" Binding="{Binding Running}" Width="Auto"/>
                                     <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="Auto"/>
                                     <DataGridTextColumn Header="Recycle in" Binding="{Binding RecycleIn}" Width="Auto"/>
@@ -387,7 +389,10 @@ $xaml = @'
                     <GroupBox Grid.Row="3" Header="Next 24 hours by server (elected owner, average duration; dark blue = running, orange = no owner, grey = suspended by maintenance)" Margin="4,0,4,0">
                         <Canvas x:Name="DashboardTimelineCanvas" Height="110" ClipToBounds="True" Background="White"/>
                     </GroupBox>
-                    <Border x:Name="DashboardLoadingOverlay" Grid.RowSpan="4" Background="#B3F3F6FA" Visibility="Collapsed">
+                    <GroupBox Grid.Row="4" Header="CPU and memory, last 12 hours (blue = CPU, green = RAM; sampled every 5 minutes by each orchestrator)" Margin="4,8,4,0">
+                        <Canvas x:Name="DashboardMetricsCanvas" Height="130" ClipToBounds="True" Background="White"/>
+                    </GroupBox>
+                    <Border x:Name="DashboardLoadingOverlay" Grid.RowSpan="5" Background="#B3F3F6FA" Visibility="Collapsed">
                         <Border Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="10" Padding="28,20" HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.25"/></Border.Effect>
                             <StackPanel Width="320">
@@ -938,7 +943,7 @@ $xaml = @'
                             <Grid Margin="12">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="390"/></Grid.ColumnDefinitions>
                                 <Grid>
-                                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                     <DataGrid x:Name="ServersGrid" ToolTip="OS, CPU, RAM and drive C: are published by each orchestrator when it starts.">
                                         <DataGrid.RowStyle>
                                             <Style TargetType="DataGridRow">
@@ -953,7 +958,9 @@ $xaml = @'
                                             <DataGridTextColumn Header="Orchestrator" Binding="{Binding Version}" Width="90"/>
                                             <DataGridTextColumn Header="OS" Binding="{Binding Os}" Width="230"/>
                                             <DataGridTextColumn Header="CPU" Binding="{Binding Cpu}" Width="220"/>
+                                            <DataGridTextColumn Header="CPU %" Binding="{Binding CpuPercent}" Width="60"/>
                                             <DataGridTextColumn Header="RAM (GB)" Binding="{Binding MemoryGB}" Width="75"/>
+                                            <DataGridTextColumn Header="RAM %" Binding="{Binding MemoryPercent}" Width="60"/>
                                             <DataGridTextColumn Header="C: size (GB)" Binding="{Binding SystemDriveSizeGB}" Width="90"/>
                                             <DataGridTextColumn Header="C: free %" Binding="{Binding SystemDriveFreePercent}" Width="75"/>
                                             <DataGridTextColumn Header="System info at" Binding="{Binding SystemInfoAt}" Width="130"/>
@@ -963,7 +970,10 @@ $xaml = @'
                                             <DataGridTextColumn Header="Jobs" Binding="{Binding AssignedJobs}" Width="50"/>
                                         </DataGrid.Columns>
                                     </DataGrid>
-                                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
+                                    <GroupBox Grid.Row="1" Header="CPU and memory, last 12 hours (blue = CPU, green = RAM; sampled every 5 minutes by each orchestrator)" Margin="0,10,0,0">
+                                        <Canvas x:Name="ServersMetricsCanvas" Height="150" ClipToBounds="True" Background="White"/>
+                                    </GroupBox>
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
                                         <TextBox x:Name="NewServerBox" Width="220" Margin="0,0,8,0"/>
                                         <Button x:Name="AddServerButton" Content="Add server"/>
                                         <Button x:Name="RemoveServerButton" Content="Remove selected"/>
@@ -1060,6 +1070,8 @@ function Set-OrchestratorDashboardView {
     $Controls.DashboardGrid.ItemsSource = @($Dashboard.Servers)
     $Controls.DashboardTimelineCanvas.Tag = $Dashboard.Timeline
     Update-OrchestratorDashboardTimeline -Canvas $Controls.DashboardTimelineCanvas
+    $Controls.DashboardMetricsCanvas.Tag = if ($Dashboard.PSObject.Properties['Metrics']) { @($Dashboard.Metrics) } else { @() }
+    Update-OrchestratorServerMetricsChart -Canvas $Controls.DashboardMetricsCanvas
 }
 
 function Update-OrchestratorDashboardTimeline {
@@ -1115,6 +1127,70 @@ function Update-OrchestratorDashboardTimeline {
     }
 }
 
+function Update-OrchestratorServerMetricsChart {
+    # Draws, for each server stored in Canvas.Tag, CPU and RAM in percent over the last 12 hours;
+    # a gap longer than three samples breaks the line. Redrawn on resize.
+    param([Parameter(Mandatory = $true)]$Canvas)
+    $Canvas.Children.Clear()
+    $servers = @($Canvas.Tag | Where-Object { $null -ne $_ })
+    $width = [double]$Canvas.ActualWidth
+    $mutedBrush = ConvertTo-OrchestratorBrush '#5D6B78'; $gridBrush = ConvertTo-OrchestratorBrush '#E3E9F0'
+    if ($servers.Count -eq 0) {
+        $empty = [System.Windows.Controls.TextBlock]::new(); $empty.Text = 'No CPU or memory sample yet (orchestrator 1.5.69 or later samples every 5 minutes).'; $empty.Foreground = $mutedBrush
+        [System.Windows.Controls.Canvas]::SetLeft($empty, 8); [System.Windows.Controls.Canvas]::SetTop($empty, 8); [void]$Canvas.Children.Add($empty)
+        return
+    }
+    $gap = 12.0; $panelWidth = ($width - $gap * ($servers.Count - 1)) / $servers.Count
+    if ($panelWidth -lt 140) { return }
+    $axisWidth = 30.0; $top = 20.0; $bottom = 16.0
+    $plotHeight = [double]$Canvas.Height - $top - $bottom
+    for ($index = 0; $index -lt $servers.Count; $index++) {
+        $metric = $servers[$index]
+        $left = $index * ($panelWidth + $gap); $plotLeft = $left + $axisWidth; $plotWidth = $panelWidth - $axisWidth - 4
+        $from = [datetime]$metric.From; $to = [datetime]$metric.To
+        $totalMinutes = [math]::Max(1.0, ($to - $from).TotalMinutes)
+        $samples = @($metric.Samples)
+        $last = if ($samples.Count) { $samples[$samples.Count - 1] } else { $null }
+        $title = [System.Windows.Controls.TextBlock]::new(); $title.FontWeight = 'SemiBold'; $title.Width = $panelWidth; $title.TextTrimming = 'CharacterEllipsis'
+        $title.Text = if ($null -ne $last) { '{0}  CPU {1}%  RAM {2}%' -f $metric.Server, $last.Cpu, $last.Memory } else { '{0}  no sample' -f $metric.Server }
+        [System.Windows.Controls.Canvas]::SetLeft($title, $left); [System.Windows.Controls.Canvas]::SetTop($title, 0); [void]$Canvas.Children.Add($title)
+        foreach ($percent in @(0, 50, 100)) {
+            $y = $top + $plotHeight - $percent / 100.0 * $plotHeight
+            $line = [System.Windows.Shapes.Line]::new(); $line.X1 = $plotLeft; $line.X2 = $plotLeft + $plotWidth; $line.Y1 = $y; $line.Y2 = $y; $line.Stroke = $gridBrush
+            [void]$Canvas.Children.Add($line)
+            $label = [System.Windows.Controls.TextBlock]::new(); $label.Text = "$percent%"; $label.FontSize = 10; $label.Foreground = $mutedBrush
+            [System.Windows.Controls.Canvas]::SetLeft($label, $left); [System.Windows.Controls.Canvas]::SetTop($label, $y - 7); [void]$Canvas.Children.Add($label)
+        }
+        $tick = $from.Date.AddHours($from.Hour + 1)
+        while ($tick -lt $to) {
+            if ($tick.Hour % 3 -eq 0) {
+                $x = $plotLeft + ($tick - $from).TotalMinutes / $totalMinutes * $plotWidth
+                $hour = [System.Windows.Controls.TextBlock]::new(); $hour.Text = $tick.ToString('HH:mm'); $hour.FontSize = 10; $hour.Foreground = $mutedBrush
+                [System.Windows.Controls.Canvas]::SetLeft($hour, $x - 14); [System.Windows.Controls.Canvas]::SetTop($hour, $top + $plotHeight + 1); [void]$Canvas.Children.Add($hour)
+            }
+            $tick = $tick.AddHours(1)
+        }
+        $maxGapMinutes = 3 * [math]::Max(1, [int]$metric.SampleMinutes) + 1
+        foreach ($series in @(@{ Name = 'Cpu'; Color = '#0078D4' }, @{ Name = 'Memory'; Color = '#107C10' })) {
+            $line = $null; $previous = $null
+            foreach ($sample in $samples) {
+                $value = $sample.($series.Name)
+                if ($null -eq $value) { $previous = $null; continue }
+                $time = [datetime]$sample.Time
+                if ($null -eq $line -or $null -eq $previous -or ($time - $previous).TotalMinutes -gt $maxGapMinutes) {
+                    $line = [System.Windows.Shapes.Polyline]::new(); $line.Stroke = ConvertTo-OrchestratorBrush $series.Color; $line.StrokeThickness = 1.6
+                    $line.ToolTip = '{0} {1}' -f $metric.Server, $(if ($series.Name -eq 'Cpu') { 'CPU %' } else { 'RAM %' })
+                    [void]$Canvas.Children.Add($line)
+                }
+                $x = $plotLeft + ($time - $from).TotalMinutes / $totalMinutes * $plotWidth
+                $y = $top + $plotHeight - [math]::Min(100.0, [math]::Max(0.0, [double]$value)) / 100.0 * $plotHeight
+                $line.Points.Add([System.Windows.Point]::new($x, $y))
+                $previous = $time
+            }
+        }
+    }
+}
+
 if ($Demo) {
     . (Join-Path $PSScriptRoot 'SmartM365-Inventory-Orchestrator-Demo.ps1')
     Invoke-OrchestratorDemo -Xaml $xaml -Scenario $DemoScenario -View $DemoView -Width $DemoWindowWidth -Height $DemoWindowHeight -ValidateOnly:$ValidateOnly
@@ -1156,7 +1232,7 @@ if ($ValidateOnly) {
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
         'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
         'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
-        'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
+        'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardMetricsCanvas', 'ServersMetricsCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
         'ConfigFilterBox', 'ConfigShowSensitiveButton', 'ConfigRefreshButton', 'ConfigOpenFolderButton', 'ConfigSummaryText', 'ConfigFileTabs', 'ConfigGlobalTab', 'ConfigTenantTab', 'ConfigMailTab', 'ConfigGlobalStatusText', 'ConfigTenantStatusText', 'ConfigMailStatusText', 'ConfigGlobalGrid', 'ConfigTenantGrid', 'ConfigMailGrid',
         'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OperationsRequestsTab', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
@@ -2699,6 +2775,8 @@ function Set-GuiOperations {
     $script:Controls.OperationsPendingGrid.ItemsSource = @($Operations.Pending)
     $script:Controls.OperationsIncidentsGrid.ItemsSource = @($Operations.Incidents)
     $script:Controls.OperationsMailsGrid.ItemsSource = @($Operations.Mails)
+    $script:Controls.ServersMetricsCanvas.Tag = if ($Operations.PSObject.Properties['Metrics']) { @($Operations.Metrics) } else { @() }
+    Update-OrchestratorServerMetricsChart -Canvas $script:Controls.ServersMetricsCanvas
 }
 
 function Receive-GuiRefresh {
@@ -3053,7 +3131,7 @@ $window = ConvertFrom-OrchestratorGuiXaml -Text $xaml
 $script:Controls = @{}
 foreach ($name in @(
     'MainTabs', 'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'ValidateButton', 'RebalanceButton', 'RequestPrepareButton', 'PublishButton',
-    'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
+    'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardMetricsCanvas', 'ServersMetricsCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
     'PlanningGrid', 'SelectedJobText', 'JobArgumentsBox', 'JobEnabledCheck', 'ScheduleTypeCombo', 'TimesBox', 'DaysPanel',
     'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck', 'MissedPolicyCombo',
     'AssignmentCombo', 'PinnedServerCombo', 'TimeoutBox', 'RetriesBox', 'RetryDelayBox', 'DurationBox', 'ApplyJobButton',
@@ -3185,6 +3263,8 @@ $script:ConfigurationTimer.Add_Tick({
 })
 $script:ConfigurationTimer.Start()
 $script:Controls.DashboardTimelineCanvas.Add_SizeChanged({ param($sender) Update-OrchestratorDashboardTimeline -Canvas $sender })
+$script:Controls.DashboardMetricsCanvas.Add_SizeChanged({ param($sender) Update-OrchestratorServerMetricsChart -Canvas $sender })
+$script:Controls.ServersMetricsCanvas.Add_SizeChanged({ param($sender) Update-OrchestratorServerMetricsChart -Canvas $sender })
 $script:Controls.DashboardTilesList.AddHandler([System.Windows.UIElement]::MouseLeftButtonUpEvent, [System.Windows.Input.MouseButtonEventHandler]{
     param($sender, $eventArgs)
     try {

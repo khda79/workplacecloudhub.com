@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.6
+1.4.7
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -40,6 +40,7 @@ function New-OrchestratorDemoData {
                 RecycleIn='02:30:00'; Pid=(4100+$i); StatePersistence='Healthy (sample)'
                 Version='1.5.47'; Maintenance='Active'; MaintenanceAcknowledgement='Ready'
                 Os='Microsoft Windows Server 2022 Standard (10.0.20348, build 20348)'; Cpu='Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz'
+                CpuPercent=$null; MemoryPercent=$null
                 MemoryGB=16; SystemDriveSizeGB=127.4; SystemDriveFreePercent=[math]::Round(41.2 - 12 * $i, 1); SystemDriveLow=((41.2 - 12 * $i) -lt 10); SystemInfoAt='2026-10-18 06:00'
             }
         }
@@ -208,8 +209,12 @@ function New-OrchestratorDemoDashboard {
         [pscustomobject]@{ Label = 'Log errors 24 h'; Value = [string]$errors; Detail = '{0} warning(s)' -f @($Data.LogEvents | Where-Object Level -eq 'WARN').Count; Level = $(if ($errors) { 'Warning' } else { 'Normal' }); Target = 'Events' }
         [pscustomobject]@{ Label = 'Certificate'; Value = '212 d'; Detail = 'days before expiry (sample)'; Level = 'Normal'; Target = 'Operations' }
     )
+    $metrics = @(New-OrchestratorDemoMetrics -Data $Data)
     $servers = @(foreach ($server in $Data.Servers) {
-        [pscustomobject]@{ Server = $server.Server; State = 'Online'; Version = $server.Version; Running = $server.Running; Pending = $server.Pending; RecycleIn = '14h30'
+        # Latest values of the sample curves, as the heartbeat publishes the last sample.
+        $last = @(@($metrics | Where-Object Server -eq $server.Server)[0].Samples)[-1]
+        $server.CpuPercent = $last.Cpu; $server.MemoryPercent = $last.Memory
+        [pscustomobject]@{ Server = $server.Server; State = 'Online'; Version = $server.Version; CpuPercent = $last.Cpu; MemoryPercent = $last.Memory; Running = $server.Running; Pending = $server.Pending; RecycleIn = '14h30'
             Owned = $server.AssignedJobs; Certificate = '212 d'; StatePersistence = 'OK'; Capabilities = $server.Capabilities }
     })
     $items = [Collections.Generic.List[object]]::new()
@@ -231,8 +236,27 @@ function New-OrchestratorDemoDashboard {
     [pscustomobject]@{
         Banner = $(if ($critical) { [pscustomobject]@{ Level = 'Critical'; Text = '{0} critical and {1} warning item(s) to review. {2}' -f $critical, $warning, $summary } } elseif ($warning) { [pscustomobject]@{ Level = 'Warning'; Text = '{0} warning item(s) to review. {1}' -f $warning, $summary } } else { [pscustomobject]@{ Level = 'Normal'; Text = 'Everything looks healthy. ' + $summary } })
         Tiles = $tiles; Actions = $sorted; Servers = $servers
+        Metrics = $metrics
         Timeline = [pscustomobject]@{ From = $clock; To = $clock.AddHours(24); Lanes = @($Data.Servers.Server); Items = @($items | Sort-Object Start) }
         GeneratedAt = $clock
+    }
+}
+
+function New-OrchestratorDemoMetrics {
+    # Fictional CPU and memory curves, one sample every 5 minutes over the 12 hours before the frozen clock.
+    param([Parameter(Mandatory)]$Data)
+    $clock = $Data.Clock
+    $index = 0
+    foreach ($server in @($Data.Servers)) {
+        $index++
+        $samples = @(for ($minute = 12 * 60; $minute -ge 0; $minute -= 5) {
+            $time = $clock.AddMinutes(-$minute)
+            # A collection burst at night, then a quieter day; the second server misses one hour (restart).
+            if ($index -eq 2 -and $minute -le 300 -and $minute -gt 240) { continue }
+            $phase = ($minute / 60.0 + $index) / 2.0
+            [pscustomobject]@{ Time = $time; Cpu = [math]::Round(20 + 12 * $index + 18 * [math]::Sin($phase) + $(if ($time.Hour -lt 4) { 25 } else { 0 }), 1); Memory = [math]::Round(50 + 6 * $index + 4 * [math]::Cos($phase / 2), 1) }
+        })
+        [pscustomobject]@{ Server = $server.Server; From = $clock.AddHours(-12); To = $clock; SampleMinutes = 5; Samples = $samples }
     }
 }
 
@@ -305,6 +329,8 @@ function Update-OrchestratorDemoViews {
     $c.VersionsGrid.ItemsSource=@($d.Versions)
     $s.Dashboard=New-OrchestratorDemoDashboard -Data $d
     Set-OrchestratorDashboardView -Controls $c -Dashboard $s.Dashboard
+    $c.ServersMetricsCanvas.Tag=@($s.Dashboard.Metrics)
+    Update-OrchestratorServerMetricsChart -Canvas $c.ServersMetricsCanvas
     $c.MaintenanceBannerText.Text=if($d.Maintenance){'DEMO - Scheduling maintenance enabled'}else{'DEMO - Scheduling active'}
     # Same colours as the live banner: normal scheduling is muted, a pause is amber.
     $c.MaintenanceBannerText.Foreground=[System.Windows.Media.BrushConverter]::new().ConvertFromString($(if($d.Maintenance){'#92400E'}else{'#5D6B78'}))
@@ -545,6 +571,8 @@ function Invoke-OrchestratorDemo {
     $c.ConfigRefreshButton.Add_Click({Update-OrchestratorDemoConfiguration;Write-OrchestratorDemoActivity 'Sample configuration refreshed. No configuration file was read.'})
     $c.ConfigOpenFolderButton.Add_Click({Write-OrchestratorDemoActivity 'Open folder is disabled in demo mode.'})
     $c.DashboardTimelineCanvas.Add_SizeChanged({param($sender) Update-OrchestratorDashboardTimeline -Canvas $sender})
+    $c.DashboardMetricsCanvas.Add_SizeChanged({param($sender) Update-OrchestratorServerMetricsChart -Canvas $sender})
+    $c.ServersMetricsCanvas.Add_SizeChanged({param($sender) Update-OrchestratorServerMetricsChart -Canvas $sender})
     $c.DashboardTilesList.AddHandler([System.Windows.UIElement]::MouseLeftButtonUpEvent,[System.Windows.Input.MouseButtonEventHandler]{param($sender,$eventArgs)$tile=$eventArgs.OriginalSource.DataContext;if($tile -and $tile.PSObject.Properties['Target']){Select-OrchestratorDemoTarget ([string]$tile.Target)}})
     $c.DashboardActionsGrid.Add_MouseDoubleClick({$row=$script:OrchestratorDemo.Controls.DashboardActionsGrid.SelectedItem;if($row){Select-OrchestratorDemoTarget ([string]$row.Target)}})
     $c.EventsRefreshButton.Add_Click({Update-OrchestratorDemoEvents;Write-OrchestratorDemoActivity 'Sample events refreshed. No log file was read.'})

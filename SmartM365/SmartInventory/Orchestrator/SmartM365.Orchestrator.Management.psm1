@@ -690,11 +690,15 @@ function Get-SmartM365OrchestratorServerStatus {
         if ($collected -is [datetime]) { $collectedText = $collected.ToLocalTime().ToString('yyyy-MM-dd HH:mm') }
         elseif ($collected) { $parsedCollected = [datetimeoffset]::MinValue; if ([datetimeoffset]::TryParse([string]$collected, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsedCollected)) { $collectedText = $parsedCollected.LocalDateTime.ToString('yyyy-MM-dd HH:mm') } }
         $freePercent = & $systemValue 'SystemDriveFreePercent'
+        # Latest CPU and memory sample (orchestrator 1.5.69+).
+        $usage = if ($null -ne $heartbeat -and $heartbeat.PSObject.Properties['ResourceUsage']) { $heartbeat.ResourceUsage } else { $null }
         [pscustomobject]@{ Server = [string]$server; Online = ($age -le [double]$ClusterDocument.PeerHeartbeatStaleMinutes); HeartbeatUtc = if ($heartbeatTime -eq [datetime]::MinValue) { $null } else { $heartbeatTime.ToUniversalTime() }; HeartbeatAgeMinutes = if ([double]::IsPositiveInfinity($age)) { $null } else { [math]::Round($age, 1) }; Capabilities = $capabilityText; Weight = if ($weights.ContainsKey($serverName)) { [double]$weights[$serverName] } else { 1.0 }; Policy = if ($policies.ContainsKey($serverName)) { @($policies[$serverName].OnlyJobsRequiring) -join ', ' } else { '' }; AssignedJobs = $assigned.Count; AssignedJobNames = $assigned -join ', '
             Version = if ($null -ne $heartbeat -and $heartbeat.PSObject.Properties['ScriptVersion']) { [string]$heartbeat.ScriptVersion } else { '' }
             Os = [string](& $systemValue 'Os'); Cpu = $(if ((& $systemValue 'LogicalProcessors')) { '{0} ({1} logical)' -f (& $systemValue 'Cpu'), (& $systemValue 'LogicalProcessors') } else { [string](& $systemValue 'Cpu') }); LogicalProcessors = & $systemValue 'LogicalProcessors'; MemoryGB = & $systemValue 'MemoryGB'
             SystemDriveSizeGB = & $systemValue 'SystemDriveSizeGB'; SystemDriveFreePercent = $freePercent; SystemDriveLow = $null -ne $freePercent -and [double]$freePercent -lt 10
-            SystemInfoAt = $collectedText; SystemInfoError = [string](& $systemValue 'Error') }
+            SystemInfoAt = $collectedText; SystemInfoError = [string](& $systemValue 'Error')
+            CpuPercent = if ($null -ne $usage -and $usage.PSObject.Properties['Cpu']) { $usage.Cpu } else { $null }
+            MemoryPercent = if ($null -ne $usage -and $usage.PSObject.Properties['Memory']) { $usage.Memory } else { $null } }
     }
     @($result)
 }

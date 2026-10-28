@@ -7,7 +7,7 @@ Uses synthetic operations, job runs, election plan, requests and log events only
 banner, tiles, items to review, server rows and 24-hour timeline, the background refresh contract,
 the delayed non-blocking loading overlay and the WPF rendering of tiles and timeline. Run with -STA.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -219,21 +219,23 @@ Export-ModuleMember -Function Get-SmartM365OrchestratorOperations, Get-SmartM365
     Assert-Dashboard ($guiText.Contains('$script:RefreshTimer.Add_Tick({ Receive-GuiRefresh; Update-GuiDashboardLoading })')) 'Overlay driven by the existing non-blocking refresh timer.'
     Assert-Dashboard ((Get-GuiFunction 'Invoke-AutoRefresh').Extent.Text -notmatch 'ShowLoading') 'Auto-refresh never shows the overlay.'
     Assert-Dashboard ($guiText -match "if \(Test-GuiDashboardTabVisible\) \{ Start-GuiRefresh -Mode Live -ShowLoading \}") 'Opening the Dashboard tab requests the overlay.'
-    Assert-Dashboard ($guiText -match '<Border x:Name="DashboardLoadingOverlay" Grid.RowSpan="4"') 'Overlay covers the Dashboard tab only (not modal).'
+    Assert-Dashboard ($guiText -match '<Border x:Name="DashboardLoadingOverlay" Grid.RowSpan="5"') 'Overlay covers the Dashboard tab only (not modal).'
 
     # WPF rendering of tiles, items and timeline.
     $colorLines = @([regex]::Matches($guiText, '(?m)^\$script:Dashboard(Level|Banner|Timeline)Colors = .*$') | ForEach-Object Value)
     Assert-Dashboard ($colorLines.Count -eq 3) 'Dashboard colour tables.'
     foreach ($line in $colorLines) { . ([scriptblock]::Create($line)) }
-    foreach ($name in @('ConvertTo-OrchestratorBrush', 'Set-OrchestratorDashboardView', 'Update-OrchestratorDashboardTimeline')) { . ([scriptblock]::Create((Get-GuiFunction $name).Extent.Text)) }
+    foreach ($name in @('ConvertTo-OrchestratorBrush', 'Set-OrchestratorDashboardView', 'Update-OrchestratorDashboardTimeline', 'Update-OrchestratorServerMetricsChart')) { . ([scriptblock]::Create((Get-GuiFunction $name).Extent.Text)) }
     $canvas = [System.Windows.Controls.Canvas]::new()
     $controls = @{
         DashboardBannerBorder = [System.Windows.Controls.Border]::new(); DashboardBannerText = [System.Windows.Controls.TextBlock]::new()
         DashboardTilesList = [System.Windows.Controls.ItemsControl]::new(); DashboardActionsGrid = [System.Windows.Controls.DataGrid]::new()
         DashboardActionsGroup = [System.Windows.Controls.GroupBox]::new(); DashboardGrid = [System.Windows.Controls.DataGrid]::new(); DashboardTimelineCanvas = $canvas
+        DashboardMetricsCanvas = [System.Windows.Controls.Canvas]::new()
     }
     $canvas.Measure([System.Windows.Size]::new(1200, 300)); $canvas.Arrange([System.Windows.Rect]::new(0, 0, 1200, 300))
     Set-OrchestratorDashboardView -Controls $controls -Dashboard $dashboard
+    Assert-Dashboard ($dashboard.PSObject.Properties['Metrics'] -and @($controls.DashboardMetricsCanvas.Tag | Where-Object { $null -ne $_ }).Count -eq @($dashboard.Metrics | Where-Object { $null -ne $_ }).Count) 'The CPU and memory chart receives the server metrics.'
     Assert-Dashboard ($controls.DashboardBannerText.Text -eq $dashboard.Banner.Text -and ([string]$controls.DashboardBannerBorder.Background) -eq '#FFFDE7E9') 'Banner text and critical colour.'
     $renderedTiles = @($controls.DashboardTilesList.ItemsSource)
     Assert-Dashboard ($renderedTiles.Count -eq 9 -and @($renderedTiles | Where-Object Label -eq 'Failures 24 h')[0].Background -eq '#FDE7E9' -and @($renderedTiles | Where-Object Label -eq 'Running')[0].Background -eq '#FFFFFF') 'Tile colours by level.'

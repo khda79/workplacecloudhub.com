@@ -297,6 +297,20 @@ function Get-SmartM365OrchestratorDependencyReadiness {
     }
 }
 
+function Get-SmartM365OrchestratorServerMetrics {
+    <# CPU and memory samples of one server (Orchestrator-Metrics.json) within the last Hours. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ServerFolder, [string]$Server = '', [int]$Hours = 12, [datetime]$Now = (Get-Date))
+    $document = Read-InsightsJson -Path (Join-Path $ServerFolder 'Orchestrator-Metrics.json')
+    $from = $Now.ToUniversalTime().AddHours(-1 * $Hours)
+    $samples = @(foreach ($sample in @(Get-InsightsProperty $document 'Samples' @())) {
+        $time = ConvertTo-InsightsUtc (Get-InsightsProperty $sample 'TimeUtc' $null)
+        if ($null -eq $time -or $time -lt $from -or $time -gt $Now.ToUniversalTime().AddMinutes(5)) { continue }
+        [pscustomobject]@{ Time = $time.ToLocalTime(); Cpu = Get-InsightsProperty $sample 'Cpu' $null; Memory = Get-InsightsProperty $sample 'Memory' $null }
+    })
+    [pscustomobject]@{ Server = $Server; From = $from.ToLocalTime(); To = $Now; SampleMinutes = [int](Get-InsightsProperty $document 'SampleMinutes' 5); Samples = @($samples | Sort-Object Time) }
+}
+
 function Get-SmartM365OrchestratorOperations {
     <# Live view from the shared heartbeats, states and orchestrator mail copies. #>
     [CmdletBinding()]
@@ -306,6 +320,7 @@ function Get-SmartM365OrchestratorOperations {
     )
     $servers = [Collections.Generic.List[object]]::new(); $running = [Collections.Generic.List[object]]::new()
     $pending = [Collections.Generic.List[object]]::new(); $incidents = [Collections.Generic.List[object]]::new()
+    $metrics = [Collections.Generic.List[object]]::new()
     $staleMinutes = [double](Get-InsightsProperty $ClusterDocument 'PeerHeartbeatStaleMinutes' 5)
     $maintenance = $null; $maintenanceError = ''; $maintenanceServers = @()
     try {
@@ -322,6 +337,8 @@ function Get-SmartM365OrchestratorOperations {
         $deadline = ConvertTo-InsightsUtc (Get-InsightsProperty $heartbeat 'LifetimeDeadline' $null)
         $jobsRunning = @(Get-InsightsProperty $heartbeat 'RunningJobs' @())
         $jobsPending = @(Get-InsightsProperty $heartbeat 'PendingJobs' @())
+        $usage = Get-InsightsProperty $heartbeat 'ResourceUsage' $null
+        $metrics.Add((Get-SmartM365OrchestratorServerMetrics -ServerFolder $folder -Server $serverName -Now $Now))
         $state = if ($null -eq $heartbeat) { 'No heartbeat' } elseif ($null -eq $age) { 'No timestamp' } elseif ($age -gt $staleMinutes) { 'Stale' } elseif ($lifecycle -eq 'Recycling') { 'Recycling' } elseif ($lifecycle -eq 'Starting') { 'Starting' } else { 'Online' }
         $recycleIn = ''
         if ($null -ne $deadline) {
@@ -333,6 +350,7 @@ function Get-SmartM365OrchestratorOperations {
             Version = [string](Get-InsightsProperty $heartbeat 'ScriptVersion' ''); Pid = [string](Get-InsightsProperty $heartbeat 'Pid' '')
             Running = $jobsRunning.Count; Pending = $jobsPending.Count
             RecycleIn = $recycleIn
+            CpuPercent = Get-InsightsProperty $usage 'Cpu' $null; MemoryPercent = Get-InsightsProperty $usage 'Memory' $null
             Maintenance = if ($maintenanceError) { 'Unknown' } elseif ($maintenance.Enabled) { 'ON' } else { 'OFF' }
             MaintenanceAcknowledgement = if ($maintenanceError) { 'Control unavailable' } else { [string](@($maintenanceServers | Where-Object Server -eq $serverName)[0].Status) }
             StatePersistence = if ([bool](Get-InsightsProperty $heartbeat 'StatePersistenceHealthy' $true)) { 'OK' } else { 'Launches paused: ' + [string](Get-InsightsProperty $heartbeat 'StatePersistenceLastError' '') }
@@ -380,6 +398,7 @@ function Get-SmartM365OrchestratorOperations {
         Servers = @($servers); Running = @($running | Sort-Object Server, Job); Pending = @($pending | Sort-Object Server, Job)
         Incidents = @($incidents); Mails = @($mails | Sort-Object Time -Descending); RefreshedAt = $Now
         Maintenance = $maintenance; MaintenanceError = $maintenanceError; MaintenanceServers = $maintenanceServers
+        Metrics = @($metrics)
     }
 }
 
@@ -563,6 +582,7 @@ function Get-SmartM365OrchestratorDashboard {
         [pscustomobject]@{
             Server = $server.Server; State = $server.State; Version = $server.Version; StatePersistence = $server.StatePersistence
             Running = $server.Running; Pending = $server.Pending; RecycleIn = $server.RecycleIn
+            CpuPercent = Get-InsightsProperty $server 'CpuPercent' $null; MemoryPercent = Get-InsightsProperty $server 'MemoryPercent' $null
             Owned = $(if ($ownedCount.ContainsKey([string]$server.Server)) { $ownedCount[[string]$server.Server] } else { 0 })
             Certificate = $(if ($null -ne (Get-InsightsProperty $server 'CertificateDaysRemaining' $null)) { '{0} d' -f [math]::Floor([double]$server.CertificateDaysRemaining) } else { '' })
             Capabilities = [string](Get-InsightsProperty $server 'ReadyCapabilities' '')
@@ -606,6 +626,7 @@ function Get-SmartM365OrchestratorDashboard {
     else { [pscustomobject]@{ Level = 'Normal'; Text = 'Everything looks healthy. ' + $summary } }
     [pscustomobject]@{
         Banner = $banner; Tiles = $tiles; Actions = $sortedActions; Servers = $serverRows
+        Metrics = @(Get-InsightsProperty $Operations 'Metrics' @())
         Timeline = [pscustomobject]@{ From = $Now; To = $to; Lanes = $lanes; Items = @($items | Sort-Object Start) }
         GeneratedAt = $Now
     }
@@ -1100,7 +1121,7 @@ function ConvertTo-InsightsSwiTimeText {
 Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorScheduleOccurrences', 'Get-SmartM365OrchestratorExpectedMaxAgeHours', 'Get-SmartM365OrchestratorRecentRuns',
     'Get-SmartM365OrchestratorJobHealth', 'Get-SmartM365OrchestratorDependents', 'Get-SmartM365OrchestratorDependencyReadiness',
-    'Get-SmartM365OrchestratorOperations', 'Get-SmartM365OrchestratorRecentPipelineRuns', 'New-SmartM365OrchestratorJobRunRequest',
+    'Get-SmartM365OrchestratorOperations', 'Get-SmartM365OrchestratorServerMetrics', 'Get-SmartM365OrchestratorRecentPipelineRuns', 'New-SmartM365OrchestratorJobRunRequest',
     'Get-SmartM365OrchestratorLogEventCategory', 'Get-SmartM365OrchestratorLogEvents', 'Select-SmartM365OrchestratorLogEvents',
     'Get-SmartM365OrchestratorDashboard', 'Get-SmartM365OrchestratorDashboardData',
     'Get-SmartM365OrchestratorScriptVersion', 'Get-SmartM365OrchestratorLatestFolderPath', 'Get-SmartM365OrchestratorSwiValidity',
