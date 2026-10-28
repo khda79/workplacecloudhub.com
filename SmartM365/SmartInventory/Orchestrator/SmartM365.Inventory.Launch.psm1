@@ -41,11 +41,11 @@ emptied; right before the launch, every code file of the cache must be byte-iden
 Compatible with Windows PowerShell 5.1 and PowerShell 7.
 
 .VERSION
-1.6.0
+1.6.1
 #>
 Set-StrictMode -Version 2.0
 
-$script:LaunchModuleVersion = '1.6.0'
+$script:LaunchModuleVersion = '1.6.1'
 $script:ValidRuntimes = @('PowerShell7', 'WindowsPowerShell')
 $script:ValidModes = @('Direct', 'LocalCache', 'Auto')
 # Test hook: replaced by the offline tests to simulate the zone of a share.
@@ -838,7 +838,17 @@ function Invoke-SmartM365InventoryLaunch {
         Write-SmartM365InventoryLaunchMessage -Message ("{0} started without a console window (process {1}); this window closes." -f $Plan.Name, $processId)
         return 0
     }
-    return (Invoke-SmartM365InventoryProcess -FilePath $command.EnginePath -Arguments $command.Arguments -WorkingDirectory $command.WorkingDirectory)
+    # The console belongs to this dispatcher (often powershell.exe 5.1); show the runtime of the launched script.
+    $previousTitle = $null
+    try {
+        $previousTitle = $Host.UI.RawUI.WindowTitle
+        $Host.UI.RawUI.WindowTitle = '{0} - {1}' -f $Plan.Name, $(if ($Plan.Runtime -eq 'WindowsPowerShell') { 'Windows PowerShell 5.1' } else { 'PowerShell 7' })
+    }
+    catch { $previousTitle = $null }
+    try { return (Invoke-SmartM365InventoryProcess -FilePath $command.EnginePath -Arguments $command.Arguments -WorkingDirectory $command.WorkingDirectory) }
+    finally {
+        if ($null -ne $previousTitle) { try { $Host.UI.RawUI.WindowTitle = $previousTitle } catch { } }
+    }
 }
 
 function Invoke-SmartM365InventoryOrchestratedLaunch {
