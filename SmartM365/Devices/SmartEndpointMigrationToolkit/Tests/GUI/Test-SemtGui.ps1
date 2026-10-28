@@ -69,7 +69,7 @@ try {
     Test-Step 'Launch All is labelled as limited to the selected Campaign in its confirmation' { [IO.File]::ReadAllText($guiPath) -match 'Launch All Waves of this Campaign only' }
     Test-Step 'stop states remote endpoints are reported separately' { [IO.File]::ReadAllText($guiPath) -match 'Remote endpoints may continue and must be verified' }
     $guiText = [IO.File]::ReadAllText($guiPath)
-    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile','Get-InventoryRefreshCommandText','Get-AdInventoryDomains')) {
+    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile','Get-InventoryRefreshCommandText','Get-AdInventoryDomains','Get-InventoryRefreshPlan')) {
         $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
         . ([scriptblock]::Create($definition.Extent.Text))
     }
@@ -103,7 +103,7 @@ try {
     Test-Step 'inventory refresh runs in a hidden process, never in a visible console' { $null -ne $refreshHandler -and $refreshHandler.Extent.Text -match '-WindowStyle Hidden' -and $guiText -notmatch '-NoExit' }
     $refreshAssignment = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$inventoryRefreshXaml' }, $true)
     $refreshXaml = [string]$refreshAssignment.Right.Expression.Value
-    Test-Step 'inventory refresh window shows the output, stops and closes' { foreach ($name in 'InventoryRefreshStateText','InventoryRefreshOutputText','InventoryRefreshStopButton','InventoryRefreshCloseButton','InventoryRefreshOpenFolderButton') { if ($refreshXaml -notmatch ('x:Name="{0}"' -f $name)) { return $false } }; $true }
+    Test-Step 'inventory refresh window shows the output, stops and closes' { foreach ($name in 'InventoryRefreshStateText','InventoryRefreshADStateText','InventoryRefreshADOutputText','InventoryRefreshGraphStateText','InventoryRefreshGraphOutputText','InventoryRefreshStopButton','InventoryRefreshCloseButton','InventoryRefreshOpenFolderButton') { if ($refreshXaml -notmatch ('x:Name="{0}"' -f $name)) { return $false } }; $true }
     # Fictional export scripts: AD writes output, Intune fails; both must run and reach the log.
     $fakeRoot = Join-Path $tempRoot 'InventoryFake'
     New-Item -ItemType Directory -Path (Join-Path $fakeRoot 'Scripts') -Force | Out-Null
@@ -112,13 +112,26 @@ try {
     $savedRoot = $script:PackageRoot; $script:PackageRoot = $fakeRoot
     $refreshLog = Join-Path $fakeRoot "Run's log\InventoryRefresh.log"
     New-Item -ItemType Directory -Path (Split-Path $refreshLog -Parent) -Force | Out-Null
-    $refreshCommand = Get-InventoryRefreshCommandText -Kinds @('AD','Intune') -LogPath $refreshLog
+    $refreshCommand = Get-InventoryRefreshCommandText -Exports @([pscustomobject]@{ Label = 'AD'; Script = 'SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1'; Arguments = @('-ForceRefresh') },[pscustomobject]@{ Label = 'Intune'; Script = 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }) -LogPath $refreshLog
     $script:PackageRoot = $savedRoot
     $refreshProcess = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($refreshCommand))) -WindowStyle Hidden -PassThru -Wait
     $refreshText = if (Test-Path -LiteralPath $refreshLog) { Get-Content -LiteralPath $refreshLog -Raw } else { '' }
     Test-Step 'inventory refresh passes -ForceRefresh and logs Write-Host and output' { $refreshText -match 'FAKE-AD force=True' -and $refreshText -match 'FAKE-AD output' }
     Test-Step 'inventory refresh runs every export after a failure and logs it with a timestamp' { $refreshText -match '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} Intune export failed: FAKE-INTUNE failure' -and $refreshText -match 'failed exports: 1\.' }
     Test-Step 'inventory refresh exit code is 1 when an export failed' { $refreshProcess.ExitCode -eq 1 }
+    # Parallel plan: AD and Graph streams; Graph uses one sign-in (combined exporter for HybridJoin).
+    $hjPlan = @(Get-InventoryRefreshPlan -Campaign HybridJoin)
+    $w11Plan = @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade)
+    Test-Step 'inventory refresh runs two parallel streams: AD and Microsoft Graph' { ($hjPlan.Name -join ',') -eq 'AD,Graph' -and ($w11Plan.Name -join ',') -eq 'AD,Graph' -and @($hjPlan + $w11Plan | Where-Object { @($_.Exports).Count -ne 1 }).Count -eq 0 }
+    Test-Step 'HybridJoin Graph stream exports Intune and Entra on one connection; Windows 11 exports Intune only' { $hjPlan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and $w11Plan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' }
+    $planProblems = foreach ($export in @($hjPlan + $w11Plan | ForEach-Object { $_.Exports })) {
+        $exportPath = Join-Path $packageRoot ('Scripts\' + $export.Script)
+        if (-not (Test-Path -LiteralPath $exportPath -PathType Leaf)) { 'missing ' + $export.Script; continue }
+        $exportParameters = @([System.Management.Automation.Language.Parser]::ParseFile($exportPath, [ref]$null, [ref]$null).ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+        foreach ($argument in @($export.Arguments)) { if ($exportParameters -notcontains $argument.TrimStart('-')) { '{0} has no {1}' -f $export.Script,$argument } }
+    }
+    Test-Step 'every planned export exists and accepts its arguments' { @($planProblems).Count -eq 0 }
+    Test-Step 'every stream has its state and output areas in the window (case-sensitive names for FindName)' { foreach ($item in $hjPlan) { if ($refreshXaml -cnotmatch ('x:Name="InventoryRefresh{0}(Output|State)Text"' -f $item.Name)) { return $false } }; $true }
     $domainCsv = Join-Path $tempRoot 'DomainInventory.csv'
     [IO.File]::WriteAllText($domainCsv, ("ComputerName,ADDomain,DistinguishedName`r`nPC1,FR.example,""CN=PC1,DC=fr,DC=example""`r`nPC2,fr.example.,""CN=PC2,DC=fr""`r`nPC3,be.example,""x, y""`r`nPC4,,`r`n"), [Text.UTF8Encoding]::new($true))
     Test-Step 'AD domain list is read from the AD inventory (distinct, lower case, sorted, quoted commas)' { (@(Get-AdInventoryDomains -Path $domainCsv) -join ',') -eq 'be.example,fr.example' }
@@ -152,7 +165,7 @@ Add-Type -AssemblyName PresentationFramework
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Gui, [ref]$null, [ref]$null)
 $assignment = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$inventoryRefreshXaml' }, $true)
 $popup = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new([string]$assignment.Right.Expression.Value)))
-'POPUP=' + ($null -ne $popup.FindName('InventoryRefreshOutputText') -and $popup.FindName('InventoryRefreshOutputText').IsReadOnly)
+'POPUP=' + (@('AD','Graph' | Where-Object { $box = $popup.FindName(('InventoryRefresh{0}OutputText' -f $_)); $null -ne $box -and $box.IsReadOnly }).Count -eq 2)
 '@ | Set-Content -LiteralPath $popupScript -Encoding ASCII
     $popupCheck = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $popupScript -Gui $guiPath 2>&1 | ForEach-Object { [string]$_ })
     Test-Step 'inventory refresh window loads under Windows PowerShell 5.1 STA' { ($popupCheck -join "`n") -match 'POPUP=True' }
