@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.7
+1.6.8
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.7'
+$script:AppVersion = '1.6.8'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
@@ -461,7 +461,7 @@ $xaml = @'
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                     <TextBlock Text="Cancellation reason" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                     <TextBox x:Name="CancellationReasonBox" Width="340" Margin="0,0,8,0"/>
-                                    <Button x:Name="CancelRequestButton" Content="Cancel remaining jobs" IsEnabled="False" ToolTip="Cancel pending jobs and retries in the selected request. Running collectors continue. All residents must support cancellation."/>
+                                    <Button x:Name="CancelRequestButton" Content="Cancel remaining jobs" IsEnabled="False" ToolTip="Cancel pending jobs and retries in the selected request. Running collectors continue. All residents must support cancellation; an offline resident applies it when it returns."/>
                                     <Button x:Name="CancelAllRequestsButton" Content="Cancel All remaining Jobs" IsEnabled="False" Margin="8,0,0,0" ToolTip="Cancel pending jobs and retries in all active pipeline requests for this tenant. Running collectors and automatic schedules are unchanged."/>
                                 </StackPanel>
                                 <TextBlock x:Name="CancellationProgressText" Grid.Row="1" Margin="0,0,0,8" Foreground="#5D6B78" TextWrapping="Wrap"/>
@@ -1381,11 +1381,14 @@ function Refresh-MaintenanceView {
             $servers = @(Get-SmartM365OrchestratorMaintenanceReadiness $script:SharedDataFolderPath $cluster $control)
         }
         $applied = $servers.Count -gt 0 -and @($servers | Where-Object Status -ne 'Applied').Count -eq 0
+        # Offline servers whose last heartbeat supports maintenance apply it when they return.
+        $activationReady = Test-SmartM365OrchestratorMaintenanceActivationReady -Servers $servers
+        $offlineCount = @($servers | Where-Object Status -like 'Offline (*').Count
         $script:MaintenanceViewState = $control
-        $script:Controls.EnableMaintenanceButton.IsEnabled = (-not $control.Enabled -and $applied)
+        $script:Controls.EnableMaintenanceButton.IsEnabled = (-not $control.Enabled -and $activationReady)
         $script:Controls.DisableMaintenanceButton.IsEnabled = $control.Enabled
-        $stateText = if ($control.Enabled) { if ($applied) { 'ACTIVE' } else { 'ACTIVATION REQUESTED' } }
-            elseif ($applied) { 'INACTIVE' } else { 'ACKNOWLEDGEMENT PENDING' }
+        $stateText = if ($control.Enabled) { if ($applied) { 'ACTIVE' } elseif ($activationReady) { "ACTIVE ($offlineCount offline server(s) apply it on return)" } else { 'ACTIVATION REQUESTED' } }
+            elseif ($applied) { 'INACTIVE' } elseif ($activationReady) { "INACTIVE ($offlineCount offline server(s))" } else { 'ACKNOWLEDGEMENT PENDING' }
         $script:Controls.MaintenanceBannerText.Text = "Maintenance: $stateText | revision $($control.Revision) | scheduled launches only; manual Pipeline requests remain available"
         $running = ($servers | Measure-Object Running -Sum).Sum
         $stamp = if ($control.ChangedAtUtc) { ([datetimeoffset]::Parse($control.ChangedAtUtc)).LocalDateTime.ToString('yyyy-MM-dd HH:mm:ss') } else { 'not changed' }
@@ -1478,11 +1481,13 @@ function Get-GuiCancellationWork {
                 if ($InputData.All) { $runs = @(Get-SmartM365OrchestratorActivePipelineRuns -SharedDataFolderPath $InputData.Root) }
                 else { $runs = @(Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $InputData.Root -BatchId $InputData.BatchIds[0]) }
                 if (-not $runs.Count) { throw 'No active pipeline requests remain.' }
+                $offlineServers = @()
                 foreach ($run in $runs) {
                     $Progress.Message = "Checking batch $($run.BatchId)..."
-                    $null = Stop-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $InputData.Root -BatchId $run.BatchId -Tenant $InputData.Tenant -Reason $InputData.Reason -ValidateOnly
+                    $preview = Stop-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $InputData.Root -BatchId $run.BatchId -Tenant $InputData.Tenant -Reason $InputData.Reason -ValidateOnly
+                    if ($preview.PSObject.Properties['OfflineServers']) { $offlineServers += @($preview.OfflineServers) }
                 }
-                return [pscustomobject]@{ Phase = 'Validate'; BatchIds = @($runs | ForEach-Object BatchId) }
+                return [pscustomobject]@{ Phase = 'Validate'; BatchIds = @($runs | ForEach-Object BatchId); OfflineServers = @($offlineServers | Sort-Object -Unique) }
             }
             $results = @(); $failure = ''; $refreshError = ''
             foreach ($batch in $InputData.BatchIds) {
@@ -1584,6 +1589,7 @@ function Receive-GuiPipelineCancellation {
             $context.Progress.Message = 'Awaiting confirmation...'
             $title = if ($context.Input.All) { 'Cancel All remaining Jobs' } else { 'Cancel remaining jobs' }
             $message = "Cancel remaining jobs in these requests?`n$($context.Input.BatchIds -join "`n")`nPending jobs and retries will not launch. Running collectors continue; completed results and automatic schedules stay unchanged.`nReason: $($context.Input.Reason)"
+            if (@($result.OfflineServers).Count) { $message += "`n`nOffline server(s): $(@($result.OfflineServers) -join ', '). Their last heartbeat supports cancellation: they apply it before any launch when they return." }
             if (Confirm-PipelineCancellation -Message $message -Title $title) {
                 $context.Input.Phase = 'Publish'
                 $context.Progress.Message = 'Starting cancellation publication...'

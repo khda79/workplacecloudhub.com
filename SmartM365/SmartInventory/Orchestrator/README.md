@@ -119,6 +119,12 @@ $parameters = @{
   Readiness diagnostics distinguish an unsupported protocol, startup/recycling, stale
   or future heartbeat and a tenant mismatch. Do not restart a live collector to bypass
   this guard. A synchronized heartbeat copy is not proof of live control readiness.
+- Since GUI 1.6.8 and Pipeline CLI 1.2.3 (shared Pipeline module), an **offline** resident (heartbeat
+  older than `PeerHeartbeatStaleMinutes`) no longer blocks cancellation when its last
+  heartbeat advertises cancellation protocol 1 for the same tenant: it launches nothing while
+  offline, and when it returns its launch guard and pipeline retries read the published
+  cancellation before any launch. The GUI confirmation and the CLI list these offline servers.
+  A live resident that is starting, recycling or on an older version is still refused.
 - Pending jobs and scheduled pipeline retries become `Cancelled`. Already reserved or
   running jobs continue under ordinary supervision and record their real result. No
   collector process is killed; an already running collector is not cancelled remotely.
@@ -207,7 +213,11 @@ Update all residents before using the feature. The GUI shows **Applied**, **Pend
 **Offline**, **Unsupported version** or **Control unavailable** and keeps an always-visible
 banner; publication is not announced as globally applied until every acknowledgement is
 present. Disabling remains possible if a server went offline, but its acknowledgement is
-still pending. A missing, malformed or unreadable initialized control pauses new launches
+still pending. Since GUI 1.6.8, activation is also possible while a server is offline when
+its last heartbeat advertises maintenance protocol 1 (status **Offline (applies on
+return)**) and at least one server is online and applied: an offline server launches
+nothing, and when it returns every launch reads the published control through the
+maintenance gate. Resuming with catch-up still requires every acknowledgement. A missing, malformed or unreadable initialized control pauses new launches
 (including manual ones) without abandoning job supervision. The launch-phase read and
 shared gate protect activation during a scheduler tick; failure does not bypass the gate.
 

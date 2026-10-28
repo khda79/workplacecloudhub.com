@@ -1,6 +1,7 @@
 # Shared scheduling control. Importing this module never touches runtime data.
 Set-StrictMode -Version 2.0
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.0' -Global -ErrorAction Stop
+$script:MaintenanceOfflineCompatibleStatus = 'Offline (applies on return)'
 
 function Get-SmartM365OrchestratorMaintenancePaths {
     param([Parameter(Mandatory)][string]$SharedDataFolderPath)
@@ -210,6 +211,10 @@ function Get-SmartM365OrchestratorMaintenanceReadiness {
                 elseif ($h.Timestamp -is [datetimeoffset]) { $h.Timestamp.UtcDateTime }
                 else { ([datetimeoffset]::Parse([string]$h.Timestamp, [Globalization.CultureInfo]::InvariantCulture)).UtcDateTime }
             $age = ($Now.ToUniversalTime() - $timestamp).TotalMinutes
+            # An offline resident launches nothing; when it returns, every launch reads the
+            # published control through the maintenance gate. Activation may proceed without it.
+            $protocolOne = $h.PSObject.Properties['MaintenanceProtocol'] -and ($h.MaintenanceProtocol -is [int] -or $h.MaintenanceProtocol -is [long]) -and $h.MaintenanceProtocol -eq 1
+            if ($age -gt $stale -and $protocolOne) { $status = $script:MaintenanceOfflineCompatibleStatus }
             if ($age -ge -1 -and $age -le $stale) {
                 if (-not $h.PSObject.Properties['MaintenanceProtocol'] -or
                     ($h.MaintenanceProtocol -isnot [int] -and $h.MaintenanceProtocol -isnot [long]) -or $h.MaintenanceProtocol -ne 1) { $status = 'Unsupported version' }
@@ -224,6 +229,17 @@ function Get-SmartM365OrchestratorMaintenanceReadiness {
         catch { $status = 'Offline' }
         [pscustomobject]@{ Server=[string]$server; Status=$status; Version=$version; Running=$running; CatchUpSupported=[bool]$catchUpSupported }
     }
+}
+
+function Test-SmartM365OrchestratorMaintenanceActivationReady {
+    # Online servers must have applied the current revision; offline servers must have advertised
+    # maintenance protocol 1. At least one online server keeps activation tied to a live cluster.
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][object[]]$Servers = @())
+    $servers = @($Servers)
+    return ($servers.Count -gt 0 -and
+        @($servers | Where-Object Status -eq 'Applied').Count -gt 0 -and
+        @($servers | Where-Object { $_.Status -notin @('Applied', $script:MaintenanceOfflineCompatibleStatus) }).Count -eq 0)
 }
 
 function Set-SmartM365OrchestratorMaintenance {
@@ -267,8 +283,8 @@ function Set-SmartM365OrchestratorMaintenance {
         if ($Enabled) {
             $cluster = (Read-SmartM365JsonDocument -Path (Join-Path $SharedDataFolderPath 'Config/Orchestrator-Cluster.json')).Document
             $servers = @(Get-SmartM365OrchestratorMaintenanceReadiness $SharedDataFolderPath $cluster $current)
-            if ($servers.Count -eq 0 -or @($servers | Where-Object Status -ne 'Applied').Count -ne 0) {
-                throw 'Every expected server must be online, maintenance-compatible and acknowledge the current revision before activation.'
+            if (-not (Test-SmartM365OrchestratorMaintenanceActivationReady -Servers $servers)) {
+                throw 'Every expected server must be online, maintenance-compatible and acknowledge the current revision before activation (an offline server whose last heartbeat advertises maintenance protocol 1 is accepted; at least one server must be online).'
             }
         }
         $now = [datetime]::UtcNow.ToString('o')
@@ -392,7 +408,7 @@ function Test-SmartM365OrchestratorMaintenanceLaunch {
 
 Export-ModuleMember -Function Get-SmartM365OrchestratorMaintenancePaths, Get-SmartM365OrchestratorMaintenanceState,
     Enter-SmartM365OrchestratorMaintenanceGate, Initialize-SmartM365OrchestratorMaintenance,
-    Get-SmartM365OrchestratorMaintenanceReadiness, Set-SmartM365OrchestratorMaintenance,
+    Get-SmartM365OrchestratorMaintenanceReadiness, Test-SmartM365OrchestratorMaintenanceActivationReady, Set-SmartM365OrchestratorMaintenance,
     Test-SmartM365OrchestratorMaintenanceLaunch, Invoke-SmartM365OrchestratorMaintenanceNotification
 
 # SIG # Begin signature block

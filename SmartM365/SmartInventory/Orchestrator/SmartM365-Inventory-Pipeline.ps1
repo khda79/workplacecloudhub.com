@@ -22,7 +22,7 @@ orchestrator applies the job's scheduled dependency rule to them (for example Fr
 Add -IncludeDependencies to run the enabled dependencies in the same request.
 
 .VERSION
-1.2.2
+1.2.3
 
 .EXAMPLE
 ./SmartM365-Inventory-Pipeline.ps1 -Tenant test -Cancel -BatchId '<active-batch-id>' -Reason 'Controlled direct collection' -ValidateOnly
@@ -176,6 +176,9 @@ try {
     if ($Cancel) {
         $cancelStatus = Stop-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId -Tenant $Tenant -Reason $Reason -ValidateOnly:$ValidateOnly
         Write-Host ("Cancellation {0}: BatchId={1}; status={2}; cancelled={3}; remaining={4}; failed={5}. Running collectors are not stopped." -f $(if ($ValidateOnly) { 'validated only (no write)' } else { 'published' }), $BatchId, $cancelStatus.OverallStatus, $cancelStatus.CancelledCount, $cancelStatus.PendingCount, $cancelStatus.FailedCount)
+        if ($cancelStatus.PSObject.Properties['OfflineServers'] -and @($cancelStatus.OfflineServers).Count) {
+            Write-Host ("Offline server(s): {0}. Their last heartbeat supports cancellation: they apply it before any launch when they return." -f (@($cancelStatus.OfflineServers) -join ', ')) -ForegroundColor Yellow
+        }
         $cancelStatus.Jobs | Format-Table JobName, Status, OwnerServer, Detail -AutoSize
         Complete-PipelineScript -Status Success
         $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(0); exit $smartM365RunGuard.ExitCode

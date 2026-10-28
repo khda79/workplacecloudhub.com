@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline cancellation tests. Synthetic temporary shared state; no collectors or tenant calls.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param()
@@ -76,7 +76,8 @@ try {
     Assert-Case ($LASTEXITCODE -eq 0 -and ($previewOutput -join "`n") -match 'no write' -and (Get-FileHash $requestPath).Hash -eq $requestHash) 'CLI preview failed or modified the request.'
     foreach ($bad in @(
         @{ Input = @{ Protocol = 0 }; Detail = '*protocol 1*' },
-        @{ Input = @{ Age = 10 }; Detail = '*stale*' },
+        @{ Input = @{ Age = 10; Protocol = 0 }; Detail = '*protocol 1*stale*' },
+        @{ Input = @{ Age = 10; Tenant = 'different' }; Detail = '*tenant*' },
         @{ Input = @{ Age = -10 }; Detail = '*future*' },
         @{ Input = @{ Lifecycle = 'Starting' }; Detail = '*Lifecycle=Starting*' },
         @{ Input = @{ Lifecycle = 'Recycling' }; Detail = '*Lifecycle=Recycling*' },
@@ -89,6 +90,14 @@ try {
         Assert-Throws { Stop-Request $batch } '*Cancellation unavailable*'
         Assert-Case ((Get-FileHash $requestPath).Hash -eq $requestHash) 'Readiness failure changed the request.'
     }
+    # Offline resident whose last heartbeat advertises protocol 1: accepted, reported, applies on return.
+    Write-Heartbeat -Age 10
+    $offlineReadiness = @(Get-SmartM365OrchestratorPipelineCancellationReadiness -SharedDataFolderPath $root -Tenant test | Where-Object Server -eq WorkerB)
+    Assert-Case ($offlineReadiness.Count -eq 1 -and $offlineReadiness[0].Ready -and $offlineReadiness[0].Offline -and $offlineReadiness[0].Detail -like '*Offline*applies the cancellation*') 'A compatible offline resident was not accepted for cancellation.'
+    $offlinePreview = Stop-Request $batch -ValidateOnly
+    Assert-Case ((@($offlinePreview.OfflineServers) -join ',') -eq 'WorkerB' -and (Get-FileHash $requestPath).Hash -eq $requestHash) 'The offline resident was not reported, or the preview wrote state.'
+    Write-Heartbeat -Age 10 -Lifecycle Starting
+    Assert-Case (@(Get-SmartM365OrchestratorPipelineCancellationReadiness -SharedDataFolderPath $root -Tenant test | Where-Object { $_.Server -eq 'WorkerB' -and $_.Ready -and $_.Offline }).Count -eq 1) 'A stale Starting heartbeat must count as offline, not as starting.'
     Remove-Item -LiteralPath (Join-Path $root 'WorkerB/Orchestrator-Heartbeat.json.txt')
     Assert-Throws { Stop-Request $batch } '*Cancellation unavailable*'
     Write-Heartbeat

@@ -537,6 +537,7 @@ function Get-SmartM365OrchestratorPipelineCancellationReadiness {
     foreach ($server in $servers) {
         if ([string]$server -notmatch '^[A-Za-z0-9_-]+$') { throw 'Invalid expected orchestrator server.' }
         $ready = $false
+        $offline = $false
         $detail = ''
         $version = ''; $lifecycle = ''; $age = $null
         try {
@@ -549,17 +550,25 @@ function Get-SmartM365OrchestratorPipelineCancellationReadiness {
             if (-not $heartbeat.PSObject.Properties['PipelineCancellationProtocol'] -or [int]$heartbeat.PipelineCancellationProtocol -ne 1) {
                 $issues += "Resident v$version does not advertise cancellation protocol 1; update/recycle safely."
             }
-            if ($lifecycle -ne 'Running') { $issues += "Lifecycle=$lifecycle; wait for a Running heartbeat. Running collectors must not be stopped." }
-            if ($age -lt -1) { $issues += 'Heartbeat is in the future; check clock synchronization.' }
-            elseif ($age -gt $staleMinutes) { $issues += ("Heartbeat is stale ({0:F1} min; limit {1} min); wait for a fresh live heartbeat." -f $age, $staleMinutes) }
             if ($Tenant -and (-not $heartbeat.PSObject.Properties['Tenant'] -or [string]$heartbeat.Tenant -ne $Tenant)) {
                 $issues += 'Heartbeat tenant does not match the cancellation tenant.'
             }
+            if ($age -lt -1) { $issues += 'Heartbeat is in the future; check clock synchronization.' }
+            elseif ($age -gt $staleMinutes) {
+                # An offline resident launches nothing. When it returns, its launch guard and its
+                # pipeline retries read the published cancellation before any launch.
+                if ($issues.Count -eq 0) {
+                    $offline = $true
+                    $detail = ("Offline (heartbeat {0:F1} min old); its last heartbeat advertises cancellation protocol 1, so it applies the cancellation before any launch when it returns." -f $age)
+                }
+                else { $issues += ("Heartbeat is stale ({0:F1} min; limit {1} min)." -f $age, $staleMinutes) }
+            }
+            elseif ($lifecycle -ne 'Running') { $issues += "Lifecycle=$lifecycle; wait for a Running heartbeat. Running collectors must not be stopped." }
             $ready = $issues.Count -eq 0
-            $detail = $issues -join ' '
+            if (-not $offline) { $detail = $issues -join ' ' }
         }
         catch { $detail = $_.Exception.Message }
-        [pscustomobject]@{ Server = [string]$server; Ready = [bool]$ready; Detail = $detail; Version = $version; Lifecycle = $lifecycle; HeartbeatAgeMinutes = $age }
+        [pscustomobject]@{ Server = [string]$server; Ready = [bool]$ready; Offline = [bool]$offline; Detail = $detail; Version = $version; Lifecycle = $lifecycle; HeartbeatAgeMinutes = $age }
     }
 }
 
@@ -627,9 +636,11 @@ function Stop-SmartM365OrchestratorPipelineRequest {
     if ($before.IsTerminal -and -not $before.CancellationRequested) { throw 'The request is already terminal; no cancellation was published.' }
     $readiness = @(Get-SmartM365OrchestratorPipelineCancellationReadiness -SharedDataFolderPath $SharedDataFolderPath -Tenant $Tenant)
     if (@($readiness | Where-Object { -not $_.Ready }).Count -gt 0) {
-        throw "Cancellation unavailable: all expected residents must provide fresh Running heartbeats with cancellation protocol 1 for this tenant. $(@($readiness | Where-Object { -not $_.Ready } | ForEach-Object { "$($_.Server): $($_.Detail)" }) -join '; ')"
+        throw "Cancellation unavailable: every expected resident must provide a fresh Running heartbeat, or be offline with a last heartbeat, with cancellation protocol 1 for this tenant. $(@($readiness | Where-Object { -not $_.Ready } | ForEach-Object { "$($_.Server): $($_.Detail)" }) -join '; ')"
     }
-    if ($ValidateOnly) { return $before }
+    # Offline residents apply the cancellation when they return; callers report them.
+    $offlineServers = @($readiness | Where-Object Offline | ForEach-Object { [string]$_.Server })
+    if ($ValidateOnly) { $before | Add-Member -NotePropertyName OfflineServers -NotePropertyValue $offlineServers -Force; return $before }
     $submissionLock = Enter-SmartM365OrchestratorPipelineLock -Path $paths.SubmissionLockPath -TimeoutSeconds $LockTimeoutSeconds
     $controlLock = $null
     try {
@@ -648,7 +659,9 @@ function Stop-SmartM365OrchestratorPipelineRequest {
         foreach ($job in @($run.Jobs | Where-Object Status -in @('Pending', 'RetryScheduled'))) {
             $null = Set-SmartM365OrchestratorPipelineJobStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId -JobName $job.JobName -Status Cancelled -Attempt $job.Attempt -OwnerServer $job.OwnerServer -Detail "Cancelled: $($run.Request.Cancellation.Reason)"
         }
-        Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId
+        $after = Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $BatchId
+        $after | Add-Member -NotePropertyName OfflineServers -NotePropertyValue $offlineServers -Force
+        $after
     }
     finally {
         if ($null -ne $controlLock) { $controlLock.Dispose(); Remove-Item -LiteralPath $paths.ControlLockPath -Force -ErrorAction SilentlyContinue }

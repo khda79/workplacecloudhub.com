@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline maintenance, scheduler admission and GUI contract tests using synthetic shared data.
 .VERSION
-1.0.6
+1.0.7
 #>
 [CmdletBinding()]
 param([string]$Tenant = 'test')
@@ -52,8 +52,31 @@ try {
     Write-Heartbeat 'SERVER-B' $zero -Protocol 0
     Assert-Case (@(Get-SmartM365OrchestratorMaintenanceReadiness $root $cluster $zero | Where-Object Status -eq 'Unsupported version').Count -eq 1) 'Old protocol is not visible.'
     Assert-Throws { Set-SmartM365OrchestratorMaintenance $root $true 0 'offline qualification' } '*Every expected server*'
-    Write-Heartbeat 'SERVER-B' $zero -AgeMinutes 10
+    Write-Heartbeat 'SERVER-B' $zero -AgeMinutes 10 -Protocol 0
     Assert-Throws { Set-SmartM365OrchestratorMaintenance $root $true 0 'offline qualification' } '*Every expected server*'
+    # An offline peer whose last heartbeat advertises protocol 1 applies maintenance when it returns.
+    Write-Heartbeat 'SERVER-B' $zero -AgeMinutes 10
+    $offlineReadiness=@(Get-SmartM365OrchestratorMaintenanceReadiness $root $cluster $zero)
+    Assert-Case (@($offlineReadiness | Where-Object { $_.Server -eq 'SERVER-B' -and $_.Status -eq 'Offline (applies on return)' }).Count -eq 1) 'A compatible offline peer is not reported as applying on return.'
+    Assert-Case (Test-SmartM365OrchestratorMaintenanceActivationReady -Servers $offlineReadiness) 'A compatible offline peer blocks activation.'
+    Assert-Case (-not (Test-SmartM365OrchestratorMaintenanceActivationReady -Servers @([pscustomobject]@{Status='Offline (applies on return)'},[pscustomobject]@{Status='Offline (applies on return)'}))) 'Activation was allowed with no online server.'
+    Assert-Case (-not (Test-SmartM365OrchestratorMaintenanceActivationReady -Servers @([pscustomobject]@{Status='Applied'},[pscustomobject]@{Status='Offline'}))) 'Activation was allowed with an unreadable offline peer.'
+    Assert-Case (-not (Test-SmartM365OrchestratorMaintenanceActivationReady -Servers @())) 'Activation was allowed without expected servers.'
+    Write-Heartbeat 'SERVER-B' $zero -AgeMinutes -10
+    Assert-Case (@(Get-SmartM365OrchestratorMaintenanceReadiness $root $cluster $zero | Where-Object { $_.Server -eq 'SERVER-B' -and $_.Status -eq 'Offline' }).Count -eq 1) 'A future heartbeat was accepted as offline-compatible.'
+    # Real activation with a compatible offline peer, in an isolated copy of the shared root.
+    $mainRoot=$root; $root=Join-Path $mainRoot 'OfflinePeer'
+    try {
+        $null=New-Item -ItemType Directory -Path (Join-Path $root 'Config') -Force
+        Write-Fixture (Join-Path $root 'Config/Orchestrator-Cluster.json.txt') $cluster
+        $offlineZero=Initialize-SmartM365OrchestratorMaintenance $root
+        Write-Heartbeat 'SERVER-A' $offlineZero; Write-Heartbeat 'SERVER-B' $offlineZero -AgeMinutes 30
+        $offlineActive=Set-SmartM365OrchestratorMaintenance $root $true 0 'Synthetic pause with an offline peer'
+        Assert-Case ($offlineActive.Enabled -and $offlineActive.Revision -eq 1) 'Activation with a compatible offline peer was not published.'
+        Write-Heartbeat 'SERVER-A' $offlineActive -CatchUpSupported $true
+        Assert-Throws { Set-SmartM365OrchestratorMaintenance $root $false 1 'Catch-up with an offline peer' -CatchUpMissedOccurrences } '*Every expected server*support catch-up*'
+    }
+    finally { $root=$mainRoot }
     Write-Heartbeat 'SERVER-B' $zero -Healthy $false
     Assert-Throws { Set-SmartM365OrchestratorMaintenance $root $true 0 'offline qualification' } '*Every expected server*'
     Write-Heartbeat 'SERVER-B' $zero -Lifecycle Starting
