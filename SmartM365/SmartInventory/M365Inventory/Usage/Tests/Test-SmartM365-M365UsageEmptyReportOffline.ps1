@@ -6,7 +6,7 @@
     with a mocked download. No Graph, tenant collection, or publication is
     performed.
 .VERSION
-1.0
+1.1
 #>
 
 [CmdletBinding()]
@@ -20,7 +20,7 @@ $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($collector,[ref]$tokens,[ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
-foreach ($name in @('Get-M365UsageReportDefinition','Assert-M365UsageReportRefreshDate','Invoke-M365UsageReportAcquisition','Resolve-M365UsageEmptyReportFallback')) {
+foreach ($name in @('Get-M365UsageReportDefinition','Assert-M365UsageReportRefreshDate','Get-M365UsageRawFileSummary','Invoke-M365UsageReportAcquisition','Resolve-M365UsageEmptyReportFallback')) {
     $definition = @($ast.FindAll({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
@@ -74,7 +74,7 @@ try {
     $date = Invoke-M365UsageReportAcquisition -ReportDefinition $activation -RawPath $rawPath -WarningAgeDays 3 -Attempts 3 -RetryDelaySeconds 120
     Assert-Case ($null -ne $date -and $date.ToString('yyyy-MM-dd') -eq $refreshText) 'Populated retry did not return its refresh date.'
     Assert-Case ($script:downloads -eq 2 -and ($script:sleeps -join ',') -eq '120') "Unexpected retry sequence: downloads=$script:downloads sleeps=$($script:sleeps -join ',')."
-    Assert-Case ($script:warnings.Count -eq 1 -and $script:warnings[0] -match 'attempt 1/3') 'Retry warning missing.'
+    Assert-Case ($script:warnings.Count -eq 1 -and $script:warnings[0] -match 'attempt 1/3; Bytes=\d+; Columns=3; Header=Report Refresh Date,User Principal Name,Product Type\. Retrying in 120 seconds') "Retry warning missing or without the raw summary: $($script:warnings -join ' | ')"
 
     # A populated first answer is neither retried nor warned.
     Reset-Case @($data)
@@ -85,21 +85,40 @@ try {
     Reset-Case @($header,$header,$header)
     $date = Invoke-M365UsageReportAcquisition -ReportDefinition $activation -RawPath $rawPath -WarningAgeDays 3 -Attempts 3 -RetryDelaySeconds 120
     Assert-Case ($null -eq $date -and $script:downloads -eq 3 -and $script:sleeps.Count -eq 2) 'Persistently empty report was not retried exactly three times.'
+    Assert-Case ($script:warnings.Count -eq 3 -and $script:warnings[2] -match 'attempt 3/3; Bytes=\d+; Columns=3; Header=' -and $script:warnings[2] -notmatch 'Retrying') 'Last empty attempt was not logged with its raw summary.'
 
-    # Non-required report: previous CSV kept byte for byte, its refresh date reported.
+    # Raw summary: missing file, quoted header with a comma inside a column, long header truncated.
+    Remove-Item -LiteralPath $rawPath -Force
+    Assert-Case ((Get-M365UsageRawFileSummary -RawPath $rawPath) -eq 'Bytes=0; Columns=0; Header=') 'Missing raw file summary is wrong.'
+    Set-Content -LiteralPath $rawPath -Value '"Report Refresh Date","Name, Display","Product Type"' -Encoding UTF8
+    Assert-Case ((Get-M365UsageRawFileSummary -RawPath $rawPath) -match 'Columns=3;') 'Quoted header columns were miscounted.'
+    Set-Content -LiteralPath $rawPath -Value ('A' * 400) -Encoding UTF8
+    Assert-Case ((Get-M365UsageRawFileSummary -RawPath $rawPath) -match "Header=A{300}\.\.\.$") 'Long header was not truncated.'
+
+    # Non-required report: previous CSV kept byte for byte, its refresh date and age reported.
     $previous = Join-Path $latest 'M365_Apps_Activations.csv'
     'RunId,ReportName,ReportPeriodRequested,Report Refresh Date,User Principal Name','old,Office365ActivationUserDetail,D180,2026-10-18,user1@contoso.example' | Set-Content -LiteralPath $previous -Encoding UTF8
+    $written = (Get-Date).ToUniversalTime().AddHours(-100)
+    (Get-Item -LiteralPath $previous).LastWriteTimeUtc = $written
     $before = (Get-FileHash -LiteralPath $previous -Algorithm SHA256).Hash
     $script:warnings.Clear()
-    $entry = Resolve-M365UsageEmptyReportFallback -ReportDefinition $activation -LatestFolderPath $latest -Attempts 3
-    Assert-Case ($entry -eq 'Office365ActivationUserDetail=2026-10-18') "Unexpected carried-over entry: $entry"
-    Assert-Case ((Get-FileHash -LiteralPath $previous -Algorithm SHA256).Hash -eq $before) 'Previous CSV was modified.'
-    Assert-Case ($script:warnings.Count -eq 1 -and $script:warnings[0] -match 'kept unchanged \(Report Refresh Date=2026-10-18\).*not part of this run''s receipt') 'Carried-over warning missing.'
+    $result = Resolve-M365UsageEmptyReportFallback -ReportDefinition $activation -LatestFolderPath $latest -Attempts 3 -AlertAgeHours 72
+    Assert-Case ($result.Entry -eq 'Office365ActivationUserDetail=2026-10-18') "Unexpected carried-over entry: $($result.Entry)"
+    Assert-Case ($result.FileAgeHours -eq 100 -and $result.Alert) "Kept CSV older than the threshold was not flagged: age=$($result.FileAgeHours) alert=$($result.Alert)"
+    Assert-Case ($result.Detail -eq 'Office365ActivationUserDetail: Report Refresh Date=2026-10-18, M365_Apps_Activations.csv written 100 h ago') "Unexpected carried-over detail: $($result.Detail)"
+    Assert-Case ((Get-FileHash -LiteralPath $previous -Algorithm SHA256).Hash -eq $before -and (Get-Item -LiteralPath $previous).LastWriteTimeUtc -eq $written) 'Previous CSV was modified.'
+    Assert-Case ($script:warnings.Count -eq 1 -and $script:warnings[0] -match 'kept unchanged \(Report Refresh Date=2026-10-18; file age=100 h\).*not part of this run''s receipt') 'Carried-over warning missing.'
+
+    # Below the threshold: kept and warned, but no alert. Exactly at the threshold: alert.
+    $result = Resolve-M365UsageEmptyReportFallback -ReportDefinition $activation -LatestFolderPath $latest -Attempts 3 -AlertAgeHours 101
+    Assert-Case (-not $result.Alert) 'Kept CSV below the threshold was flagged.'
+    $result = Resolve-M365UsageEmptyReportFallback -ReportDefinition $activation -LatestFolderPath $latest -Attempts 3 -AlertAgeHours 100
+    Assert-Case ($result.Alert) 'Kept CSV at the threshold was not flagged.'
 
     Remove-Item -LiteralPath $previous -Force
     $script:warnings.Clear()
-    $entry = Resolve-M365UsageEmptyReportFallback -ReportDefinition $activation -LatestFolderPath $latest -Attempts 3
-    Assert-Case ($entry -eq 'Office365ActivationUserDetail=none' -and $script:warnings[0] -match 'No previous M365_Apps_Activations.csv exists') 'Missing previous CSV was not reported.'
+    $result = Resolve-M365UsageEmptyReportFallback -ReportDefinition $activation -LatestFolderPath $latest -Attempts 3
+    Assert-Case ($result.Entry -eq 'Office365ActivationUserDetail=none' -and $null -eq $result.FileAgeHours -and $result.Alert -and $script:warnings[0] -match 'No previous M365_Apps_Activations.csv exists') 'Missing previous CSV was not reported and flagged.'
 
     # Required report: an empty answer stays fatal.
     Assert-Rejected { Resolve-M365UsageEmptyReportFallback -ReportDefinition $activeUsers -LatestFolderPath $latest -Attempts 3 } 'Graph report is empty: Office365ActiveUserDetail after 3 attempt\(s\)' 'Required empty report did not fail the run.'
@@ -108,7 +127,11 @@ try {
     $runText = @($ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.TryStatementAst] -and $_.Finally })[0].Body.Extent.Text
     Assert-Case ($runText -match 'Invoke-M365UsageReportAcquisition' -and $runText -match 'Resolve-M365UsageEmptyReportFallback' -and $runText -notmatch 'Assert-M365UsageReportRefreshDate') 'Run loop does not use the retry and fallback.'
     Assert-Case ($runText -match 'not receipted' -and $runText -match 'EmptyKeptPrevious') 'Carried-over reports are missing from the receipt qualifications or summary.'
-    'PASS: empty reports retry then recover; persistent empties keep the previous CSV with a warning; the required report stays fatal.'
+    Assert-Case ($runText -match "'CarriedOverReportAlertAgeHours' -DefaultValue 72" -and $runText -match '-AlertAgeHours \$carriedOverAlertAgeHours') 'Alert threshold is not read from configuration or passed to the fallback.'
+    Assert-Case ($runText -match "-Level WARNING -Channel Alerts -Title 'SmartM365 M365 usage report kept from a previous run'") 'Stale carried-over CSV is not sent to the Alerts channel.'
+    $template = Get-Content -LiteralPath (Join-Path (Split-Path $collector -Parent) 'SmartM365-M365UserActivity-Inventory.local.json.template') -Raw | ConvertFrom-Json
+    Assert-Case ($template.CarriedOverReportAlertAgeHours -eq 72) 'Template does not declare CarriedOverReportAlertAgeHours=72.'
+    'PASS: empty reports retry then recover and log their raw summary; persistent empties keep the previous CSV with its age and alert past the threshold; the required report stays fatal.'
 }
 finally {
     $resolved = [IO.Path]::GetFullPath($tempRoot)

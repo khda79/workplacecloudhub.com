@@ -26,6 +26,7 @@
   "ReportRefreshWarningAgeDays": 3,
   "EmptyReportAttempts": 3,
   "EmptyReportRetryDelaySeconds": 120,
+  "CarriedOverReportAlertAgeHours": 72,
   "WeeklyHistoryFolderPath": "{{DataAllRootPath}}\\M365\\Usage\\WeeklyHistory",
   "WeeklyHistoryRetentionWeeks": 52,
   "OutputPath": "{{DataAllRootPath}}\\M365\\Usage"
