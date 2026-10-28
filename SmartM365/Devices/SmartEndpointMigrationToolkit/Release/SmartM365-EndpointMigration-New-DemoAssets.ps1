@@ -74,12 +74,31 @@ function Save-ViewPng {
 
 $campaigns = @(@{ Index = 0; Name = 'HybridJoin' }, @{ Index = 1; Name = 'Windows11Upgrade' })
 $tabs = @($state.Tabs | ForEach-Object { @($_.Items) } | Where-Object { $_ -is [Windows.Controls.TabItem] })
+function Get-ParentTabItem {
+    # A tab inside another tab (for example Options and Activity of the Waves view) is captured
+    # with its parent tab selected and named after it.
+    param($Element)
+    $node = [Windows.LogicalTreeHelper]::GetParent($Element)
+    while ($null -ne $node -and $node -isnot [Windows.Controls.TabItem]) { $node = [Windows.LogicalTreeHelper]::GetParent($node) }
+    return $node
+}
+
+# A tab that holds sub-tabs is captured through its sub-tabs only (its default view is the first one).
+$parentTabs = @($tabs | ForEach-Object { Get-ParentTabItem -Element ([Windows.Controls.ItemsControl]::ItemsControlFromItemContainer($_)) } | Where-Object { $null -ne $_ })
 foreach ($campaign in $campaigns) {
     $state.Controls.CampaignCombo.SelectedIndex = $campaign.Index
+    foreach ($tabControl in @($state.Tabs)) { $tabControl.SelectedIndex = 0 }
     foreach ($tab in $tabs) {
+        if ($parentTabs -contains $tab) { continue }
         $owner = [Windows.Controls.ItemsControl]::ItemsControlFromItemContainer($tab)
+        $header = [string]$tab.Header
+        $parentTab = Get-ParentTabItem -Element $owner
+        if ($null -ne $parentTab) {
+            [Windows.Controls.ItemsControl]::ItemsControlFromItemContainer($parentTab).SelectedItem = $parentTab
+            $header = '{0}-{1}' -f $parentTab.Header,$header
+        }
         $owner.SelectedItem = $tab
-        $safe = ([string]$tab.Header) -replace '[^A-Za-z0-9]+', '-'
+        $safe = $header -replace '[^A-Za-z0-9]+', '-'
         Save-ViewPng -Window $state.Window -Path (Join-Path $setRoot ('GUI\SEMT-{0}-{1}.png' -f $campaign.Name,$safe.Trim('-')))
     }
     foreach ($output in @(Export-SmartM365DemoProfileOutputs)) {
