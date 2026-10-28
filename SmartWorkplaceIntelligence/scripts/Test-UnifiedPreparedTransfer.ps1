@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# Version: 0.1.2
+# Version: 0.1.3
 [CmdletBinding()]
 param()
 # Synthetic inputs and local callbacks only: no collector, tenant or cloud connection.
@@ -151,6 +151,10 @@ try {
         Json (Join-Path $last ($stem+'.run.json.txt')) @{Owner='SmartInventory-SourceRun';Producer=$group.Producer;TenantKey='synthetic-unified';RunId='source-run';Status='Completed';UnqualifiedPublication=$false}
         foreach($record in $records) { @{Name=$record.File;Ready=$true;Provisional=$false;SHA256=$record.SHA256} }
     })
+    # This test writes the dependencies straight into the capture; Prepare only copies contract files.
+    $sourceContract=(Read-SmartM365JsonDocument (Join-Path $PSScriptRoot '../config/prepared-source-contract.json.txt')).Document
+    $capturedFiles=@($sourceContract.currentFiles)+@($sourceContract.optionalCurrentFiles | ForEach-Object file)
+    foreach($source in $sources){Check ($capturedFiles -ccontains $source.Name) "License dependency never captured by Prepare: $($source.Name)"}
 
     Json (Join-Path $last 'M365_Licenses_ReportSnapshot.json.txt') @{GeneratedAtUtc='2026-10-17T23:00:00Z';Sources=$sources;TenantKey='synthetic-unified';SnapshotId=('a'*32);SchemaVersion=2;Products=@(1,2,3,4);OtherProducts=@(1,2,3);AssignmentIssues=@{Available=$false;Rows=@()};ReceiptRun=@{Producer='SmartM365-Licences-Inventory.ps1';RunId=$runId}}
     $reportFiles=@($artifacts.licenseReport.reportFiles)
