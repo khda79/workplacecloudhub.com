@@ -4,7 +4,7 @@ Offline tests of the server system information: each orchestrator reads OS, CPU,
 C: once at startup and publishes them in its heartbeat; the GUI Servers and versions view reads
 them from the heartbeat and never queries the servers.
 .VERSION
-1.0
+1.0.1
 .NOTES
 Synthetic heartbeats in a temporary folder. The collector runs read-only CIM queries on this
 computer. No tenant initialization, collectors, scheduling or publication.
@@ -66,6 +66,12 @@ finally {
 # GUI: Servers and versions is a sub-tab of Configuration with the system columns; Activity is removed.
 $guiText = [IO.File]::ReadAllText((Join-Path $base 'SmartM365-Inventory-Orchestrator-GUI.ps1'))
 Check ($guiText -match '<TabItem x:Name="ConfigurationServersTab" Header="Servers and versions">' -and $guiText -notmatch '<TabItem Header="Servers and versions">' -and $guiText -notmatch '<TabItem Header="Activity">') 'Servers and versions must be under Configuration and Activity removed.'
+# Every control the GUI code reads must exist in the XAML: a removed control (GUI 1.6.13 ActivityBox)
+# made the strict-mode GUI fail at startup.
+$xamlNames = [Collections.Generic.HashSet[string]]::new([string[]]@([regex]::Matches($guiText, 'x:Name="([A-Za-z0-9_]+)"') | ForEach-Object { $_.Groups[1].Value }))
+$controlRefs = @([regex]::Matches($guiText, '\$(?:script:)?Controls(?:\.|\[\x27)([A-Za-z0-9_]+)') | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notin @('Keys', 'Values', 'ContainsKey', 'Count') } | Sort-Object -Unique)
+$unknown = @($controlRefs | Where-Object { -not $xamlNames.Contains($_) })
+Check ($controlRefs.Count -gt 100 -and $unknown.Count -eq 0) "GUI code reads controls absent from the XAML: $($unknown -join ', ')"
 foreach ($binding in @('Version', 'Os', 'Cpu', 'MemoryGB', 'SystemDriveSizeGB', 'SystemDriveFreePercent', 'SystemInfoAt')) {
     Check ($guiText -match ('Binding="\{Binding ' + $binding + '\}"')) "Servers grid column missing: $binding"
 }

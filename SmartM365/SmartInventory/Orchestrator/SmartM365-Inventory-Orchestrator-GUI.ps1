@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.14
+1.6.15
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.14'
+$script:AppVersion = '1.6.15'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -1272,11 +1272,8 @@ function Write-GuiActivity {
         [switch]$DisplayOnly
     )
     foreach ($physicalLine in @($Message -split '\r?\n')) {
+        # The Activity tab was removed in GUI 1.6.13: lines go to the console and the GUI log only.
         $line = '[{0}][{1}] {2}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $Level, $physicalLine
-        if ($script:Controls -and $script:Controls.ActivityBox) {
-            $script:Controls.ActivityBox.AppendText($line + [Environment]::NewLine)
-            $script:Controls.ActivityBox.ScrollToEnd()
-        }
         Microsoft.PowerShell.Utility\Write-Host $line
         if (-not $DisplayOnly -and -not [string]::IsNullOrWhiteSpace($script:GuiLogPath)) {
             try {
