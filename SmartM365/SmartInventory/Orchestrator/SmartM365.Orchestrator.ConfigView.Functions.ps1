@@ -5,7 +5,7 @@ Pure helpers of the read-only Orchestrator GUI Configuration view.
 Flattening, descriptions, sensitive masking, effective values and filtering. No file access.
 Dot-sourced by SmartM365.Orchestrator.ConfigView.psm1 and by the demo, which must not import modules.
 .VERSION
-1.0.1
+1.0.2
 #>
 
 $script:ConfigViewPlaceholders = @('__USE_GLOBAL__', 'USE_GLOBAL')
@@ -179,8 +179,10 @@ function New-SmartM365OrchestratorConfigurationView {
 function Select-SmartM365OrchestratorConfigRows {
     <# Display rows: sensitive values masked unless revealed; the filter never matches a hidden value. #>
     [CmdletBinding()]
-    param([AllowEmptyCollection()][object[]]$Rows = @(), [string]$Filter = '', [switch]$ShowSensitive)
+    param([AllowEmptyCollection()][object[]]$Rows = @(), [string]$Filter = '', [switch]$ShowSensitive, [switch]$HideNotInTemplate)
     foreach ($row in @($Rows)) {
+        # Keys that the template does not describe (old or custom keys) can be hidden from the view.
+        if ($HideNotInTemplate -and $row.Model -eq 'Not in template') { continue }
         $masked = $row.Sensitive -and -not $ShowSensitive -and $row.Model -ne 'Missing from file'
         $value = if ($masked) { $script:ConfigViewMask } else { $row.RawValue }
         $effective = if ($masked -and $row.RawEffective) { $script:ConfigViewMask } else { $row.RawEffective }

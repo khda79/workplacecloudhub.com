@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.67
+1.5.68
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.67"
+$ScriptVersion = "1.5.68"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2612,6 +2612,37 @@ function Get-OrchestratorPendingJobSnapshot {
     }
     return @($pending.ToArray())
 }
+function Get-OrchestratorSystemInfo {
+    # Read once when the orchestrator starts; each part that cannot be read is named in Error.
+    $info = [ordered]@{
+        CollectedAtUtc = [datetime]::UtcNow.ToString('o'); Os = ''; Cpu = ''; LogicalProcessors = $null; MemoryGB = $null
+        SystemDrive = 'C:'; SystemDriveSizeGB = $null; SystemDriveFreePercent = $null; Error = ''
+    }
+    $errors = [System.Collections.Generic.List[string]]::new()
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop | Select-Object -First 1
+        $info.Os = '{0} ({1}, build {2})' -f ([string]$os.Caption).Trim(), $os.Version, $os.BuildNumber
+        $info.MemoryGB = [math]::Round([double]$os.TotalVisibleMemorySize / 1MB, 1)
+    }
+    catch { $errors.Add('OS: ' + $_.Exception.Message) }
+    try {
+        $processors = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop)
+        $names = @($processors | ForEach-Object { ([string]$_.Name -replace '\s+', ' ').Trim() } | Sort-Object -Unique)
+        $info.Cpu = if ($processors.Count -gt 1) { '{0} x {1}' -f $processors.Count, ($names -join ', ') } else { $names -join ', ' }
+        $info.LogicalProcessors = [int](($processors | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum)
+    }
+    catch { $errors.Add('CPU: ' + $_.Exception.Message) }
+    try {
+        $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop | Select-Object -First 1
+        if ($null -eq $disk -or [double]$disk.Size -le 0) { throw 'drive C: not found' }
+        $info.SystemDriveSizeGB = [math]::Round([double]$disk.Size / 1GB, 1)
+        $info.SystemDriveFreePercent = [math]::Round([double]$disk.FreeSpace * 100 / [double]$disk.Size, 1)
+    }
+    catch { $errors.Add('Drive C: ' + $_.Exception.Message) }
+    $info.Error = $errors -join '; '
+    return [pscustomobject]$info
+}
+
 function Write-OrchestratorHeartbeat {
     $now = Get-Date
     $running = @()
@@ -2637,6 +2668,7 @@ function Write-OrchestratorHeartbeat {
         ProcessStartTime = ConvertTo-StateTime -Value $script:StartTime
         LifetimeDeadline = ConvertTo-StateTime -Value $script:LifetimeDeadline
         RunningJobs = $running
+        SystemInfo = $script:SystemInfo
         PendingJobs = $pending
         ReadyCapabilities = if ($null -ne $script:ServerCapabilities) { @($script:ServerCapabilities.ReadyCapabilities) } else { @() }
         CapabilityGeneratedAtUtc = if ($null -ne $script:ServerCapabilities) { [string]$script:ServerCapabilities.GeneratedAtUtc } else { '' }
@@ -7083,6 +7115,8 @@ $script:PipelineBatchJobNames = @{}
 $script:PipelineWaitState = @{}
 # Last known reason why a dependency is not ready (operator text, read by the wait text).
 $script:DependencyWaitReason = @{}
+# OS, CPU, memory and system drive, read once at startup and published in the heartbeat.
+$script:SystemInfo = $null
 $script:SmtpEndpoint = ''
 $script:Manifest = $null
 $script:State = $null
@@ -7502,6 +7536,8 @@ try {
     Add-OrchestratorRunTracking
     Write-OrchestratorLog -Message ("{0} v{1} starting (PID {2}, tenant {3}, MaxConcurrency {4}, MaxLifetimeHours {5})." -f $ScriptName, $ScriptVersion, $PID, $Tenant, $script:Settings.MaxConcurrency, $script:Settings.MaxLifetimeHours)
     Write-OrchestratorLog -Message ("Runtime context: server={0}; user={1}; pid={2}; PowerShell={3}; edition={4}; process64bit={5}." -f $env:COMPUTERNAME, (Get-OrchestratorRunUserName), $PID, $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, [Environment]::Is64BitProcess)
+    $script:SystemInfo = Get-OrchestratorSystemInfo
+    Write-OrchestratorLog -Message ("System info: os={0}; cpu={1}; logicalProcessors={2}; memoryGB={3}; C: sizeGB={4}, free={5}%.{6}" -f $script:SystemInfo.Os, $script:SystemInfo.Cpu, $script:SystemInfo.LogicalProcessors, $script:SystemInfo.MemoryGB, $script:SystemInfo.SystemDriveSizeGB, $script:SystemInfo.SystemDriveFreePercent, $(if ($script:SystemInfo.Error) { ' Unavailable: ' + $script:SystemInfo.Error } else { '' })) -Level $(if ($script:SystemInfo.Error) { 'WARN' } else { 'INFO' })
     Write-OrchestratorLog -Message ("Paths: scriptRoot={0}; currentDirectory={1}; data={2}; log={3}; jobLogs={4}; state={5}; heartbeat={6}; stopRequest={7}; runCsv={8}." -f $PSScriptRoot, (Get-Location).Path, $script:Settings.OrchestratorDataFolderPath, $script:Settings.OrchestratorLogFolderPath, $script:Settings.JobLogFolderPath, $script:Settings.StatePath, $script:Settings.HeartbeatPath, $script:Settings.StopRequestPath, $script:Settings.OrchestratorRunsCsvPath)
     Write-OrchestratorLog -Message ("Mail context: enabled={0}; mode={1}; graphConfigured={2}; smtpConfigured={3}; fromConfigured={4}; recipientConfigured={5}; jobMailMode={6}; dailySummary={7}." -f $script:Settings.MailEnabled, $script:Settings.SendMailMode, $script:Settings.GraphMailConfigured, $script:Settings.SmtpMailConfigured, (-not [string]::IsNullOrWhiteSpace($script:Settings.MailFrom)), (-not [string]::IsNullOrWhiteSpace($script:Settings.MailTo)), $script:Settings.JobMailMode, $script:Settings.SendDailySummaryEmail)
 

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercises the two pilot demos with WPF events and forbidden operational commands.
 .VERSION
-1.0.6
+1.0.7
 .NOTES
 Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
 #>
@@ -139,11 +139,18 @@ try {
         Assert-Demo (@($s.Data.History|Where-Object {[datetime]$_.EventTime -gt $s.Data.Clock}).Count -eq 0) 'History contains future sample executions.'
         Assert-Demo (-not (Test-Path -LiteralPath $s.OutputRoot)) 'Demo wrote files during initialization.'
         Assert-Demo ($c.RequestJobsGrid.Items.Count -eq 3) 'Request detail selection failed.'
-        foreach($view in @('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity','Events','Configuration')){
+        foreach($view in @('Dashboard','Operations','Planning','History','Requests','Servers and versions','Events','Configuration')){
             if($view -eq 'Requests'){
                 # Requests is a sub-tab of Operations since GUI 1.6.3.
                 Select-OrchestratorDemoTarget 'Requests'
                 Assert-Demo ($c.MainTabs.SelectedItem.Header -eq 'Operations' -and $c.OperationsTabs.SelectedItem -eq $c.OperationsRequestsTab -and @($c.MainTabs.Items | Where-Object Header -EQ 'Requests').Count -eq 0) 'Requests is not under Operations.'
+            }
+            elseif($view -eq 'Servers and versions'){
+                # Servers and versions is a sub-tab of Configuration since GUI 1.6.13; Activity is removed.
+                Select-OrchestratorDemoTarget 'Servers and versions'
+                Assert-Demo ($c.MainTabs.SelectedItem.Header -eq 'Configuration' -and $c.ConfigurationTabs.SelectedItem -eq $c.ConfigurationServersTab -and @($c.MainTabs.Items | Where-Object { $_.Header -in @('Servers and versions','Activity') }).Count -eq 0) 'Servers and versions is not under Configuration.'
+                Assert-Demo (@($c.ServersGrid.ItemsSource | Where-Object { $_.Os -and $_.Cpu -and $_.MemoryGB -and $_.SystemDriveSizeGB }).Count -eq @($c.ServersGrid.ItemsSource).Count -and @($c.ServersGrid.ItemsSource | Where-Object SystemDriveLow).Count -eq 1) 'Server system information missing in the demo.'
+                $c.ConfigurationSettingsTab.IsSelected=$true
             }
             else{
                 foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $view){$c.MainTabs.SelectedItem=$tab}}
@@ -159,7 +166,8 @@ try {
         $tenantRows=@($c.ConfigTenantGrid.ItemsSource)
         Assert-Demo (@($c.ConfigGlobalGrid.ItemsSource).Count -gt 0 -and $tenantRows.Count -gt 0 -and @($c.ConfigMailGrid.ItemsSource).Count -gt 0) 'Configuration grids are empty.'
         Assert-Demo (@($tenantRows | Where-Object { $_.Sensitive -and -not $_.Masked }).Count -eq 0 -and @($tenantRows | Where-Object Parameter -eq 'Thumbprint')[0].Value -notlike 'DEMO0*') 'Sensitive demo values are visible by default.'
-        Assert-Demo (@($tenantRows | Where-Object Model -eq 'Not in template').Count -eq 1 -and @($tenantRows | Where-Object Model -eq 'Missing from file').Count -eq 1) 'Template comparison missing in the demo.'
+        $tenantView=@(@($s.Configuration.Files | Where-Object Kind -eq 'Tenant')[0].Rows)
+        Assert-Demo (@($tenantView | Where-Object Model -eq 'Not in template').Count -eq 1 -and @($tenantRows | Where-Object Model -eq 'Not in template').Count -eq 0 -and @($tenantRows | Where-Object Model -eq 'Missing from file').Count -eq 1) 'Template comparison missing in the demo, or keys not in the template are shown.'
         Assert-Demo (@($tenantRows | Where-Object Parameter -eq 'MailClientName')[0].Source -eq 'global' -and @($tenantRows | Where-Object Parameter -eq 'MailClientName')[0].Effective -eq 'Contoso (DEMO)') 'Inherited tenant value not resolved from global.'
         Invoke-DemoClick $c.ConfigShowSensitiveButton
         Assert-Demo (@($c.ConfigTenantGrid.ItemsSource | Where-Object Parameter -eq 'Thumbprint')[0].Value -like 'DEMO0*') 'Show did not reveal sensitive demo values.'

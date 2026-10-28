@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.12
+1.6.13
 #>
 [CmdletBinding()]
 param(
@@ -46,7 +46,7 @@ param(
     [switch]$Demo,
     [ValidateSet('Overview','Issues','Maintenance','Healthy')]
     [string]$DemoScenario = 'Overview',
-    [ValidateSet('Dashboard','Operations','Planning','History','Requests','Servers and versions','Activity','Events','Configuration')]
+    [ValidateSet('Dashboard','Operations','Planning','History','Requests','Servers and versions','Events','Configuration')]
     [string]$DemoView = 'Dashboard',
     [ValidateRange(1180,3840)][int]$DemoWindowWidth = 1500,
     [ValidateRange(720,2160)][int]$DemoWindowHeight = 900
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.12'
+$script:AppVersion = '1.6.13'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -802,70 +802,6 @@ $xaml = @'
                 </Grid>
             </TabItem>
 
-            <TabItem Header="Servers and versions">
-                <Grid Margin="12">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="390"/></Grid.ColumnDefinitions>
-                    <Grid>
-                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                        <DataGrid x:Name="ServersGrid">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="170"/>
-                                <DataGridCheckBoxColumn Header="Online" Binding="{Binding Online}" Width="70"/>
-                                <DataGridTextColumn Header="Weight" Binding="{Binding Weight}" Width="70"/>
-                                <DataGridTextColumn Header="Policy" Binding="{Binding Policy}" Width="220"/>
-                                <DataGridTextColumn Header="Capabilities" Binding="{Binding Capabilities}" Width="*"/>
-                                <DataGridTextColumn Header="Jobs" Binding="{Binding AssignedJobs}" Width="60"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
-                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
-                            <TextBox x:Name="NewServerBox" Width="220" Margin="0,0,8,0"/>
-                            <Button x:Name="AddServerButton" Content="Add server"/>
-                            <Button x:Name="RemoveServerButton" Content="Remove selected"/>
-                        </StackPanel>
-                    </Grid>
-                    <ScrollViewer Grid.Column="1" Margin="14,0,0,0" VerticalScrollBarVisibility="Auto">
-                        <StackPanel>
-                            <GroupBox Header="Selected server">
-                                <StackPanel>
-                                    <TextBlock x:Name="SelectedServerText" FontWeight="SemiBold" Text="Select a server"/>
-                                    <TextBlock Text="Election weight" Margin="0,8,0,0"/>
-                                    <TextBox x:Name="ServerWeightBox"/>
-                                    <TextBlock Text="Only jobs requiring capabilities, comma separated (blank = unrestricted)"/>
-                                    <ComboBox x:Name="ServerPolicyCombo" IsEditable="True">
-                                        <ComboBoxItem Content=""/>
-                                        <ComboBoxItem Content="ExchangeOnPrem"/>
-                                        <ComboBoxItem Content="SharePointOnPrem"/>
-                                        <ComboBoxItem Content="AD"/>
-                                        <ComboBoxItem Content="Graph"/>
-                                        <ComboBoxItem Content="EXO"/>
-                                        <ComboBoxItem Content="TeamsPowerShell"/>
-                                    </ComboBox>
-                                    <Button x:Name="ApplyServerButton" Content="Apply server settings to draft" Background="#E5F1FB" Margin="0,6,0,0"/>
-                                </StackPanel>
-                            </GroupBox>
-                            <GroupBox Header="Configuration versions">
-                                <Grid>
-                                    <Grid.RowDefinitions><RowDefinition Height="260"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                    <DataGrid x:Name="VersionsGrid">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Version" Binding="{Binding VersionId}" Width="*"/>
-                                            <DataGridTextColumn Header="Created" Binding="{Binding Created}" Width="135"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                    <Button x:Name="RollbackButton" Grid.Row="1" Content="Rollback to state before selected version" Margin="0,8,0,0"/>
-                                </Grid>
-                            </GroupBox>
-                        </StackPanel>
-                    </ScrollViewer>
-                </Grid>
-            </TabItem>
-
-            <TabItem Header="Activity">
-                <Grid Margin="12">
-                    <TextBox x:Name="ActivityBox" FontFamily="Consolas" FontSize="12" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
-                </Grid>
-            </TabItem>
-
             <TabItem Header="Events">
                 <Grid Margin="12">
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="90"/></Grid.RowDefinitions>
@@ -907,89 +843,166 @@ $xaml = @'
 
             <TabItem Header="Configuration">
                 <Grid Margin="12">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                    <Grid>
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                        <StackPanel Margin="0,0,8,0"><TextBlock Text="Filter (parameter, description, source, visible value)"/><TextBox x:Name="ConfigFilterBox"/></StackPanel>
-                        <Button x:Name="ConfigShowSensitiveButton" Grid.Column="1" Content="Show" VerticalAlignment="Bottom" Margin="4,0,4,8" ToolTip="Shows hidden sensitive values for 30 seconds."/>
-                        <Button x:Name="ConfigRefreshButton" Grid.Column="2" Content="Refresh" VerticalAlignment="Bottom" Margin="4,0,4,8"/>
-                        <Button x:Name="ConfigOpenFolderButton" Grid.Column="3" Content="Open folder" VerticalAlignment="Bottom" Margin="4,0,4,8" ToolTip="Opens the folder of the selected file in Explorer."/>
-                    </Grid>
-                    <TextBlock x:Name="ConfigSummaryText" Grid.Row="1" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="Read-only view of the configuration of the current tenant profile. Nothing is written."/>
-                    <TabControl x:Name="ConfigFileTabs" Grid.Row="2">
-                        <TabItem x:Name="ConfigGlobalTab" Header="Global">
+                    <TabControl x:Name="ConfigurationTabs">
+                        <TabItem x:Name="ConfigurationSettingsTab" Header="Settings">
                             <Grid Margin="8">
-                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                <TextBlock x:Name="ConfigGlobalStatusText" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
-                                <DataGrid x:Name="ConfigGlobalGrid" Grid.Row="1" SelectionMode="Single" ClipboardCopyMode="None">
-                                    <DataGrid.RowStyle>
-                                        <Style TargetType="DataGridRow">
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Model}" Value="Not in template"><Setter Property="Background" Value="#FFF4CE"/></DataTrigger>
-                                                <DataTrigger Binding="{Binding Model}" Value="Missing from file"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
-                                                <DataTrigger Binding="{Binding Masked}" Value="True"><Setter Property="FontStyle" Value="Italic"/></DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </DataGrid.RowStyle>
-                                    <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Parameter" Binding="{Binding Parameter}" Width="300"/>
-                                        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="220"/>
-                                        <DataGridTextColumn Header="Effective value" Binding="{Binding Effective}" Width="220"/>
-                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"/>
-                                        <DataGridTextColumn Header="Template" Binding="{Binding Model}" Width="115"/>
-                                        <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
-                                    </DataGrid.Columns>
-                                </DataGrid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,8,0"><TextBlock Text="Filter (parameter, description, source, visible value)"/><TextBox x:Name="ConfigFilterBox"/></StackPanel>
+                                    <Button x:Name="ConfigShowSensitiveButton" Grid.Column="1" Content="Show" VerticalAlignment="Bottom" Margin="4,0,4,8" ToolTip="Shows hidden sensitive values for 30 seconds."/>
+                                    <Button x:Name="ConfigRefreshButton" Grid.Column="2" Content="Refresh" VerticalAlignment="Bottom" Margin="4,0,4,8"/>
+                                    <Button x:Name="ConfigOpenFolderButton" Grid.Column="3" Content="Open folder" VerticalAlignment="Bottom" Margin="4,0,4,8" ToolTip="Opens the folder of the selected file in Explorer."/>
+                                </Grid>
+                                <TextBlock x:Name="ConfigSummaryText" Grid.Row="1" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="Read-only view of the configuration of the current tenant profile. Nothing is written."/>
+                                <TabControl x:Name="ConfigFileTabs" Grid.Row="2">
+                                    <TabItem x:Name="ConfigGlobalTab" Header="Global">
+                                        <Grid Margin="8">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                            <TextBlock x:Name="ConfigGlobalStatusText" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                            <DataGrid x:Name="ConfigGlobalGrid" Grid.Row="1" SelectionMode="Single" ClipboardCopyMode="None">
+                                                <DataGrid.RowStyle>
+                                                    <Style TargetType="DataGridRow">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Model}" Value="Not in template"><Setter Property="Background" Value="#FFF4CE"/></DataTrigger>
+                                                            <DataTrigger Binding="{Binding Model}" Value="Missing from file"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                                            <DataTrigger Binding="{Binding Masked}" Value="True"><Setter Property="FontStyle" Value="Italic"/></DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </DataGrid.RowStyle>
+                                                <DataGrid.Columns>
+                                                    <DataGridTextColumn Header="Parameter" Binding="{Binding Parameter}" Width="300"/>
+                                                    <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="220"/>
+                                                    <DataGridTextColumn Header="Effective value" Binding="{Binding Effective}" Width="220"/>
+                                                    <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"/>
+                                                    <DataGridTextColumn Header="Template" Binding="{Binding Model}" Width="115"/>
+                                                    <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                        </Grid>
+                                    </TabItem>
+                                    <TabItem x:Name="ConfigTenantTab" Header="Tenant">
+                                        <Grid Margin="8">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                            <TextBlock x:Name="ConfigTenantStatusText" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                            <DataGrid x:Name="ConfigTenantGrid" Grid.Row="1" SelectionMode="Single" ClipboardCopyMode="None">
+                                                <DataGrid.RowStyle>
+                                                    <Style TargetType="DataGridRow">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Model}" Value="Not in template"><Setter Property="Background" Value="#FFF4CE"/></DataTrigger>
+                                                            <DataTrigger Binding="{Binding Model}" Value="Missing from file"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                                            <DataTrigger Binding="{Binding Masked}" Value="True"><Setter Property="FontStyle" Value="Italic"/></DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </DataGrid.RowStyle>
+                                                <DataGrid.Columns>
+                                                    <DataGridTextColumn Header="Parameter" Binding="{Binding Parameter}" Width="300"/>
+                                                    <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="220"/>
+                                                    <DataGridTextColumn Header="Effective value" Binding="{Binding Effective}" Width="220"/>
+                                                    <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"/>
+                                                    <DataGridTextColumn Header="Template" Binding="{Binding Model}" Width="115"/>
+                                                    <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                        </Grid>
+                                    </TabItem>
+                                    <TabItem x:Name="ConfigMailTab" Header="Mail">
+                                        <Grid Margin="8">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                            <TextBlock x:Name="ConfigMailStatusText" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                            <DataGrid x:Name="ConfigMailGrid" Grid.Row="1" SelectionMode="Single" ClipboardCopyMode="None">
+                                                <DataGrid.RowStyle>
+                                                    <Style TargetType="DataGridRow">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Model}" Value="Not in template"><Setter Property="Background" Value="#FFF4CE"/></DataTrigger>
+                                                            <DataTrigger Binding="{Binding Model}" Value="Missing from file"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                                            <DataTrigger Binding="{Binding Masked}" Value="True"><Setter Property="FontStyle" Value="Italic"/></DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </DataGrid.RowStyle>
+                                                <DataGrid.Columns>
+                                                    <DataGridTextColumn Header="Parameter" Binding="{Binding Parameter}" Width="300"/>
+                                                    <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="220"/>
+                                                    <DataGridTextColumn Header="Effective value" Binding="{Binding Effective}" Width="220"/>
+                                                    <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"/>
+                                                    <DataGridTextColumn Header="Template" Binding="{Binding Model}" Width="115"/>
+                                                    <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                        </Grid>
+                                    </TabItem>
+                                </TabControl>
                             </Grid>
                         </TabItem>
-                        <TabItem x:Name="ConfigTenantTab" Header="Tenant">
-                            <Grid Margin="8">
-                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                <TextBlock x:Name="ConfigTenantStatusText" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
-                                <DataGrid x:Name="ConfigTenantGrid" Grid.Row="1" SelectionMode="Single" ClipboardCopyMode="None">
-                                    <DataGrid.RowStyle>
-                                        <Style TargetType="DataGridRow">
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Model}" Value="Not in template"><Setter Property="Background" Value="#FFF4CE"/></DataTrigger>
-                                                <DataTrigger Binding="{Binding Model}" Value="Missing from file"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
-                                                <DataTrigger Binding="{Binding Masked}" Value="True"><Setter Property="FontStyle" Value="Italic"/></DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </DataGrid.RowStyle>
-                                    <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Parameter" Binding="{Binding Parameter}" Width="300"/>
-                                        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="220"/>
-                                        <DataGridTextColumn Header="Effective value" Binding="{Binding Effective}" Width="220"/>
-                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"/>
-                                        <DataGridTextColumn Header="Template" Binding="{Binding Model}" Width="115"/>
-                                        <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
-                                    </DataGrid.Columns>
-                                </DataGrid>
-                            </Grid>
-                        </TabItem>
-                        <TabItem x:Name="ConfigMailTab" Header="Mail">
-                            <Grid Margin="8">
-                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                <TextBlock x:Name="ConfigMailStatusText" Margin="0,0,0,6" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
-                                <DataGrid x:Name="ConfigMailGrid" Grid.Row="1" SelectionMode="Single" ClipboardCopyMode="None">
-                                    <DataGrid.RowStyle>
-                                        <Style TargetType="DataGridRow">
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Model}" Value="Not in template"><Setter Property="Background" Value="#FFF4CE"/></DataTrigger>
-                                                <DataTrigger Binding="{Binding Model}" Value="Missing from file"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
-                                                <DataTrigger Binding="{Binding Masked}" Value="True"><Setter Property="FontStyle" Value="Italic"/></DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </DataGrid.RowStyle>
-                                    <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Parameter" Binding="{Binding Parameter}" Width="300"/>
-                                        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="220"/>
-                                        <DataGridTextColumn Header="Effective value" Binding="{Binding Effective}" Width="220"/>
-                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"/>
-                                        <DataGridTextColumn Header="Template" Binding="{Binding Model}" Width="115"/>
-                                        <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
-                                    </DataGrid.Columns>
-                                </DataGrid>
+                        <TabItem x:Name="ConfigurationServersTab" Header="Servers and versions">
+                            <Grid Margin="12">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="390"/></Grid.ColumnDefinitions>
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <DataGrid x:Name="ServersGrid" ToolTip="OS, CPU, RAM and drive C: are published by each orchestrator when it starts.">
+                                        <DataGrid.RowStyle>
+                                            <Style TargetType="DataGridRow">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding SystemDriveLow}" Value="True"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </DataGrid.RowStyle>
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="150"/>
+                                            <DataGridCheckBoxColumn Header="Online" Binding="{Binding Online}" Width="60"/>
+                                            <DataGridTextColumn Header="Orchestrator" Binding="{Binding Version}" Width="90"/>
+                                            <DataGridTextColumn Header="OS" Binding="{Binding Os}" Width="230"/>
+                                            <DataGridTextColumn Header="CPU" Binding="{Binding Cpu}" Width="220"/>
+                                            <DataGridTextColumn Header="RAM (GB)" Binding="{Binding MemoryGB}" Width="75"/>
+                                            <DataGridTextColumn Header="C: size (GB)" Binding="{Binding SystemDriveSizeGB}" Width="90"/>
+                                            <DataGridTextColumn Header="C: free %" Binding="{Binding SystemDriveFreePercent}" Width="75"/>
+                                            <DataGridTextColumn Header="System info at" Binding="{Binding SystemInfoAt}" Width="130"/>
+                                            <DataGridTextColumn Header="Weight" Binding="{Binding Weight}" Width="60"/>
+                                            <DataGridTextColumn Header="Policy" Binding="{Binding Policy}" Width="160"/>
+                                            <DataGridTextColumn Header="Capabilities" Binding="{Binding Capabilities}" Width="220"/>
+                                            <DataGridTextColumn Header="Jobs" Binding="{Binding AssignedJobs}" Width="50"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
+                                        <TextBox x:Name="NewServerBox" Width="220" Margin="0,0,8,0"/>
+                                        <Button x:Name="AddServerButton" Content="Add server"/>
+                                        <Button x:Name="RemoveServerButton" Content="Remove selected"/>
+                                    </StackPanel>
+                                </Grid>
+                                <ScrollViewer Grid.Column="1" Margin="14,0,0,0" VerticalScrollBarVisibility="Auto">
+                                    <StackPanel>
+                                        <GroupBox Header="Selected server">
+                                            <StackPanel>
+                                                <TextBlock x:Name="SelectedServerText" FontWeight="SemiBold" Text="Select a server"/>
+                                                <TextBlock Text="Election weight" Margin="0,8,0,0"/>
+                                                <TextBox x:Name="ServerWeightBox"/>
+                                                <TextBlock Text="Only jobs requiring capabilities, comma separated (blank = unrestricted)"/>
+                                                <ComboBox x:Name="ServerPolicyCombo" IsEditable="True">
+                                                    <ComboBoxItem Content=""/>
+                                                    <ComboBoxItem Content="ExchangeOnPrem"/>
+                                                    <ComboBoxItem Content="SharePointOnPrem"/>
+                                                    <ComboBoxItem Content="AD"/>
+                                                    <ComboBoxItem Content="Graph"/>
+                                                    <ComboBoxItem Content="EXO"/>
+                                                    <ComboBoxItem Content="TeamsPowerShell"/>
+                                                </ComboBox>
+                                                <Button x:Name="ApplyServerButton" Content="Apply server settings to draft" Background="#E5F1FB" Margin="0,6,0,0"/>
+                                            </StackPanel>
+                                        </GroupBox>
+                                        <GroupBox Header="Configuration versions">
+                                            <Grid>
+                                                <Grid.RowDefinitions><RowDefinition Height="260"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                                <DataGrid x:Name="VersionsGrid">
+                                                    <DataGrid.Columns>
+                                                        <DataGridTextColumn Header="Version" Binding="{Binding VersionId}" Width="*"/>
+                                                        <DataGridTextColumn Header="Created" Binding="{Binding Created}" Width="135"/>
+                                                    </DataGrid.Columns>
+                                                </DataGrid>
+                                                <Button x:Name="RollbackButton" Grid.Row="1" Content="Rollback to state before selected version" Margin="0,8,0,0"/>
+                                            </Grid>
+                                        </GroupBox>
+                                    </StackPanel>
+                                </ScrollViewer>
                             </Grid>
                         </TabItem>
                     </TabControl>
@@ -2363,6 +2376,8 @@ function Set-GuiEventsServers {
 }
 
 function Test-GuiConfigurationTabVisible {
+    # The configuration files are read only while their Settings sub-tab is shown.
+    if ($script:Controls['ConfigurationSettingsTab'] -and -not $script:Controls.ConfigurationSettingsTab.IsSelected) { return $false }
     return $null -ne $script:Controls.MainTabs.SelectedItem -and [string]$script:Controls.MainTabs.SelectedItem.Header -eq 'Configuration'
 }
 
@@ -2377,11 +2392,11 @@ function Update-GuiConfigurationView {
         $file = @($view.Files | Where-Object Kind -eq $pair[0])[0]
         $grid = $script:Controls[$pair[1] + 'Grid']; $status = $script:Controls[$pair[1] + 'StatusText']; $tab = $script:Controls[$pair[1] + 'Tab']
         if ($null -eq $file) { $grid.ItemsSource = @(); continue }
-        $rows = @(Select-SmartM365OrchestratorConfigRows -Rows @($file.Rows) -Filter $filter -ShowSensitive:$show)
+        $rows = @(Select-SmartM365OrchestratorConfigRows -Rows @($file.Rows) -Filter $filter -ShowSensitive:$show -HideNotInTemplate)
         $grid.ItemsSource = $rows
         $tab.Header = '{0} ({1})' -f $pair[0], [IO.Path]::GetFileName([string]$file.Path)
         $statusText = switch ($file.Status) { 'OK' { 'Read' } 'Missing' { 'File not found' } 'Busy' { 'Transport lock held by another process; previous values not shown' } default { 'Unreadable' } }
-        $status.Text = '{0}: {1}. {2} key(s), {3} shown; {4} not in template, {5} missing from file; {6} sensitive value(s) {7}.{8}' -f $statusText, $file.Path, @($file.Rows).Count, $rows.Count, $file.NotInTemplate, $file.MissingFromFile, @($file.Rows | Where-Object Sensitive).Count, $(if ($show) { 'shown' } else { 'hidden' }), $(if ($file.Error) { ' ' + $file.Error } else { '' })
+        $status.Text = '{0}: {1}. {2} key(s), {3} shown; {4} not in template (hidden), {5} missing from file; {6} sensitive value(s) {7}.{8}' -f $statusText, $file.Path, @($file.Rows).Count, $rows.Count, $file.NotInTemplate, $file.MissingFromFile, @($file.Rows | Where-Object Sensitive).Count, $(if ($show) { 'shown' } else { 'hidden' }), $(if ($file.Error) { ' ' + $file.Error } else { '' })
     }
     $script:Controls.ConfigSummaryText.Text = 'Tenant profile {0}, read {1:HH:mm:ss}. Read-only: nothing is written; sensitive values are hidden unless Show is pressed.' -f $view.ProfileKey, $view.ReadAt
 }
@@ -2471,6 +2486,8 @@ function Select-GuiTab {
     param([Parameter(Mandatory = $true)][string]$Header)
     # Requests is a sub-tab of Operations since GUI 1.6.3.
     if ($Header -eq 'Requests') { $script:Controls.OperationsRequestsTab.IsSelected = $true; $Header = 'Operations' }
+    # Servers and versions is a sub-tab of Configuration since GUI 1.6.13.
+    if ($Header -eq 'Servers and versions') { $script:Controls.ConfigurationServersTab.IsSelected = $true; $Header = 'Configuration' }
     foreach ($tab in $script:Controls.MainTabs.Items) { if ([string]$tab.Header -eq $Header) { $script:Controls.MainTabs.SelectedItem = $tab; return } }
 }
 
@@ -3043,7 +3060,7 @@ foreach ($name in @(
     'HistoryFromPicker', 'HistoryToPicker', 'HistoryServerCombo', 'HistoryJobCombo', 'HistoryStatusCombo', 'HistoryRefreshButton',
     'ExportCsvButton', 'ExportHtmlButton', 'HistoryGrid', 'ServersGrid', 'NewServerBox', 'AddServerButton', 'RemoveServerButton',
     'SelectedServerText', 'ServerWeightBox', 'ServerPolicyCombo', 'ApplyServerButton', 'VersionsGrid', 'RollbackButton',
-    'ActivityBox', 'FooterText', 'VersionText',
+    'ConfigurationTabs', 'ConfigurationSettingsTab', 'ConfigurationServersTab', 'FooterText', 'VersionText',
     'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
     'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
     'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
@@ -3145,6 +3162,12 @@ $script:Controls.MainTabs.Add_SelectionChanged({
     }
     if (Test-GuiEventsTabVisible) { Start-GuiRefresh -Mode Live }
     if (Test-GuiDashboardTabVisible) { Start-GuiRefresh -Mode Live -ShowLoading }
+    if (Test-GuiConfigurationTabVisible) { Start-GuiRefresh -Mode Live }
+    elseif ([datetime]::UtcNow -lt $script:ConfigurationShowUntil) { $script:ConfigurationShowUntil = [datetime]::MinValue; Update-GuiConfigurationView }
+})
+$script:Controls.ConfigurationTabs.Add_SelectionChanged({
+    # Settings sub-tab shown again: read the configuration files, as when Configuration is opened.
+    if ($_.OriginalSource -ne $script:Controls.ConfigurationTabs -or -not $script:InitialHistoryLoaded) { return }
     if (Test-GuiConfigurationTabVisible) { Start-GuiRefresh -Mode Live }
     elseif ([datetime]::UtcNow -lt $script:ConfigurationShowUntil) { $script:ConfigurationShowUntil = [datetime]::MinValue; Update-GuiConfigurationView }
 })

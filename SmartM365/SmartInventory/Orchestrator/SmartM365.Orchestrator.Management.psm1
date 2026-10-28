@@ -661,6 +661,7 @@ function Get-SmartM365OrchestratorServerStatus {
     $result = foreach ($server in @($ClusterDocument.ExpectedOrchestratorServers | Sort-Object -Unique)) {
         $serverName = ([string]$server).ToUpperInvariant(); $serverFolder = Join-Path $SharedDataFolderPath $server
         $heartbeatPath = Join-Path $serverFolder 'Orchestrator-Heartbeat.json'; $capabilitiesPath = Join-Path $serverFolder 'Orchestrator-Capabilities.json'; $heartbeatTime = [datetime]::MinValue
+        $heartbeat = $null
         $selectedHeartbeat = Get-SmartM365JsonReadPath $heartbeatPath -Optional
         $selectedCapabilities = Get-SmartM365JsonReadPath $capabilitiesPath -Optional
         if ($selectedHeartbeat) { $heartbeatPath = $selectedHeartbeat }
@@ -681,7 +682,19 @@ function Get-SmartM365OrchestratorServerStatus {
         $age = if ($heartbeatTime -eq [datetime]::MinValue) { [double]::PositiveInfinity } else { ([datetime]::UtcNow - $heartbeatTime.ToUniversalTime()).TotalMinutes }
         $capabilityText = ''; if (Test-Path $capabilitiesPath) { $capabilities = Read-SmartM365OrchestratorJson $capabilitiesPath; if ($capabilities.PSObject.Properties['ReadyCapabilities']) { $capabilityText = @($capabilities.ReadyCapabilities | Sort-Object -Unique) -join ', ' } }
         $assigned = @($assignments.Keys | Where-Object { $assignments[$_] -ieq $server })
-        [pscustomobject]@{ Server = [string]$server; Online = ($age -le [double]$ClusterDocument.PeerHeartbeatStaleMinutes); HeartbeatUtc = if ($heartbeatTime -eq [datetime]::MinValue) { $null } else { $heartbeatTime.ToUniversalTime() }; HeartbeatAgeMinutes = if ([double]::IsPositiveInfinity($age)) { $null } else { [math]::Round($age, 1) }; Capabilities = $capabilityText; Weight = if ($weights.ContainsKey($serverName)) { [double]$weights[$serverName] } else { 1.0 }; Policy = if ($policies.ContainsKey($serverName)) { @($policies[$serverName].OnlyJobsRequiring) -join ', ' } else { '' }; AssignedJobs = $assigned.Count; AssignedJobNames = $assigned -join ', ' }
+        # Published by the orchestrator when it starts (heartbeat SystemInfo, orchestrator 1.5.68+).
+        $system = if ($null -ne $heartbeat -and $heartbeat.PSObject.Properties['SystemInfo']) { $heartbeat.SystemInfo } else { $null }
+        $systemValue = { param($Name) if ($null -ne $system -and $system.PSObject.Properties[$Name]) { $system.PSObject.Properties[$Name].Value } else { $null } }
+        $collected = & $systemValue 'CollectedAtUtc'
+        $collectedText = ''
+        if ($collected -is [datetime]) { $collectedText = $collected.ToLocalTime().ToString('yyyy-MM-dd HH:mm') }
+        elseif ($collected) { $parsedCollected = [datetimeoffset]::MinValue; if ([datetimeoffset]::TryParse([string]$collected, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsedCollected)) { $collectedText = $parsedCollected.LocalDateTime.ToString('yyyy-MM-dd HH:mm') } }
+        $freePercent = & $systemValue 'SystemDriveFreePercent'
+        [pscustomobject]@{ Server = [string]$server; Online = ($age -le [double]$ClusterDocument.PeerHeartbeatStaleMinutes); HeartbeatUtc = if ($heartbeatTime -eq [datetime]::MinValue) { $null } else { $heartbeatTime.ToUniversalTime() }; HeartbeatAgeMinutes = if ([double]::IsPositiveInfinity($age)) { $null } else { [math]::Round($age, 1) }; Capabilities = $capabilityText; Weight = if ($weights.ContainsKey($serverName)) { [double]$weights[$serverName] } else { 1.0 }; Policy = if ($policies.ContainsKey($serverName)) { @($policies[$serverName].OnlyJobsRequiring) -join ', ' } else { '' }; AssignedJobs = $assigned.Count; AssignedJobNames = $assigned -join ', '
+            Version = if ($null -ne $heartbeat -and $heartbeat.PSObject.Properties['ScriptVersion']) { [string]$heartbeat.ScriptVersion } else { '' }
+            Os = [string](& $systemValue 'Os'); Cpu = $(if ((& $systemValue 'LogicalProcessors')) { '{0} ({1} logical)' -f (& $systemValue 'Cpu'), (& $systemValue 'LogicalProcessors') } else { [string](& $systemValue 'Cpu') }); LogicalProcessors = & $systemValue 'LogicalProcessors'; MemoryGB = & $systemValue 'MemoryGB'
+            SystemDriveSizeGB = & $systemValue 'SystemDriveSizeGB'; SystemDriveFreePercent = $freePercent; SystemDriveLow = $null -ne $freePercent -and [double]$freePercent -lt 10
+            SystemInfoAt = $collectedText; SystemInfoError = [string](& $systemValue 'Error') }
     }
     @($result)
 }

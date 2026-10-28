@@ -8,7 +8,7 @@ description points to a vanished key, then reads a synthetic Config folder: tran
 lock respect without writing, effective values and sources, template differences, sensitive
 masking, filtering, the background refresh contract and the absence of values in GUI logs.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param()
@@ -122,6 +122,8 @@ try {
 
     # 3. Masking and filtering.
     $tenantRows = @(Select-SmartM365OrchestratorConfigRows -Rows @($files['Tenant'].Rows))
+    $visibleRows = @(Select-SmartM365OrchestratorConfigRows -Rows @($files['Tenant'].Rows) -HideNotInTemplate)
+    Assert-Config (@($visibleRows | Where-Object Model -eq 'Not in template').Count -eq 0 -and $visibleRows.Count -eq $tenantRows.Count - @($tenantRows | Where-Object Model -eq 'Not in template').Count -and @($visibleRows | Where-Object Model -eq 'Missing from file').Count -ge 1) 'HideNotInTemplate must hide only the keys that are not in the template.'
     $hidden = @($tenantRows | Where-Object Masked)
     Assert-Config ($hidden.Count -ge 5 -and @($tenantRows | Where-Object { $_.Value -eq $secret -or $_.Effective -eq $secret }).Count -eq 0 -and @($tenantRows | Where-Object { [string]$_.Value -like '*SECRETSIGNATURE*' }).Count -eq 0) 'Sensitive values hidden by default (thumbprints, webhook, ids).'
     Assert-Config (@($tenantRows | Where-Object Parameter -eq 'OrgDomain')[0].Masked -eq $false) 'Non-sensitive values stay visible.'
@@ -161,7 +163,8 @@ try {
     $moduleText = [IO.File]::ReadAllText($configModule) + [IO.File]::ReadAllText((Join-Path $folder 'SmartM365.Orchestrator.ConfigView.Functions.ps1'))
     Assert-Config ($moduleText -notmatch '(?i)Set-Content|Add-Content|Out-File|Remove-Item|New-Item|Move-Item|Copy-Item|WriteAll|Resolve-SmartM365JsonConfigurationPath|Move-SmartM365OwnedJsonFile|Write-SmartM365Json|FileAccess\]::(Read)?Write|FileMode\]::(Create|OpenOrCreate|Append|Truncate)') 'Configuration view code has no write path and avoids the migrating resolver.'
     $guiText = [IO.File]::ReadAllText($guiPath)
-    $tabXaml = [regex]::Match($guiText, '(?s)<TabItem Header="Configuration">.*?\n            </TabItem>').Value
+    # The read-only files are the Settings sub-tab; Servers and versions (GUI 1.6.13) keeps its draft controls.
+    $tabXaml = [regex]::Match($guiText, '(?s)<TabItem x:Name="ConfigurationSettingsTab" Header="Settings">.*?\n                        </TabItem>').Value
     Assert-Config ($tabXaml -and @([regex]::Matches($tabXaml, '<TextBox ')).Count -eq 1 -and $tabXaml -notmatch '(?i)Content="(Save|Apply|Edit|Publish)' -and @([regex]::Matches($tabXaml, '<Button ')).Count -eq 3) 'Tab offers only filter, Show, Refresh and Open folder; no edit control.'
     Assert-Config ($tabXaml -match 'ClipboardCopyMode="None"') 'Grids do not copy values to the clipboard.'
 

@@ -7,7 +7,7 @@ Builds fictional daily logs for three servers, then verifies parsing, categories
 and display filters, repeat grouping, incremental cached reads, shared reads of a file
 held open by a writer, read-only behaviour, and the background GUI refresh contract.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -169,7 +169,7 @@ try {
     $guiAst = [Management.Automation.Language.Parser]::ParseFile($guiPath, [ref]$tokens, [ref]$errors)
     Assert-Events ($errors.Count -eq 0) 'GUI parses.'
     $guiText = [IO.File]::ReadAllText($guiPath)
-    Assert-Events ($guiText -match '<TabItem Header="Events">' -and $guiText -match "'Activity','Events'[,)]") 'Events tab and demo view exist.'
+    Assert-Events ($guiText -match '<TabItem Header="Events">' -and $guiText -match "'Servers and versions','Events'[,)]") 'Events tab and demo view exist.'
     $startRefresh = $guiAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Start-GuiRefresh' }, $true)
     Assert-Events ($startRefresh.Extent.Text -match "LogEventsHours = \`$\(if \(\`$Mode -ne 'History' -and \(Test-GuiEventsTabVisible\)\)") 'Logs are read only by live/full refreshes while the Events tab is visible.'
     $updateView = $guiAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Update-GuiEventsView' }, $true)

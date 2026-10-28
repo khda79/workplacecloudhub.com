@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.5
+1.4.6
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -39,6 +39,8 @@ function New-OrchestratorDemoData {
                 State='Running'; LastHeartbeat='2026-10-18 09:30'; Running=0; Pending=0
                 RecycleIn='02:30:00'; Pid=(4100+$i); StatePersistence='Healthy (sample)'
                 Version='1.5.47'; Maintenance='Active'; MaintenanceAcknowledgement='Ready'
+                Os='Microsoft Windows Server 2022 Standard (10.0.20348, build 20348)'; Cpu='Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz'
+                MemoryGB=16; SystemDriveSizeGB=127.4; SystemDriveFreePercent=[math]::Round(41.2 - 12 * $i, 1); SystemDriveLow=((41.2 - 12 * $i) -lt 10); SystemInfoAt='2026-10-18 06:00'
             }
         }
     )
@@ -145,8 +147,6 @@ function Write-OrchestratorDemoActivity {
     param([string]$Message)
     $c = $script:OrchestratorDemo.Controls
     $c.StatusText.Text = 'DEMO: ' + $Message
-    $c.ActivityBox.AppendText("[2026-10-18 09:30:00] [DEMO] $Message`r`n")
-    $c.ActivityBox.ScrollToEnd()
 }
 
 function Update-OrchestratorDemoHistory {
@@ -278,10 +278,10 @@ function Update-OrchestratorDemoConfiguration {
     $c.ConfigShowSensitiveButton.Content = if ($s.ConfigurationShow) { 'Hide' } else { 'Show' }
     foreach ($pair in @(@('Global', 'ConfigGlobal'), @('Tenant', 'ConfigTenant'), @('Mail', 'ConfigMail'))) {
         $file = @($s.Configuration.Files | Where-Object Kind -eq $pair[0])[0]
-        $rows = @(Select-SmartM365OrchestratorConfigRows -Rows @($file.Rows) -Filter $c.ConfigFilterBox.Text.Trim() -ShowSensitive:$s.ConfigurationShow)
+        $rows = @(Select-SmartM365OrchestratorConfigRows -Rows @($file.Rows) -Filter $c.ConfigFilterBox.Text.Trim() -ShowSensitive:$s.ConfigurationShow -HideNotInTemplate)
         $c[$pair[1] + 'Grid'].ItemsSource = $rows
         $c[$pair[1] + 'Tab'].Header = '{0} ({1})' -f $pair[0], [IO.Path]::GetFileName(($file.Path -replace ' \(DEMO\)$', ''))
-        $c[$pair[1] + 'StatusText'].Text = 'DEMO: {0}. {1} key(s), {2} shown; {3} not in template, {4} missing from file; {5} sensitive value(s) {6}.' -f $file.Path, @($file.Rows).Count, $rows.Count, $file.NotInTemplate, $file.MissingFromFile, @($file.Rows | Where-Object Sensitive).Count, $(if ($s.ConfigurationShow) { 'shown' } else { 'hidden' })
+        $c[$pair[1] + 'StatusText'].Text = 'DEMO: {0}. {1} key(s), {2} shown; {3} not in template (hidden), {4} missing from file; {5} sensitive value(s) {6}.' -f $file.Path, @($file.Rows).Count, $rows.Count, $file.NotInTemplate, $file.MissingFromFile, @($file.Rows | Where-Object Sensitive).Count, $(if ($s.ConfigurationShow) { 'shown' } else { 'hidden' })
     }
     $c.ConfigSummaryText.Text = 'DEMO - fictional Contoso configuration built from the shipped templates. Read-only: nothing is written; sensitive values are hidden unless Show is pressed.'
 }
@@ -447,8 +447,9 @@ function Invoke-OrchestratorDemoAction {
 function Select-OrchestratorDemoTarget {
     param([string]$Target)
     $c=$script:OrchestratorDemo.Controls
-    $header=switch($Target){'Failures24h'{'History'}'Requests'{'Operations'}default{$Target}}
+    $header=switch($Target){'Failures24h'{'History'}'Requests'{'Operations'}'Servers and versions'{'Configuration'}default{$Target}}
     if($Target -eq 'Requests'){$c.OperationsRequestsTab.IsSelected=$true}
+    if($Target -eq 'Servers and versions'){$c.ConfigurationServersTab.IsSelected=$true}
     if($Target -eq 'Failures24h'){$c.HistoryStatusCombo.SelectedItem='Failed';Update-OrchestratorDemoHistory}
     if($Target -eq 'Events'){$c.EventsLevelCombo.SelectedIndex=1}
     foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $header){$c.MainTabs.SelectedItem=$tab;break}}
@@ -535,7 +536,7 @@ function Invoke-OrchestratorDemo {
         $c[$name].Add_Click({param($demoControl)try{Invoke-OrchestratorDemoAction -Action ([string]$demoControl.Tag)}catch{Write-OrchestratorDemoActivity $_.Exception.Message}})
     }
     $c.RequestPrepareButton.IsEnabled=$true
-    $c.HistoryGrid.Add_MouseDoubleClick({$c=$script:OrchestratorDemo.Controls;if($c.HistoryGrid.SelectedItem){$c.MainTabs.SelectedIndex=6;Write-OrchestratorDemoActivity ('Sample log: '+$c.HistoryGrid.SelectedItem.LogPath)}})
+    $c.HistoryGrid.Add_MouseDoubleClick({$c=$script:OrchestratorDemo.Controls;if($c.HistoryGrid.SelectedItem){Select-OrchestratorDemoTarget 'Events';Write-OrchestratorDemoActivity ('Sample log: '+$c.HistoryGrid.SelectedItem.LogPath)}})
     $c.OperationsMailsGrid.Add_MouseDoubleClick({Write-OrchestratorDemoActivity 'Sample mail: Contoso inventory completed successfully. No email was sent.'})
     foreach($name in @('EventsServerCombo','EventsLevelCombo','EventsCategoryCombo','EventsPeriodCombo')){$c[$name].Add_SelectionChanged({Update-OrchestratorDemoEvents})}
     $c.EventsTextBox.Add_TextChanged({Update-OrchestratorDemoEvents})
@@ -556,7 +557,7 @@ function Invoke-OrchestratorDemo {
     $c.HeaderLogo.Add_MouseLeftButtonUp({Start-Process 'https://workplacecloudhub.com'})
     Update-OrchestratorDemoViews
     Write-OrchestratorDemoActivity 'Contoso sample data loaded. No connection, resident worker or collector was started.'
-    if($View -eq 'Requests'){Select-OrchestratorDemoTarget 'Requests'}
+    if($View -in @('Requests','Servers and versions')){Select-OrchestratorDemoTarget $View}
     else{foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $View){$c.MainTabs.SelectedItem=$tab;break}}}
     if($ValidateOnly){return $s}
     $splash=$null
