@@ -182,6 +182,7 @@ try {
     foreach ($name in @('ConvertTo-QuotedArgument', 'Set-OrchestratorGuiShortcut')) {
         . ([scriptblock]::Create($installerAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true).Extent.Text))
     }
+    Assert-Case ($installerAst.Extent.Text -match "GetFolderPath\('CommonDesktopDirectory'\)" -and $installerAst.Extent.Text -match 'foreach \(\$guiShortcutPath in \$guiShortcutPaths\)') 'The installer must create and remove the GUI shortcut on the all-users desktop as well as in the Start menu.'
     $shortcutPath = Join-Path $root 'Start Menu\WorkplaceCloudHub\SmartM365 Orchestrator - demo.lnk'
     $guiPath = Join-Path $folder 'SmartM365-Inventory-Orchestrator-GUI.ps1'
     $pwshPath = Get-SmartM365InventoryEnginePath -Runtime PowerShell7

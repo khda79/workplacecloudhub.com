@@ -16,11 +16,11 @@ every five minutes for one day so the orchestrator is restarted after its normal
 recycle. Concurrent instances are ignored, missed starts run as soon as possible, and
 Task Scheduler retries a failed start three times at one-minute intervals.
 
-The installation also creates the Start menu shortcut
-"WorkplaceCloudHub\SmartM365 Orchestrator - <Tenant>" to the orchestrator GUI. It starts
-PowerShell 7 hidden (no console window); uninstalling removes it. Its WorkplaceCloudHub
-icon is copied to %ProgramData%\WorkplaceCloudHub\SmartM365 because the Start menu does not
-display an icon read from the UNC code share.
+The installation also creates the shortcut "SmartM365 Orchestrator - <Tenant>" to the
+orchestrator GUI in the Start menu folder "WorkplaceCloudHub" and on the all-users
+(public) desktop. It starts PowerShell 7 hidden (no console window); uninstalling removes
+both. Its WorkplaceCloudHub icon is copied to %ProgramData%\WorkplaceCloudHub\SmartM365
+because Windows does not display an icon read from the UNC code share.
 
 .PARAMETER Tenant
 Tenant profile passed to the orchestrator. Valid values are prod and test.
@@ -48,7 +48,7 @@ Forces the guided interactive workflow. This is used by the CMD launcher.
 ./Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1 -Tenant prod -Uninstall
 
 .VERSION
-1.2.1
+1.2.2
 
 .REQUIREMENTS
     Windows PowerShell 5.1 or PowerShell 7. The script requests UAC elevation when needed.
@@ -383,7 +383,11 @@ if ([string]::IsNullOrWhiteSpace($TaskName)) {
 if ($TaskName.IndexOfAny([char[]]'\/:*?"<>|[]') -ge 0) {
     throw 'TaskName contains a character that is not allowed in a scheduled-task name.'
 }
-$guiShortcutPath = Join-Path -Path $env:ProgramData -ChildPath ("Microsoft\Windows\Start Menu\Programs\WorkplaceCloudHub\SmartM365 Orchestrator - {0}.lnk" -f $Tenant)
+$guiShortcutName = 'SmartM365 Orchestrator - {0}.lnk' -f $Tenant
+$guiShortcutPaths = @(
+    (Join-Path -Path $env:ProgramData -ChildPath ("Microsoft\Windows\Start Menu\Programs\WorkplaceCloudHub\{0}" -f $guiShortcutName)),
+    (Join-Path -Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) -ChildPath $guiShortcutName)
+)
 
 if ($Uninstall) {
     if ($StartNow) {
@@ -406,9 +410,11 @@ if ($Uninstall) {
     if (-not $taskWasFound) {
         Write-InstallerMessage "Scheduled task does not exist in $taskPath or the legacy root folder: $TaskName"
     }
-    if ((Test-Path -LiteralPath $guiShortcutPath -PathType Leaf) -and $PSCmdlet.ShouldProcess($guiShortcutPath, 'Remove GUI shortcut')) {
-        Remove-Item -LiteralPath $guiShortcutPath -Force
-        Write-InstallerMessage "GUI shortcut removed: $guiShortcutPath"
+    foreach ($guiShortcutPath in $guiShortcutPaths) {
+        if ((Test-Path -LiteralPath $guiShortcutPath -PathType Leaf) -and $PSCmdlet.ShouldProcess($guiShortcutPath, 'Remove GUI shortcut')) {
+            Remove-Item -LiteralPath $guiShortcutPath -Force
+            Write-InstallerMessage "GUI shortcut removed: $guiShortcutPath"
+        }
     }
     Wait-InteractiveClose
     Complete-InstallerExecution
@@ -534,12 +540,14 @@ try {
     Write-InstallerMessage "Run account: $ServiceAccount"
     Write-InstallerMessage "Action: $powerShell7Path $actionArguments"
     # A missing shortcut does not invalidate the task registration: warn and continue.
-    try {
-        Set-OrchestratorGuiShortcut -ShortcutPath $guiShortcutPath -PowerShell7Path $powerShell7Path -GuiPath (Join-Path -Path $scriptDirectory -ChildPath 'SmartM365-Inventory-Orchestrator-GUI.ps1') -TenantName $Tenant -IconPath (Join-Path -Path $scriptDirectory -ChildPath 'WorkplaceCloudHub.ico') -WorkingDirectory $taskWorkingDirectory -LocalIconDirectory (Join-Path -Path $env:ProgramData -ChildPath 'WorkplaceCloudHub\SmartM365')
-        Write-InstallerMessage "GUI shortcut created (no console window): $guiShortcutPath"
-    }
-    catch {
-        Write-InstallerMessage "WARNING: GUI shortcut not created: $($_.Exception.Message)"
+    foreach ($guiShortcutPath in $guiShortcutPaths) {
+        try {
+            Set-OrchestratorGuiShortcut -ShortcutPath $guiShortcutPath -PowerShell7Path $powerShell7Path -GuiPath (Join-Path -Path $scriptDirectory -ChildPath 'SmartM365-Inventory-Orchestrator-GUI.ps1') -TenantName $Tenant -IconPath (Join-Path -Path $scriptDirectory -ChildPath 'WorkplaceCloudHub.ico') -WorkingDirectory $taskWorkingDirectory -LocalIconDirectory (Join-Path -Path $env:ProgramData -ChildPath 'WorkplaceCloudHub\SmartM365')
+            Write-InstallerMessage "GUI shortcut created (no console window): $guiShortcutPath"
+        }
+        catch {
+            Write-InstallerMessage "WARNING: GUI shortcut not created: $guiShortcutPath - $($_.Exception.Message)"
+        }
     }
     if ($StartNow) {
         Start-ScheduledTask -TaskPath $taskPath -TaskName $TaskName
