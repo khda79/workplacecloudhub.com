@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.18
+1.6.19
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.18'
+$script:AppVersion = '1.6.19'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -462,6 +462,13 @@ $xaml = @'
                                             <Button x:Name="StopRunningJobButton" Content="Stop selected job" IsEnabled="False" Margin="8,0,0,0" Background="#FDE7E9" ToolTip="The owning orchestrator verifies the selected process and records the stop. The job is not retried automatically."/>
                                         </StackPanel>
                                     <DataGrid x:Name="OperationsRunningGrid" Grid.Row="1">
+                                        <DataGrid.RowStyle>
+                                            <Style TargetType="DataGridRow">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Activity}" Value="Stalled"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </DataGrid.RowStyle>
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="130"/>
                                             <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="90"/>
@@ -469,6 +476,10 @@ $xaml = @'
                                             <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="65"/>
                                             <DataGridTextColumn Header="Started" Binding="{Binding Started}" Width="120"/>
                                             <DataGridTextColumn Header="Duration (min)" Binding="{Binding DurationMinutes}" Width="100"/>
+                                            <DataGridTextColumn Header="Activity" Binding="{Binding Activity}" Width="70"/>
+                                            <DataGridTextColumn Header="Silent (min)" Binding="{Binding SilentMinutes}" Width="80"/>
+                                            <DataGridTextColumn Header="CPU (s)" Binding="{Binding CpuSeconds}" Width="65"/>
+                                            <DataGridTextColumn Header="CPU s/min" Binding="{Binding CpuSecondsPerMinute}" Width="70"/>
                                         </DataGrid.Columns>
                                     </DataGrid>
                                     </Grid>

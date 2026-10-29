@@ -369,6 +369,12 @@ function Get-SmartM365OrchestratorOperations {
                 Started = if ($null -ne $start) { $start.ToLocalTime().ToString('yyyy-MM-dd HH:mm') } else { '' }
                 DurationMinutes = if ($null -ne $start) { [math]::Round(($Now.ToUniversalTime() - $start).TotalMinutes, 0) } else { $null }
                 Occurrence = [string](Get-InsightsProperty $job 'ScheduledOccurrence' '')
+                # Stalled-job signals published by orchestrator 1.5.72+; empty for older residents.
+                Activity = $(if ([bool](Get-InsightsProperty $job 'Stalled' $false)) { 'Stalled' } elseif ($null -ne (Get-InsightsProperty $job 'SilentMinutes' $null)) { 'Active' } else { '' })
+                SilentMinutes = Get-InsightsProperty $job 'SilentMinutes' $null
+                MaxSilentMinutes = Get-InsightsProperty $job 'MaxSilentMinutes' $null
+                CpuSeconds = Get-InsightsProperty $job 'CpuSeconds' $null
+                CpuSecondsPerMinute = Get-InsightsProperty $job 'CpuSecondsPerMinute' $null
             })
         }
         foreach ($job in $jobsPending) {
@@ -526,6 +532,11 @@ function Get-SmartM365OrchestratorDashboard {
         Add-DashboardAction 'Warning' 'Election' $groupName ('Unassigned: ' + $reason) 'Servers and versions'
     }
     foreach ($incident in @($Operations.Incidents)) { Add-DashboardAction 'Warning' 'Peer monitoring' ([string]$incident.ObservedBy) ([string]$incident.Issue) 'Events' }
+    # Alert only: the orchestrator never stops a stalled job, the administrator decides in Operations.
+    foreach ($row in @($Operations.Running | Where-Object { [string](Get-InsightsProperty $_ 'Activity' '') -eq 'Stalled' })) {
+        $cpuRate = Get-InsightsProperty $row 'CpuSecondsPerMinute' $null
+        Add-DashboardAction 'Critical' 'Stalled job' ([string]$row.Job) ('No log write for {0} min on {1} (limit {2} min){3}. Not stopped automatically: stop it from Operations if needed.' -f $row.SilentMinutes, $row.Server, $row.MaxSilentMinutes, $(if ($null -ne $cpuRate) { '; CPU +{0} s/min' -f $cpuRate } else { '' })) 'Operations'
+    }
     # A required SWI input that WorkplaceEvidence-Prepare would refuse (Get-SmartM365OrchestratorSwiValidity).
     foreach ($swi in @($SwiRows | Where-Object { [bool](Get-InsightsProperty $_ 'Blocks' $false) })) {
         Add-DashboardAction 'Critical' 'SWI validity' ([string]$swi.Name) ('{0}. {1}' -f [string]$swi.Swi, [string](Get-InsightsProperty $swi 'Detail' '')) 'Planning'

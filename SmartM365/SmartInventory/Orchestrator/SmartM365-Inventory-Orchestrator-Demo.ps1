@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.9
+1.4.10
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -102,9 +102,13 @@ function New-OrchestratorDemoData {
     $spoJob=@($jobs | Where-Object Name -EQ 'M365-SPO-Inventory')[0]
     $activeUsersJob=@($jobs | Where-Object Name -EQ 'M365-ActiveUsers-Inventory')[0]
     $running = @(
-        [pscustomobject]@{Server=$deviceJob.Server;ServerState='Running';Job=$deviceJob.Name;Pid=5201;Started='2026-10-18 09:22';DurationMinutes=8}
-        [pscustomobject]@{Server=$teamsJob.Server;ServerState='Running';Job=$teamsJob.Name;Pid=5202;Started='2026-10-18 09:26';DurationMinutes=4}
+        [pscustomobject]@{Server=$deviceJob.Server;ServerState='Running';Job=$deviceJob.Name;Pid=5201;Started='2026-10-18 09:22';DurationMinutes=8;Activity='Active';SilentMinutes=0.4;MaxSilentMinutes=60;CpuSeconds=96.3;CpuSecondsPerMinute=11.8}
+        [pscustomobject]@{Server=$teamsJob.Server;ServerState='Running';Job=$teamsJob.Name;Pid=5202;Started='2026-10-18 09:26';DurationMinutes=4;Activity='Active';SilentMinutes=0.2;MaxSilentMinutes=60;CpuSeconds=41.7;CpuSecondsPerMinute=9.6}
     )
+    if ($Scenario -eq 'Issues') {
+        # Sample stalled run: the log is silent, the process tree barely uses CPU; it is not stopped automatically.
+        $running[1].Started='2026-10-18 07:40'; $running[1].DurationMinutes=110; $running[1].Activity='Stalled'; $running[1].SilentMinutes=75; $running[1].CpuSeconds=58.2; $running[1].CpuSecondsPerMinute=0.3
+    }
     $servers[0].Running=1; $servers[1].Running=1; $servers[2].Pending=1
     $pending = @([pscustomobject]@{Server=$spoJob.Server;ServerState='Running';Job=$spoJob.Name;Reason='Dependency';WaitingMinutes=4;Details='Waiting for the current Teams inventory (sample).'})
     $incidents = @()
@@ -192,6 +196,7 @@ function New-OrchestratorDemoDashboard {
     foreach ($job in @($Data.Jobs | Where-Object Health -eq 'Stale')) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Job Stale'; Item = $job.Name; Detail = ('Last sample success {0} ({1} h).' -f $job.LastSuccess, $job.SuccessAgeHours); Target = 'Planning' }) }
     foreach ($job in @($Data.Jobs | Where-Object SwiBlocks)) { $actions.Add([pscustomobject]@{ Severity = 'Critical'; Area = 'SWI validity'; Item = $job.Name; Detail = ('{0}. DEMO - Sample required SWI input expired.' -f $job.Swi); Target = 'Planning' }) }
     foreach ($incident in @($Data.Incidents)) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Peer monitoring'; Item = $incident.ObservedBy; Detail = $incident.Issue; Target = 'Events' }) }
+    foreach ($row in @($Data.Running | Where-Object Activity -eq 'Stalled')) { $actions.Add([pscustomobject]@{ Severity = 'Critical'; Area = 'Stalled job'; Item = $row.Job; Detail = ('No log write for {0} min on {1} (limit {2} min); CPU +{3} s/min. Not stopped automatically (sample).' -f $row.SilentMinutes, $row.Server, $row.MaxSilentMinutes, $row.CpuSecondsPerMinute); Target = 'Operations' }) }
     if ($Data.Maintenance) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Maintenance'; Item = 'Scheduling'; Detail = 'Sample maintenance is ON: scheduled launches are suspended.'; Target = 'Operations' }) }
     foreach ($logEvent in @($Data.LogEvents | Where-Object { $_.Level -eq 'ERROR' })) { $actions.Add([pscustomobject]@{ Severity = 'Warning'; Area = 'Log ' + $logEvent.Category; Item = $logEvent.Server; Detail = $logEvent.Message; Target = 'Events' }) }
     $sorted = @($actions | Sort-Object @{ Expression = { @{ Critical = 0; Warning = 1; Info = 2 }[$_.Severity] } }, Area)

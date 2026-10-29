@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.71
+1.5.72
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.71"
+$ScriptVersion = "1.5.72"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1202,6 +1202,12 @@ function ConvertTo-NormalizedJob {
     if ($RawJob.PSObject.Properties['MinimumSuccessDurationSeconds'] -and $null -ne $RawJob.MinimumSuccessDurationSeconds) {
         $minimumSuccessDurationSeconds = [int]$RawJob.MinimumSuccessDurationSeconds
     }
+    # Minutes without any write to the job log before the run is reported as stalled (alert only, 0 = off).
+    $maxSilentMinutes = 60
+    if ($RawJob.PSObject.Properties['MaxSilentMinutes'] -and $null -ne $RawJob.MaxSilentMinutes) {
+        $maxSilentMinutes = [int]$RawJob.MaxSilentMinutes
+        if ($maxSilentMinutes -lt 0) { $Errors.Add("Job '$name': MaxSilentMinutes cannot be negative.") }
+    }
     $dependencyWaitTimeoutMinutes = 0
     if ($RawJob.PSObject.Properties['DependencyWaitTimeoutMinutes'] -and $null -ne $RawJob.DependencyWaitTimeoutMinutes) {
         $dependencyWaitTimeoutMinutes = [int]$RawJob.DependencyWaitTimeoutMinutes
@@ -1302,6 +1308,7 @@ function ConvertTo-NormalizedJob {
         EstimatedDurationMinutes = $estimatedDurationMinutes
         RequiredLogPatterns = $requiredLogPatterns
         MinimumSuccessDurationSeconds = $minimumSuccessDurationSeconds
+        MaxSilentMinutes = $maxSilentMinutes
         DependencyWaitTimeoutMinutes = $dependencyWaitTimeoutMinutes
         DependencyMode = $dependencyMode
         LatestOccurrenceDependencies = $latestOccurrenceDependencies
@@ -2724,6 +2731,13 @@ function Write-OrchestratorHeartbeat {
             Pid = if ($null -ne $info.Process) { $info.Process.Id } else { $info.RecordedPid }
             StartTime = ConvertTo-StateTime -Value $info.StartTime
             ScheduledOccurrence = ConvertTo-StateTime -Value $info.Occurrence
+            # Stalled-job signals (orchestrator 1.5.72): log silence and process tree CPU.
+            LastLogWriteUtc = if ($info.ContainsKey('LastActivityUtc')) { ([datetime]$info['LastActivityUtc']).ToString('o') } else { '' }
+            SilentMinutes = $info['SilentMinutes']
+            MaxSilentMinutes = $info['MaxSilentMinutes']
+            Stalled = $info.ContainsKey('Stalled') -and [bool]$info['Stalled']
+            CpuSeconds = $info['CpuSeconds']
+            CpuSecondsPerMinute = $info['CpuSecondsPerMinute']
         }
     }
     # Starting/Recycling heartbeats keep the server alive for peers but publish no pending queue:
@@ -4441,6 +4455,134 @@ function Get-RunningJobTimeoutWindow {
     }
 }
 
+function Get-OrchestratorProcessTreeCpuTime {
+    # Cumulative CPU of the launcher and its descendants: the job itself runs in a child pwsh.
+    param([Parameter(Mandatory = $true)][int]$RootPid)
+    $children = @{}; $created = @{}
+    foreach ($row in @(Get-CimInstance -ClassName Win32_Process -Property ProcessId, ParentProcessId, CreationDate -ErrorAction Stop)) {
+        $created[[int]$row.ProcessId] = $row.CreationDate
+        $parent = [int]$row.ParentProcessId
+        if (-not $children.ContainsKey($parent)) { $children[$parent] = [System.Collections.Generic.List[int]]::new() }
+        $children[$parent].Add([int]$row.ProcessId)
+    }
+    $total = 0.0
+    $seen = @{}
+    $queue = [System.Collections.Generic.Queue[int]]::new()
+    $queue.Enqueue($RootPid)
+    while ($queue.Count -gt 0) {
+        $id = $queue.Dequeue()
+        if ($seen.ContainsKey($id)) { continue }
+        $seen[$id] = $true
+        try { $total += (Get-Process -Id $id -ErrorAction Stop).TotalProcessorTime.TotalSeconds } catch { }
+        if (-not $children.ContainsKey($id)) { continue }
+        foreach ($child in $children[$id]) {
+            # A child older than its parent belongs to a reused parent PID, not to this job.
+            if ($null -ne $created[$id] -and $null -ne $created[$child] -and $created[$child] -lt $created[$id]) { continue }
+            $queue.Enqueue($child)
+        }
+    }
+    return [math]::Round($total, 1)
+}
+
+function Get-OrchestratorJobLogActivity {
+    # The size is read through an open handle: the directory entry of a file that another
+    # process keeps appending to can report a stale size and write time.
+    param([AllowNull()][AllowEmptyString()][string]$LogPath)
+    if ([string]::IsNullOrWhiteSpace($LogPath) -or -not (Test-Path -LiteralPath $LogPath -PathType Leaf)) { return $null }
+    $stream = [IO.File]::Open($LogPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+    try { $length = $stream.Length } finally { $stream.Dispose() }
+    return [pscustomobject]@{ Length = [long]$length; LastWriteUtc = [IO.File]::GetLastWriteTimeUtc($LogPath) }
+}
+
+function Send-JobStalledEmail {
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)][hashtable]$RunInfo
+    )
+    $cpuText = if ($RunInfo.ContainsKey('CpuSeconds')) { '{0} s (+{1} s per minute)' -f $RunInfo['CpuSeconds'], $(if ($RunInfo.ContainsKey('CpuSecondsPerMinute')) { $RunInfo['CpuSecondsPerMinute'] } else { '?' }) } else { 'not measured' }
+    $details = [ordered]@{
+        Server = $env:COMPUTERNAME
+        Started = ([datetime]$RunInfo.StartTime).ToString('yyyy-MM-dd HH:mm:ss')
+        'Last log write' = ([datetime]$RunInfo['LastActivityUtc']).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss')
+        'Silent for' = '{0} min (limit {1} min)' -f $RunInfo['SilentMinutes'], $RunInfo['MaxSilentMinutes']
+        'Process tree CPU' = $cpuText
+        'Job log' = [string]$RunInfo.LogPath
+    }
+    $rows = ''
+    foreach ($key in $details.Keys) {
+        $rows += "<tr><td style='padding:3px 10px;border:1px solid #DDDDDD;'><b>{0}</b></td><td style='padding:3px 10px;border:1px solid #DDDDDD;'>{1}</td></tr>" -f (ConvertTo-HtmlText -Text $key), (ConvertTo-HtmlText -Text ([string]$details[$key]))
+    }
+    $body = @"
+<html><body style='font-family:Segoe UI,Arial,sans-serif;font-size:13px;color:#1F2937;'>
+<h2 style='color:#FF8C00;'>Job $(ConvertTo-HtmlText -Text $JobName) seems stalled</h2>
+<p>The job has not written to its log for $(ConvertTo-HtmlText -Text ([string]$RunInfo['SilentMinutes'])) minutes. It was <b>not stopped</b>: the administrator decides whether to stop it (GUI Operations, Running jobs, Stop selected job). Its timeout still applies.</p>
+<table style='border-collapse:collapse;'>$rows</table>
+$(Get-JobLogTailHtml -LogPath ([string]$RunInfo.LogPath))
+<p style='color:#5F6B7A;'>Sent once per run by $ScriptName v$ScriptVersion on $(ConvertTo-HtmlText -Text $env:COMPUTERNAME) (tenant $(ConvertTo-HtmlText -Text $Tenant)).</p>
+</body></html>
+"@
+    return [bool](Send-OrchestratorMail -Subject "[SmartM365 Orchestrator][$Tenant] Job $JobName stalled on $($env:COMPUTERNAME)" -HtmlBody $body -IsError)
+}
+
+function Update-RunningJobActivity {
+    # Alert only: a silent job is never stopped automatically, the administrator decides.
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)][hashtable]$RunInfo,
+        [Parameter(Mandatory = $true)][datetime]$Now
+    )
+    $nowUtc = $Now.ToUniversalTime()
+    if ($RunInfo.ContainsKey('ActivityCheckedUtc') -and ($nowUtc - [datetime]$RunInfo['ActivityCheckedUtc']).TotalSeconds -lt $script:JobActivityCheckSeconds) { return }
+    $RunInfo['ActivityCheckedUtc'] = $nowUtc
+    $startUtc = ([datetime]$RunInfo.StartTime).ToUniversalTime()
+    $log = $null
+    try { $log = Get-OrchestratorJobLogActivity -LogPath ([string]$RunInfo.LogPath) } catch { $log = $null }
+    if (-not $RunInfo.ContainsKey('LastActivityUtc')) {
+        $RunInfo['LastActivityUtc'] = $startUtc
+        if ($null -ne $log -and $log.LastWriteUtc -gt $startUtc) { $RunInfo['LastActivityUtc'] = $log.LastWriteUtc }
+    }
+    if ($null -ne $log) {
+        if ($RunInfo.ContainsKey('LogLength') -and [long]$RunInfo['LogLength'] -ne $log.Length) { $RunInfo['LastActivityUtc'] = $nowUtc }
+        elseif ($log.LastWriteUtc -gt [datetime]$RunInfo['LastActivityUtc'] -and $log.LastWriteUtc -le $nowUtc) { $RunInfo['LastActivityUtc'] = $log.LastWriteUtc }
+        $RunInfo['LogLength'] = $log.Length
+    }
+    if ($null -ne $RunInfo['Process']) {
+        try {
+            $cpu = Get-OrchestratorProcessTreeCpuTime -RootPid ([int]$RunInfo['Process'].Id)
+            if ($RunInfo.ContainsKey('CpuSeconds') -and $RunInfo.ContainsKey('CpuSampledUtc')) {
+                $elapsed = ($nowUtc - [datetime]$RunInfo['CpuSampledUtc']).TotalMinutes
+                if ($elapsed -gt 0) { $RunInfo['CpuSecondsPerMinute'] = [math]::Round([math]::Max(0, $cpu - [double]$RunInfo['CpuSeconds']) / $elapsed, 2) }
+            }
+            $RunInfo['CpuSeconds'] = $cpu
+            $RunInfo['CpuSampledUtc'] = $nowUtc
+        }
+        catch { }
+    }
+    $limit = 60
+    if ($script:Manifest -and $script:Manifest.JobsByName.ContainsKey($JobName) -and $script:Manifest.JobsByName[$JobName].PSObject.Properties['MaxSilentMinutes']) { $limit = [int]$script:Manifest.JobsByName[$JobName].MaxSilentMinutes }
+    $silent = [math]::Round([math]::Max(0, ($nowUtc - [datetime]$RunInfo['LastActivityUtc']).TotalMinutes), 1)
+    $RunInfo['SilentMinutes'] = $silent
+    $RunInfo['MaxSilentMinutes'] = $limit
+    $wasStalled = $RunInfo.ContainsKey('Stalled') -and [bool]$RunInfo['Stalled']
+    $stalled = $limit -gt 0 -and $silent -ge $limit
+    $RunInfo['Stalled'] = $stalled
+    if ($stalled -and -not $wasStalled) {
+        $cpuText = if ($RunInfo.ContainsKey('CpuSecondsPerMinute')) { '; process tree CPU {0} s, +{1} s per minute' -f $RunInfo['CpuSeconds'], $RunInfo['CpuSecondsPerMinute'] } elseif ($RunInfo.ContainsKey('CpuSeconds')) { '; process tree CPU {0} s' -f $RunInfo['CpuSeconds'] } else { '' }
+        Write-OrchestratorLog -Message ("Job {0}: stalled, no write to its log for {1} minutes (limit {2}){3}. Not stopped: the administrator decides (GUI Operations, Stop selected job)." -f $JobName, $silent, $limit, $cpuText) -Level WARN
+        if (-not ($RunInfo.ContainsKey('StallAlertSent') -and [bool]$RunInfo['StallAlertSent'])) {
+            # Once per run, also after an orchestrator restart (persisted with the running state).
+            $RunInfo['StallAlertSent'] = $true
+            $state = Get-JobState -JobName $JobName
+            if ($null -ne $state.Running) { $state.Running['StallAlertSent'] = $true }
+            Save-OrchestratorState
+            if (-not (Send-JobStalledEmail -JobName $JobName -RunInfo $RunInfo)) { Write-OrchestratorLog -Message ("Job {0}: stalled alert email was not sent; the alert stays in this log and in the GUI." -f $JobName) -Level WARN }
+        }
+    }
+    elseif ($wasStalled -and -not $stalled) {
+        Write-OrchestratorLog -Message ("Job {0}: log activity resumed (stalled alert cleared)." -f $JobName)
+    }
+}
+
 function Sync-RunningJobConcurrencyLease {
     param(
         [Parameter(Mandatory = $true)][string]$JobName,
@@ -4581,13 +4723,14 @@ function Update-RunningJobs {
             Sync-RunningJobConcurrencyLease -JobName $name -RunInfo $info -Now $Now
             if (-not (Test-OrchestratorStatePersistenceReady)) { continue }
             $identity = $null
-            try { $identity = Test-ProcessMatchesRecord -RecordedPid $process.Id -ExpectedStartTime ([datetime]$info.StartTime) -ExpectedProcessName ([string]$info.ProcessName) }
+            $expectedName = if ([string]::IsNullOrWhiteSpace([string]$info['ProcessName'])) { 'pwsh' } else { [string]$info['ProcessName'] }
+            try { $identity = Test-ProcessMatchesRecord -RecordedPid $process.Id -ExpectedStartTime ([datetime]$info.StartTime) -ExpectedProcessName $expectedName }
             catch { Write-OrchestratorLog -Message ("Job {0}: stop deferred because process identity could not be verified: {1}" -f $name, $_.Exception.Message) -Level ERROR; continue }
             if ($null -eq $identity) {
-                Write-OrchestratorLog -Message ("Job {0}: stop deferred because PID {1} no longer matches its recorded start time." -f $name, $process.Id) -Level ERROR
+                Write-OrchestratorLog -Message ("Job {0}: stop deferred because PID {1} no longer matches its recorded process ({2}, started {3})." -f $name, $process.Id, $expectedName, ([datetime]$info.StartTime).ToString('yyyy-MM-dd HH:mm:ss')) -Level ERROR
                 continue
             }
-            if ([math]::Abs(($identity.StartTime - [datetime]$info.StartTime).TotalSeconds) -gt 1) {
+            if ([math]::Abs(($identity.StartTime.ToUniversalTime() - ([datetime]$info.StartTime).ToUniversalTime()).TotalSeconds) -gt 1) {
                 Write-OrchestratorLog -Message ("Job {0}: stop deferred because the process start time differs from the selected run." -f $name) -Level ERROR
                 continue
             }
@@ -4635,6 +4778,8 @@ function Update-RunningJobs {
             continue
         }
 
+        try { Update-RunningJobActivity -JobName $name -RunInfo $info -Now $Now }
+        catch { Write-OrchestratorRuntimeUpdateWarning -Key ("job-activity:{0}" -f $name) -Message ("Job {0}: stalled-job check failed; supervision is unchanged: {1}" -f $name, $_.Exception.Message) -Now $Now }
         Sync-RunningJobConcurrencyLease -JobName $name -RunInfo $info -Now $Now
     }
 }
@@ -4678,6 +4823,10 @@ function Restore-RunningJobs {
             ConcurrencyLeaseId = if ($record.ContainsKey('ConcurrencyLeaseId')) { [string]$record.ConcurrencyLeaseId } else { '' }
             PipelineBatchId = if ($record.ContainsKey('PipelineBatchId')) { [string]$record.PipelineBatchId } else { '' }
             PipelineStatusPath = if ($record.ContainsKey('PipelineStatusPath')) { [string]$record.PipelineStatusPath } else { '' }
+            StallAlertSent = $record.ContainsKey('StallAlertSent') -and [bool]$record.StallAlertSent
+            # Needed by the operator stop identity check; missing before 1.5.72, so every stop of a
+            # re-adopted job was deferred as a start-time mismatch.
+            ProcessName = $expectedProcessName
         }
         if ($null -eq $runInfo.StartTime) { $runInfo.StartTime = Get-Date }
         if ($null -eq $runInfo.Occurrence) { $runInfo.Occurrence = $runInfo.StartTime }
@@ -7193,6 +7342,8 @@ $script:SystemInfo = $null
 $script:ResourceSamples = [System.Collections.Generic.List[object]]::new()
 $script:LastResourceSampleAt = [datetime]::MinValue
 $script:ResourceSampleMinutes = 5
+# Stalled-job check interval for each running job (log size and process tree CPU).
+$script:JobActivityCheckSeconds = 60
 $script:ResourceRetentionHours = 12
 $script:SmtpEndpoint = ''
 $script:Manifest = $null
