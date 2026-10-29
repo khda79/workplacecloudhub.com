@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.27
+1.6.28
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.27'
+$script:AppVersion = '1.6.28'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -892,6 +892,91 @@ $xaml = @'
             <TabItem Header="Configuration">
                 <Grid Margin="12">
                     <TabControl x:Name="ConfigurationTabs">
+                        <!-- Servers and versions first and selected by default (GUI 1.6.28). -->
+                        <TabItem x:Name="ConfigurationServersTab" Header="Servers and versions">
+                            <Grid Margin="12">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="390"/></Grid.ColumnDefinitions>
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <DataGrid x:Name="ServersGrid" ToolTip="OS, CPU, RAM and drive C: are published by each orchestrator when it starts.">
+                                        <DataGrid.RowStyle>
+                                            <Style TargetType="DataGridRow">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding State}" Value="Inactive"><Setter Property="Foreground" Value="#6B6B6B"/></DataTrigger>
+                                                    <DataTrigger Binding="{Binding SystemDriveLow}" Value="True"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </DataGrid.RowStyle>
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="150"/>
+                                            <DataGridTextColumn Header="State" Binding="{Binding State}" Width="70">
+                                                <DataGridTextColumn.ElementStyle>
+                                                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="Active = takes jobs. Inactive = runs as an orchestrator (heartbeat, monitoring, maintenance) but takes no job. A new server is Inactive."/></Style>
+                                                </DataGridTextColumn.ElementStyle>
+                                            </DataGridTextColumn>
+                                            <DataGridCheckBoxColumn Header="Online" Binding="{Binding Online}" Width="60"/>
+                                            <DataGridTextColumn Header="Orchestrator" Binding="{Binding Version}" Width="90"/>
+                                            <DataGridTextColumn Header="Weight" Binding="{Binding Weight}" Width="60"/>
+                                            <DataGridTextColumn Header="Policy" Binding="{Binding Policy}" Width="160"/>
+                                            <DataGridTextColumn Header="Capabilities" Binding="{Binding Capabilities}" Width="220"/>
+                                            <DataGridTextColumn Header="OS" Binding="{Binding Os}" Width="230"/>
+                                            <DataGridTextColumn Header="CPU" Binding="{Binding Cpu}" Width="220"/>
+                                            <DataGridTextColumn Header="CPU %" Binding="{Binding CpuPercent}" Width="60"/>
+                                            <DataGridTextColumn Header="RAM (GB)" Binding="{Binding MemoryGB}" Width="75"/>
+                                            <DataGridTextColumn Header="RAM %" Binding="{Binding MemoryPercent}" Width="60"/>
+                                            <DataGridTextColumn Header="C: size (GB)" Binding="{Binding SystemDriveSizeGB}" Width="90"/>
+                                            <DataGridTextColumn Header="C: free %" Binding="{Binding SystemDriveFreePercent}" Width="75"/>
+                                            <DataGridTextColumn Header="Usage at" Binding="{Binding UsageAt}" Width="120"/>
+                                            <DataGridTextColumn Header="Started at (static)" Binding="{Binding SystemInfoAt}" Width="130"/>
+                                            <DataGridTextColumn Header="Jobs" Binding="{Binding AssignedJobs}" Width="50"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <GroupBox Grid.Row="1" Header="CPU and memory, last 12 hours (blue = CPU, green = RAM; sampled every 5 minutes by each orchestrator)" Margin="0,10,0,0">
+                                        <Canvas x:Name="ServersMetricsCanvas" Height="260" ClipToBounds="True" Background="White"/>
+                                    </GroupBox>
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+                                        <TextBox x:Name="NewServerBox" Width="220" Margin="0,0,8,0"/>
+                                        <Button x:Name="AddServerButton" Content="Add server"/>
+                                        <Button x:Name="RemoveServerButton" Content="Remove selected"/>
+                                    </StackPanel>
+                                </Grid>
+                                <Grid Grid.Column="1" Margin="14,0,0,0">
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                        <GroupBox Header="Selected server">
+                                            <StackPanel>
+                                                <TextBlock x:Name="SelectedServerText" FontWeight="SemiBold" Text="Select a server"/>
+                                                <CheckBox x:Name="ServerActiveCheck" Content="Active (takes jobs)" Margin="0,8,0,0" ToolTip="Inactive: the orchestrator keeps running (heartbeat, peer monitoring, maintenance, disk space guard, mails) but launches no job and is never elected. A new server is Inactive until you activate it here and publish."/>
+                                                <TextBlock Text="Election weight" Margin="0,8,0,0"/>
+                                                <TextBox x:Name="ServerWeightBox"/>
+                                                <TextBlock Text="Only jobs requiring capabilities, comma separated (blank = unrestricted)"/>
+                                                <ComboBox x:Name="ServerPolicyCombo" IsEditable="True">
+                                                    <ComboBoxItem Content=""/>
+                                                    <ComboBoxItem Content="ExchangeOnPrem"/>
+                                                    <ComboBoxItem Content="SharePointOnPrem"/>
+                                                    <ComboBoxItem Content="AD"/>
+                                                    <ComboBoxItem Content="Graph"/>
+                                                    <ComboBoxItem Content="EXO"/>
+                                                    <ComboBoxItem Content="TeamsPowerShell"/>
+                                                    <ComboBoxItem Content="Adaxes"/>
+                                                </ComboBox>
+                                                <Button x:Name="ApplyServerButton" Content="Apply server settings to draft" Background="#E5F1FB" Margin="0,6,0,0"/>
+                                            </StackPanel>
+                                        </GroupBox>
+                                        <GroupBox Grid.Row="1" Header="Configuration versions" Margin="0,10,0,0">
+                                            <Grid>
+                                                <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                                <DataGrid x:Name="VersionsGrid">
+                                                    <DataGrid.Columns>
+                                                        <DataGridTextColumn Header="Version" Binding="{Binding VersionId}" Width="*"/>
+                                                        <DataGridTextColumn Header="Created" Binding="{Binding Created}" Width="135"/>
+                                                    </DataGrid.Columns>
+                                                </DataGrid>
+                                                <Button x:Name="RollbackButton" Grid.Row="1" Content="Rollback to state before selected version" Margin="0,8,0,0"/>
+                                            </Grid>
+                                        </GroupBox>
+                                </Grid>
+                            </Grid>
+                        </TabItem>
                         <TabItem x:Name="ConfigurationSettingsTab" Header="Settings">
                             <Grid Margin="8">
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
@@ -980,90 +1065,6 @@ $xaml = @'
                                         </Grid>
                                     </TabItem>
                                 </TabControl>
-                            </Grid>
-                        </TabItem>
-                        <TabItem x:Name="ConfigurationServersTab" Header="Servers and versions">
-                            <Grid Margin="12">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="390"/></Grid.ColumnDefinitions>
-                                <Grid>
-                                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                    <DataGrid x:Name="ServersGrid" ToolTip="OS, CPU, RAM and drive C: are published by each orchestrator when it starts.">
-                                        <DataGrid.RowStyle>
-                                            <Style TargetType="DataGridRow">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding State}" Value="Inactive"><Setter Property="Foreground" Value="#6B6B6B"/></DataTrigger>
-                                                    <DataTrigger Binding="{Binding SystemDriveLow}" Value="True"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </DataGrid.RowStyle>
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="150"/>
-                                            <DataGridTextColumn Header="State" Binding="{Binding State}" Width="70">
-                                                <DataGridTextColumn.ElementStyle>
-                                                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="Active = takes jobs. Inactive = runs as an orchestrator (heartbeat, monitoring, maintenance) but takes no job. A new server is Inactive."/></Style>
-                                                </DataGridTextColumn.ElementStyle>
-                                            </DataGridTextColumn>
-                                            <DataGridCheckBoxColumn Header="Online" Binding="{Binding Online}" Width="60"/>
-                                            <DataGridTextColumn Header="Orchestrator" Binding="{Binding Version}" Width="90"/>
-                                            <DataGridTextColumn Header="Weight" Binding="{Binding Weight}" Width="60"/>
-                                            <DataGridTextColumn Header="Policy" Binding="{Binding Policy}" Width="160"/>
-                                            <DataGridTextColumn Header="Capabilities" Binding="{Binding Capabilities}" Width="220"/>
-                                            <DataGridTextColumn Header="OS" Binding="{Binding Os}" Width="230"/>
-                                            <DataGridTextColumn Header="CPU" Binding="{Binding Cpu}" Width="220"/>
-                                            <DataGridTextColumn Header="CPU %" Binding="{Binding CpuPercent}" Width="60"/>
-                                            <DataGridTextColumn Header="RAM (GB)" Binding="{Binding MemoryGB}" Width="75"/>
-                                            <DataGridTextColumn Header="RAM %" Binding="{Binding MemoryPercent}" Width="60"/>
-                                            <DataGridTextColumn Header="C: size (GB)" Binding="{Binding SystemDriveSizeGB}" Width="90"/>
-                                            <DataGridTextColumn Header="C: free %" Binding="{Binding SystemDriveFreePercent}" Width="75"/>
-                                            <DataGridTextColumn Header="Usage at" Binding="{Binding UsageAt}" Width="120"/>
-                                            <DataGridTextColumn Header="Started at (static)" Binding="{Binding SystemInfoAt}" Width="130"/>
-                                            <DataGridTextColumn Header="Jobs" Binding="{Binding AssignedJobs}" Width="50"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                    <GroupBox Grid.Row="1" Header="CPU and memory, last 12 hours (blue = CPU, green = RAM; sampled every 5 minutes by each orchestrator)" Margin="0,10,0,0">
-                                        <Canvas x:Name="ServersMetricsCanvas" Height="260" ClipToBounds="True" Background="White"/>
-                                    </GroupBox>
-                                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
-                                        <TextBox x:Name="NewServerBox" Width="220" Margin="0,0,8,0"/>
-                                        <Button x:Name="AddServerButton" Content="Add server"/>
-                                        <Button x:Name="RemoveServerButton" Content="Remove selected"/>
-                                    </StackPanel>
-                                </Grid>
-                                <Grid Grid.Column="1" Margin="14,0,0,0">
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                        <GroupBox Header="Selected server">
-                                            <StackPanel>
-                                                <TextBlock x:Name="SelectedServerText" FontWeight="SemiBold" Text="Select a server"/>
-                                                <CheckBox x:Name="ServerActiveCheck" Content="Active (takes jobs)" Margin="0,8,0,0" ToolTip="Inactive: the orchestrator keeps running (heartbeat, peer monitoring, maintenance, disk space guard, mails) but launches no job and is never elected. A new server is Inactive until you activate it here and publish."/>
-                                                <TextBlock Text="Election weight" Margin="0,8,0,0"/>
-                                                <TextBox x:Name="ServerWeightBox"/>
-                                                <TextBlock Text="Only jobs requiring capabilities, comma separated (blank = unrestricted)"/>
-                                                <ComboBox x:Name="ServerPolicyCombo" IsEditable="True">
-                                                    <ComboBoxItem Content=""/>
-                                                    <ComboBoxItem Content="ExchangeOnPrem"/>
-                                                    <ComboBoxItem Content="SharePointOnPrem"/>
-                                                    <ComboBoxItem Content="AD"/>
-                                                    <ComboBoxItem Content="Graph"/>
-                                                    <ComboBoxItem Content="EXO"/>
-                                                    <ComboBoxItem Content="TeamsPowerShell"/>
-                                                    <ComboBoxItem Content="Adaxes"/>
-                                                </ComboBox>
-                                                <Button x:Name="ApplyServerButton" Content="Apply server settings to draft" Background="#E5F1FB" Margin="0,6,0,0"/>
-                                            </StackPanel>
-                                        </GroupBox>
-                                        <GroupBox Grid.Row="1" Header="Configuration versions" Margin="0,10,0,0">
-                                            <Grid>
-                                                <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                                <DataGrid x:Name="VersionsGrid">
-                                                    <DataGrid.Columns>
-                                                        <DataGridTextColumn Header="Version" Binding="{Binding VersionId}" Width="*"/>
-                                                        <DataGridTextColumn Header="Created" Binding="{Binding Created}" Width="135"/>
-                                                    </DataGrid.Columns>
-                                                </DataGrid>
-                                                <Button x:Name="RollbackButton" Grid.Row="1" Content="Rollback to state before selected version" Margin="0,8,0,0"/>
-                                            </Grid>
-                                        </GroupBox>
-                                </Grid>
                             </Grid>
                         </TabItem>
                     </TabControl>
