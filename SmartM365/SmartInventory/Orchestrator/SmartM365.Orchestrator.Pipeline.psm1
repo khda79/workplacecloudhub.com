@@ -14,6 +14,10 @@ $script:PipelineTerminalStatuses = @(
     'Cancelled',
     'MissingStatus'
 )
+# Requests seen terminal with every job status read: their state no longer changes, so the
+# active-run scan skips them for the life of the process instead of re-reading them each tick.
+$script:PipelineTerminalBatches = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$script:PipelineBatchNamePattern = '^(\d{8}T\d{9}Z)-[0-9a-f]{8}$'
 
 function Get-SmartM365OrchestratorPipelinePaths {
     [CmdletBinding()]
@@ -26,6 +30,7 @@ function Get-SmartM365OrchestratorPipelinePaths {
     $result = [ordered]@{
         RootPath = $root
         SubmissionLockPath = Join-Path -Path $root -ChildPath 'PipelineRuns.lock'
+        ArchiveRootPath = Join-Path -Path $SharedDataFolderPath -ChildPath 'PipelineRuns-Archive'
     }
     if (-not [string]::IsNullOrWhiteSpace($BatchId)) {
         if ($BatchId -notmatch '^[A-Za-z0-9._-]+$' -or $BatchId -in @('.','..')) { throw "Invalid pipeline BatchId '$BatchId'." }
@@ -305,19 +310,34 @@ function Get-SmartM365OrchestratorPipelineRunStatus {
 
 function Get-SmartM365OrchestratorActivePipelineRuns {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$SharedDataFolderPath)
+    param(
+        [Parameter(Mandatory)][string]$SharedDataFolderPath,
+        # Called before each request is read, so a slow share does not starve the heartbeat.
+        [scriptblock]$OnProgress
+    )
 
     $paths = Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath
     if (-not (Test-Path -LiteralPath $paths.RootPath -PathType Container)) { return @() }
+    $cachePrefix = [IO.Path]::GetFullPath($paths.RootPath).TrimEnd('\', '/') + '|'
     $active = @(
         foreach ($folder in @(Get-ChildItem -LiteralPath $paths.RootPath -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
+            if ($script:PipelineTerminalBatches.Contains($cachePrefix + $folder.Name)) { continue }
+            if ($OnProgress) { & $OnProgress }
             $requestPath = (Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath -BatchId $folder.Name).RequestPath
             if (-not (Test-Path -LiteralPath $requestPath -PathType Leaf)) { continue }
             try {
                 $status = Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $SharedDataFolderPath -BatchId $folder.Name
                 if (-not $status.IsTerminal) { $status }
+                elseif (@($status.Jobs | Where-Object Status -eq 'MissingStatus').Count -eq 0) {
+                    # A missing status file may be a transient share error: such a request is re-read.
+                    [void]$script:PipelineTerminalBatches.Add($cachePrefix + $folder.Name)
+                }
             }
-            catch { throw "Invalid pipeline request '$($folder.Name)': $($_.Exception.Message)" }
+            catch {
+                # Archived by another server between the listing and the read.
+                if (-not (Test-Path -LiteralPath $folder.FullName -PathType Container)) { continue }
+                throw "Invalid pipeline request '$($folder.Name)': $($_.Exception.Message)"
+            }
         }
     )
     # Residents process only the oldest active request (FIFO); the others wait in the queue.
@@ -669,7 +689,121 @@ function Stop-SmartM365OrchestratorPipelineRequest {
     }
 }
 
+function Get-SmartM365OrchestratorPipelineBatchCreatedUtc {
+    param([Parameter(Mandatory)][string]$BatchId)
+    if ($BatchId -notmatch $script:PipelineBatchNamePattern) { return $null }
+    [datetime]::ParseExact($Matches[1], 'yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)
+}
+
+function Get-SmartM365OrchestratorPipelineArchiveState {
+    # Read-only view of one request folder: terminal only when the request and every selected
+    # job status are readable and final. Never migrates or rewrites a file.
+    param([Parameter(Mandatory)][string]$BatchPath, [Parameter(Mandatory)][string]$BatchId)
+    $request = (Read-SmartM365JsonDocument -Path (Join-Path $BatchPath 'request.json')).Document
+    if ([string]$request.BatchId -ne $BatchId -or -not $request.PSObject.Properties['SelectedJobs']) { throw 'Pipeline request owner/batch mismatch.' }
+    $times = [Collections.Generic.List[datetime]]::new()
+    foreach ($value in @($request.CreatedAtUtc, $(if ($request.PSObject.Properties['ActivatedAtUtc']) { $request.ActivatedAtUtc }), $(if ($request.PSObject.Properties['Cancellation']) { $request.Cancellation.RequestedAtUtc }))) {
+        $text = ConvertTo-SmartM365OrchestratorPipelineTimestampText $value
+        if ($text) { $times.Add([datetime]::Parse($text, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()) }
+    }
+    foreach ($selectedJob in @($request.SelectedJobs)) {
+        $name = if ($selectedJob -is [string]) { [string]$selectedJob } else { [string]$selectedJob.Name }
+        if ($name -notmatch '^[A-Za-z0-9._-]+$' -or $name -in @('.', '..')) { return [pscustomobject]@{ Terminal = $false; Reason = "invalid job name '$name'" } }
+        $statusPath = Join-Path (Join-Path $BatchPath 'Jobs') ($name + '.json')
+        if (-not (Get-SmartM365JsonReadPath $statusPath -Optional)) { return [pscustomobject]@{ Terminal = $false; Reason = "job $name has no status file" } }
+        $status = (Read-SmartM365JsonDocument -Path $statusPath).Document
+        if ([string]$status.Status -notin $script:PipelineTerminalStatuses -or [string]$status.Status -eq 'MissingStatus') {
+            return [pscustomobject]@{ Terminal = $false; Reason = "job $name is $($status.Status)" }
+        }
+        $text = if ($status.PSObject.Properties['UpdatedAtUtc']) { ConvertTo-SmartM365OrchestratorPipelineTimestampText $status.UpdatedAtUtc } else { '' }
+        if ($text) { $times.Add([datetime]::Parse($text, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()) }
+    }
+    if ($times.Count -eq 0) { return [pscustomobject]@{ Terminal = $false; Reason = 'no timestamp' } }
+    [pscustomobject]@{ Terminal = $true; Reason = ''; LastActivityUtc = @($times | Sort-Object -Descending)[0] }
+}
+
+function Move-SmartM365OrchestratorPipelineRunsToArchive {
+    # Moves requests ended more than ArchiveAfterDays ago from PipelineRuns to the sibling folder
+    # PipelineRuns-Archive (a rename on the same share), then purges archived requests created
+    # more than RetentionDays ago (0 keeps them). Residents and the GUI no longer read archived
+    # requests on every refresh. Callers run it on one server at a time (shared lock file).
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SharedDataFolderPath,
+        [ValidateRange(1, 3650)][int]$ArchiveAfterDays = 2,
+        [ValidateRange(0, 36500)][int]$RetentionDays = 7,
+        [datetime]$NowUtc = [datetime]::UtcNow,
+        [datetime]$DeadlineUtc = [datetime]::MaxValue,
+        [scriptblock]$OnProgress,
+        [int]$LockTimeoutSeconds = 5
+    )
+
+    $paths = Get-SmartM365OrchestratorPipelinePaths -SharedDataFolderPath $SharedDataFolderPath
+    $result = [pscustomobject]@{
+        Archived = 0; Purged = 0; KeptActive = 0; KeptRecent = 0; KeptUnreadable = 0; Failures = 0
+        BudgetExhausted = $false; Messages = [Collections.Generic.List[string]]::new()
+    }
+    if ($RetentionDays -gt 0 -and $RetentionDays -le $ArchiveAfterDays) { throw 'RetentionDays must exceed ArchiveAfterDays.' }
+    $archiveCutoffUtc = $NowUtc.ToUniversalTime().AddDays(-1 * $ArchiveAfterDays)
+    $cachePrefix = [IO.Path]::GetFullPath($paths.RootPath).TrimEnd('\', '/') + '|'
+
+    if (Test-Path -LiteralPath $paths.RootPath -PathType Container) {
+        foreach ($folder in @(Get-ChildItem -LiteralPath $paths.RootPath -Directory -Force -ErrorAction Stop | Sort-Object Name)) {
+            if ([datetime]::UtcNow -ge $DeadlineUtc) { $result.BudgetExhausted = $true; break }
+            if ($OnProgress) { & $OnProgress }
+            $createdUtc = Get-SmartM365OrchestratorPipelineBatchCreatedUtc -BatchId $folder.Name
+            if ($null -eq $createdUtc) { continue }
+            # Folders are sorted by creation time: every later request is too recent as well.
+            if ($createdUtc -ge $archiveCutoffUtc) { break }
+            if ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint) { $result.KeptUnreadable++; $result.Messages.Add("$($folder.Name): linked folder kept"); continue }
+            try { $state = Get-SmartM365OrchestratorPipelineArchiveState -BatchPath $folder.FullName -BatchId $folder.Name }
+            catch { $result.KeptUnreadable++; $result.Messages.Add("$($folder.Name): kept, unreadable ($($_.Exception.Message))"); continue }
+            if (-not $state.Terminal) { $result.KeptActive++; continue }
+            if ($state.LastActivityUtc -ge $archiveCutoffUtc) { $result.KeptRecent++; continue }
+            # Control.lock or a job status lock means a writer is active. JSON transport locks stay
+            # on disk after a migration and only block the move while a handle is really open.
+            if (@(Get-ChildItem -LiteralPath $folder.FullName -Recurse -Force -File -Filter '*.lock' -ErrorAction Stop | Where-Object Name -notlike '*.transport.lock').Count -gt 0) { $result.KeptActive++; continue }
+
+            $destination = Join-Path $paths.ArchiveRootPath $folder.Name
+            if (Test-Path -LiteralPath $destination) { $result.Failures++; $result.Messages.Add("$($folder.Name): already present in the archive; left in place"); continue }
+            if (-not (Test-Path -LiteralPath $paths.ArchiveRootPath -PathType Container)) { New-Item -ItemType Directory -Path $paths.ArchiveRootPath -Force | Out-Null }
+            # Same lock as submissions and cancellations: their active-request scan never sees a half-moved folder.
+            try { $lock = Enter-SmartM365OrchestratorPipelineLock -Path $paths.SubmissionLockPath -TimeoutSeconds $LockTimeoutSeconds }
+            catch { $result.Messages.Add('Pipeline submission lock busy; archiving resumes on the next pass.'); break }
+            try {
+                [IO.Directory]::Move($folder.FullName, $destination)
+                [void]$script:PipelineTerminalBatches.Remove($cachePrefix + $folder.Name)
+                $result.Archived++
+            }
+            catch { $result.Failures++; $result.Messages.Add("$($folder.Name): move failed ($($_.Exception.Message))") }
+            finally {
+                $lock.Dispose()
+                Remove-Item -LiteralPath $paths.SubmissionLockPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    if ($RetentionDays -le 0 -or $result.BudgetExhausted -or -not (Test-Path -LiteralPath $paths.ArchiveRootPath -PathType Container)) { return $result }
+    $purgeCutoffUtc = $NowUtc.ToUniversalTime().AddDays(-1 * $RetentionDays)
+    foreach ($folder in @(Get-ChildItem -LiteralPath $paths.ArchiveRootPath -Directory -Force -ErrorAction Stop | Sort-Object Name)) {
+        if ([datetime]::UtcNow -ge $DeadlineUtc) { $result.BudgetExhausted = $true; break }
+        if ($OnProgress) { & $OnProgress }
+        $createdUtc = Get-SmartM365OrchestratorPipelineBatchCreatedUtc -BatchId $folder.Name
+        if ($null -eq $createdUtc) { continue }
+        if ($createdUtc -ge $purgeCutoffUtc) { break }
+        # Never delete through a link: a reparse point anywhere in the folder keeps it.
+        if (($folder.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            @(Get-ChildItem -LiteralPath $folder.FullName -Recurse -Force -Attributes ReparsePoint -ErrorAction Stop).Count -gt 0) {
+            $result.Failures++; $result.Messages.Add("$($folder.Name): archived folder contains a link; not purged"); continue
+        }
+        try { Remove-Item -LiteralPath $folder.FullName -Recurse -Force -ErrorAction Stop; $result.Purged++ }
+        catch { $result.Failures++; $result.Messages.Add("$($folder.Name): purge failed ($($_.Exception.Message))") }
+    }
+    $result
+}
+
 Export-ModuleMember -Function @(
+    'Move-SmartM365OrchestratorPipelineRunsToArchive',
     'Test-SmartM365OrchestratorPipelineCancellation',
     'Get-SmartM365OrchestratorPipelineCancellationReadiness',
     'Enter-SmartM365OrchestratorPipelineLaunchGuard',

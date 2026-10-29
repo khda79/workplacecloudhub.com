@@ -5,6 +5,9 @@ Set-StrictMode -Version 2.0
 if ($PSVersionTable.PSEdition -eq 'Desktop') {
     Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -Global -ErrorAction Stop
 }
+# Per-process memory of parent directories verified unlinked (Assert-SmartM365JsonUnlinkedPath).
+$script:UnlinkedDirectoryCache = @{}
+$script:UnlinkedDirectoryCacheSeconds = 300
 
 function Get-SmartM365JsonNames {
     [CmdletBinding()]
@@ -145,15 +148,32 @@ function Assert-SmartM365JsonUnlinkedPath {
     }
     $cursor = [IO.Path]::GetFullPath($Path)
     $volumeRoot = [IO.Path]::GetPathRoot($cursor).TrimEnd('\', '/')
+    $leaf = $cursor
+    # The target itself is always inspected. Parent directories found unlinked are trusted for
+    # UnlinkedDirectoryCacheSeconds: a scan of many files on a share does not re-walk every
+    # parent with network calls. A cached entry carries the time its whole chain was verified.
+    $chainVerifiedUtc = [datetime]::UtcNow
+    $verifiedDirectories = [Collections.Generic.List[string]]::new()
     while ($cursor) {
+        if ($cursor -ne $leaf -and $script:UnlinkedDirectoryCache.ContainsKey($cursor)) {
+            $cachedUtc = [datetime]$script:UnlinkedDirectoryCache[$cursor]
+            if (([datetime]::UtcNow - $cachedUtc).TotalSeconds -lt $script:UnlinkedDirectoryCacheSeconds) {
+                $chainVerifiedUtc = $cachedUtc
+                break
+            }
+        }
         if (Test-Path -LiteralPath $cursor) {
             $item = Get-Item -LiteralPath $cursor -Force -ErrorAction Stop
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Linked path is not eligible for JSON migration: $cursor" }
+            if ($cursor -ne $leaf -and $item.PSIsContainer) { $verifiedDirectories.Add($cursor) }
         }
         if ($cursor.TrimEnd('\', '/') -eq $volumeRoot) { break }
         $parent = [IO.Path]::GetDirectoryName($cursor)
         if ($parent -eq $cursor) { break }
         $cursor = $parent
+    }
+    if ($script:UnlinkedDirectoryCacheSeconds -gt 0) {
+        foreach ($directory in $verifiedDirectories) { $script:UnlinkedDirectoryCache[$directory] = $chainVerifiedUtc }
     }
 }
 

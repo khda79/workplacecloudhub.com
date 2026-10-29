@@ -412,10 +412,24 @@ function Get-SmartM365OrchestratorRecentPipelineRuns {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$SharedDataFolderPath, [int]$Count = 20)
     $root = Join-Path $SharedDataFolderPath 'PipelineRuns'
-    if (-not (Test-Path -LiteralPath $root)) { return @() }
+    # Requests ended for a while are moved to PipelineRuns-Archive by the residents; the history
+    # still lists them, newest first, without reading the folders it does not show.
+    $archiveRoot = Join-Path $SharedDataFolderPath 'PipelineRuns-Archive'
+    $foldersByName = @{}
+    foreach ($candidateRoot in @($archiveRoot, $root)) {
+        if (-not (Test-Path -LiteralPath $candidateRoot)) { continue }
+        # The live folder wins over an archived copy of the same request.
+        foreach ($folder in @(Get-ChildItem -LiteralPath $candidateRoot -Directory -ErrorAction SilentlyContinue)) { $foldersByName[$folder.Name] = $folder }
+    }
+    if ($foldersByName.Count -eq 0) { return @() }
     # Direct read-only reads: the pipeline module resolves and validates request.json once per
     # job status, which costs about one second per batch on a shared folder.
-    $rows = @(foreach ($folder in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First $Count)) {
+    $rows = @(foreach ($folder in @($foldersByName.Values | Sort-Object Name -Descending | Select-Object -First $Count)) {
+        if (-not (Test-Path -LiteralPath $folder.FullName)) {
+            # Archived between the listing and the read.
+            $archived = Get-Item -LiteralPath (Join-Path $archiveRoot $folder.Name) -ErrorAction SilentlyContinue
+            if ($null -ne $archived) { $folder = $archived }
+        }
         $request = Read-InsightsJson -Path (Join-Path $folder.FullName 'request.json')
         if ($null -eq $request -or [string](Get-InsightsProperty $request 'BatchId' '') -ne $folder.Name) {
             [pscustomobject]@{ BatchId = $folder.Name; Selection = ''; Created = ''; Status = 'Unreadable'; Jobs = 0; Pending = 0; Failed = 0; RequestedBy = ''; JobRows = @() }

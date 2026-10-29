@@ -75,6 +75,11 @@
   "OrchestratorLogRetentionDays": 30,
   "JobLogRetentionDays": 30,
   "JobRunsCsvRetentionDays": 90,
+  "OrchestratorTranscriptEnabled": true,
+  "OrchestratorTranscriptRetentionDays": 14,
+  "PipelineRunArchiveDays": 2,
+  "PipelineRunArchiveRetentionDays": 7,
+  "MailHtmlCopyRetentionHours": 24,
   "AuthenticodeInstallTrustedCertificates": true,
   "AuthenticodeTrustedCertificatePaths": [
     "..\\..\\..\\Certificates\\workplacecloudhub.com-CodeSigning-D70ECB7B00377EBFB76B304C08DFC6620584E114.cer"

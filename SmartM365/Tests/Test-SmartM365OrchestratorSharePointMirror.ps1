@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline tests for the orchestrator SharePoint operational-folder mirror.
 .VERSION
-1.0.3
+1.0.4
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -188,6 +188,30 @@ try {
     & $mirrorModule { $script:ThrowSnapshot = $true; Invoke-OrchestratorSharePointMirror; $script:ThrowSnapshot = $false }
     Assert-True -Condition ((& $mirrorModule { $script:Deletes.Count }) -eq $deleteCountBeforeFailure) -Message 'Incomplete scan triggered a remote deletion.'
     Assert-True -Condition ((Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash -eq $stateHashBeforeFailure) -Message 'Incomplete scan changed the valid mirror state.'
+
+    # A request moved to PipelineRuns-Archive (not mirrored) loses its remote copy; a request
+    # folder that merely disappeared keeps it.
+    & $mirrorModule {
+        param($Root)
+        $script:Settings | Add-Member NoteProperty PipelineRunsFolderPath (Join-Path $Root 'PipelineRuns')
+        $script:Settings | Add-Member NoteProperty PipelineRunsArchiveFolderPath (Join-Path $Root 'PipelineRuns-Archive')
+        $script:Settings | Add-Member NoteProperty ElectionClaimRetentionMaxSecondsPerRun 120
+    } $sharedRoot
+    New-Item -ItemType Directory -Path (Join-Path $sharedRoot 'PipelineRuns\batch-2') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $sharedRoot 'PipelineRuns\batch-2\request.json') -Value '{"BatchId":"batch-2"}' -Encoding utf8
+    & $mirrorModule { Invoke-OrchestratorSharePointMirror }
+    $deletesBeforeArchive = & $mirrorModule { $script:Deletes.Count }
+    New-Item -ItemType Directory -Path (Join-Path $sharedRoot 'PipelineRuns-Archive') -Force | Out-Null
+    Move-Item -LiteralPath (Join-Path $sharedRoot 'PipelineRuns\batch-1') -Destination (Join-Path $sharedRoot 'PipelineRuns-Archive\batch-1')
+    Remove-Item -LiteralPath (Join-Path $sharedRoot 'PipelineRuns\batch-2') -Recurse -Force
+    & $mirrorModule { Invoke-OrchestratorSharePointMirror }
+    $archiveDeletes = @(& $mirrorModule { param($Skip) @($script:Deletes.ToArray() | Select-Object -Skip $Skip) } $deletesBeforeArchive)
+    Assert-True -Condition ($archiveDeletes.Count -eq 2 -and @($archiveDeletes | Where-Object { $_ -notlike '*\PipelineRuns\batch-1\*' }).Count -eq 0) -Message "Archived request remote copies were not deleted exactly: $($archiveDeletes -join ', ')."
+    $mirrorState = Get-Content -LiteralPath $statePath -Raw
+    Assert-True -Condition ($mirrorState -notmatch 'PipelineRuns/batch-1/' -and $mirrorState -match 'PipelineRuns/batch-2/request\.json') -Message 'Mirror state did not drop the archived request or dropped the missing one.'
+    & $mirrorModule { Invoke-OrchestratorSharePointMirror }
+    Assert-True -Condition ((& $mirrorModule { $script:Deletes.Count }) -eq ($deletesBeforeArchive + 2)) -Message 'Archived request deletion was repeated or a missing request was deleted remotely.'
+    Assert-True -Condition (@(& $mirrorModule { $script:Logs.ToArray() } | Where-Object { $_ -like '*archivedRequestFilesDeleted=2*' }).Count -eq 1) -Message 'Archived request deletions were not reported in the mirror log.'
 
     # Execute the actual finalization call, with only remote operations mocked.
     $finalCall = $ast.FindAll({ param($node)

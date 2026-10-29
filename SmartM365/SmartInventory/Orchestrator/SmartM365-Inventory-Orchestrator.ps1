@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.73
+1.5.74
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.73"
+$ScriptVersion = "1.5.74"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -717,10 +717,33 @@ function Invoke-OrchestratorSharePointMirror {
         $claimPurgeDeadline = (Get-Date).AddSeconds([int]$script:Settings.ElectionClaimRetentionMaxSecondsPerRun)
         $claimsDeleted = 0
         $claimsDeferred = 0
+        $archivedRequestFilesDeleted = 0
+        $archivedBatches = @{}
         foreach ($relativePath in @($previousByPath.Keys)) {
             if ($currentByPath.ContainsKey($relativePath)) { continue }
             $previous = $previousByPath[$relativePath]
             if ($snapshot.DeferredPaths -contains $relativePath) { $nextByPath[$relativePath] = $previous; continue }
+            if ($relativePath -match '^DATA-ALL/Orchestrator/PipelineRuns/([^/]+)/') {
+                # A request moved to PipelineRuns-Archive (not mirrored): remove its remote copy too,
+                # within the same budget. Only when the archived folder exists and the live one is gone.
+                $batchId = $Matches[1]
+                if (-not $archivedBatches.ContainsKey($batchId)) {
+                    $archivedBatches[$batchId] = (Test-Path -LiteralPath (Join-Path $script:Settings.PipelineRunsArchiveFolderPath $batchId) -PathType Container) -and
+                        -not (Test-Path -LiteralPath (Join-Path $script:Settings.PipelineRunsFolderPath $batchId))
+                }
+                if ($archivedBatches[$batchId]) {
+                    Update-OrchestratorHeartbeatDuringLongOperation
+                    if ((Get-Date) -ge $claimPurgeDeadline) { $nextByPath[$relativePath] = $previous; $claimsDeferred++; continue }
+                    if (Invoke-OrchestratorSharePointDelete -LocalFilePath ([string]$previous.LocalFilePath) -Reason 'archived pipeline request') {
+                        $archivedRequestFilesDeleted++
+                    }
+                    else {
+                        $nextByPath[$relativePath] = $previous
+                        $failed++
+                    }
+                    continue
+                }
+            }
             if ($claimRetentionDays -gt 0 -and (Test-OrchestratorExpiredClaimRelativePath -RelativePath $relativePath -CutoffUtc $claimCutoffUtc)) {
                 # The local claim was removed by claim retention: remove the mirrored copy too, within a time budget.
                 Update-OrchestratorHeartbeatDuringLongOperation
@@ -763,7 +786,7 @@ function Invoke-OrchestratorSharePointMirror {
 
         Save-OrchestratorSharePointMirrorState -Path $script:Settings.SharePointMirrorStatePath -Files @($nextByPath.Values)
         $level = if ($failed -gt 0 -or $folderFailures -gt 0) { 'ERROR' } else { 'INFO' }
-        Write-OrchestratorLog -Message ("SharePoint operational mirror complete: folders={0}; files={1}; uploaded={2}; unchanged={3}; expiredLeasesDeleted={4}; expiredClaimsDeleted={5}; expiredClaimsDeferred={6}; folderFailures={7}; fileFailures={8}." -f @($snapshot.Folders).Count, @($snapshot.Files).Count, $uploaded, $unchanged, $deleted, $claimsDeleted, $claimsDeferred, $folderFailures, $failed) -Level $level
+        Write-OrchestratorLog -Message ("SharePoint operational mirror complete: folders={0}; files={1}; uploaded={2}; unchanged={3}; expiredLeasesDeleted={4}; expiredClaimsDeleted={5}; archivedRequestFilesDeleted={6}; deletionsDeferred={7}; folderFailures={8}; fileFailures={9}." -f @($snapshot.Folders).Count, @($snapshot.Files).Count, $uploaded, $unchanged, $deleted, $claimsDeleted, $archivedRequestFilesDeleted, $claimsDeferred, $folderFailures, $failed) -Level $level
     }
     catch {
         Write-OrchestratorLog -Message ("SharePoint operational mirror failed safely; no remote cleanup was inferred from the incomplete scan: {0}" -f $_.Exception.Message) -Level ERROR
@@ -5104,7 +5127,9 @@ function Repair-OrchestratorPipelineOrphanStatus {
 
 function Update-OrchestratorPipelineRequests {
     $pending = @{}
-    $activeRuns = @(Get-SmartM365OrchestratorActivePipelineRuns -SharedDataFolderPath $script:Settings.SharedDataFolderPath)
+    # Terminal requests are skipped once seen (pipeline module cache); the heartbeat stays fresh
+    # while the remaining requests are read on a slow share.
+    $activeRuns = @(Get-SmartM365OrchestratorActivePipelineRuns -SharedDataFolderPath $script:Settings.SharedDataFolderPath -OnProgress { Update-OrchestratorHeartbeatDuringLongOperation })
     if ($activeRuns.Count -eq 0) {
         $script:PipelinePending = $pending
         return
@@ -7256,7 +7281,8 @@ function Invoke-RetentionCleanup {
     $targets = @(
         @{ Folder = $script:Settings.OrchestratorLogFolderPath; Filter = 'SmartM365-Inventory-Orchestrator_*.log'; Days = $script:Settings.OrchestratorLogRetentionDays; Recurse = $false },
         @{ Folder = $script:Settings.JobLogFolderPath; Filter = 'Job-*.log'; Days = $script:Settings.JobLogRetentionDays; Recurse = $false },
-        @{ Folder = $script:Settings.JobRunsFolderPath; Filter = 'Orchestrator_JobRuns_*.csv'; Days = $script:Settings.JobRunsCsvRetentionDays; Recurse = $false }
+        @{ Folder = $script:Settings.JobRunsFolderPath; Filter = 'Orchestrator_JobRuns_*.csv'; Days = $script:Settings.JobRunsCsvRetentionDays; Recurse = $false },
+        @{ Folder = $script:Settings.OrchestratorTranscriptFolderPath; Filter = ($ScriptName + '_*.transcript.log'); Days = $script:Settings.OrchestratorTranscriptRetentionDays; Recurse = $false }
     )
     foreach ($target in $targets) {
         if ($target.Days -le 0) { continue }
@@ -7264,6 +7290,7 @@ function Invoke-RetentionCleanup {
         $cutoff = (Get-Date).AddDays(-1 * $target.Days)
         $items = @(Get-ChildItem -Path $target.Folder -File -Filter $target.Filter -Recurse:($target.Recurse) -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt $cutoff })
         foreach ($item in $items) {
+            Update-OrchestratorHeartbeatDuringLongOperation
             try {
                 Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop
                 Write-OrchestratorLog -Message ("Retention: removed {0}" -f $item.FullName)
@@ -7315,6 +7342,7 @@ function Invoke-OrchestratorClaimRetention {
     $deadline = (Get-Date).AddSeconds([int]$script:Settings.ElectionClaimRetentionMaxSecondsPerRun)
     $removedClaims = 0
     $removedFiles = 0
+    $removedStaleLeases = 0
     $keptActive = 0
     $keptUnreadable = 0
     $failures = 0
@@ -7359,6 +7387,26 @@ function Invoke-OrchestratorClaimRetention {
                 if (-not $groupFailed) { $removedClaims++ }
             }
         }
+
+        # Expired concurrency leases are renamed <key>.json.stale.<LeaseId>.json on takeover and
+        # never read again: same retention as the claims, from their last write.
+        if (-not $budgetExhausted -and (Test-Path -LiteralPath $script:Settings.ConcurrencyLeasesPath -PathType Container)) {
+            $leaseCutoff = $Now.AddDays(-1 * $retentionDays)
+            foreach ($item in @(Get-ChildItem -LiteralPath $script:Settings.ConcurrencyLeasesPath -File -Force -ErrorAction Stop |
+                Where-Object { $_.Name -match '\.json\.stale\.[0-9a-f]{32}\.json(?:\.txt)?$' -and $_.LastWriteTime -lt $leaseCutoff })) {
+                Update-OrchestratorHeartbeatDuringLongOperation
+                if ((Get-Date) -ge $deadline) { $budgetExhausted = $true; break }
+                try {
+                    Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop
+                    $removedStaleLeases++
+                }
+                catch [System.Management.Automation.ItemNotFoundException] { continue }
+                catch {
+                    $failures++
+                    Write-OrchestratorLog -Message ("Claim retention: failed to remove expired lease archive {0}: {1}" -f $item.FullName, $_.Exception.Message) -Level WARN
+                }
+            }
+        }
     }
     catch {
         Write-OrchestratorLog -Message ("Claim retention stopped safely without further deletion: {0}" -f $_.Exception.Message) -Level ERROR
@@ -7367,9 +7415,97 @@ function Invoke-OrchestratorClaimRetention {
         Exit-OrchestratorSharePointMirrorLock -LockStream $lock -Path $lockPath
     }
 
-    if ($removedFiles -gt 0 -or $keptActive -gt 0 -or $keptUnreadable -gt 0 -or $failures -gt 0 -or $budgetExhausted) {
+    if ($removedFiles -gt 0 -or $removedStaleLeases -gt 0 -or $keptActive -gt 0 -or $keptUnreadable -gt 0 -or $failures -gt 0 -or $budgetExhausted) {
         $level = if ($failures -gt 0 -or $keptUnreadable -gt 0) { 'WARN' } else { 'INFO' }
-        Write-OrchestratorLog -Message ("Claim retention ({0} days, cutoff {1}): occurrences removed={2}; files removed={3}; kept non-terminal/still-safe={4}; kept unreadable={5}; failures={6}; budget exhausted={7}." -f $retentionDays, $cutoffUtc.ToString('o'), $removedClaims, $removedFiles, $keptActive, $keptUnreadable, $failures, $budgetExhausted) -Level $level
+        Write-OrchestratorLog -Message ("Claim retention ({0} days, cutoff {1}): occurrences removed={2}; files removed={3}; expired lease archives removed={4}; kept non-terminal/still-safe={5}; kept unreadable={6}; failures={7}; budget exhausted={8}." -f $retentionDays, $cutoffUtc.ToString('o'), $removedClaims, $removedFiles, $removedStaleLeases, $keptActive, $keptUnreadable, $failures, $budgetExhausted) -Level $level
+    }
+}
+
+function Invoke-OrchestratorPipelineRunArchive {
+    # Once per hour and under a shared lock (one server at a time), moves pipeline requests ended
+    # more than PipelineRunArchiveDays ago to PipelineRuns-Archive and purges archived requests
+    # older than PipelineRunArchiveRetentionDays. Residents then stop re-reading old requests.
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+
+    if ([int]$script:Settings.PipelineRunArchiveDays -le 0) { return }
+    if ($script:LastPipelineRunArchiveRun -ne [datetime]::MinValue -and ($Now - $script:LastPipelineRunArchiveRun).TotalMinutes -lt 60) { return }
+    $script:LastPipelineRunArchiveRun = $Now
+    if (-not (Test-Path -LiteralPath $script:Settings.PipelineRunsFolderPath -PathType Container)) { return }
+
+    $lockPath = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath 'Orchestrator-PipelineRunArchive.lock'
+    $lock = Enter-OrchestratorSharePointMirrorLock -Path $lockPath -StaleMinutes 120
+    if ($null -eq $lock) { return }
+    try {
+        $result = Move-SmartM365OrchestratorPipelineRunsToArchive -SharedDataFolderPath $script:Settings.SharedDataFolderPath -ArchiveAfterDays ([int]$script:Settings.PipelineRunArchiveDays) -RetentionDays ([int]$script:Settings.PipelineRunArchiveRetentionDays) -NowUtc $Now.ToUniversalTime() -DeadlineUtc ([datetime]::UtcNow.AddSeconds([int]$script:Settings.ElectionClaimRetentionMaxSecondsPerRun)) -OnProgress { Update-OrchestratorHeartbeatDuringLongOperation }
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Pipeline request archiving stopped safely: {0}" -f $_.Exception.Message) -Level ERROR
+        return
+    }
+    finally {
+        Exit-OrchestratorSharePointMirrorLock -LockStream $lock -Path $lockPath
+    }
+    # Once per message and process: a request kept for the same reason is not reported every hour.
+    foreach ($message in @($result.Messages)) { Write-OrchestratorRuntimeUpdateWarning -Key ("pipeline-archive:{0}" -f $message) -Message ("Pipeline request archiving: {0}" -f $message) -Now $Now }
+    if ($result.Archived -gt 0 -or $result.Purged -gt 0 -or $result.BudgetExhausted) {
+        $level = if ($result.Failures -gt 0) { 'WARN' } else { 'INFO' }
+        Write-OrchestratorLog -Message ("Pipeline request archiving (after {0} days, purge after {1} days): archived={2}; purged={3}; kept active={4}; kept recent={5}; kept unreadable={6}; failures={7}; budget exhausted={8}." -f $script:Settings.PipelineRunArchiveDays, $script:Settings.PipelineRunArchiveRetentionDays, $result.Archived, $result.Purged, $result.KeptActive, $result.KeptRecent, $result.KeptUnreadable, $result.Failures, $result.BudgetExhausted) -Level $level
+    }
+}
+
+function Invoke-OrchestratorMailHtmlRetention {
+    # Once per hour and under a shared lock (one server at a time), removes the mail HTML copies
+    # (*.htm, written by the common mail helper next to each script log) older than
+    # MailHtmlCopyRetentionHours anywhere under LOG-ALL, for every script. The GUI only lists the
+    # last 24 hours, and SharePoint copies were uploaded directly (no mirror state): a local
+    # removal never deletes a remote copy. Links are not followed.
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+
+    $hours = [int]$script:Settings.MailHtmlCopyRetentionHours
+    $root = [string]$script:Settings.LogAllRootPath
+    if ($hours -le 0 -or [string]::IsNullOrWhiteSpace($root)) { return }
+    if ($script:LastMailHtmlRetentionRun -ne [datetime]::MinValue -and ($Now - $script:LastMailHtmlRetentionRun).TotalMinutes -lt 60) { return }
+    $script:LastMailHtmlRetentionRun = $Now
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) { return }
+
+    $lockPath = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath 'Orchestrator-MailHtmlRetention.lock'
+    $lock = Enter-OrchestratorSharePointMirrorLock -Path $lockPath -StaleMinutes 120
+    if ($null -eq $lock) { return }
+    $cutoff = $Now.AddHours(-1 * $hours)
+    $deadline = (Get-Date).AddSeconds([int]$script:Settings.ElectionClaimRetentionMaxSecondsPerRun)
+    $removed = 0
+    $failures = 0
+    $budgetExhausted = $false
+    try {
+        $options = [IO.EnumerationOptions]::new()
+        $options.RecurseSubdirectories = $true
+        $options.IgnoreInaccessible = $true
+        $options.AttributesToSkip = [IO.FileAttributes]::ReparsePoint
+        # Lazy enumeration: the heartbeat and the time budget apply while the share is walked.
+        foreach ($path in [IO.Directory]::EnumerateFiles($root, '*.htm', $options)) {
+            Update-OrchestratorHeartbeatDuringLongOperation
+            if ((Get-Date) -ge $deadline) { $budgetExhausted = $true; break }
+            if (-not [IO.Path]::GetExtension($path).Equals('.htm', [StringComparison]::OrdinalIgnoreCase)) { continue }
+            try {
+                if ([IO.File]::GetLastWriteTime($path) -ge $cutoff) { continue }
+                [IO.File]::Delete($path)
+                $removed++
+            }
+            catch {
+                $failures++
+                Write-OrchestratorRuntimeUpdateWarning -Key ("mail-html-retention:{0}" -f $path) -Message ("Mail HTML copy retention: failed to remove {0}: {1}" -f $path, $_.Exception.Message) -Now $Now
+            }
+        }
+    }
+    catch {
+        Write-OrchestratorLog -Message ("Mail HTML copy retention stopped safely: {0}" -f $_.Exception.Message) -Level ERROR
+    }
+    finally {
+        Exit-OrchestratorSharePointMirrorLock -LockStream $lock -Path $lockPath
+    }
+    if ($removed -gt 0 -or $failures -gt 0 -or $budgetExhausted) {
+        $level = if ($failures -gt 0) { 'WARN' } else { 'INFO' }
+        Write-OrchestratorLog -Message ("Mail HTML copy retention ({0} h, LOG-ALL): removed={1}; failures={2}; budget exhausted={3}." -f $hours, $removed, $failures, $budgetExhausted) -Level $level
     }
 }
 
@@ -7537,6 +7673,9 @@ $script:LastLongOperationHeartbeat = [datetime]::MinValue
 # Published in the heartbeat: Starting (lock held, re-adoption pending), Running (tick loop), Recycling (planned exit).
 $script:HeartbeatLifecycle = 'Starting'
 $script:LastClaimRetentionRun = [datetime]::MinValue
+$script:LastPipelineRunArchiveRun = [datetime]::MinValue
+$script:LastMailHtmlRetentionRun = [datetime]::MinValue
+$script:TranscriptStarted = $false
 $script:DependencyFreshCache = @{}
 $script:LastPeerMonitoringCheckTime = [datetime]::MinValue
 $script:LastSharePointConfigWarningKey = ''
@@ -7725,6 +7864,7 @@ try {
         ElectionClaimsPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Claims')
         ConcurrencyLeasesPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Concurrency')
         PipelineRunsFolderPath = (Join-Path -Path $sharedDataFolder -ChildPath 'PipelineRuns')
+        PipelineRunsArchiveFolderPath = (Join-Path -Path $sharedDataFolder -ChildPath 'PipelineRuns-Archive')
         SharePointMirrorStatePath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator-SharePointMirrorState.json')
         SharePointMirrorLockPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Orchestrator-SharePointMirror.lock')
         ElectionPlanPath = (Join-Path -Path $sharedDataFolder -ChildPath 'Election\Orchestrator-ElectionPlan.json')
@@ -7828,6 +7968,24 @@ try {
         OrchestratorLogRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorLogRetentionDays' -DefaultValue 30
         JobLogRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'JobLogRetentionDays' -DefaultValue 30
         JobRunsCsvRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'JobRunsCsvRetentionDays' -DefaultValue 90
+        # Mail HTML copies (*.htm written by the common mail helper next to every script log):
+        # removed from the whole LOG-ALL tree after this many hours (0 disables).
+        LogAllRootPath = $(
+            $logAllRoot = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'LogAllRootPath' -DefaultValue '')
+            if ($logAllRoot -match '\{\{[^}]+\}\}') { '' } else { $logAllRoot }
+        )
+        MailHtmlCopyRetentionHours = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'MailHtmlCopyRetentionHours' -DefaultValue 24))
+        OrchestratorTranscriptEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'OrchestratorTranscriptEnabled' -DefaultValue $true
+        OrchestratorTranscriptFolderPath = (Join-Path -Path $logFolder -ChildPath 'Transcripts')
+        OrchestratorTranscriptRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorTranscriptRetentionDays' -DefaultValue 14
+        # 0 disables archiving. Archived requests are purged after the retention (0 keeps them),
+        # which always exceeds the archive delay.
+        PipelineRunArchiveDays = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PipelineRunArchiveDays' -DefaultValue 2))
+        PipelineRunArchiveRetentionDays = $(
+            $archiveDays = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PipelineRunArchiveDays' -DefaultValue 2))
+            $archiveRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PipelineRunArchiveRetentionDays' -DefaultValue 7
+            if ($archiveRetentionDays -le 0) { 0 } else { [math]::Max($archiveDays + 1, $archiveRetentionDays) }
+        )
         MailEnabled = ($mailConfigIssues.Count -eq 0)
         MailConfigIssue = $mailConfigIssueText
     }
@@ -7941,6 +8099,20 @@ try {
         $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=($script:ExitCode); exit $smartM365RunGuard.ExitCode
     }
 
+    # Raw console of this instance (uncaught errors, module warnings and output that never reaches
+    # the orchestrator log), one file per instance. The log stays the reference; the transcript is
+    # kept OrchestratorTranscriptRetentionDays, never uploaded, and the lifecycle guard closes it.
+    if ($script:Settings.OrchestratorTranscriptEnabled -and -not $DryRun) {
+        try {
+            if (-not (Test-Path -LiteralPath $script:Settings.OrchestratorTranscriptFolderPath)) { New-Item -ItemType Directory -Path $script:Settings.OrchestratorTranscriptFolderPath -Force | Out-Null }
+            $transcriptPath = Join-Path -Path $script:Settings.OrchestratorTranscriptFolderPath -ChildPath ("{0}_{1}_{2}_{3}.transcript.log" -f $ScriptName, $env:COMPUTERNAME, (Get-Date).ToString('yyyyMMdd-HHmmss'), $PID)
+            Start-SmartM365RunTranscript -Path $transcriptPath -UseMinimalHeader | Out-Null
+            $script:TranscriptStarted = $true
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Console transcript could not be started; the orchestrator log is unaffected: {0}" -f $_.Exception.Message) -Level WARN
+        }
+    }
     Add-OrchestratorRunTracking
     Write-OrchestratorLog -Message ("{0} v{1} starting (PID {2}, tenant {3}, MaxConcurrency {4}, MaxLifetimeHours {5})." -f $ScriptName, $ScriptVersion, $PID, $Tenant, $script:Settings.MaxConcurrency, $script:Settings.MaxLifetimeHours)
     Write-OrchestratorLog -Message ("Runtime context: server={0}; user={1}; pid={2}; PowerShell={3}; edition={4}; process64bit={5}." -f $env:COMPUTERNAME, (Get-OrchestratorRunUserName), $PID, $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, [Environment]::Is64BitProcess)
@@ -7954,6 +8126,7 @@ try {
     Write-OrchestratorLog -Message ("Authenticode context: enabled={0}; mode={1}; allowedThumbprints={2}; checkCoreModule={3}; checkWindowsPowerShellModule={4}; installTrustedCertificates={5}; trustedCertificatePaths={6}; installRoot={7}; installTrustedPublisher={8}." -f $script:Settings.AuthenticodeValidationEnabled, $script:Settings.AuthenticodeValidationMode, @($script:Settings.AuthenticodeAllowedThumbprints).Count, $script:Settings.AuthenticodeCheckCoreModule, $script:Settings.AuthenticodeCheckWindowsPowerShellModule, $script:Settings.AuthenticodeInstallTrustedCertificates, @($script:Settings.AuthenticodeTrustedCertificatePaths).Count, $script:Settings.AuthenticodeInstallTrustedRoot, $script:Settings.AuthenticodeInstallTrustedPublisher)
     Write-OrchestratorLog -Message ("Peer monitoring context: enabled={0}; jobMonitoring={1}; expectedServers={2}; checkIntervalSeconds={3}; heartbeatStaleMinutes={4}; confirmationChecks={5}; jobStartGraceMinutes={6}; reminderMinutes={7}; recycleGraceMinutes={8}." -f $script:Settings.PeerMonitoringEnabled, $script:Settings.PeerJobMonitoringEnabled, (@($script:Settings.ExpectedOrchestratorServers) -join ', '), $script:Settings.PeerMonitoringCheckIntervalSeconds, $script:Settings.PeerHeartbeatStaleMinutes, $script:Settings.PeerMonitoringConfirmationChecks, $script:Settings.PeerJobStartGraceMinutes, $script:Settings.PeerAlertReminderMinutes, (Get-OrchestratorPeerRecycleGrace))
     Write-OrchestratorLog -Message ("Runtime update context: autoRecycle={0}; checkIntervalSeconds={1}; stableChecks={2}; cooldownMinutes={3}; monitorCoreModule={4}; sendUpdateEmail={5}; baselineOrchestrator={6}; baselineCore={7}." -f $script:Settings.AutoRecycleOnRuntimeUpdate, $script:Settings.RuntimeUpdateCheckIntervalSeconds, $script:Settings.RuntimeUpdateStableChecks, $script:Settings.RuntimeUpdateCooldownMinutes, $script:Settings.MonitorCoreModuleVersion, $script:Settings.SendRuntimeUpdateEmail, $script:RuntimeUpdateBaseline.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion)
+    Write-OrchestratorLog -Message ("Retention context: orchestratorLogDays={0}; jobLogDays={1}; jobRunsCsvDays={2}; transcript={3}; transcriptDays={4}; transcriptFolder={5}; electionClaimDays={6}; pipelineRunArchiveDays={7}; pipelineRunArchiveRetentionDays={8}; mailHtmlCopyHours={9} (LOG-ALL configured={10})." -f $script:Settings.OrchestratorLogRetentionDays, $script:Settings.JobLogRetentionDays, $script:Settings.JobRunsCsvRetentionDays, $script:TranscriptStarted, $script:Settings.OrchestratorTranscriptRetentionDays, $script:Settings.OrchestratorTranscriptFolderPath, $script:Settings.ElectionClaimRetentionDays, $script:Settings.PipelineRunArchiveDays, $script:Settings.PipelineRunArchiveRetentionDays, $script:Settings.MailHtmlCopyRetentionHours, (-not [string]::IsNullOrWhiteSpace([string]$script:Settings.LogAllRootPath)))
     Install-OrchestratorAuthenticodeTrustedCertificates
     if (-not $script:Settings.MailEnabled) {
         Write-OrchestratorLog -Message ("Email notifications are disabled ({0})." -f $script:Settings.MailConfigIssue) -Level WARN
@@ -8101,6 +8274,18 @@ try {
         }
         catch {
             Write-OrchestratorLog -Message ("Claim retention failed without stopping the scheduler: {0}" -f $_.Exception.Message) -Level ERROR
+        }
+        try {
+            Invoke-OrchestratorPipelineRunArchive -Now $now
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Pipeline request archiving failed without stopping the scheduler: {0}" -f $_.Exception.Message) -Level ERROR
+        }
+        try {
+            Invoke-OrchestratorMailHtmlRetention -Now $now
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Mail HTML copy retention failed without stopping the scheduler: {0}" -f $_.Exception.Message) -Level ERROR
         }
         Invoke-OrchestratorPeriodicSharePointUpload -Now $now
         if ($now.Date -ne $lastCleanupDate) {

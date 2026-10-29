@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline pipeline and production-manifest contract tests for the SmartM365 orchestrator.
 .VERSION
-1.2.1
+1.2.2
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -218,6 +218,8 @@ try {
     $scanSelection = Get-SmartM365OrchestratorPipelineSelection -JobsDocument $document -Pipeline Full
     $scanRequest = New-SmartM365OrchestratorPipelineRequest -SharedDataFolderPath $scanRoot -Tenant test -Pipeline Full -Selection $scanSelection -ManifestHash ((Get-FileHash -LiteralPath $scanManifestPath -Algorithm SHA256).Hash)
     Set-SmartM365OrchestratorPipelineJobStatus -SharedDataFolderPath $scanRoot -BatchId $scanRequest.BatchId -JobName Child -Status RetryScheduled -Attempt 1 -OwnerServer SERVER-B -NotBeforeUtc ([datetime]::UtcNow.AddMinutes(10).ToString('o')) | Out-Null
+    # The scan refreshes the shared heartbeat while it reads requests on a slow share.
+    $scanDefinitions = @($scanDefinitions) + 'function Update-OrchestratorHeartbeatDuringLongOperation { $script:LongOperationHeartbeats++ }'
     $scanModule = New-Module -ScriptBlock ([scriptblock]::Create($scanDefinitions -join [Environment]::NewLine))
     $scanResult = & $scanModule {
         param($Root, $ManifestPath, $JobsDocument, $BatchId)
@@ -228,8 +230,10 @@ try {
         $script:Tenant = 'test'
         function script:Write-OrchestratorRuntimeUpdateWarning { param($Key, $Message) }
         function script:Set-OrchestratorPipelineJobStatus { param($BatchId, $JobName, $Status, $Detail) throw "Unexpected rejection: $JobName/$Status/$Detail" }
+        $script:LongOperationHeartbeats = 0
         Update-OrchestratorPipelineRequests
         [pscustomobject]@{
+            Heartbeats = $script:LongOperationHeartbeats
             PendingNames = @($script:PipelinePending.Keys)
             ParentStatus = Get-OrchestratorPipelineDependencyStatus -BatchId $BatchId -JobName Parent
             BatchJobNames = @($script:PipelineBatchJobNames[$BatchId])
@@ -238,6 +242,7 @@ try {
         }
     } $scanRoot $scanManifestPath $document $scanRequest.BatchId
     Assert-True ($scanResult.PendingNames.Count -eq 1 -and $scanResult.PendingNames[0] -eq 'Parent') 'A retry was made runnable before NotBeforeUtc.'
+    Assert-True ($scanResult.Heartbeats -ge 1) 'The pipeline request scan did not refresh the heartbeat while reading requests.'
     Assert-True ($scanResult.ParentStatus -eq 'Pending') 'Shared dependency status was not read from the batch.'
     Assert-True ((@($scanResult.BatchJobNames | Sort-Object) -join ',') -eq 'Child,Parent') 'The request job names were not recorded for the dependency gate.'
     $scanActivated = (Get-SmartM365OrchestratorPipelineRunStatus -SharedDataFolderPath $scanRoot -BatchId $scanRequest.BatchId).ActivatedAtUtc
