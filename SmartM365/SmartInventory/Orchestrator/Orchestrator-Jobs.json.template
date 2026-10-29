@@ -1366,6 +1366,36 @@
       "EstimatedDurationMinutes": 5
     },
     {
+      "Name": "AD-Adaxes-Inventory",
+      "ScriptPath": "ActiveDirectoryInventory\\SmartM365-ActiveDirectory-Adaxes-Inventory.ps1",
+      "Arguments": "-EnableConfiguredExternalActions",
+      "Runtime": "PowerShell7",
+      "LegacyLaunchers": [],
+      "Enabled": false,
+      "Group": "AD",
+      "DependsOn": [],
+      "AllowedServers": [],
+      "TimeoutMinutes": 1380,
+      "MaxRetries": 1,
+      "RetryDelaySeconds": 300,
+      "ContinueOnError": true,
+      "Schedule": {
+        "Type": "Daily",
+        "Times": [
+          "01:30"
+        ],
+        "MissedRunPolicy": "RunOnce",
+        "DaysOfWeek": []
+      },
+      "AssignmentMode": "Elected",
+      "RequiredCapabilities": [
+        "Adaxes",
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "EstimatedDurationMinutes": 15
+    },
+    {
       "Name": "WorkplaceEvidence-Prepare",
       "ScriptPath": "PreparedEvidence\\SmartM365-WorkplaceEvidence-Prepare.ps1",
       "Arguments": "",

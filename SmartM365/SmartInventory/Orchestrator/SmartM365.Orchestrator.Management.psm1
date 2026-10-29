@@ -29,7 +29,7 @@ function Copy-OrchestratorConfigurationSnapshot {
     if ($receipt.SHA256 -ne $sourceDocument.SHA256) { throw 'Configuration source changed while saving version snapshot.' }
 }
 
-$script:ValidCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell')
+$script:ValidCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes')
 $script:ValidDays = @('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')
 
 function ConvertTo-SmartM365OrchestratorHashtable {

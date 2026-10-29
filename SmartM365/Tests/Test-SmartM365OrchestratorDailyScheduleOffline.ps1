@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate the single daily inventory cycle and weekly exceptions offline.
 .VERSION
-1.2.10
+1.2.11
 .NOTES
 Reads the repository template and an optional additional local manifest.
 No tenant initialization, collectors, scheduling, authentication or publication.
@@ -25,6 +25,7 @@ $daily = @{
         'M365-VerifiedDomains-Inventory' = '00:05'
         'AD-Inventory' = '00:10'
         'AD-HealthCheck' = '05:00'
+        'AD-Adaxes-Inventory' = '01:30'
         'M365-ActiveUsers-Inventory' = '00:15'
         'M365-Licences-Inventory' = '00:15'
         'M365-EntraDevices-Inventory' = '00:25'
@@ -95,7 +96,7 @@ $estimates = @{
 # Template defaults for a new installation; a runtime manifest may enable them explicitly.
 $disabledNames = @('M365-BackupProtectedMailboxes-Inventory',
     'M365-BackupPolicyScope-Inventory', 'M365-BackupProtectedSitesAndDrives-Inventory',
-    'M365-PowerBIFabricActivity-Inventory')
+    'M365-PowerBIFabricActivity-Inventory', 'AD-Adaxes-Inventory')
 # LatestOccurrence chain: Name = dependencies | DependencyWaitTimeoutMinutes.
 $chain = @{
         'EXO-Mailboxes-Inventory-Fast' = 'AD-Inventory,M365-ActiveUsers-Inventory|1080'
@@ -116,7 +117,7 @@ foreach ($path in $paths) {
     $document = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
     $validation = Test-SmartM365OrchestratorJobsDocument -Document $document
     Assert-True $validation.Valid ('Invalid jobs manifest: ' + ($validation.Errors -join '; '))
-    if ($isTemplate) { Assert-True ($document.Jobs.Count -eq 55) 'Expected 55 template jobs.' }
+    if ($isTemplate) { Assert-True ($document.Jobs.Count -eq 56) 'Expected 56 template jobs.' }
     if ($isTemplate) {
         # SharePoint Server collectors are manual for now: -Force only, no dependency, no scheduled election.
         foreach ($name in @('SharePointOnPrem-Infrastructure-Inventory', 'SharePointOnPrem-Content-Inventory')) {

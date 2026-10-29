@@ -6,6 +6,7 @@ Active Directory inventory and reporting scripts.
 
 - `SmartM365-ActiveDirectory-Inventory.ps1`: full AD inventory across domains, combined CSV generation, duplicate checks, weekly inventory history, and daily AD computer/user reports.
 - `SmartM365-ActiveDirectory-HealthCheck.ps1`: AD forest health check across domains and domain controllers, with CSV export, mail report, LOG-ALL log/transcript finalization, and SharePoint upload when enabled.
+- `SmartM365-ActiveDirectory-Adaxes-Inventory.ps1`: users' attributes read through Adaxes, including Adaxes virtual attributes (`adm-*`), published as `AD_Adaxes_Users.csv`. See [Adaxes attributes](#adaxes-attributes).
 - Use `SmartM365-ActiveDirectory-Inventory.ps1 -ReportOnly` to regenerate daily reports from existing consolidated inventory CSV files without a live AD scan.
 
 Versions 1.44 (inventory), 1.0.22 (health check), 1.3 (computer enrichment)
@@ -97,3 +98,19 @@ The inventory script can keep one weekly snapshot of the consolidated AD invento
 - When SharePoint upload is enabled, every weekly snapshot file is published under `DATA-ALL/ActiveDirectory/Inventory/WeeklyHistory/<year-week>`, followed by `manifest.json`. The manifest records the publication status so completed weekly snapshots are not uploaded again on every run; an existing snapshot without this status is published automatically.
 - `DeleteTemporaryPerDomainCsv`: defaults to `true`; the current per-domain temporary folder is deleted after consolidation.
 - `TemporaryPerDomainRetentionDays`: defaults to `2`; abandoned timestamped folders under `Not-CSV-Combined` older than this value are deleted at the start of a normal inventory run.
+
+## Adaxes attributes
+
+`SmartM365-ActiveDirectory-Adaxes-Inventory.ps1` (PowerShell 7) reads users through the Adaxes service with the Adaxes PowerShell module (`Get-AdmUser`). Adaxes virtual attributes (`adm-CustomAttribute*`) are stored by Adaxes, not in Active Directory, so this is the only collector that can read them; it is a documented exception to the ActiveDirectory module rule of this folder.
+
+Output: `AD_Adaxes_Users.csv` in `{{DataAllRootPath}}\ActiveDirectory\Adaxes` and `DATA-LAST`, with weekly history. Columns: `TenantKey`, `RunId`, `CollectedAtUtc`, `CollectionStatus`, `IsPartialInventory`, `SourceScriptVersion`, `Domain`, `ObjectGUID`, then one column per configured attribute. Join it to `AD_Users_AllDomains.csv` on `ObjectGUID`, which is unique across the forest and survives renames and moves. Dates are written in UTC ISO 8601, multi-valued attributes are joined with ` | `.
+
+Settings in the private `SmartM365-ActiveDirectory-Adaxes-Inventory.local.json`:
+
+- `AdaxesService`: Adaxes service host name, or a list of host names tried in order. Required; the run fails when it is empty. For each domain, a failed read is retried on the next service; the run then ends with warnings, and the domain fails only when every service failed.
+- `Attributes`: list of `{ "Column": "<CSV column>", "Attribute": "<attribute name>" }`. The column names are plain identifiers and must not repeat the fixed columns. Keep the real attribute mapping in the private file only; the committed template contains neutral examples.
+- `Domains`: domains to read. Empty means every domain of the current forest.
+- `LdapFilter`: defaults to enabled and disabled user accounts without `adminCount=1`. Adaxes cannot build a user object whose `objectClass` the running account cannot read, which typically happens on protected administrator accounts, and such an object stops the read of its whole domain.
+- `NonBlockingDomainErrors`: domains whose read failure is tolerated. The other domains are still published, rows carry `IsPartialInventory=true` and the run ends with warnings. Any other domain failure fails the run and keeps the previous export.
+
+Requirements: the Adaxes PowerShell module (a component of the Adaxes installer; it is not installed automatically) on the collection server, and read access in Adaxes to the configured attributes for the running account. The orchestrator job `AD-Adaxes-Inventory` is disabled in the template and requires the `Adaxes` capability. Use `-ValidateOnly` to read without publishing and `-SelfTest` for the offline contract.

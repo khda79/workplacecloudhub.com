@@ -90,7 +90,7 @@ try {
         $_.FullName -notmatch '[\\/](Tests|TestRuns)[\\/]' -and
         [IO.File]::ReadAllText($_.FullName).Contains('Start-SmartM365InventoryRun -ScriptPath $PSCommandPath')
     })
-    Assert-Lifecycle ($targets.Count -eq 57) 'Approved envelope count changed'
+    Assert-Lifecycle ($targets.Count -eq 56) 'Approved envelope count changed'
     foreach($target in $targets){
         $ast=Read-LifecycleAst $target.FullName
         $outer=@($ast.EndBlock.Statements|Where-Object {$_ -is [Management.Automation.Language.TryStatementAst] -and $_.Finally -and $_.Finally.Extent.Text.Contains('Complete-SmartM365InventoryRun -State')})

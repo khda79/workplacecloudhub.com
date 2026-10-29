@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.69
+1.5.70
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.69"
+$ScriptVersion = "1.5.70"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1174,7 +1174,7 @@ function ConvertTo-NormalizedJob {
     if ($RawJob.PSObject.Properties['RequiredCapabilities'] -and $null -ne $RawJob.RequiredCapabilities) {
         $requiredCapabilities = @($RawJob.RequiredCapabilities | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
     }
-    $validCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell')
+    $validCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes')
     foreach ($capability in $requiredCapabilities) {
         if ($capability -notin $validCapabilities) {
             $Errors.Add("Job '$name': unknown RequiredCapabilities value '$capability'.")
@@ -7341,7 +7341,7 @@ try {
     $serverJobPolicies = @{}
     $serverJobPoliciesRaw = Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'ServerJobPolicies' -DefaultValue $null
     if ($null -ne $serverJobPoliciesRaw) {
-        $validJobPolicyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell')
+        $validJobPolicyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes')
         foreach ($serverPolicyProperty in @($serverJobPoliciesRaw.PSObject.Properties)) {
             $serverPolicyName = ([string]$serverPolicyProperty.Name).Trim().ToUpperInvariant()
             if ([string]::IsNullOrWhiteSpace($serverPolicyName)) { throw 'ServerJobPolicies contains an empty server name.' }

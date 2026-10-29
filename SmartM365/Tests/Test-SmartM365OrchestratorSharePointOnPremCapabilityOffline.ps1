@@ -8,7 +8,7 @@ it from the snap-in registration, that the read-only probe uses the collector sn
 read-only farm call in Windows PowerShell, and that an OnlyJobsRequiring SharePointOnPrem
 policy keeps the other jobs away from that server in the election plan.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -25,7 +25,7 @@ function Assert-Capability {
 }
 
 # Every hard-coded capability list must stay identical and include SharePointOnPrem.
-$expected = "'SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell'"
+$expected = "'SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes'"
 $orchestratorText = [IO.File]::ReadAllText((Join-Path $folder 'SmartM365-Inventory-Orchestrator.ps1'))
 $managementText = [IO.File]::ReadAllText((Join-Path $folder 'SmartM365.Orchestrator.Management.psm1'))
 $guiText = [IO.File]::ReadAllText((Join-Path $folder 'SmartM365-Inventory-Orchestrator-GUI.ps1'))
@@ -60,6 +60,9 @@ try {
     $registered = [bool](& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoLogo -NoProfile -NonInteractive -Command "if (Get-PSSnapin -Registered -Name Microsoft.SharePoint.PowerShell -ErrorAction SilentlyContinue) { 'yes' }")
     Assert-Capability ($probe.Count -eq 1 -and $probe[0].Ready -eq $registered) 'Static probe result matches the snap-in registration.'
     Assert-Capability (($static.ReadyCapabilities -contains 'SharePointOnPrem') -eq $registered) 'ReadyCapabilities follows the probe.'
+    $adaxesProbe = @($static.Results | Where-Object Name -eq 'Adaxes')
+    $adaxesInstalled = $null -ne (Get-Module -ListAvailable -Name Adaxes)
+    Assert-Capability ($adaxesProbe.Count -eq 1 -and $adaxesProbe[0].Ready -eq $adaxesInstalled -and ($adaxesInstalled -or $adaxesProbe[0].ComponentMissing)) 'Static Adaxes probe follows the module installation.'
     Assert-Capability (@(Get-ChildItem -LiteralPath $root -Recurse -File).Count -eq 0) 'Static probe leaves no file behind.'
 }
 finally { if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force } }

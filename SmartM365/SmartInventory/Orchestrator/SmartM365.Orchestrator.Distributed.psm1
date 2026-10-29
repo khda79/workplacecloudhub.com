@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.17'
+$script:DistributedModuleVersion = '1.1.18'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -561,6 +561,8 @@ function Get-SmartM365OrchestratorServerCapability {
         $results.Add((Get-CapabilityProbeResult -Name 'SharePointOnPrem' -Ready $sharePointRegistered -Detail $(if ($sharePointRegistered) { 'Static check of the SharePoint Server PowerShell snap-in registration.' } else { 'SharePoint Server PowerShell snap-in Microsoft.SharePoint.PowerShell is not registered on this server.' })))
         $teamsModule = Get-Module -ListAvailable -Name MicrosoftTeams | Sort-Object Version -Descending | Select-Object -First 1
         $results.Add((Get-CapabilityProbeResult -Name 'TeamsPowerShell' -Ready ($cloudConfigurationReady -and $null -ne $teamsModule) -Detail $(if ($null -eq $teamsModule) { 'MicrosoftTeams PowerShell module is not installed on this server.' } else { "Static check: module={0}; {1}" -f $teamsModule.Version, $certificate.Detail })))
+        $adaxesModule = Get-Module -ListAvailable -Name Adaxes | Sort-Object Version -Descending | Select-Object -First 1
+        $results.Add((Get-CapabilityProbeResult -Name 'Adaxes' -Ready ($null -ne $adaxesModule) -Detail $(if ($null -eq $adaxesModule) { 'Adaxes PowerShell module is not installed on this server.' } else { "Static check: Adaxes module {0}." -f $adaxesModule.Version })))
     }
     else {
         $environment = @{
@@ -676,6 +678,20 @@ finally {
 "SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
 '@
         $results.Add((Invoke-IsolatedCapabilityProbe -Name 'TeamsPowerShell' -EnginePath $pwshPath -ScriptText $teamsScript -Environment $environment -TimeoutSeconds $ProbeTimeoutSeconds))
+
+        # The probe has no Adaxes service name: it checks that the collector module loads in PowerShell 7.
+        $adaxesScript = @'
+$ErrorActionPreference = 'Stop'
+try {
+    if (-not (Get-Module -ListAvailable -Name Adaxes)) { throw 'Adaxes PowerShell module is not installed on this server.' }
+    Import-Module Adaxes -ErrorAction Stop
+    if (-not (Get-Command -Name Get-AdmUser -ErrorAction SilentlyContinue)) { throw 'Adaxes PowerShell module does not expose Get-AdmUser.' }
+    $result = @{ Ready = $true; Roles = @(); Detail = "Adaxes PowerShell module $((Get-Module -Name Adaxes).Version) loaded." }
+}
+catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message } }
+"SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
+'@
+        $results.Add((Invoke-IsolatedCapabilityProbe -Name 'Adaxes' -EnginePath $pwshPath -ScriptText $adaxesScript -TimeoutSeconds $ProbeTimeoutSeconds))
     }
 
     foreach ($result in $results) { $result | Add-Member -NotePropertyName ComponentMissing -NotePropertyValue (Test-SmartM365OrchestratorCapabilityComponentMissing -Result $result) -Force }
