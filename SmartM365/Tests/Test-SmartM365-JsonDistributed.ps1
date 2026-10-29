@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline JSON transport tests for distributed orchestrator state.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -79,6 +79,28 @@ try {
     Check ($claim.ClaimPath -notin @(& $distributed {$script:ResolvedPaths.ToArray()})) 'Native JSON-text claim unnecessarily migrated.'
     [IO.File]::WriteAllBytes($claimJournal,$journalBytes)
     & $distributed {Set-Item Function:script:Resolve-DistributedJsonPath $script:OriginalResolver}
+    # Startup race seen in production (1.1.18): a peer releases a live lease between the listing and its read.
+    $vanishing=Enter-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $leases -ConcurrencyKey vanishing -JobName Vanishing -Occurrence $occurrence -OwnerServer SYNTHETIC-B
+    $vanishingPath=(Get-SmartM365JsonNames $vanishing.LeasePath).Legacy
+    & $distributed {
+        param($Target)
+        $script:VanishTarget=$Target; $script:VanishDelete=$true
+        function script:Resolve-DistributedJsonPath {
+            param([string]$Path)
+            if ($Path -ne $script:VanishTarget) { return & $script:OriginalResolver -Path $Path }
+            if ($script:VanishDelete) { Get-ChildItem -LiteralPath ([IO.Path]::GetDirectoryName($Path)) -File | Where-Object { $_.Name -like ([IO.Path]::GetFileName($Path) + '*') } | Remove-Item -Force }
+            throw [IO.FileNotFoundException]::new('Could not find file ' + $Path)
+        }
+    } $vanishingPath
+    $progress.Clear()
+    Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $claims -LeasesRootPath $leases -OnProgress {param($message) $progress.Add($message)}
+    Check (@($progress | Where-Object { $_ -match 'disappeared after the listing' }).Count -eq 1 -and $progress[-1] -match 'vanished=1') 'A lease released during the startup scan stopped the orchestrator or was not reported.'
+    & $distributed {$script:VanishTarget=''}
+    $kept=Enter-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $leases -ConcurrencyKey vanishing -JobName Vanishing -Occurrence $occurrence -OwnerServer SYNTHETIC-B
+    & $distributed {$script:VanishTarget=$args[0]; $script:VanishDelete=$false} (Get-SmartM365JsonNames $kept.LeasePath).Legacy
+    Reject {Convert-SmartM365OrchestratorDistributedHistory -ClaimsRootPath $claims -LeasesRootPath $leases} 'A read failure on a lease that still exists was ignored.'
+    & $distributed {Set-Item Function:script:Resolve-DistributedJsonPath $script:OriginalResolver}
+    Check (Exit-SmartM365OrchestratorConcurrencyLease -LeasePath $kept.LeasePath -LeaseId $kept.Lease.LeaseId -OwnerServer SYNTHETIC-B) 'Race fixture lease could not be released.'
     $competitor=Enter-SmartM365OrchestratorConcurrencyLease -LeasesRootPath $leases -ConcurrencyKey fixture -JobName Other -Occurrence $occurrence -OwnerServer SYNTHETIC-B
     Check (!$competitor.Acquired) 'Migration allowed a competing lease.'
     $null=Set-SmartM365OrchestratorOccurrenceClaim -ClaimPath $claim.ClaimPath -OwnerServer SYNTHETIC-A -Status Success

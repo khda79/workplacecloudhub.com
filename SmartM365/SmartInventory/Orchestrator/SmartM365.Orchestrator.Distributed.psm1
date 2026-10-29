@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.18'
+$script:DistributedModuleVersion = '1.1.19'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -33,7 +33,7 @@ function Convert-SmartM365OrchestratorDistributedHistory {
     if ((Get-SmartM365JsonTransportPolicy).Mode -ne 'JsonText') { return }
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $lastReport = 0.0
-    $checked = 0; $skipped = 0; $resolved = 0
+    $checked = 0; $skipped = 0; $resolved = 0; $vanished = 0
     if ($OnProgress) { & $OnProgress 'Distributed JSON history scan started.' | Out-Null }
     $entries = @{}
     $claimPaths = [Collections.Generic.List[string]]::new()
@@ -85,14 +85,23 @@ function Convert-SmartM365OrchestratorDistributedHistory {
         $paths += @(Get-ChildItem -LiteralPath $LeasesRootPath -File -ErrorAction Stop | Where-Object { $_.Name -match '\.json(?:\.txt)?$' } | ForEach-Object { $_.FullName })
     }
     foreach ($path in @($paths | ForEach-Object { (Get-SmartM365JsonNames $_).Legacy } | Sort-Object -Unique)) {
-        $null = Resolve-DistributedJsonPath $path
+        try { $null = Resolve-DistributedJsonPath $path }
+        catch {
+            # A peer can release a live lease (or retention can purge a claim) between the listing
+            # and this read. A file that no longer exists has nothing left to migrate; any other
+            # failure, or a file still present, stays fatal for the owner.
+            if (Get-SmartM365JsonReadPath -Path $path -Optional) { throw }
+            $vanished++
+            if ($OnProgress) { & $OnProgress ("Distributed JSON history recovery: {0} disappeared after the listing (released by a peer); skipped." -f [IO.Path]::GetFileName($path)) | Out-Null }
+            continue
+        }
         $resolved++
         if ($OnProgress -and ($timer.Elapsed.TotalSeconds - $lastReport) -ge 5) {
             & $OnProgress ("Distributed JSON history recovery: resolved={0}; alreadyCurrent={1}; current={2}." -f $resolved,$skipped,[IO.Path]::GetFileName($path)) | Out-Null
             $lastReport = $timer.Elapsed.TotalSeconds
         }
     }
-    if ($OnProgress) { & $OnProgress ("Distributed JSON history scan complete: checked={0}; alreadyCurrent={1}; resolved={2}; seconds={3:N1}." -f $checked,$skipped,$resolved,$timer.Elapsed.TotalSeconds) | Out-Null }
+    if ($OnProgress) { & $OnProgress ("Distributed JSON history scan complete: checked={0}; alreadyCurrent={1}; resolved={2}; vanished={3}; seconds={4:N1}." -f $checked,$skipped,$resolved,$vanished,$timer.Elapsed.TotalSeconds) | Out-Null }
 }
 
 function ConvertTo-SafeFileName {
