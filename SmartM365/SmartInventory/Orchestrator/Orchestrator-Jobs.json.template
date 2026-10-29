@@ -1914,6 +1914,26 @@
       "TimeoutMinutes": 1380,
       "EstimatedDurationMinutes": 120,
       "Schedule": {"Type": "Daily", "Times": ["06:30"], "DaysOfWeek": [], "MissedRunPolicy": "RunOnce"}
+    },
+    {
+      "Name": "Maintenance-ServerDataCleanup",
+      "ScriptPath": "Maintenance\\Invoke-SmartM365-ServerDataCleanup.ps1",
+      "Arguments": "-Execute",
+      "Enabled": false,
+      "Group": "Maintenance",
+      "DependsOn": [],
+      "AssignmentMode": "Elected",
+      "AllowedServers": [],
+      "RequiredCapabilities": [
+        "SharedRuntime"
+      ],
+      "RequiredGraphAppRoles": [],
+      "ContinueOnError": true,
+      "MaxRetries": 0,
+      "RetryDelaySeconds": 600,
+      "TimeoutMinutes": 8640,
+      "EstimatedDurationMinutes": 15,
+      "Schedule": {"Type": "Weekly", "Times": ["06:00"], "DaysOfWeek": ["Sunday"], "MissedRunPolicy": "RunOnce"}
     }
   ],
   "Launches": [

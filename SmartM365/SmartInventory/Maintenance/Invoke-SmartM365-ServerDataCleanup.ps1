@@ -32,19 +32,27 @@ retention lock of the root is held while they are removed. A file another rule
 already removes is reported as PlannedByAnotherRule and counted once.
 
 .VERSION
-1.4.0
+1.5.0
 
 .EXAMPLE
 ./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server DATA root>'
 ./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server DATA root>' -Execute
 ./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server DATA root>' -RetireLinkedPreparedBatches -RetainedLinkedPreparedBatchCount 10 -LinkedPreparedBatchMinimumAgeDays 90
+./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -Execute
+
+.NOTES
+Without -DataRootPath the tenant DATA root is the parent of the tenant DataAllRootPath of the
+global configuration: this is how the orchestrator job Maintenance-ServerDataCleanup runs it.
+Without -ReportDirectory the reports go to a dated TEMP folder; such default folders older than
+-ReportRetentionDays are removed at the start of the next run.
 #>
 #requires -Version 7.2
 [CmdletBinding()]
 param(
     [string]$Tenant = 'test',
-    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DataRootPath,
+    [string]$DataRootPath = '',
     [string]$ReportDirectory = '',
+    [ValidateRange(1, 3650)][int]$ReportRetentionDays = 30,
     [string]$EffectiveJobsPath = '',
     # A JSON transport .previous copy can be the only prior version: it gets a longer age.
     [ValidateRange(1, 3650)][int]$OrphanTemporaryMinimumAgeDays = 7,
@@ -62,8 +70,30 @@ $ErrorActionPreference = 'Stop'
 $tenantContextPath = Join-Path $PSScriptRoot '..\..\Config\SmartM365-TenantContext.ps1'
 if (Test-Path -LiteralPath $tenantContextPath -PathType Leaf) {
     . $tenantContextPath
-    Write-SmartM365StartupBanner
+    if ([string]::IsNullOrWhiteSpace($DataRootPath)) {
+        # Same tenant DATA-ALL as the producers: its parent holds DATA-ALL, DATA-LAST and LOG-ALL.
+        $tenantConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath (Join-Path $PSScriptRoot '..\..')
+        $tokens = @{
+            ProfileKey = [string]$tenantConfig.ProfileKey
+            WorkspaceRootPath = [string]$tenantConfig.WorkspaceRootPath
+            SmartM365RootPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..')).TrimEnd('\')
+        }
+        $dataAllSetting = [string]$tenantConfig.DataAllRootPath
+        for ($pass = 0; $pass -lt 5 -and $dataAllSetting -match '\{\{'; $pass++) {
+            foreach ($match in [regex]::Matches($dataAllSetting, '\{\{([A-Za-z0-9_.-]+)\}\}')) {
+                if (-not $tokens.ContainsKey($match.Groups[1].Value)) { throw "DataAllRootPath token $($match.Value) cannot be resolved; pass -DataRootPath." }
+                $dataAllSetting = $dataAllSetting.Replace($match.Value, $tokens[$match.Groups[1].Value])
+            }
+        }
+        if ($dataAllSetting -match '\{\{' -or -not [IO.Path]::IsPathRooted($dataAllSetting)) { throw "DataAllRootPath does not resolve to an absolute folder: $dataAllSetting" }
+        $DataRootPath = Split-Path -Path ([IO.Path]::GetFullPath($dataAllSetting).TrimEnd('\', '/')) -Parent
+        Write-Information ('[{0}] DATA root resolved from the tenant configuration: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $DataRootPath) -InformationAction Continue
+    }
+    else {
+        Write-SmartM365StartupBanner
+    }
 }
+if ([string]::IsNullOrWhiteSpace($DataRootPath)) { throw 'DataRootPath is required when the SmartM365 configuration is not available.' }
 
 $root = [IO.Path]::GetFullPath($DataRootPath).TrimEnd('\', '/')
 if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "DATA root not found: $root" }
@@ -74,7 +104,16 @@ if ((Get-Item -LiteralPath $root -Force).Attributes -band [IO.FileAttributes]::R
     throw 'A reparse-point DATA root is not supported.'
 }
 if ([string]::IsNullOrWhiteSpace($ReportDirectory)) {
-    $ReportDirectory = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-ServerDataCleanup_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    # A scheduled run reports to TEMP: earlier default report folders age out here.
+    $reportParent = [IO.Path]::GetTempPath()
+    $reportCutoff = (Get-Date).AddDays(-$ReportRetentionDays)
+    foreach ($oldReport in @(Get-ChildItem -LiteralPath $reportParent -Directory -Filter 'SmartM365-ServerDataCleanup_*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^SmartM365-ServerDataCleanup_\d{8}_\d{6}$' -and $_.LastWriteTime -lt $reportCutoff -and
+            -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) })) {
+        try { Remove-Item -LiteralPath $oldReport.FullName -Recurse -Force -ErrorAction Stop }
+        catch { Write-Warning ('Old cleanup report kept: {0}: {1}' -f $oldReport.FullName, $_.Exception.Message) }
+    }
+    $ReportDirectory = Join-Path $reportParent ('SmartM365-ServerDataCleanup_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
 }
 $reportRoot = [IO.Path]::GetFullPath($ReportDirectory).TrimEnd('\', '/')
 $rootPrefix = $root + [IO.Path]::DirectorySeparatorChar

@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline pipeline and production-manifest contract tests for the SmartM365 orchestrator.
 .VERSION
-1.2.3
+1.2.4
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -407,7 +407,8 @@ try {
     Assert-True (@($missingExternalActionOptIns).Count -eq 0) ("Jobs declaring EnableConfiguredExternalActions must opt in explicitly: {0}" -f (@($missingExternalActionOptIns) -join ', '))
     $productionSelection = Get-SmartM365OrchestratorPipelineSelection -JobsDocument $productionDocument -Pipeline Full
     Assert-True ($productionSelection.SelectedCount -eq 49) 'Template Full selection must contain the 49 enabled non-manual jobs.'
-    Assert-True ($productionSelection.ExcludedCount -eq 7) 'Full selection must exclude the five disabled jobs (three Backup, PowerBIFabricActivity, AD-Adaxes) and the two manual SharePoint on-premises jobs.'
+    Assert-True ($productionSelection.ExcludedCount -eq 8) 'Full selection must exclude the six disabled jobs (three Backup, PowerBIFabricActivity, AD-Adaxes, Maintenance-ServerDataCleanup) and the two manual SharePoint on-premises jobs.'
+    Assert-True (@($productionSelection.ExcludedJobs | Where-Object { $_.Name -eq 'Maintenance-ServerDataCleanup' -and $_.Reason -eq 'Disabled' }).Count -eq 1) 'Maintenance-ServerDataCleanup is shipped disabled: the operator enables it.'
     Assert-True (@($productionSelection.ExcludedJobs | Where-Object { $_.Name -eq 'AD-Adaxes-Inventory' -and $_.Reason -eq 'Disabled' }).Count -eq 1) 'AD-Adaxes-Inventory is expected disabled in the jobs template.'
     Assert-True (@($productionSelection.ExcludedJobs | Where-Object { $_.Name -like 'SharePointOnPrem-*' -and $_.Reason -eq 'Manual' }).Count -eq 2) 'Manual SharePoint on-premises jobs must be excluded from Full pipelines.'
     Assert-True (@($productionDocument.Jobs | Where-Object Name -eq 'CmdbEvidence-Prepare').Count -eq 0) 'Retired CMDB preparation must not remain in the template.'
