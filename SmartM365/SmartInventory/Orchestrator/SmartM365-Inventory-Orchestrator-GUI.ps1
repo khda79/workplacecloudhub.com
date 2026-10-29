@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.24
+1.6.25
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.24'
+$script:AppVersion = '1.6.25'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -311,7 +311,7 @@ $xaml = @'
                 <Button x:Name="RefreshButton" Content="Refresh"/>
                 <Button x:Name="ValidateButton" Content="Validate draft"/>
                 <Button x:Name="RebalanceButton" Content="Rebalance now" Background="#FFF4CE"/>
-                <Button x:Name="RequestPrepareButton" Content="Request Prepare" Background="#FFF4CE" IsEnabled="False" ToolTip="Asks the orchestrators to run WorkplaceEvidence-Prepare (published configuration; its dependencies are not run)."/>
+                <Button x:Name="RequestPrepareButton" Content="Refresh Power BI data" Background="#FFF4CE" IsEnabled="False" ToolTip="Asks the orchestrators to run WorkplaceEvidence-Prepare once with the current data (published configuration; the inventory jobs it depends on are not rerun)."/>
                 <Button x:Name="PublishButton" Content="Publish changes" Background="{StaticResource AccentBrush}" BorderBrush="{StaticResource AccentBrush}" Foreground="White" FontWeight="SemiBold"/>
             </StackPanel>
         </Grid>
@@ -481,6 +481,11 @@ $xaml = @'
                                             <DataGridTextColumn Header="Started" Binding="{Binding Started}" Width="110"/>
                                             <DataGridTextColumn Header="Duration (min)" Binding="{Binding DurationMinutes}" Width="95"/>
                                             <DataGridTextColumn Header="Est. remaining" Binding="{Binding EstimatedRemaining}" Width="130">
+                                                <DataGridTextColumn.ElementStyle>
+                                                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding EstimateSource}"/></Style>
+                                                </DataGridTextColumn.ElementStyle>
+                                            </DataGridTextColumn>
+                                            <DataGridTextColumn Header="Est. end" Binding="{Binding EstimatedEnd}" Width="150">
                                                 <DataGridTextColumn.ElementStyle>
                                                     <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding EstimateSource}"/></Style>
                                                 </DataGridTextColumn.ElementStyle>
@@ -1061,6 +1066,147 @@ function ConvertFrom-OrchestratorGuiXaml {
     return [System.Windows.Markup.XamlReader]::Load($reader)
 }
 
+function Show-OrchestratorDialog {
+    # Branded replacement of System.Windows.MessageBox: same buttons, icons and results (OK, Yes, No, Cancel).
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Message,
+        [string]$Title = 'SmartM365 Orchestrator',
+        [ValidateSet('OK', 'OKCancel', 'YesNo', 'YesNoCancel')][string]$Buttons = 'OK',
+        [string]$Icon = 'None'
+    )
+    $style = switch -Regex ($Icon) {
+        '^(Information|Asterisk)$' { @{ Glyph = 0xE946; Color = '#0078D4'; Tint = '#E5F1FB' }; break }
+        '^(Warning|Exclamation)$' { @{ Glyph = 0xE7BA; Color = '#92400E'; Tint = '#FFF4CE' }; break }
+        '^(Error|Hand|Stop)$' { @{ Glyph = 0xEA39; Color = '#A4262C'; Tint = '#FDE7E9' }; break }
+        '^Question$' { @{ Glyph = 0xE9CE; Color = '#0078D4'; Tint = '#E5F1FB' }; break }
+        default { @{ Glyph = 0xE946; Color = '#5D6B78'; Tint = '#F3F6FA' } }
+    }
+    $dialogXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight" ShowInTaskbar="False" FontFamily="Segoe UI" UseLayoutRounding="True">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="16,7"/>
+            <Setter Property="Margin" Value="8,0,0,0"/>
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="MinWidth" Value="92"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#17324D"/>
+            <Setter Property="BorderBrush" Value="#C3CFDC"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6"/>
+                            <Border x:Name="Overlay" Background="#17324D" Opacity="0" CornerRadius="6"/>
+                            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Overlay" Property="Opacity" Value="0.07"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Overlay" Property="Opacity" Value="0.15"/></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#0078D4"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Border Margin="18" Background="White" BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="10">
+        <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="2" Opacity="0.28"/></Border.Effect>
+        <Grid MinWidth="420" MaxWidth="640">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Border x:Name="DialogHeader" Background="#17324D" CornerRadius="9,9,0,0" Padding="16,10" Cursor="SizeAll">
+                <DockPanel>
+                    <Image x:Name="DialogLogo" Width="26" Height="26" Margin="0,0,10,0" DockPanel.Dock="Left" Stretch="Uniform"/>
+                    <TextBlock x:Name="DialogTitle" Foreground="White" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+            </Border>
+            <Grid Grid.Row="1" Margin="22,20,22,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border x:Name="DialogIconBadge" Width="42" Height="42" CornerRadius="21" VerticalAlignment="Top" Margin="0,0,16,0">
+                    <TextBlock x:Name="DialogIconGlyph" FontFamily="Segoe MDL2 Assets" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <ScrollViewer Grid.Column="1" MaxHeight="380" VerticalScrollBarVisibility="Auto" VerticalAlignment="Center">
+                    <TextBox x:Name="DialogMessage" IsReadOnly="True" BorderThickness="0" Background="Transparent" TextWrapping="Wrap" FontSize="13" Foreground="#17324D" Padding="0"/>
+                </ScrollViewer>
+            </Grid>
+            <Border Grid.Row="2" Background="#F7FAFD" BorderBrush="#E3E9F0" BorderThickness="0,1,0,0" CornerRadius="0,0,9,9" Padding="16,10">
+                <StackPanel x:Name="DialogButtons" Orientation="Horizontal" HorizontalAlignment="Right"/>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
+'@
+    $dialog = ConvertFrom-OrchestratorGuiXaml -Text $dialogXaml
+    $dialog.Title = $Title
+    $dialog.FindName('DialogTitle').Text = $Title
+    $dialog.FindName('DialogMessage').Text = [string]$Message
+    $converter = [System.Windows.Media.BrushConverter]::new()
+    $dialog.FindName('DialogIconBadge').Background = $converter.ConvertFromString($style.Tint)
+    $glyph = $dialog.FindName('DialogIconGlyph')
+    $glyph.Text = [string][char]$style.Glyph
+    $glyph.Foreground = $converter.ConvertFromString($style.Color)
+    $logoFile = Join-Path $PSScriptRoot 'WorkplaceCloudHub-lockup-WPF.png'
+    if (Test-Path -LiteralPath $logoFile) {
+        $logo = [System.Windows.Media.Imaging.BitmapImage]::new()
+        $logo.BeginInit(); $logo.CacheOption = 'OnLoad'; $logo.UriSource = [Uri]$logoFile; $logo.EndInit(); $logo.Freeze()
+        $dialog.FindName('DialogLogo').Source = $logo
+    }
+    $dialog.FindName('DialogHeader').Add_MouseLeftButtonDown({ param($source) [System.Windows.Window]::GetWindow($source).DragMove() })
+
+    $labels = switch ($Buttons) { 'OK' { @('OK') } 'OKCancel' { @('OK', 'Cancel') } 'YesNo' { @('Yes', 'No') } 'YesNoCancel' { @('Yes', 'No', 'Cancel') } }
+    # Escape and the window close answer like MessageBox: Cancel when offered, else No, else OK.
+    $cancelResult = if ($labels -contains 'Cancel') { 'Cancel' } elseif ($labels -contains 'No') { 'No' } else { 'OK' }
+    $accent = $converter.ConvertFromString('#0078D4')
+    $panel = $dialog.FindName('DialogButtons')
+    $primary = $null
+    foreach ($label in $labels) {
+        $button = [System.Windows.Controls.Button]::new()
+        $button.Content = $label
+        $button.Tag = $label
+        if ($null -eq $primary) {
+            $button.Background = $accent; $button.BorderBrush = $accent; $button.Foreground = [System.Windows.Media.Brushes]::White
+            $button.FontWeight = [System.Windows.FontWeights]::SemiBold; $button.IsDefault = $true
+            $primary = $button
+        }
+        if ($label -eq $cancelResult) { $button.IsCancel = $true }
+        $button.Add_Click({ param($source) $owner = [System.Windows.Window]::GetWindow($source); $owner.Tag = [string]$source.Tag; $owner.Close() })
+        [void]$panel.Children.Add($button)
+    }
+    $mainWindow = Get-Variable -Name window -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($mainWindow -is [System.Windows.Window] -and $mainWindow.IsVisible) {
+        $dialog.Owner = $mainWindow
+        $dialog.WindowStartupLocation = 'CenterOwner'
+        if ($mainWindow.Icon) { $dialog.Icon = $mainWindow.Icon }
+    }
+    else {
+        $dialog.WindowStartupLocation = 'CenterScreen'
+        $dialog.Topmost = $true
+    }
+    $dialog.Add_ContentRendered({ param($source) [void]$source.FindName('DialogButtons').Children[0].Focus() })
+    [void]$dialog.ShowDialog()
+    if ([string]::IsNullOrEmpty([string]$dialog.Tag)) { return $cancelResult }
+    return [string]$dialog.Tag
+}
+
+# Same call shape as $script:OrchestratorDialog.Show(message, title, buttons, icon).
+$script:OrchestratorDialog = [pscustomobject]@{}
+Add-Member -InputObject $script:OrchestratorDialog -MemberType ScriptMethod -Name Show -Value {
+    param($Message, $Title = 'SmartM365 Orchestrator', $Buttons = 'OK', $Icon = 'None')
+    Show-OrchestratorDialog -Message ([string]$Message) -Title ([string]$Title) -Buttons ([string]$Buttons) -Icon ([string]$Icon)
+}
+
 function Get-OrchestratorGuiPropertyValue {
     param(
         [AllowNull()]$Object,
@@ -1631,6 +1777,16 @@ function Add-GuiJobDurationEstimates {
             elseif ([double]$elapsed -le $estimate.Minutes) { '~{0} min' -f [math]::Max(0, $estimate.Minutes - [double]$elapsed) }
             else { 'over by {0} min' -f [math]::Round([double]$elapsed - $estimate.Minutes) }
         $row | Add-Member -NotePropertyName EstimatedRemaining -NotePropertyValue $text -Force
+        # Estimated end: start time plus the estimate (same date format as Started); past it, the run is overdue.
+        $endText = ''
+        if ($null -ne $estimate) {
+            $startedAt = [datetime]::MinValue
+            $endAt = if ([datetime]::TryParseExact([string](Get-OrchestratorGuiPropertyValue -Object $row -Name 'Started' -DefaultValue ''), 'yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$startedAt)) { $startedAt.AddMinutes($estimate.Minutes) }
+                elseif ($null -ne $elapsed) { (Get-Date).AddMinutes($estimate.Minutes - [double]$elapsed) }
+                else { (Get-Date).AddMinutes($estimate.Minutes) }
+            $endText = if ($endAt -lt (Get-Date)) { 'overdue since ' + $endAt.ToString('yyyy-MM-dd HH:mm') } else { $endAt.ToString('yyyy-MM-dd HH:mm') }
+        }
+        $row | Add-Member -NotePropertyName EstimatedEnd -NotePropertyValue $endText -Force
         $row | Add-Member -NotePropertyName EstimateSource -NotePropertyValue $(if ($null -ne $estimate) { '{0}: {1} min' -f $estimate.Source, $estimate.Minutes } else { 'No duration history or catalog estimate' }) -Force
     }
     foreach ($row in @(Get-OrchestratorGuiPropertyValue -Object $Operations -Name 'Pending' -DefaultValue @())) {
@@ -1675,11 +1831,11 @@ function Request-SelectedRunningJobStop {
     $reason = $script:Controls.JobStopReasonBox.Text.Trim()
     if ($reason.Length -lt 3) { throw 'Enter a stop reason (at least 3 characters).' }
     $message = "Stop this running job?`n`nJob: $($row.Job)`nServer: $($row.Server)`nPID: $($row.Pid)`nStarted: $($row.Started)`n`nReason: $reason`n`nThe owning orchestrator will verify this exact process, stop its process tree, and record Cancelled. This occurrence will not be retried automatically."
-    if ([System.Windows.MessageBox]::Show($message, 'Stop running job', 'YesNo', 'Warning') -ne 'Yes') { return }
+    if ($script:OrchestratorDialog.Show($message, 'Stop running job', 'YesNo', 'Warning') -ne 'Yes') { return }
     $request = Request-SmartM365OrchestratorJobStop -SharedDataFolderPath $script:SharedDataFolderPath -Server ([string]$row.Server) -JobName ([string]$row.Job) -ProcessId ([int]$row.Pid) -StartTime ([string]$row.StartTime) -Reason $reason -Tenant $Tenant
     Write-GuiActivity -Message ("Job stop requested: job={0}; server={1}; PID={2}; request={3}; reason={4}." -f $row.Job, $row.Server, $row.Pid, $request.RequestId, $reason) -Level WARN
     $script:Controls.JobStopReasonBox.Clear()
-    [System.Windows.MessageBox]::Show("Stop request $($request.RequestId) was submitted. The owning orchestrator will process it on its next cycle. Refresh Operations or History to verify the final status.", 'Stop requested', 'OK', 'Information') | Out-Null
+    $script:OrchestratorDialog.Show("Stop request $($request.RequestId) was submitted. The owning orchestrator will process it on its next cycle. Refresh Operations or History to verify the final status.", 'Stop requested', 'OK', 'Information') | Out-Null
 }
 
 function Set-GuiMaintenanceBannerStyle {
@@ -1739,12 +1895,12 @@ function Set-GuiMaintenance {
     $catchUp = $false
     if ($Enabled) {
         $message = "Enable shared maintenance for this tenant?`n`nAutomatic launches and retries will pause. Running jobs remain supervised and manual Pipeline requests remain available.`n`nReason: $reason"
-        if ([System.Windows.MessageBox]::Show($message, 'Enable maintenance', 'YesNo', 'Warning') -ne 'Yes') { return }
+        if ($script:OrchestratorDialog.Show($message, 'Enable maintenance', 'YesNo', 'Warning') -ne 'Yes') { return }
     }
     else {
         $started = ([datetimeoffset]::Parse($script:MaintenanceViewState.ChangedAtUtc)).ToLocalTime().ToString('yyyy-MM-dd HH:mm')
         $message = "Disable shared maintenance for this tenant?`n`nSuspended since: $started`n`nYES: replay every missed scheduled occurrence for currently enabled jobs, including jobs marked Skip. Each run collects current data; this does not reconstruct historical snapshots. Independent jobs may run in parallel; normal ownership, dependency and concurrency checks apply. This can queue many jobs.`n`nNO: skip occurrences from this maintenance interval and resume future schedules. Earlier confirmed catch-up work remains queued.`n`nCANCEL: keep maintenance enabled.`n`nReason: $reason"
-        $choice = [System.Windows.MessageBox]::Show($message, 'Disable maintenance', 'YesNoCancel', 'Warning')
+        $choice = $script:OrchestratorDialog.Show($message, 'Disable maintenance', 'YesNoCancel', 'Warning')
         if ($choice -eq 'Cancel') { return }
         $catchUp = $choice -eq 'Yes'
     }
@@ -1783,7 +1939,7 @@ function Refresh-RequestsView {
 
 function Confirm-PipelineCancellation {
     param([string]$Message, [string]$Title)
-    return [System.Windows.MessageBox]::Show($Message, $Title, 'YesNo', 'Warning') -eq 'Yes'
+    return $script:OrchestratorDialog.Show($Message, $Title, 'YesNo', 'Warning') -eq 'Yes'
 }
 
 function Get-GuiCancellationWork {
@@ -1896,7 +2052,7 @@ function Stop-AllPipelineRequests {
 function Show-GuiCancellationError {
     param([string]$Message)
     Write-GuiActivity -Message $Message -Level ERROR -DisplayOnly
-    [System.Windows.MessageBox]::Show($Message, 'Cancellation failed', 'OK', 'Error') | Out-Null
+    $script:OrchestratorDialog.Show($Message, 'Cancellation failed', 'OK', 'Error') | Out-Null
 }
 
 function Receive-GuiPipelineCancellation {
@@ -2020,12 +2176,12 @@ function Request-SelectedJobRun {
 
 function Confirm-GuiJobRunRequest {
     param([string]$Message)
-    return [System.Windows.MessageBox]::Show($Message, 'Request run', 'YesNo', 'Question') -eq 'Yes'
+    return $script:OrchestratorDialog.Show($Message, 'Request run', 'YesNo', 'Question') -eq 'Yes'
 }
 
 function Show-GuiJobRunRequestResult {
     param([string]$Message, [string]$Title, [ValidateSet('Information', 'Warning', 'Error')][string]$Icon)
-    [System.Windows.MessageBox]::Show($Message, $Title, 'OK', $Icon) | Out-Null
+    $script:OrchestratorDialog.Show($Message, $Title, 'OK', $Icon) | Out-Null
 }
 
 function Get-GuiJobRunSubmissionWork {
@@ -2447,7 +2603,7 @@ function Invoke-GuiOrchestratorAction {
     $command = Get-GuiOrchestratorActionCommand -Action $Action
     $preview = (@($command.ScriptPath) + @($command.Arguments) | ForEach-Object { ConvertTo-SmartM365InventoryCommandLineArgument -Value $_ }) -join ' '
     if ($Action -eq 'SendSummary' -and $null -ne $script:SendSummaryRun) { throw 'The execution summary is already being sent. Wait for its result.' }
-    if ([System.Windows.MessageBox]::Show(("{0}`n`nCommand (PowerShell 7):`n{1}" -f $command.Message, $preview), $command.Title, 'YesNo', $command.Icon) -ne 'Yes') { return }
+    if ($script:OrchestratorDialog.Show(("{0}`n`nCommand (PowerShell 7):`n{1}" -f $command.Message, $preview), $command.Title, 'YesNo', $command.Icon) -ne 'Yes') { return }
     if ($Action -eq 'SendSummary') { Start-GuiSendSummary -Command $command; return }
     [void](Start-GuiConsoleProcess -Runtime PowerShell7 -ScriptPath $command.ScriptPath -Arguments $command.Arguments -KeepOpen:([bool]$command.KeepOpen))
     $script:Controls.StatusText.Text = "$($command.Title): started in a new console."
@@ -2468,7 +2624,7 @@ function Invoke-GuiLaunch {
         $icon = 'Warning'
         $message += "`n`nTHIS ENTRY MODIFIES DATA. The console will also ask you to type WRITE before it starts."
     }
-    if ([System.Windows.MessageBox]::Show($message, ('Run ' + $row.Name), 'YesNo', $icon) -ne 'Yes') { return }
+    if ($script:OrchestratorDialog.Show($message, ('Run ' + $row.Name), 'YesNo', $icon) -ne 'Yes') { return }
     $engineScript = Join-Path $script:SmartInventoryRoot 'Orchestrator\Invoke-SmartM365InventoryJob.ps1'
     [void](Start-GuiConsoleProcess -Runtime WindowsPowerShell -ScriptPath $engineScript -Arguments @([string]$row.Name, '-Now', '-Tenant', $Tenant) -KeepOpen)
     Write-GuiActivity -Message ("Run now: {0} ({1}) started on {2}." -f $row.Name, $Kind, $env:COMPUTERNAME) -Level SUCCESS
@@ -2968,7 +3124,7 @@ function Refresh-AllViewsSync {
     catch {
         $script:Controls.StatusText.Text = 'Refresh failed'
         Write-GuiException -Context 'Refresh failed' -ErrorRecord $_
-        [System.Windows.MessageBox]::Show($_.Exception.Message, 'Refresh failed', 'OK', 'Error') | Out-Null
+        $script:OrchestratorDialog.Show($_.Exception.Message, 'Refresh failed', 'OK', 'Error') | Out-Null
     }
 }
 
@@ -2982,7 +3138,7 @@ function Apply-SelectedJobToDraft {
         $dependents = @(Get-SmartM365OrchestratorDependents -JobsDocument $script:DraftJobs -JobName ([string]$job.Name) -EnabledOnly)
         if ($dependents.Count) {
             $warning = "{0} enabled job(s) depend on '{1}':`n{2}`n`nOnce disabled, the dependency gate ignores it and these jobs run without waiting for it. Disable it anyway?" -f $dependents.Count, $job.Name, ($dependents -join [Environment]::NewLine)
-            if ([System.Windows.MessageBox]::Show($warning, 'Job used as a dependency', 'YesNo', 'Warning') -ne 'Yes') { return }
+            if ($script:OrchestratorDialog.Show($warning, 'Job used as a dependency', 'YesNo', 'Warning') -ne 'Yes') { return }
         }
     }
     $dependsOn = @($script:Controls.DependsOnBox.Text -split '[,;\r\n]' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
@@ -3042,6 +3198,8 @@ function Apply-SelectedJobToDraft {
     Refresh-PlanningView
     $script:Controls.PlanningGrid.SelectedItem = @($script:PlanningRows | Where-Object Name -eq $job.Name)[0]
     $script:Controls.StatusText.Text = "Draft changed: $($job.Name)"
+    # The draft is local until it is published: say so, the status line alone is easy to miss.
+    $script:OrchestratorDialog.Show(("Job '{0}' was changed in the draft.{1}{1}Nothing runs differently yet: click Publish changes to apply it to the orchestrators." -f $job.Name, [Environment]::NewLine), 'Draft changed', 'OK', 'Information') | Out-Null
     $previousAllowedText = if ($previousAllowedServers.Count -gt 0) { $previousAllowedServers -join ',' } else { '<none>' }
     $newAllowedText = if ($newAllowedServers.Count -gt 0) { $newAllowedServers -join ',' } else { '<none>' }
     Write-GuiActivity -Message ("Job '{0}' updated in the draft. AssignmentMode={1}->{2}; AllowedServers={3}->{4}; DependsOn={5}; DependencyMode={6}; DependencyMaxAgeHours={7}" -f $job.Name, $previousMode, $mode, $previousAllowedText, $newAllowedText, ($(if ($dependsOn.Count) { $dependsOn -join ',' } else { '<none>' })), $dependencyMode, $dependencyMaxAge)
@@ -3072,6 +3230,7 @@ function Apply-SelectedServerToDraft {
     if (-not $validation.Valid) { throw $validation.Errors -join [Environment]::NewLine }
     Refresh-ServersView | Out-Null
     $script:Controls.StatusText.Text = "Draft changed: $server"
+    $script:OrchestratorDialog.Show(("Server '{0}' was changed in the draft.{1}{1}Nothing changes yet: click Publish changes to apply it to the orchestrators." -f $server, [Environment]::NewLine), 'Draft changed', 'OK', 'Information') | Out-Null
     Write-GuiActivity -Message "Server '$server' settings updated in the draft."
 }
 
@@ -3082,12 +3241,12 @@ function Show-DraftValidation {
     $errors = @($jobsValidation.Errors) + @($clusterValidation.Errors) + @($consistencyValidation.Errors)
     $warnings = @($jobsValidation.Warnings) + @($clusterValidation.Warnings) + @($consistencyValidation.Warnings)
     if ($errors.Count -gt 0) {
-        [System.Windows.MessageBox]::Show(($errors -join [Environment]::NewLine), 'Invalid draft', 'OK', 'Error') | Out-Null
+        $script:OrchestratorDialog.Show(($errors -join [Environment]::NewLine), 'Invalid draft', 'OK', 'Error') | Out-Null
         return $false
     }
     $message = "Draft is valid.`nJobs: $($jobsValidation.JobCount)`nServers: $($clusterValidation.ServerCount)"
     if ($warnings.Count -gt 0) { $message += "`n`nWarnings:`n" + ($warnings -join [Environment]::NewLine) }
-    [System.Windows.MessageBox]::Show($message, 'Validation', 'OK', 'Information') | Out-Null
+    $script:OrchestratorDialog.Show($message, 'Validation', 'OK', 'Information') | Out-Null
     return $true
 }
 
@@ -3095,7 +3254,7 @@ function Publish-Draft {
     if (-not (Show-DraftValidation)) { return }
     $enabled = @($script:DraftJobs.Jobs | Where-Object Enabled).Count
     $confirmation = "Publish the shared configuration?`n`nJobs: $(@($script:DraftJobs.Jobs).Count) ($enabled enabled)`nServers: $(@($script:DraftCluster.ExpectedOrchestratorServers).Count)`n`nEvery Orchestrator server will reload it automatically."
-    if ([System.Windows.MessageBox]::Show($confirmation, 'Publish shared configuration', 'YesNo', 'Warning') -ne 'Yes') { return }
+    if ($script:OrchestratorDialog.Show($confirmation, 'Publish shared configuration', 'YesNo', 'Warning') -ne 'Yes') { return }
     try {
         Write-GuiActivity -Message ("Publication requested. ExpectedJobsHash={0}; ExpectedClusterHash={1}" -f $script:Snapshot.JobsHash, $script:Snapshot.ClusterHash)
         $result = Publish-SmartM365OrchestratorConfiguration `
@@ -3106,12 +3265,12 @@ function Publish-Draft {
             -ExpectedClusterHash $script:Snapshot.ClusterHash `
             -ChangeSummary 'Published from SmartM365 Orchestrator GUI'
         Write-GuiActivity -Message "Configuration published as version $($result.VersionId)." -Level SUCCESS
-        [System.Windows.MessageBox]::Show("Configuration published successfully.`nVersion: $($result.VersionId)", 'Published', 'OK', 'Information') | Out-Null
+        $script:OrchestratorDialog.Show("Configuration published successfully.`nVersion: $($result.VersionId)", 'Published', 'OK', 'Information') | Out-Null
         Refresh-AllViews
     }
     catch {
         Write-GuiException -Context 'Publication failed' -ErrorRecord $_
-        [System.Windows.MessageBox]::Show($_.Exception.Message, 'Publication failed', 'OK', 'Error') | Out-Null
+        $script:OrchestratorDialog.Show($_.Exception.Message, 'Publication failed', 'OK', 'Error') | Out-Null
     }
 }
 
@@ -3120,21 +3279,21 @@ function Request-ElectionRebalance {
 
     if (-not $SkipConfirmation) {
         $confirmation = "Recalculate elected job owners now?`n`nThe active published configuration, current live capabilities, server weights, policies and duration history will be used.`nPinned and Manual jobs are not changed.`n`nUnsaved draft changes are not included; publish them first if they must affect this rebalance."
-        if ([System.Windows.MessageBox]::Show($confirmation, 'Rebalance elected jobs', 'YesNo', 'Warning') -ne 'Yes') { return $null }
+        if ($script:OrchestratorDialog.Show($confirmation, 'Rebalance elected jobs', 'YesNo', 'Warning') -ne 'Yes') { return $null }
     }
     try {
         $result = Request-SmartM365OrchestratorRebalance -SharedDataFolderPath $script:SharedDataFolderPath
         $script:Controls.StatusText.Text = "Rebalance requested: $($result.RequestId)"
         Write-GuiActivity -Message ("Election rebalance requested. RequestId={0}; RequestPath={1}" -f $result.RequestId, $result.RequestPath) -Level SUCCESS
         if (-not $SkipConfirmation) {
-            [System.Windows.MessageBox]::Show("Rebalance request submitted successfully.`nRequest: $($result.RequestId)`n`nA resident Orchestrator will apply it on its next tick. Refresh the GUI to see the new owners.", 'Rebalance requested', 'OK', 'Information') | Out-Null
+            $script:OrchestratorDialog.Show("Rebalance request submitted successfully.`nRequest: $($result.RequestId)`n`nA resident Orchestrator will apply it on its next tick. Refresh the GUI to see the new owners.", 'Rebalance requested', 'OK', 'Information') | Out-Null
         }
         return $result
     }
     catch {
         Write-GuiException -Context 'Election rebalance request failed' -ErrorRecord $_
         if ($SkipConfirmation) { throw }
-        [System.Windows.MessageBox]::Show($_.Exception.Message, 'Rebalance failed', 'OK', 'Error') | Out-Null
+        $script:OrchestratorDialog.Show($_.Exception.Message, 'Rebalance failed', 'OK', 'Error') | Out-Null
         return $null
     }
 }
@@ -3291,8 +3450,8 @@ $script:Controls.ServersGrid.Add_SelectionChanged({
     $script:Controls.ServerWeightBox.Text = ([double]$row.Weight).ToString([System.Globalization.CultureInfo]::InvariantCulture)
     Select-ComboText -Combo $script:Controls.ServerPolicyCombo -Text ([string]$row.Policy)
 })
-$script:Controls.ApplyJobButton.Add_Click({ try { Apply-SelectedJobToDraft } catch { Write-GuiException -Context 'Invalid job draft' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Invalid job', 'OK', 'Error') | Out-Null } })
-$script:Controls.ApplyServerButton.Add_Click({ try { Apply-SelectedServerToDraft } catch { Write-GuiException -Context 'Invalid server draft' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Invalid server', 'OK', 'Error') | Out-Null } })
+$script:Controls.ApplyJobButton.Add_Click({ try { Apply-SelectedJobToDraft } catch { Write-GuiException -Context 'Invalid job draft' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Invalid job', 'OK', 'Error') | Out-Null } })
+$script:Controls.ApplyServerButton.Add_Click({ try { Apply-SelectedServerToDraft } catch { Write-GuiException -Context 'Invalid server draft' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Invalid server', 'OK', 'Error') | Out-Null } })
 $script:Controls.RefreshButton.Add_Click({ Refresh-AllViews })
 $script:Controls.ValidateButton.Add_Click({ [void](Show-DraftValidation) })
 $script:Controls.RebalanceButton.Add_Click({ [void](Request-ElectionRebalance) })
@@ -3356,16 +3515,16 @@ $script:Controls.HistoryGrid.Add_MouseDoubleClick({
     if ($null -eq $row) { return }
     if (-not [string]::IsNullOrWhiteSpace([string]$row.LogPath) -and (Test-Path -LiteralPath $row.LogPath)) { Start-Process -FilePath $row.LogPath; return }
     $logText = if ([string]::IsNullOrWhiteSpace([string]$row.LogPath)) { '<no log path recorded>' } else { [string]$row.LogPath }
-    [System.Windows.MessageBox]::Show("The log of this run is not reachable from this computer.`n`n$logText`n`nThe log stays on the server that ran the job ($($row.Server)) until it is copied to LOG-ALL.", 'Log not found', 'OK', 'Information') | Out-Null
+    $script:OrchestratorDialog.Show("The log of this run is not reachable from this computer.`n`n$logText`n`nThe log stays on the server that ran the job ($($row.Server)) until it is copied to LOG-ALL.", 'Log not found', 'OK', 'Information') | Out-Null
 })
 $script:Controls.Failures24hButton.Add_Click({ try { Show-FailuresLast24Hours } catch { Write-GuiException -Context 'Failure filter failed' -ErrorRecord $_ } })
 $script:Controls.EnableMaintenanceButton.Add_Click({
     try { Set-GuiMaintenance -Enabled $true }
-    catch { Write-GuiException -Context 'Enable maintenance failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Maintenance', 'OK', 'Error') | Out-Null; Refresh-MaintenanceView }
+    catch { Write-GuiException -Context 'Enable maintenance failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Maintenance', 'OK', 'Error') | Out-Null; Refresh-MaintenanceView }
 })
 $script:Controls.DisableMaintenanceButton.Add_Click({
     try { Set-GuiMaintenance -Enabled $false }
-    catch { Write-GuiException -Context 'Disable maintenance failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Maintenance', 'OK', 'Error') | Out-Null; Refresh-MaintenanceView }
+    catch { Write-GuiException -Context 'Disable maintenance failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Maintenance', 'OK', 'Error') | Out-Null; Refresh-MaintenanceView }
 })
 $script:Controls.OperationsRunningGrid.Add_SelectionChanged({
     $row = $script:Controls.OperationsRunningGrid.SelectedItem
@@ -3373,17 +3532,17 @@ $script:Controls.OperationsRunningGrid.Add_SelectionChanged({
 })
 $script:Controls.StopRunningJobButton.Add_Click({
     try { Request-SelectedRunningJobStop }
-    catch { Write-GuiException -Context 'Job stop request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Stop request failed', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Job stop request failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Stop request failed', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.LaunchJobsGrid.Add_SelectionChanged({ try { Update-SelectedLaunchPreview -Kind Job } catch { Write-GuiException -Context 'Job preview failed' -ErrorRecord $_ } })
 $script:Controls.ManualLaunchesGrid.Add_SelectionChanged({ try { Update-SelectedLaunchPreview -Kind Manual } catch { Write-GuiException -Context 'Launch preview failed' -ErrorRecord $_ } })
 $script:Controls.RunJobNowButton.Add_Click({
     try { Invoke-GuiLaunch -Kind Job }
-    catch { Write-GuiException -Context 'Run now failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Run now failed', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Run now failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Run now failed', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.RunManualLaunchButton.Add_Click({
     try { Invoke-GuiLaunch -Kind Manual }
-    catch { Write-GuiException -Context 'Manual launch failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Manual launch failed', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Manual launch failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Manual launch failed', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.RequestJobButton.Add_Click({
     try {
@@ -3391,7 +3550,7 @@ $script:Controls.RequestJobButton.Add_Click({
         if ($null -eq $row) { throw 'Select a job first.' }
         [void](Request-SelectedJobRun -JobName ([string]$row.Name) -IncludeDependencies ([bool]$script:Controls.LaunchIncludeDependenciesCheck.IsChecked))
     }
-    catch { Write-GuiException -Context 'Run request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Run request failed', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Run request failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Run request failed', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.ApplyJobExecutionModeButton.Add_Click({
     try {
@@ -3399,7 +3558,7 @@ $script:Controls.ApplyJobExecutionModeButton.Add_Click({
         if ($null -eq $row) { throw 'Select an on-premises job first.' }
         [void](Set-GuiJobExecutionMode -JobName ([string]$row.Name) -Mode (Get-ComboText -Combo $script:Controls.JobExecutionModeCombo))
     }
-    catch { Write-GuiException -Context 'Execution mode change failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Execution mode', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Execution mode change failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Execution mode', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.ApplyModeToAllOnPremButton.Add_Click({
     try {
@@ -3407,23 +3566,23 @@ $script:Controls.ApplyModeToAllOnPremButton.Add_Click({
         if ([string]::IsNullOrWhiteSpace($mode)) { $mode = '(default)' }
         $names = @($script:LaunchJobRows | Where-Object { $_.OnPremises -and $_.InManifest } | ForEach-Object { [string]$_.Name })
         if ($names.Count -eq 0) { throw 'No on-premises job in the published configuration.' }
-        if ([System.Windows.MessageBox]::Show(("Set the execution mode {0} in the draft for {1} on-premises job(s)?`n`n{2}`n`nPublish the changes to apply." -f $mode, $names.Count, ($names -join [Environment]::NewLine)), 'Execution mode', 'YesNo', 'Question') -ne 'Yes') { return }
+        if ($script:OrchestratorDialog.Show(("Set the execution mode {0} in the draft for {1} on-premises job(s)?`n`n{2}`n`nPublish the changes to apply." -f $mode, $names.Count, ($names -join [Environment]::NewLine)), 'Execution mode', 'YesNo', 'Question') -ne 'Yes') { return }
         [void](Set-GuiJobExecutionMode -JobName $names -Mode $mode)
     }
-    catch { Write-GuiException -Context 'Execution mode change failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Execution mode', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Execution mode change failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Execution mode', 'OK', 'Error') | Out-Null }
 })
-$script:Controls.OrchestratorStartButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action Start } catch { Write-GuiException -Context 'Orchestrator action Start failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
-$script:Controls.OrchestratorStopButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action Stop } catch { Write-GuiException -Context 'Orchestrator action Stop failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
-$script:Controls.OrchestratorRestartButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action Restart } catch { Write-GuiException -Context 'Orchestrator action Restart failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
-$script:Controls.FullCollectButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action FullCollect } catch { Write-GuiException -Context 'Orchestrator action FullCollect failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
-$script:Controls.SendSummaryButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action SendSummary } catch { Write-GuiException -Context 'Orchestrator action SendSummary failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
+$script:Controls.OrchestratorStartButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action Start } catch { Write-GuiException -Context 'Orchestrator action Start failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
+$script:Controls.OrchestratorStopButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action Stop } catch { Write-GuiException -Context 'Orchestrator action Stop failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
+$script:Controls.OrchestratorRestartButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action Restart } catch { Write-GuiException -Context 'Orchestrator action Restart failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
+$script:Controls.FullCollectButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action FullCollect } catch { Write-GuiException -Context 'Orchestrator action FullCollect failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
+$script:Controls.SendSummaryButton.Add_Click({ try { Invoke-GuiOrchestratorAction -Action SendSummary } catch { Write-GuiException -Context 'Orchestrator action SendSummary failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Orchestrator action failed', 'OK', 'Error') | Out-Null } })
 $script:Controls.RequestPrepareButton.Add_Click({
     try { [void](Request-SelectedJobRun -JobName $script:PrepareJobName -IncludeDependencies $false) }
-    catch { Write-GuiException -Context 'Prepare request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Prepare request failed', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Prepare request failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Prepare request failed', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.RequestRunButton.Add_Click({
     try { [void](Request-SelectedJobRun) }
-    catch { Write-GuiException -Context 'Run request failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Run request failed', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Run request failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Run request failed', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.RequestsGrid.Add_SelectionChanged({
     try { Update-SelectedPipelineRequest }
@@ -3452,7 +3611,7 @@ $script:Controls.AddServerButton.Add_Click({
         Refresh-ServersView | Out-Null
         Write-GuiActivity -Message "Server '$server' added to the draft."
     }
-    catch { Write-GuiException -Context 'Add server failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Add server', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Add server failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Add server', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.RemoveServerButton.Add_Click({
     $row = $script:Controls.ServersGrid.SelectedItem
@@ -3460,10 +3619,10 @@ $script:Controls.RemoveServerButton.Add_Click({
     $server = [string]$row.Server
     $pinnedJobs = @($script:DraftJobs.Jobs | Where-Object { $_.AssignmentMode -eq 'Pinned' -and $server -in @($_.AllowedServers) })
     if ($pinnedJobs.Count -gt 0) {
-        [System.Windows.MessageBox]::Show("Server is still used by pinned jobs: $($pinnedJobs.Name -join ', ')", 'Cannot remove server', 'OK', 'Error') | Out-Null
+        $script:OrchestratorDialog.Show("Server is still used by pinned jobs: $($pinnedJobs.Name -join ', ')", 'Cannot remove server', 'OK', 'Error') | Out-Null
         return
     }
-    if ([System.Windows.MessageBox]::Show("Remove $server from the cluster draft?", 'Remove server', 'YesNo', 'Warning') -ne 'Yes') { return }
+    if ($script:OrchestratorDialog.Show("Remove $server from the cluster draft?", 'Remove server', 'YesNo', 'Warning') -ne 'Yes') { return }
     $script:DraftCluster.ExpectedOrchestratorServers = @($script:DraftCluster.ExpectedOrchestratorServers | Where-Object { $_ -ine $server })
     [void]$script:DraftCluster.ElectionWeightsByServer.PSObject.Properties.Remove($server)
     [void]$script:DraftCluster.ServerJobPolicies.PSObject.Properties.Remove($server)
@@ -3473,13 +3632,13 @@ $script:Controls.RemoveServerButton.Add_Click({
 $script:Controls.RollbackButton.Add_Click({
     $version = $script:Controls.VersionsGrid.SelectedItem
     if ($null -eq $version) { return }
-    if ([System.Windows.MessageBox]::Show("Rollback to the configuration before $($version.VersionId)?`nThis creates a new audited version.", 'Rollback', 'YesNo', 'Warning') -ne 'Yes') { return }
+    if ($script:OrchestratorDialog.Show("Rollback to the configuration before $($version.VersionId)?`nThis creates a new audited version.", 'Rollback', 'YesNo', 'Warning') -ne 'Yes') { return }
     try {
         $result = Restore-SmartM365OrchestratorConfigurationVersion -SharedDataFolderPath $script:SharedDataFolderPath -VersionFolderPath $version.FolderPath -Snapshot Before -ExpectedJobsHash $script:Snapshot.JobsHash -ExpectedClusterHash $script:Snapshot.ClusterHash
         Write-GuiActivity -Message "Rollback published as $($result.VersionId)." -Level SUCCESS
         Refresh-AllViews
     }
-    catch { Write-GuiException -Context 'Rollback failed' -ErrorRecord $_; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Rollback failed', 'OK', 'Error') | Out-Null }
+    catch { Write-GuiException -Context 'Rollback failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Rollback failed', 'OK', 'Error') | Out-Null }
 })
 $script:Controls.ExportCsvButton.Add_Click({
     $dialog = [Microsoft.Win32.SaveFileDialog]::new()
@@ -3691,11 +3850,11 @@ $window.Add_Closing({
     param($sender, $eventArgs)
     if ($script:CancellationBusy) {
         $eventArgs.Cancel = $true
-        [System.Windows.MessageBox]::Show('Cancellation is still being checked or published. Wait for the result before closing this window. Running collectors are not stopped.', 'Operation in progress', 'OK', 'Information') | Out-Null
+        $script:OrchestratorDialog.Show('Cancellation is still being checked or published. Wait for the result before closing this window. Running collectors are not stopped.', 'Operation in progress', 'OK', 'Information') | Out-Null
     }
     elseif ($script:RequestSubmitBusy) {
         $eventArgs.Cancel = $true
-        [System.Windows.MessageBox]::Show('A run request is still being submitted. Wait for the result before closing this window.', 'Operation in progress', 'OK', 'Information') | Out-Null
+        $script:OrchestratorDialog.Show('A run request is still being submitted. Wait for the result before closing this window.', 'Operation in progress', 'OK', 'Information') | Out-Null
     }
 })
 [void]$window.ShowDialog()
@@ -3707,7 +3866,7 @@ $window.Add_Closing({
     if ($env:SMARTM365_GUI_DETACHED -eq '1' -and $_.Exception -isnot [Management.Automation.PipelineStoppedException]) {
         try {
             Add-Type -AssemblyName PresentationFramework -ErrorAction Stop
-            [System.Windows.MessageBox]::Show(("The orchestrator GUI could not start.`n`n{0}" -f $_.Exception.Message), 'SmartM365 Orchestrator GUI', 'OK', 'Error') | Out-Null
+            $script:OrchestratorDialog.Show(("The orchestrator GUI could not start.`n`n{0}" -f $_.Exception.Message), 'SmartM365 Orchestrator GUI', 'OK', 'Error') | Out-Null
         }
         catch { Write-Verbose ("Startup error message box unavailable: {0}" -f $_.Exception.Message) }
     }
