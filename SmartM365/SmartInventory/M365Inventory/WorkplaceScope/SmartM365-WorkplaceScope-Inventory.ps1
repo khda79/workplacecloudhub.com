@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collect native Entra direct membership and Intune policy/assignment evidence.
 .VERSION
-1.0.12
+1.0.13
 .NOTES
 Candidate collector. Not automatically scheduled until production qualification.
 Graph beta membership avoids the documented v1.0 service-principal omission.
@@ -43,7 +43,7 @@ try {
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.92' -ErrorAction Stop
-    Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -ErrorAction Stop
+    Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.18' -ErrorAction Stop
     Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.WorkplaceSource.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
     $script:Runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effective `
         -DefaultOutputRelativePath 'M365/WorkplaceScope' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath `
@@ -154,8 +154,11 @@ try {
         return ($badRequest -and ($directoryToken -or $text -match '\bThe page token is not valid\b'))
     }
     # Catalog properties and membership scope share this single enumeration.
+    Write-SmartM365EvidenceLog 'Reading the Entra group catalog (single paged enumeration).'
+    $catalogTimer = [Diagnostics.Stopwatch]::StartNew()
     $groups = @(Get-MgBetaGroup -All -Property id,visibility,displayName,mailEnabled,securityEnabled,groupTypes,onPremisesSecurityIdentifier -ErrorAction Stop)
     $groupCatalogCollectedAtUtc = [datetime]::UtcNow.ToString('o')
+    Write-SmartM365EvidenceLog ("Entra group catalog read in {0:N1} min: {1} group(s)." -f $catalogTimer.Elapsed.TotalMinutes, $groups.Count)
     if ($MaxItems -gt 0) { $groups = @($groups | Select-Object -First $MaxItems) }
     if (@($groups | Where-Object Visibility -eq 'HiddenMembership').Count) {
         Invoke-SmartM365Preflight -ScriptName 'SmartM365-WorkplaceScope-Inventory' -RequiredGraphApplicationPermissions @('Member.Read.Hidden') | Out-Null
@@ -166,7 +169,10 @@ try {
     # lowercase. Distinct groups and distinct members per group make every pair distinct without a global set.
     $membershipTimer = [Diagnostics.Stopwatch]::StartNew()
     $seenGroups = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    # Without this line the job log stayed silent for hours and the orchestrator reported the job as stalled.
+    $membershipProgress = New-SmartM365EvidenceProgress -Activity 'Direct membership' -Total $groups.Count -Unit 'groups'
     foreach ($group in $groups) {
+        [void](Write-SmartM365EvidenceProgress -Progress $membershipProgress -Processed $seenGroups.Count -Detail "membership rows=$($memberships.Count); absent groups=$($absentGroups.Count)")
         if ([string]::IsNullOrWhiteSpace([string]$group.Id) -or -not $seenGroups.Add(([string]$group.Id).Trim().ToLowerInvariant())) { throw 'Missing or duplicate Entra group identity.' }
         $memberRead = Get-WorkplaceDirectMembers -GroupId $group.Id
         if ($memberRead.Absent) { $absentGroups.Add([string]$group.Id); continue }
@@ -194,6 +200,7 @@ try {
     Write-SmartM365EvidenceLog ("Direct membership collection completed in {0:N1} min: {1} membership row(s) validated while collected." -f $membershipTimer.Elapsed.TotalMinutes, $memberships.Count)
     if ($absentGroups.Count) {
         # Corroborate targeted 404s with a successful fresh full enumeration.
+        Write-SmartM365EvidenceLog "Verifying absence of $($absentGroups.Count) group(s) with a fresh full group enumeration."
         $freshIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($currentGroup in @(Get-MgBetaGroup -All -Property id -ErrorAction Stop)) {
             if (-not $currentGroup.Id -or -not $freshIds.Add([string]$currentGroup.Id)) { throw 'Missing or duplicate identity in group absence verification.' }
@@ -216,7 +223,10 @@ try {
         $items = @(& $family.Command -All -ErrorAction Stop)
         if ($MaxItems -gt 0) { $items = @($items | Select-Object -First $MaxItems) }
         $seenPolicies = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        Write-SmartM365EvidenceLog "Reading assignments for $($items.Count) $($family.Name) policies."
+        $policyProgress = New-SmartM365EvidenceProgress -Activity "$($family.Name) assignments" -Total $items.Count -Unit 'policies'
         foreach ($policy in $items) {
+            [void](Write-SmartM365EvidenceProgress -Progress $policyProgress -Processed $seenPolicies.Count -Detail "assignment rows=$($assignments.Count)")
             $id = [string](Get-WorkplaceSourceValue $policy @('id'))
             if (-not $id -or -not $seenPolicies.Add($id)) { throw 'Missing or duplicate policy identity.' }
             $uri = 'https://graph.microsoft.com/beta/deviceManagement/'+$family.Path+'/'+[uri]::EscapeDataString($id)+'/assignments'
@@ -258,6 +268,7 @@ try {
         Assert-SmartM365CsvDataCompleteness -Data $export.Rows -BaseFileName $export.Name -Columns $export.Columns | Out-Null
     }
     foreach ($export in $exports) {
+        Write-SmartM365EvidenceLog "Publishing $($export.Name): $($export.Rows.Count) row(s)."
         Export-SmartM365EvidenceDataset $script:Runtime $export.Name $export.Rows $export.Columns -NoWeeklyHistory -SingleSerialization | Out-Null
     }
     $qualifications = @('Direct membership only; all five required policy families collected.')

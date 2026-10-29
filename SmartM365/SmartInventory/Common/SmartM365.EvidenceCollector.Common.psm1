@@ -333,6 +333,57 @@ function Write-SmartM365EvidenceLog {
     WriteLog -Message $Message -Level $Level
 }
 
+function New-SmartM365EvidenceProgress {
+    # Progress state for a long loop: one INFO line every EveryItems items or EveryMinutes minutes, whichever
+    # comes first, so the job log keeps growing and the orchestrator does not report the job as stalled.
+    param(
+        [Parameter(Mandatory)][string]$Activity,
+        [Parameter(Mandatory)][ValidateRange(0,[int]::MaxValue)][int]$Total,
+        [string]$Unit='item(s)',
+        [ValidateRange(0,10000000)][int]$EveryItems=1000,
+        [ValidateRange(0,1440)][double]$EveryMinutes=5,
+        # Returns the current UTC time; injected by offline tests.
+        [scriptblock]$Clock={ [datetime]::UtcNow }
+    )
+    $now = [datetime](& $Clock)
+    return [pscustomobject]@{
+        Activity=$Activity; Total=$Total; Unit=$Unit; EveryItems=$EveryItems; EveryMinutes=$EveryMinutes; Clock=$Clock
+        StartedUtc=$now; LastLogUtc=$now; LastLogProcessed=0
+    }
+}
+
+function Write-SmartM365EvidenceProgress {
+    # Writes the line only when due and something advanced since the last line: a loop that stops advancing
+    # stays silent, so a real stall is still reported. Returns $true when a line was written.
+    param(
+        [Parameter(Mandatory)]$Progress,
+        [Parameter(Mandatory)][ValidateRange(0,[int]::MaxValue)][int]$Processed,
+        [string]$Detail='',
+        [switch]$Force
+    )
+    $now = [datetime](& $Progress.Clock)
+    if ($Processed -le $Progress.LastLogProcessed -and -not $Force) { return $false }
+    $dueByCount = $Progress.EveryItems -gt 0 -and ($Processed - $Progress.LastLogProcessed) -ge $Progress.EveryItems
+    $dueByTime = $Progress.EveryMinutes -gt 0 -and ($now - $Progress.LastLogUtc).TotalMinutes -ge $Progress.EveryMinutes
+    if (-not ($Force -or $dueByCount -or $dueByTime)) { return $false }
+    $culture = [Globalization.CultureInfo]::InvariantCulture
+    $elapsed = $now - $Progress.StartedUtc
+    $percent = if ($Progress.Total -gt 0) { [string]::Format($culture, '{0:0.0}%', 100.0 * $Processed / $Progress.Total) } else { 'n/a' }
+    $rate = if ($elapsed.TotalSeconds -gt 0) { $Processed / $elapsed.TotalSeconds } else { 0.0 }
+    $eta = 'n/a'
+    if ($rate -gt 0 -and $Progress.Total -ge $Processed) {
+        $remaining = [timespan]::FromSeconds(($Progress.Total - $Processed) / $rate)
+        $eta = [string]::Format($culture, '{0:0} min (~{1:HH:mm})', $remaining.TotalMinutes, ($now + $remaining).ToLocalTime())
+    }
+    $message = [string]::Format($culture, '{0} progress: {1}/{2} {3} ({4}); elapsed {5:0.0} min; {6:0.0} {3}/s; ETA {7}.',
+        $Progress.Activity, $Processed, $Progress.Total, $Progress.Unit, $percent, $elapsed.TotalMinutes, $rate, $eta)
+    if (-not [string]::IsNullOrWhiteSpace($Detail)) { $message = $message.TrimEnd('.') + '; ' + $Detail.Trim() }
+    Write-SmartM365EvidenceLog -Message $message -Level INFO
+    $Progress.LastLogUtc = $now
+    $Progress.LastLogProcessed = $Processed
+    return $true
+}
+
 function Complete-SmartM365EvidenceRuntime {
     param(
         [ValidateSet('Auto','Success','CompletedWithWarnings','Failed','Cancelled')][string]$Status='Auto',
@@ -345,7 +396,7 @@ function Complete-SmartM365EvidenceRuntime {
     Complete-SmartM365ExecutionContext -Status $Status -ErrorRecord $ErrorRecord -FailureStage $FailureStage @options
 }
 
-Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365EvidenceText,ConvertTo-SmartM365EvidenceJson,Get-SmartM365EvidenceConfig,Initialize-SmartM365EvidenceRuntime,Connect-SmartM365EvidenceGraph,Get-SmartM365EvidenceStatusCode,Invoke-SmartM365EvidenceGraphRequest,Get-SmartM365EvidenceGraphCollection,Invoke-SmartM365EvidenceExportReport,Export-SmartM365EvidenceDataset,Write-SmartM365EvidenceLog,Complete-SmartM365EvidenceRuntime
+Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365EvidenceText,ConvertTo-SmartM365EvidenceJson,Get-SmartM365EvidenceConfig,Initialize-SmartM365EvidenceRuntime,Connect-SmartM365EvidenceGraph,Get-SmartM365EvidenceStatusCode,Invoke-SmartM365EvidenceGraphRequest,Get-SmartM365EvidenceGraphCollection,Invoke-SmartM365EvidenceExportReport,Export-SmartM365EvidenceDataset,Write-SmartM365EvidenceLog,New-SmartM365EvidenceProgress,Write-SmartM365EvidenceProgress,Complete-SmartM365EvidenceRuntime
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

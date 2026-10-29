@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline coherent group catalog/membership acquisition tests. No tenant calls.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param()
@@ -123,6 +123,9 @@ function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]
         }
         function Start-Sleep { param([int]$Seconds) $script:Sleeps.Add($Seconds) }
         function Write-SmartM365EvidenceLog { param($Message, $Level) $script:Logs.Add([pscustomobject]@{Message=$Message;Level=$Level}) }
+        $script:ProgressCalls=[Collections.Generic.List[object]]::new()
+        function New-SmartM365EvidenceProgress { param($Activity, $Total, $Unit) [pscustomobject]@{Activity=$Activity;Total=$Total;Unit=$Unit} }
+        function Write-SmartM365EvidenceProgress { param($Progress, $Processed, $Detail) $script:ProgressCalls.Add([pscustomobject]@{Activity=$Progress.Activity;Total=$Progress.Total;Processed=$Processed;Detail=$Detail}); $false }
         function Invoke-SmartM365Preflight { throw 'Unexpected preflight in synthetic visible group collection.' }
         function Get-MgBetaDeviceManagementConfigurationPolicy {
             [CmdletBinding()] param([switch]$All)
@@ -145,7 +148,7 @@ function Invoke-CatalogFixture([object[]]$Groups, [switch]$FailMembers, [switch]
             [pscustomobject]@{Exports=$script:Exports;GroupCalls=$script:GroupCalls;MemberCalls=$script:MemberCalls;
                              Properties=$script:Properties;Scope=$script:Scope;ErrorText=$script:ErrorText;
                              ParentCalls=$script:ParentCalls;Sleeps=$script:Sleeps.ToArray();Logs=$script:Logs.ToArray();Qualifications=$script:Qualifications;
-                             CallsByGroup=$script:CallsByGroup}
+                             CallsByGroup=$script:CallsByGroup;ProgressCalls=$script:ProgressCalls.ToArray()}
         }
     } -ArgumentList @($Groups, $collectionBlock, [bool]$FailMembers, [bool]$DuplicateMember, [bool]$FailPolicies,
         $Member404Count, $ParentResults, [bool]$Reappears, [bool]$FailFinalCatalog, [bool]$DuplicateFinalCatalog, [bool]$CodeOnly404, $MemberStatus, $ErrorShape, $MemberErrors)
@@ -182,6 +185,11 @@ foreach ($column in @('GroupId','Visibility','MemberCount','MemberCollectionStat
                      'DisplayName','MailEnabled','SecurityEnabled','GroupTypes','OnPremisesSecurityIdentifier','GroupCollectedAtUtc')) {
     Assert-Catalog ($scope.Columns -contains $column) "Export column missing: $column"
 }
+$membershipProgress = @($result.ProgressCalls | Where-Object Activity -eq 'Direct membership')
+Assert-Catalog ($membershipProgress.Count -eq 2 -and ($membershipProgress.Processed -join ',') -ceq '0,1' -and $membershipProgress[0].Total -eq 2) 'Membership progress is not checked once per group with the completed count.'
+Assert-Catalog ($membershipProgress[1].Detail -ceq 'membership rows=2; absent groups=0') "Membership progress detail changed: $($membershipProgress[1].Detail)"
+Assert-Catalog (@($result.Logs | Where-Object { $_.Message -match '^Entra group catalog read in .* min: 2 group\(s\)\.$' }).Count -eq 1) 'Group catalog duration line missing.'
+Assert-Catalog (@($result.Logs | Where-Object { $_.Message -match '^Publishing M365_EntraGroupMemberships_All: 2 row\(s\)\.$' }).Count -eq 1) 'Export start line missing.'
 $zero = Invoke-CatalogFixture @()
 Assert-Catalog (-not $zero.ErrorText -and $zero.Exports['M365_EntraGroupMembershipScope'].Rows.Count -eq 0) 'Successful zero collection failed.'
 Assert-Catalog ($zero.Exports['M365_EntraGroupMembershipScope'].Columns.Count -eq 12) 'Empty enriched schema lost headers.'
