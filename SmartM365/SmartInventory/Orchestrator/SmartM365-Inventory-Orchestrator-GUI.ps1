@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.19
+1.6.20
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.19'
+$script:AppVersion = '1.6.20'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -452,7 +452,7 @@ $xaml = @'
                                 </DataGrid.Columns>
                             </DataGrid>
                             <Grid Grid.Row="2" Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="9*"/><ColumnDefinition Width="11*"/></Grid.ColumnDefinitions>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="11*"/><ColumnDefinition Width="9*"/></Grid.ColumnDefinitions>
                                 <GroupBox Header="Running jobs" Margin="0,0,6,0">
                                     <Grid>
                                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
@@ -470,13 +470,14 @@ $xaml = @'
                                             </Style>
                                         </DataGrid.RowStyle>
                                         <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="130"/>
-                                            <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="90"/>
-                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="*"/>
-                                            <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="65"/>
-                                            <DataGridTextColumn Header="Started" Binding="{Binding Started}" Width="120"/>
-                                            <DataGridTextColumn Header="Duration (min)" Binding="{Binding DurationMinutes}" Width="100"/>
-                                            <DataGridTextColumn Header="Activity" Binding="{Binding Activity}" Width="70"/>
+                                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="120"/>
+                                            <!-- MinWidth keeps the job name readable when the stalled-job columns take the room (GUI 1.6.20). -->
+                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="*" MinWidth="220"/>
+                                            <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="85"/>
+                                            <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="55"/>
+                                            <DataGridTextColumn Header="Started" Binding="{Binding Started}" Width="110"/>
+                                            <DataGridTextColumn Header="Duration (min)" Binding="{Binding DurationMinutes}" Width="95"/>
+                                            <DataGridTextColumn Header="Activity" Binding="{Binding Activity}" Width="65"/>
                                             <DataGridTextColumn Header="Silent (min)" Binding="{Binding SilentMinutes}" Width="80"/>
                                             <DataGridTextColumn Header="CPU (s)" Binding="{Binding CpuSeconds}" Width="65"/>
                                             <DataGridTextColumn Header="CPU s/min" Binding="{Binding CpuSecondsPerMinute}" Width="70"/>
@@ -489,7 +490,7 @@ $xaml = @'
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="110"/>
                                             <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="90"/>
-                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="165"/>
+                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="220"/>
                                             <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="125"/>
                                             <DataGridTextColumn Header="Waiting (min)" Binding="{Binding WaitingMinutes}" Width="85"/>
                                             <DataGridTextColumn Header="Details" Binding="{Binding Details}" Width="*">
