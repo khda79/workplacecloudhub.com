@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.72
+1.5.73
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.72"
+$ScriptVersion = "1.5.73"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2552,7 +2552,10 @@ function Get-OrchestratorPendingJobSnapshot {
                 ScheduledOccurrence = [string]$state.PendingRetry.ScheduledOccurrence
                 Reason = 'PendingRetry'
                 FirstSeen = [string]$state.LastRunEnd
-                Details = ("Retry attempt {0}; not before {1}." -f $state.PendingRetry.Attempt, $state.PendingRetry.NotBefore)
+                Details = ("Retry attempt {0}; not before {1}; {2}." -f $state.PendingRetry.Attempt, $state.PendingRetry.NotBefore, $(
+                    if ($state.PendingRetry.ContainsKey('HandoffFrom') -and $state.PendingRetry.HandoffFrom) { 'planned server: {0} (taken over from {1})' -f $env:COMPUTERNAME, $state.PendingRetry.HandoffFrom }
+                    elseif ($state.PendingRetry.ContainsKey('HandoffOffered') -and $state.PendingRetry.HandoffOffered) { 'planned server: to be elected (another eligible server first, else {0} {1} s later)' -f $env:COMPUTERNAME, $script:RetryHandoffGraceSeconds }
+                    else { 'planned server: {0}' -f $env:COMPUTERNAME }))
             })
             continue
         }
@@ -4327,6 +4330,17 @@ function Complete-JobRun {
         }
         catch {
             Write-OrchestratorLog -Message ("Job {0}: shared occurrence claim could not be finalized as {1}: {2}" -f $JobName, $claimStatus, $_.Exception.Message) -Level ERROR
+            $claimStatus = ''
+        }
+        # Elected jobs only (a job pinned by AllowedServers keeps its retry here): the retry is
+        # offered to the other eligible servers once the shared claim says RetryScheduled.
+        if ($retryScheduled -and $claimStatus -eq 'RetryScheduled' -and $script:Settings.DistributedSchedulingEnabled -and [string]$manifestJob.AssignmentMode -eq 'Elected') {
+            try {
+                $state.PendingRetry['HandoffOfferId'] = Write-OrchestratorRetryOffer -JobName $JobName -PendingRetry $state.PendingRetry -ClaimPath ([string]$RunInfo.ClaimPath)
+                $state.PendingRetry['HandoffOffered'] = $true
+                Write-OrchestratorLog -Message ("Job {0}: retry attempt {1} offered to the other eligible servers from {2}; this server runs it itself if nobody took it {3} s after the retry delay." -f $JobName, $state.PendingRetry.Attempt, $state.PendingRetry.NotBefore, $script:RetryHandoffGraceSeconds)
+            }
+            catch { Write-OrchestratorLog -Message ("Job {0}: retry could not be offered to the other servers; it stays on this server: {1}" -f $JobName, $_.Exception.Message) -Level WARN }
         }
     }
 
@@ -5359,6 +5373,11 @@ function Test-JobAllowedOnServer {
     switch ([string]$Job.AssignmentMode) {
         'Manual' { return ([bool]$AllowManual -and @(Get-ManualJobMissingCapabilities -Job $Job).Count -eq 0) }
         'Elected' {
+            # A retry adopted from the server where the job failed may run here (Invoke-RetryHandoffAdoption).
+            if ($script:State -is [hashtable] -and $script:State['Jobs'] -is [hashtable] -and $script:State['Jobs'].ContainsKey([string]$Job.Name)) {
+                $adopted = $script:State['Jobs'][[string]$Job.Name]['PendingRetry']
+                if ($adopted -is [hashtable] -and $adopted.ContainsKey('HandoffFrom') -and $adopted['HandoffFrom']) { return $true }
+            }
             $owner = Get-ElectedJobOwner -JobName $Job.Name
             return (-not [string]::IsNullOrWhiteSpace($owner) -and $owner -eq $env:COMPUTERNAME)
         }
@@ -6213,12 +6232,135 @@ function Test-OrchestratorLocalConcurrencyBlocked {
     return $true
 }
 
+function Get-OrchestratorRetryOfferPath {
+    param([Parameter(Mandatory = $true)][string]$JobName)
+    return Join-Path -Path (Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath 'RetryOffers') -ChildPath (($JobName -replace '[^A-Za-z0-9._-]', '_') + '.json')
+}
+
+function Write-OrchestratorRetryOffer {
+    # Advisory only: the shared occurrence claim (RetryScheduled, compare-and-swap on takeover)
+    # decides who runs the retry.
+    param(
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)][hashtable]$PendingRetry,
+        [Parameter(Mandatory = $true)][string]$ClaimPath
+    )
+    $offer = [ordered]@{
+        SchemaVersion = 1; OfferId = [guid]::NewGuid().ToString('N'); JobName = $JobName; FailedServer = $env:COMPUTERNAME.ToUpperInvariant()
+        OccurrenceUtc = (ConvertFrom-StateTime -Text ([string]$PendingRetry.ScheduledOccurrence)).ToUniversalTime().ToString('o')
+        Attempt = [int]$PendingRetry.Attempt; NotBeforeUtc = (ConvertFrom-StateTime -Text ([string]$PendingRetry.NotBefore)).ToUniversalTime().ToString('o')
+        ClaimPath = $ClaimPath; PipelineBatchId = [string]$PendingRetry.PipelineBatchId; PipelineStatusPath = [string]$PendingRetry.PipelineStatusPath
+        CreatedAtUtc = [datetime]::UtcNow.ToString('o')
+    }
+    $path = Get-OrchestratorRetryOfferPath -JobName $JobName
+    [void](New-Item -ItemType Directory -Path (Split-Path -Path $path -Parent) -Force -ErrorAction Stop)
+    $null = Write-SmartM365JsonBytesAtomically -Path $path -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($offer | ConvertTo-Json -Depth 4))) -Validate { param($document) if (-not $document.PSObject.Properties['OfferId']) { throw 'OfferId missing.' } }
+    return [string]$offer.OfferId
+}
+
+function Get-OrchestratorRetryOffers {
+    $folder = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath 'RetryOffers'
+    if (-not (Test-Path -LiteralPath $folder -PathType Container)) { return @() }
+    $offers = [System.Collections.Generic.List[object]]::new()
+    $paths = @(Get-ChildItem -LiteralPath $folder -File -ErrorAction Stop | Where-Object { $_.Name -match '\.json(?:\.txt)?$' } | ForEach-Object { (Get-SmartM365JsonNames $_.FullName).Legacy } | Sort-Object -Unique)
+    foreach ($path in $paths) {
+        try {
+            $document = (Read-SmartM365JsonDocument $path).Document
+            if ($document.PSObject.Properties['OfferId'] -and $document.PSObject.Properties['JobName']) { $offers.Add($document) }
+        }
+        catch { Write-OrchestratorRuntimeUpdateWarning -Key ("retry-offer-read:{0}" -f $path) -Message ("Retry offer {0} could not be read; ignored: {1}" -f $path, $_.Exception.Message) -Now (Get-Date) }
+    }
+    return @($offers)
+}
+
+function Remove-OrchestratorRetryOffer {
+    # Removes the offer only while it is still the expected one (a newer offer for the job stays).
+    param([Parameter(Mandatory = $true)][string]$JobName, [string]$OfferId = '')
+    $path = Get-OrchestratorRetryOfferPath -JobName $JobName
+    if (-not (Get-SmartM365JsonReadPath -Path $path -Optional)) { return }
+    if (-not [string]::IsNullOrWhiteSpace($OfferId)) {
+        $current = $null
+        try { $current = (Read-SmartM365JsonDocument $path).Document } catch { $current = $null }
+        if ($null -ne $current -and [string]$current.OfferId -ne $OfferId) { return }
+    }
+    $names = Get-SmartM365JsonNames $path
+    foreach ($candidate in @($names.Preferred, $names.Legacy)) { Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue }
+}
+
+function Test-OrchestratorRetryHandoffEligible {
+    # Same rules as the election for this server: ready capabilities and Graph roles, no
+    # job-specific prerequisite block, and the server job policy.
+    param([Parameter(Mandatory = $true)]$Job)
+    $capabilities = $script:ServerCapabilities
+    if ($null -eq $capabilities) { return $false }
+    if ($capabilities.PSObject.Properties['BlockedJobs'] -and [string]$Job.Name -in @($capabilities.BlockedJobs | ForEach-Object { [string]$_ })) { return $false }
+    $match = Test-SmartM365OrchestratorCapabilityMatch -ServerCapabilities $capabilities -RequiredCapabilities @($Job.RequiredCapabilities) -RequiredGraphAppRoles @($Job.RequiredGraphAppRoles)
+    if (-not $match.Eligible) { return $false }
+    $serverName = $env:COMPUTERNAME.ToUpperInvariant()
+    $policy = if ($capabilities.PSObject.Properties['ServerJobPolicy'] -and $null -ne $capabilities.ServerJobPolicy) { $capabilities.ServerJobPolicy } elseif ($script:Settings.ServerJobPolicies.ContainsKey($serverName)) { $script:Settings.ServerJobPolicies[$serverName] } else { $null }
+    if ($null -eq $policy) { return $true }
+    $only = @(if ($policy -is [System.Collections.IDictionary]) { if ($policy.Contains('OnlyJobsRequiring')) { $policy['OnlyJobsRequiring'] } } elseif ($policy.PSObject.Properties['OnlyJobsRequiring']) { $policy.OnlyJobsRequiring })
+    $only = @($only | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    $jobCapabilities = @($Job.RequiredCapabilities | ForEach-Object { [string]$_ })
+    return @($only | Where-Object { $_ -notin $jobCapabilities }).Count -eq 0
+}
+
+function Invoke-RetryHandoffAdoption {
+    # A free, eligible server adopts a retry offered by the server where the job failed. The
+    # adopted retry then goes through the normal launch gates; the claim takeover is atomic.
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+    if (-not $script:Settings.DistributedSchedulingEnabled -or $null -eq $script:ElectionPlan) { return }
+    $self = $env:COMPUTERNAME.ToUpperInvariant()
+    foreach ($offer in @(Get-OrchestratorRetryOffers)) {
+        $name = [string]$offer.JobName
+        # ConvertFrom-Json may already return these values as DateTime.
+        $occurrenceTime = ConvertTo-OrchestratorUtcTime -Value $offer.OccurrenceUtc
+        $notBeforeTime = ConvertTo-OrchestratorUtcTime -Value $offer.NotBeforeUtc
+        if ($null -eq $occurrenceTime -or $null -eq $notBeforeTime) { continue }
+        $occurrenceUtc = $occurrenceTime.UtcDateTime
+        $claimRecord = $null
+        try { $claimRecord = Get-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $name -Occurrence $occurrenceUtc }
+        catch { continue }
+        $stillOffered = $null -ne $claimRecord -and [string]$claimRecord.Claim.Status -eq 'RetryScheduled' -and [string]$claimRecord.Claim.OwnerServer -eq [string]$offer.FailedServer
+        if (-not $stillOffered) {
+            # Taken, finished or cancelled: any server cleans the stale offer.
+            Remove-OrchestratorRetryOffer -JobName $name -OfferId ([string]$offer.OfferId)
+            continue
+        }
+        if ([string]$offer.FailedServer -eq $self) { continue }
+        if ($script:RunningJobs.Count -ge $script:Settings.MaxConcurrency) { return }
+        if (-not $script:Manifest.JobsByName.ContainsKey($name)) { continue }
+        $job = $script:Manifest.JobsByName[$name]
+        if ([string]$job.AssignmentMode -ne 'Elected' -or -not (Test-JobSelected -JobName $name) -or $script:RunningJobs.ContainsKey($name)) { continue }
+        $state = Get-JobState -JobName $name
+        if ($null -ne $state.PendingRetry) { continue }
+        $notBeforeUtc = $notBeforeTime.UtcDateTime
+        if ($Now.ToUniversalTime() -lt $notBeforeUtc) { continue }
+        $isPipelineRetry = -not [string]::IsNullOrWhiteSpace([string]$offer.PipelineBatchId)
+        if ($null -ne $script:MaintenanceControl -and $script:MaintenanceControl.Enabled -and -not $isPipelineRetry) { continue }
+        if (-not (Test-OrchestratorRetryHandoffEligible -Job $job)) { continue }
+        $state.PendingRetry = @{
+            NotBefore = ConvertTo-StateTime -Value $notBeforeUtc
+            Attempt = [int]$offer.Attempt
+            ScheduledOccurrence = ConvertTo-StateTime -Value $occurrenceUtc
+            PipelineBatchId = [string]$offer.PipelineBatchId
+            PipelineStatusPath = [string]$offer.PipelineStatusPath
+            HandoffFrom = [string]$offer.FailedServer
+            HandoffOfferId = [string]$offer.OfferId
+        }
+        Save-OrchestratorState
+        Write-OrchestratorLog -Message ("Job {0}: retry attempt {1} offered by {2} after its failure there is adopted by this server; the shared claim decides who runs it." -f $name, $offer.Attempt, $offer.FailedServer)
+    }
+}
+
 function Invoke-LaunchPhase {
     param([Parameter(Mandatory = $true)][datetime]$Now)
 
     if (-not $script:MaintenanceHealthy) { return }
     $limit = $script:Settings.MaxConcurrency
     $launchedThisTick = New-Object System.Collections.Generic.List[string]
+    try { Invoke-RetryHandoffAdoption -Now $Now }
+    catch { Write-OrchestratorRuntimeUpdateWarning -Key ("retry-handoff:{0}" -f $_.Exception.Message) -Message ("Retry offers of other servers could not be evaluated; local scheduling continues: {0}" -f $_.Exception.Message) -Now $Now }
 
     foreach ($job in $script:Manifest.OrderedJobs) {
         $name = $job.Name
@@ -6280,7 +6422,9 @@ function Invoke-LaunchPhase {
             $isPipeline = $false
             $pipelineInfo = $null
             $notBefore = ConvertFrom-StateTime -Text ([string]$state.PendingRetry.NotBefore)
-            if ($null -ne $notBefore -and $notBefore -le $Now) {
+            # An offered retry first waits for another eligible server to take it.
+            $handoffWait = $state.PendingRetry.ContainsKey('HandoffOffered') -and $state.PendingRetry.HandoffOffered -and $null -ne $notBefore -and $Now -lt $notBefore.AddSeconds($script:RetryHandoffGraceSeconds)
+            if ($null -ne $notBefore -and $notBefore -le $Now -and -not $handoffWait) {
                 $occurrence = ConvertFrom-StateTime -Text ([string]$state.PendingRetry.ScheduledOccurrence)
                 if ($null -eq $occurrence) { $occurrence = $Now }
                 $attempt = [int]$state.PendingRetry.Attempt
@@ -6531,11 +6675,31 @@ function Invoke-LaunchPhase {
                 }
             }
 
+        $retryHandoffFrom = ''
+        $retryOfferId = ''
+        if ($reason -eq 'retry' -and $null -ne $state.PendingRetry) {
+            if ($state.PendingRetry.ContainsKey('HandoffFrom')) { $retryHandoffFrom = [string]$state.PendingRetry.HandoffFrom }
+            if ($state.PendingRetry.ContainsKey('HandoffOfferId')) { $retryOfferId = [string]$state.PendingRetry.HandoffOfferId }
+        }
         if ($job.AssignmentMode -eq 'Elected') {
             # Read the shared occurrence claim before requesting the ConcurrencyKey: an occurrence a
             # peer already runs holds that key itself and must not be reported as blocked by it.
             # Read-only check; the atomic claim below stays authoritative.
             $peerClaimCheck = Get-OrchestratorPeerOccurrenceClaimState -JobName $name -Occurrence $occurrence -Now $Now
+            $offeredByFailedServer = $peerClaimCheck.State -ne 'None' -and [string]$peerClaimCheck.Claim.Status -eq 'RetryScheduled' -and [string]$peerClaimCheck.Claim.OwnerServer -eq $retryHandoffFrom
+            if ($retryHandoffFrom -and $peerClaimCheck.State -ne 'None' -and -not $offeredByFailedServer) {
+                $state.PendingRetry = $null
+                Save-OrchestratorState
+                Write-OrchestratorLog -Message ("Job {0}: adopted retry dropped; occurrence {1} is now handled by {2} (claim {3})." -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), [string]$peerClaimCheck.Claim.OwnerServer, [string]$peerClaimCheck.Claim.Status)
+                continue
+            }
+            if ($retryOfferId -and -not $retryHandoffFrom -and $peerClaimCheck.State -eq 'Active') {
+                # Another server took over the retry offered by this server.
+                $state.PendingRetry = $null
+                Save-OrchestratorState
+                Write-OrchestratorLog -Message ("Job {0}: retry of occurrence {1} taken over by {2}; it no longer runs here." -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), [string]$peerClaimCheck.Claim.OwnerServer)
+                continue
+            }
             if ($peerClaimCheck.State -eq 'Terminal') {
                 if ($reason -eq 'maintenance-catch-up') { Complete-MaintenanceCatchUpOccurrence -State $state -Occurrence $occurrence }
                 else { Set-OccurrenceHandledByPeer -JobName $name -Occurrence $occurrence -Claim $peerClaimCheck.Claim }
@@ -6544,7 +6708,8 @@ function Invoke-LaunchPhase {
                 }
                 continue
             }
-            if ($peerClaimCheck.State -eq 'Active') {
+            # A retry offered by the failing server is taken over by the atomic claim below.
+            if ($peerClaimCheck.State -eq 'Active' -and -not $offeredByFailedServer) {
                 Write-OrchestratorRuntimeUpdateWarning -Level INFO -Key ("peer-claim-active:{0}:{1}" -f $name, $occurrence.ToUniversalTime().ToString('o')) -Message ("Job {0}: occurrence {1} is handled by {2} (claim {3}); waiting for its result." -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), [string]$peerClaimCheck.Claim.OwnerServer, [string]$peerClaimCheck.Claim.Status) -Now $Now
                 continue
             }
@@ -6570,13 +6735,20 @@ function Invoke-LaunchPhase {
         $claimPath = ''
         if ($job.AssignmentMode -eq 'Elected') {
             try {
-                $claim = Enter-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $name -Occurrence $occurrence -OwnerServer $env:COMPUTERNAME -PlanId ([string]$script:ElectionPlan.PlanId) -SafeMinutes ($job.TimeoutMinutes + $script:Settings.ElectionClaimGraceMinutes) -HeartbeatRootPath $script:Settings.SharedDataFolderPath -HeartbeatStaleMinutes $script:Settings.PeerHeartbeatStaleMinutes
+                $claim = Enter-SmartM365OrchestratorOccurrenceClaim -ClaimsRootPath $script:Settings.ElectionClaimsPath -JobName $name -Occurrence $occurrence -OwnerServer $env:COMPUTERNAME -PlanId ([string]$script:ElectionPlan.PlanId) -SafeMinutes ($job.TimeoutMinutes + $script:Settings.ElectionClaimGraceMinutes) -HeartbeatRootPath $script:Settings.SharedDataFolderPath -HeartbeatStaleMinutes $script:Settings.PeerHeartbeatStaleMinutes -RetryHandoffFrom $retryHandoffFrom
                 if (-not $claim.Acquired) {
                     try {
                         $null = Exit-SmartM365OrchestratorConcurrencyLease -LeasePath $concurrencyLeasePath -LeaseId $concurrencyLeaseId -OwnerServer $env:COMPUTERNAME
                     }
                     catch {
                         Write-OrchestratorLog -Message ("Job {0}: failed to release ConcurrencyKey '{1}' after occurrence claim refusal: {2}" -f $name, $job.ConcurrencyKey, $_.Exception.Message) -Level ERROR
+                    }
+                    if ($retryHandoffFrom -or ($retryOfferId -and [string]$claim.Claim.OwnerServer -ne $env:COMPUTERNAME.ToUpperInvariant())) {
+                        # Another server won the retry: nothing runs here.
+                        $state.PendingRetry = $null
+                        Save-OrchestratorState
+                        Write-OrchestratorLog -Message ("Job {0}: retry of occurrence {1} not launched here: {2}" -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $claim.Reason)
+                        continue
                     }
                     $terminalClaim = $null -ne $claim.Claim -and [string]$claim.Claim.Status -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled')
                     if ($terminalClaim) {
@@ -6623,6 +6795,11 @@ function Invoke-LaunchPhase {
             Start-InventoryJob -Job $job -Occurrence $occurrence -Attempt $attempt -ClaimPath $claimPath -ConcurrencyLeasePath $concurrencyLeasePath -ConcurrencyLeaseId $concurrencyLeaseId
         }
         if ($reason -eq 'maintenance-catch-up') { Complete-MaintenanceCatchUpOccurrence -State $state -Occurrence $occurrence }
+        if ($retryOfferId) {
+            try { Remove-OrchestratorRetryOffer -JobName $name -OfferId $retryOfferId }
+            catch { Write-OrchestratorRuntimeUpdateWarning -Key ("retry-offer-remove:{0}" -f $name) -Message ("Job {0}: launched retry offer could not be removed; peers ignore it because the claim is no longer RetryScheduled: {1}" -f $name, $_.Exception.Message) -Now $Now }
+            if ($retryHandoffFrom) { Write-OrchestratorLog -Message ("Job {0}: retry attempt {1} taken over from {2} and launched on this server." -f $name, $attempt, $retryHandoffFrom) }
+        }
         $launchedThisTick.Add($name)
         if (-not $script:StatePersistenceHealthy) {
             Write-OrchestratorLog -Message ("Job {0}: state could not be persisted after process launch; stopping this tick's launch phase until persistence recovers." -f $name) -Level ERROR
@@ -7344,6 +7521,9 @@ $script:LastResourceSampleAt = [datetime]::MinValue
 $script:ResourceSampleMinutes = 5
 # Stalled-job check interval for each running job (log size and process tree CPU).
 $script:JobActivityCheckSeconds = 60
+# A failed elected job's retry is offered to the other eligible servers first; the failing
+# server runs it itself only this long after RetryDelaySeconds if nobody took it.
+$script:RetryHandoffGraceSeconds = 120
 $script:ResourceRetentionHours = 12
 $script:SmtpEndpoint = ''
 $script:Manifest = $null

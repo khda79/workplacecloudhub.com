@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.19'
+$script:DistributedModuleVersion = '1.1.20'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -1010,6 +1010,31 @@ function Get-SmartM365OrchestratorOccurrenceClaim {
     }
 }
 
+function Set-DistributedClaimOwnerAtomically {
+    # Compare-and-swap on the claim file: the write succeeds only if nobody changed the claim
+    # since it was read, so two servers can never both win an offered retry.
+    param(
+        [Parameter(Mandatory = $true)][string]$ClaimPath,
+        [Parameter(Mandatory = $true)]$ClaimDocument,
+        [Parameter(Mandatory = $true)][string]$OwnerServer,
+        [Parameter(Mandatory = $true)][string]$PlanId,
+        [int]$SafeMinutes = 60,
+        [string]$HandoffFrom = ''
+    )
+    $claim = $ClaimDocument.Document
+    $values = [ordered]@{
+        OwnerServer = $OwnerServer.ToUpperInvariant(); Status = 'Claimed'; OrchestratorPid = $PID; PlanId = $PlanId
+        UpdatedAtUtc = [datetime]::UtcNow.ToString('o'); SafeUntilUtc = [datetime]::UtcNow.AddMinutes([math]::Max(1, $SafeMinutes)).ToString('o')
+    }
+    if (-not [string]::IsNullOrWhiteSpace($HandoffFrom)) { $values['HandoffFrom'] = $HandoffFrom.ToUpperInvariant(); $values['HandoffAtUtc'] = [datetime]::UtcNow.ToString('o') }
+    foreach ($key in $values.Keys) {
+        if ($claim.PSObject.Properties.Name -contains $key) { $claim.$key = $values[$key] }
+        else { $claim | Add-Member -NotePropertyName $key -NotePropertyValue $values[$key] }
+    }
+    Write-JsonAtomically -Path $ClaimPath -Value $claim -ExpectedSHA256 $ClaimDocument.SHA256
+    return $claim
+}
+
 function Enter-SmartM365OrchestratorOccurrenceClaim {
     [CmdletBinding()]
     param(
@@ -1020,7 +1045,9 @@ function Enter-SmartM365OrchestratorOccurrenceClaim {
         [Parameter(Mandatory = $true)][string]$PlanId,
         [int]$SafeMinutes = 60,
         [string]$HeartbeatRootPath = '',
-        [int]$HeartbeatStaleMinutes = 5
+        [int]$HeartbeatStaleMinutes = 5,
+        # Server whose RetryScheduled claim this server may take over (orchestrator retry handoff).
+        [string]$RetryHandoffFrom = ''
     )
 
     $jobFolder = Join-Path -Path $ClaimsRootPath -ChildPath (ConvertTo-SafeFileName $JobName)
@@ -1049,14 +1076,25 @@ function Enter-SmartM365OrchestratorOccurrenceClaim {
     }
     catch [System.IO.IOException] {
         try {
-            $existing = (Read-SmartM365JsonDocument $claimPath).Document
+            $existingDocument = Read-SmartM365JsonDocument $claimPath
+            $existing = $existingDocument.Document
             $sameOwner = [string]$existing.OwnerServer -eq $OwnerServer.ToUpperInvariant()
             $sameOrchestratorProcess = $false
             try { $sameOrchestratorProcess = [int]$existing.OrchestratorPid -eq $PID } catch { $sameOrchestratorProcess = $false }
             $reusable = [string]$existing.Status -eq 'RetryScheduled' -or
                 ([string]$existing.Status -eq 'Claimed' -and $sameOrchestratorProcess)
             if ($sameOwner -and $reusable) {
+                if ([string]$existing.Status -eq 'RetryScheduled') {
+                    # The retry may be offered to peers: take it back only if no peer took it meanwhile.
+                    try { $existing = Set-DistributedClaimOwnerAtomically -ClaimPath $claimPath -ClaimDocument $existingDocument -OwnerServer $OwnerServer -PlanId $PlanId -SafeMinutes $SafeMinutes }
+                    catch { return [pscustomobject]@{ Acquired = $false; Reused = $false; ClaimPath = $claimPath; Claim = $existing; Reason = "The scheduled retry changed while it was claimed (another server took it): $($_.Exception.Message)" } }
+                }
                 return [pscustomobject]@{ Acquired = $true; Reused = $true; ClaimPath = $claimPath; Claim = $existing; Reason = 'Existing non-terminal claim belongs to this server.' }
+            }
+            if (-not [string]::IsNullOrWhiteSpace($RetryHandoffFrom) -and [string]$existing.Status -eq 'RetryScheduled' -and [string]$existing.OwnerServer -eq $RetryHandoffFrom.ToUpperInvariant()) {
+                try { $existing = Set-DistributedClaimOwnerAtomically -ClaimPath $claimPath -ClaimDocument $existingDocument -OwnerServer $OwnerServer -PlanId $PlanId -SafeMinutes $SafeMinutes -HandoffFrom $RetryHandoffFrom }
+                catch { return [pscustomobject]@{ Acquired = $false; Reused = $false; ClaimPath = $claimPath; Claim = $existing; Reason = "The offered retry was taken by another server: $($_.Exception.Message)" } }
+                return [pscustomobject]@{ Acquired = $true; Reused = $true; ClaimPath = $claimPath; Claim = $existing; Reason = "Retry taken over from $($RetryHandoffFrom.ToUpperInvariant())." }
             }
 
             $terminal = [string]$existing.Status -in @('Success', 'CompletedWithWarnings', 'Failed', 'TimedOut', 'Interrupted', 'Cancelled')
