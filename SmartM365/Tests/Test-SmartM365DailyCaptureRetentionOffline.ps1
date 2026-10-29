@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic daily capture, preservation and conditional SharePoint deletion tests.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored in finally.')]
@@ -27,7 +27,7 @@ try {
         param($Temporary)
         $script:Checks=0;$script:Logs=[Collections.Generic.List[string]]::new()
         $script:RemoteCalls=[Collections.Generic.List[object]]::new();$script:RemoteRoot=Join-Path $Temporary 'fake-remote'
-        $script:BadUpload=$false;$script:MutateOnDelete=$false
+        $script:BadUpload=$false;$script:MutateOnDelete=$false;$script:UploadLog=[Collections.Generic.List[string]]::new()
         $script:Limited=$false;$script:ProbeProtectedPath='';$script:ProtectedWriteBlocked=$false
         function script:WriteLog {param($Message,$Level) $script:Logs.Add("$Level|$Message")}
         function script:Check {param([bool]$Condition,[string]$Message) if(-not $Condition){throw "FAIL: $Message"};$script:Checks++}
@@ -46,6 +46,7 @@ try {
             param($LocalFilePath,[switch]$EnsureParentFolders)
             Check ([bool]$EnsureParentFolders) 'capture uploads create remote parent folders explicitly'
             New-Item -ItemType Directory -Path $script:RemoteRoot -Force | Out-Null
+            $script:UploadLog.Add($LocalFilePath)
             [IO.File]::Copy($LocalFilePath,(RemotePath $LocalFilePath),$true)
             if($script:BadUpload -and $LocalFilePath -like '*.csv'){[IO.File]::AppendAllText((RemotePath $LocalFilePath),'corrupt')}
             return [pscustomobject]@{LocalFilePath=$LocalFilePath;SharePointPath='synthetic'}
@@ -243,7 +244,33 @@ try {
         $run=New-Run $f ([datetimeoffset]'2026-10-19T08:00:00Z') 'first'
         Reject {Finish $run} 'size differs|SHA256 differs'
         Check ((Records $f).Count -eq 0) 'failed read-back cannot create completed capture proof'
-        $script:BadUpload=$false;$global:EnableSharePointUpload=$false
+        $script:BadUpload=$false
+
+        # A capture this run already uploaded (Publish-SmartM365Csv) is verified by SHA-256 read-back, not resent.
+        foreach($case in @('Verified','StaleRemote','FailedOutcome')){
+            $f=New-Fixture "remote-uploaded-$case"
+            $run=New-Run $f ([datetimeoffset]'2026-10-19T08:00:00Z') $case -ExistingTimestamp
+            $dated=@($global:csvGeneratedPaths | Where-Object {$_ -match '_\d{8}_\d{6}\.csv$'})
+            Check ($dated.Count -eq 2) 'fixture publishes two timestamped captures'
+            $global:SmartM365SharePointUploadedFiles=[Collections.ArrayList]::new()
+            foreach($path in $dated){
+                $null=Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path -EnsureParentFolders
+                [void]$global:SmartM365SharePointUploadedFiles.Add([pscustomobject]@{LocalFilePath=$path;Size=(Get-Item -LiteralPath $path).Length})
+            }
+            if($case -eq 'StaleRemote'){[IO.File]::AppendAllText((RemotePath $dated[0]),'changed')}
+            if($case -eq 'FailedOutcome'){Set-SmartM365SharePointUploadOutcome -Path $dated[0] -Failed}
+            $script:UploadLog.Clear();$script:Logs.Clear()
+            Finish $run
+            $resent=@($script:UploadLog | Where-Object {$_ -like '*.csv'})
+            $skipped=@($script:Logs | Where-Object {$_ -match 'upload skipped'})
+            if($case -eq 'Verified'){Check ($resent.Count -eq 0 -and $skipped.Count -eq 2) 'verified captures are not uploaded twice'}
+            else{Check ($resent.Count -eq 1 -and $resent[0] -ieq $dated[0] -and $skipped.Count -eq 1) "$case capture is uploaded again"}
+            if($case -eq 'StaleRemote'){Check (@($script:Logs | Where-Object {$_ -match '^WARNING\|.*uploading again'}).Count -eq 1) 'stale remote copy is reported'}
+            if($case -eq 'FailedOutcome'){Set-SmartM365SharePointUploadOutcome -Path $dated[0]}
+            Check ((Records $f).Count -eq 1) "$case capture proof is completed"
+            foreach($path in $dated){Check ((Get-FileHash -LiteralPath (RemotePath $path)).Hash -ceq (Get-FileHash -LiteralPath $path).Hash) "$case remote bytes match"}
+        }
+        $global:SmartM365SharePointUploadedFiles=$null;$global:EnableSharePointUpload=$false
 
         # Exercise the actual receipt finalizer: the source lock encloses the capture handoff.
         $script:SmartM365CmdbSourceContext=$null;$script:SmartM365DailyCapture=$null

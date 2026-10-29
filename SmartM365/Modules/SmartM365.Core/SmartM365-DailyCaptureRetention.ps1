@@ -2,7 +2,7 @@
 .SYNOPSIS
 Receipt-qualified daily capture retention. Internal, opt-in Core helper.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Reads the established Core publication/authentication context; does not introduce operational globals.')]
@@ -134,6 +134,19 @@ function Assert-SmartM365DailyCaptureRemoteFile {
     } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
 }
 
+# True when this run already uploaded this local file (Publish-SmartM365Csv uploads the timestamped CSV that
+# usually becomes the capture) and the upload did not fail afterwards.
+function Test-SmartM365DailyCaptureUploadedInRun {
+    param([string]$Path,$Expected)
+    $full = [IO.Path]::GetFullPath($Path)
+    if ($script:SmartM365SharePointFailedUploads -and $script:SmartM365SharePointFailedUploads.Contains($full)) { return $false }
+    foreach ($record in @($global:SmartM365SharePointUploadedFiles)) {
+        if ($null -eq $record -or [string]::IsNullOrWhiteSpace([string]$record.LocalFilePath)) { continue }
+        if ([IO.Path]::GetFullPath([string]$record.LocalFilePath) -ieq $full -and [int64]$record.Size -eq $Expected.Bytes) { return $true }
+    }
+    return $false
+}
+
 function Invoke-SmartM365DailyCaptureRetention {
     [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)]$Context,[Parameter(Mandatory)]$Proof,[datetimeoffset]$ReferenceUtc=[datetimeoffset]::UtcNow)
@@ -221,6 +234,16 @@ function Invoke-SmartM365DailyCaptureRetention {
         if ($remote) {
             foreach ($file in $files) {
                 $path = Resolve-SmartM365DailyCapturePath $root $file.Relative
+                # Uploaded earlier in this run: the SHA-256 read-back proves SharePoint holds these bytes, so the
+                # file is not sent twice. Any read-back failure falls back to the upload below.
+                if (Test-SmartM365DailyCaptureUploadedInRun $path $file) {
+                    try {
+                        $null = Assert-SmartM365DailyCaptureRemoteFile $path $file
+                        WriteLog -Message ("Daily capture already uploaded in this run; SharePoint copy verified by SHA-256, upload skipped: {0}" -f $file.Relative) -Level INFO
+                        continue
+                    }
+                    catch { WriteLog -Message ("Daily capture read-back after this run's upload failed; uploading again: {0}" -f $_.Exception.Message) -Level WARNING }
+                }
                 $uploaded = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path -EnsureParentFolders
                 if (-not $uploaded) { throw 'Capture publication did not succeed; no purge.' }
                 $null = Assert-SmartM365DailyCaptureRemoteFile $path $file
