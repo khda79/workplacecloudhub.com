@@ -5,6 +5,7 @@
 .DESCRIPTION
     Retrieves calendar folder permissions for Exchange Online user, shared, room, and equipment mailboxes.
     Primary-calendar mode uses persistent parallel Exchange Online worker sessions; full-folder mode remains sequential.
+    Parallel mode logs a progress line every 1,000 mailboxes or 5 minutes with rate, ETA and per-worker counts.
     The script tries the canonical Calendar name, folder statistics, then common localized names.
     It exports mailbox coverage, collection status, stable permission-principal identifiers when Exchange exposes them,
     and an explicit diagnostic when a display-name-only principal collision cannot be resolved safely.
@@ -23,7 +24,7 @@
     Limits mailbox processing to the first N mailboxes for smoke tests. Default 0 processes all mailboxes.
 
 .VERSION
-2.7
+2.8
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ExchangeOnlineManagement.
@@ -31,7 +32,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled; Mail.Send is required only when Graph mail is enabled.
 
 .NOTES
-    Version : 2.7
+    Version : 2.8
     Author: https://github.com/khda79/workplacecloudhub.com
     Environment : Exchange Online
 #>
@@ -270,7 +271,7 @@ function Join-ModulePath {
     throw "SmartM365.Core module file not found: $FileName"
 }
 
-$ScriptVersion = '2.7'
+$ScriptVersion = '2.8'
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'ExoCalendarPermissionsCsvLogFolderPath' -DefaultValue $OutputPath
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 
@@ -786,6 +787,79 @@ function Remove-CalendarLatestCsvIfPresent {
     Remove-SmartM365SharePointFile -LocalFilePath $sharePointPath | Out-Null
 }
 
+function New-CalendarProgressTracker {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$Total,
+        [int]$EveryMailboxes = 1000,
+        [int]$EveryMinutes = 5,
+        [int[]]$WorkerTotals = @(),
+        [switch]$TrackWarnings
+    )
+
+    return @{
+        Total               = $Total
+        EveryMailboxes      = [math]::Max(1, $EveryMailboxes)
+        EveryMinutes        = [math]::Max(1, $EveryMinutes)
+        Processed           = 0
+        Errors              = 0
+        Warnings            = $(if ($TrackWarnings) { 0 } else { $null })
+        Rows                = 0
+        WorkerTotals        = [int[]]@($WorkerTotals)
+        WorkerProcessed     = (New-Object 'int[]' @($WorkerTotals).Count)
+        Stopwatch           = [System.Diagnostics.Stopwatch]::StartNew()
+        LastLoggedProcessed = 0
+        LastLoggedSeconds   = 0.0
+    }
+}
+
+function Get-CalendarProgressLine {
+    # Returns a log line when a mailbox-count step is crossed, when EveryMinutes elapsed since the
+    # previous line with new work, or on the last mailbox; otherwise $null. No progress, no line:
+    # a collection that stops advancing must still trip the orchestrator stalled-job alert.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][hashtable]$Tracker,
+        [double]$ElapsedSeconds = -1,
+        [datetime]$Now = [datetime]::MinValue
+    )
+
+    $elapsed = if ($ElapsedSeconds -ge 0) { $ElapsedSeconds } else { $Tracker.Stopwatch.Elapsed.TotalSeconds }
+    $processedCount = [int]$Tracker.Processed
+    $lastProcessed = [int]$Tracker.LastLoggedProcessed
+    if ($processedCount -le $lastProcessed) { return $null }
+    $total = [int]$Tracker.Total
+    $step = [int]$Tracker.EveryMailboxes
+    $countDue = [math]::Floor($processedCount / $step) -gt [math]::Floor($lastProcessed / $step)
+    $timeDue = ($elapsed - [double]$Tracker.LastLoggedSeconds) -ge (60.0 * [int]$Tracker.EveryMinutes)
+    if (-not $countDue -and -not $timeDue -and $processedCount -lt $total) { return $null }
+
+    $Tracker.LastLoggedProcessed = $processedCount
+    $Tracker.LastLoggedSeconds = $elapsed
+    $culture = [System.Globalization.CultureInfo]::InvariantCulture
+    $percent = if ($total -gt 0) { 100.0 * $processedCount / $total } else { 100.0 }
+    $rate = if ($elapsed -gt 0) { $processedCount / $elapsed } else { 0.0 }
+    $remaining = [math]::Max(0, $total - $processedCount)
+    $etaText = 'n/a'
+    if ($remaining -eq 0) { $etaText = 'done' }
+    elseif ($rate -gt 0) {
+        $remainingSeconds = $remaining / $rate
+        $clock = if ($Now -ne [datetime]::MinValue) { $Now } else { Get-Date }
+        $etaText = [string]::Format($culture, '~{0:F0} min ({1:HH:mm})', ($remainingSeconds / 60.0), $clock.AddSeconds($remainingSeconds))
+    }
+    $warningText = if ($null -ne $Tracker.Warnings) { [string]::Format($culture, ' warnings={0};', [int]$Tracker.Warnings) } else { '' }
+    $line = [string]::Format($culture, 'Calendar permissions progress: {0}/{1} mailboxes ({2:F1}%); errors={3};{4} rows={5}; rate={6:F2} mailbox/s; elapsed={7:F1} min; ETA {8}',
+        $processedCount, $total, $percent, [int]$Tracker.Errors, $warningText, [int]$Tracker.Rows, $rate, ($elapsed / 60.0), $etaText)
+    $workerTotals = @($Tracker.WorkerTotals)
+    if ($workerTotals.Count -gt 0) {
+        $workerParts = for ($workerIndex = 0; $workerIndex -lt $workerTotals.Count; $workerIndex++) {
+            '{0}/{1}' -f $Tracker.WorkerProcessed[$workerIndex], $workerTotals[$workerIndex]
+        }
+        $line += '; workers ' + ($workerParts -join ' ')
+    }
+    return $line + '.'
+}
+
 # ------------------------- Processing Loop -------------------------
 $overallActivity = "Calendar permissions inventory"
 $index = 0
@@ -814,7 +888,11 @@ if ($PrimaryOnly -and $ParallelThrottle -gt 1) {
     $p_ConnectRetries = $PermissionWorkerConnectRetries
     $p_EmitNoPermRow = [bool]$EmitNoPermRow
 
-    $parallelCalendarOutput = @($calendarWorkItems | ForEach-Object -ThrottleLimit $workerCount -Parallel {
+    # Worker results stream to this runspace as they complete, so progress is counted here without shared state.
+    $progressTracker = New-CalendarProgressTracker -Total $mailboxes.Count -TrackWarnings `
+        -WorkerTotals ([int[]]@($calendarWorkItems | ForEach-Object { @($_.Mailboxes).Count }))
+    $parallelCalendarOutput = [System.Collections.Generic.List[object]]::new()
+    $calendarWorkItems | ForEach-Object -ThrottleLimit $workerCount -Parallel {
         $workItem = $_
         $workerId = [int]$workItem.WorkerId
         $workerMailboxes = @($workItem.Mailboxes)
@@ -1030,7 +1108,18 @@ if ($PrimaryOnly -and $ParallelThrottle -gt 1) {
             }
         }
         # Worker disconnects are intentionally omitted; one parent cleanup closes every EXO session.
-    })
+    } | ForEach-Object {
+        $calendarOutput = $_
+        [void]$parallelCalendarOutput.Add($calendarOutput)
+        $progressTracker.Processed++
+        $progressTracker.Rows += @($calendarOutput.Rows).Count
+        if (-not [string]::IsNullOrWhiteSpace([string]$calendarOutput.Error)) { $progressTracker.Errors++ }
+        if (-not [string]::IsNullOrWhiteSpace([string]$calendarOutput.Warning)) { $progressTracker.Warnings++ }
+        $workerSlot = [int]$calendarOutput.WorkerId - 1
+        if ($workerSlot -ge 0 -and $workerSlot -lt $progressTracker.WorkerProcessed.Count) { $progressTracker.WorkerProcessed[$workerSlot]++ }
+        $progressLine = Get-CalendarProgressLine -Tracker $progressTracker
+        if ($progressLine) { WriteLog -Message $progressLine 'INFO' }
+    }
 
     $connectionFailures = @($parallelCalendarOutput | Where-Object { $_.ConnectionFailure })
     if ($connectionFailures.Count -gt 0) {

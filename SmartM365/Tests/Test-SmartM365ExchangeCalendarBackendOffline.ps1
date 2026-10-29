@@ -1,5 +1,5 @@
 ﻿#Requires -Version 5.1
-<# .SYNOPSIS Synthetic calendar session, backend isolation and terminal publication tests. .VERSION 1.0.0 #>
+<# .SYNOPSIS Synthetic calendar session, backend isolation and terminal publication tests. .VERSION 1.0.1 #>
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
@@ -25,7 +25,7 @@ Check ($parseErrors.Count -eq 0) 'Collector parser failed'
 foreach($name in @('Invoke-Quiet','Initialize-SmartM365CalendarExchangeConnection','Get-SmartM365CalendarFailureCategory',
     'Get-SmartM365CalendarBackendName','New-SmartM365CalendarLookupException','Test-SmartM365CalendarBackendPreflight',
     'New-SmartM365CalendarErrorRecord','Get-CalendarFoldersSafe','Try-GetFolderPermission','Add-NoPermissionRow',
-    'Add-CalendarResultRows','Assert-SmartM365CalendarQualification')) {
+    'Add-CalendarResultRows','Assert-SmartM365CalendarQualification','New-CalendarProgressTracker','Get-CalendarProgressLine')) {
     $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     Check ($null -ne $node) ('Missing production function: '+$name)
     . ([scriptblock]::Create($node.Extent.Text))
@@ -231,6 +231,7 @@ try {
             }
         }
     }
+    Check (@($script:messages | Where-Object { $_ -like 'Calendar permissions progress: 1/1 mailboxes (100.0%);*ETA done.' }).Count -gt 0) 'Processing loop did not log the final progress line'
     Assert-SmartM365CalendarQualification -ExpectedMailboxes 0 -QualifiedCalendars 0
     Check $true 'Zero expected mailboxes must not fail qualification'
 }

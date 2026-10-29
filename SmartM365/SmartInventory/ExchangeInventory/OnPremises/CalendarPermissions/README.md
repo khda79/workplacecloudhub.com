@@ -1,6 +1,6 @@
 # Exchange On-Premises Calendar Permissions
 
-`SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1` inventories Exchange 2016 mailbox calendar permissions (version 1.11).
+`SmartM365-Exchange-MailboxCalendarPermissions-Inventory.ps1` inventories Exchange 2016 mailbox calendar permissions (version 1.12).
 
 - Runtime: Windows PowerShell 5.1 with Exchange Management Tools.
 - Authentication: current Windows account, Kerberos to the local host FQDN at `/PowerShell/` (`Microsoft.Exchange`). No additional permissions are granted.
@@ -11,6 +11,7 @@
 - Output: `Exchange_OnPrem_MailboxCalendarPermissions_AllDomains.csv`, with the existing tenant columns plus `Mailbox`, `UPN`, `CalendarFolder`, `User`, `AccessRights`.
 - Qualification: a successful calendar ACL read qualifies that calendar, even with only Default/Anonymous entries. `EmitNoPermRow` controls `(none)` rows; with it disabled, proven empty ACLs produce a header-only CSV. Missing/denied reads never become `(none)` or zero.
 - Failure contract: when mailboxes were expected but no calendar ACL read succeeded, the run fails with its diagnostic CSV/log preserved. It does not replace the previous canonical permissions CSV, publish weekly history or apply retention. An actual zero-mailbox enumeration remains distinct.
+- Progress (1.12+): `Calendar permissions progress: processed/total` is logged every 1,000 mailboxes, or after 5 minutes when at least one mailbox completed, with errors, rows, rate and ETA.
 - Diagnostics: failures include category, operation, attempts, duration, database and backend. Mixed successful/failed reads retain `CompletedWithWarnings` and their diagnostic CSV.
 - Weekly history: qualified permissions and mailbox-error CSVs are published together once per run under `Exchange\OnPrem\CalendarPermissions\WeeklyHistory`.
 
@@ -33,4 +34,4 @@ pwsh.exe -NoProfile -File SmartM365/Tests/Test-SmartM365ExchangeCalendarBackendO
 
 The tests exercise both connection modes with stubs, real PSSerializer round trips, denied/unknown/empty preflight results, database isolation, target denials, primary/all-calendar modes, real local CSV validation/publication helpers and failure retention. Session ownership/cleanup is also covered by `Test-SmartM365ExchangeOnPremSessionOffline.ps1`.
 
-After operator deployment, test directly under the service account: check version 1.11, `Remote; state=Ready` once, forest scope, positive qualified-calendar count, localized folders/ACLs, diagnostic categories, canonical CSV and receipt hashes, duration, and session cleanup. Confirm a mailbox access denial does not produce server-wide `BackendPreviouslyUnavailable`. Only the operator runs these server checks; offline success does not establish production access or completeness.
+After operator deployment, test directly under the service account: check version 1.12, `Remote; state=Ready` once, forest scope, positive qualified-calendar count, localized folders/ACLs, diagnostic categories, canonical CSV and receipt hashes, duration, and session cleanup. Confirm a mailbox access denial does not produce server-wide `BackendPreviouslyUnavailable`. Only the operator runs these server checks; offline success does not establish production access or completeness.
