@@ -1234,11 +1234,82 @@ Write-Host "Smart Endpoint Migration Toolkit - Hybrid Join endpoint version $Scr
 Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. CorrelationId=$CorrelationId. DataRoot=$DataRoot. LegacyActivityPolicy=$LegacyActivityPolicy. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). SkipVirtualMachines=$([bool]$SkipVirtualMachines). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). IgnoreRunGuard=$([bool]$IgnoreRunGuard). RetryAfterRebootTaskRun=$([bool]$RetryAfterRebootTaskRun)."
 Invoke-OldEvidenceCleanup -Paths @($LogsDir, $OutputDir, $TranscriptDir) -RetentionDays $CleanupRetentionDays
 
+function Get-ComputerSystemSummary {
+    try {
+        $system = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        $manufacturer = [string]$system.Manufacturer
+        $model = [string]$system.Model
+        $hypervisorPresent = $false
+        try { $hypervisorPresent = [bool]$system.HypervisorPresent } catch { $hypervisorPresent = $false }
+
+        $signature = ("{0} {1}" -f $manufacturer,$model)
+        $virtualPatterns = @(
+            'Virtual Machine',
+            'VMware',
+            'VirtualBox',
+            'KVM',
+            'QEMU',
+            'Xen',
+            'HVM domU',
+            'Parallels',
+            'BHYVE',
+            'OpenStack',
+            'Google Compute Engine',
+            'Amazon EC2'
+        )
+
+        $matchedPattern = ''
+        foreach ($pattern in $virtualPatterns) {
+            if ($signature -match [regex]::Escape($pattern)) {
+                $matchedPattern = $pattern
+                break
+            }
+        }
+
+        $isVirtual = -not [string]::IsNullOrWhiteSpace($matchedPattern)
+        $evidence = if ($matchedPattern) {
+            "Manufacturer=$manufacturer; Model=$model; Pattern=$matchedPattern"
+        }
+        else {
+            "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=$hypervisorPresent"
+        }
+
+        return [PSCustomObject]@{
+            Success = $true
+            ComputerSystem = $system
+            IsVirtualMachine = $isVirtual
+            VirtualMachineEvidence = $evidence
+            Detail = ""
+        }
+    }
+    catch {
+        return [PSCustomObject]@{
+            Success = $false
+            ComputerSystem = $null
+            IsVirtualMachine = ""
+            VirtualMachineEvidence = ""
+            Detail = $_.Exception.Message
+        }
+    }
+}
+
+# A virtual machine skipped by -SkipVirtualMachines is detected before the run guard: the skip does
+# nothing on the computer, so it neither applies nor writes the 12-hour guard (LastRun.json). Writing
+# it left Status=RUNNING and blocked the next Runs with RUN_GUARD_ACTIVE.
+$script:SkipAsVirtualMachine = $false
+if ($SkipVirtualMachines) {
+    $earlyComputerSystem = Get-ComputerSystemSummary
+    $script:SkipAsVirtualMachine = ($earlyComputerSystem.Success -and $earlyComputerSystem.IsVirtualMachine -eq $true)
+}
+
 # ============================
 # 12-hour local run guard
 # ============================
 try {
-    if ($IgnoreRunGuard -or $RetryAfterRebootTaskRun) {
+    if ($script:SkipAsVirtualMachine) {
+        Write-RunLog "$RunGuardHours-hour run guard not applied: virtual machine skipped by -SkipVirtualMachines."
+    }
+    elseif ($IgnoreRunGuard -or $RetryAfterRebootTaskRun) {
         $guardBypassReason = if ($RetryAfterRebootTaskRun) { "-RetryAfterRebootTaskRun" } else { "-IgnoreRunGuard" }
         Write-RunLog "$RunGuardHours-hour run guard bypassed by $guardBypassReason."
     }
@@ -1259,6 +1330,7 @@ catch {
 }
 
 try {
+    if (-not $script:SkipAsVirtualMachine) {
         [PSCustomObject]@{
             RunId       = $RunId
             Version     = $ScriptVersion
@@ -1273,6 +1345,7 @@ try {
         HeartbeatUtc = (Get-Date).ToUniversalTime().ToString("o")
         Status      = "RUNNING"
     } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $RunGuardPath -Encoding UTF8 -Force
+    }
 }
 catch {
     Write-RunLog ("Run guard write failed; continuing. Error={0}" -f $_.Exception.Message)
@@ -3374,64 +3447,6 @@ function Get-LocalOsBootInfo {
     }
 }
 
-function Get-ComputerSystemSummary {
-    try {
-        $system = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
-        $manufacturer = [string]$system.Manufacturer
-        $model = [string]$system.Model
-        $hypervisorPresent = $false
-        try { $hypervisorPresent = [bool]$system.HypervisorPresent } catch { $hypervisorPresent = $false }
-
-        $signature = ("{0} {1}" -f $manufacturer,$model)
-        $virtualPatterns = @(
-            'Virtual Machine',
-            'VMware',
-            'VirtualBox',
-            'KVM',
-            'QEMU',
-            'Xen',
-            'HVM domU',
-            'Parallels',
-            'BHYVE',
-            'OpenStack',
-            'Google Compute Engine',
-            'Amazon EC2'
-        )
-
-        $matchedPattern = ''
-        foreach ($pattern in $virtualPatterns) {
-            if ($signature -match [regex]::Escape($pattern)) {
-                $matchedPattern = $pattern
-                break
-            }
-        }
-
-        $isVirtual = -not [string]::IsNullOrWhiteSpace($matchedPattern)
-        $evidence = if ($matchedPattern) {
-            "Manufacturer=$manufacturer; Model=$model; Pattern=$matchedPattern"
-        }
-        else {
-            "Manufacturer=$manufacturer; Model=$model; HypervisorPresent=$hypervisorPresent"
-        }
-
-        return [PSCustomObject]@{
-            Success = $true
-            ComputerSystem = $system
-            IsVirtualMachine = $isVirtual
-            VirtualMachineEvidence = $evidence
-            Detail = ""
-        }
-    }
-    catch {
-        return [PSCustomObject]@{
-            Success = $false
-            ComputerSystem = $null
-            IsVirtualMachine = ""
-            VirtualMachineEvidence = ""
-            Detail = $_.Exception.Message
-        }
-    }
-}
 
 function Stop-ComputerSystemQueryFailed {
     param([Parameter(Mandatory=$true)][string]$Detail)

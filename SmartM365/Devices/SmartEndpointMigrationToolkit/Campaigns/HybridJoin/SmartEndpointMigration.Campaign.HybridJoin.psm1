@@ -71,7 +71,8 @@ function Get-HybridJoinCentralLogBucket {
     if ($status -like '*ADMIN_SHARE_UNREACHABLE') { return 'AdminShareUnreachable' }
     if ($status -like 'PSEXEC_TIMEOUT*') { return 'PsExecTimeout' }
     if ($status -eq 'PSEXEC_COMMUNICATION_LOST') { return 'PsExecCommunicationLost' }
-    if ($status -like 'TARGET_*' -or $status -like 'LEGACY_*' -or $status -eq 'ENDPOINT_RUN_ACTIVE') { return 'TargetBusy' }
+    if ($status -like 'SKIPPED_*') { return 'Skipped' }
+    if ($status -like 'TARGET_*' -or $status -like 'LEGACY_*' -or $status -in @('ENDPOINT_RUN_ACTIVE','RUN_GUARD_ACTIVE')) { return 'TargetBusy' }
     if ($status -like 'PSEXEC_*' -or $status -like 'REMOTE_*' -or $status -like 'DNS_*') { return 'RemoteCollectionFailed' }
     return 'Errors'
 }
@@ -294,7 +295,7 @@ function Get-SemtHybridJoinProfile {
         ProjectedFields = @($script:HybridJoinExtensionFields)
         ReportColumns = @($columns | Select-Object -Unique)
         SeparatedStatuses = @('ADMIN_SHARE_UNREACHABLE','RUN_GUARD_ACTIVE','SKIPPED_BY_STATUS_BACKOFF','SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT','SKIPPED_ALREADY_INTUNE_IN_INVENTORY','DNS_PREFLIGHT_ALL_SAMPLES_FAILED')
-        CentralLogBuckets = @('Success','AdminShareUnreachable','RemoteCollectionFailed','PsExecTimeout','PsExecCommunicationLost','TargetBusy','Errors')
+        CentralLogBuckets = @('Success','Skipped','AdminShareUnreachable','RemoteCollectionFailed','PsExecTimeout','PsExecCommunicationLost','TargetBusy','Errors')
         EvidenceRules = @(
             [pscustomobject]@{ Folder = 'Output'; Filter = '*'; Recurse = $true; CurrentAttemptOnly = $true; MaxFiles = 40; MaxBytes = 5MB; TargetFolder = 'Output' },
             [pscustomobject]@{ Folder = 'State'; Filter = '*.json'; Recurse = $false; CurrentAttemptOnly = $false; Names = @('EndpointInstance.json','RebootSafety.json','RetryAfterReboot.json'); MaxFiles = 5; MaxBytes = 1MB; TargetFolder = 'State' }

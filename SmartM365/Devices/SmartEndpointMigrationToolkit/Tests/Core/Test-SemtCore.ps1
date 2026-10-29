@@ -379,6 +379,28 @@ $script:HostLines.Clear()
         [void](Write-SemtRunHtmlReport -State $reportState -CycleNumber 1 -IsLive)
         (Test-Path -LiteralPath $reportState.HtmlPath -PathType Leaf) -and @(Get-ChildItem -LiteralPath $reportRoot -Force -Filter '*.tmp').Count -eq 0
     }
+    # A virtual machine skipped by -SkipVirtualMachines must never consume the endpoint run guard:
+    # Hybrid Join left LastRun.json at RUNNING, Windows 11 checked the guard before the skip.
+    $hjEndpointText = [IO.File]::ReadAllText((Join-Path $script:PackageRoot 'Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1'))
+    $w11EndpointText = [IO.File]::ReadAllText((Join-Path $script:PackageRoot 'Campaigns\Windows11Upgrade\Scripts\SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1'))
+    Test-Step 'Hybrid Join endpoint: a skipped virtual machine neither applies nor writes the run guard' {
+        $function = $hjEndpointText.IndexOf('function Get-ComputerSystemSummary {')
+        $early = $hjEndpointText.IndexOf('$script:SkipAsVirtualMachine = ($earlyComputerSystem.Success')
+        $guard = $hjEndpointText.IndexOf('# 12-hour local run guard')
+        $function -ge 0 -and $function -lt $early -and $early -lt $guard -and $hjEndpointText -match '(?s)if \(\$script:SkipAsVirtualMachine\) \{\s*Write-RunLog "\$RunGuardHours-hour run guard not applied' -and $hjEndpointText -match '(?s)if \(-not \$script:SkipAsVirtualMachine\) \{\s*\[PSCustomObject\]@\{\s*RunId\s*=\s*\$RunId'
+    }
+    Test-Step 'Windows 11 endpoint: a virtual machine is skipped before the run guard is checked' {
+        $skip = $w11EndpointText.IndexOf("`$status = 'SKIPPED_VIRTUAL_MACHINE'")
+        $guard = $w11EndpointText.IndexOf('if (-not $IgnoreRunGuard -and $RunGuardHours -gt 0')
+        $skip -ge 0 -and $guard -gt $skip
+    }
+    foreach ($profileFunction in @(@('Campaigns\HybridJoin\SmartEndpointMigration.Campaign.HybridJoin.psm1','Get-HybridJoinCentralLogBucket'),@('Campaigns\Windows11Upgrade\SmartEndpointMigration.Campaign.Windows11Upgrade.psm1','Get-Windows11CentralLogBucket'))) {
+        $profileAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:PackageRoot $profileFunction[0]), [ref]$null, [ref]$null)
+        . ([scriptblock]::Create($profileAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $profileFunction[1] }, $true).Extent.Text))
+    }
+    Test-Step 'central logs: skipped virtual machines go to Skipped, run guards to TargetBusy (not Errors)' {
+        (Get-HybridJoinCentralLogBucket -Result ([pscustomobject]@{ Status = 'SKIPPED_VIRTUAL_MACHINE' })) -eq 'Skipped' -and (Get-HybridJoinCentralLogBucket -Result ([pscustomobject]@{ Status = 'RUN_GUARD_ACTIVE' })) -eq 'TargetBusy' -and (Get-Windows11CentralLogBucket -Result ([pscustomobject]@{ RemoteStatus = 'SKIPPED_VIRTUAL_MACHINE'; Status = 'SKIPPED_VIRTUAL_MACHINE'; ExitCode = '0' })) -eq 'Skipped' -and (Get-Windows11CentralLogBucket -Result ([pscustomobject]@{ RemoteStatus = 'RUN_GUARD_ACTIVE'; ExitCode = '3' })) -eq 'TargetBusy'
+    }
     Test-Step 'Run engine: report names omit the Wave name; a cycle HTML report failure never fails the Run' {
         $engineText -match "'SEMT_\{0\}_cycle\{1\}_\{2\}\.csv' -f \`$Campaign,\`$cycle" -and $engineText -match "'SEMT_\{0\}_\{1\}_final\.html' -f \`$Campaign,\`$script:RunId" -and $engineText -match 'HTML report update failed' -and $engineText -match 'Final report failed'
     }

@@ -5896,6 +5896,16 @@ try {
         }
     }
 
+    # A skipped virtual machine is reported before the run guard: a previous skip must not block it.
+    $computerSystem = Get-ComputerSystemSummary
+    if ($SkipVirtualMachines -and $computerSystem.IsVirtualMachine) {
+        $status = 'SKIPPED_VIRTUAL_MACHINE'
+        $nextAction = 'NO_ACTION_VIRTUAL_MACHINE'
+        $detail = $computerSystem.Evidence
+        $exitCode = 0
+        throw [System.OperationCanceledException]::new($detail)
+    }
+
     if (-not $IgnoreRunGuard -and $RunGuardHours -gt 0 -and (Test-Path -LiteralPath $script:LastRunPath -PathType Leaf)) {
         $last = Get-Content -LiteralPath $script:LastRunPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         $lastStatus = ''
@@ -5932,15 +5942,6 @@ try {
                 throw [System.OperationCanceledException]::new($detail)
             }
         }
-    }
-
-    $computerSystem = Get-ComputerSystemSummary
-    if ($SkipVirtualMachines -and $computerSystem.IsVirtualMachine) {
-        $status = 'SKIPPED_VIRTUAL_MACHINE'
-        $nextAction = 'NO_ACTION_VIRTUAL_MACHINE'
-        $detail = $computerSystem.Evidence
-        $exitCode = 0
-        throw [System.OperationCanceledException]::new($detail)
     }
 
     $os = Get-OsSummary

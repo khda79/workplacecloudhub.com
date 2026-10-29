@@ -147,7 +147,8 @@ function Get-Windows11CentralLogBucket {
         if ($value -like 'INSUFFICIENT_DISK*') { return 'InsufficientDisk' }
         if ($value -in @('WINDOWS11_COMPAT_BLOCKER','WINDOWS11_HARDWARE_NOT_CAPABLE')) { return 'Compatibility' }
         if ($value -like 'PSEXEC_TIMEOUT*') { return 'PsExecTimeout' }
-        if ($value -like 'TARGET_*' -or $value -like 'LEGACY_*') { return 'TargetBusy' }
+        if ($value -like 'SKIPPED_*') { return 'Skipped' }
+        if ($value -like 'TARGET_*' -or $value -like 'LEGACY_*' -or $value -eq 'RUN_GUARD_ACTIVE') { return 'TargetBusy' }
         if ($value -eq 'SETUP_PROCESS_TIMEOUT') { return 'SetupProcessTimeout' }
         if ($value -eq 'SETUP_MEDIA_COPY_TIMEOUT') { return 'SetupMediaCopyTimeout' }
         if ($value -eq 'SETUP_MEDIA_COPY_FAILED') { return 'SetupMediaCopyFailure' }
@@ -347,7 +348,7 @@ function Get-SemtWindows11UpgradeProfile {
         ProjectedFields = @($script:Windows11ExtensionFields)
         ReportColumns = @($columns | Select-Object -Unique)
         SeparatedStatuses = @('ADMIN_SHARE_UNREACHABLE','RUN_GUARD_ACTIVE','SKIPPED_BY_TECH_RUN_GUARD','SKIPPED_BY_TECH_RUN_GUARD_STARTED_NO_RESULT','DNS_PREFLIGHT_ALL_SAMPLES_FAILED')
-        CentralLogBuckets = @('Success','AdminShareUnreachable','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupMediaReuse','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','PsExecCommunicationLost','RemoteCollectionFailed','TargetBusy','Errors')
+        CentralLogBuckets = @('Success','Skipped','AdminShareUnreachable','InsufficientDisk','Compatibility','SetupSourceLanguageUnavailable','SetupMigrationProfileFailure','SetupMigrationProfileRepaired','SetupMigrationPluginFailure','SetupCopyLeaseTimeout','SetupMediaCopyTimeout','SetupMediaCopyFailure','SetupMediaManifestFailure','SetupMediaReuse','SetupProcessTimeout','SetupProcessInterrupted','PsExecTimeout','PsExecCommunicationLost','RemoteCollectionFailed','TargetBusy','Errors')
         EvidenceRules = @(
             [pscustomobject]@{ Folder = 'Logs\SetupUpgrade'; Filter = '*'; Recurse = $false; CurrentAttemptOnly = $true; MaxFiles = 12; MaxBytes = 5MB; TargetFolder = 'Setup' }
         )
