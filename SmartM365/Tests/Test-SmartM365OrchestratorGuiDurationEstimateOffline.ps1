@@ -3,7 +3,7 @@
 Offline test of the duration estimates of the orchestrator GUI: estimated time left in Running
 jobs, estimated duration in Pending jobs, both frames stacked in Operations > Live.
 .VERSION
-1.0.1
+1.0.2
 .NOTES
 Runs the GUI helpers extracted from the script on synthetic rows. No WPF window, tenant
 initialization, shared folder or orchestrator.
@@ -54,9 +54,10 @@ Check (([regex]::Matches($guiText, '(?i)Add-GuiJobDurationEstimates -Operations 
 Check ($guiText -match 'Header="Est\. remaining" Binding="\{Binding EstimatedRemaining\}"' -and $guiText -match 'Header="Est\. duration \(min\)" Binding="\{Binding EstimatedMinutes\}"') 'The estimate columns are missing.'
 $live = $guiText.Substring($guiText.IndexOf('<TabItem Header="Live">'))
 $live = $live.Substring(0, $live.IndexOf('</TabItem>'))
-$runningColumns = @([regex]::Matches($live.Substring($live.IndexOf('x:Name="OperationsRunningGrid"')), 'DataGridTextColumn Header="([^"]+)"') | Select-Object -First 3 | ForEach-Object { $_.Groups[1].Value })
-$pendingColumns = @([regex]::Matches($live.Substring($live.IndexOf('x:Name="OperationsPendingGrid"')), 'DataGridTextColumn Header="([^"]+)"') | Select-Object -First 3 | ForEach-Object { $_.Groups[1].Value })
-Check (($runningColumns -join ',') -eq 'Server,Job,Server state' -and ($pendingColumns -join ',') -eq 'Server,Job,Server state') "Running and pending jobs must start with the same columns ($($runningColumns -join ',') / $($pendingColumns -join ','))."
+$columnPattern = 'DataGridTextColumn Header="([^"]+)" Binding="\{Binding [^}]+\}" Width="([^"]+)"'
+$runningColumns = @([regex]::Matches($live.Substring($live.IndexOf('x:Name="OperationsRunningGrid"')), $columnPattern) | Select-Object -First 3 | ForEach-Object { '{0}={1}' -f $_.Groups[1].Value, $_.Groups[2].Value })
+$pendingColumns = @([regex]::Matches($live.Substring($live.IndexOf('x:Name="OperationsPendingGrid"')), $columnPattern) | Select-Object -First 3 | ForEach-Object { '{0}={1}' -f $_.Groups[1].Value, $_.Groups[2].Value })
+Check (($runningColumns -join ',') -eq ($pendingColumns -join ',') -and ($runningColumns -join ',') -match '^Server=\d+,Job=\d+,Server state=\d+$') "Running and pending jobs must start with the same columns at the same fixed widths ($($runningColumns -join ',') / $($pendingColumns -join ','))."
 Check ($live -match '<GroupBox Header="Running jobs" Margin="0,0,0,6">' -and $live -match '<GroupBox Grid\.Row="1" Header="Pending jobs \(why they wait\)"' -and $live -notmatch 'Grid\.Column="1" Header="Pending jobs') 'Running and pending jobs must be stacked.'
 "PASS: GUI duration estimates, $($script:passed) offline checks."
 

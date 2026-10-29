@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.22
+1.6.23
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.22'
+$script:AppVersion = '1.6.23'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -472,8 +472,8 @@ $xaml = @'
                                         </DataGrid.RowStyle>
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="120"/>
-                                            <!-- MinWidth keeps the job name readable when the stalled-job columns take the room (GUI 1.6.20). -->
-                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="*" MinWidth="220"/>
+                                            <!-- Server, Job and Server state share their widths with Pending jobs so the columns align (GUI 1.6.23). -->
+                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="320"/>
                                             <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="85"/>
                                             <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="55"/>
                                             <DataGridTextColumn Header="Started" Binding="{Binding Started}" Width="110"/>
@@ -486,7 +486,7 @@ $xaml = @'
                                             <DataGridTextColumn Header="Activity" Binding="{Binding Activity}" Width="65"/>
                                             <DataGridTextColumn Header="Silent (min)" Binding="{Binding SilentMinutes}" Width="80"/>
                                             <DataGridTextColumn Header="CPU (s)" Binding="{Binding CpuSeconds}" Width="65"/>
-                                            <DataGridTextColumn Header="CPU s/min" Binding="{Binding CpuSecondsPerMinute}" Width="70"/>
+                                            <DataGridTextColumn Header="CPU s/min" Binding="{Binding CpuSecondsPerMinute}" Width="*" MinWidth="70"/>
                                         </DataGrid.Columns>
                                     </DataGrid>
                                     </Grid>
@@ -494,9 +494,9 @@ $xaml = @'
                                 <GroupBox Grid.Row="1" Header="Pending jobs (why they wait)" Margin="0,6,0,0">
                                     <DataGrid x:Name="OperationsPendingGrid">
                                         <DataGrid.Columns>
-                                            <!-- Same leading columns as Running jobs: Server, Job, Server state (GUI 1.6.22). -->
+                                            <!-- Same leading columns and widths as Running jobs: Server, Job, Server state (GUI 1.6.23). -->
                                             <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="120"/>
-                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="260"/>
+                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="320"/>
                                             <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="85"/>
                                             <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="125"/>
                                             <DataGridTextColumn Header="Waiting (min)" Binding="{Binding WaitingMinutes}" Width="85"/>
