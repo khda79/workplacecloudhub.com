@@ -106,7 +106,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.70
+1.5.71
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +156,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.70"
+$ScriptVersion = "1.5.71"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2648,16 +2648,24 @@ function Get-OrchestratorMetricsPath {
 }
 
 function Get-OrchestratorResourceSample {
-    # Instant CPU load (average of the processors) and memory in use, in percent.
+    # Instant CPU load (average of the processors), memory in use and free space on drive C:, in percent.
     param([Parameter(Mandatory = $true)][datetime]$Now)
     $processors = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop)
     $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop | Select-Object -First 1
     $cpu = ($processors | Measure-Object -Property LoadPercentage -Average).Average
     $total = [double]$os.TotalVisibleMemorySize
+    # Drive C: fills up between restarts; an unreadable drive leaves the value empty without losing CPU and memory.
+    $driveFree = $null
+    try {
+        $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop | Select-Object -First 1
+        if ($null -ne $disk -and [double]$disk.Size -gt 0) { $driveFree = [math]::Round([double]$disk.FreeSpace * 100 / [double]$disk.Size, 1) }
+    }
+    catch { $driveFree = $null }
     return [pscustomobject]@{
         TimeUtc = $Now.ToUniversalTime().ToString('o')
         Cpu = if ($null -ne $cpu) { [math]::Round([double]$cpu, 1) } else { $null }
         Memory = if ($total -gt 0) { [math]::Round(($total - [double]$os.FreePhysicalMemory) * 100 / $total, 1) } else { $null }
+        SystemDriveFreePercent = $driveFree
     }
 }
 

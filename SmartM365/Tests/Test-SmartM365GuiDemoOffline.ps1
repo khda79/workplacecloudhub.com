@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercises the two pilot demos with WPF events and forbidden operational commands.
 .VERSION
-1.0.7
+1.0.8
 .NOTES
 Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
 #>
@@ -150,9 +150,10 @@ try {
                 Select-OrchestratorDemoTarget 'Servers and versions'
                 Assert-Demo ($c.MainTabs.SelectedItem.Header -eq 'Configuration' -and $c.ConfigurationTabs.SelectedItem -eq $c.ConfigurationServersTab -and @($c.MainTabs.Items | Where-Object { $_.Header -in @('Servers and versions','Activity') }).Count -eq 0) 'Servers and versions is not under Configuration.'
                 Assert-Demo (@($c.ServersGrid.ItemsSource | Where-Object { $_.Os -and $_.Cpu -and $_.MemoryGB -and $_.SystemDriveSizeGB }).Count -eq @($c.ServersGrid.ItemsSource).Count -and @($c.ServersGrid.ItemsSource | Where-Object SystemDriveLow).Count -eq 1) 'Server system information missing in the demo.'
-                $c.ConfigurationSettingsTab.IsSelected=$true
             }
             else{
+                # Servers and versions is captured on its own sub-tab; Configuration shows Settings.
+                if($view -eq 'Configuration'){$c.ConfigurationSettingsTab.IsSelected=$true}
                 foreach($tab in $c.MainTabs.Items){if($tab.Header -eq $view){$c.MainTabs.SelectedItem=$tab}}
                 Assert-Demo ($c.MainTabs.SelectedItem.Header -eq $view) "Cannot navigate to $view"
             }

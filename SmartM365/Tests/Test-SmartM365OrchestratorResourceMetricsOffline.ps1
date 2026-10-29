@@ -4,7 +4,7 @@ Offline tests of the CPU and memory curves: each orchestrator samples every 5 mi
 the last 12 hours in Orchestrator-Metrics.json and publishes the latest sample in its heartbeat;
 the GUI reads the file and draws one chart per server in the Dashboard and in Servers and versions.
 .VERSION
-1.0
+1.1
 .NOTES
 Synthetic samples in a temporary folder; one real read-only CIM sample of this computer. No tenant
 initialization, collectors, scheduling or publication.
@@ -62,6 +62,7 @@ function Write-OrchestratorRuntimeUpdateWarning { param($Key, $Message, $Now) $s
     # A real sample of this computer: percentages between 0 and 100.
     $sample = & $module { param($n) Get-OrchestratorResourceSample -Now $n } $now
     Check ($null -ne $sample.Cpu -and $sample.Cpu -ge 0 -and $sample.Cpu -le 100 -and $sample.Memory -gt 0 -and $sample.Memory -le 100) "CPU and memory must be read as percentages ($($sample.Cpu), $($sample.Memory))."
+    Check ($null -ne $sample.SystemDriveFreePercent -and $sample.SystemDriveFreePercent -ge 0 -and $sample.SystemDriveFreePercent -le 100) "Drive C: free space must be sampled with CPU and memory ($($sample.SystemDriveFreePercent))."
 
     # Samples older than 12 hours are dropped when the file is rewritten.
     & $module {

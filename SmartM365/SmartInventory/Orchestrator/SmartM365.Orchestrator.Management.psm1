@@ -685,20 +685,26 @@ function Get-SmartM365OrchestratorServerStatus {
         # Published by the orchestrator when it starts (heartbeat SystemInfo, orchestrator 1.5.68+).
         $system = if ($null -ne $heartbeat -and $heartbeat.PSObject.Properties['SystemInfo']) { $heartbeat.SystemInfo } else { $null }
         $systemValue = { param($Name) if ($null -ne $system -and $system.PSObject.Properties[$Name]) { $system.PSObject.Properties[$Name].Value } else { $null } }
-        $collected = & $systemValue 'CollectedAtUtc'
-        $collectedText = ''
-        if ($collected -is [datetime]) { $collectedText = $collected.ToLocalTime().ToString('yyyy-MM-dd HH:mm') }
-        elseif ($collected) { $parsedCollected = [datetimeoffset]::MinValue; if ([datetimeoffset]::TryParse([string]$collected, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsedCollected)) { $collectedText = $parsedCollected.LocalDateTime.ToString('yyyy-MM-dd HH:mm') } }
-        $freePercent = & $systemValue 'SystemDriveFreePercent'
-        # Latest CPU and memory sample (orchestrator 1.5.69+).
+        $localTime = {
+            param($Value)
+            if ($Value -is [datetime]) { return $Value.ToLocalTime().ToString('yyyy-MM-dd HH:mm') }
+            $parsedTime = [datetimeoffset]::MinValue
+            if ($Value -and [datetimeoffset]::TryParse([string]$Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsedTime)) { return $parsedTime.LocalDateTime.ToString('yyyy-MM-dd HH:mm') }
+            ''
+        }
+        $collectedText = & $localTime (& $systemValue 'CollectedAtUtc')
+        # Latest 5-minute sample (CPU and memory since orchestrator 1.5.69, drive C: free since 1.5.71).
         $usage = if ($null -ne $heartbeat -and $heartbeat.PSObject.Properties['ResourceUsage']) { $heartbeat.ResourceUsage } else { $null }
+        $usageValue = { param($Name) if ($null -ne $usage -and $usage.PSObject.Properties[$Name]) { $usage.PSObject.Properties[$Name].Value } else { $null } }
+        # The live drive value wins; an older orchestrator only has the startup reading.
+        $freePercent = & $usageValue 'SystemDriveFreePercent'
+        if ($null -eq $freePercent) { $freePercent = & $systemValue 'SystemDriveFreePercent' }
         [pscustomobject]@{ Server = [string]$server; Online = ($age -le [double]$ClusterDocument.PeerHeartbeatStaleMinutes); HeartbeatUtc = if ($heartbeatTime -eq [datetime]::MinValue) { $null } else { $heartbeatTime.ToUniversalTime() }; HeartbeatAgeMinutes = if ([double]::IsPositiveInfinity($age)) { $null } else { [math]::Round($age, 1) }; Capabilities = $capabilityText; Weight = if ($weights.ContainsKey($serverName)) { [double]$weights[$serverName] } else { 1.0 }; Policy = if ($policies.ContainsKey($serverName)) { @($policies[$serverName].OnlyJobsRequiring) -join ', ' } else { '' }; AssignedJobs = $assigned.Count; AssignedJobNames = $assigned -join ', '
             Version = if ($null -ne $heartbeat -and $heartbeat.PSObject.Properties['ScriptVersion']) { [string]$heartbeat.ScriptVersion } else { '' }
             Os = [string](& $systemValue 'Os'); Cpu = $(if ((& $systemValue 'LogicalProcessors')) { '{0} ({1} logical)' -f (& $systemValue 'Cpu'), (& $systemValue 'LogicalProcessors') } else { [string](& $systemValue 'Cpu') }); LogicalProcessors = & $systemValue 'LogicalProcessors'; MemoryGB = & $systemValue 'MemoryGB'
             SystemDriveSizeGB = & $systemValue 'SystemDriveSizeGB'; SystemDriveFreePercent = $freePercent; SystemDriveLow = $null -ne $freePercent -and [double]$freePercent -lt 10
             SystemInfoAt = $collectedText; SystemInfoError = [string](& $systemValue 'Error')
-            CpuPercent = if ($null -ne $usage -and $usage.PSObject.Properties['Cpu']) { $usage.Cpu } else { $null }
-            MemoryPercent = if ($null -ne $usage -and $usage.PSObject.Properties['Memory']) { $usage.Memory } else { $null } }
+            CpuPercent = & $usageValue 'Cpu'; MemoryPercent = & $usageValue 'Memory'; UsageAt = & $localTime (& $usageValue 'TimeUtc') }
     }
     @($result)
 }

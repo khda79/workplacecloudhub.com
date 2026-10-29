@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.8
+1.4.9
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -41,7 +41,7 @@ function New-OrchestratorDemoData {
                 Version='1.5.47'; Maintenance='Active'; MaintenanceAcknowledgement='Ready'
                 Os='Microsoft Windows Server 2022 Standard (10.0.20348, build 20348)'; Cpu='Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz'
                 CpuPercent=$null; MemoryPercent=$null
-                MemoryGB=16; SystemDriveSizeGB=127.4; SystemDriveFreePercent=[math]::Round(41.2 - 12 * $i, 1); SystemDriveLow=((41.2 - 12 * $i) -lt 10); SystemInfoAt='2026-10-18 06:00'
+                MemoryGB=16; SystemDriveSizeGB=127.4; SystemDriveFreePercent=[math]::Round(41.2 - 12 * $i, 1); SystemDriveLow=((41.2 - 12 * $i) -lt 10); SystemInfoAt='2026-10-18 06:00'; UsageAt='2026-10-18 09:30'
             }
         }
     )

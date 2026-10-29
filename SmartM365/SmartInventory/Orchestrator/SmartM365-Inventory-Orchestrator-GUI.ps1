@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.17
+1.6.18
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.17'
+$script:AppVersion = '1.6.18'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -963,7 +963,8 @@ $xaml = @'
                                             <DataGridTextColumn Header="RAM %" Binding="{Binding MemoryPercent}" Width="60"/>
                                             <DataGridTextColumn Header="C: size (GB)" Binding="{Binding SystemDriveSizeGB}" Width="90"/>
                                             <DataGridTextColumn Header="C: free %" Binding="{Binding SystemDriveFreePercent}" Width="75"/>
-                                            <DataGridTextColumn Header="System info at" Binding="{Binding SystemInfoAt}" Width="130"/>
+                                            <DataGridTextColumn Header="Usage at" Binding="{Binding UsageAt}" Width="120"/>
+                                            <DataGridTextColumn Header="Started at (static)" Binding="{Binding SystemInfoAt}" Width="130"/>
                                             <DataGridTextColumn Header="Weight" Binding="{Binding Weight}" Width="60"/>
                                             <DataGridTextColumn Header="Policy" Binding="{Binding Policy}" Width="160"/>
                                             <DataGridTextColumn Header="Capabilities" Binding="{Binding Capabilities}" Width="220"/>

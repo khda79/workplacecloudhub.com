@@ -4,7 +4,7 @@ Offline tests of the server system information: each orchestrator reads OS, CPU,
 C: once at startup and publishes them in its heartbeat; the GUI Servers and versions view reads
 them from the heartbeat and never queries the servers.
 .VERSION
-1.0.1
+1.0.2
 .NOTES
 Synthetic heartbeats in a temporary folder. The collector runs read-only CIM queries on this
 computer. No tenant initialization, collectors, scheduling or publication.
@@ -42,21 +42,31 @@ Check (($info.SystemDriveSizeGB -gt 0 -and $info.SystemDriveFreePercent -ge 0 -a
 Import-Module (Join-Path $base 'SmartM365.Orchestrator.Management.psm1') -Force
 $root = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-SystemInfo-' + [guid]::NewGuid().ToString('N').Substring(0, 12))
 try {
-    foreach ($server in @('SRV-A', 'SRV-B')) { New-Item -ItemType Directory -Path (Join-Path $root $server) -Force | Out-Null }
+    foreach ($server in @('SRV-A', 'SRV-B', 'SRV-C')) { New-Item -ItemType Directory -Path (Join-Path $root $server) -Force | Out-Null }
     $heartbeat = [ordered]@{
         Timestamp = (Get-Date).ToString('o'); Lifecycle = 'Running'; ScriptVersion = '1.5.68'
-        SystemInfo = [ordered]@{ CollectedAtUtc = '2026-10-28T05:00:00.0000000Z'; Os = 'Windows Server 2022 Standard (10.0.20348, build 20348)'; Cpu = 'Xeon Gold'; LogicalProcessors = 8; MemoryGB = 16; SystemDrive = 'C:'; SystemDriveSizeGB = 127.4; SystemDriveFreePercent = 8.5; Error = '' }
+        SystemInfo = [ordered]@{ CollectedAtUtc = '2026-10-28T05:00:00.0000000Z'; Os = 'Windows Server 2022 Standard (10.0.20348, build 20348)'; Cpu = 'Xeon Gold'; LogicalProcessors = 8; MemoryGB = 16; SystemDrive = 'C:'; SystemDriveSizeGB = 127.4; SystemDriveFreePercent = 30.0; Error = '' }
+        # Orchestrator 1.5.71: the 5-minute sample carries the current drive C: free space.
+        ResourceUsage = [ordered]@{ TimeUtc = '2026-10-28T09:25:00.0000000Z'; Cpu = 12.5; Memory = 40.1; SystemDriveFreePercent = 8.5 }
     }
     [IO.File]::WriteAllText((Join-Path $root 'SRV-A/Orchestrator-Heartbeat.json'), ($heartbeat | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
     # SRV-B runs an older orchestrator: no SystemInfo in its heartbeat.
     [IO.File]::WriteAllText((Join-Path $root 'SRV-B/Orchestrator-Heartbeat.json'), ([ordered]@{ Timestamp = (Get-Date).ToString('o'); ScriptVersion = '1.5.60' } | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
-    $cluster = [pscustomobject]@{ ExpectedOrchestratorServers = @('SRV-A', 'SRV-B'); ElectionWeightsByServer = [pscustomobject]@{}; ServerJobPolicies = [pscustomobject]@{}; PeerHeartbeatStaleMinutes = 5 }
+    # SRV-C runs 1.5.69/1.5.70: CPU and memory samples without the drive value.
+    $heartbeatC = [ordered]@{ Timestamp = (Get-Date).ToString('o'); ScriptVersion = '1.5.70'; SystemInfo = [ordered]@{ CollectedAtUtc = '2026-10-28T05:00:00.0000000Z'; SystemDriveSizeGB = 200; SystemDriveFreePercent = 22.2 }; ResourceUsage = [ordered]@{ TimeUtc = '2026-10-28T09:25:00.0000000Z'; Cpu = 5; Memory = 50 } }
+    [IO.File]::WriteAllText((Join-Path $root 'SRV-C/Orchestrator-Heartbeat.json'), ($heartbeatC | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
+    $cluster = [pscustomobject]@{ ExpectedOrchestratorServers = @('SRV-A', 'SRV-B', 'SRV-C'); ElectionWeightsByServer = [pscustomobject]@{}; ServerJobPolicies = [pscustomobject]@{}; PeerHeartbeatStaleMinutes = 5 }
     $rows = @(Get-SmartM365OrchestratorServerStatus -SharedDataFolderPath $root -ClusterDocument $cluster)
     $a = @($rows | Where-Object Server -eq 'SRV-A')[0]
     $b = @($rows | Where-Object Server -eq 'SRV-B')[0]
+    $c = @($rows | Where-Object Server -eq 'SRV-C')[0]
+    $usageLocal = ([datetimeoffset]::Parse('2026-10-28T09:25:00Z')).LocalDateTime.ToString('yyyy-MM-dd HH:mm')
     $collectedLocal = ([datetimeoffset]::Parse('2026-10-28T05:00:00Z')).LocalDateTime.ToString('yyyy-MM-dd HH:mm')
     Check ($a.Version -eq '1.5.68' -and $a.Os -like 'Windows Server 2022*' -and $a.Cpu -eq 'Xeon Gold (8 logical)' -and $a.MemoryGB -eq 16) 'Version, OS, CPU and RAM must come from the heartbeat.'
-    Check ($a.SystemDriveSizeGB -eq 127.4 -and $a.SystemDriveFreePercent -eq 8.5 -and $a.SystemDriveLow -and $a.SystemInfoAt -eq $collectedLocal) "Drive C: and the collection time must come from the heartbeat ($($a.SystemInfoAt))."
+    Check ($a.SystemDriveSizeGB -eq 127.4 -and $a.SystemDriveFreePercent -eq 8.5 -and $a.SystemDriveLow -and $a.SystemInfoAt -eq $collectedLocal) "The live drive C: sample must win over the startup reading ($($a.SystemDriveFreePercent), $($a.SystemInfoAt))."
+    Check ($a.UsageAt -eq $usageLocal -and $a.CpuPercent -eq 12.5 -and $a.MemoryPercent -eq 40.1) "Usage at must be the time of the latest sample ($($a.UsageAt))."
+    Check ($c.SystemDriveFreePercent -eq 22.2 -and -not $c.SystemDriveLow -and $c.UsageAt -eq $usageLocal -and $c.CpuPercent -eq 5) 'A sample without drive value keeps the startup drive reading.'
+    Check ($null -eq $b.CpuPercent -and -not $b.UsageAt) 'An orchestrator without samples shows no usage time.'
     Check ($b.Version -eq '1.5.60' -and -not $b.Os -and $null -eq $b.MemoryGB -and -not $b.SystemDriveLow -and -not $b.SystemInfoAt) 'An older orchestrator shows its version and empty system values.'
 }
 finally {
@@ -72,7 +82,8 @@ $xamlNames = [Collections.Generic.HashSet[string]]::new([string[]]@([regex]::Mat
 $controlRefs = @([regex]::Matches($guiText, '\$(?:script:)?Controls(?:\.|\[\x27)([A-Za-z0-9_]+)') | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notin @('Keys', 'Values', 'ContainsKey', 'Count') } | Sort-Object -Unique)
 $unknown = @($controlRefs | Where-Object { -not $xamlNames.Contains($_) })
 Check ($controlRefs.Count -gt 100 -and $unknown.Count -eq 0) "GUI code reads controls absent from the XAML: $($unknown -join ', ')"
-foreach ($binding in @('Version', 'Os', 'Cpu', 'MemoryGB', 'SystemDriveSizeGB', 'SystemDriveFreePercent', 'SystemInfoAt')) {
+Check ($guiText -match 'Header="Usage at" Binding="\{Binding UsageAt\}"' -and $guiText -match 'Header="Started at \(static\)" Binding="\{Binding SystemInfoAt\}"' -and $guiText -notmatch 'Header="System info at"') 'Servers grid must show Usage at and Started at (static).'
+foreach ($binding in @('Version', 'Os', 'Cpu', 'MemoryGB', 'SystemDriveSizeGB', 'SystemDriveFreePercent', 'SystemInfoAt', 'UsageAt')) {
     Check ($guiText -match ('Binding="\{Binding ' + $binding + '\}"')) "Servers grid column missing: $binding"
 }
 "PASS: server system information, $($script:passed) offline checks."
