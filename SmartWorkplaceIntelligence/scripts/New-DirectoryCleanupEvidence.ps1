@@ -1,4 +1,4 @@
-# Version 1.0.0: directory cleanup candidates for AD user accounts, AD workstation accounts and user mailboxes.
+# Version 1.1.0: Persona Basis (User Inventory, else the AD inventory persona) and Account Type Source; 1.0.0: directory cleanup candidates for AD user accounts, AD workstation accounts and user mailboxes.
 # Read-only evidence: an object is a candidate only when none of its qualified activity signals
 # (AD, Entra, Exchange, Intune, Microsoft 365 usage, console) is more recent than one year and
 # every applicable source is qualified. Weak matches, missing or stale sources, unknown holds and
@@ -205,7 +205,7 @@ function Get-Source([string]$Name, [string]$File, [string]$Producer, [string[]]$
     return [pscustomobject]$state
 }
 $sources = [ordered]@{
-    AdUsers     = Get-Source 'AD users' 'AD_Users_AllDomains.csv' 'SmartM365-ActiveDirectory-Inventory.ps1' @('ObjectGUID', 'ObjectSID', 'DomainName', 'Enabled', 'AccountType', 'LastLogonDateIso8601', 'WhenCreatedIso8601') @() @('ImmutableId_AD', 'SamAccountName', 'UserPrincipalName', 'DisplayName', 'HasMailbox', 'Country', 'CountryName', 'PasswordLastSetDateIso8601', 'IsPasswordNeverExpires', 'OnPremMailboxSizeMB')
+    AdUsers     = Get-Source 'AD users' 'AD_Users_AllDomains.csv' 'SmartM365-ActiveDirectory-Inventory.ps1' @('ObjectGUID', 'ObjectSID', 'DomainName', 'Enabled', 'AccountType', 'LastLogonDateIso8601', 'WhenCreatedIso8601') @() @('ImmutableId_AD', 'SamAccountName', 'UserPrincipalName', 'DisplayName', 'HasMailbox', 'Country', 'CountryName', 'PasswordLastSetDateIso8601', 'IsPasswordNeverExpires', 'OnPremMailboxSizeMB', 'AccountTypeSource', 'WorkforcePersona')
     AdComputers = Get-Source 'AD computers' 'AD_Computers_AllDomains.csv' 'SmartM365-ActiveDirectory-Inventory.ps1' @('ObjectGUID', 'DomainName', 'Enabled', 'OperatingSystem', 'LastLogonDateIso8601', 'WhenCreatedIso8601', 'EntraMatchCountByObjectGuid', 'ExistsInEntraByObjectGuid', 'EntraApproximateLastSignInDateTime') @() @('Name', 'SamAccountName', 'OperatingSystemShortName', 'pwdLastSetDateIso8601', 'IsInDisabledObjectsOU')
     EntraUsers  = Get-Source 'Entra users' 'M365_Users_Active.csv' 'SmartM365-ActiveUsers-Inventory.ps1' @('Object Id', 'User principal name', 'OnPremisesSecurityIdentifier', 'OnPremisesImmutableId', 'AccountEnabled', 'LastSignInDateTimeIso8601', 'LastNonInteractiveSignInDateTimeIso8601', 'LastSuccessfulSignInDateTimeIso8601')
     EntraDevices = Get-Source 'Entra devices' 'M365_Entra_Devices.csv' 'SmartM365-EntraDevices-Inventory.ps1' @('DeviceId')
@@ -296,6 +296,12 @@ function Get-Population([string]$AccountType) {
     $type = if ($AccountType) { $AccountType } else { 'Unclassified Account' }
     Get-SmartM365AccountPopulation -PopulationRules $populationRules -AccountType $type
 }
+function Get-Persona([AllowNull()]$Inventory, [AllowNull()]$AdUser) {
+    # User Inventory first (strong Entra match); otherwise the persona the AD inventory computed with the same workbook.
+    if ($null -ne $Inventory -and ($Fast::F($Inventory, 'Workforce Persona'))) { return [pscustomobject]@{ Persona = $Fast::F($Inventory, 'Workforce Persona'); Basis = 'User Inventory' } }
+    if ($null -ne $AdUser -and ($Fast::F($AdUser, 'WorkforcePersona'))) { return [pscustomobject]@{ Persona = $Fast::F($AdUser, 'WorkforcePersona'); Basis = 'AD attributes' } }
+    [pscustomobject]@{ Persona = 'Unknown'; Basis = 'Unknown' }
+}
 function Get-Classification([AllowNull()]$Entra) {
     # User Inventory classification is reused only after a strong, unique Entra match.
     $result = [ordered]@{Status = 'Not matched'; Row = $null}
@@ -356,7 +362,8 @@ foreach ($u in $sources.AdUsers.Rows) {
     if (-not $guid -or $adUserByGuid[$guid].Count -ne 1) { $excluded.UnkeyableUsers++; continue }
     $entra = Resolve-Entra $u
     $class = Get-Classification $entra.Row
-    $inv = $class.Row
+    $inv = $class.Row; $ad = $u
+    $persona = Get-Persona $inv $u
     $accountType = $Fast::F($u, 'AccountType'); $population = Get-Population $accountType
     $imperative = [Collections.Generic.List[string]]::new(); $secondary = [Collections.Generic.List[string]]::new()
     switch ($entra.Status) { 'Ambiguous' { $imperative.Add('Ambiguous Entra match') } 'Weak' { $imperative.Add('Weak Entra match (UPN only)') } 'Unknown' { $imperative.Add('Entra source not qualified') } }
@@ -411,7 +418,7 @@ foreach ($u in $sources.AdUsers.Rows) {
         'Identity Match Status' = $entra.Status; 'Identity Match Method' = $entra.Method; 'Classification Match Status' = $class.Status
         'Country' = $(if ($country) { $country } else { 'Unknown' }); 'Country Basis' = $(if ($null -ne $inv) { 'User Inventory Evidence' } elseif ($country) { 'AD attribute' } else { 'Unknown' })
         'Account Type' = $(if ($accountType) { $accountType } else { 'Unclassified Account' }); 'Account Population' = $population; 'Account Population Source' = 'AD AccountType'; 'Account Classification Rule Version' = $classificationRuleVersion
-        'User Type' = $(if ($null -ne $inv -and ($Fast::F($inv, 'User Type'))) { $Fast::F($inv, 'User Type') } else { 'Unknown' }); 'Workforce Persona' = $(if ($null -ne $inv -and ($Fast::F($inv, 'Workforce Persona'))) { $Fast::F($inv, 'Workforce Persona') } else { 'Unknown' })
+        'User Type' = $(if ($null -ne $inv -and ($Fast::F($inv, 'User Type'))) { $Fast::F($inv, 'User Type') } else { 'Unknown' }); 'Workforce Persona' = $persona.Persona; 'Persona Basis' = $persona.Basis; 'Account Type Source' = $(if ($null -ne $ad -and ($Fast::F($ad, 'AccountTypeSource'))) { $Fast::F($ad, 'AccountTypeSource') } elseif ($null -ne $ad) { 'SWI rules' } else { 'Unknown' })
         'Has Mailbox' = $hasMailbox; 'Hosting Location' = $hosting; 'Litigation Hold' = (Join-Flags (@($exoLinked) + @($onPremLinked)) 'LitigationHoldEnabled'); 'Retention Hold' = (Join-Flags (@($exoLinked) + @($onPremLinked)) 'RetentionHoldEnabled')
         'In-Place Holds' = $(if ($onPremLinked.Count) { $inPlace = 'False'; foreach ($x in $onPremLinked) { if ($Fast::F($x, 'InPlaceHolds')) { $inPlace = 'True' } }; $inPlace } elseif ($exoLinked.Count) { 'Not collected' } else { '' }); 'Hold State' = $holdState
     }
@@ -548,6 +555,7 @@ foreach ($guid in @($groups.Keys | Sort-Object)) {
         if ($null -ne $exo -and $null -ne $onPrem) { $secondary.Add('Hybrid duplicate') }
         switch ($owner.Status) { 'Not found' { $imperative.Add('Owner not found') } 'Ambiguous' { $imperative.Add('Owner match ambiguous') } }
         $class = Get-Classification $entraRow; $inv = $class.Row
+        $persona = Get-Persona $inv $ad
         $accountType = if ($null -ne $ad) { $Fast::F($ad, 'AccountType') } else { '' }
         $population = if ($null -ne $ad) { Get-Population $accountType } else { 'Review required' }
         if ($population -eq 'Review required') { $secondary.Add('Account population requires classification review') }
@@ -594,7 +602,7 @@ foreach ($guid in @($groups.Keys | Sort-Object)) {
             'AD Domain' = $(if ($Fast::F($ad, 'DomainName')) { $Fast::F($ad, 'DomainName') } elseif ($Fast::F($onPrem, 'DomainName')) { $Fast::F($onPrem, 'DomainName') } else { 'Unknown' })
             'Country' = $(if ($country) { $country } else { 'Unknown' }); 'Country Basis' = $(if ($null -ne $inv) { 'User Inventory Evidence' } elseif ($country) { 'AD attribute' } else { 'Unknown' })
             'Account Type' = $(if ($accountType) { $accountType } elseif ($null -ne $ad) { 'Unclassified Account' } else { 'Unknown' }); 'Account Population' = $population; 'Account Population Source' = $(if ($null -ne $ad) { 'AD AccountType' } else { 'Owner not in AD' }); 'Account Classification Rule Version' = $classificationRuleVersion
-            'User Type' = $(if ($null -ne $inv -and ($Fast::F($inv, 'User Type'))) { $Fast::F($inv, 'User Type') } else { 'Unknown' }); 'Workforce Persona' = $(if ($null -ne $inv -and ($Fast::F($inv, 'Workforce Persona'))) { $Fast::F($inv, 'Workforce Persona') } else { 'Unknown' }); 'Classification Match Status' = $class.Status
+            'User Type' = $(if ($null -ne $inv -and ($Fast::F($inv, 'User Type'))) { $Fast::F($inv, 'User Type') } else { 'Unknown' }); 'Workforce Persona' = $persona.Persona; 'Persona Basis' = $persona.Basis; 'Account Type Source' = $(if ($null -ne $ad -and ($Fast::F($ad, 'AccountTypeSource'))) { $Fast::F($ad, 'AccountTypeSource') } elseif ($null -ne $ad) { 'SWI rules' } else { 'Unknown' }); 'Classification Match Status' = $class.Status
             'Litigation Hold' = (Join-Flags $present 'LitigationHoldEnabled'); 'Retention Hold' = (Join-Flags $present 'RetentionHoldEnabled')
             'In-Place Holds' = $(if ($null -ne $onPrem) { if ($Fast::F($onPrem, 'InPlaceHolds')) { 'True' } else { 'False' } } else { 'Not collected' }); 'Hold State' = $holdState; 'Mailbox Size GB' = $sizeGb
         }
@@ -621,7 +629,7 @@ function Write-Evidence([string]$Path, [object[]]$Rows, [string[]]$Header) {
 }
 $signalColumns = { param([string[]]$Names) foreach ($n in $Names) { $n; "$n Quality" } }
 $userHeader = @('User Cleanup Key', 'AD Object GUID', 'Entra Object ID', 'AD Domain', 'SamAccountName', 'User Principal Name', 'Display Name', 'Enabled', 'When Created', 'Password Last Set', 'Password Never Expires',
-    'Identity Match Status', 'Identity Match Method', 'Classification Match Status', 'Country', 'Country Basis', 'Account Type', 'Account Population', 'Account Population Source', 'Account Classification Rule Version', 'User Type', 'Workforce Persona',
+    'Identity Match Status', 'Identity Match Method', 'Classification Match Status', 'Country', 'Country Basis', 'Account Type', 'Account Population', 'Account Population Source', 'Account Classification Rule Version', 'User Type', 'Workforce Persona', 'Persona Basis', 'Account Type Source',
     'Has Mailbox', 'Hosting Location', 'Litigation Hold', 'Retention Hold', 'In-Place Holds', 'Hold State') +
     @(& $signalColumns @('AD Last Logon', 'Entra Last Sign-In', 'Entra Last Non-Interactive Sign-In', 'Entra Last Successful Sign-In', 'EXO Last User Action', 'EXO Last Logon', 'On-Prem Last Logon', 'Mailbox Usage Last Activity', 'M365 Last Activity', 'Console Last Activity')) +
     @('Entra Match Status', 'M365 Report Match Status', 'Mailbox Usage Match Status', 'Last Activity Date', 'Last Activity Source', 'Days Since Last Activity', 'Inactivity Bucket', 'Bucket Sort', 'Cleanup State', 'State Sort', 'Decision Reason', 'Secondary Reasons', 'Recommended Action',
@@ -632,7 +640,7 @@ $computerHeader = @('Computer Cleanup Key', 'AD Object GUID', 'Entra Device ID',
     @('Last Activity Date', 'Last Activity Source', 'Days Since Last Activity', 'Inactivity Bucket', 'Bucket Sort', 'Cleanup State', 'State Sort', 'Decision Reason', 'Secondary Reasons', 'Recommended Action',
     'AD Source Status', 'AD Collected UTC', 'Entra Source Status', 'Entra Collected UTC', 'Intune Source Status', 'Intune Collected UTC', 'Reference UTC', 'Evidence Date', 'Evidence Status')
 $mailboxHeader = @('Mailbox Cleanup Key', 'Mailbox Identity Basis', 'Mailbox GUID', 'Primary SMTP Address', 'Hosting Location', 'Recipient Type', 'Scope State', 'When Mailbox Created', 'Owner AD Object GUID', 'Owner Entra Object ID', 'Owner Match Status', 'Owner Account State',
-    'AD Domain', 'Country', 'Country Basis', 'Account Type', 'Account Population', 'Account Population Source', 'Account Classification Rule Version', 'User Type', 'Workforce Persona', 'Classification Match Status',
+    'AD Domain', 'Country', 'Country Basis', 'Account Type', 'Account Population', 'Account Population Source', 'Account Classification Rule Version', 'User Type', 'Workforce Persona', 'Persona Basis', 'Account Type Source', 'Classification Match Status',
     'Litigation Hold', 'Retention Hold', 'In-Place Holds', 'Hold State', 'Mailbox Size GB') +
     @(& $signalColumns @('EXO Last User Action', 'EXO Last Logon', 'On-Prem Last Logon', 'Mailbox Usage Last Activity', 'Owner AD Last Logon', 'Owner Entra Last Sign-In', 'Owner M365 Last Activity', 'Owner Console Last Activity')) +
     @('Mailbox Usage Match Status', 'Owner M365 Report Match Status', 'Last Activity Date', 'Last Activity Source', 'Days Since Last Activity', 'Inactivity Bucket', 'Bucket Sort', 'Cleanup State', 'State Sort', 'Decision Reason', 'Secondary Reasons', 'Recommended Action',

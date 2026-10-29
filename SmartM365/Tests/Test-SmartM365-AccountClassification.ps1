@@ -3,7 +3,7 @@
     Validates the published account-classification template and, when present, the private
     AccountClassification.local.json(.txt) rules.
 .VERSION
-1.3
+1.4
 #>
 
 [CmdletBinding()]
@@ -15,7 +15,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $smartInventoryRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'SmartInventory'
-Import-Module (Join-Path $smartInventoryRoot 'Common\SmartM365.AccountClassification.psd1') -MinimumVersion '1.1.0' -Force -ErrorAction Stop
+Import-Module (Join-Path $smartInventoryRoot 'Common\SmartM365.AccountClassification.psd1') -MinimumVersion '1.4.0' -Force -ErrorAction Stop
 $templatePath = Join-Path $smartInventoryRoot 'Config\AccountClassification.local.json.template'
 $expectedAccountTypes = @(
     'Named Account', 'Ext Account', 'Service Account', 'Shared Mailbox',
@@ -93,6 +93,46 @@ foreach ($case in $fallbackCases) {
 $missingDirectoryRules = $false
 try { Assert-SmartM365DirectoryRuleConfiguration -Configuration @{ SourcePath = 'test' } } catch { $missingDirectoryRules = $_.Exception.Message -like '*DirectoryRules*' }
 if (-not $missingDirectoryRules) { throw 'A configuration without DirectoryRules was accepted.' }
+
+# External account type source: off unless enabled, then type first, generic flag, mapped type, rules fallback.
+if ($null -ne (Get-SmartM365ExternalAccountTypeSource -Configuration @{ SourcePath = 'test' })) { throw 'An absent external source was not ignored.' }
+if ($null -ne (Get-SmartM365ExternalAccountTypeSource -Configuration @{ ExternalAccountTypeSource = @{ Enabled = $false; File = 'x.csv' } })) { throw 'A disabled external source was not ignored.' }
+$templateSource = (Get-Content -LiteralPath $templatePath -Raw | ConvertFrom-Json -AsHashtable)['ExternalAccountTypeSource']
+if ($null -eq $templateSource -or [bool]$templateSource['Enabled']) { throw 'The published template must describe the external source disabled.' }
+$incomplete = $false
+try { $null = Get-SmartM365ExternalAccountTypeSource -Configuration @{ ExternalAccountTypeSource = @{ Enabled = $true; File = 'x.csv' } } } catch { $incomplete = $_.Exception.Message -like '*KeyColumn*' }
+if (-not $incomplete) { throw 'An enabled external source without columns was accepted.' }
+$badAge = $false
+try { $null = Get-SmartM365ExternalAccountTypeSource -Configuration @{ ExternalAccountTypeSource = @{ Enabled = $true; File = 'x.csv'; KeyColumn = 'K'; TypeColumn = 'T'; GenericColumn = 'G'; WarnAgeDays = 0 } } } catch { $badAge = $_.Exception.Message -like '*WarnAgeDays*' }
+if (-not $badAge) { throw 'A non-positive WarnAgeDays was accepted.' }
+$source = Get-SmartM365ExternalAccountTypeSource -Configuration @{ ExternalAccountTypeSource = @{
+    Enabled = $true; File = 'x.csv'; KeyColumn = 'K'; TypeColumn = 'T'; GenericColumn = 'G'
+    GenericTrueValues = @('True'); GenericAppliesToTypes = @('USER', '')
+    TypeMap = @{ USER = 'Named Account'; SHARED = 'Shared Mailbox'; SERVICE = 'Service Account'; ADMIN = 'Admin Account' }
+    KeepRulesTypes = @{ USER = @('Ext Account') }
+} }
+if ($source.WarnAgeDays -ne 7) { throw 'WarnAgeDays does not default to 7.' }
+$externalCases = @(
+    @('USER', 'False', 'Generic Account', 'Named Account', 'External source'),
+    @('USER', '', 'Ext Account', 'Ext Account', 'SWI rules'),
+    @('USER', 'True', 'Named Account', 'Generic Account', 'External source'),
+    @('', 'True', 'Named Account', 'Generic Account', 'External source'),
+    @('', 'False', 'Service Account', 'Service Account', 'SWI rules'),
+    @('', '', 'Admin Account', 'Admin Account', 'SWI rules'),
+    @('SHARED', 'True', 'Generic Account', 'Shared Mailbox', 'External source'),
+    @('SERVICE', '', 'Shared Mailbox', 'Service Account', 'External source'),
+    @('admin', 'False', 'Named Account', 'Admin Account', 'External source'),
+    @('MDM-X', 'True', 'Generic Account', 'MDM-X', 'External source'),
+    @('NEWTYPE', '', 'Named Account', 'NEWTYPE', 'External source')
+)
+foreach ($case in $externalCases) {
+    $row = [pscustomobject]@{ K = 'k'; T = $case[0]; G = $case[1] }
+    $result = Resolve-SmartM365ExternalAccountType -Source $source -Row $row -RulesAccountType $case[2]
+    if ($result.AccountType -ne $case[3] -or $result.Source -ne $case[4]) { throw ("External type {0}/{1} over {2} gave {3} ({4}) instead of {5} ({6})." -f $case[0], $case[1], $case[2], $result.AccountType, $result.Source, $case[3], $case[4]) }
+}
+$noRow = Resolve-SmartM365ExternalAccountType -Source $source -Row $null -RulesAccountType 'Named Account'
+if ($noRow.AccountType -ne 'Named Account' -or $noRow.Source -ne 'SWI rules') { throw 'An account absent from the external source did not keep the SWI rules type.' }
+Write-Output ('External account type source checks passed: {0} cases.' -f ($externalCases.Count + 1))
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

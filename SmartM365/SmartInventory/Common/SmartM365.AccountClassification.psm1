@@ -118,7 +118,73 @@ function Assert-SmartM365DirectoryRuleConfiguration {
     if ([string]::IsNullOrWhiteSpace([string]$rules['IntegrationFallback']['Default'])) { throw 'DirectoryRules.IntegrationFallback.Default is required.' }
 }
 
-Export-ModuleMember -Function Get-SmartM365AccountClassificationDefaultPath, Resolve-SmartM365AccountClassificationPath, Read-SmartM365AccountClassification, Get-SmartM365IntegrationFallback, Get-SmartM365AccountPopulation, Assert-SmartM365DirectoryRuleConfiguration
+function Get-SmartM365ExternalAccountTypeSource {
+    # Returns the validated ExternalAccountTypeSource section, or $null when it is absent or disabled:
+    # by default only the SWI rules classify accounts. All source names and values are tenant configuration.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Configuration)
+    if (-not $Configuration.ContainsKey('ExternalAccountTypeSource')) { return $null }
+    $source = $Configuration['ExternalAccountTypeSource']
+    if ($source -isnot [hashtable]) { throw 'ExternalAccountTypeSource must be a JSON object.' }
+    if (-not [bool]$source['Enabled']) { return $null }
+    foreach ($name in 'File', 'KeyColumn', 'TypeColumn', 'GenericColumn') {
+        if ([string]::IsNullOrWhiteSpace([string]$source[$name])) { throw "ExternalAccountTypeSource.$name is required when the source is enabled." }
+    }
+    foreach ($name in 'TypeMap', 'KeepRulesTypes') {
+        if ($source.ContainsKey($name) -and $source[$name] -isnot [hashtable]) { throw "ExternalAccountTypeSource.$name must be a JSON object." }
+    }
+    $warnAgeDays = 7
+    if ($source.ContainsKey('WarnAgeDays')) {
+        if (-not [int]::TryParse([string]$source['WarnAgeDays'], [ref]$warnAgeDays) -or $warnAgeDays -lt 1) { throw 'ExternalAccountTypeSource.WarnAgeDays must be a positive integer.' }
+    }
+    $map = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($source['TypeMap']) { foreach ($key in $source['TypeMap'].Keys) { $map[([string]$key).Trim()] = ([string]$source['TypeMap'][$key]).Trim() } }
+    $keep = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($source['KeepRulesTypes']) { foreach ($key in $source['KeepRulesTypes'].Keys) { $keep[([string]$key).Trim()] = @($source['KeepRulesTypes'][$key] | ForEach-Object { ([string]$_).Trim() }) } }
+    $trueValues = if ($source.ContainsKey('GenericTrueValues')) { @($source['GenericTrueValues'] | ForEach-Object { ([string]$_).Trim() }) } else { @('True') }
+    $genericTypes = if ($source.ContainsKey('GenericAppliesToTypes')) { @($source['GenericAppliesToTypes'] | ForEach-Object { ([string]$_).Trim() }) } else { @('') }
+    [pscustomobject]@{
+        File = ([string]$source['File']).Trim()
+        KeyColumn = ([string]$source['KeyColumn']).Trim()
+        TypeColumn = ([string]$source['TypeColumn']).Trim()
+        GenericColumn = ([string]$source['GenericColumn']).Trim()
+        GenericTrueValues = $trueValues
+        GenericAppliesToTypes = $genericTypes
+        TypeMap = $map
+        KeepRulesTypes = $keep
+        NonItStaffTypes = @($source['NonItStaffTypes'] | Where-Object { $_ } | ForEach-Object { ([string]$_).Trim() })
+        WarnAgeDays = $warnAgeDays
+    }
+}
+
+function Resolve-SmartM365ExternalAccountType {
+    # Applies the external source to one account, in order: a type outside GenericAppliesToTypes wins
+    # (mapped through TypeMap, otherwise kept as named by the source); then a true generic flag gives
+    # Generic Account; then a mapped type, unless the SWI rules type is listed in KeepRulesTypes; an empty
+    # type, or no source row, keeps the SWI rules type.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Source,
+        [AllowNull()]$Row,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$RulesAccountType
+    )
+    $rules = [pscustomobject]@{ AccountType = $RulesAccountType; Source = 'SWI rules' }
+    if ($null -eq $Row) { return $rules }
+    $typeProperty = $Row.PSObject.Properties[$Source.TypeColumn]
+    $genericProperty = $Row.PSObject.Properties[$Source.GenericColumn]
+    $type = if ($null -ne $typeProperty) { ([string]$typeProperty.Value).Trim() } else { '' }
+    $generic = if ($null -ne $genericProperty) { ([string]$genericProperty.Value).Trim() } else { '' }
+    $isGeneric = @($Source.GenericTrueValues | Where-Object { $_ -ieq $generic }).Count -gt 0
+    $genericApplies = @($Source.GenericAppliesToTypes | Where-Object { $_ -ieq $type }).Count -gt 0
+    $mapped = if ($type -and $Source.TypeMap.ContainsKey($type)) { $Source.TypeMap[$type] } else { $type }
+    if ($type -and -not $genericApplies) { return [pscustomobject]@{ AccountType = $mapped; Source = 'External source' } }
+    if ($isGeneric) { return [pscustomobject]@{ AccountType = 'Generic Account'; Source = 'External source' } }
+    if (-not $type) { return $rules }
+    if ($Source.KeepRulesTypes.ContainsKey($type) -and @($Source.KeepRulesTypes[$type] | Where-Object { $_ -ieq $RulesAccountType }).Count -gt 0) { return $rules }
+    return [pscustomobject]@{ AccountType = $mapped; Source = 'External source' }
+}
+
+Export-ModuleMember -Function Get-SmartM365AccountClassificationDefaultPath, Resolve-SmartM365AccountClassificationPath, Read-SmartM365AccountClassification, Get-SmartM365IntegrationFallback, Get-SmartM365AccountPopulation, Assert-SmartM365DirectoryRuleConfiguration, Get-SmartM365ExternalAccountTypeSource, Resolve-SmartM365ExternalAccountType
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

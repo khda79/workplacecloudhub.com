@@ -1,4 +1,4 @@
-# Version 1.0.0: directory cleanup decisions, boundaries, matching, holds, scope and source qualification.
+# Version 1.1.0: Persona Basis and Account Type Source; 1.0.0: directory cleanup decisions, boundaries, matching, holds, scope and source qualification.
 [CmdletBinding()]
 param([string]$TestRoot = (Join-Path ([IO.Path]::GetTempPath()) 'SmartM365-OfflineTests'))
 # Synthetic local files only. No collectors, tenant calls, production data or uploads.
@@ -85,7 +85,7 @@ $created = Iso $now.AddYears(-6)
 function New-AdUser([int]$N, [hashtable]$Values = @{}) {
     $row = [ordered]@{TenantKey = $tenant; DomainName = 'contoso.example'; ObjectGUID = (Guid $N); ObjectSID = "S-1-5-21-1-1-1-$N"; ImmutableId_AD = "imm$N=="; SamAccountName = "user$N"
         UserPrincipalName = "user$N@contoso.example"; DisplayName = "Synthetic User $N"; Enabled = 'True'; AccountType = 'Named Account'; HasMailbox = 'False'; Country = 'XA'; CountryName = 'Synthetic Country A'
-        LastLogonDateIso8601 = (Iso $old); WhenCreatedIso8601 = $created; PasswordLastSetDateIso8601 = (Iso $old); IsPasswordNeverExpires = 'False'; OnPremMailboxSizeMB = ''}
+        LastLogonDateIso8601 = (Iso $old); WhenCreatedIso8601 = $created; PasswordLastSetDateIso8601 = (Iso $old); IsPasswordNeverExpires = 'False'; OnPremMailboxSizeMB = ''; WorkforcePersona = ''; AccountTypeSource = ''}
     foreach ($k in $Values.Keys) { $row[$k] = $Values[$k] }
     [pscustomobject]$row
 }
@@ -124,7 +124,7 @@ function Write-Estate {
         New-AdUser 6 @{AccountType = 'Service Account'}                                                         # Non-human
         New-AdUser 7 @{ObjectSID = 'S-1-5-21-9-9-9-7'; ImmutableId_AD = 'other7=='}                             # UPN-only Entra match
         New-AdUser 8 @{LastLogonDateIso8601 = (Iso $now.AddYears(-1).AddDays(-5)); UserPrincipalName = 'solo8@contoso.example'; ObjectSID = 'S-1-5-21-8-8-8-8'; ImmutableId_AD = 'solo8=='}
-        New-AdUser 9 @{LastLogonDateIso8601 = ''; UserPrincipalName = 'solo9@contoso.example'; ObjectSID = 'S-1-5-21-8-8-8-9'; ImmutableId_AD = 'solo9=='}
+        New-AdUser 9 @{WorkforcePersona = 'AD persona'; AccountTypeSource = 'External source'; LastLogonDateIso8601 = ''; UserPrincipalName = 'solo9@contoso.example'; ObjectSID = 'S-1-5-21-8-8-8-9'; ImmutableId_AD = 'solo9=='}
         New-AdUser 10 @{LastLogonDateIso8601 = ''; WhenCreatedIso8601 = (Iso $now.AddMonths(-5)); UserPrincipalName = 'solo10@contoso.example'; ObjectSID = 'S-1-5-21-8-8-8-10'; ImmutableId_AD = 'solo10=='}
         New-AdUser 11 @{LastLogonDateIso8601 = (Iso $now.AddDays(40)); UserPrincipalName = 'solo11@contoso.example'; ObjectSID = 'S-1-5-21-8-8-8-11'; ImmutableId_AD = 'solo11=='}
         New-AdUser 12 @{LastLogonDateIso8601 = (Iso $now.AddHours(2)); UserPrincipalName = 'solo12@contoso.example'; ObjectSID = 'S-1-5-21-8-8-8-12'; ImmutableId_AD = 'solo12=='}
@@ -213,7 +213,10 @@ try {
     Check ($u.user7.'Cleanup State' -eq 'Review' -and $u.user7.'Identity Match Status' -eq 'Weak' -and $u.user7.'Entra Last Sign-In Quality' -eq 'Weak match') 'UPN-only match must be Review and never count as activity'
     Check ($u.user8.'Cleanup State' -eq 'Review' -and $u.user8.'Decision Reason' -eq 'Near threshold (AD replication latency)' -and $u.user8.'Inactivity Bucket' -eq '1-2 years') 'AD logon inside the latency margin must be Review'
     Check ($u.user9.'Cleanup State' -eq 'Candidate' -and $u.user9.'Inactivity Bucket' -eq 'No observed activity' -and $u.user9.'Identity Match Status' -eq 'No Entra object' -and $u.user9.'Has Mailbox' -eq 'No') 'Qualified no-activity account older than a year must be a candidate'
-    Check ($u.user10.'Cleanup State' -eq 'Review' -and $u.user10.'Decision Reason' -match 'created less than one year ago') 'Recent account without activity must be Review'
+    Check ($u.user2.'Persona Basis' -eq 'User Inventory' -and $u.user2.'Account Type Source' -eq 'SWI rules') 'User Inventory persona must be used first; an empty AD account type source means SWI rules'
+Check ($u.user9.'Workforce Persona' -eq 'AD persona' -and $u.user9.'Persona Basis' -eq 'AD attributes' -and $u.user9.'Account Type Source' -eq 'External source') 'Without User Inventory, the AD inventory persona and account type source must be used'
+Check ($u.user3.'Persona Basis' -eq 'Unknown' -or $u.user3.'Persona Basis' -eq 'User Inventory') 'A user without any persona must say Unknown'
+Check ($u.user10.'Cleanup State' -eq 'Review' -and $u.user10.'Decision Reason' -match 'created less than one year ago') 'Recent account without activity must be Review'
     Check ($u.user11.'Cleanup State' -eq 'Review' -and $u.user11.'AD Last Logon Quality' -eq 'Future date' -and $u.user11.'Decision Reason' -match 'Future date') 'Future date must be Review'
     Check ($u.user12.'Cleanup State' -eq 'Active' -and $u.user12.'AD Last Logon Quality' -eq 'Clock skew' -and $u.user12.'Days Since Last Activity' -eq '0') 'Date within one day ahead must be clamped to the reference'
     Check ($u.user13.'Cleanup State' -eq 'Review' -and $u.user13.'Has Mailbox' -eq 'Unknown' -and $u.user13.'Hold State' -eq 'Unknown') 'Mailbox presence without mailbox must be Review'

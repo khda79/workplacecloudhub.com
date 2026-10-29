@@ -2360,6 +2360,14 @@
           "type": "string"
         },
         {
+          "name": "Persona Basis",
+          "type": "string"
+        },
+        {
+          "name": "Account Type Source",
+          "type": "string"
+        },
+        {
           "name": "Has Mailbox",
           "type": "string"
         },
@@ -2841,6 +2849,14 @@
         },
         {
           "name": "Workforce Persona",
+          "type": "string"
+        },
+        {
+          "name": "Persona Basis",
+          "type": "string"
+        },
+        {
+          "name": "Account Type Source",
           "type": "string"
         },
         {

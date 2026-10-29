@@ -2,7 +2,11 @@
 .SYNOPSIS
     Builds enriched Active Directory user CSV columns required by the SmartWorkplace Power BI model.
 .VERSION
-1.16
+1.17
+.NOTES
+    1.17: optional external account type source (private ExternalAccountTypeSource section, off by default)
+    takes priority over the SWI rules; AccountTypeSource, RulesAccountType, ExternalAccountType,
+    ExternalGenericAccount, WorkforcePersona, PersonaMatchState and PersonaClassificationSource are published.
 #>
 
 . (Join-Path $PSScriptRoot '../Common/SmartM365.IdentityDateEvidence.ps1')
@@ -31,7 +35,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     }
 
     # Private tenant rules (git-ignored); only AccountClassification.local.json.template is published.
-    Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Common\SmartM365.AccountClassification.psd1') -MinimumVersion '1.1.0' -ErrorAction Stop
+    Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'Common\SmartM365.AccountClassification.psd1') -MinimumVersion '1.4.0' -ErrorAction Stop
     $accountClassificationConfig = Read-SmartM365AccountClassification -Path $AccountClassificationConfigPath
     if (-not $accountClassificationConfig.ContainsKey('LegacyLikelyPrivilegedOrServiceAccount')) {
         throw ("Account classification configuration has no LegacyLikelyPrivilegedOrServiceAccount section: {0}" -f $accountClassificationConfig.SourcePath)
@@ -217,7 +221,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
 
     function Get-SmartM365CombinedJobFamily {
         # PersonaCategory comes from the persona workbook and already applies the HQ site and the non-human exclusions.
-        param([string]$AccountType, [string]$TypeEntity, [string]$UserPrincipalName, [bool]$NoLastLogonInOnComputer, [string]$PersonaCategory)
+        param([string]$AccountType, [string]$TypeEntity, [string]$UserPrincipalName, [bool]$NoLastLogonInOnComputer, [string]$PersonaCategory, [string]$AccountPopulation)
         $accountTypeText = ([string]$AccountType).Trim()
         $typeEntityText = ([string]$TypeEntity).Trim()
         $upnLower = ([string]$UserPrincipalName).ToLowerInvariant()
@@ -234,6 +238,8 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
                 'Room Mailbox' { $immediate = 'Non-IT staff' }
                 'Test Account' { $immediate = 'Non-IT staff' }
             }
+            # Types named by the external source: a non-human population, or a configured type, is not workforce.
+            if (-not $immediate -and ($AccountPopulation -eq 'Non-human' -or $externalNonItStaffTypes -contains $accountTypeText)) { $immediate = 'Non-IT staff' }
         }
         $extDetected = ''
         if ([string]::IsNullOrWhiteSpace($notIntegrated) -and ($upnLower.Contains('.ext') -or $upnLower.Contains('#ext#') -or $upnLower.Contains('-ext'))) { $extDetected = 'Ext staff' }
@@ -340,6 +346,13 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         'GivenNameNormalized'
         'SurnameNormalized'
         'AccountType'
+        'AccountTypeSource'
+        'RulesAccountType'
+        'ExternalAccountType'
+        'ExternalGenericAccount'
+        'WorkforcePersona'
+        'PersonaMatchState'
+        'PersonaClassificationSource'
         'AccountPopulation'
         'AccountClassificationRuleVersion'
         'ExchangeOnlineMappingStatus'
@@ -476,6 +489,42 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     $verifiedDomains = Import-SourceCsv @('M365_Entra_VerifiedDomains.csv')
     $backupCoverage = Import-SourceCsv @('M365_BackupPolicyScope_MailboxCoverage.csv')
     $migrationJobs = Import-SourceCsv @('Exchange_EXO_MigrationJobs.csv')
+    # Optional external account type source (private configuration): without it, only the SWI rules apply.
+    $externalTypeSource = Get-SmartM365ExternalAccountTypeSource -Configuration $accountClassificationConfig
+    $externalTypeByKey = @{}
+    $externalNonItStaffTypes = @()
+    if ($null -ne $externalTypeSource) {
+        $externalNonItStaffTypes = @($externalTypeSource.NonItStaffTypes)
+        $externalCsv = Find-SourceCsv -Names @($externalTypeSource.File)
+        if ([string]::IsNullOrWhiteSpace($externalCsv)) {
+            WriteLog -Message ("WARNING: External account type source not found: {0}; the SWI rules classify every account." -f $externalTypeSource.File)
+        }
+        else {
+            $externalRows = @(Import-Csv -LiteralPath $externalCsv -Encoding UTF8)
+            if ($externalRows.Count -gt 0) {
+                foreach ($column in @($externalTypeSource.KeyColumn, $externalTypeSource.TypeColumn, $externalTypeSource.GenericColumn)) {
+                    if (-not $externalRows[0].PSObject.Properties[$column]) { throw ("External account type source has no {0} column: {1}" -f $column, $externalCsv) }
+                }
+            }
+            $latestCollected = $null; $skipped = 0
+            foreach ($row in $externalRows) {
+                # Only rows the source marks as observed are used; a missing domain simply has no rows.
+                $status = Get-Value $row @('CollectionStatus')
+                if ($status -and $status -ne 'Observed') { $skipped++; continue }
+                Add-SmartM365MapValue $externalTypeByKey (Get-Key (Get-Value $row @($externalTypeSource.KeyColumn))) $row
+                $collected = [datetimeoffset]::MinValue
+                if ([datetimeoffset]::TryParse((Get-Value $row @('CollectedAtUtc')), [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$collected) -and ($null -eq $latestCollected -or $collected -gt $latestCollected)) { $latestCollected = $collected }
+            }
+            $collectedText = if ($null -ne $latestCollected) { $latestCollected.UtcDateTime.ToString('o') } else { 'unknown' }
+            WriteLog -Message ("External account type source loaded: {0}; {1} account(s); {2} row(s) not observed; collected {3}" -f $externalCsv, $externalTypeByKey.Count, $skipped, $collectedText)
+            if ($null -eq $latestCollected) {
+                WriteLog -Message ("WARNING: External account type source has no collection date: {0}" -f $externalCsv)
+            }
+            elseif (([datetimeoffset]::UtcNow - $latestCollected).TotalDays -gt $externalTypeSource.WarnAgeDays) {
+                WriteLog -Message ("WARNING: External account type source is {0} day(s) old (collected {1}); it is still applied." -f [math]::Floor(([datetimeoffset]::UtcNow - $latestCollected).TotalDays), $collectedText)
+            }
+        }
+    }
     if ($users.Count -gt 0 -and -not $users[0].PSObject.Properties[$siteClassification.SiteAttribute]) {
         throw ("Configured site attribute is not present in AD user evidence: {0}" -f $siteClassification.SiteAttribute)
     }
@@ -505,6 +554,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
     $backupBySmtp = @{}; foreach ($row in $backupCoverage) { Add-SmartM365MapValue $backupBySmtp (Get-Key (Get-Value $row @('PrimarySmtpAddress','MailboxUserPrincipalName','MemberUserPrincipalName'))) $row }
     $migrationBySmtp = @{}; foreach ($row in $migrationJobs) { Add-SmartM365MapValue $migrationBySmtp (Get-Key (Get-Value $row @('MigrationUser','EmailAddress'))) $row }
     $enrichedRows = New-Object System.Collections.Generic.List[object]
+    $unlistedExternalTypes = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     $currentUtcDate = [datetime]::UtcNow.Date
     $exchangeLastLogon90DayCutoff = $currentUtcDate.AddDays(-90)
     $exchangeLastLogon180DayCutoff = $currentUtcDate.AddDays(-180)
@@ -589,8 +639,15 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $inDisabledObjectsOu = $distinguishedNameUpper.Contains('OU=DISABLED_OBJECTS')
         $givenNameClean = Convert-SmartM365NameClean -Value (Get-Value $user @('GivenName'))
         $surnameClean = Convert-SmartM365NameClean -Value (Get-Value $user @('Surname'))
-        $accountType = Get-SmartM365AccountType -UPN $userPrincipalName -SAM $samAccountName -DN $distinguishedName -RecipientType $recipientType -GivenName (Get-Value $user @('GivenName')) -Surname (Get-Value $user @('Surname')) -GivenNameClean $givenNameClean -SurnameClean $surnameClean
+        $rulesAccountType = Get-SmartM365AccountType -UPN $userPrincipalName -SAM $samAccountName -DN $distinguishedName -RecipientType $recipientType -GivenName (Get-Value $user @('GivenName')) -Surname (Get-Value $user @('Surname')) -GivenNameClean $givenNameClean -SurnameClean $surnameClean
+        $externalRow = if ($externalTypeByKey.ContainsKey($objectGuidKey)) { $externalTypeByKey[$objectGuidKey] } else { $null }
+        $accountType = $rulesAccountType; $accountTypeSource = 'SWI rules'
+        if ($null -ne $externalTypeSource) {
+            $resolvedType = Resolve-SmartM365ExternalAccountType -Source $externalTypeSource -Row $externalRow -RulesAccountType $rulesAccountType
+            $accountType = $resolvedType.AccountType; $accountTypeSource = $resolvedType.Source
+        }
         $accountPopulation = Get-SmartM365AccountPopulation -AccountType $accountType
+        if ($accountTypeSource -ne 'SWI rules' -and $accountPopulation -eq 'Review required' -and -not (@($accountPopulationRules.ReviewRequired) -contains $accountType)) { [void]$unlistedExternalTypes.Add($accountType) }
         $jobTitleFromDesc = Get-SmartM365JobTitleFromDescription -Description (Get-Value $user @('Description'))
         $jobTitleFromDesc2 = $jobTitleFromDesc
         $jobTitleNormalized = Normalize-SmartM365JobTitleText -ManagedTitle '' -DescriptionTitle $jobTitleFromDesc
@@ -605,7 +662,7 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $jobFamilyFromKeywords = (Get-SmartM365WorkplacePersona @personaArgs -SiteType '').Persona
         $jobFamilyFromKeywords2 = $jobFamilyFromKeywords
         $noLastLogonInOnComputer = $true
-        $jobFamilyCombined = Get-SmartM365CombinedJobFamily -AccountType $accountType -TypeEntity $typeEntityValue -UserPrincipalName $userPrincipalName -NoLastLogonInOnComputer $noLastLogonInOnComputer -PersonaCategory $persona.Persona
+        $jobFamilyCombined = Get-SmartM365CombinedJobFamily -AccountType $accountType -TypeEntity $typeEntityValue -UserPrincipalName $userPrincipalName -NoLastLogonInOnComputer $noLastLogonInOnComputer -PersonaCategory $persona.Persona -AccountPopulation $accountPopulation
         $jobFamilyCombined2 = $jobFamilyCombined
         $target1Persona = if (@('UserMailbox','RemoteUserMailbox') -contains $recipientType) { Get-SmartM365BasePersona -JobFamily $jobFamilyCombined -LicenseGroup $licenseGroup } else { 'None' }
         $target1Persona2 = $target1Persona
@@ -655,6 +712,14 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         $out['GivenNameNormalized'] = $givenNameClean
         $out['SurnameNormalized'] = $surnameClean
         $out['AccountType'] = $accountType
+        $out['AccountTypeSource'] = $accountTypeSource
+        $out['RulesAccountType'] = $rulesAccountType
+        $out['ExternalAccountType'] = if ($null -ne $externalRow) { Get-Value $externalRow @($externalTypeSource.TypeColumn) } else { '' }
+        $out['ExternalGenericAccount'] = if ($null -ne $externalRow) { Get-Value $externalRow @($externalTypeSource.GenericColumn) } else { '' }
+        # Persona of the shared workbook rules (HQ site, title, AD description), without the account-type overrides of JobFamily.
+        $out['WorkforcePersona'] = $persona.Persona
+        $out['PersonaMatchState'] = $persona.State
+        $out['PersonaClassificationSource'] = $persona.Source
         $out['AccountPopulation'] = $accountPopulation
         $out['AccountClassificationRuleVersion'] = $accountClassificationRuleVersion
         $out['ExchangeOnlineMappingStatus'] = if ($null -eq $exoMailbox) { 'Not EXO' } elseif (-not [string]::IsNullOrWhiteSpace($aadObjectId)) { 'OK_GUID' } else { 'Missing_AAD_Object' }
@@ -781,6 +846,13 @@ function Invoke-SmartM365AdUsersEnrichedCsv {
         [void]$enrichedRows.Add([pscustomobject]$out)
     }
 
+    if ($unlistedExternalTypes.Count -gt 0) {
+        WriteLog -Message ("WARNING: External account type(s) absent from the Population section are Review required: {0}" -f (@($unlistedExternalTypes | Sort-Object) -join ', '))
+    }
+    if ($null -ne $externalTypeSource) {
+        $sourceCounts = @($enrichedRows | Group-Object AccountTypeSource | ForEach-Object { '{0}={1}' -f $_.Name, $_.Count }) -join '; '
+        WriteLog -Message ("AD users account type source: {0}" -f $sourceCounts)
+    }
     $enrichedCsv = Join-Path -Path $OutputFolder -ChildPath 'AD_Users_AllDomains.csv'
     $exportColumns = @()
     if ($enrichedRows.Count -eq 0) {

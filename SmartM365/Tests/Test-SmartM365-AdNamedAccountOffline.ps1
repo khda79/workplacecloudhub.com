@@ -59,7 +59,28 @@ Assert-AccountType -Account $account -Expected 'Named Account'
 $account.SAM = 'SVC_EXAMPLE'
 Assert-AccountType -Account $account -Expected 'Service Account'
 
-Write-Output 'Optional Named Account SAM pattern offline tests passed.'
+# External source types: a non-human population or a configured type is Non-IT staff in JobFamily.
+$jobFamilyDefinition = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-SmartM365CombinedJobFamily' }, $true))
+if ($jobFamilyDefinition.Count -ne 1) { throw 'Expected one Get-SmartM365CombinedJobFamily function in AD users enrichment.' }
+. ([scriptblock]::Create($jobFamilyDefinition[0].Extent.Text))
+$personaLabels = [pscustomobject]@{ NoMatch = 'Unclassified' }
+$externalNonItStaffTypes = @('TEST-X')
+$jobFamilyCases = @(
+    @('MDM-X', 'Non-human', 'Care staff', 'Non-IT staff'),
+    @('TEST-X', 'Review required', 'Care staff', 'Non-IT staff'),
+    @('Named Account', 'Human', 'Care staff', 'Care staff'),
+    @('Service Account', 'Non-human', 'Care staff', 'Non-IT staff')
+)
+foreach ($case in $jobFamilyCases) {
+    $family = Get-SmartM365CombinedJobFamily -AccountType $case[0] -TypeEntity 'INTEGRATED' -UserPrincipalName 'user@example.test' -NoLastLogonInOnComputer $true -PersonaCategory $case[2] -AccountPopulation $case[1]
+    if ($family -ne $case[3]) { throw "JobFamily for $($case[0]) is '$family' instead of '$($case[3])'." }
+}
+$enrichmentText = Get-Content -LiteralPath $enrichmentPath -Raw
+foreach ($marker in 'Get-SmartM365ExternalAccountTypeSource', 'Resolve-SmartM365ExternalAccountType', "'AccountTypeSource'", "'RulesAccountType'", "'WorkforcePersona'") {
+    if (-not $enrichmentText.Contains($marker)) { throw "AD users enrichment does not use $marker." }
+}
+
+Write-Output 'Optional Named Account SAM pattern and external account type offline tests passed.'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

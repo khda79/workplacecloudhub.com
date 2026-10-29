@@ -458,4 +458,13 @@ Site and persona columns use the same private workbooks as SmartWorkplaceIntelli
 
 Organization-specific directory rules are also private, in the `DirectoryRules` section of the same file. `IntegrationFallback` holds the ordered domain rules that give `EntityIntegrationType` for users and computers whose site is unmapped. Each rule has `Domains`, an optional `CountryIn` or `CountryNotIn`, and a `Result`. For computers, the country is read before `ComputerCountryOuSuffix` in the distinguished name. `HeadquartersOuContains` lists the OU fragments that mark headquarters accounts and computers. `Windows11OutOfScopeDomains` lists the domains excluded from the Windows 11 migration phases. A missing section stops the enrichment. The Exchange hybrid identity issues collector reads the routing domain from the tenant `RemoteRoutingDomain` and the allowed TargetAddress domains from `AllowedTargetDomains` in its local configuration. It refuses the template values.
 
+An optional `ExternalAccountTypeSource` section lets a tenant classify accounts from an external directory export, for example the Adaxes users export. It is disabled in the template: by default only the rules above classify accounts. When `Enabled` is true, the AD enrichment reads `File` from the latest data folder and joins it on `KeyColumn` (the AD `ObjectGUID`). Rows whose `CollectionStatus` is not `Observed` are ignored. For each account, in order:
+
+1. A `TypeColumn` value that is neither empty nor listed in `GenericAppliesToTypes` wins: the `TypeMap` value, otherwise the source value as written.
+2. Otherwise, a `GenericColumn` value listed in `GenericTrueValues` gives `Generic Account`.
+3. Otherwise, a mapped type, unless the rules type is listed for it in `KeepRulesTypes` (for example `Ext Account`).
+4. An empty type, an account absent from the file, or a missing file keeps the rules type.
+
+New types must be added to `Population`; a type absent from it is `Review required` and logged as a warning. `NonItStaffTypes` lists the source types that are Non-IT staff in `JobFamily`, as non-human types are. A file older than `WarnAgeDays` (default 7) is still applied, with a warning. The export adds `AccountTypeSource` (`External source` or `SWI rules`), `RulesAccountType`, `ExternalAccountType` and `ExternalGenericAccount`, and `WorkforcePersona`, `PersonaMatchState` and `PersonaClassificationSource`: the workbook persona without the account-type overrides of `JobFamily`.
+
 Change `RuleVersion` whenever a classification or population rule changes. Keep the three populations disjoint; validate the template and the private rules with `Tests/Test-SmartM365-AccountClassification.ps1` before running a full inventory.

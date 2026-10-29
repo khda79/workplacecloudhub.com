@@ -98,6 +98,24 @@
     "HeadquartersOuContains": [],
     "Windows11OutOfScopeDomains": []
   },
+  "ExternalAccountTypeSource": {
+    "Enabled": false,
+    "File": "AD_External_Users.csv",
+    "KeyColumn": "ObjectGUID",
+    "TypeColumn": "InternalType",
+    "GenericColumn": "GenericAccount",
+    "GenericTrueValues": [ "True" ],
+    "GenericAppliesToTypes": [ "USER", "" ],
+    "TypeMap": {
+      "USER": "Named Account",
+      "SHARED": "Shared Mailbox",
+      "SERVICE": "Service Account",
+      "ADMIN": "Admin Account"
+    },
+    "KeepRulesTypes": { "USER": [ "Ext Account" ] },
+    "NonItStaffTypes": [],
+    "WarnAgeDays": 7
+  },
   "LegacyLikelyPrivilegedOrServiceAccount": {
     "SamStartsWith": [],
     "SamContains": [
