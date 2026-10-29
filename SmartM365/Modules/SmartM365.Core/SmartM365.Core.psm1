@@ -7,7 +7,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumV
 . (Join-Path $PSScriptRoot 'SmartM365-InventoryLifecycle.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-CsvFast.ps1')
 # SmartM365.Core.psm1
-# Version: 1.0.114
+# Version: 1.0.115
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
 function Get-ModuleLocalConfig {
@@ -1386,7 +1386,9 @@ function RemoveOldFiles {
         [Alias('FilePattern')][string]$Filter = "*.log",
         [Alias('MaxFiles')][int]$KeepCount = 10,
         [string[]]$ExcludeFiles = @(),
-        [string]$LogFile
+        [string]$LogFile,
+        # Optional exact name regex: a -Filter prefix also matches longer families (Name_* and Name_Archive_*).
+        [string]$NamePattern = ''
     )
 
     if ((Get-Command Test-SmartM365DailyCapturePath -ErrorAction SilentlyContinue) -and (Test-SmartM365DailyCapturePath $Path)) { return }
@@ -1440,6 +1442,7 @@ function RemoveOldFiles {
     }
 
     $files = Get-ChildItem -LiteralPath $Path -Filter $Filter -File |
+             Where-Object { [string]::IsNullOrEmpty($NamePattern) -or $_.Name -match $NamePattern } |
              Sort-Object LastWriteTime -Descending
 
     $filesToDelete = $files | Where-Object { -not $excludeSet.Contains($_.FullName) } |
@@ -2513,7 +2516,7 @@ function Publish-SmartM365Csv {
         $timestampedName = [System.IO.Path]::GetFileNameWithoutExtension($TimestampedPath)
         $retentionPrefix = $timestampedName -replace '_\d{8}[-_]\d{6}$', ''
         if (-not [string]::IsNullOrWhiteSpace($timestampedFolder) -and -not [string]::IsNullOrWhiteSpace($retentionPrefix)) {
-            RemoveOldFiles -Path $timestampedFolder -Filter "$retentionPrefix*.csv" -KeepCount $RetentionMaxCsv -LogFile $global:LogTextFile
+            RemoveOldFiles -Path $timestampedFolder -Filter "$retentionPrefix`_*.csv" -NamePattern ('^' + [regex]::Escape($retentionPrefix) + '_\d{8}[-_]\d{6}\.csv$') -KeepCount $RetentionMaxCsv -LogFile $global:LogTextFile
         }
     }
 
@@ -5907,7 +5910,7 @@ function ExportAndCopyCsv {
     }
 
     if ($global:RetentionMaxCSV -gt 0) {
-        RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -MaxFiles $global:RetentionMaxCSV
+        RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -NamePattern ('^' + [regex]::Escape($BaseFileName) + '(?:_MAXITEMS-\d+)?_\d{8}_\d{6}\.csv$') -MaxFiles $global:RetentionMaxCSV
     }
 
     if (-not $globalStaged) { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3 }
@@ -6201,7 +6204,7 @@ function ExportAndCopyCsvFromConvert {
         }
 
         if ($global:RetentionMaxCSV -gt 0) {
-            RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -MaxFiles $global:RetentionMaxCSV
+            RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -NamePattern ('^' + [regex]::Escape($BaseFileName) + '(?:_MAXITEMS-\d+)?_\d{8}_\d{6}\.csv$') -MaxFiles $global:RetentionMaxCSV
         }
 
         if (-not $globalStaged) { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3 }

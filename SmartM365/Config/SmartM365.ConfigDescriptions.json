@@ -29,7 +29,6 @@
       "LogAllRootPath": "Central log root (LOG-ALL) per tenant profile.",
       "RetentionMaxCSV": "Number of historical CSV copies kept per export.",
       "RetentionMaxLogs": "Number of log files kept per script.",
-      "WeeklyHistoryMaxRetentionWeeks": "Optional ceiling on the ISO weeks every WeeklyHistory keeps on the server (default 12; 0 removes the ceiling). A smaller script value still applies.",
       "MailBrandingEnabled": "Applies the shared branded email template.",
       "MailClientName": "Client name shown in the email header.",
       "MailClientLogoPath": "Client logo file for the email header.",

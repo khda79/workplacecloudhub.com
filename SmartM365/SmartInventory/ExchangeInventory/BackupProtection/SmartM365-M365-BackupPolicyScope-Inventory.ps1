@@ -32,7 +32,7 @@
     the coverage join is representative. Generated CSV names include _MAXITEMS.
 
 .VERSION
-1.9
+1.10
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum application permissions: GroupMember.Read.All, User.Read.All.
@@ -86,7 +86,7 @@ $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Te
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = '1.9'
+$ScriptVersion = '1.10'
 $TaskName = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $script:SmartM365GlobalConfig = $null
 $script:LogPath = ''
@@ -440,6 +440,15 @@ foreach ($folder in @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $logRoot)) 
 }
 Set-SmartM365CoreContext -RunId $runId -RunOutputRoot $ScriptCsvLogFolderPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $script:LogPath
 $global:LogTextFile = $script:LogPath
+# This script names its own logs, so the shared per-script log retention never sees them.
+try {
+    $currentLogs = @($script:LogPath)
+    $keepLogs = [int]$global:RetentionMaxLogs
+    if ($keepLogs -gt 0) {
+        @(Get-ChildItem -LiteralPath $logRoot -Filter 'SmartM365-M365-BackupPolicyScope-Inventory_*.log' -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notin $currentLogs } |
+            Sort-Object LastWriteTime -Descending | Select-Object -Skip $keepLogs) | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+} catch { Write-Warning ("Log retention skipped: {0}" -f $_.Exception.Message) }
 
 try {
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $LatestCsvFolderPath -ScopeParameters @{BackupPolicyScopeGroupId=$BackupPolicyScopeGroupId;BackupPolicyScopeGroupDisplayName=$BackupPolicyScopeGroupDisplayName}

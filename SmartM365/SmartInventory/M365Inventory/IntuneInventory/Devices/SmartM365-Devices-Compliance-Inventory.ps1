@@ -48,7 +48,7 @@ Uses interactive authentication instead of app-only certificate authentication.
     Version : 1.28
 
 .VERSION
-1.29
+1.30
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -335,7 +335,7 @@ try {
 # ==========================================================
 # Fixed output paths and transcript
 # ==========================================================
-$ScriptVersion = "1.29"
+$ScriptVersion = "1.30"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $TaskName = "$ScriptName v$ScriptVersion"
 $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -411,6 +411,15 @@ foreach ($dir in @($ScriptCsvLogFolderPath, $LatestCsvFolderPath, $logDir)) {
 $global:LogPath = $logDir
 $global:LogTextFile = Join-Path $logDir ("{0}-{1}.log" -f $ScriptName, (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'))
 $global:logTranscriptFile = Join-Path $logDir ("{0}-{1}_Transcript.log" -f $ScriptName, (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'))
+# This script names its own logs, so the shared per-script log retention never sees them.
+try {
+    $currentLogs = @($global:LogTextFile, $global:logTranscriptFile)
+    $keepLogs = [int]$global:RetentionMaxLogs
+    if ($keepLogs -gt 0) {
+        @(Get-ChildItem -LiteralPath $logDir -Filter "$ScriptName-*.log" -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notin $currentLogs } |
+            Sort-Object LastWriteTime -Descending | Select-Object -Skip $keepLogs) | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+} catch { Write-Warning ("Log retention skipped: {0}" -f $_.Exception.Message) }
 $global:SmartM365ExecutionStartTime = Get-Date
 $global:SmartM365ExecutionSummaryWritten = $false
 Set-SmartM365CoreContext -RunId $ts -RunOutputRoot $ScriptCsvLogFolderPath -LatestOutputRoot $LatestCsvFolderPath -LogPath $global:LogTextFile

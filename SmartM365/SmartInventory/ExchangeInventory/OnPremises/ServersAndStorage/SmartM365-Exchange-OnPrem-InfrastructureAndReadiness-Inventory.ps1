@@ -26,7 +26,7 @@
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.11
+1.8.12
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in;
@@ -38,7 +38,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.11
+    Version     : 1.8.12
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -280,7 +280,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.11"
+$ScriptVersion = "1.8.12"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -3605,6 +3605,15 @@ $script:CompletionStatus = 'Auto'
 try {
     Ensure-Directory -Path $OutputFolder
     Ensure-Directory -Path $LogFolder
+    # This script names its own logs, so the shared per-script log retention never sees them.
+    try {
+        $currentLogs = @($LogFile, $TranscriptFile)
+        $keepLogs = 30
+        if ($keepLogs -gt 0) {
+            @(Get-ChildItem -LiteralPath $LogFolder -Filter "$ScriptName-*.log" -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notin $currentLogs } |
+                Sort-Object LastWriteTime -Descending | Select-Object -Skip $keepLogs) | Remove-Item -Force -ErrorAction SilentlyContinue
+        }
+    } catch { Write-Warning ("Log retention skipped: {0}" -f $_.Exception.Message) }
     Start-SmartM365RunTranscript -Path $TranscriptFile -Append | Out-Null
     $script:TranscriptStarted = $true
     Write-Log "Starting $ScriptName v$ScriptVersion. RunId: $RunId"

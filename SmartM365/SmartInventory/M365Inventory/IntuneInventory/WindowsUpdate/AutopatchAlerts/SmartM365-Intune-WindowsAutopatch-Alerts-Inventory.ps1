@@ -44,7 +44,7 @@ Uses device code authentication.
 .EXAMPLE
 pwsh -File .\SmartM365-Intune-WindowsAutopatch-Alerts-Inventory.ps1
 .VERSION
-1.27
+1.28
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -321,7 +321,7 @@ if ([string]::IsNullOrWhiteSpace($OutputFolder)) {
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) {
     $LatestCsvFolderPath = $OutputFolder
 }
-$ScriptVersion = "1.27"
+$ScriptVersion = "1.28"
 $ScriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 $StartTime = Get-Date
 $RunStamp = $StartTime.ToString('yyyyMMdd_HHmmss')
@@ -730,6 +730,15 @@ $script:TranscriptStarted = $false
 try {
     Ensure-Folder -Path $OutputFolder
     Ensure-Folder -Path $LogFolder
+    # This script names its own logs, so the shared per-script log retention never sees them.
+    try {
+        $currentLogs = @($LogFile, $TranscriptFile)
+        $keepLogs = [int]$global:RetentionMaxLogs
+        if ($keepLogs -gt 0) {
+            @(Get-ChildItem -LiteralPath $LogFolder -Filter "${ScriptName}_*.log" -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notin $currentLogs } |
+                Sort-Object LastWriteTime -Descending | Select-Object -Skip $keepLogs) | Remove-Item -Force -ErrorAction SilentlyContinue
+        }
+    } catch { Write-Warning ("Log retention skipped: {0}" -f $_.Exception.Message) }
     try { Start-SmartM365RunTranscript -Path $TranscriptFile -Force -ErrorAction Stop | Out-Null; $script:TranscriptStarted = $true } catch { Write-Log -Message ("Transcript start failed: {0}" -f $_.Exception.Message) -Level WARN }
     Test-Ps7
     Import-SmartM365CorePreflight

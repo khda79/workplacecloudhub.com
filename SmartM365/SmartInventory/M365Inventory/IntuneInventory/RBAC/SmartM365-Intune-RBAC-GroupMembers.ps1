@@ -27,7 +27,7 @@
 .PARAMETER DryRun
     Lists target groups without making any Graph API calls.
 .VERSION
-1.20
+1.21
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -553,7 +553,7 @@ $connectedGraphInThisRun = $false
 
 try {
     #region Initialization
-$ScriptVersion = "1.20"
+$ScriptVersion = "1.21"
     $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
     $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'RbacGroupMembersCsvLogFolderPath' -DefaultValue $OutputPath
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $ScriptCsvLogFolderPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
@@ -1153,6 +1153,8 @@ finally {
     try {
         if ((Get-Command RemoveOldFiles -ErrorAction SilentlyContinue) -and $OutputPath) {
             Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.csv' -RetentionDays 7 -RequireCurrentRunPublication -LogFile $global:logTextFile
+            # The per-run and per-country workbooks age out like the CSV copies they are built from.
+            Remove-SmartM365TimestampedFilesOlderThan -FolderPath $OutputPath -FilePattern '*.xlsx' -RetentionDays 7 -RequireCurrentRunPublication -LogFile $global:logTextFile
         }
         if (Get-Command WriteLog -ErrorAction SilentlyContinue) {
             WriteLog -Message "Cleanup completed." "INFO"

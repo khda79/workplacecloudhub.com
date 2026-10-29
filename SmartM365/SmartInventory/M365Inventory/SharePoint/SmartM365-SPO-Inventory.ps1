@@ -58,7 +58,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
- 0.43
+ 0.44
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell enables tenant capacity collection and optional sharing scans.
@@ -128,7 +128,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.43"
+$ScriptVersion = "0.44"
 $TenantCapacityEnabled = -not [bool]$SkipPnPTenantCapacity -and ([bool]$UsePnPTenantCapacity -or [bool](Get-Module -ListAvailable PnP.PowerShell | Select-Object -First 1))
 $CurrentOperation = 'Initialize'
 
@@ -1585,6 +1585,8 @@ try {
     $workbookPath = Join-Path -Path $initializedOutput -ChildPath ("M365_SPO_Inventory_{0}.xlsx" -f $exportStamp)
     New-SpoTimestampedWorkbook -CsvFiles $timestampedCsvFiles.ToArray() -Path $workbookPath | Out-Null
     Remove-SmartM365TimestampedFilesOlderThan -FolderPath $initializedOutput -FilePattern 'M365_SPO_Inventory_*.xlsx' -RetentionDays 7 -LogFile $global:LogTextFile
+    # Raw Graph report downloads are working copies: the published CSVs and WeeklyHistory keep the data.
+    if (-not [string]::IsNullOrWhiteSpace($rawReportFolder)) { Remove-SmartM365TimestampedFilesOlderThan -FolderPath $rawReportFolder -FilePattern '*.csv' -RetentionDays 7 -LogFile $global:LogTextFile }
     $CurrentOperation = 'Build and send notification'
     $siteArray = @($siteRows.ToArray())
     $listArray = @($listRows.ToArray())
