@@ -2,7 +2,7 @@
 .SYNOPSIS
 Offline tests for weekly history label compatibility.
 .VERSION
-1.0.1
+1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -17,6 +17,7 @@ function Check($Value,$Message){if(-not $Value){throw $Message};$script:passed++
 function Reject($Action,$Message){$rejected=$false;try{& $Action|Out-Null}catch{$rejected=$true};Check $rejected $Message}
 function WriteLog {param($Message,$Level)}
 function Get-SmartM365IsoWeekName {'2026-W40'}
+function Get-SmartM365WeeklyHistoryMaxRetentionWeeks {0}
 function Get-SmartM365WeeklyHistoryFileName {param($Path)[IO.Path]::GetFileName($Path)}
 function Copy-SmartM365FileAtomically {param($SourcePath,$DestinationPath)Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath}
 function Invoke-SmartM365SharePointCsvUpload {param($LocalFilePath)$script:uploads+=$LocalFilePath}

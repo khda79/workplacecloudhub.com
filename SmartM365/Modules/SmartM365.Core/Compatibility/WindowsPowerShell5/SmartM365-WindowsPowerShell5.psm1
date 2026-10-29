@@ -197,6 +197,19 @@ function Get-SmartM365WeeklyHistoryConfigValue {
     return Get-ModuleLocalConfigValue -Config $callerConfig -Name $Name -DefaultValue $DefaultValue
 }
 
+function Get-SmartM365WeeklyHistoryMaxRetentionWeeks {
+    # Global WeeklyHistoryMaxRetentionWeeks: ceiling on the weeks every WeeklyHistory keeps; 0 removes the ceiling.
+    [CmdletBinding()]
+    param()
+    $value = 12
+    try {
+        $property = (Get-SmartM365EffectiveModuleGlobalConfig).PSObject.Properties['WeeklyHistoryMaxRetentionWeeks']
+        if ($null -ne $property -and $null -ne $property.Value -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) { $value = [int]$property.Value }
+    }
+    catch { WriteLog -Message ("WeeklyHistoryMaxRetentionWeeks unreadable; default {0} applies: {1}" -f $value, $_.Exception.Message) -Level 'WARNING' }
+    return [Math]::Max(0, $value)
+}
+
 function Get-SmartM365IsoWeekName {
     [CmdletBinding()]
     param([datetime]$Date = (Get-Date))
@@ -336,6 +349,9 @@ function Save-SmartM365WeeklyInventoryHistory {
         Remove-Item -LiteralPath $pendingPublicationPath -Force
     }
 
+    # The global ceiling bounds every producer, including a local value or 0 (keep all) left from older templates.
+    $maximumWeeks = Get-SmartM365WeeklyHistoryMaxRetentionWeeks
+    if ($maximumWeeks -gt 0 -and ($RetentionWeeks -le 0 -or $RetentionWeeks -gt $maximumWeeks)) { $RetentionWeeks = $maximumWeeks }
     if ($RetentionWeeks -gt 0) {
         $oldWeekFolders = @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{4}-W\d{2}$' } | Sort-Object Name -Descending | Select-Object -Skip $RetentionWeeks)
         foreach ($oldWeekFolder in $oldWeekFolders) {

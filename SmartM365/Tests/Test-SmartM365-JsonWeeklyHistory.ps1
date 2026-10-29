@@ -3,7 +3,7 @@
 Offline tests of the weekly history JSON transition and changed-only SharePoint publication.
 
 .VERSION
-1.2
+1.3
 #>
 [CmdletBinding()]
 param()
@@ -18,6 +18,7 @@ function Check([bool]$Value, [string]$Message) { if (-not $Value) { throw $Messa
 function Reject([scriptblock]$Action, [string]$Message) { $failed=$false; try { & $Action | Out-Null } catch { $failed=$true }; Check $failed $Message }
 function WriteLog { param($Message,$Level) }
 function Get-SmartM365IsoWeekName { '2026-W39' }
+function Get-SmartM365WeeklyHistoryMaxRetentionWeeks { 0 }
 function Get-SmartM365WeeklyHistoryFileName { param($Path) [IO.Path]::GetFileName($Path) }
 function Copy-SmartM365FileAtomically { param($SourcePath,$DestinationPath) Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath }
 function Invoke-SmartM365SharePointCsvUpload { param($LocalFilePath) $script:uploads += $LocalFilePath; if ($script:failUploads) { return $null }; return 'receipt' }

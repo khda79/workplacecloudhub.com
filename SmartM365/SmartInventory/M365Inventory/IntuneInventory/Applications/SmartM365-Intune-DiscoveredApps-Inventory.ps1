@@ -41,10 +41,10 @@
 .PARAMETER DelayMs
     Milliseconds to wait between each managedDevices Graph call to avoid throttling.
     Default: 300. Increase if 429 errors persist (e.g. 500 or 1000).
-    Version : 1.35
+    Version : 1.38
 
 .VERSION
-1.37
+1.38
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -53,7 +53,7 @@
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Script  : Intune-DiscoveredApps-Inventory
-    Version : 1.35
+    Version : 1.38
     Requires: Microsoft.Graph.Authentication module
               SmartM365.Core module (Modules\SmartM365.Core\SmartM365.Core.psd1)
     Local configuration: DiscoveredAppsCsvLogFolderPath -> output folder (DATA-ALL\M365-Inventory\Output-Windows-Discovered apps)
@@ -2466,7 +2466,7 @@ try {
             $weeklySummaryHistoryRoot = Join-Path -Path $OutputPath -ChildPath 'SummaryHistory'
             $weeklyRetentionWeeks = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'WeeklyHistoryRetentionWeeks' -DefaultValue 5)
             Save-DiscoveredAppsHistoricalSummaries -WeeklyHistoryRoot $weeklyHistoryRoot -SummaryHistoryRoot $weeklySummaryHistoryRoot -RetentionWeeks $weeklyRetentionWeeks
-            Add-SmartM365WeeklyHistory -SourceCsvPaths @($summaryWrittenPath, $deviceDetailWrittenPath) -HistoryRootPath $weeklyHistoryRoot -OverwriteExisting -UploadChangedFilesOnly | Out-Null
+            Add-SmartM365WeeklyHistory -SourceCsvPaths @($summaryWrittenPath, $deviceDetailWrittenPath) -HistoryRootPath $weeklyHistoryRoot -RetentionWeeks $weeklyRetentionWeeks -OverwriteExisting -UploadChangedFilesOnly | Out-Null
             WriteLog -Message "Summary and AppDeviceRelations WeeklyHistory publication completed in one batch: $weeklyHistoryRoot" "INFO"
 
             if ($DeviceDetailMode -eq 'All' -and $MaxApps -eq 0) {

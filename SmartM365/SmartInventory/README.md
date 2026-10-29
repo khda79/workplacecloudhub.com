@@ -105,6 +105,16 @@ of a multi-file set is not an atomic transaction; inspect the retained metadata
 and run log after an interrupted or partially completed cleanup.
 An output root containing a filesystem link disables both daily retention and
 legacy cleanup with a warning, while allowing collection to continue.
+Unindexed legacy CSVs at the top of a capture root are retired on demand by
+`Maintenance/Invoke-SmartM365-ServerDataCleanup.ps1` (report
+`daily-capture-legacy.csv`), never by the producer itself.
+
+Every WeeklyHistory keeps at most `WeeklyHistoryMaxRetentionWeeks` ISO weeks on
+the server (optional global key, default 12, `0` removes the ceiling). The
+ceiling is applied when a producer prunes its history after a successful
+publication; a smaller script `WeeklyHistoryRetentionWeeks` still applies, and
+script values above the ceiling or `0` are capped. SharePoint copies of older
+weeks are not removed.
 
 Offline regression coverage is available through
 `Tests/Test-SmartM365DailyCaptureRetentionOffline.ps1`. It uses temporary
@@ -126,7 +136,7 @@ qualification remain separate.
 - `SmartInventory.cmd`: the single entry point (see [Running jobs and manual launches](#running-jobs-and-manual-launches)).
 - `Maintenance/Remove-SmartM365-ExpiredTimestampedCsv.ps1`: one-time cleanup of the timestamped run copies that WeeklyHistory already covers (see below).
 - `Maintenance/Import-SmartM365-LegacyDailyStats.ps1`: one-time import of legacy AD and Exchange on-premises daily statistics into the SmartInventory daily CSVs (see below).
-- `Maintenance/Invoke-SmartM365-ServerDataCleanup.ps1`: complete tenant DATA inventory with preview and verified server-only cleanup. It reports every file, groups decisions by area, preserves compact Discovered Apps summaries, keeps the prepared-batch history unless `-RetireLinkedPreparedBatches` is passed (then with audit receipts), retires old orphan atomic-write temporaries, and leaves unproven categories for review.
+- `Maintenance/Invoke-SmartM365-ServerDataCleanup.ps1`: complete tenant DATA inventory with preview and verified server-only cleanup. It reports every file, groups decisions by area, preserves compact Discovered Apps summaries, keeps the prepared-batch history unless `-RetireLinkedPreparedBatches` is passed (then with audit receipts), retires old orphan atomic-write temporaries, retires unrecorded timestamped CSVs left in daily capture roots once older than the seven-day window (only when a recorded capture still holds the same export, under the capture retention locks), and leaves unproven categories for review.
 - `Launchers/` and `LaunchersByOrchestrator/`: one-line aliases of the former `.cmd` launchers, kept for one version (see below).
 
 ## Running jobs and manual launches

@@ -7,7 +7,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumV
 . (Join-Path $PSScriptRoot 'SmartM365-InventoryLifecycle.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-CsvFast.ps1')
 # SmartM365.Core.psm1
-# Version: 1.0.111
+# Version: 1.0.114
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
 function Get-ModuleLocalConfig {
@@ -209,6 +209,19 @@ function Get-SmartM365WeeklyHistoryConfigValue {
     return Get-ModuleLocalConfigValue -Config $callerConfig -Name $Name -DefaultValue $DefaultValue
 }
 
+function Get-SmartM365WeeklyHistoryMaxRetentionWeeks {
+    # Global WeeklyHistoryMaxRetentionWeeks: ceiling on the weeks every WeeklyHistory keeps; 0 removes the ceiling.
+    [CmdletBinding()]
+    param()
+    $value = 12
+    try {
+        $property = (Get-SmartM365EffectiveModuleGlobalConfig).PSObject.Properties['WeeklyHistoryMaxRetentionWeeks']
+        if ($null -ne $property -and $null -ne $property.Value -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) { $value = [int]$property.Value }
+    }
+    catch { WriteLog -Message ("WeeklyHistoryMaxRetentionWeeks unreadable; default {0} applies: {1}" -f $value, $_.Exception.Message) -Level 'WARNING' }
+    return [Math]::Max(0, $value)
+}
+
 function Get-SmartM365IsoWeekName {
     [CmdletBinding()]
     param([datetime]$Date = (Get-Date))
@@ -348,6 +361,9 @@ function Save-SmartM365WeeklyInventoryHistory {
         Remove-Item -LiteralPath $pendingPublicationPath -Force
     }
 
+    # The global ceiling bounds every producer, including a local value or 0 (keep all) left from older templates.
+    $maximumWeeks = Get-SmartM365WeeklyHistoryMaxRetentionWeeks
+    if ($maximumWeeks -gt 0 -and ($RetentionWeeks -le 0 -or $RetentionWeeks -gt $maximumWeeks)) { $RetentionWeeks = $maximumWeeks }
     if ($RetentionWeeks -gt 0) {
         $oldWeekFolders = @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{4}-W\d{2}$' } | Sort-Object Name -Descending | Select-Object -Skip $RetentionWeeks)
         foreach ($oldWeekFolder in $oldWeekFolders) {
@@ -6830,7 +6846,7 @@ Export-ModuleMember -Function `
     ConvertTo-SmartM365ConfigBoolean, Get-SmartM365MailBrandingConfig, ConvertTo-SmartM365MailLogoDataUri, Add-SmartM365MailBranding, ConvertToRecipientArray, ConvertTo-SmartM365EmailHtmlText, New-SmartM365EmailKpiGridHtml, New-SmartM365EmailTableHtml, New-SmartM365EmailBody, ConvertTo-SmartM365EmailBody, Get-SmartM365SharePointUploadRecordForLocalFile, Convert-SmartM365MailBodyLocalPathsToSharePointLinks, NewSimpleEmailBody, ConvertBytesToSizeString, GetFileList, `
     NewTableEmailBody, NewTableFilesEmailBody, SendEmailHtmlReport, Send-SmartM365Mail, Send-SmartM365GraphMail, SendFileListEmailReport, Send-SmartM365TeamsNotification, `
     TestSharePath, InitializeScriptEnvironment, Connect-SmartM365GraphAppOnly, ConvertTo-SmartM365SharePointDataRootPath, Get-SmartM365SharePointRelativeFilePath, Initialize-SmartM365SharePointFolder, Invoke-SmartM365SharePointCsvUpload, Remove-SmartM365SharePointFile, Remove-SmartM365SharePointTimestampedCsvOlderThan, Invoke-SmartM365SharePointFileDownload, Resolve-SmartM365CsvPathWithSharePointFallback, Import-SmartM365CsvWithSharePointFallback, `
-    ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, `
+    ExportAndCopyCsv, ExportAndCopyCsvFromConvert, Save-SmartM365WeeklyInventoryHistory, Add-SmartM365WeeklyHistory, Get-SmartM365WeeklyHistoryMaxRetentionWeeks, `
     NewRemoteScheduledTaskAndWait, `
     Invoke-SmartM365Preflight, Initialize-SmartM365ImportExcel, Connect-SmartM365CloudSession, Disconnect-SmartM365CloudSession, `
     Get-SmartM365GraphErrorStatusCode, Test-SmartM365GraphTransientError, Get-SmartM365GraphRetryAfterSeconds, Get-SmartM365RetryDelay, Test-SmartM365GraphRetryableError, Invoke-SmartM365ExportFileDownload

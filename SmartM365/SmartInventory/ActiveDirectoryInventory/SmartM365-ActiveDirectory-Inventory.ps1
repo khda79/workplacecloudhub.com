@@ -23,7 +23,7 @@
     - Sends an email notification in case of a global error (SendEmailHtmlReport)
 
 .VERSION
-1.68
+1.69
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ActiveDirectory RSAT/Windows Server module; ImportExcel for the diagnostic mail workbook.
@@ -801,7 +801,7 @@ try {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.68"
+$ScriptVersion = "1.69"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $script:ExitCode = 0
 $globalError = $null
@@ -1516,6 +1516,10 @@ try {
             -RequiredFileNames $requiredFileNames
 
         if ($global:EnableSharePointUpload -and -not $historyPublished) { throw 'Weekly AD history publication incomplete; retention is deferred.' }
+
+        # Same global ceiling as the Core weekly history (WeeklyHistoryMaxRetentionWeeks, default 12).
+        $maximumWeeks = Get-SmartM365WeeklyHistoryMaxRetentionWeeks
+        if ($maximumWeeks -gt 0 -and ($RetentionWeeks -le 0 -or $RetentionWeeks -gt $maximumWeeks)) { $RetentionWeeks = $maximumWeeks }
 
         if ($RetentionWeeks -gt 0) {
             $oldWeekFolders = @(Get-ChildItem -LiteralPath $HistoryRootPath -Directory -ErrorAction SilentlyContinue |
