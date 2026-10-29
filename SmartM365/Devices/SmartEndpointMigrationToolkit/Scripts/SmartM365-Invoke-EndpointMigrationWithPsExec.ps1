@@ -450,6 +450,8 @@ try {
         Write-Host ("Cycle {0}: {1} computer(s)." -f $cycle,$computers.Count) -ForegroundColor Cyan
 
         foreach ($kind in @($script:CampaignProfile.InventoryKinds)) {
+            # A stop requested during an inventory refresh does not start the next refresh.
+            if ((Get-SemtCancellationState).Requested) { Write-Host ("Cycle {0}: {1} inventory refresh skipped: stop requested." -f $cycle,$kind) -ForegroundColor Yellow; continue }
             try { Update-CycleInventory -Kind $kind -CycleNumber $cycle } catch { Write-Host ("WARNING: Cycle {0}: {1} inventory unavailable: {2}" -f $cycle,$kind,$_.Exception.Message) -ForegroundColor Yellow }
         }
         $hookContext = [pscustomobject]@{ Options = $script:Options; RunContext = $script:RunContext; Inventory = $script:Inventory; CycleNumber = $cycle; DryRun = [bool](Opt 'DryRun'); Log = $script:Log; ExportScripts = $script:ExportScripts; PackageRoot = $script:PackageRoot }
@@ -518,7 +520,11 @@ try {
                         $skip = New-EngineResult -Computer $computer -CycleNumber $cycle -Status $decision.Status -NextAction $decision.NextAction -Detail $decision.Detail
                         foreach ($fieldName in @($decision.Fields.Keys)) { Set-SemtResultField -Result $skip -Name $fieldName -Value $decision.Fields[$fieldName] }
                         [void]$cycleRows.Add($skip)
-                        Write-Host ("  [{0}] {1}" -f $decision.Status,$computer) -ForegroundColor DarkYellow
+                        # Why and until when: the previous status and the next eligible local time.
+                        $priorStatus = [string]$(if ($decision.Fields -and $decision.Fields.ContainsKey('BackoffStatus')) { $decision.Fields['BackoffStatus'] } else { '' })
+                        $untilUtc = ConvertTo-SemtUtcDateTime -Value $(if ($decision.Fields -and $decision.Fields.ContainsKey('BackoffUntilUtc')) { $decision.Fields['BackoffUntilUtc'] } else { '' })
+                        $untilText = if ($null -ne $untilUtc) { ' next try after {0:yyyy-MM-dd HH:mm} (local);' -f $untilUtc.ToLocalTime() } else { '' }
+                        Write-Host ("  [{0}] {1} - previous status {2};{3} a run mode 'ignore run guard' bypasses it." -f $decision.Status,$computer,$(if ($priorStatus) { $priorStatus } else { 'unknown' }),$untilText) -ForegroundColor DarkYellow
                         continue
                     }
                     if ($decision.BypassEndpointGuard -and -not $perComputer.Contains('-IgnoreRunGuard')) {
