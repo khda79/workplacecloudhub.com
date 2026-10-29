@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.7
+1.4.8
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -523,7 +523,6 @@ function Invoke-OrchestratorDemo {
     # Keep both running sample rows visible at the default capture size.
     $operationsLayout=$c.OperationsServersGrid.Parent
     $operationsLayout.RowDefinitions[1].Height=[System.Windows.GridLength]::new(110)
-    $operationsLayout.RowDefinitions[3].Height=[System.Windows.GridLength]::new(150)
     $c.HistoryFromPicker.SelectedDate=$s.Data.Clock.AddDays(-6).Date
     $c.HistoryToPicker.SelectedDate=$s.Data.Clock.Date
     $c.HistoryServerCombo.ItemsSource=@('All')+@($s.Data.Servers.Server);$c.HistoryServerCombo.SelectedIndex=0
