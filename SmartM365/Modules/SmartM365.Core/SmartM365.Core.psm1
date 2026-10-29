@@ -5,6 +5,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumV
 . (Join-Path $PSScriptRoot 'SmartM365-MailMaintenance.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-ImportExcelHealth.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-InventoryLifecycle.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-CsvFast.ps1')
 # SmartM365.Core.psm1
 # Version: 1.0.111
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
@@ -1831,7 +1832,16 @@ function Assert-SmartM365CsvDataCompleteness {
         }
     }
 
-    if ($rule.ContainsKey('UniqueFields') -and @($rule.UniqueFields).Count -gt 0) {
+    # Large datasets: the same unique-key and critical-field checks, compiled (SmartM365-CsvFast.ps1).
+    $uniqueFields = @(if ($rule.ContainsKey('UniqueFields')) { $rule.UniqueFields | ForEach-Object { [string]$_ } })
+    $rowScan = if (Get-Command -Name Invoke-SmartM365CsvRowScan -ErrorAction SilentlyContinue) {
+        Invoke-SmartM365CsvRowScan -Rows $rows -UniqueFields $uniqueFields -CriticalFields $criticalFields -FailMinRows $criticalMissingFailMinRows -FailPercent $criticalMissingFailPercent
+    }
+    if ($null -ne $rowScan) {
+        if ($null -ne $rowScan.MissingIdentityColumn) { throw "CSV '$displayName' is missing identity column '$($rowScan.MissingIdentityColumn)'." }
+        if ($rowScan.DuplicateKey) { throw "CSV '$displayName' has duplicate immutable identity keys. DATA-LAST publication is blocked." }
+    }
+    elseif ($rule.ContainsKey('UniqueFields') -and @($rule.UniqueFields).Count -gt 0) {
         $keys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         foreach ($row in $rows) {
             $values = @($rule.UniqueFields | ForEach-Object {
@@ -1848,7 +1858,14 @@ function Assert-SmartM365CsvDataCompleteness {
     $missingCriticalRows = 0
     $rowNumber = 1
     $thresholdReached = $false
-    foreach ($row in $rows) {
+    $criticalRows = $rows
+    if ($null -ne $rowScan) {
+        $missingCriticalRows = $rowScan.MissingRows
+        $thresholdReached = $rowScan.ThresholdReached
+        foreach ($example in $rowScan.Examples) { [void]$missingExamples.Add($example) }
+        $criticalRows = @()
+    }
+    foreach ($row in $criticalRows) {
         $rowHasMissingCriticalField = $false
         foreach ($field in $criticalFields) {
             $property = $row.PSObject.Properties[$field]
@@ -2238,6 +2255,10 @@ function Write-SmartM365PreparedCsvAtomically {
         if ($rows.Count -eq 0 -and $Columns.Count -gt 0) {
             $header = ($Columns | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join $Delimiter
             Set-Content -LiteralPath $tempPath -Value $header -Encoding $Encoding -ErrorAction Stop
+        }
+        elseif ($Columns.Count -gt 0 -and $NoTypeInformation -and (Get-Command -Name Write-SmartM365CsvRowsFast -ErrorAction SilentlyContinue) -and
+            (Write-SmartM365CsvRowsFast -Rows $rows -Columns $Columns -Path $tempPath -Encoding $Encoding -Delimiter $Delimiter)) {
+            # Large datasets: the same bytes as Select-Object | Export-Csv, streamed by compiled code.
         }
         elseif ($Columns.Count -gt 0) {
             $exportParams = @{

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Verifies managed-app report filters and assigned-app status collection without Graph access.
 .VERSION
-1.2.0
+1.2.1
 #>
 [CmdletBinding()]
 param()
@@ -138,7 +138,7 @@ $collectorModule = New-Module -ScriptBlock ([scriptblock]::Create($definitions -
 
 $collectorText = Get-Content $collectorPath -Raw
 if ($collectorText -notmatch "Name='Intune_ManagedAppDeviceStates';Rows=\`$deviceStates;Options=@\{NoTenantKey=\`$true;LocalSerialization=\`$true\};Columns=@\('TenantKey','OrganizationKey','EnvironmentKey','TenantId','ApplicationId'" -or
-    $collectorText -notmatch "SmartM365\.Core\.psd1'\) -MinimumVersion '1\.0\.108'" -or $collectorText -notmatch "EvidenceCollector\.Common\.psd1'\) -MinimumVersion '1\.0\.15'") {
+    $collectorText -notmatch "SmartM365\.Core\.psd1'\) -MinimumVersion '1\.0\.113'" -or $collectorText -notmatch "EvidenceCollector\.Common\.psd1'\) -MinimumVersion '1\.0\.15'") {
     throw 'Device state publication must use prepared identity columns, local serialization and the matching module versions.'
 }
 

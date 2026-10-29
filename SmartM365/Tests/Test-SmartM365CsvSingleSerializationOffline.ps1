@@ -3,14 +3,14 @@
 .SYNOPSIS
 Offline byte equivalence, validation, atomic-copy and bounded performance tests.
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals in an isolated offline test process.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions','',Justification='Only unique temporary fixtures and module-scoped mocks are changed.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets','',Justification='Module-scoped copy and serialization mocks; real cmdlets are explicitly qualified.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Offline mocks retain the real APIs but record only the fields required by each assertion.')]
-param([ValidateRange(0,100000)][int]$BenchmarkRows=0)
+param([ValidateRange(0,2000000)][int]$BenchmarkRows=0)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
@@ -43,6 +43,8 @@ $definitions=foreach($name in $names) {
 $helperAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $root 'Modules/SmartM365.Core/SmartM365-CmdbReceipt.ps1'),[ref]$tokens,[ref]$errors)
 $register=$helperAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Register-SmartM365SourceCsv'},$true)
 $definitions+=@('$script:SmartM365CmdbSourceContext=$null',$register.Extent.Text)
+# Compiled helpers used by the validation and the serializer for large datasets.
+$definitions=@(". '{0}'" -f (Join-Path $root 'Modules/SmartM365.Core/SmartM365-CsvFast.ps1').Replace("'","''"))+@($definitions)
 $module=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"))
 try {
     & $module {
@@ -105,19 +107,26 @@ try {
                 $old=Join-Path $folder 'old/Synthetic_Members.csv';$oldLast=Join-Path $folder 'old-last/Synthetic_Members.csv'
                 $new=Join-Path $folder 'new/Synthetic_Members.csv';$newLast=Join-Path $folder 'new-last/Synthetic_Members.csv'
                 $local=Join-Path $folder 'local/Synthetic_Members.csv';$localLast=Join-Path $folder 'local-last/Synthetic_Members.csv'
+                $compiled=Join-Path $folder 'compiled/Synthetic_Members.csv';$compiledLast=Join-Path $folder 'compiled-last/Synthetic_Members.csv'
                 $counts=& $module {
-                    param($Data,$Columns,$Old,$OldLast,$New,$NewLast,$Local,$LocalLast,$Encoding,$Delimiter)
+                    param($Data,$Columns,$Old,$OldLast,$New,$NewLast,$Local,$LocalLast,$Encoding,$Delimiter,$Compiled,$CompiledLast)
                     $script:Serializations=0
                     Publish-SmartM365Csv -Data $Data -Columns $Columns -TimestampedPath $Old -LatestPath $OldLast -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload -NoWeeklyHistory | Out-Null
                     $legacy=$script:Serializations;$script:Serializations=0
                     Publish-SmartM365Csv -Data $Data -Columns $Columns -TimestampedPath $New -LatestPath $NewLast -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload -NoWeeklyHistory -SingleSerialization | Out-Null
                     $optimized=$script:Serializations;$script:Serializations=0
                     Publish-SmartM365Csv -Data $Data -Columns $Columns -TimestampedPath $Local -LatestPath $LocalLast -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload -NoWeeklyHistory -SingleSerialization -LocalSerialization | Out-Null
-                    [pscustomobject]@{Legacy=$legacy;Optimized=$optimized;Local=$script:Serializations}
-                } $rows $columns $old $oldLast $new $newLast $local $localLast $encoding $delimiter
+                    $localCount=$script:Serializations;$script:Serializations=0
+                    # Compiled validation and writer forced on two rows; encodings other than UTF8 and utf8BOM keep Export-Csv.
+                    $script:SmartM365CsvFastMinimumRows=1
+                    try { Publish-SmartM365Csv -Data $Data -Columns $Columns -TimestampedPath $Compiled -LatestPath $CompiledLast -Encoding $Encoding -Delimiter $Delimiter -NoSharePointUpload -NoWeeklyHistory -SingleSerialization -LocalSerialization | Out-Null }
+                    finally { $script:SmartM365CsvFastMinimumRows=5000 }
+                    [pscustomobject]@{Legacy=$legacy;Optimized=$optimized;Local=$localCount;Compiled=$script:Serializations}
+                } $rows $columns $old $oldLast $new $newLast $local $localLast $encoding $delimiter $compiled $compiledLast
                 $hash=(Get-FileHash -LiteralPath $old -Algorithm SHA256).Hash
-                foreach($path in @($oldLast,$new,$newLast,$local,$localLast)) { Assert-Csv ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ceq $hash) 'Legacy, optimized and locally serialized bytes differ.' }
+                foreach($path in @($oldLast,$new,$newLast,$local,$localLast,$compiled,$compiledLast)) { Assert-Csv ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ceq $hash) 'Legacy, optimized, locally serialized and compiled bytes differ.' }
                 Assert-Csv ($counts.Legacy -eq 2 -and $counts.Optimized -eq 1 -and $counts.Local -eq 1) 'Serialization count changed unexpectedly.'
+                Assert-Csv ($counts.Compiled -eq [int]($encoding -notin @('UTF8','utf8BOM'))) 'Compiled writer did not replace Export-Csv exactly for UTF8 and utf8BOM.'
                 Assert-Csv (@(Get-ChildItem $folder -Recurse -Filter '~sm*').Count -eq 0) 'Publication retained a temporary file next to the outputs.'
                 $parsed=@(Import-Csv -LiteralPath $newLast -Delimiter $delimiter -Encoding $encoding)
                 Assert-Csv ($parsed.Count -eq 2 -and $parsed[0].MemberId -ceq '001') 'Row count or leading zeros changed.'
@@ -251,6 +260,78 @@ try {
         } $rows $preparedRows $columns $generic $prepared $identityColumns
         Assert-Csv ((Get-FileHash $generic).Hash -ceq (Get-FileHash $prepared).Hash) 'Prepared identity rows differ from generic enrichment.'
     }
+    Test-CsvCase 'Compiled writer equals Select-Object | Export-Csv for every value shape' {
+        $shapes=@(
+            [pscustomobject][ordered]@{AppId='a"b';N=$null;I=12345;D=1.5;B=$true;Dt=[datetime]'2026-10-29T10:11:12';Arr=@(1,2);W=[psobject]::AsPSObject(@(1,2,3));E='';G=[guid]::Empty;Nl="x`r`ny";H=@{a=1};Ps=[pscustomobject]@{z=1};Dec=[decimal]1234.5;U="caf$([char]0xE9) $([char]0x4E2D)"},
+            [pscustomobject][ordered]@{appid='second';I=-1;D=[double]::NaN;Extra='ignored'},
+            [pscustomobject][ordered]@{AppId=' ';N='';I=0}
+        )
+        $shapeColumns=@('appid','N','I','D','B','Dt','Arr','W','E','G','Nl','H','Ps','Dec','U','Missing')
+        $savedCulture=[cultureinfo]::CurrentCulture
+        try {
+            foreach($culture in @('fr-FR','en-US')){ foreach($encoding in @('UTF8','utf8BOM')){ foreach($delimiter in @(',',';',"`t")){
+                [cultureinfo]::CurrentCulture=$culture
+                $expected=Join-Path $testRoot ([guid]::NewGuid().ToString('N')+'.csv');$actual=Join-Path $testRoot ([guid]::NewGuid().ToString('N')+'.csv')
+                $shapes | Select-Object -Property $shapeColumns | Microsoft.PowerShell.Utility\Export-Csv -LiteralPath $expected -Encoding $encoding -Delimiter $delimiter -NoTypeInformation
+                $written=& $module {param($r,$c,$p,$e,$d) $script:SmartM365CsvFastMinimumRows=1; try { Write-SmartM365CsvRowsFast -Rows $r -Columns $c -Path $p -Encoding $e -Delimiter $d } finally { $script:SmartM365CsvFastMinimumRows=5000 }} $shapes $shapeColumns $actual $encoding $delimiter
+                Assert-Csv ($written -and (Get-FileHash $expected).Hash -ceq (Get-FileHash $actual).Hash) "Compiled bytes differ: $culture / $encoding / [$delimiter]"
+            }}}
+        }
+        finally { [cultureinfo]::CurrentCulture=$savedCulture }
+        $scripted=[pscustomobject]@{A=1};$scripted | Add-Member -MemberType ScriptProperty -Name S -Value {2}
+        foreach($unsupported in @(@{Rows=@([pscustomobject]@{A=1},(Get-Item -LiteralPath $testRoot));Columns=@('A')},@{Rows=@($scripted);Columns=@('A','S')},@{Rows=@($scripted);Columns=@('A*')},@{Rows=@($scripted);Columns=@('A','a')})){
+            $path=Join-Path $testRoot 'unsupported.csv'
+            $written=& $module {param($r,$c,$p) $script:SmartM365CsvFastMinimumRows=1; try { Write-SmartM365CsvRowsFast -Rows $r -Columns $c -Path $p } finally { $script:SmartM365CsvFastMinimumRows=5000 }} $unsupported.Rows $unsupported.Columns $path
+            Assert-Csv (-not $written -and -not (Test-Path -LiteralPath $path)) 'An unsupported row shape was written by the compiled writer.'
+        }
+    }
+    Test-CsvCase 'Compiled validation equals the PowerShell loops' {
+        function New-ShapeRow($a,$b,$c) { [pscustomobject][ordered]@{A=$a;B=$b;C=$c} }
+        $cases=[ordered]@{
+            Valid=@(@((New-ShapeRow 'x' 1 'c'),(New-ShapeRow 'y' 2 'c')),@('A','B'),@('A','C'),1,0)
+            DuplicateCaseAndSpace=@(@((New-ShapeRow ' X ' 1 'c'),(New-ShapeRow 'x' '1' 'c')),@('A','B'),@('A'),1,0)
+            SeparatorIsNotDuplicate=@(@((New-ShapeRow 'a|1:b' 'c' 'c'),(New-ShapeRow 'a' '1:b|c' 'c')),@('A','B'),@('A'),1,0)
+            MissingIdentity=@(@((New-ShapeRow 'x' 1 'c')),@('A','Z'),@('A'),1,0)
+            EmptyIdentityName=@(@((New-ShapeRow 'x' 1 'c')),@('A',''),@('A'),1,0)
+            MissingWarning=@(@((New-ShapeRow 'x' $null 'c'),(New-ShapeRow ' ' 2 ''),(New-ShapeRow 'z' 0 'c'),(New-ShapeRow 'w' @() 'c')),@(),@('A','B','C'),50,0.0)
+            MissingRowsFail=@(@((New-ShapeRow 'x' $null 'c'),(New-ShapeRow ' ' 2 ''),(New-ShapeRow 'z' 0 'c')),@(),@('A','B','C'),2,0)
+            MissingPercentFail=@(@((New-ShapeRow 'x' 1 'c'),(New-ShapeRow 'y' 2 'c'),(New-ShapeRow '' 3 'c')),@(),@('A'),0,30)
+            TenExamples=@(@(1..30 | ForEach-Object { New-ShapeRow '' $null '' }),@(),@('A','B','C'),100,0)
+            NonString=@(@((New-ShapeRow 1.5 ([datetime]'2026-01-01') $true),(New-ShapeRow 1.50 'x' 'y')),@('A'),@('A','B','C'),1,0)
+        }
+        foreach($name in $cases.Keys){
+            $case=$cases[$name]
+            $outcomes=foreach($minimum in @([int]::MaxValue,1)){
+                & $module {param($r,$u,$c,$minRows,$percent,$minimum)
+                    $saved=$global:SmartM365CsvValidationRules
+                    $global:SmartM365CsvValidationRules=@{Shape=@{Name='Shape';CriticalFields=$c;RequiredColumns=@();UniqueFields=$u;AllowEmptyDataset=$true;CriticalMissingFailMinRows=$minRows;CriticalMissingFailPercent=$percent}}
+                    $script:SmartM365CsvFastMinimumRows=$minimum;$script:ShapeLog=[Collections.Generic.List[string]]::new()
+                    function script:WriteLog { param($Message,$Level) $script:ShapeLog.Add("$Level $Message") }
+                    $failure=''
+                    try { Assert-SmartM365CsvDataCompleteness -Data $r -BaseFileName 'Shape' } catch { $failure=$_.Exception.Message }
+                    finally { $script:SmartM365CsvFastMinimumRows=5000;$global:SmartM365CsvValidationRules=$saved;function script:WriteLog { param($Message,$Level) } }
+                    "$failure | $($script:ShapeLog -join ' || ')"
+                } $case[0] $case[1] $case[2] $case[3] $case[4] $minimum
+            }
+            Assert-Csv ($outcomes[0] -ceq $outcomes[1]) "Compiled validation differs: $name"
+        }
+    }
+    Test-CsvCase 'Compiled writer failure keeps both previous files' {
+        $folder=Join-Path $testRoot 'compiled-failure';New-Item -ItemType Directory -Path $folder | Out-Null
+        $stamp=Join-Path $folder 'Synthetic_Members.csv';$last=Join-Path $folder 'latest/Synthetic_Members.csv'
+        New-Item -ItemType Directory -Path (Split-Path $last) | Out-Null
+        Set-Content $stamp 'OLD HISTORY';Set-Content $last 'OLD LATEST'
+        $rejected=& $module {param($d,$c,$s,$l)
+            $real=${function:Write-SmartM365CsvRowsFast}
+            function script:Write-SmartM365CsvRowsFast { param($Rows,$Columns,$Path,$Encoding,$Delimiter) Set-Content -LiteralPath $Path -Value 'partial';throw 'Synthetic compiled writer failure.' }
+            try { Publish-SmartM365Csv -Data $d -Columns $c -TimestampedPath $s -LatestPath $l -SingleSerialization -LocalSerialization | Out-Null;$false }
+            catch { $true }
+            finally { Set-Item -Path function:script:Write-SmartM365CsvRowsFast -Value $real }
+        } $rows $columns $stamp $last
+        Assert-Csv $rejected 'Compiled writer failure was not blocking.'
+        Assert-Csv ((Get-Content $stamp -Raw).Trim() -ceq 'OLD HISTORY' -and (Get-Content $last -Raw).Trim() -ceq 'OLD LATEST') 'Compiled writer failure replaced a previous file.'
+        Assert-Csv (@(Get-ChildItem $folder -Recurse -Filter '~sm*').Count -eq 0) 'Compiled writer failure retained a temporary file.'
+    }
     Test-CsvCase 'Local serialization leaves no local staging file' {
         $leftover=@(Get-LocalStagingFiles | Where-Object { $stagingBefore -notcontains $_ })
         Assert-Csv ($leftover.Count -eq 0) ("Local staging files were retained: {0}" -f ($leftover -join ', '))
@@ -261,16 +342,19 @@ try {
     if($BenchmarkRows -gt 0) {
         $timings=& $module {param($count,$folder,$c)
             $d=@(for($i=0;$i -lt $count;$i++){[pscustomobject]@{GroupId='group';MemberId=[string]$i;MembershipKind='Direct';CollectionStatus='Collected';RunId='synthetic';CollectedAtUtc='2026-01-01T00:00:00Z';Label='synthetic'}})
-            $measurements=foreach($optimized in @($false,$true)) {
-                $s=Join-Path $folder ("benchmark-$optimized/Synthetic_Members.csv");$l=Join-Path $folder ("benchmark-$optimized-last/Synthetic_Members.csv")
+            # Legacy and Single run the PowerShell loops and Export-Csv; Compiled runs the compiled helpers.
+            $measurements=foreach($mode in @('Legacy','Single','Compiled')) {
+                $s=Join-Path $folder ("benchmark-$mode/Synthetic_Members.csv");$l=Join-Path $folder ("benchmark-$mode-last/Synthetic_Members.csv")
+                $script:SmartM365CsvFastMinimumRows=$(if($mode -eq 'Compiled'){1}else{[int]::MaxValue})
                 $watch=[Diagnostics.Stopwatch]::StartNew()
-                Publish-SmartM365Csv -Data $d -Columns $c -TimestampedPath $s -LatestPath $l -SingleSerialization:$optimized -NoSharePointUpload -NoWeeklyHistory | Out-Null
+                try { Publish-SmartM365Csv -Data $d -Columns $c -TimestampedPath $s -LatestPath $l -SingleSerialization:($mode -ne 'Legacy') -NoSharePointUpload -NoWeeklyHistory | Out-Null }
+                finally { $script:SmartM365CsvFastMinimumRows=5000 }
                 $watch.Stop()
-                [pscustomobject]@{Optimized=$optimized;Rows=$count;Milliseconds=[math]::Round($watch.Elapsed.TotalMilliseconds);SHA256=(Get-FileHash $l).Hash}
+                [pscustomobject]@{Mode=$mode;Rows=$count;Milliseconds=[math]::Round($watch.Elapsed.TotalMilliseconds);SHA256=(Get-FileHash $l).Hash}
             }
             return @($measurements)
         } $BenchmarkRows $testRoot $columns
-        Assert-Csv ($timings[0].SHA256 -ceq $timings[1].SHA256) 'Benchmark outputs differ.'
+        Assert-Csv ($timings[0].SHA256 -ceq $timings[1].SHA256 -and $timings[0].SHA256 -ceq $timings[2].SHA256) 'Benchmark outputs differ.'
         $timings | Format-Table -AutoSize
     }
     $results | Format-Table -AutoSize
