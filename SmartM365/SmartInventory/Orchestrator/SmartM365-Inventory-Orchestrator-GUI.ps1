@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.28
+1.6.29
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.28'
+$script:AppVersion = '1.6.29'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -430,15 +430,17 @@ $xaml = @'
                                 <RowDefinition Height="150"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
-                            <StackPanel Margin="0,0,0,10">
-                                <TextBlock x:Name="MaintenanceDetailText" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                                <StackPanel Orientation="Horizontal">
+                            <!-- Maintenance text left, reason and buttons right on the same rows (GUI 1.6.29). -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBlock x:Name="MaintenanceDetailText" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Text="Reason" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                    <TextBox x:Name="MaintenanceReasonBox" Width="330" MaxLength="1000" ToolTip="Required to enable maintenance. Does not publish the configuration draft."/>
+                                    <TextBox x:Name="MaintenanceReasonBox" Width="300" MaxLength="1000" ToolTip="Required to enable maintenance. Does not publish the configuration draft."/>
                                     <Button x:Name="EnableMaintenanceButton" Content="Enable maintenance" Background="#FFF4CE" IsEnabled="False"/>
                                     <Button x:Name="DisableMaintenanceButton" Content="Disable maintenance" IsEnabled="False"/>
                                 </StackPanel>
-                            </StackPanel>
+                            </Grid>
                             <DataGrid x:Name="OperationsServersGrid" Grid.Row="1">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="160"/>
@@ -467,14 +469,21 @@ $xaml = @'
                             <!-- Running and pending jobs stacked at full width (GUI 1.6.21). -->
                             <Grid Grid.Row="2" Margin="0,10,0,0">
                                 <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                <GroupBox Header="Running jobs" Margin="0,0,0,6">
+                                <GroupBox Margin="0,0,0,6">
+                                    <GroupBox.Header>
+                                        <!-- Stop reason on the right of the title (GUI 1.6.29). -->
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="Running jobs" VerticalAlignment="Center"/>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" TextElement.FontWeight="Normal">
+                                            <TextBlock Text="Stop reason" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Normal"/>
+                                            <TextBox x:Name="JobStopReasonBox" Width="260" MaxLength="1000" ToolTip="Required. Select one running job, then request its owner to stop it."/>
+                                            <Button x:Name="StopRunningJobButton" Content="Stop selected job" IsEnabled="False" Margin="8,0,0,0" Background="#FDE7E9" FontWeight="Normal" ToolTip="The owning orchestrator verifies the selected process and records the stop. The job is not retried automatically."/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </GroupBox.Header>
                                     <Grid>
                                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                        <StackPanel Orientation="Horizontal" Margin="6,4,6,5">
-                                            <TextBlock Text="Stop reason" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                            <TextBox x:Name="JobStopReasonBox" Width="260" MaxLength="1000" ToolTip="Required. Select one running job, then request its owner to stop it."/>
-                                            <Button x:Name="StopRunningJobButton" Content="Stop selected job" IsEnabled="False" Margin="8,0,0,0" Background="#FDE7E9" ToolTip="The owning orchestrator verifies the selected process and records the stop. The job is not retried automatically."/>
-                                        </StackPanel>
                                     <DataGrid x:Name="OperationsRunningGrid" Grid.Row="1">
                                         <DataGrid.RowStyle>
                                             <Style TargetType="DataGridRow">
@@ -896,9 +905,9 @@ $xaml = @'
                         <TabItem x:Name="ConfigurationServersTab" Header="Servers and versions">
                             <Grid Margin="12">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="390"/></Grid.ColumnDefinitions>
-                                <Grid>
-                                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                    <DataGrid x:Name="ServersGrid" ToolTip="OS, CPU, RAM and drive C: are published by each orchestrator when it starts.">
+                                <!-- Servers grid on the full width, chart and server panel below (GUI 1.6.29). -->
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                    <DataGrid x:Name="ServersGrid" Grid.ColumnSpan="2" MaxHeight="300" ToolTip="OS, CPU, RAM and drive C: are published by each orchestrator when it starts.">
                                         <DataGrid.RowStyle>
                                             <Style TargetType="DataGridRow">
                                                 <Style.Triggers>
@@ -931,17 +940,21 @@ $xaml = @'
                                             <DataGridTextColumn Header="Jobs" Binding="{Binding AssignedJobs}" Width="50"/>
                                         </DataGrid.Columns>
                                     </DataGrid>
-                                    <GroupBox Grid.Row="1" Header="CPU and memory, last 12 hours (blue = CPU, green = RAM; sampled every 5 minutes by each orchestrator)" Margin="0,10,0,0">
-                                        <Canvas x:Name="ServersMetricsCanvas" Height="260" ClipToBounds="True" Background="White"/>
+                                <Grid Grid.Row="1" Margin="0,10,0,0">
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                    <GroupBox Header="CPU and memory, last 12 hours (blue = CPU, green = RAM; sampled every 5 minutes by each orchestrator)" Margin="0,10,0,0">
+                                        <Canvas x:Name="ServersMetricsCanvas" Height="230" ClipToBounds="True" Background="White"/>
                                     </GroupBox>
-                                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+                                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
                                         <TextBox x:Name="NewServerBox" Width="220" Margin="0,0,8,0"/>
                                         <Button x:Name="AddServerButton" Content="Add server"/>
                                         <Button x:Name="RemoveServerButton" Content="Remove selected"/>
                                     </StackPanel>
                                 </Grid>
-                                <Grid Grid.Column="1" Margin="14,0,0,0">
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <!-- Right panel scrolls when the window is too low for the versions list (GUI 1.6.29). -->
+                                <ScrollViewer Grid.Row="1" Grid.Column="1" Margin="14,10,0,0" VerticalScrollBarVisibility="Auto">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="230"/></Grid.RowDefinitions>
                                         <GroupBox Header="Selected server">
                                             <StackPanel>
                                                 <TextBlock x:Name="SelectedServerText" FontWeight="SemiBold" Text="Select a server"/>
@@ -975,6 +988,7 @@ $xaml = @'
                                             </Grid>
                                         </GroupBox>
                                 </Grid>
+                                </ScrollViewer>
                             </Grid>
                         </TabItem>
                         <TabItem x:Name="ConfigurationSettingsTab" Header="Settings">
