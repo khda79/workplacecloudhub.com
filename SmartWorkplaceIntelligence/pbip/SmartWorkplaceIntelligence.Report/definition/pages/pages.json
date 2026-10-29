@@ -10,6 +10,7 @@
     "270d570d0b3c317afd17",
     "c823af8cf0f8d76eb252",
     "7e703070ffe685a52305",
+    "directory-cleanup",
     "9ae7c13f821d4a608e52",
     "0443c39bb6eba584da07",
     "3a0fb4ff8eb05c8835b3",
@@ -33,7 +34,9 @@
     "7b020122c7890360dc36",
     "736753e8cf8c034002ef",
     "6665fb035f086688c22f",
-    "6e8276acf6fa00f4aa6f"
+    "6e8276acf6fa00f4aa6f",
+    "tooltip-cleanup-user",
+    "tooltip-cleanup-mailbox"
   ],
   "activePageName": "f0b223aaaa07dc5ad1d0"
 }

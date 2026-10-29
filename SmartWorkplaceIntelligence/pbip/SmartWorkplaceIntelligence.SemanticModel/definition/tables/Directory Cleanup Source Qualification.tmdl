@@ -1,0 +1,101 @@
+/// Prepared Directory Cleanup evidence; country provenance is preserved.
+table 'Directory Cleanup Source Qualification'
+	lineageTag: 70410584-f3c0-4cae-86b4-c49435d38d53
+
+	column TenantKey
+		dataType: string
+		lineageTag: 39547678-c218-43ce-bc44-55498133e220
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column Source
+		dataType: string
+		lineageTag: e7a031db-b901-43a6-90b0-85488762daf7
+		summarizeBy: none
+		sourceColumn: Source
+
+	column File
+		dataType: string
+		lineageTag: 854017fb-3fa0-49fb-afb2-4b95d59560f8
+		summarizeBy: none
+		sourceColumn: File
+
+	column Producer
+		dataType: string
+		lineageTag: 0c189c14-ff78-4953-9e98-fb1b7768c0cc
+		summarizeBy: none
+		sourceColumn: Producer
+
+	column Status
+		dataType: string
+		lineageTag: 76b736e5-0e9c-40ff-8c9c-a8d7a728c13b
+		summarizeBy: none
+		sourceColumn: Status
+
+	column Reason
+		dataType: string
+		lineageTag: a14c34fa-e3bc-490c-a805-a185b5d3c406
+		summarizeBy: none
+		sourceColumn: Reason
+
+	column Rows
+		dataType: int64
+		lineageTag: 8eaeb9ec-9e58-43e7-9bd0-2f716c316a1b
+		summarizeBy: none
+		sourceColumn: Rows
+
+	column 'Collected UTC'
+		dataType: dateTime
+		lineageTag: 4a6bef56-3592-4c4d-8dc0-919f7480e3d6
+		summarizeBy: none
+		sourceColumn: Collected UTC
+
+	column 'Report Refresh Date'
+		dataType: dateTime
+		lineageTag: de5a61c8-37cd-43eb-acb4-695213577cb7
+		summarizeBy: none
+		sourceColumn: Report Refresh Date
+
+	column 'Out Of Scope Rows'
+		dataType: int64
+		lineageTag: 5d076a00-f592-4766-af6b-e75ed8bda525
+		summarizeBy: none
+		sourceColumn: Out Of Scope Rows
+
+	column 'Unkeyable Rows'
+		dataType: int64
+		lineageTag: 583f8af5-65ce-4179-a32d-95cfc183eff8
+		summarizeBy: none
+		sourceColumn: Unkeyable Rows
+
+	column 'Reference UTC'
+		dataType: dateTime
+		lineageTag: 26e5be1d-c3e9-41db-bd31-3dfee2ed7f22
+		summarizeBy: none
+		sourceColumn: Reference UTC
+
+	column 'Evidence Date'
+		dataType: dateTime
+		lineageTag: 5728b872-0318-4089-8814-9a134de81ec9
+		summarizeBy: none
+		sourceColumn: Evidence Date
+
+	column 'Loaded Batch ID'
+		dataType: string
+		lineageTag: aac9d08a-b50d-4aa3-ae9f-e081b9010a7e
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Directory Cleanup Source Qualification' = m
+		mode: import
+		source =
+				let
+				 Readers = CreatePreparedReaders(),
+				 Raw = Table.PromoteHeaders(Csv.Document(Readers[GetPreparedEvidenceFile]("DirectoryCleanupSourceQualification.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]), [PromoteAllScalars=true]),
+				 Selected = Table.SelectColumns(Raw, {"TenantKey", "Source", "File", "Producer", "Status", "Reason", "Rows", "Collected UTC", "Report Refresh Date", "Out Of Scope Rows", "Unkeyable Rows", "Reference UTC", "Evidence Date"}),
+				 Scoped = if List.AllTrue(List.Transform(Table.Column(Selected, "TenantKey"), each _ = PreparedExpectedTenantKey)) then Selected else error "Foreign or missing tenant",
+				 Nulls = Table.ReplaceValue(Scoped, "", null, Replacer.ReplaceValue, {"Rows", "Out Of Scope Rows", "Unkeyable Rows"}),
+				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"Source", type text}, {"File", type text}, {"Producer", type text}, {"Status", type text}, {"Reason", type text}, {"Rows", Int64.Type}, {"Collected UTC", type text}, {"Report Refresh Date", type text}, {"Out Of Scope Rows", Int64.Type}, {"Unkeyable Rows", Int64.Type}, {"Reference UTC", type text}, {"Evidence Date", type text}}, "en-US"),
+				 Dates = Table.TransformColumns(Typed, {{"Collected UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Report Refresh Date", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Reference UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Evidence Date", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}})
+				in
+				 Readers[Finish](Dates)

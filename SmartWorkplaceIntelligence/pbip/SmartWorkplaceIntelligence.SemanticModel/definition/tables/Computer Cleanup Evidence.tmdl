@@ -1,0 +1,326 @@
+/// Prepared Directory Cleanup evidence; country provenance is preserved.
+table 'Computer Cleanup Evidence'
+	lineageTag: d158f706-8f59-4f6e-a8ef-e2a5f225ea2f
+
+	measure 'Computer Cleanup Total' =
+			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Computer Cleanup Evidence')), 0), BLANK())
+		formatString: #,0
+		displayFolder: Directory Cleanup
+		lineageTag: 4092e365-3cbe-4613-9b5d-fc5dcacac203
+
+	measure 'Computer Cleanup Candidates' =
+			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Computer Cleanup Evidence'), KEEPFILTERS('Computer Cleanup Evidence'[Cleanup State] = "Candidate")), 0), BLANK())
+		formatString: #,0
+		displayFolder: Directory Cleanup
+		lineageTag: fba94cc3-003d-46ea-a302-e9d36cb2fc20
+
+	measure 'Computer Cleanup Review' =
+			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Computer Cleanup Evidence'), KEEPFILTERS('Computer Cleanup Evidence'[Cleanup State] = "Review")), 0), BLANK())
+		formatString: #,0
+		displayFolder: Directory Cleanup
+		lineageTag: 9639a92e-bfde-4d1e-aef8-dfd79048879a
+
+	measure 'Computer Cleanup Active' =
+			VAR _q = CALCULATE(COUNTROWS('Directory Cleanup Source Qualification'), REMOVEFILTERS('Directory Cleanup Source Qualification'))
+			RETURN IF(_q > 0, COALESCE(CALCULATE(COUNTROWS('Computer Cleanup Evidence'), KEEPFILTERS('Computer Cleanup Evidence'[Cleanup State] = "Active")), 0), BLANK())
+		formatString: #,0
+		displayFolder: Directory Cleanup
+		lineageTag: 4f6e99a6-904e-49d6-bc40-8c6326636d72
+
+	column TenantKey
+		dataType: string
+		lineageTag: 2ce7e27a-91f7-41f0-82d2-0736975ee555
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'Computer Cleanup Key'
+		dataType: string
+		lineageTag: 6e6f6b7b-bf46-4fc7-b318-2b4363b9b289
+		summarizeBy: none
+		sourceColumn: Computer Cleanup Key
+
+	column 'AD Object GUID'
+		dataType: string
+		lineageTag: 264e34d4-e6cf-4f00-900b-98b97d46acb2
+		summarizeBy: none
+		sourceColumn: AD Object GUID
+
+	column 'Entra Device ID'
+		dataType: string
+		lineageTag: 9d3d5051-c148-4f60-9d64-02956f80fd3d
+		summarizeBy: none
+		sourceColumn: Entra Device ID
+
+	column 'Intune Device ID'
+		dataType: string
+		lineageTag: 2c19ecc8-2ca6-4b2a-8fa8-0fdb124e700f
+		summarizeBy: none
+		sourceColumn: Intune Device ID
+
+	column 'AD Domain'
+		dataType: string
+		lineageTag: 051ae101-ced4-4bb9-bfe9-e599bcc9feae
+		summarizeBy: none
+		sourceColumn: AD Domain
+
+	column 'Computer Name'
+		dataType: string
+		lineageTag: 51c6cf89-b908-42d7-8692-dd4c19703d62
+		summarizeBy: none
+		sourceColumn: Computer Name
+
+	column Enabled
+		dataType: string
+		lineageTag: affd662e-e4a8-477e-8bb3-fcf71202df3b
+		summarizeBy: none
+		sourceColumn: Enabled
+
+	column 'Operating System'
+		dataType: string
+		lineageTag: 5e00d94d-7a78-4f9f-bbb5-aa2c8df0a2a3
+		summarizeBy: none
+		sourceColumn: Operating System
+
+	column 'Scope State'
+		dataType: string
+		lineageTag: a0b43d9e-e9fe-49f8-a397-5160c4cfe439
+		summarizeBy: none
+		sourceColumn: Scope State
+
+	column 'In Disabled OU'
+		dataType: string
+		lineageTag: c33cad55-2e86-40f7-813e-06b9dac75f30
+		summarizeBy: none
+		sourceColumn: In Disabled OU
+
+	column 'When Created'
+		dataType: dateTime
+		lineageTag: bc4e8f7e-58ec-4cc3-bd67-04c8a44ee3ba
+		summarizeBy: none
+		sourceColumn: When Created
+
+	column 'Password Last Set'
+		dataType: dateTime
+		lineageTag: c5851311-ac72-4e38-b471-ac5ce8f89509
+		summarizeBy: none
+		sourceColumn: Password Last Set
+
+	column Country
+		dataType: string
+		lineageTag: bc7b6702-0f5f-47b5-8af4-6f78ee1705c7
+		summarizeBy: none
+		sourceColumn: Country
+
+	column 'Country Basis'
+		dataType: string
+		lineageTag: 40fd672c-69ae-43a5-b512-53de2008b193
+		summarizeBy: none
+		sourceColumn: Country Basis
+
+	column 'Account Type'
+		dataType: string
+		lineageTag: cddb4af0-8af3-41ff-8ff3-378fc977e275
+		summarizeBy: none
+		sourceColumn: Account Type
+
+	column 'Account Population'
+		dataType: string
+		lineageTag: 6ce3c44d-7aab-406c-9fce-17668d7c60d4
+		summarizeBy: none
+		sourceColumn: Account Population
+
+	column 'Workforce Persona'
+		dataType: string
+		lineageTag: ca94d855-8b5d-422e-a80a-89c30ae73d60
+		summarizeBy: none
+		sourceColumn: Workforce Persona
+
+	column 'Entra Match Status'
+		dataType: string
+		lineageTag: dd008264-92a3-467b-93b2-2c17a8242cc2
+		summarizeBy: none
+		sourceColumn: Entra Match Status
+
+	column 'Intune Match Status'
+		dataType: string
+		lineageTag: fac86f39-386f-4d83-82d7-79289e740fd0
+		summarizeBy: none
+		sourceColumn: Intune Match Status
+
+	column 'AD Last Logon'
+		dataType: dateTime
+		lineageTag: c737461f-e296-42e0-a8c0-f92541d56f04
+		summarizeBy: none
+		sourceColumn: AD Last Logon
+
+	column 'AD Last Logon Quality'
+		dataType: string
+		lineageTag: c7a41b60-9f08-4f9c-bd6d-dbeb85409a3c
+		summarizeBy: none
+		sourceColumn: AD Last Logon Quality
+
+	column 'Entra Last Sign-In'
+		dataType: dateTime
+		lineageTag: e95f058b-6955-4948-a41a-afc9df0e8875
+		summarizeBy: none
+		sourceColumn: Entra Last Sign-In
+
+	column 'Entra Last Sign-In Quality'
+		dataType: string
+		lineageTag: 6077e214-6eeb-4d3d-97dc-908ca71221b1
+		summarizeBy: none
+		sourceColumn: Entra Last Sign-In Quality
+
+	column 'Intune Last Sync'
+		dataType: dateTime
+		lineageTag: aeb4b641-c2df-459f-940e-6b18d98c1206
+		summarizeBy: none
+		sourceColumn: Intune Last Sync
+
+	column 'Intune Last Sync Quality'
+		dataType: string
+		lineageTag: 9d01f5b2-cc01-43b3-afcf-fdb8a8156ab0
+		summarizeBy: none
+		sourceColumn: Intune Last Sync Quality
+
+	column 'Last Activity Date'
+		dataType: dateTime
+		lineageTag: 15c6d214-7535-44cb-8d99-a5ffadf8c825
+		summarizeBy: none
+		sourceColumn: Last Activity Date
+
+	column 'Last Activity Source'
+		dataType: string
+		lineageTag: 9b89f3b9-d34a-46c5-a838-de132733124b
+		summarizeBy: none
+		sourceColumn: Last Activity Source
+
+	column 'Days Since Last Activity'
+		dataType: int64
+		lineageTag: e1b7e9a4-c109-4684-9653-338b5ead5328
+		summarizeBy: none
+		sourceColumn: Days Since Last Activity
+
+	column 'Inactivity Bucket'
+		dataType: string
+		lineageTag: 628dc344-7d22-40ff-815a-ddcde1be8b05
+		summarizeBy: none
+		sourceColumn: Inactivity Bucket
+		sortByColumn: 'Bucket Sort'
+
+	column 'Bucket Sort'
+		dataType: int64
+		lineageTag: 261014bf-82a7-40fc-acdd-35f0a7f6467f
+		summarizeBy: none
+		sourceColumn: Bucket Sort
+
+	column 'Cleanup State'
+		dataType: string
+		lineageTag: 22bdffe8-0b85-48e5-954f-e9e9186996c5
+		summarizeBy: none
+		sourceColumn: Cleanup State
+		sortByColumn: 'State Sort'
+
+	column 'State Sort'
+		dataType: int64
+		lineageTag: 832a44dc-7062-4f81-a53f-b21316313252
+		summarizeBy: none
+		sourceColumn: State Sort
+
+	column 'Decision Reason'
+		dataType: string
+		lineageTag: 79856142-e5c3-493c-808c-e031e117e9ba
+		summarizeBy: none
+		sourceColumn: Decision Reason
+
+	column 'Secondary Reasons'
+		dataType: string
+		lineageTag: a8052a4f-33cc-4167-84ae-4c5c3881991d
+		summarizeBy: none
+		sourceColumn: Secondary Reasons
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: 39125acb-9d7b-4dea-85ba-472a9f4e41fc
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+	column 'AD Source Status'
+		dataType: string
+		lineageTag: d426a637-b0ca-4834-8a58-5d61721a07e3
+		summarizeBy: none
+		sourceColumn: AD Source Status
+
+	column 'AD Collected UTC'
+		dataType: dateTime
+		lineageTag: a505c4d8-eb10-48f9-b695-13d56f103d06
+		summarizeBy: none
+		sourceColumn: AD Collected UTC
+
+	column 'Entra Source Status'
+		dataType: string
+		lineageTag: cb746494-8ca6-4736-a5d5-234a6f48d46f
+		summarizeBy: none
+		sourceColumn: Entra Source Status
+
+	column 'Entra Collected UTC'
+		dataType: dateTime
+		lineageTag: ec94c0b9-fbb9-4e1d-a2a1-b3adc3fcd869
+		summarizeBy: none
+		sourceColumn: Entra Collected UTC
+
+	column 'Intune Source Status'
+		dataType: string
+		lineageTag: 80e2e105-8989-435d-a5dc-8c8f19e74ccf
+		summarizeBy: none
+		sourceColumn: Intune Source Status
+
+	column 'Intune Collected UTC'
+		dataType: dateTime
+		lineageTag: b83130dc-d2e8-4e1f-aeae-5ef142c5a35b
+		summarizeBy: none
+		sourceColumn: Intune Collected UTC
+
+	column 'Reference UTC'
+		dataType: dateTime
+		lineageTag: 37519952-077c-42f5-831f-1fd70c63e9f5
+		summarizeBy: none
+		sourceColumn: Reference UTC
+
+	column 'Evidence Date'
+		dataType: dateTime
+		lineageTag: ecb3ce48-06f7-4af8-b6aa-e5bd4a83290a
+		summarizeBy: none
+		sourceColumn: Evidence Date
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 18b8892c-5ad4-40f0-ad55-e5cb71b800ca
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Loaded Batch ID'
+		dataType: string
+		lineageTag: 2b76f2c0-fbae-4fd0-b5b8-b9b2ff18fcb8
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Computer Cleanup Evidence' = m
+		mode: import
+		source =
+				let
+				 Readers = CreatePreparedReaders(),
+				 Raw = Table.PromoteHeaders(Csv.Document(Readers[GetPreparedEvidenceFile]("ComputerCleanupEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]), [PromoteAllScalars=true]),
+				 Selected = Table.SelectColumns(Raw, {"TenantKey", "Computer Cleanup Key", "AD Object GUID", "Entra Device ID", "Intune Device ID", "AD Domain", "Computer Name", "Enabled", "Operating System", "Scope State", "In Disabled OU", "When Created", "Password Last Set", "Country", "Country Basis", "Account Type", "Account Population", "Workforce Persona", "Entra Match Status", "Intune Match Status", "AD Last Logon", "AD Last Logon Quality", "Entra Last Sign-In", "Entra Last Sign-In Quality", "Intune Last Sync", "Intune Last Sync Quality", "Last Activity Date", "Last Activity Source", "Days Since Last Activity", "Inactivity Bucket", "Bucket Sort", "Cleanup State", "State Sort", "Decision Reason", "Secondary Reasons", "Recommended Action", "AD Source Status", "AD Collected UTC", "Entra Source Status", "Entra Collected UTC", "Intune Source Status", "Intune Collected UTC", "Reference UTC", "Evidence Date", "Evidence Status"}),
+				 Scoped = if List.AllTrue(List.Transform(Table.Column(Selected, "TenantKey"), each _ = PreparedExpectedTenantKey)) then Selected else error "Foreign or missing tenant",
+				 Nulls = Table.ReplaceValue(Scoped, "", null, Replacer.ReplaceValue, {"Days Since Last Activity", "Bucket Sort", "State Sort"}),
+				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"Computer Cleanup Key", type text}, {"AD Object GUID", type text}, {"Entra Device ID", type text}, {"Intune Device ID", type text}, {"AD Domain", type text}, {"Computer Name", type text}, {"Enabled", type text}, {"Operating System", type text}, {"Scope State", type text}, {"In Disabled OU", type text}, {"When Created", type text}, {"Password Last Set", type text}, {"Country", type text}, {"Country Basis", type text}, {"Account Type", type text}, {"Account Population", type text}, {"Workforce Persona", type text}, {"Entra Match Status", type text}, {"Intune Match Status", type text}, {"AD Last Logon", type text}, {"AD Last Logon Quality", type text}, {"Entra Last Sign-In", type text}, {"Entra Last Sign-In Quality", type text}, {"Intune Last Sync", type text}, {"Intune Last Sync Quality", type text}, {"Last Activity Date", type text}, {"Last Activity Source", type text}, {"Days Since Last Activity", Int64.Type}, {"Inactivity Bucket", type text}, {"Bucket Sort", Int64.Type}, {"Cleanup State", type text}, {"State Sort", Int64.Type}, {"Decision Reason", type text}, {"Secondary Reasons", type text}, {"Recommended Action", type text}, {"AD Source Status", type text}, {"AD Collected UTC", type text}, {"Entra Source Status", type text}, {"Entra Collected UTC", type text}, {"Intune Source Status", type text}, {"Intune Collected UTC", type text}, {"Reference UTC", type text}, {"Evidence Date", type text}, {"Evidence Status", type text}}, "en-US"),
+				 Dates = Table.TransformColumns(Typed, {{"When Created", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Password Last Set", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"AD Last Logon", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Entra Last Sign-In", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Intune Last Sync", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Last Activity Date", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"AD Collected UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Entra Collected UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Intune Collected UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Reference UTC", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}, {"Evidence Date", each if _ = null or _ = "" then null else if Text.Length(_) = 10 then DateTime.From(Date.FromText(_)) else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(_), 0)), type datetime}}),
+				 QualifiedCountry = Table.AddColumn(Dates, "__Qualified Country", each if Text.StartsWith(if [Country Basis] = null then "" else [Country Basis], "Configured AD domain") or Text.StartsWith(if [Country Basis] = null then "" else [Country Basis], "Configured computer-name prefix") or [Country] = null or Text.Trim([Country]) = "" then "Unknown" else [Country], type text),
+				 CountryRemoved = Table.RemoveColumns(QualifiedCountry, {"Country"}),
+				 CountryRenamed = Table.RenameColumns(CountryRemoved, {{"__Qualified Country", "Country"}})
+				in
+				 Readers[Finish](CountryRenamed)

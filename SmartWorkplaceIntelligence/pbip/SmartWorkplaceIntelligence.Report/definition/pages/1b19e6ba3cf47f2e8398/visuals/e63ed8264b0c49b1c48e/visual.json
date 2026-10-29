@@ -96,6 +96,17 @@
                   "Value": "11D"
                 }
               }
+            },
+            "background": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -148,7 +159,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#FFFFFF'"
+                      "Value": "'#DEEAF8'"
                     }
                   }
                 }
@@ -179,7 +190,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#CCDCEC'"
+                      "Value": "'#4D7FB3'"
                     }
                   }
                 }

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "cleanupusersbookmark",
+  "displayName": "Directory Cleanup · Users",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "cleanupusersgroup",
+      "cleanupcomputersgroup",
+      "cleanupmailboxesgroup"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "directory-cleanup",
+    "sections": {
+      "directory-cleanup": {
+        "visualContainers": {},
+        "visualContainerGroups": {
+          "cleanupusersgroup": {
+            "isHidden": false
+          },
+          "cleanupcomputersgroup": {
+            "isHidden": true
+          },
+          "cleanupmailboxesgroup": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -698,3 +698,31 @@ relationship Private_DeviceRisk_Inventory
 	fromCardinality: one
 	fromColumn: 'Device Deployment Risk'.'Inventory Key'
 	toColumn: 'Device Exploration Inventory'.'Inventory Key'
+
+relationship Collaboration_Copilot_Daily_Date
+	fromColumn: 'Copilot Daily Adoption Evidence'.'Date Key'
+	toColumn: Date.'Date Key'
+
+relationship cleanup_country_0
+	fromColumn: 'User Cleanup Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship cleanup_domain_0
+	fromColumn: 'User Cleanup Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship cleanup_country_1
+	fromColumn: 'Computer Cleanup Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship cleanup_domain_1
+	fromColumn: 'Computer Cleanup Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship cleanup_country_2
+	fromColumn: 'Mailbox Cleanup Evidence'.Country
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship cleanup_domain_2
+	fromColumn: 'Mailbox Cleanup Evidence'.'AD Domain'
+	toColumn: 'Daily Domain'.Domain

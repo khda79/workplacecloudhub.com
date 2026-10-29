@@ -1,0 +1,103 @@
+/// Prepared current evidence with qualified source and immutable batch identity.
+table 'OneDrive Activity Evidence'
+	lineageTag: cd384a82-2c77-46a5-a533-de0a91fa9ae1
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'OneDrive Activity User Rate' = IF(HASONEVALUE('OneDrive Activity Evidence'[Metric]) && SELECTEDVALUE('OneDrive Activity Evidence'[Evidence Status]) = "Observed", DIVIDE(SUM('OneDrive Activity Evidence'[Users]), MAX('OneDrive Activity Evidence'[Population Users])))
+		formatString: 0.0%
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 497ef859-100a-4440-a2ba-336661e9bb72
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'OneDrive Activity Users' = IF(HASONEVALUE('OneDrive Activity Evidence'[Metric]) && SELECTEDVALUE('OneDrive Activity Evidence'[Evidence Status]) = "Observed", SUM('OneDrive Activity Evidence'[Users]))
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: b5796cc7-cbca-40c6-8ab5-97aacb653f89
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: f3934dc9-4869-4430-85ed-4d2dbdd43b66
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column Metric
+		dataType: string
+		lineageTag: d48603ac-841e-4d11-98b2-cc928fdfc89f
+		summarizeBy: none
+		sourceColumn: Metric
+
+	column Users
+		dataType: int64
+		lineageTag: acf42c5b-6f7f-4842-ae1d-8e2d799f40e4
+		summarizeBy: none
+		sourceColumn: Users
+
+	column Files
+		dataType: int64
+		lineageTag: d7e1406f-96de-445c-9ebc-356489a398a6
+		summarizeBy: none
+		sourceColumn: Files
+
+	column 'Population Users'
+		dataType: int64
+		lineageTag: e0b1c067-132b-4d06-903a-c963b176f299
+		summarizeBy: none
+		sourceColumn: Population Users
+
+	column 'User Rate (%)'
+		dataType: double
+		formatString: 0.0%
+		lineageTag: a4c40c58-4448-4f75-bd27-01d324ae54eb
+		summarizeBy: none
+		sourceColumn: User Rate (%)
+
+	column 'Report Period Days'
+		dataType: int64
+		lineageTag: 55d9536f-2a05-445f-9e7d-ce56a13b4770
+		summarizeBy: none
+		sourceColumn: Report Period Days
+
+	column 'Usage Refresh Date'
+		dataType: dateTime
+		lineageTag: 83171c23-03c2-4616-afb9-46d0b50733a2
+		summarizeBy: none
+		sourceColumn: Usage Refresh Date
+
+	column 'Evidence Age Days'
+		dataType: int64
+		lineageTag: 78f43153-54e7-4536-a399-03e7f406db6f
+		summarizeBy: none
+		sourceColumn: Evidence Age Days
+
+	column 'Freshness State'
+		dataType: string
+		lineageTag: a0923459-214c-4b8b-ac18-6c5d2b716c95
+		summarizeBy: none
+		sourceColumn: Freshness State
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 026292f1-cb62-449f-8871-5cc1faa15998
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: b5b248ab-c555-45c6-a3bc-69ca7c4ee0cd
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'OneDrive Activity Evidence' = m
+		mode: import
+		source =
+				let
+				 Readers = CreatePreparedReaders(),
+				 Raw = Table.PromoteHeaders(Csv.Document(Readers[GetPreparedEvidenceFile]("OneDriveActivityEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]), [PromoteAllScalars=true]),
+				 Selected = Table.SelectColumns(Raw, {"TenantKey", "Metric", "Users", "Files", "Population Users", "User Rate (%)", "Report Period Days", "Usage Refresh Date", "Evidence Age Days", "Freshness State", "Evidence Status"}),
+				 Scoped = if List.AllTrue(List.Transform(Table.Column(Selected, "TenantKey"), each _ = PreparedExpectedTenantKey)) then Selected else error "Foreign or missing tenant",
+				 Nulls = Table.ReplaceValue(Scoped, "", null, Replacer.ReplaceValue, {"Users", "Files", "Population Users", "User Rate (%)", "Report Period Days", "Usage Refresh Date", "Evidence Age Days"}),
+				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"Metric", type text}, {"Users", Int64.Type}, {"Files", Int64.Type}, {"Population Users", Int64.Type}, {"User Rate (%)", type number}, {"Report Period Days", Int64.Type}, {"Usage Refresh Date", type datetime}, {"Evidence Age Days", Int64.Type}, {"Freshness State", type text}, {"Evidence Status", type text}}, "en-US")
+				in
+				 Readers[Finish](Typed)

@@ -1,0 +1,136 @@
+/// Prepared current evidence with qualified source and immutable batch identity.
+table 'Copilot Daily Adoption Evidence'
+	lineageTag: 3fcd1c33-7e74-4c45-a87b-558a803e99e7
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'Copilot Daily Active Users' = VAR _s = CALCULATETABLE('Data Trust Evidence', REMOVEFILTERS('Data Trust Evidence'), 'Data Trust Evidence'[File Name] = "M365_Copilot_UserCountTrend.csv") VAR _ready = COUNTROWS(_s) = 1 && COUNTROWS(FILTER(_s, 'Data Trust Evidence'[Evidence Status] = "Observed" && 'Data Trust Evidence'[Schema State] = "Qualified" && 'Data Trust Evidence'[Decision Readiness] = "Ready")) = 1  RETURN IF(_ready && HASONEVALUE('Copilot Daily Adoption Evidence'[App]) && HASONEVALUE('Copilot Daily Adoption Evidence'[Date Key]), CALCULATE(SUM('Copilot Daily Adoption Evidence'[Active Users]), 'Copilot Daily Adoption Evidence'[Evidence Status] = "Observed"))
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 0d741439-7e8c-46c5-ae7e-57dfba48dd68
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'Copilot Daily Enabled Users' = VAR _s = CALCULATETABLE('Data Trust Evidence', REMOVEFILTERS('Data Trust Evidence'), 'Data Trust Evidence'[File Name] = "M365_Copilot_UserCountTrend.csv") VAR _ready = COUNTROWS(_s) = 1 && COUNTROWS(FILTER(_s, 'Data Trust Evidence'[Evidence Status] = "Observed" && 'Data Trust Evidence'[Schema State] = "Qualified" && 'Data Trust Evidence'[Decision Readiness] = "Ready")) = 1  RETURN IF(_ready && HASONEVALUE('Copilot Daily Adoption Evidence'[App]) && HASONEVALUE('Copilot Daily Adoption Evidence'[Date Key]), CALCULATE(SUM('Copilot Daily Adoption Evidence'[Enabled Users]), 'Copilot Daily Adoption Evidence'[Evidence Status] = "Observed"))
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 22ebc5d2-4fd7-4826-8bfe-1c355145c732
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'Copilot Daily Active Rate' = DIVIDE([Copilot Daily Active Users],[Copilot Daily Enabled Users])
+		formatString: 0.0%
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 8e828f2c-5152-4928-8f63-ef1ec66cc24f
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'Copilot Daily Prompts Any App' = VAR _s = CALCULATETABLE('Data Trust Evidence', REMOVEFILTERS('Data Trust Evidence'), 'Data Trust Evidence'[File Name] = "M365_Copilot_UserCountTrend.csv") VAR _ready = COUNTROWS(_s) = 1 && COUNTROWS(FILTER(_s, 'Data Trust Evidence'[Evidence Status] = "Observed" && 'Data Trust Evidence'[Schema State] = "Qualified" && 'Data Trust Evidence'[Decision Readiness] = "Ready")) = 1  RETURN IF(_ready && HASONEVALUE('Copilot Daily Adoption Evidence'[Date Key]), CALCULATE(SUM('Copilot Daily Adoption Evidence'[Prompts Submitted]), 'Copilot Daily Adoption Evidence'[App] = "Any app", 'Copilot Daily Adoption Evidence'[Evidence Status] = "Observed"))
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 98618ddf-1ff0-4de8-9a57-5e3205712449
+
+	measure 'Copilot source display status' =
+			VAR _rows = CALCULATETABLE('Data Trust Evidence', REMOVEFILTERS('Data Trust Evidence'), 'Data Trust Evidence'[File Name] = "M365_Copilot_UserCountTrend.csv")
+			VAR _status = MAXX(_rows, 'Data Trust Evidence'[Evidence Status])
+			VAR _schema = MAXX(_rows, 'Data Trust Evidence'[Schema State])
+			VAR _ready = MAXX(_rows, 'Data Trust Evidence'[Decision Readiness])
+			RETURN IF(COUNTROWS(_rows) <> 1, "Source status unavailable", IF(_status = "Observed" && _ready = "Ready" && _schema = "Qualified", "Observed", COALESCE(_status, "Not collected") & " · " & COALESCE(_ready, "Not qualified")))
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 57e889a8-710a-4255-929e-afed71efa84d
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 774be938-48b1-474c-a0f3-400dbb0780f5
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'Report Date'
+		dataType: dateTime
+		lineageTag: 79b97932-d430-4c30-b443-0e2996068d34
+		summarizeBy: none
+		sourceColumn: Report Date
+
+	column 'Date Key'
+		dataType: int64
+		lineageTag: a815756c-4754-45a0-b0d1-6b46484b4a16
+		summarizeBy: none
+		sourceColumn: Date Key
+
+	column App
+		dataType: string
+		lineageTag: f4cfd3e7-ead8-424c-8f36-20261ba0b32b
+		summarizeBy: none
+		sourceColumn: App
+
+	column 'Enabled Users'
+		dataType: int64
+		lineageTag: 263b3991-ebe5-4401-9fde-b26c3a3bd0bd
+		summarizeBy: none
+		sourceColumn: Enabled Users
+
+	column 'Active Users'
+		dataType: int64
+		lineageTag: 6c0aaabb-0412-4cc5-b952-c95e406a1dfc
+		summarizeBy: none
+		sourceColumn: Active Users
+
+	column 'Active User Rate (%)'
+		dataType: double
+		formatString: 0.0%
+		lineageTag: 604f2fef-c0a5-41d4-88cf-7df906995ec7
+		summarizeBy: none
+		sourceColumn: Active User Rate (%)
+
+	column 'Prompts Submitted'
+		dataType: int64
+		lineageTag: 8f8b6373-f20f-48da-826a-9fd627c0f6bb
+		summarizeBy: none
+		sourceColumn: Prompts Submitted
+
+	column 'Report Version'
+		dataType: string
+		lineageTag: 6c383e1c-070d-4c65-a883-1ee98ca9593c
+		summarizeBy: none
+		sourceColumn: Report Version
+
+	column 'Usage Refresh Date'
+		dataType: dateTime
+		lineageTag: a08d747a-8433-498c-88a8-f22907f35e39
+		summarizeBy: none
+		sourceColumn: Usage Refresh Date
+
+	column 'Evidence Age Days'
+		dataType: int64
+		lineageTag: 073e3001-bd2c-4dd2-8f78-373f92fbc6ed
+		summarizeBy: none
+		sourceColumn: Evidence Age Days
+
+	column 'Freshness State'
+		dataType: string
+		lineageTag: 644c38ee-fd58-407d-b4a6-657941622553
+		summarizeBy: none
+		sourceColumn: Freshness State
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 87314026-cbbd-4951-8048-d122c791d9f0
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 35594427-ddcd-4e3f-be1a-56b9570278bb
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Copilot Daily Adoption Evidence' = m
+		mode: import
+		source =
+				let
+				 Readers = CreatePreparedReaders(),
+				 Raw = Table.PromoteHeaders(Csv.Document(Readers[GetPreparedEvidenceFile]("CopilotDailyAdoptionEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]), [PromoteAllScalars=true]),
+				 Selected = Table.SelectColumns(Raw, {"TenantKey", "Report Date", "Date Key", "App", "Enabled Users", "Active Users", "Active User Rate (%)", "Prompts Submitted", "Report Version", "Usage Refresh Date", "Evidence Age Days", "Freshness State", "Evidence Status"}),
+				 Scoped = if List.AllTrue(List.Transform(Table.Column(Selected, "TenantKey"), each _ = PreparedExpectedTenantKey)) then Selected else error "Foreign or missing tenant",
+				 Nulls = Table.ReplaceValue(Scoped, "", null, Replacer.ReplaceValue, {"Report Date", "Date Key", "Enabled Users", "Active Users", "Active User Rate (%)", "Prompts Submitted", "Usage Refresh Date", "Evidence Age Days"}),
+				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"Report Date", type datetime}, {"Date Key", Int64.Type}, {"App", type text}, {"Enabled Users", Int64.Type}, {"Active Users", Int64.Type}, {"Active User Rate (%)", type number}, {"Prompts Submitted", Int64.Type}, {"Report Version", type text}, {"Usage Refresh Date", type datetime}, {"Evidence Age Days", Int64.Type}, {"Freshness State", type text}, {"Evidence Status", type text}}, "en-US")
+				in
+				 Readers[Finish](Typed)

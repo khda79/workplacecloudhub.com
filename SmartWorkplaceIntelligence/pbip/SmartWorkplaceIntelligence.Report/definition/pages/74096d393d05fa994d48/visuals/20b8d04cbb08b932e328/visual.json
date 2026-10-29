@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Scope: native-linked records only. Tenant capacity and aggregate evidence remain global.",
+                    "value": "",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "12px",

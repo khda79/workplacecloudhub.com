@@ -59,4 +59,15 @@ the previous batch and refused when a key disappears, while Microsoft's trend is
 contracts, source selection, absent, header-only, populated and drifted reports, Data Trust and
 the evidence contract validator.
 
-Power BI tables, measures and views are a separate lot.
+## Power BI
+
+The semantic model imports the four evidence tables named above. Collaboration measures expose
+email client users and shares, legacy protocol observations, OneDrive activity, group governance,
+and daily Copilot adoption. Unqualified evidence is displayed as unavailable rather than a
+healthy zero. Group and Copilot source status is also displayed when their evidence tables are
+empty.
+
+The Collaboration Adoption page includes email and OneDrive details, a group governance table,
+and a daily Copilot activity chart. Operational signals cover legacy protocols, groups requiring
+ownership or activity review, and groups with external members. Legacy protocol observations
+can overlap and therefore have no comparable covered-population percentage.

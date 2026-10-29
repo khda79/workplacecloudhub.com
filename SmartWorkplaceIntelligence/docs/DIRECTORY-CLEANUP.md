@@ -181,4 +181,21 @@ all-platform Intune device inventory and mailbox usage (optional).
 - stale, missing and unqualified sources ;
 - the evidence contract validator.
 
-Power BI tables, measures and the Directory Cleanup page are a separate lot.
+## Power BI
+
+The model imports User Cleanup Evidence, Computer Cleanup Evidence, Mailbox Cleanup Evidence,
+and Directory Cleanup Source Qualification. The Directory Cleanup page has separate Users,
+Computers, and Mailboxes views, with counts by state and inactivity bucket, candidate counts by
+AD domain and country, detail tables, and source qualification. The three populations are not
+summed as people. State and bucket order use the published sort columns.
+
+User and mailbox details include `Persona Basis` and `Account Type Source`. Persona Basis
+identifies whether the workforce persona came from User Inventory, AD attributes, or is unknown.
+Account Type Source identifies an external source, SWI rules, or an unknown source. Account Type
+values are not a fixed list; use Account Population to group accounts for cleanup decisions.
+
+Country and domain selectors use the prepared country and AD domain values. For computers,
+country inferred from an AD domain or computer-name prefix is displayed as Unknown; Country
+Basis remains available in the details. The page retains the warning that organization retention
+policies have not been assessed. Recommended actions are evidence for review, not automated
+directory or mailbox changes.

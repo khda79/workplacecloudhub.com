@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "43db5c30c5c9800712cd",
   "position": {
-    "x": 628,
-    "y": 578,
+    "x": 40.75,
+    "y": 877.74,
     "z": 23000,
-    "height": 138,
-    "width": 744,
+    "height": 119.84,
+    "width": 542.5,
     "tabOrder": 25000
   },
   "visual": {
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Content Storage Evidence.Messaging and Collaboration Storage (TB)",
-              "nativeQueryRef": "Messaging + collaboration (TB)"
+              "nativeQueryRef": "Messaging + collaboration (TB)",
+              "displayName": "Messaging + collaboration (TB)"
             },
             {
               "field": {
@@ -41,7 +42,8 @@
                 }
               },
               "queryRef": "Content Storage Evidence.Messaging and Collaboration Storage per Workforce Account (GB)",
-              "nativeQueryRef": "Storage / workforce (GB)"
+              "nativeQueryRef": "Storage / workforce (GB)",
+              "displayName": "Storage / workforce (GB)"
             },
             {
               "field": {
@@ -55,8 +57,8 @@
                 }
               },
               "queryRef": "Mailbox Evidence.Total Mailbox Storage (TB)",
-              "nativeQueryRef": "Total Exchange Storage (TB)",
-              "displayName": "Total Exchange Storage (TB)"
+              "nativeQueryRef": "Exchange storage (TB)",
+              "displayName": "Exchange storage (TB)"
             },
             {
               "field": {
@@ -70,8 +72,8 @@
                 }
               },
               "queryRef": "Content Storage Evidence.Total SharePoint Storage (TB)",
-              "nativeQueryRef": "Total SharePoint Storage (TB)",
-              "displayName": "Total SharePoint Storage (TB)"
+              "nativeQueryRef": "SharePoint storage (TB)",
+              "displayName": "SharePoint storage (TB)"
             }
           ]
         },
@@ -171,7 +173,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "9D"
                 }
               }
             },

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
+  "name": "tooltip-cleanup-user",
+  "displayName": "User classification tooltip",
+  "displayOption": "ActualSize",
+  "height": 150,
+  "width": 420,
+  "pageBinding": {
+    "name": "cleanup-tooltip-user",
+    "type": "Tooltip",
+    "parameters": []
+  },
+  "visibility": "HiddenInViewMode",
+  "type": "Tooltip"
+}

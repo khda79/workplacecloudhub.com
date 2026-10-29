@@ -236,5 +236,13 @@ ref table 'Readiness Reading'
 ref table 'Readiness Condition'
 ref table 'Backlog Attribution Selection'
 ref table 'Readiness Matrix Metric'
+ref table 'Email Client Usage Evidence'
+ref table 'OneDrive Activity Evidence'
+ref table 'Group Activity Evidence'
+ref table 'Copilot Daily Adoption Evidence'
+ref table 'User Cleanup Evidence'
+ref table 'Computer Cleanup Evidence'
+ref table 'Mailbox Cleanup Evidence'
+ref table 'Directory Cleanup Source Qualification'
 
 ref cultureInfo en-US

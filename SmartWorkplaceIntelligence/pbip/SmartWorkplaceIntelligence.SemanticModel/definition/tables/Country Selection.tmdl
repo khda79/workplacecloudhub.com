@@ -28,7 +28,10 @@ table 'Country Selection'
 				            SELECTCOLUMNS ( DISTINCT ( 'User Inventory Evidence'[Country] ), "Source Country", 'User Inventory Evidence'[Country] ),
 				            SELECTCOLUMNS ( DISTINCT ( 'Device Inventory Evidence'[Country] ), "Source Country", 'Device Inventory Evidence'[Country] ),
 				            SELECTCOLUMNS ( DISTINCT ( 'All Accounts Evidence'[Country Name] ), "Source Country", 'All Accounts Evidence'[Country Name] ),
-				            SELECTCOLUMNS ( DISTINCT ( 'All Devices Evidence'[Country Name] ), "Source Country", 'All Devices Evidence'[Country Name] )
+				            SELECTCOLUMNS ( DISTINCT ( 'All Devices Evidence'[Country Name] ), "Source Country", 'All Devices Evidence'[Country Name] ),
+				SELECTCOLUMNS ( DISTINCT ( 'User Cleanup Evidence'[Country] ), "Source Country", 'User Cleanup Evidence'[Country] ),
+				SELECTCOLUMNS ( DISTINCT ( 'Computer Cleanup Evidence'[Country] ), "Source Country", 'Computer Cleanup Evidence'[Country] ),
+				SELECTCOLUMNS ( DISTINCT ( 'Mailbox Cleanup Evidence'[Country] ), "Source Country", 'Mailbox Cleanup Evidence'[Country] )
 				        )
 				    )
 				RETURN

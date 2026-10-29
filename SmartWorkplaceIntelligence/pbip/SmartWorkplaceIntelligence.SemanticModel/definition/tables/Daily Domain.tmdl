@@ -18,7 +18,7 @@ table 'Daily Domain'
 				VAR _history = DISTINCT(UNION(
 				SELECTCOLUMNS(FILTER('Daily Directory Trends','Daily Directory Trends'[Domain Key]<>"__all__"),"Domain Key",'Daily Directory Trends'[Domain Key],"Domain",'Daily Directory Trends'[Domain Name]),
 				SELECTCOLUMNS(FILTER('Daily Mailbox Trends','Daily Mailbox Trends'[Domain Key]<>"__all__"),"Domain Key",'Daily Mailbox Trends'[Domain Key],"Domain",'Daily Mailbox Trends'[Domain Name])))
-				VAR _current = DISTINCT(UNION(SELECTCOLUMNS('AD User Evidence',"Domain",'AD User Evidence'[DomainName]), SELECTCOLUMNS('AD Computer Evidence',"Domain",'AD Computer Evidence'[DomainName]),SELECTCOLUMNS('AD Object Evidence',"Domain",'AD Object Evidence'[DomainName])))
+				VAR _current = DISTINCT(UNION(SELECTCOLUMNS('AD User Evidence',"Domain",'AD User Evidence'[DomainName]), SELECTCOLUMNS('AD Computer Evidence',"Domain",'AD Computer Evidence'[DomainName]),SELECTCOLUMNS('AD Object Evidence',"Domain",'AD Object Evidence'[DomainName]), SELECTCOLUMNS('User Cleanup Evidence',"Domain",'User Cleanup Evidence'[AD Domain]), SELECTCOLUMNS('Computer Cleanup Evidence',"Domain",'Computer Cleanup Evidence'[AD Domain]), SELECTCOLUMNS('Mailbox Cleanup Evidence',"Domain",'Mailbox Cleanup Evidence'[AD Domain])))
 				VAR _known=SELECTCOLUMNS(_history,"Domain",[Domain])
 				VAR _new=FILTER(EXCEPT(_current,_known),NOT ISBLANK([Domain]) && [Domain]<>"")
 				RETURN UNION(_history,SELECTCOLUMNS(_new,"Domain Key","private:ad:" & LOWER([Domain]),"Domain",[Domain]))

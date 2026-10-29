@@ -526,6 +526,15 @@
       "children": [
         "2b7bbecd78b9f276a495"
       ]
+    },
+    {
+      "name": "directoryCleanupViews",
+      "displayName": "Directory Cleanup views",
+      "children": [
+        "cleanupusersbookmark",
+        "cleanupcomputersbookmark",
+        "cleanupmailboxesbookmark"
+      ]
     }
   ]
 }

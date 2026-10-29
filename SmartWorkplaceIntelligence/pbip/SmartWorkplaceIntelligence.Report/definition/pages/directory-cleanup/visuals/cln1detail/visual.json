@@ -1,0 +1,642 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "name": "cln1detail",
+  "position": {
+    "x": 32,
+    "y": 565,
+    "width": 1856,
+    "height": 300,
+    "z": 1000,
+    "tabOrder": 1000
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "SamAccountName"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.SamAccountName",
+              "nativeQueryRef": "SamAccountName"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "User Principal Name"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.User Principal Name",
+              "nativeQueryRef": "User Principal Name"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "AD Domain"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.AD Domain",
+              "nativeQueryRef": "AD Domain"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Country"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Country",
+              "nativeQueryRef": "Country"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Country Basis"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Country Basis",
+              "nativeQueryRef": "Country Basis"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Account Type"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Account Type",
+              "nativeQueryRef": "Account Type"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Account Type Source"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Account Type Source",
+              "nativeQueryRef": "Account Type Source"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Account Population"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Account Population",
+              "nativeQueryRef": "Account Population"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "User Type"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.User Type",
+              "nativeQueryRef": "User Type"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Workforce Persona"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Workforce Persona",
+              "nativeQueryRef": "Workforce Persona"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Persona Basis"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Persona Basis",
+              "nativeQueryRef": "Persona Basis"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Last Activity Date"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Last Activity Date",
+              "nativeQueryRef": "Last Activity Date"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Last Activity Source"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Last Activity Source",
+              "nativeQueryRef": "Last Activity Source"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Inactivity Bucket"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Inactivity Bucket",
+              "nativeQueryRef": "Inactivity Bucket"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Cleanup State"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Cleanup State",
+              "nativeQueryRef": "Cleanup State"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Decision Reason"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Decision Reason",
+              "nativeQueryRef": "Decision Reason"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Secondary Reasons"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Secondary Reasons",
+              "nativeQueryRef": "Secondary Reasons"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Cleanup Evidence"
+                    }
+                  },
+                  "Property": "Recommended Action"
+                }
+              },
+              "queryRef": "User Cleanup Evidence.Recommended Action",
+              "nativeQueryRef": "Recommended Action"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#2D5F9E'"
+                    }
+                  }
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "fontColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorPrimary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "backColorSecondary": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F0F5FA'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "total": [
+        {
+          "properties": {
+            "totals": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "11D"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "general": [
+        {
+          "properties": {
+            "altText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Governance · selected evidence'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'User · evidence and recommended action'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#183153'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#FFFFFF'"
+                    }
+                  }
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#CCDCEC'"
+                    }
+                  }
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualHeader": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "padding": [
+        {
+          "properties": {
+            "top": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "bottom": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "left": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            },
+            "right": {
+              "expr": {
+                "Literal": {
+                  "Value": "8D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "stylePreset": [
+        {
+          "properties": {
+            "name": {
+              "expr": {
+                "Literal": {
+                  "Value": "'None'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualTooltip": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "type": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Canvas'"
+                }
+              }
+            },
+            "section": {
+              "expr": {
+                "Literal": {
+                  "Value": "'tooltip-cleanup-user'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "parentGroupName": "cleanupusersgroup"
+}

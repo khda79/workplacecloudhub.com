@@ -1,0 +1,195 @@
+/// Prepared current evidence with qualified source and immutable batch identity.
+table 'Group Activity Evidence'
+	lineageTag: 4c5127a0-322e-4ba9-9b07-5e883ed420e4
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'Qualified M365 Groups' = VAR _s = CALCULATETABLE('Data Trust Evidence', REMOVEFILTERS('Data Trust Evidence'), 'Data Trust Evidence'[File Name] = "M365_Groups_Activity.csv") VAR _ready = COUNTROWS(_s) = 1 && COUNTROWS(FILTER(_s, 'Data Trust Evidence'[Evidence Status] = "Observed" && 'Data Trust Evidence'[Schema State] = "Qualified" && 'Data Trust Evidence'[Decision Readiness] = "Ready")) = 1  RETURN IF(_ready, COALESCE(CALCULATE(COUNTROWS('Group Activity Evidence'), 'Group Activity Evidence'[Evidence Status] = "Observed"), 0))
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 87bcac37-8152-4218-8774-b96ec8ce3d54
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'M365 Groups Without Owners' = CALCULATE([Qualified M365 Groups], 'Group Activity Evidence'[Owner State] = "No owner")
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: ce8a8c78-c372-4dc1-b302-1652e1e52c62
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'M365 Groups Inactive' = CALCULATE([Qualified M365 Groups], 'Group Activity Evidence'[Activity State] = "Inactive 180D+")
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 1339989a-f9bd-4900-835a-0867186520a2
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'M365 Groups With External Members' = CALCULATE([Qualified M365 Groups], 'Group Activity Evidence'[External Access State] = "External members present")
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 05edffc8-91c6-4ea9-964a-0b66d52ba44e
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'M365 Groups Owner Or Activity Review' = CALCULATE([Qualified M365 Groups], FILTER('Group Activity Evidence', 'Group Activity Evidence'[Owner State] = "No owner" || 'Group Activity Evidence'[Activity State] IN {"Inactive 180D+", "No activity evidence"}))
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 3ae4bcc7-0c6c-43f1-8b3c-8fe80c2a7f97
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'M365 Groups Teams Enabled' = CALCULATE([Qualified M365 Groups], 'Group Activity Evidence'[Teams State] = "Teams-enabled")
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 11a2ba48-8692-47fe-893c-ecf631a47fcd
+
+	measure 'Group source display status' =
+			VAR _rows = CALCULATETABLE('Data Trust Evidence', REMOVEFILTERS('Data Trust Evidence'), 'Data Trust Evidence'[File Name] = "M365_Groups_Activity.csv")
+			VAR _status = MAXX(_rows, 'Data Trust Evidence'[Evidence Status])
+			VAR _schema = MAXX(_rows, 'Data Trust Evidence'[Schema State])
+			VAR _ready = MAXX(_rows, 'Data Trust Evidence'[Decision Readiness])
+			RETURN IF(COUNTROWS(_rows) <> 1, "Source status unavailable", IF(_status = "Observed" && _ready = "Ready" && _schema = "Qualified", "Observed", COALESCE(_status, "Not collected") & " · " & COALESCE(_ready, "Not qualified")))
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 20ab2846-e7aa-45dc-ac44-1b7cb38b97bc
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: d6fdb5aa-7f7a-43c5-817c-13edcc246398
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column 'Group ID'
+		dataType: string
+		lineageTag: f1bc0c38-59bc-44ae-8448-6e27ed0e8b7a
+		summarizeBy: none
+		sourceColumn: Group ID
+
+	column 'Group Name'
+		dataType: string
+		lineageTag: 49d5dd05-65bb-45c8-a8ba-6e696a820429
+		summarizeBy: none
+		sourceColumn: Group Name
+
+	column 'Group Type'
+		dataType: string
+		lineageTag: 69f3739d-7fc9-4beb-9428-01fe426f7954
+		summarizeBy: none
+		sourceColumn: Group Type
+
+	column 'Teams State'
+		dataType: string
+		lineageTag: 82bd1c64-8bba-44b0-b551-eb4490e74c48
+		summarizeBy: none
+		sourceColumn: Teams State
+
+	column 'Activity State'
+		dataType: string
+		lineageTag: 2521b2f9-8677-4b38-af93-a43ac7e843eb
+		summarizeBy: none
+		sourceColumn: Activity State
+
+	column 'Days Since Last Activity'
+		dataType: int64
+		lineageTag: 186d3ef5-229e-4156-868f-062985baa274
+		summarizeBy: none
+		sourceColumn: Days Since Last Activity
+
+	column 'Last Activity Date'
+		dataType: dateTime
+		lineageTag: d07fe7f9-fd4c-470d-92b9-b1c203154653
+		summarizeBy: none
+		sourceColumn: Last Activity Date
+
+	column 'Owner State'
+		dataType: string
+		lineageTag: 00089c72-fdcc-45f8-980c-0d05c9f1e8e6
+		summarizeBy: none
+		sourceColumn: Owner State
+
+	column 'Member Count'
+		dataType: int64
+		lineageTag: e6c86371-3555-447a-b742-b8d68f402263
+		summarizeBy: none
+		sourceColumn: Member Count
+
+	column 'External Member Count'
+		dataType: int64
+		lineageTag: d7cd84b6-1f10-4f0a-9711-0f688fa60149
+		summarizeBy: none
+		sourceColumn: External Member Count
+
+	column 'External Access State'
+		dataType: string
+		lineageTag: 27a3d47c-c694-4112-866e-a04dea006b45
+		summarizeBy: none
+		sourceColumn: External Access State
+
+	column 'Received Email Count'
+		dataType: int64
+		lineageTag: a8e2b800-4ce2-40e2-9e39-5790d899832d
+		summarizeBy: none
+		sourceColumn: Received Email Count
+
+	column 'SharePoint Active File Count'
+		dataType: int64
+		lineageTag: baee6a16-e076-40ec-a45f-4e8a675e78e2
+		summarizeBy: none
+		sourceColumn: SharePoint Active File Count
+
+	column 'Viva Engage Posted Message Count'
+		dataType: int64
+		lineageTag: 275e3668-0ab6-45ff-90b0-15cf9dabc75c
+		summarizeBy: none
+		sourceColumn: Viva Engage Posted Message Count
+
+	column 'Storage Used GB'
+		dataType: double
+		lineageTag: ab61cb6c-bf34-4fcd-803c-c24734900307
+		summarizeBy: none
+		sourceColumn: Storage Used GB
+
+	column 'Risk Priority'
+		dataType: string
+		lineageTag: fb1f55dc-95bb-46eb-b01e-890afa0c1230
+		summarizeBy: none
+		sourceColumn: Risk Priority
+
+	column 'Risk Signal'
+		dataType: string
+		lineageTag: 5614e95a-0374-4f90-9cc8-072d6edcaad0
+		summarizeBy: none
+		sourceColumn: Risk Signal
+
+	column 'Recommended Action'
+		dataType: string
+		lineageTag: fb1d50cf-4e6d-4f03-84aa-0ceff162d30b
+		summarizeBy: none
+		sourceColumn: Recommended Action
+
+	column 'Snapshot Date'
+		dataType: dateTime
+		lineageTag: 1e4ac263-7717-4613-81f1-3355dcc4e1e8
+		summarizeBy: none
+		sourceColumn: Snapshot Date
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: b14eb34b-bf85-4663-9229-c590bfd974f7
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: c3be806a-0c3c-499f-b805-35cf41029aba
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Group Activity Evidence' = m
+		mode: import
+		source =
+				let
+				 Readers = CreatePreparedReaders(),
+				 Raw = Table.PromoteHeaders(Csv.Document(Readers[GetPreparedEvidenceFile]("GroupActivityEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]), [PromoteAllScalars=true]),
+				 Selected = Table.SelectColumns(Raw, {"TenantKey", "Group ID", "Group Name", "Group Type", "Teams State", "Activity State", "Days Since Last Activity", "Last Activity Date", "Owner State", "Member Count", "External Member Count", "External Access State", "Received Email Count", "SharePoint Active File Count", "Viva Engage Posted Message Count", "Storage Used GB", "Risk Priority", "Risk Signal", "Recommended Action", "Snapshot Date", "Evidence Status"}),
+				 Scoped = if List.AllTrue(List.Transform(Table.Column(Selected, "TenantKey"), each _ = PreparedExpectedTenantKey)) then Selected else error "Foreign or missing tenant",
+				 Nulls = Table.ReplaceValue(Scoped, "", null, Replacer.ReplaceValue, {"Days Since Last Activity", "Last Activity Date", "Member Count", "External Member Count", "Received Email Count", "SharePoint Active File Count", "Viva Engage Posted Message Count", "Storage Used GB", "Snapshot Date"}),
+				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"Group ID", type text}, {"Group Name", type text}, {"Group Type", type text}, {"Teams State", type text}, {"Activity State", type text}, {"Days Since Last Activity", Int64.Type}, {"Last Activity Date", type datetime}, {"Owner State", type text}, {"Member Count", Int64.Type}, {"External Member Count", Int64.Type}, {"External Access State", type text}, {"Received Email Count", Int64.Type}, {"SharePoint Active File Count", Int64.Type}, {"Viva Engage Posted Message Count", Int64.Type}, {"Storage Used GB", type number}, {"Risk Priority", type text}, {"Risk Signal", type text}, {"Recommended Action", type text}, {"Snapshot Date", type datetime}, {"Evidence Status", type text}}, "en-US")
+				in
+				 Readers[Finish](Typed)

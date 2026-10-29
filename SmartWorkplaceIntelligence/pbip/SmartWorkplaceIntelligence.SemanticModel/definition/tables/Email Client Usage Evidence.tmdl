@@ -1,0 +1,121 @@
+/// Prepared current evidence with qualified source and immutable batch identity.
+table 'Email Client Usage Evidence'
+	lineageTag: 33b6999a-995b-4a8e-8671-b73b5a7be9bf
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'Email Client Users Observed' = IF(SELECTEDVALUE('Email Client Usage Evidence'[Evidence Status]) = "Observed", SUM('Email Client Usage Evidence'[Users]))
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: e6c6f11f-a3f5-4e34-8f26-b9b81d1a96cb
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'Email Client User Share' = IF(HASONEVALUE('Email Client Usage Evidence'[Client]) && SELECTEDVALUE('Email Client Usage Evidence'[Evidence Status]) = "Observed", DIVIDE(SUM('Email Client Usage Evidence'[Users]), MAX('Email Client Usage Evidence'[Email Client Users])))
+		formatString: 0.0%
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 0dfae644-f693-4299-ba21-7235420f4565
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'Legacy Protocol Usage Observations' = VAR _s = CALCULATETABLE('Data Trust Evidence', REMOVEFILTERS('Data Trust Evidence'), 'Data Trust Evidence'[File Name] = "M365_Email_AppUsage.csv") VAR _ready = COUNTROWS(_s) = 1 && COUNTROWS(FILTER(_s, 'Data Trust Evidence'[Evidence Status] = "Observed" && 'Data Trust Evidence'[Schema State] = "Qualified" && 'Data Trust Evidence'[Decision Readiness] = "Ready")) = 1  RETURN IF(_ready, CALCULATE(SUM('Email Client Usage Evidence'[Users]), 'Email Client Usage Evidence'[Legacy Protocol] = "Yes", 'Email Client Usage Evidence'[Evidence Status] = "Observed"))
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 6c76645e-9a70-46c2-ab3d-33f6ab3e9fd3
+
+	/// Prepared source evidence; missing or unqualified source remains blank.
+	measure 'Email Client Covered Users' = VAR _s = CALCULATETABLE('Data Trust Evidence', REMOVEFILTERS('Data Trust Evidence'), 'Data Trust Evidence'[File Name] = "M365_Email_AppUsage.csv") VAR _ready = COUNTROWS(_s) = 1 && COUNTROWS(FILTER(_s, 'Data Trust Evidence'[Evidence Status] = "Observed" && 'Data Trust Evidence'[Schema State] = "Qualified" && 'Data Trust Evidence'[Decision Readiness] = "Ready")) = 1  RETURN IF(_ready, CALCULATE(MAX('Email Client Usage Evidence'[Email Client Users]), REMOVEFILTERS('Email Client Usage Evidence'[Client]), 'Email Client Usage Evidence'[Evidence Status] = "Observed"))
+		formatString: #,0
+		displayFolder: Collaboration | Usage signals
+		lineageTag: 3caeb5ed-1b04-4758-88ab-8ba2c6408af6
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: 3e275db5-edb3-486f-b32f-42237ff15f95
+		summarizeBy: none
+		sourceColumn: TenantKey
+
+	column Client
+		dataType: string
+		lineageTag: f05dc9ef-6586-47f3-8a4f-f0e9e93ed1a0
+		summarizeBy: none
+		sourceColumn: Client
+
+	column 'Client Family'
+		dataType: string
+		lineageTag: 7c68181e-af22-4436-9013-0f0d07565989
+		summarizeBy: none
+		sourceColumn: Client Family
+
+	column 'Legacy Protocol'
+		dataType: string
+		lineageTag: 3932b32a-8ceb-4fd2-942c-c9083bf50fe1
+		summarizeBy: none
+		sourceColumn: Legacy Protocol
+
+	column Users
+		dataType: int64
+		lineageTag: 04572bf4-426b-4102-983f-89f17eb9e526
+		summarizeBy: none
+		sourceColumn: Users
+
+	column 'Email Client Users'
+		dataType: int64
+		lineageTag: 44fe285a-922a-43e2-8f20-c9b413117d72
+		summarizeBy: none
+		sourceColumn: Email Client Users
+
+	column 'User Share (%)'
+		dataType: double
+		formatString: 0.0%
+		lineageTag: 01ca1e45-8ee8-4e9d-b804-8c95883441ad
+		summarizeBy: none
+		sourceColumn: User Share (%)
+
+	column 'Report Period Days'
+		dataType: int64
+		lineageTag: cf4cdf33-9342-45d5-bbe4-eed683f63e2f
+		summarizeBy: none
+		sourceColumn: Report Period Days
+
+	column 'Usage Refresh Date'
+		dataType: dateTime
+		lineageTag: ade569a3-219e-4422-a7eb-91a2b61c4fd8
+		summarizeBy: none
+		sourceColumn: Usage Refresh Date
+
+	column 'Evidence Age Days'
+		dataType: int64
+		lineageTag: b1f70bca-9381-4df1-b2de-90b04e655b4f
+		summarizeBy: none
+		sourceColumn: Evidence Age Days
+
+	column 'Freshness State'
+		dataType: string
+		lineageTag: 693f8dda-6ce8-46e8-b594-ff24ec32ba0c
+		summarizeBy: none
+		sourceColumn: Freshness State
+
+	column 'Evidence Status'
+		dataType: string
+		lineageTag: 7c807f75-2eba-4d8f-a64e-3aa926ee7403
+		summarizeBy: none
+		sourceColumn: Evidence Status
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 8f0c91c2-e70e-4bc1-80b3-3a5a453788e6
+		summarizeBy: none
+		sourceColumn: Loaded Batch ID
+
+	partition 'Email Client Usage Evidence' = m
+		mode: import
+		source =
+				let
+				 Readers = CreatePreparedReaders(),
+				 Raw = Table.PromoteHeaders(Csv.Document(Readers[GetPreparedEvidenceFile]("EmailClientUsageEvidence.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv, ExtraValues=ExtraValues.Error]), [PromoteAllScalars=true]),
+				 Selected = Table.SelectColumns(Raw, {"TenantKey", "Client", "Client Family", "Legacy Protocol", "Users", "Email Client Users", "User Share (%)", "Report Period Days", "Usage Refresh Date", "Evidence Age Days", "Freshness State", "Evidence Status"}),
+				 Scoped = if List.AllTrue(List.Transform(Table.Column(Selected, "TenantKey"), each _ = PreparedExpectedTenantKey)) then Selected else error "Foreign or missing tenant",
+				 Nulls = Table.ReplaceValue(Scoped, "", null, Replacer.ReplaceValue, {"Users", "Email Client Users", "User Share (%)", "Report Period Days", "Usage Refresh Date", "Evidence Age Days"}),
+				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"Client", type text}, {"Client Family", type text}, {"Legacy Protocol", type text}, {"Users", Int64.Type}, {"Email Client Users", Int64.Type}, {"User Share (%)", type number}, {"Report Period Days", Int64.Type}, {"Usage Refresh Date", type datetime}, {"Evidence Age Days", Int64.Type}, {"Freshness State", type text}, {"Evidence Status", type text}}, "en-US")
+				in
+				 Readers[Finish](Typed)
