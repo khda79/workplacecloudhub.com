@@ -314,6 +314,15 @@
       "OptionalFiles": []
     },
     {
+      "Script": "SmartM365-ActiveDirectory-Adaxes-Inventory.ps1",
+      "Receipt": "SmartInventory_SmartM365-ActiveDirectory-Adaxes-Inventory.current.json.txt",
+      "Scope": "ConfiguredOutputs",
+      "Files": [
+        "AD_Adaxes_Users.csv"
+      ],
+      "OptionalFiles": []
+    },
+    {
       "Script": "SmartM365-AzureADConnect-SyncHealth-Inventory.ps1",
       "Receipt": "SmartInventory_SmartM365-AzureADConnect-SyncHealth-Inventory.current.json.txt",
       "Scope": "ConfiguredOutputs",
