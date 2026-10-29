@@ -50,7 +50,7 @@ run is in progress on the other servers. This computer is checked by the script.
 .\SmartM365-Move-InventoryConfigToRoot.ps1 -Tenant prod -Apply -OtherServersStopped
 
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param(
@@ -64,7 +64,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 $global:SmartM365ScriptName = 'SmartM365-Move-InventoryConfigToRoot'
 $global:SmartM365ExecutionStartTime = Get-Date
 
@@ -129,8 +129,9 @@ function Assert-NoLocalRun {
             $_.ProcessId -ne $PID -and $_.CommandLine -and
             ($_.CommandLine.IndexOf($smartRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or $_.CommandLine -match 'SmartM365LauncherCache|SmartM365\\LauncherCache') })
     foreach ($process in $running) { Write-Host ('Running: PID {0} {1}' -f $process.ProcessId, $process.CommandLine) -ForegroundColor Yellow }
+    # COM handler and other non-exec actions have no Execute property.
     $tasks = @(Get-ScheduledTask -ErrorAction Stop | Where-Object {
-            $_.State -ne 'Disabled' -and (@($_.Actions | ForEach-Object { '{0} {1}' -f $_.Execute, $_.Arguments }) -join ' ').IndexOf($smartRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+            $_.State -ne 'Disabled' -and (@($_.Actions | Where-Object { $_.PSObject.Properties['Execute'] } | ForEach-Object { '{0} {1}' -f $_.Execute, $_.Arguments }) -join ' ').IndexOf($smartRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
     foreach ($task in $tasks) { Write-Host ('Scheduled task not disabled: {0}{1} ({2})' -f $task.TaskPath, $task.TaskName, $task.State) -ForegroundColor Yellow }
     return ($running.Count -eq 0 -and $tasks.Count -eq 0)
 }
