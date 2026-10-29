@@ -7,7 +7,7 @@ that stays silent ends with a clear error, and the per-file limit stops the uplo
 A SharePoint maintenance 403 (serviceReadOnly) is retried while other 403s are final, and a source
 receipt and its run state are not mirrored when a file they reference failed to upload in the run.
 .VERSION
-1.1.0
+1.2.0
 .NOTES
 The silent endpoint is a local TCP listener on the loopback address that accepts connections and never
 answers. Every other Graph and SharePoint call is replaced by recorders. No tenant, Graph, SharePoint,
@@ -21,7 +21,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$core = Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.111' -Force -PassThru
+$core = Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.112' -Force -PassThru
 $script:checks = 0
 function Check { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message }; $script:checks++ }
 
@@ -297,12 +297,14 @@ try {
     $text = [IO.File]::ReadAllText((Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psm1'))
     $ast = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)
     $raw = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in @('Invoke-RestMethod', 'Invoke-WebRequest') }, $true))
-    # A splatted call is bounded when its function sets TimeoutSec in the splatted table.
+    # A call is bounded by a splatted table from Get-SmartM365WebRequestTimeout: TimeoutSec alone leaves the
+    # read of a stalled response body unbounded (see Test-SmartM365NetworkReadTimeoutOffline.ps1).
     $unbounded = @($raw | Where-Object {
         $call = $_
         $function = $call
         while ($function -and $function -isnot [Management.Automation.Language.FunctionDefinitionAst]) { $function = $function.Parent }
-        $call.Extent.Text -notmatch '-TimeoutSec\b' -and -not ($call.Extent.Text -match '@(params|putParams)\b' -and $function -and $function.Extent.Text -match 'TimeoutSec\s*=')
+        $splatted = @($call.CommandElements | Where-Object { $_ -is [Management.Automation.Language.VariableExpressionAst] -and $_.Splatted }).Count -gt 0
+        $call.Extent.Text -match '-TimeoutSec\b' -or -not ($splatted -and $function -and $function.Extent.Text -match 'Get-SmartM365WebRequestTimeout -Command')
     })
     Check ($raw.Count -ge 7 -and $unbounded.Count -eq 0) ("Core network calls without a time limit: " + (($unbounded | ForEach-Object { $_.Extent.StartLineNumber }) -join ','))
 }

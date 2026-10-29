@@ -2934,9 +2934,10 @@ function Get-SmartM365NetworkSetting {
     [CmdletBinding()]
     [OutputType([int])]
     param(
-        [Parameter(Mandatory)][ValidateSet('GraphTokenTimeoutSeconds','GraphRequestTimeoutSeconds','SharePointUploadTransferTimeoutSeconds','SharePointUploadChunkTimeoutSeconds','SharePointUploadFileTimeoutMinutes','GraphTokenMaxAttempts','GraphProbeMaxAttempts')][string]$Name
+        [Parameter(Mandatory)][ValidateSet('GraphTokenTimeoutSeconds','GraphRequestTimeoutSeconds','SharePointUploadTransferTimeoutSeconds','SharePointUploadChunkTimeoutSeconds','SharePointUploadFileTimeoutMinutes','GraphTokenMaxAttempts','GraphProbeMaxAttempts','NetworkReadIdleTimeoutSeconds')][string]$Name
     )
     $defaults = @{
+        NetworkReadIdleTimeoutSeconds = @(120, 5, 3600)
         GraphTokenTimeoutSeconds = @(60, 5, 600)
         GraphRequestTimeoutSeconds = @(180, 10, 3600)
         SharePointUploadTransferTimeoutSeconds = @(900, 30, 7200)
@@ -2978,6 +2979,25 @@ function Get-SmartM365NetworkCallTimeout {
         throw $failure
     }
     return [math]::Min($TimeoutSeconds, $remaining)
+}
+
+# -TimeoutSec (ConnectionTimeoutSeconds) bounds a call only until the response headers arrive (PowerShell
+# 7.4+): a response body that stopped arriving was waited for forever (2026-10-29: an Intune export download
+# hung for 5 h). OperationTimeoutSeconds ends a read that receives nothing for NetworkReadIdleTimeoutSeconds;
+# its error mentions the timeout, so callers retry it as transient. Added only when the command offers it.
+function Get-SmartM365WebRequestTimeout {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)][ValidateSet('Invoke-RestMethod','Invoke-WebRequest')][string]$Command,
+        [Parameter(Mandatory)][int]$TimeoutSeconds
+    )
+    $parameters = @{ TimeoutSec = $TimeoutSeconds }
+    $resolved = Get-Command -Name $Command -ErrorAction SilentlyContinue
+    if ($resolved -and $resolved.Parameters.ContainsKey('OperationTimeoutSeconds')) {
+        $parameters.OperationTimeoutSeconds = [int][math]::Max(1, [math]::Min($TimeoutSeconds, (Get-SmartM365NetworkSetting -Name 'NetworkReadIdleTimeoutSeconds')))
+    }
+    return $parameters
 }
 
 function Wait-SmartM365NetworkRetry {
@@ -3032,7 +3052,8 @@ function Get-SmartM365GraphAccessToken {
     for ($attempt = 1; $null -eq $response; $attempt++) {
         try {
             $timeoutSeconds = Get-SmartM365NetworkCallTimeout -TimeoutSeconds $tokenTimeoutSeconds -Operation ("Microsoft Graph token request for {0}" -f $Purpose)
-            $response = Invoke-RestMethod -Method POST -Uri $tokenUri -Body $body -ContentType 'application/x-www-form-urlencoded' -TimeoutSec $timeoutSeconds -ErrorAction Stop
+            $webTimeout = Get-SmartM365WebRequestTimeout -Command 'Invoke-RestMethod' -TimeoutSeconds $timeoutSeconds
+            $response = Invoke-RestMethod -Method POST -Uri $tokenUri -Body $body -ContentType 'application/x-www-form-urlencoded' @webTimeout -ErrorAction Stop
         }
         catch {
             $statusCode = $null
@@ -3075,7 +3096,7 @@ function Invoke-SmartM365GraphFileDownloadWithRetry {
         try {
             $token = Get-SmartM365GraphAccessToken -Purpose $Operation
             $timeoutSeconds = Get-SmartM365NetworkCallTimeout -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'SharePointUploadTransferTimeoutSeconds') -Operation $Operation
-            $params = @{ Method = 'GET'; Uri = $Uri; Headers = @{ Authorization = "Bearer $token" }; OutFile = $OutputFilePath; TimeoutSec = $timeoutSeconds; ErrorAction = 'Stop' }
+            $params = @{ Method = 'GET'; Uri = $Uri; Headers = @{ Authorization = "Bearer $token" }; OutFile = $OutputFilePath; ErrorAction = 'Stop' } + (Get-SmartM365WebRequestTimeout -Command 'Invoke-WebRequest' -TimeoutSeconds $timeoutSeconds)
             $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop
             if ($invokeWebRequestCommand.Parameters.ContainsKey('UseBasicParsing')) { $params.UseBasicParsing = $true }
             Invoke-WebRequest @params | Out-Null
@@ -4306,12 +4327,13 @@ function Send-SmartM365TeamsNotification {
             $payload['potentialAction'] = $actions
         }
 
+        $webTimeout = Get-SmartM365WebRequestTimeout -Command 'Invoke-RestMethod' -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds')
         Invoke-RestMethod `
             -Method POST `
             -Uri $WebhookUrl `
             -ContentType 'application/json; charset=utf-8' `
             -Body ($payload | ConvertTo-Json -Depth 8) `
-            -TimeoutSec (Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds') `
+            @webTimeout `
             -ErrorAction Stop | Out-Null
 
         WriteLog -Message ("Teams notification sent: {0}" -f $Title) -Level 'SUCCESS'
@@ -4768,7 +4790,7 @@ function Invoke-SmartM365ExportFileDownload {
     $partial = [IO.Path]::Combine([IO.Path]::GetDirectoryName($OutFile), ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.partial'))
     for ($attempt = 1; ; $attempt++) {
         try {
-            $params = @{ Method = 'GET'; Uri = $Url; OutFile = $partial; ErrorAction = 'Stop'; TimeoutSec = (Get-SmartM365NetworkCallTimeout -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'SharePointUploadTransferTimeoutSeconds') -Operation $Operation) }
+            $params = @{ Method = 'GET'; Uri = $Url; OutFile = $partial; ErrorAction = 'Stop' } + (Get-SmartM365WebRequestTimeout -Command 'Invoke-WebRequest' -TimeoutSeconds (Get-SmartM365NetworkCallTimeout -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'SharePointUploadTransferTimeoutSeconds') -Operation $Operation))
             Invoke-WebRequest @params | Out-Null
             Move-Item -LiteralPath $partial -Destination $OutFile -Force
             if ($attempt -gt 1) { WriteLog -Message ("{0} succeeded on attempt {1}: {2}" -f $Operation, $attempt, $safeUrl) -Level 'INFO' }
@@ -4808,7 +4830,8 @@ function Invoke-SmartM365GraphProbe {
         try {
             if (-not [string]::IsNullOrWhiteSpace($GraphAccessToken)) {
                 $headers = @{ Authorization = "Bearer $GraphAccessToken" }
-                $null = Invoke-RestMethod -Method GET -Uri $Uri -Headers $headers -TimeoutSec (Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds') -ErrorAction Stop
+                $webTimeout = Get-SmartM365WebRequestTimeout -Command 'Invoke-RestMethod' -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds')
+                $null = Invoke-RestMethod -Method GET -Uri $Uri -Headers $headers @webTimeout -ErrorAction Stop
             }
             else {
                 $null = Invoke-MgGraphRequest -Method GET -Uri $Uri -ErrorAction Stop
@@ -4856,9 +4879,9 @@ function Invoke-SmartM365GraphRestWithRetry {
                 Method      = $Method
                 Uri         = $Uri
                 Headers     = @{ Authorization = "Bearer $token" }
-                TimeoutSec  = (Get-SmartM365NetworkCallTimeout -TimeoutSeconds $TimeoutSeconds -Operation $Operation)
                 ErrorAction = 'Stop'
             }
+            $params += Get-SmartM365WebRequestTimeout -Command $(if ($AllowMissingJsonMetadata) { 'Invoke-WebRequest' } else { 'Invoke-RestMethod' }) -TimeoutSeconds (Get-SmartM365NetworkCallTimeout -TimeoutSeconds $TimeoutSeconds -Operation $Operation)
             if (-not $params.ContainsKey('Headers')) { $params.Headers = @{} }
             foreach ($header in $AdditionalHeaders.Keys) {
                 if ($header -ieq 'Authorization') { throw 'Authorization cannot be overridden by transition headers.' }
@@ -4981,9 +5004,9 @@ function Invoke-SmartM365SharePointLargeFileUpload {
                         Headers     = $headers
                         ContentType = 'application/octet-stream'
                         Body        = $chunk
-                        TimeoutSec  = (Get-SmartM365NetworkCallTimeout -TimeoutSeconds $chunkTimeoutSeconds -Operation 'SharePoint chunk upload')
                         ErrorAction = 'Stop'
                     }
+                    $putParams += Get-SmartM365WebRequestTimeout -Command 'Invoke-WebRequest' -TimeoutSeconds (Get-SmartM365NetworkCallTimeout -TimeoutSeconds $chunkTimeoutSeconds -Operation 'SharePoint chunk upload')
                     $invokeWebRequestCommand = Get-Command Invoke-WebRequest -ErrorAction Stop
                     if ($invokeWebRequestCommand.Parameters.ContainsKey('UseBasicParsing')) {
                         $putParams.UseBasicParsing = $true
@@ -5368,11 +5391,12 @@ function Invoke-SmartM365GraphDeleteQuietly {
             $token = Get-SmartM365GraphAccessToken -Purpose $Operation
             $statusCodeValue = $null
             $responseHeadersValue = $null
+            $webTimeout = Get-SmartM365WebRequestTimeout -Command 'Invoke-RestMethod' -TimeoutSeconds (Get-SmartM365NetworkCallTimeout -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds') -Operation $Operation)
             $response = Invoke-RestMethod `
                 -Method DELETE `
                 -Uri $Uri `
                 -Headers @{ Authorization = "Bearer $token" } `
-                -TimeoutSec (Get-SmartM365NetworkCallTimeout -TimeoutSeconds (Get-SmartM365NetworkSetting -Name 'GraphRequestTimeoutSeconds') -Operation $Operation) `
+                @webTimeout `
                 -SkipHttpErrorCheck `
                 -StatusCodeVariable statusCodeValue `
                 -ResponseHeadersVariable responseHeadersValue `

@@ -124,8 +124,10 @@ function Initialize-SmartM365EvidenceRuntime {
 # with SDK 2.30 an absolute-URI Invoke-MgGraphRequest empties the session's AzureADEndpoint, and the client
 # that Set-MgRequestContext forces to be rebuilt then fails app-only certificate auth with "Invalid URI"
 # before sending. Connect-MgGraph restores the environment, so this point is safe.
+# The same call sets ClientTimeout explicitly: it bounds each Invoke-MgGraphRequest, response body included,
+# and its timeout error is retried by Invoke-SmartM365EvidenceGraphRequest.
 function Connect-SmartM365EvidenceGraph {
-    param([Parameter(Mandatory)]$Runtime,[Parameter(Mandatory)][string[]]$Scopes,[switch]$InteractiveAuth,[switch]$DisableSdkRetry)
+    param([Parameter(Mandatory)]$Runtime,[Parameter(Mandatory)][string[]]$Scopes,[switch]$InteractiveAuth,[switch]$DisableSdkRetry,[ValidateRange(10,3600)][int]$ClientTimeoutSeconds=300)
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
     try { if (Get-MgContext -ErrorAction SilentlyContinue) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null; Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $false } } catch {}
     if ($InteractiveAuth) { Connect-MgGraph -Scopes $Scopes -NoWelcome -ErrorAction Stop | Out-Null }
@@ -137,7 +139,7 @@ function Connect-SmartM365EvidenceGraph {
         Connect-MgGraph -ClientId $appId -TenantId $tenantId -CertificateThumbprint $thumb -NoWelcome -ErrorAction Stop | Out-Null
     }
     Set-SmartM365InventoryConnectionOwnership -Connection Graph -Owned $true
-    if ($DisableSdkRetry) { Set-MgRequestContext -MaxRetry 0 | Out-Null }
+    if ($DisableSdkRetry) { Set-MgRequestContext -MaxRetry 0 -ClientTimeout $ClientTimeoutSeconds | Out-Null }
 }
 
 function Get-SmartM365EvidenceStatusCode {
@@ -292,6 +294,8 @@ function Invoke-SmartM365EvidenceExportReport {
     try {
         $extract = Join-Path $tempRoot 'content'; $zip = Join-Path $tempRoot 'export.zip'
         New-Item -Path $extract -ItemType Directory -Force | Out-Null
+        # Each download attempt is bounded by Core (connection timeout and read idle timeout), then retried.
+        Write-SmartM365EvidenceLog "Intune export job $jobId for $ReportName completed; downloading the export."
         Invoke-SmartM365ExportFileDownload -Url $downloadUrl -OutFile $zip -Operation "Intune export download ($ReportName)" | Out-Null
         Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
         $csv = Get-ChildItem -LiteralPath $extract -Filter '*.csv' -File -Recurse | Select-Object -First 1

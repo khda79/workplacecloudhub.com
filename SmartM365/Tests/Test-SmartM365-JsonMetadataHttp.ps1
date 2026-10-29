@@ -2,7 +2,7 @@
 .SYNOPSIS
  Offline transport contract test: AST-only loading, no tenant startup or network.
 .VERSION
- 1.0.1
+ 1.0.2
 #>
 [CmdletBinding()]
 param()
@@ -11,7 +11,7 @@ $source=Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.Core.psm1'
 $tokens=$null;$parseErrors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$parseErrors)
 if($parseErrors.Count){throw 'Core parse failed.'}
-foreach($name in 'Invoke-SmartM365GraphRestWithRetry','Test-SmartM365GraphTransientError','Get-SmartM365NetworkSetting','Get-SmartM365NetworkCallTimeout','Wait-SmartM365NetworkRetry'){
+foreach($name in 'Invoke-SmartM365GraphRestWithRetry','Test-SmartM365GraphTransientError','Get-SmartM365NetworkSetting','Get-SmartM365NetworkCallTimeout','Get-SmartM365WebRequestTimeout','Wait-SmartM365NetworkRetry'){
     $fn=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)
     . ([scriptblock]::Create($fn.Extent.Text))
 }

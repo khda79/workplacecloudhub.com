@@ -1,6 +1,6 @@
 @{
     RootModule='SmartM365.EvidenceCollector.Common.psm1'
-    ModuleVersion='1.0.16'
+    ModuleVersion='1.0.17'
     GUID='ec77e13b-72ee-4d87-9a41-d3f81e70d9f6'
     Author='WorkplaceCloudHub'
     Description='Shared runtime, Graph, export-job, and CSV helpers for SmartM365 evidence collectors.'

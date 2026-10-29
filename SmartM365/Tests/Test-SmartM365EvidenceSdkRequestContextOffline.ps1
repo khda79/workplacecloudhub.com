@@ -14,7 +14,7 @@ auth fails with "Invalid URI" before anything is sent (endpoint-security exports
    listener with a synthetic token. The fixed order sends every request; the former order (a request-context
    change after an absolute-URI request) fails before sending. NOT RUN when that SDK version is absent.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 No tenant, Graph, storage, mail or synchronized data access.
 #>
@@ -60,7 +60,7 @@ if ($TransportChild) {
         }
         # Fixed order: request context set right after connecting, then three reports without touching it.
         Connect-MgGraph -AccessToken $token -NoWelcome | Out-Null
-        Set-MgRequestContext -MaxRetry 0 | Out-Null
+        Set-MgRequestContext -MaxRetry 0 -ClientTimeout 300 | Out-Null
         Send POST $uri; Send GET "$uri/job-1"
         Check ([string]::IsNullOrEmpty([string]$sessionType::Instance.Environment.AzureADEndpoint)) 'Premise: an absolute-URI request no longer empties the session AzureADEndpoint (review the SDK version).'
         Use-CertificateContext
@@ -83,7 +83,7 @@ if ($TransportChild) {
 
 $root = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $root 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.103' -Force -Global -WarningAction SilentlyContinue
-$evidence = Import-Module (Join-Path $root 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.14' -Force -PassThru
+$evidence = Import-Module (Join-Path $root 'SmartInventory/Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.17' -Force -PassThru
 $collector = Join-Path $root 'SmartInventory/M365Inventory/IntuneInventory/Security/SmartM365-Intune-EndpointSecurityHealth-Inventory.ps1'
 try {
     # ---- 1. Recorded stand-ins: connection, then three budgeted exports ----
@@ -95,7 +95,7 @@ try {
         function script:Connect-MgGraph { param([Parameter(ValueFromRemainingArguments)]$Arguments) $script:Events.Add('Connect') }
         function script:Set-SmartM365InventoryConnectionOwnership { param($Connection, $Owned) }
         function script:Get-MgRequestContext { [pscustomobject]@{ MaxRetry = $script:MaxRetry } }
-        function script:Set-MgRequestContext { param([int]$MaxRetry) $script:MaxRetry = $MaxRetry; $script:Events.Add("Set:$MaxRetry") }
+        function script:Set-MgRequestContext { param([int]$MaxRetry, [int]$ClientTimeout) $script:MaxRetry = $MaxRetry; $script:Events.Add("Set:${MaxRetry}:$ClientTimeout") }
         function script:WriteLog { param($Message, $Level) if ($Level -eq 'WARNING') { $script:Events.Add("Warning:$Message") } }
         function script:Start-Sleep { param([int]$Seconds) }
         function script:Invoke-MgGraphRequest {
@@ -118,7 +118,7 @@ try {
     }
     $sets = @(for ($i = 0; $i -lt $events.Count; $i++) { if ($events[$i] -like 'Set:*') { $i } })
     $requests = @(for ($i = 0; $i -lt $events.Count; $i++) { if ($events[$i] -like 'Request:*') { $i } })
-    Check ($events[0] -eq 'Connect' -and $sets.Count -eq 1 -and $events[$sets[0]] -eq 'Set:0') "The SDK retry is not turned off exactly once at connection: $($events -join ', ')"
+    Check ($events[0] -eq 'Connect' -and $sets.Count -eq 1 -and $events[$sets[0]] -eq 'Set:0:300') "The SDK retry is not turned off, with an explicit client timeout, exactly once at connection: $($events -join ', ')"
     Check ($requests.Count -eq 6 -and $sets[0] -lt $requests[0]) "Set-MgRequestContext runs after a Graph request: $($events -join ', ')"
     Check (@($events | Where-Object { $_ -like 'Warning:*' }).Count -eq 0) "Budgeted exports warned although the SDK retry was off: $($events -join ', ')"
 
