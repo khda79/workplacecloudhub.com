@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.23
+1.6.24
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.23'
+$script:AppVersion = '1.6.24'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -448,6 +448,8 @@ $xaml = @'
                                     <DataGridTextColumn Header="Pending" Binding="{Binding Pending}" Width="70"/>
                                     <DataGridTextColumn Header="Recycle in" Binding="{Binding RecycleIn}" Width="90"/>
                                     <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="70"/>
+                                    <DataGridTextColumn Header="DATA free %" Binding="{Binding DataFreePercent}" Width="90"/>
+                                    <DataGridTextColumn Header="Disk space" Binding="{Binding DiskSpace}" Width="120"/>
                                     <DataGridTextColumn Header="State persistence" Binding="{Binding StatePersistence}" Width="*"/>
                                 </DataGrid.Columns>
                             </DataGrid>
@@ -2007,6 +2009,10 @@ function Request-SelectedJobRun {
     if (Test-JobDraftChanged -JobName $jobName) { $message += "`n`nThis job has unpublished draft changes. The request uses the PUBLISHED configuration." }
     if ($activeRequests.Count) { $message += "`n`n$($activeRequests.Count) request(s) are active or queued (last refresh): this request is queued and starts automatically when they have finished." }
     else { $message += "`n`nIf another request becomes active first, this one is queued behind it." }
+    # Displayed server rows only (last refresh): a paused server keeps the request queued.
+    $serverRows = if ($script:Controls.ContainsKey('OperationsServersGrid') -and $null -ne $script:Controls['OperationsServersGrid']) { @($script:Controls['OperationsServersGrid'].ItemsSource) } else { @() }
+    $diskPausedServers = @($serverRows | Where-Object { $null -ne $_ -and $_.PSObject.Properties['DiskSpace'] -and [string]$_.DiskSpace -eq 'Launches paused' } | ForEach-Object { [string]$_.Server })
+    if ($diskPausedServers.Count) { $message += "`n`nLow DATA disk space: new launches are paused on $($diskPausedServers -join ', '). The request waits until free space reaches the resume threshold." }
     if (-not (Confirm-GuiJobRunRequest -Message $message)) { return $null }
     [void](Start-GuiJobRunSubmission -JobName $jobName -IncludeDependencies $includeDependencies)
     return $null

@@ -12,5 +12,12 @@
   "PeerRecycleGraceMinutes": 15,
   "PeerAlertReminderMinutes": 240,
   "PeerAlertMailRetryMinutes": 15,
-  "PeerRecoveryEmailEnabled": true
+  "PeerRecoveryEmailEnabled": true,
+  "DiskSpaceGuardEnabled": true,
+  "DiskSpaceBlockFreePercent": 10,
+  "DiskSpaceResumeFreePercent": 12,
+  "DiskSpaceWarningFreePercent": 15,
+  "DiskSpaceCheckMinutes": 5,
+  "DiskSpaceCheckTimeoutSeconds": 10,
+  "DiskSpaceAlertRepeatHours": 6
 }

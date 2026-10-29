@@ -354,6 +354,10 @@ function Get-SmartM365OrchestratorOperations {
             Maintenance = if ($maintenanceError) { 'Unknown' } elseif ($maintenance.Enabled) { 'ON' } else { 'OFF' }
             MaintenanceAcknowledgement = if ($maintenanceError) { 'Control unavailable' } else { [string](@($maintenanceServers | Where-Object Server -eq $serverName)[0].Status) }
             StatePersistence = if ([bool](Get-InsightsProperty $heartbeat 'StatePersistenceHealthy' $true)) { 'OK' } else { 'Launches paused: ' + [string](Get-InsightsProperty $heartbeat 'StatePersistenceLastError' '') }
+            # Disk space guard on the DATA share (orchestrator 1.5.75+); empty for older residents.
+            DataFreePercent = Get-InsightsProperty $heartbeat 'DiskSpaceFreePercent' $null
+            DiskSpace = $(if ([int](Get-InsightsProperty $heartbeat 'DiskSpaceProtocol' 0) -lt 1) { '' } elseif (-not [bool](Get-InsightsProperty $heartbeat 'DiskSpaceGuardEnabled' $true)) { 'Off' } elseif ([bool](Get-InsightsProperty $heartbeat 'DiskSpaceBlocked' $false)) { 'Launches paused' } else { [string](Get-InsightsProperty $heartbeat 'DiskSpaceState' '') })
+            DiskSpaceDetail = [string](Get-InsightsProperty $heartbeat 'DiskSpaceDetail' '')
             ReadyCapabilities = (@(Get-InsightsProperty $heartbeat 'ReadyCapabilities' @() | ForEach-Object { [string]$_ } | Sort-Object -Unique) -join ', ')
             CertificateDaysRemaining = Get-InsightsProperty $heartbeat 'CertificateDaysRemaining' $null
             PrerequisiteBlocks = (@(Get-InsightsProperty $heartbeat 'PrerequisiteBlocks' @() | ForEach-Object { if ($_ -is [string]) { $_ } else { '{0}: {1}' -f (Get-InsightsProperty $_ 'Name' ''), (Get-InsightsProperty $_ 'Detail' '') } }) -join '; ')
@@ -524,6 +528,10 @@ function Get-SmartM365OrchestratorDashboard {
             default { Add-DashboardAction 'Critical' 'Server' $server.Server ('{0}; heartbeat age {1} min.' -f $server.State, $(if ($null -ne $server.HeartbeatAgeMinutes) { $server.HeartbeatAgeMinutes } else { 'unknown' })) 'Operations' }
         }
         if ([string]$server.StatePersistence -ne 'OK') { Add-DashboardAction 'Critical' 'State persistence' $server.Server ([string]$server.StatePersistence) 'Events' }
+        switch ([string](Get-InsightsProperty $server 'DiskSpace' '')) {
+            'Launches paused' { Add-DashboardAction 'Critical' 'Disk space' $server.Server ('DATA share low: new launches paused. ' + [string]$server.DiskSpaceDetail) 'Operations' }
+            { $_ -in @('Warning', 'Unknown') } { Add-DashboardAction 'Warning' 'Disk space' $server.Server ([string]$server.DiskSpaceDetail) 'Operations' }
+        }
         if ([string](Get-InsightsProperty $server 'PrerequisiteBlocks' '')) { Add-DashboardAction 'Critical' 'Launch prerequisite' $server.Server ([string]$server.PrerequisiteBlocks) 'Operations' }
         $days = Get-InsightsProperty $server 'CertificateDaysRemaining' $null
         if ($null -ne $days -and [double]$days -lt $CertificateWarningDays) {

@@ -395,6 +395,18 @@ function Test-SmartM365OrchestratorClusterDocument {
     foreach ($name in @('PeerMonitoringCheckIntervalSeconds', 'PeerHeartbeatStaleMinutes', 'PeerMonitoringConfirmationChecks', 'PeerJobStartGraceMinutes', 'PeerRecycleGraceMinutes', 'PeerAlertReminderMinutes', 'PeerAlertMailRetryMinutes')) {
         if ($Document.PSObject.Properties[$name] -and [int]$Document.$name -lt 1) { $errors.Add("$name must be greater than zero.") }
     }
+    foreach ($name in @('DiskSpaceCheckMinutes', 'DiskSpaceCheckTimeoutSeconds', 'DiskSpaceAlertRepeatHours')) {
+        if ($Document.PSObject.Properties[$name] -and [int]$Document.$name -lt 1) { $errors.Add("$name must be greater than zero.") }
+    }
+    # Disk space guard (DATA share): pause below Block, resume at Resume, warn below Warning.
+    $diskThresholds = [ordered]@{ DiskSpaceBlockFreePercent = 10; DiskSpaceResumeFreePercent = 12; DiskSpaceWarningFreePercent = 15 }
+    foreach ($name in @($diskThresholds.Keys)) {
+        if (-not $Document.PSObject.Properties[$name]) { continue }
+        $diskThresholds[$name] = [int]$Document.$name
+        if ($diskThresholds[$name] -lt 1 -or $diskThresholds[$name] -gt 50) { $errors.Add("$name must be between 1 and 50.") }
+    }
+    if ($diskThresholds.DiskSpaceResumeFreePercent -le $diskThresholds.DiskSpaceBlockFreePercent) { $errors.Add('DiskSpaceResumeFreePercent must be greater than DiskSpaceBlockFreePercent.') }
+    if ($diskThresholds.DiskSpaceWarningFreePercent -lt $diskThresholds.DiskSpaceResumeFreePercent) { $errors.Add('DiskSpaceWarningFreePercent must be greater than or equal to DiskSpaceResumeFreePercent.') }
     [pscustomobject]@{ Valid = ($errors.Count -eq 0); Errors = @($errors); Warnings = @($warnings); ServerCount = @($servers).Count }
 }
 

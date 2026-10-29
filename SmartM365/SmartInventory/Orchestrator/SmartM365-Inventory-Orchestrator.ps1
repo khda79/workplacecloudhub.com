@@ -49,6 +49,8 @@ Features:
 - Optional Authenticode validation before job launch, configurable and usable
   in Audit mode before switching to Enforce.
 - Shared maintenance pauses automatic launches/retries, not supervision or Pipeline requests.
+- Disk space guard: below DiskSpaceBlockFreePercent free on the DATA share every new launch
+  (scheduled, retry, Pipeline, -Force) waits until DiskSpaceResumeFreePercent; running jobs continue.
   Resume can catch up all suspended occurrences after explicit GUI confirmation;
   GUI transitions and process creation share a gate.
 
@@ -106,7 +108,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.74
+1.5.75
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -156,7 +158,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.74"
+$ScriptVersion = "1.5.75"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2537,6 +2539,7 @@ function Get-OrchestratorPendingJobSnapshot {
 
     $pending = [System.Collections.Generic.List[object]]::new()
     if (-not $script:Manifest -or -not $script:Manifest.OrderedJobs) { return @() }
+    $diskSpaceGuard = if (Test-Path -LiteralPath 'variable:script:DiskSpaceGuard') { $script:DiskSpaceGuard } else { $null }
 
     foreach ($job in @($script:Manifest.OrderedJobs)) {
         if (-not $job.Enabled -or -not (Test-JobAllowedOnServer -Job $job)) { continue }
@@ -2544,6 +2547,27 @@ function Get-OrchestratorPendingJobSnapshot {
         if ($script:RunningJobs.ContainsKey($name)) { continue }
 
         $state = Get-JobState -JobName $name
+        if ($null -ne $diskSpaceGuard -and [bool]$diskSpaceGuard.Blocked) {
+            # Only what would start now is listed: a forced run, a queued request, a retry or a due occurrence.
+            $diskWaiting = ''
+            $diskOccurrence = ''
+            if ($script:ForcedPending -contains $name) { $diskWaiting = 'Forced run' }
+            elseif ($null -ne $script:PipelinePending -and $script:PipelinePending.ContainsKey($name)) { $diskWaiting = 'Request {0}' -f $script:PipelinePending[$name].BatchId }
+            elseif ($null -ne $state.PendingRetry) { $diskWaiting = 'Retry attempt {0}' -f $state.PendingRetry.Attempt; $diskOccurrence = [string]$state.PendingRetry.ScheduledOccurrence }
+            else {
+                $diskDue = Get-DueOccurrence -Job $job -LastOccurrence (ConvertFrom-StateTime -Text ([string]$state.LastScheduledOccurrence)) -Now $Now
+                if ($null -ne $diskDue) { $diskWaiting = 'Scheduled occurrence'; $diskOccurrence = ConvertTo-StateTime -Value $diskDue }
+            }
+            if ($diskWaiting) {
+                $pending.Add([pscustomobject]@{
+                    Name = $name; ScheduledOccurrence = $diskOccurrence; Reason = 'LowDiskSpace'
+                    FirstSeen = [string]$diskSpaceGuard.SinceUtc
+                    Details = ('{0} waits for DATA disk space. {1}' -f $diskWaiting, $diskSpaceGuard.Detail)
+                    ConcurrencyKey = [string]$job.ConcurrencyKey; BlockingJob = ''; BlockingServer = ''; BlockSafeUntilUtc = ''
+                })
+            }
+            continue
+        }
         if ($script:PipelineWaitState.ContainsKey($name) -and ($null -ne $state.PendingRetry -or ($null -ne $script:PipelinePending -and $script:PipelinePending.ContainsKey($name)))) {
             $wait = $script:PipelineWaitState[$name]
             $pending.Add([pscustomobject]@{
@@ -2801,6 +2825,17 @@ function Write-OrchestratorHeartbeat {
         MaintenanceRevision = if ($null -ne $script:MaintenanceControl) { $script:MaintenanceControl.Revision } else { -1 }
         MaintenanceEnabled = if ($null -ne $script:MaintenanceControl) { $script:MaintenanceControl.Enabled } else { $false }
         MaintenanceError = [string]$script:MaintenanceError
+        # Disk space guard on the DATA share (orchestrator 1.5.75).
+        DiskSpaceProtocol = 1
+        DiskSpaceGuardEnabled = [bool]$script:Settings.DiskSpaceGuardEnabled
+        DiskSpaceState = if ($null -ne $script:DiskSpaceGuard) { [string]$script:DiskSpaceGuard.State } else { '' }
+        DiskSpaceBlocked = $null -ne $script:DiskSpaceGuard -and [bool]$script:DiskSpaceGuard.Blocked
+        DiskSpaceFreePercent = if ($null -ne $script:DiskSpaceGuard) { $script:DiskSpaceGuard.FreePercent } else { $null }
+        DiskSpaceFreeGB = if ($null -ne $script:DiskSpaceGuard) { $script:DiskSpaceGuard.FreeGB } else { $null }
+        DiskSpaceTotalGB = if ($null -ne $script:DiskSpaceGuard) { $script:DiskSpaceGuard.TotalGB } else { $null }
+        DiskSpaceCheckedAtUtc = if ($null -ne $script:DiskSpaceGuard) { [string]$script:DiskSpaceGuard.CheckedAtUtc } else { '' }
+        DiskSpaceSinceUtc = if ($null -ne $script:DiskSpaceGuard) { [string]$script:DiskSpaceGuard.SinceUtc } else { '' }
+        DiskSpaceDetail = if ($null -ne $script:DiskSpaceGuard) { [string]$script:DiskSpaceGuard.Detail } else { '' }
     }
     try { Write-FileAtomically -Path $script:Settings.HeartbeatPath -Content ($heartbeat | ConvertTo-Json -Depth 5) }
     catch { Write-OrchestratorLog -Message ("Failed to write heartbeat: {0}" -f $_.Exception.Message) -Level WARN }
@@ -3078,6 +3113,8 @@ function Get-OrchestratorPeerHealthSnapshot {
         }
 
         $auditNow = $Now.AddMinutes(-[int]$script:Settings.PeerJobStartGraceMinutes)
+        # A peer paused by low DATA disk space does not start jobs on purpose; that pause is alerted on its own.
+        $peerDiskSpaceBlocked = $null -ne $heartbeat -and $heartbeat.PSObject.Properties['DiskSpaceBlocked'] -and [bool]$heartbeat.DiskSpaceBlocked
         foreach ($job in @($script:Manifest.OrderedJobs)) {
             if (-not $job.Enabled -or -not (Test-JobAllowedOnNamedServer -Job $job -ServerName $peerServer)) { continue }
             $expectedOccurrence = Get-LatestPastOccurrence -Job $job -Now $auditNow
@@ -3085,6 +3122,7 @@ function Get-OrchestratorPeerHealthSnapshot {
 
             # A deliberate scheduling suspension is not a missing-start incident. Server/state
             # health and real run failures are still monitored above and in job supervision.
+            if ($peerDiskSpaceBlocked) { continue }
             if ($script:MaintenanceHealthy -and $null -ne $script:MaintenanceControl -and
                 ($script:MaintenanceControl.Enabled -or ($script:MaintenanceControl.ResumeAfterUtc -and
                  $expectedOccurrence.ToUniversalTime() -le ([datetimeoffset]::Parse($script:MaintenanceControl.ResumeAfterUtc)).UtcDateTime))) { continue }
@@ -3133,7 +3171,7 @@ function Get-OrchestratorPeerHealthSnapshot {
             )
             if ($pendingMatch.Count -eq 1) {
                 $pendingReason = [string]$pendingMatch[0].Reason
-                if ($pendingReason -in @('PendingRetry', 'BlockedByServerConcurrency', 'WaitingConcurrency')) { continue }
+                if ($pendingReason -in @('PendingRetry', 'BlockedByServerConcurrency', 'WaitingConcurrency', 'LowDiskSpace')) { continue }
                 if ($pendingReason -eq 'BlockedByConcurrencyKey') {
                     $blockSafeUntilUtc = if ($pendingMatch[0].PSObject.Properties['BlockSafeUntilUtc']) { ConvertTo-OrchestratorUtcTime -Value $pendingMatch[0].BlockSafeUntilUtc } else { $null }
                     if ($null -ne $blockSafeUntilUtc -and ([datetimeoffset]$Now).ToUniversalTime() -le $blockSafeUntilUtc) { continue }
@@ -6202,6 +6240,147 @@ function Update-OrchestratorMaintenance {
     }
 }
 
+function Get-OrchestratorDiskSpaceThresholds {
+    # Local defaults are repaired here; the central cluster configuration is validated before use.
+    $block = [math]::Min(49, [math]::Max(1, [int]$script:Settings.DiskSpaceBlockFreePercent))
+    $resume = [math]::Min(50, [math]::Max($block + 1, [int]$script:Settings.DiskSpaceResumeFreePercent))
+    $warning = [math]::Min(50, [math]::Max($resume, [int]$script:Settings.DiskSpaceWarningFreePercent))
+    return [pscustomobject]@{ Block = $block; Resume = $resume; Warning = $warning }
+}
+
+function Update-OrchestratorDiskSpaceGuard {
+    # Measures the DATA share every DiskSpaceCheckMinutes. Below the block threshold no new job is
+    # launched on this server (scheduled, retry, Pipeline, -Force) until the resume threshold is
+    # reached; running jobs, supervision, housekeeping and SharePoint uploads continue.
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+
+    if (-not $script:Settings.DiskSpaceGuardEnabled) {
+        if ($null -ne $script:DiskSpaceGuard) {
+            Write-OrchestratorLog -Message 'Disk space guard disabled by configuration; launches no longer wait for disk space.' -Level WARN
+            $script:DiskSpaceGuard = $null
+            [void]$script:State.Remove('DiskSpaceGuard')
+        }
+        return
+    }
+    if ($null -ne $script:DiskSpaceGuard -and $script:LastDiskSpaceCheckAt -ne [datetime]::MinValue -and
+        ($Now - $script:LastDiskSpaceCheckAt).TotalMinutes -lt [int]$script:Settings.DiskSpaceCheckMinutes) { return }
+    $script:LastDiskSpaceCheckAt = $Now
+
+    $previous = $script:DiskSpaceGuard
+    # After a restart the persisted decision keeps an existing pause until the resume threshold.
+    if ($null -eq $previous -and $script:State -is [hashtable] -and $script:State['DiskSpaceGuard'] -is [System.Collections.IDictionary]) { $previous = [pscustomobject]$script:State['DiskSpaceGuard'] }
+    $thresholds = Get-OrchestratorDiskSpaceThresholds
+    $measurement = Get-SmartM365OrchestratorVolumeFreeSpace -Path ([string]$script:Settings.DiskSpaceDataPath) -TimeoutSeconds ([int]$script:Settings.DiskSpaceCheckTimeoutSeconds)
+    $decision = Get-SmartM365OrchestratorDiskSpaceDecision -Measurement $measurement -PreviousState $previous -BlockFreePercent $thresholds.Block -ResumeFreePercent $thresholds.Resume -WarningFreePercent $thresholds.Warning -NowUtc $Now.ToUniversalTime()
+    $script:DiskSpaceGuard = $decision
+    $script:State['DiskSpaceGuard'] = @{
+        State = [string]$decision.State; Blocked = [bool]$decision.Blocked; SinceUtc = [string]$decision.SinceUtc
+        FreePercent = $decision.FreePercent; FreeGB = $decision.FreeGB; TotalGB = $decision.TotalGB; MeasuredAtUtc = [string]$decision.MeasuredAtUtc
+        UnknownSinceUtc = [string]$decision.UnknownSinceUtc
+    }
+
+    $previousState = if ($null -ne $previous -and $previous.PSObject.Properties['State']) { [string]$previous.State } else { '' }
+    $wasBlocked = $null -ne $previous -and $previous.PSObject.Properties['Blocked'] -and [bool]$previous.Blocked
+    if ($decision.State -ne $previousState) {
+        if ($decision.Blocked -and -not $wasBlocked) {
+            Write-OrchestratorLog -Message ("Disk space guard: new launches paused on {0}. {1}" -f $env:COMPUTERNAME, $decision.Detail) -Level ERROR
+        }
+        elseif ($wasBlocked -and -not $decision.Blocked) {
+            Write-OrchestratorLog -Message ("Disk space guard: launches resumed on {0}. {1}" -f $env:COMPUTERNAME, $decision.Detail)
+        }
+        else {
+            $level = if ($decision.State -eq 'OK') { 'INFO' } else { 'WARN' }
+            Write-OrchestratorLog -Message ("Disk space guard ({0}, path {1}): {2}" -f $decision.State, $decision.Path, $decision.Detail) -Level $level
+        }
+    }
+    elseif ($decision.State -eq 'Unknown' -or ($decision.Blocked -and [string]$decision.Error)) {
+        Write-OrchestratorRuntimeUpdateWarning -Key ('disk-space:' + [string]$decision.Error) -Message ("Disk space guard: {0}" -f $decision.Detail) -Now $Now
+    }
+    try { Send-OrchestratorDiskSpaceAlert -Now $Now -Resumed:($wasBlocked -and -not $decision.Blocked) }
+    catch { Write-OrchestratorLog -Message ("Disk space alert failed; the guard itself is unchanged: {0}" -f $_.Exception.Message) -Level WARN }
+}
+
+function Send-OrchestratorDiskSpaceAlert {
+    # One mail per transition for the whole cluster: every server measures the same DATA share, so
+    # the last alert sent is shared in Orchestrator-DiskSpaceAlert.json under a lock. Pause alerts
+    # repeat every DiskSpaceAlertRepeatHours; the resume mail comes from a server that resumed.
+    param([Parameter(Mandatory = $true)][datetime]$Now, [switch]$Resumed)
+
+    $guard = $script:DiskSpaceGuard
+    if ($null -eq $guard) { return }
+    $nowUtc = $Now.ToUniversalTime()
+    $wanted = switch ([string]$guard.State) {
+        'Low' { 'Low' }
+        'Warning' { 'Warning' }
+        'Unknown' {
+            $since = ConvertTo-OrchestratorUtcTime -Value ([string]$guard.UnknownSinceUtc)
+            if ($null -ne $since -and ([datetimeoffset]$nowUtc - $since).TotalMinutes -ge 30) { 'Unknown' } else { '' }
+        }
+        default { 'OK' }
+    }
+    if (-not $Resumed -and $wanted -eq '') { return }
+
+    $alertPath = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath 'Orchestrator-DiskSpaceAlert.json'
+    $lockPath = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath 'Orchestrator-DiskSpaceAlert.lock'
+    $lock = Enter-OrchestratorSharePointMirrorLock -Path $lockPath -StaleMinutes 10
+    if ($null -eq $lock) { return }
+    try {
+        $last = $null
+        try {
+            $selected = Get-SmartM365JsonReadPath $alertPath -Optional
+            if ($selected) { $last = (Read-SmartM365JsonDocument -Path $selected).Document }
+        }
+        catch { Write-OrchestratorRuntimeUpdateWarning -Key ('disk-space-alert-read:' + $_.Exception.Message) -Message ("Disk space alert state unreadable; it restarts empty: {0}" -f $_.Exception.Message) -Now $Now }
+        $lastKind = if ($null -ne $last -and $last.PSObject.Properties['Kind']) { [string]$last.Kind } else { '' }
+        $lastSent = if ($null -ne $last -and $last.PSObject.Properties['SentAtUtc']) { ConvertTo-OrchestratorUtcTime -Value ([string]$last.SentAtUtc) } else { $null }
+
+        $send = ''
+        $record = ''
+        if ($Resumed -and $lastKind -eq 'Low') { $send = 'Resumed'; $record = if ($wanted -in @('Warning', 'Unknown')) { $wanted } else { 'OK' } }
+        elseif ($wanted -eq 'Low') {
+            $repeatDue = $null -eq $lastSent -or ([datetimeoffset]$nowUtc - $lastSent).TotalHours -ge [int]$script:Settings.DiskSpaceAlertRepeatHours
+            if ($lastKind -ne 'Low' -or $repeatDue) { $send = 'Low'; $record = 'Low' }
+        }
+        elseif ($wanted -eq 'Warning' -and $lastKind -notin @('Warning', 'Low')) { $send = 'Warning'; $record = 'Warning' }
+        elseif ($wanted -eq 'Unknown' -and $lastKind -notin @('Unknown', 'Low')) { $send = 'Unknown'; $record = 'Unknown' }
+        elseif ($wanted -eq 'OK' -and $lastKind -in @('Warning', 'Unknown')) {
+            # Re-arm silently, with a margin so that servers measuring around the warning level do not alternate mails.
+            if ($null -ne $guard.FreePercent -and [double]$guard.FreePercent -ge ([double]$guard.WarningFreePercent + 2)) { $record = 'OK' }
+        }
+        if (-not $send -and -not $record) { return }
+
+        $sent = $true
+        if ($send) {
+            $title = switch ($send) {
+                'Low' { 'DATA disk space low: new launches paused' }
+                'Resumed' { 'DATA disk space recovered: launches resumed' }
+                'Warning' { 'DATA disk space warning' }
+                default { 'DATA disk space unknown' }
+            }
+            $message = switch ($send) {
+                'Low' { 'New inventory launches (scheduled, retries, Pipeline requests, -Force) are paused on every server that sees this level. Running jobs continue. Free space on the DATA share to resume.' }
+                'Resumed' { 'Free space on the DATA share reached the resume threshold; scheduled launches and queued requests resume.' }
+                'Warning' { 'Free space on the DATA share is below the warning level. Launches continue but will pause at the block threshold.' }
+                default { 'The free space of the DATA share could not be measured for 30 minutes. Launches continue; check the share and the file server.' }
+            }
+            $summary = [ordered]@{
+                Tenant = $Tenant; Server = $env:COMPUTERNAME; State = [string]$guard.State
+                FreePercent = $guard.FreePercent; FreeGB = $guard.FreeGB; TotalGB = $guard.TotalGB
+                Thresholds = ('pause below {0} %, resume at {1} %, warning below {2} %' -f $guard.BlockFreePercent, $guard.ResumeFreePercent, $guard.WarningFreePercent)
+                Detail = [string]$guard.Detail
+            }
+            $body = New-SmartM365EmailBody -Title $title -Category 'SmartInventory disk space' -Message $message -SummaryData $summary
+            $sent = [bool](Send-OrchestratorMail -Subject ("[SmartM365 Orchestrator][$Tenant] $title") -HtmlBody $body -IsError:($send -in @('Low', 'Unknown')))
+            if (-not $sent) { Write-OrchestratorLog -Message ("Disk space alert '{0}' not sent; it is retried at the next check." -f $send) -Level WARN; return }
+            Write-OrchestratorLog -Message ("Disk space alert sent: {0}." -f $send)
+        }
+        $document = [ordered]@{ Kind = $record; SentAtUtc = if ($send) { $nowUtc.ToString('o') } elseif ($null -ne $lastSent) { $lastSent.UtcDateTime.ToString('o') } else { '' }; Server = $env:COMPUTERNAME; LastMail = if ($send) { $send } else { '' } }
+        try { Write-FileAtomically -Path $alertPath -Content ($document | ConvertTo-Json -Depth 3) }
+        catch { Write-OrchestratorLog -Message ("Disk space alert state could not be saved; another server may repeat the mail: {0}" -f $_.Exception.Message) -Level WARN }
+    }
+    finally { Exit-OrchestratorSharePointMirrorLock -LockStream $lock -Path $lockPath }
+}
+
 function Invoke-MissedRunCatchUp {
     # Startup only: apply MissedRunPolicy=Skip by fast-forwarding past occurrences.
     # RunOnce jobs keep their due occurrence and are caught up by the launch phase.
@@ -6382,6 +6561,18 @@ function Invoke-LaunchPhase {
     param([Parameter(Mandatory = $true)][datetime]$Now)
 
     if (-not $script:MaintenanceHealthy) { return }
+    $diskSpaceGuard = if (Test-Path -LiteralPath 'variable:script:DiskSpaceGuard') { $script:DiskSpaceGuard } else { $null }
+    if (-not (Test-Path -LiteralPath 'variable:script:DiskSpaceDeferredForced') -or $null -eq $script:DiskSpaceDeferredForced) { $script:DiskSpaceDeferredForced = @{} }
+    if ($null -ne $diskSpaceGuard -and [bool]$diskSpaceGuard.Blocked) {
+        # Low DATA disk space: nothing new starts; forced runs stay queued and start once it recovers.
+        foreach ($forcedName in @($script:ForcedPending)) {
+            if ($script:DiskSpaceDeferredForced.ContainsKey($forcedName)) { continue }
+            $script:DiskSpaceDeferredForced[$forcedName] = $true
+            Write-OrchestratorLog -Message ("Job {0}: -Force deferred until DATA disk space recovers. {1}" -f $forcedName, $diskSpaceGuard.Detail) -Level WARN
+        }
+        return
+    }
+    $script:DiskSpaceDeferredForced.Clear()
     $limit = $script:Settings.MaxConcurrency
     $launchedThisTick = New-Object System.Collections.Generic.List[string]
     try { Invoke-RetryHandoffAdoption -Now $Now }
@@ -7600,6 +7791,13 @@ function Set-OrchestratorCentralClusterSettings {
         PeerAlertReminderMinutes = 'Int32'
         PeerAlertMailRetryMinutes = 'Int32'
         PeerRecoveryEmailEnabled = 'Boolean'
+        DiskSpaceGuardEnabled = 'Boolean'
+        DiskSpaceBlockFreePercent = 'Int32'
+        DiskSpaceResumeFreePercent = 'Int32'
+        DiskSpaceWarningFreePercent = 'Int32'
+        DiskSpaceCheckMinutes = 'Int32'
+        DiskSpaceCheckTimeoutSeconds = 'Int32'
+        DiskSpaceAlertRepeatHours = 'Int32'
     }
     foreach ($propertyName in $mapping.Keys) {
         if (-not $ClusterDocument.PSObject.Properties[$propertyName]) { continue }
@@ -7651,6 +7849,10 @@ $script:PipelineWaitState = @{}
 $script:DependencyWaitReason = @{}
 # OS, CPU, memory and system drive, read once at startup and published in the heartbeat.
 $script:SystemInfo = $null
+# Last disk space decision for the DATA share (persisted in the state to keep the pause across recycles).
+$script:DiskSpaceGuard = $null
+$script:LastDiskSpaceCheckAt = [datetime]::MinValue
+$script:DiskSpaceDeferredForced = @{}
 # CPU and memory use sampled every 5 minutes; samples older than 12 hours are not kept.
 $script:ResourceSamples = [System.Collections.Generic.List[object]]::new()
 $script:LastResourceSampleAt = [datetime]::MinValue
@@ -7963,6 +8165,18 @@ try {
         PeerAlertReminderMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerAlertReminderMinutes' -DefaultValue 240))
         PeerAlertMailRetryMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerAlertMailRetryMinutes' -DefaultValue 15))
         PeerRecoveryEmailEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'PeerRecoveryEmailEnabled' -DefaultValue $true
+        # Disk space guard on the DATA share; the central cluster configuration overrides these defaults.
+        DiskSpaceGuardEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'DiskSpaceGuardEnabled' -DefaultValue $true
+        DiskSpaceDataPath = $(
+            $diskSpaceDataPath = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'DataAllRootPath' -DefaultValue '')
+            if ([string]::IsNullOrWhiteSpace($diskSpaceDataPath) -or $diskSpaceDataPath -match '\{\{[^}]+\}\}') { $sharedDataFolder } else { $diskSpaceDataPath }
+        )
+        DiskSpaceBlockFreePercent = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DiskSpaceBlockFreePercent' -DefaultValue 10
+        DiskSpaceResumeFreePercent = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DiskSpaceResumeFreePercent' -DefaultValue 12
+        DiskSpaceWarningFreePercent = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DiskSpaceWarningFreePercent' -DefaultValue 15
+        DiskSpaceCheckMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DiskSpaceCheckMinutes' -DefaultValue 5))
+        DiskSpaceCheckTimeoutSeconds = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DiskSpaceCheckTimeoutSeconds' -DefaultValue 10))
+        DiskSpaceAlertRepeatHours = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DiskSpaceAlertRepeatHours' -DefaultValue 6))
         SendDailySummaryEmail = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'SendDailySummaryEmail' -DefaultValue $false
         DailySummaryTime = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'DailySummaryTime' -DefaultValue '07:00')
         OrchestratorLogRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorLogRetentionDays' -DefaultValue 30
@@ -8126,6 +8340,8 @@ try {
     Write-OrchestratorLog -Message ("Authenticode context: enabled={0}; mode={1}; allowedThumbprints={2}; checkCoreModule={3}; checkWindowsPowerShellModule={4}; installTrustedCertificates={5}; trustedCertificatePaths={6}; installRoot={7}; installTrustedPublisher={8}." -f $script:Settings.AuthenticodeValidationEnabled, $script:Settings.AuthenticodeValidationMode, @($script:Settings.AuthenticodeAllowedThumbprints).Count, $script:Settings.AuthenticodeCheckCoreModule, $script:Settings.AuthenticodeCheckWindowsPowerShellModule, $script:Settings.AuthenticodeInstallTrustedCertificates, @($script:Settings.AuthenticodeTrustedCertificatePaths).Count, $script:Settings.AuthenticodeInstallTrustedRoot, $script:Settings.AuthenticodeInstallTrustedPublisher)
     Write-OrchestratorLog -Message ("Peer monitoring context: enabled={0}; jobMonitoring={1}; expectedServers={2}; checkIntervalSeconds={3}; heartbeatStaleMinutes={4}; confirmationChecks={5}; jobStartGraceMinutes={6}; reminderMinutes={7}; recycleGraceMinutes={8}." -f $script:Settings.PeerMonitoringEnabled, $script:Settings.PeerJobMonitoringEnabled, (@($script:Settings.ExpectedOrchestratorServers) -join ', '), $script:Settings.PeerMonitoringCheckIntervalSeconds, $script:Settings.PeerHeartbeatStaleMinutes, $script:Settings.PeerMonitoringConfirmationChecks, $script:Settings.PeerJobStartGraceMinutes, $script:Settings.PeerAlertReminderMinutes, (Get-OrchestratorPeerRecycleGrace))
     Write-OrchestratorLog -Message ("Runtime update context: autoRecycle={0}; checkIntervalSeconds={1}; stableChecks={2}; cooldownMinutes={3}; monitorCoreModule={4}; sendUpdateEmail={5}; baselineOrchestrator={6}; baselineCore={7}." -f $script:Settings.AutoRecycleOnRuntimeUpdate, $script:Settings.RuntimeUpdateCheckIntervalSeconds, $script:Settings.RuntimeUpdateStableChecks, $script:Settings.RuntimeUpdateCooldownMinutes, $script:Settings.MonitorCoreModuleVersion, $script:Settings.SendRuntimeUpdateEmail, $script:RuntimeUpdateBaseline.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion)
+    $diskSpaceThresholds = Get-OrchestratorDiskSpaceThresholds
+    Write-OrchestratorLog -Message ("Disk space guard: enabled={0}; path={1}; pause below {2} %; resume at {3} %; warning below {4} %; check every {5} min (timeout {6} s); alert repeat {7} h." -f $script:Settings.DiskSpaceGuardEnabled, $script:Settings.DiskSpaceDataPath, $diskSpaceThresholds.Block, $diskSpaceThresholds.Resume, $diskSpaceThresholds.Warning, $script:Settings.DiskSpaceCheckMinutes, $script:Settings.DiskSpaceCheckTimeoutSeconds, $script:Settings.DiskSpaceAlertRepeatHours)
     Write-OrchestratorLog -Message ("Retention context: orchestratorLogDays={0}; jobLogDays={1}; jobRunsCsvDays={2}; transcript={3}; transcriptDays={4}; transcriptFolder={5}; electionClaimDays={6}; pipelineRunArchiveDays={7}; pipelineRunArchiveRetentionDays={8}; mailHtmlCopyHours={9} (LOG-ALL configured={10})." -f $script:Settings.OrchestratorLogRetentionDays, $script:Settings.JobLogRetentionDays, $script:Settings.JobRunsCsvRetentionDays, $script:TranscriptStarted, $script:Settings.OrchestratorTranscriptRetentionDays, $script:Settings.OrchestratorTranscriptFolderPath, $script:Settings.ElectionClaimRetentionDays, $script:Settings.PipelineRunArchiveDays, $script:Settings.PipelineRunArchiveRetentionDays, $script:Settings.MailHtmlCopyRetentionHours, (-not [string]::IsNullOrWhiteSpace([string]$script:Settings.LogAllRootPath)))
     Install-OrchestratorAuthenticodeTrustedCertificates
     if (-not $script:Settings.MailEnabled) {
@@ -8248,6 +8464,12 @@ try {
         if (Test-OrchestratorRuntimeUpdate -Now $now) {
             $script:OrchestratorStopReason = 'RuntimeUpdate'
             break
+        }
+        try {
+            Update-OrchestratorDiskSpaceGuard -Now $now
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Disk space guard check failed without stopping the scheduler; the previous decision is kept: {0}" -f $_.Exception.Message) -Level ERROR
         }
         if (Test-OrchestratorStatePersistenceReady) {
             Invoke-LaunchPhase -Now $now

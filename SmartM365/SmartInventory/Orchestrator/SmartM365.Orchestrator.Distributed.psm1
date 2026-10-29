@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.20'
+$script:DistributedModuleVersion = '1.1.21'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -328,6 +328,144 @@ function Test-SmartM365OrchestratorPathAccess {
             Detail = [string]$probe.Detail
         }
     }
+}
+
+$script:VolumeFreeSpaceProbeScript = @'
+param($Path, $Answers)
+try {
+    [uint64]$available = 0; [uint64]$total = 0; [uint64]$volumeFree = 0
+    # The API expects a folder; a UNC share root needs its trailing backslash.
+    $directory = ([string]$Path).TrimEnd('\') + '\'
+    if (-not [SmartM365Orchestrator.DiskFreeSpaceNative]::GetDiskFreeSpaceEx($directory, [ref]$available, [ref]$total, [ref]$volumeFree)) {
+        $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw ('{0} (Win32 error {1})' -f ([ComponentModel.Win32Exception]::new($code)).Message, $code)
+    }
+    $Answers['Result'] = [pscustomobject]@{ Available = $available; Total = $total; VolumeFree = $volumeFree; Error = '' }
+}
+catch {
+    $exception = $_.Exception
+    while ($null -ne $exception.InnerException) { $exception = $exception.InnerException }
+    $Answers['Result'] = [pscustomobject]@{ Error = $exception.Message }
+}
+'@
+
+function Initialize-DiskFreeSpaceNative {
+    # Compiled once per process; probe runspaces of the same process see the type.
+    if ('SmartM365Orchestrator.DiskFreeSpaceNative' -as [type]) { return }
+    Add-Type -Namespace 'SmartM365Orchestrator' -Name 'DiskFreeSpaceNative' -MemberDefinition @'
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+[return: MarshalAs(UnmanagedType.Bool)]
+public static extern bool GetDiskFreeSpaceEx(string lpDirectoryName, out ulong lpFreeBytesAvailable, out ulong lpTotalNumberOfBytes, out ulong lpTotalNumberOfFreeBytes);
+'@
+}
+
+function Get-SmartM365OrchestratorVolumeFreeSpace {
+    <# Free space of the volume behind a local or UNC folder, with a hard time limit: a hung share must not stall a scheduler tick.
+       FreePercent uses the bytes the current account can write, so a share quota is honored. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Path,
+        [int]$TimeoutSeconds = 10,
+        # Tests only: replaces the native probe (same parameters: Path, Answers).
+        [string]$ProbeScript = ''
+    )
+
+    $result = [ordered]@{
+        Path = $Path; CheckedAtUtc = [datetime]::UtcNow.ToString('o'); Ready = $false
+        FreePercent = $null; FreeGB = $null; TotalGB = $null; VolumeFreeGB = $null; Error = ''
+    }
+    if ([string]::IsNullOrWhiteSpace($Path)) { $result.Error = 'The path is not configured.'; return [pscustomobject]$result }
+    if (-not $ProbeScript) {
+        try { Initialize-DiskFreeSpaceNative }
+        catch { $result.Error = 'Disk space API unavailable: ' + $_.Exception.Message; return [pscustomobject]$result }
+    }
+
+    $answers = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
+    $powerShell = [powershell]::Create()
+    $completed = $false
+    try {
+        $probeText = if ($ProbeScript) { $ProbeScript } else { $script:VolumeFreeSpaceProbeScript }
+        $null = $powerShell.AddScript($probeText).AddArgument($Path).AddArgument($answers)
+        $async = $powerShell.BeginInvoke()
+        $completed = $async.AsyncWaitHandle.WaitOne([math]::Max(1, $TimeoutSeconds) * 1000)
+        if ($completed) { try { $null = $powerShell.EndInvoke($async) } catch { Write-Verbose ("Disk space probe ended with an error: {0}" -f $_.Exception.Message) } }
+    }
+    finally {
+        # A hung SMB call cannot be interrupted: the probe is abandoned and finishes on its own.
+        if ($completed) { $powerShell.Dispose() } else { $null = $powerShell.BeginStop($null, $null) }
+    }
+
+    $probe = $null
+    if (-not $answers.TryGetValue('Result', [ref]$probe)) {
+        $result.Error = "No answer within $([math]::Max(1, $TimeoutSeconds)) second(s); the share is unreachable or hung."
+    }
+    elseif ([string]$probe.Error) { $result.Error = [string]$probe.Error }
+    elseif ([double]$probe.Total -le 0) { $result.Error = 'The volume reported a total size of zero.' }
+    else {
+        $result.Ready = $true
+        $result.FreePercent = [math]::Round([double]$probe.Available * 100 / [double]$probe.Total, 1)
+        $result.FreeGB = [math]::Round([double]$probe.Available / 1GB, 1)
+        $result.TotalGB = [math]::Round([double]$probe.Total / 1GB, 1)
+        $result.VolumeFreeGB = [math]::Round([double]$probe.VolumeFree / 1GB, 1)
+    }
+    return [pscustomobject]$result
+}
+
+function Get-SmartM365OrchestratorDiskSpaceDecision {
+    <# Launch decision with hysteresis: launches pause below BlockFreePercent and resume only at ResumeFreePercent.
+       A failed measurement never pauses launches by itself, but never lifts an existing pause either. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Measurement,
+        [AllowNull()]$PreviousState,
+        [double]$BlockFreePercent = 10,
+        [double]$ResumeFreePercent = 12,
+        [double]$WarningFreePercent = 15,
+        [datetime]$NowUtc = [datetime]::UtcNow
+    )
+
+    $previous = if ($PreviousState -is [System.Collections.IDictionary]) { [pscustomobject]$PreviousState } elseif ($null -ne $PreviousState) { $PreviousState } else { [pscustomobject]@{} }
+    foreach ($name in @('State', 'Blocked')) { if (-not $previous.PSObject.Properties[$name]) { $previous | Add-Member -NotePropertyName $name -NotePropertyValue $(if ($name -eq 'Blocked') { $false } else { '' }) } }
+    $wasBlocked = [bool]$previous.Blocked
+    $nowText = $NowUtc.ToUniversalTime().ToString('o')
+    # Figures stay in invariant culture: they end up in English logs, mails and the shared heartbeat.
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    $thresholdText = [string]::Format($inv, 'launches pause below {0} % and resume at {1} %', $BlockFreePercent, $ResumeFreePercent)
+    $decision = [ordered]@{
+        State = ''; Blocked = $false; Path = [string]$Measurement.Path; CheckedAtUtc = $nowText
+        FreePercent = $null; FreeGB = $null; TotalGB = $null; MeasuredAtUtc = ''
+        Error = [string]$Measurement.Error; Detail = ''; SinceUtc = $nowText; UnknownSinceUtc = ''
+        BlockFreePercent = $BlockFreePercent; ResumeFreePercent = $ResumeFreePercent; WarningFreePercent = $WarningFreePercent
+    }
+
+    if (-not [bool]$Measurement.Ready) {
+        if ($wasBlocked) {
+            # Keep the last valid figures: only a real measurement may lift the pause.
+            $decision.State = 'Low'; $decision.Blocked = $true
+            foreach ($name in @('FreePercent', 'FreeGB', 'TotalGB', 'MeasuredAtUtc')) { if ($previous.PSObject.Properties[$name]) { $decision[$name] = $previous.$name } }
+            $decision.Detail = [string]::Format($inv, 'DATA free space could not be measured ({0}); launches stay paused until a measurement reaches {1} %.', $Measurement.Error, $ResumeFreePercent)
+        }
+        else {
+            $decision.State = 'Unknown'
+            $decision.UnknownSinceUtc = if ([string]$previous.State -eq 'Unknown' -and $previous.PSObject.Properties['UnknownSinceUtc'] -and [string]$previous.UnknownSinceUtc) { [string]$previous.UnknownSinceUtc } else { $nowText }
+            $decision.Detail = [string]::Format($inv, 'DATA free space could not be measured: {0}. Launches continue.', $Measurement.Error)
+        }
+    }
+    else {
+        $percent = [double]$Measurement.FreePercent
+        $decision.FreePercent = $Measurement.FreePercent; $decision.FreeGB = $Measurement.FreeGB; $decision.TotalGB = $Measurement.TotalGB
+        $decision.MeasuredAtUtc = $nowText
+        $decision.Blocked = if ($wasBlocked) { $percent -lt $ResumeFreePercent } else { $percent -lt $BlockFreePercent }
+        $decision.State = if ($decision.Blocked) { 'Low' } elseif ($percent -lt $WarningFreePercent) { 'Warning' } else { 'OK' }
+        $figures = [string]::Format($inv, 'DATA free {0} % ({1} GiB of {2} GiB)', $Measurement.FreePercent, $Measurement.FreeGB, $Measurement.TotalGB)
+        $decision.Detail = switch ($decision.State) {
+            'Low' { '{0}; new launches paused, running jobs continue; {1}.' -f $figures, $thresholdText }
+            'Warning' { [string]::Format($inv, '{0} is below the {1} % warning level; {2}.', $figures, $WarningFreePercent, $thresholdText) }
+            default { '{0}.' -f $figures }
+        }
+    }
+    if ([string]$previous.State -eq $decision.State -and $previous.PSObject.Properties['SinceUtc'] -and [string]$previous.SinceUtc) { $decision.SinceUtc = [string]$previous.SinceUtc }
+    return [pscustomobject]$decision
 }
 
 function Test-PrerequisiteCacheEntry {
@@ -1702,7 +1840,9 @@ Export-ModuleMember -Function @(
     'Get-SmartM365OrchestratorCertificateCandidate',
     'Get-SmartM365OrchestratorCachedCertificateReadiness',
     'Test-SmartM365OrchestratorPathAccess',
-    'Test-SmartM365OrchestratorLaunchPrerequisite'
+    'Test-SmartM365OrchestratorLaunchPrerequisite',
+    'Get-SmartM365OrchestratorVolumeFreeSpace',
+    'Get-SmartM365OrchestratorDiskSpaceDecision'
 )
 
 # SIG # Begin signature block
