@@ -197,7 +197,12 @@ function Read-SemtRemoteAttemptResult {
 
     $path = Join-Path -Path $RemoteDataShare -ChildPath ("State\Results\{0}.json" -f $CorrelationId)
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        return [pscustomobject]@{ Exists = $false; State = ''; Completed = $false; Result = $null; Path = $path; Detail = 'No result for this attempt on the target.' }
+        # Say why: a missing data folder means the endpoint wrote nothing visible (not started,
+        # access denied or blocked on the target), not only that the attempt has not finished.
+        $reason = if (-not (Test-Path -LiteralPath $RemoteDataShare -PathType Container)) { 'the endpoint data folder is not visible through the administrative share' }
+        elseif (-not (Test-Path -LiteralPath (Join-Path -Path $RemoteDataShare -ChildPath 'State\Results') -PathType Container)) { 'the endpoint data folder has no State\Results folder' }
+        else { 'no result file for this attempt' }
+        return [pscustomobject]@{ Exists = $false; State = ''; Completed = $false; Result = $null; Path = $path; Detail = ('No result for this attempt on the target ({0}).' -f $reason) }
     }
     try {
         $document = Read-SemtJsonFile -Path $path -Required
@@ -331,9 +336,12 @@ function Copy-SemtCentralEvidence {
         [object[]]$EvidenceRules = @()
     )
 
-    if (-not (Test-Path -LiteralPath $RemoteDataShare -PathType Container)) { return 0 }
     if (Test-Path -LiteralPath $TargetPath) { Remove-Item -LiteralPath $TargetPath -Recurse -Force -ErrorAction SilentlyContinue }
     New-SemtDirectory -Path $TargetPath
+    if (-not (Test-Path -LiteralPath $RemoteDataShare -PathType Container)) {
+        Add-Content -LiteralPath (Join-Path -Path $TargetPath -ChildPath 'CentralLogCollection.txt') -Value ('{0} No endpoint evidence for CorrelationId={1}: the endpoint data folder {2} is not visible through the administrative share (not created, access denied, or blocked on the target). Check the target locally and the EDR console.' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$CorrelationId,$RemoteDataShare) -Encoding UTF8
+        return 0
+    }
     $count = 0
     if ($Mode -eq 'Full') {
         foreach ($child in @('Logs','Output','State','Transcripts','LastRun.json')) {

@@ -284,6 +284,18 @@ try {
     Write-SemtJsonFileAtomic -Path (Join-Path $share 'State\Results\attempt-3.json') -InputObject ([pscustomobject]@{ CorrelationId = 'attempt-3'; State = 'Completed'; FinalStatus = 'ENROLLED' })
     Test-Step 'matching completed attempt result is accepted' { (Read-SemtRemoteAttemptResult -RemoteDataShare $share -CorrelationId 'attempt-3').Completed }
     Test-Step 'missing attempt result is reported, not invented' { -not (Read-SemtRemoteAttemptResult -RemoteDataShare $share -CorrelationId 'attempt-4').Exists }
+    # Why there is no result: data folder not visible, no Results folder, or no file for this attempt.
+    $hiddenShare = Join-Path $tempRoot 'TargetShareNotVisible'
+    $emptyShare = Join-Path $tempRoot 'TargetShareEmpty'
+    New-Item -ItemType Directory -Path $emptyShare -Force | Out-Null
+    Test-Step 'missing attempt result says why (data folder not visible, no Results folder, no file)' {
+        (Read-SemtRemoteAttemptResult -RemoteDataShare $hiddenShare -CorrelationId 'attempt-4').Detail -match 'data folder is not visible' -and (Read-SemtRemoteAttemptResult -RemoteDataShare $emptyShare -CorrelationId 'attempt-4').Detail -match 'no State\\Results folder' -and (Read-SemtRemoteAttemptResult -RemoteDataShare $share -CorrelationId 'attempt-4').Detail -match 'no result file for this attempt'
+    }
+    Test-Step 'evidence collection records why nothing was collected when the data folder is not visible' {
+        $evidenceTarget = Join-Path $tempRoot 'EvidenceNotVisible\Latest'
+        $copied = Copy-SemtCentralEvidence -RemoteDataShare $hiddenShare -RemoteDataRoot 'C:\ProgramData\WCH\Test' -TargetPath $evidenceTarget -CorrelationId 'attempt-4' -AttemptResult $null -AttemptStartedUtc ([datetime]::UtcNow)
+        $copied -eq 0 -and (Get-Content -LiteralPath (Join-Path $evidenceTarget 'CentralLogCollection.txt') -Raw) -match 'not visible through the administrative share'
+    }
     #endregion
 
     #region Inventory isolation
