@@ -108,7 +108,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.75
+1.5.76
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -158,7 +158,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.75"
+$ScriptVersion = "1.5.76"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2812,6 +2812,9 @@ function Write-OrchestratorHeartbeat {
         CertificateNotAfterUtc = if ($null -ne $script:LastCertificateReadiness) { [string]$script:LastCertificateReadiness.NotAfterUtc } else { '' }
         CertificateDaysRemaining = if ($null -ne $script:LastCertificateReadiness) { $script:LastCertificateReadiness.DaysRemaining } else { $null }
         ElectionPlanId = if ($null -ne $script:ElectionPlan) { [string]$script:ElectionPlan.PlanId } else { '' }
+        # Active or Inactive (orchestrator 1.5.76): an Inactive server launches no job.
+        ServerStateProtocol = 1
+        ServerState = Get-OrchestratorLocalServerState
         ElectedJobsOwned = if ($null -ne $script:ElectionPlan) { @($script:ElectionPlan.Assignments | Where-Object { $_.OwnerServer -eq $env:COMPUTERNAME } | ForEach-Object { [string]$_.JobName } | Sort-Object) } else { @() }
         StatePersistenceHealthy = [bool]$script:StatePersistenceHealthy
         StatePersistenceFailureCount = [int]$script:StatePersistenceFailureCount
@@ -2865,6 +2868,8 @@ function Test-JobAllowedOnNamedServer {
         [Parameter(Mandatory = $true)][string]$ServerName
     )
 
+    # An Inactive peer is expected to start nothing: no JobNotStarted incident for it.
+    if (-not (Test-OrchestratorLocalServerActive -ServerName $ServerName)) { return $false }
     switch ([string]$Job.AssignmentMode) {
         'Manual' { return $false }
         'Elected' {
@@ -5427,12 +5432,32 @@ function Get-ManualJobMissingCapabilities {
     return @(@($Job.RequiredCapabilities) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) -and [string]$_ -notin $ready } | ForEach-Object { [string]$_ })
 }
 
+function Test-OrchestratorLocalServerActive {
+    # Cluster ServerStates (1.5.76): an Inactive server keeps running as a resident but launches no job.
+    # Without explicit states (older cluster document, local configuration) every server is Active.
+    # -ServerName checks a peer with the same rule (peer job monitoring); default = this server.
+    param([string]$ServerName = '')
+    $settings = if (Test-Path -LiteralPath 'variable:script:Settings') { $script:Settings } else { $null }
+    if ($null -eq $settings -or -not $settings.PSObject.Properties['ServerStates']) { return $true }
+    $states = $settings.ServerStates
+    $localServerName = if ([string]::IsNullOrWhiteSpace($ServerName)) { ([string]$env:COMPUTERNAME).ToUpperInvariant() } else { $ServerName.Trim().ToUpperInvariant() }
+    if ($states -is [hashtable] -and $states.ContainsKey($localServerName)) { return ([string]$states[$localServerName] -eq 'Active') }
+    return -not ($settings.PSObject.Properties['ServerStatesExplicit'] -and [bool]$settings.ServerStatesExplicit)
+}
+
+function Get-OrchestratorLocalServerState {
+    if (Test-OrchestratorLocalServerActive) { return 'Active' }
+    return 'Inactive'
+}
+
 function Test-JobAllowedOnServer {
     param(
         [Parameter(Mandatory = $true)]$Job,
         [switch]$AllowManual
     )
 
+    # An Inactive server takes no job at all: elected, pinned, legacy, manual (-Force), pipeline or adopted retry.
+    if (-not (Test-OrchestratorLocalServerActive)) { return $false }
     switch ([string]$Job.AssignmentMode) {
         'Manual' { return ([bool]$AllowManual -and @(Get-ManualJobMissingCapabilities -Job $Job).Count -eq 0) }
         'Elected' {
@@ -5496,12 +5521,13 @@ function Update-OrchestratorServerCapabilities {
         $capabilities | Add-Member -NotePropertyName ElectionWeight -NotePropertyValue $script:Settings.ElectionWeight -Force
         $localJobPolicy = if ($script:Settings.ServerJobPolicies.ContainsKey($env:COMPUTERNAME)) { $script:Settings.ServerJobPolicies[$env:COMPUTERNAME] } else { $null }
         $capabilities | Add-Member -NotePropertyName ServerJobPolicy -NotePropertyValue $localJobPolicy -Force
+        $capabilities | Add-Member -NotePropertyName ServerState -NotePropertyValue (Get-OrchestratorLocalServerState) -Force
         # Launch-time prerequisite blocks stay applied until their own re-check passes.
         $script:ServerCapabilitiesBase = $capabilities
         Publish-OrchestratorEffectiveCapability
         $readyText = if (@($script:ServerCapabilities.ReadyCapabilities).Count -gt 0) { @($script:ServerCapabilities.ReadyCapabilities) -join ', ' } else { 'none' }
         $jobPolicyText = if ($null -ne $localJobPolicy) { 'only jobs requiring ' + (@($localJobPolicy.OnlyJobsRequiring) -join ', ') } else { 'none' }
-        Write-OrchestratorLog -Message ("Automatic server capabilities refreshed: ready={0}; probeMode={1}; weight={2}; jobPolicy={3}; file={4}." -f $readyText, $capabilities.ProbeMode, $script:Settings.ElectionWeight, $jobPolicyText, $script:Settings.CapabilitiesPath)
+        Write-OrchestratorLog -Message ("Automatic server capabilities refreshed: ready={0}; probeMode={1}; weight={2}; jobPolicy={3}; serverState={4}; file={5}." -f $readyText, $capabilities.ProbeMode, $script:Settings.ElectionWeight, $jobPolicyText, (Get-OrchestratorLocalServerState), $script:Settings.CapabilitiesPath)
         foreach ($probe in @($capabilities.Results | Where-Object { -not $_.Ready })) {
             # A component that is simply not installed here is expected on servers that do not host it.
             if ($probe.PSObject.Properties['ComponentMissing'] -and [bool]$probe.ComponentMissing) {
@@ -5953,6 +5979,13 @@ function Test-OrchestratorElectionPlanAssignmentsEqual {
     return (Get-OrchestratorElectionPlanAssignmentSignature -Plan $Left) -ceq (Get-OrchestratorElectionPlanAssignmentSignature -Plan $Right)
 }
 
+function Get-OrchestratorInactiveServers {
+    if (-not $script:Settings.PSObject.Properties['ServerStates']) { return @() }
+    $states = $script:Settings.ServerStates
+    if ($states -isnot [hashtable]) { return @() }
+    return @($states.Keys | Where-Object { [string]$states[$_] -ne 'Active' } | Sort-Object)
+}
+
 function Update-OrchestratorElectionPlan {
     param([switch]$ForceRefresh)
 
@@ -5999,9 +6032,10 @@ function Update-OrchestratorElectionPlan {
             }
         }
 
+        $inactiveServers = @(Get-OrchestratorInactiveServers)
         $preserveOwners = -not $script:ElectionRebalanceRequested -and -not $pendingRebalanceRequest -and
-            (Test-SmartM365OrchestratorCanPreserveOwners -PreviousPlan $sharedPlan -ServerCapabilities $capabilities)
-        $plan = Get-SmartM365OrchestratorElectionPlan -Jobs $script:Manifest.OrderedJobs -ServerCapabilities $capabilities -ServerWeights $weights -ServerJobPolicies $jobPolicies -DurationMinutesByJob (Get-OrchestratorDurationMedians) -PreviousPlan $sharedPlan -PreservePreviousOwners:$preserveOwners -NowUtc $nowUtc
+            (Test-SmartM365OrchestratorCanPreserveOwners -PreviousPlan $sharedPlan -ServerCapabilities $capabilities -InactiveServers $inactiveServers)
+        $plan = Get-SmartM365OrchestratorElectionPlan -Jobs $script:Manifest.OrderedJobs -ServerCapabilities $capabilities -ServerWeights $weights -ServerJobPolicies $jobPolicies -DurationMinutesByJob (Get-OrchestratorDurationMedians) -PreviousPlan $sharedPlan -PreservePreviousOwners:$preserveOwners -InactiveServers $inactiveServers -NowUtc $nowUtc
         $assignmentsChanged = -not (Test-OrchestratorElectionPlanAssignmentsEqual -Left $sharedPlan -Right $plan)
         $rebalanceRequestedBy = '<unknown>'
         if ($null -ne $rebalanceRequest) {
@@ -6066,6 +6100,10 @@ function Update-OrchestratorElectionPlan {
     }
 }
 function Write-ServerAllowlistSummary {
+    if (-not (Test-OrchestratorLocalServerActive)) {
+        Write-OrchestratorLog -Message ("Server inactive: no job will be launched on {0} (cluster ServerStates). Heartbeat, peer monitoring, maintenance, disk space guard, mails and mirror copy keep running; set the server Active in the Orchestrator GUI to give it jobs." -f $env:COMPUTERNAME) -Level WARN
+        return
+    }
     $blocked = @($script:Manifest.OrderedJobs | Where-Object { -not (Test-JobAllowedOnServer -Job $_) } | ForEach-Object { $_.Name })
     if ($blocked.Count -gt 0) {
         Write-OrchestratorLog -Message ("Jobs not owned by this server under the active assignment policy ({0}): {1}" -f $env:COMPUTERNAME, ($blocked -join ', '))
@@ -6514,6 +6552,8 @@ function Invoke-RetryHandoffAdoption {
     # adopted retry then goes through the normal launch gates; the claim takeover is atomic.
     param([Parameter(Mandatory = $true)][datetime]$Now)
     if (-not $script:Settings.DistributedSchedulingEnabled -or $null -eq $script:ElectionPlan) { return }
+    # An Inactive server never adopts a retry: it stays offered to the active servers.
+    if (-not (Test-OrchestratorLocalServerActive)) { return }
     $self = $env:COMPUTERNAME.ToUpperInvariant()
     foreach ($offer in @(Get-OrchestratorRetryOffers)) {
         $name = [string]$offer.JobName
@@ -6586,7 +6626,7 @@ function Invoke-LaunchPhase {
         $pipelineInfo = if ($isPipeline) { $script:PipelinePending[$name] } else { $null }
         if (-not (Test-JobAllowedOnServer -Job $job -AllowManual:$isForced)) {
             if ($isForced) {
-                $ownershipReason = if ($job.AssignmentMode -eq 'Elected') { "elected owner is '$(Get-ElectedJobOwner -JobName $name)'" } elseif ($job.AssignmentMode -eq 'Manual') { "required capabilities not ready on this server: $((Get-ManualJobMissingCapabilities -Job $job) -join ', ')" } else { "effective allowlist is '$((Get-JobEffectiveAllowedServers -Job $job) -join ', ')'" }
+                $ownershipReason = if (-not (Test-OrchestratorLocalServerActive)) { 'this server is Inactive in the cluster configuration' } elseif ($job.AssignmentMode -eq 'Elected') { "elected owner is '$(Get-ElectedJobOwner -JobName $name)'" } elseif ($job.AssignmentMode -eq 'Manual') { "required capabilities not ready on this server: $((Get-ManualJobMissingCapabilities -Job $job) -join ', ')" } else { "effective allowlist is '$((Get-JobEffectiveAllowedServers -Job $job) -join ', ')'" }
                 Write-OrchestratorLog -Message ("Job {0}: -Force refused on {1}; {2}." -f $name, $env:COMPUTERNAME, $ownershipReason) -Level WARN
                 $script:ForcedPending = @($script:ForcedPending | Where-Object { $_ -ne $name })
             }
@@ -7719,6 +7759,7 @@ function Show-DryRunPlan {
         if ($null -ne (Get-OrchestratorJobLaunchDefinition -Job $job)) { $flags += 'catalog engine' }
         elseif ($job.PSObject.Properties['LauncherPath'] -and -not [string]::IsNullOrWhiteSpace([string]$job.LauncherPath)) { $flags += ('launcher ' + [string]$job.LauncherPath + ' (deprecated)') }
         if ($job.AssignmentMode -eq 'Manual') { $flags += 'manual; schedule disabled by assignment policy' }
+        elseif (-not (Test-OrchestratorLocalServerActive)) { $flags += 'server inactive; no job is launched here' }
         elseif (-not (Test-JobAllowedOnServer -Job $job)) { $flags += ('not owned on this server; elected/pinned owner: ' + (Get-ElectedJobOwner -JobName $job.Name)) }
         $flagText = ''
         if ($flags.Count -gt 0) { $flagText = ' [' + ($flags -join '; ') + ']' }
@@ -7775,8 +7816,27 @@ function Set-OrchestratorCentralClusterSettings {
         }
     }
 
+    $previousLocalState = Get-OrchestratorLocalServerState
+    $previousStates = if ($script:Settings.ServerStates -is [hashtable]) { $script:Settings.ServerStates } else { @{} }
+    $serverStates = Get-SmartM365OrchestratorServerStateTable -ClusterDocument $ClusterDocument
     $script:Settings.ExpectedOrchestratorServers = $expectedServers
     $script:Settings.ServerJobPolicies = $policies
+    $script:Settings.ServerStates = $serverStates
+    $script:Settings.ServerStatesExplicit = [bool]($ClusterDocument.PSObject.Properties['ServerStates'] -and $null -ne $ClusterDocument.ServerStates)
+    $changedStates = @($serverStates.Keys | Sort-Object | Where-Object { $previousStates.Count -gt 0 -and [string]$previousStates[$_] -ne [string]$serverStates[$_] } | ForEach-Object { '{0}={1}' -f $_, $serverStates[$_] })
+    if ($changedStates.Count -gt 0 -and $script:LogReady) {
+        Write-OrchestratorLog -Message ("Server state changed in the cluster configuration: {0}; the election plan is rebalanced." -f ($changedStates -join ', '))
+    }
+    $newLocalState = Get-OrchestratorLocalServerState
+    if ($newLocalState -ne $previousLocalState -and $previousStates.Count -gt 0) {
+        # Republish the capabilities at once so every scheduler sees the new state, then rebalance.
+        $script:LastCapabilityRefreshUtc = [datetime]::MinValue
+        $script:ElectionRebalanceRequested = $true
+        if ($script:LogReady) {
+            if ($newLocalState -eq 'Active') { Write-OrchestratorLog -Message ("Server {0} is now Active: it can take jobs again." -f $env:COMPUTERNAME) }
+            else { Write-OrchestratorLog -Message ("Server {0} is now Inactive: no new job will be launched; jobs already running finish normally." -f $env:COMPUTERNAME) -Level WARN }
+        }
+    }
     $localServerName = ([string]$env:COMPUTERNAME).ToUpperInvariant()
     $script:Settings.ElectionWeight = if ($weights.ContainsKey($localServerName)) { [math]::Max(0.1, [double]$weights[$localServerName]) } else { 1.0 }
 
@@ -7892,6 +7952,7 @@ $script:StatePersistenceFailureCount = 0
 $script:StatePersistenceLastError = ''
 $script:LastStatePersistenceWarningUtc = [datetime]::MinValue
 $script:ServerCapabilities = $null
+$script:ServerStatesMigration = $null
 $script:ServerCapabilitiesBase = $null
 $script:PrerequisiteCache = @{}
 $script:PrerequisiteBlockedOccurrences = @{}
@@ -8106,6 +8167,9 @@ try {
         ElectionClaimRetentionMaxSecondsPerRun = [math]::Max(30, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionClaimRetentionMaxSecondsPerRun' -DefaultValue 120))
         ElectionWeight = $electionWeight
         ServerJobPolicies = $serverJobPolicies
+        # Filled from the central cluster ServerStates; empty and not explicit = every server Active.
+        ServerStates = @{}
+        ServerStatesExplicit = $false
         ExchangeOnlineOrganization = $exchangeOnlineOrganization
         DependencyWaitLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitLogIntervalMinutes' -DefaultValue 30))
         DependencyWaitTimeoutMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DependencyWaitTimeoutMinutes' -DefaultValue 1440))
@@ -8240,6 +8304,12 @@ try {
             ExpectedOrchestratorServers = @($expectedOrchestratorServers)
             ElectionWeightsByServer = if ($null -eq $electionWeightsByServer) { [pscustomobject]@{} } else { $electionWeightsByServer }
             ServerJobPolicies = if ($null -eq $serverJobPoliciesRaw) { [pscustomobject]@{} } else { $serverJobPoliciesRaw }
+            # Servers declared at bootstrap are Active; servers added later are Inactive until activated.
+            ServerStates = $(
+                $bootstrapStates = [ordered]@{}
+                foreach ($bootstrapServer in @($expectedOrchestratorServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ } | Sort-Object -Unique)) { $bootstrapStates[$bootstrapServer] = 'Active' }
+                [pscustomobject]$bootstrapStates
+            )
             PeerMonitoringEnabled = $script:Settings.PeerMonitoringEnabled
             PeerJobMonitoringEnabled = $script:Settings.PeerJobMonitoringEnabled
             PeerMonitoringCheckIntervalSeconds = $script:Settings.PeerMonitoringCheckIntervalSeconds
@@ -8259,6 +8329,7 @@ try {
         $script:Settings.CentralAuditPath = $centralSnapshot.Paths.AuditPath
         Set-OrchestratorCentralClusterSettings -ClusterDocument $centralSnapshot.Cluster
         $script:CentralClusterHash = $centralSnapshot.ClusterHash
+        $script:ServerStatesMigration = if ($centralSnapshot.PSObject.Properties['ServerStatesMigration']) { $centralSnapshot.ServerStatesMigration } else { $null }
     }
 
     $global:SmartM365MaintenanceMailContext = [pscustomobject]@{
@@ -8379,6 +8450,13 @@ try {
         Write-OrchestratorLog -Message ("Jobs manifest loaded: {0} ({1} jobs, {2} enabled)." -f $script:Settings.JobsManifestPath, @($script:Manifest.OrderedJobs).Count, @($script:Manifest.OrderedJobs | Where-Object { $_.Enabled }).Count)
         Write-OrchestratorTimeoutPolicySummary
         $script:ElectionPlan = Read-SharedElectionPlan
+        if ($null -ne $script:ServerStatesMigration -and [bool]$script:ServerStatesMigration.Migrated) {
+            Write-OrchestratorLog -Message ("Cluster configuration migrated to explicit server states: {0} stay Active (version {1}); servers added later are Inactive until activated." -f (@($script:ServerStatesMigration.ActiveServers) -join ', '), $script:ServerStatesMigration.VersionId)
+        }
+        elseif ($null -ne $script:ServerStatesMigration -and -not [string]::IsNullOrWhiteSpace([string]$script:ServerStatesMigration.Error)) {
+            Write-OrchestratorLog -Message ("Explicit server states could not be published yet; every declared server stays Active until a later start migrates them: {0}" -f $script:ServerStatesMigration.Error) -Level WARN
+        }
+        Write-OrchestratorLog -Message ("Server state: {0} ({1})." -f (Get-OrchestratorLocalServerState), $env:COMPUTERNAME)
         Write-ServerAllowlistSummary
     }
     catch {

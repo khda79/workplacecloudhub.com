@@ -3,6 +3,7 @@
   "ExpectedOrchestratorServers": [],
   "ElectionWeightsByServer": {},
   "ServerJobPolicies": {},
+  "ServerStates": {},
   "PeerMonitoringEnabled": true,
   "PeerJobMonitoringEnabled": true,
   "PeerMonitoringCheckIntervalSeconds": 60,

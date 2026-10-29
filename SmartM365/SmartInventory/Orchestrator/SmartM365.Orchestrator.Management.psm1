@@ -31,6 +31,7 @@ function Copy-OrchestratorConfigurationSnapshot {
 
 $script:ValidCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes')
 $script:ValidDays = @('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')
+$script:ValidServerStates = @('Active', 'Inactive')
 
 function ConvertTo-SmartM365OrchestratorHashtable {
     param([AllowNull()]$InputObject)
@@ -49,6 +50,46 @@ function ConvertTo-SmartM365OrchestratorHashtable {
         return @($InputObject | ForEach-Object { ConvertTo-SmartM365OrchestratorHashtable $_ })
     }
     return $InputObject
+}
+
+function Get-SmartM365OrchestratorServerStateTable {
+    # Server state (orchestrator 1.5.76): an Inactive server runs as a resident but never takes a job.
+    # ServerStates absent (cluster written before 1.5.76): every expected server stays Active.
+    # ServerStates present: a server without an Active entry is Inactive, so a new server is Inactive by default.
+    [CmdletBinding()]
+    param([AllowNull()]$ClusterDocument)
+    $result = @{}
+    if ($null -eq $ClusterDocument) { return $result }
+    $servers = if ($ClusterDocument.PSObject.Properties['ExpectedOrchestratorServers']) { @($ClusterDocument.ExpectedOrchestratorServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ }) } else { @() }
+    $hasStates = $ClusterDocument.PSObject.Properties['ServerStates'] -and $null -ne $ClusterDocument.ServerStates
+    $declared = @{}
+    if ($hasStates) {
+        $raw = ConvertTo-SmartM365OrchestratorHashtable $ClusterDocument.ServerStates
+        if ($raw -is [hashtable]) { foreach ($key in @($raw.Keys)) { $declared[([string]$key).Trim().ToUpperInvariant()] = ([string]$raw[$key]).Trim() } }
+    }
+    foreach ($server in $servers) {
+        $result[$server] = if (-not $hasStates -or ($declared.ContainsKey($server) -and $declared[$server] -ieq 'Active')) { 'Active' } else { 'Inactive' }
+    }
+    return $result
+}
+
+function Get-SmartM365OrchestratorInactiveServers {
+    [CmdletBinding()]
+    param([AllowNull()]$ClusterDocument)
+    $states = Get-SmartM365OrchestratorServerStateTable -ClusterDocument $ClusterDocument
+    return @($states.Keys | Where-Object { $states[$_] -eq 'Inactive' } | Sort-Object)
+}
+
+function Initialize-SmartM365OrchestratorServerStates {
+    # Makes the implicit pre-1.5.76 rule explicit: every server already declared stays Active.
+    # Returns $true when the document was changed (in place).
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$ClusterDocument)
+    if ($ClusterDocument.PSObject.Properties['ServerStates'] -and $null -ne $ClusterDocument.ServerStates) { return $false }
+    $states = [ordered]@{}
+    foreach ($server in @($ClusterDocument.ExpectedOrchestratorServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ } | Sort-Object -Unique)) { $states[$server] = 'Active' }
+    $ClusterDocument | Add-Member -NotePropertyName ServerStates -NotePropertyValue ([pscustomobject]$states) -Force
+    return $true
 }
 
 function Get-SmartM365OrchestratorConfigurationPaths {
@@ -378,6 +419,20 @@ function Test-SmartM365OrchestratorClusterDocument {
     $servers = if ($Document.PSObject.Properties['ExpectedOrchestratorServers']) { @($Document.ExpectedOrchestratorServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ }) } else { @() }
     if (@($servers).Count -eq 0) { $warnings.Add('ExpectedOrchestratorServers is empty.') }
     if (@($servers | Sort-Object -Unique).Count -ne @($servers).Count) { $errors.Add('ExpectedOrchestratorServers contains duplicates.') }
+    if ($Document.PSObject.Properties['ServerStates'] -and $null -ne $Document.ServerStates) {
+        $rawStates = ConvertTo-SmartM365OrchestratorHashtable $Document.ServerStates
+        if ($rawStates -isnot [hashtable]) { $errors.Add('ServerStates must be an object: { "SERVER": "Active" | "Inactive" }.') }
+        else {
+            foreach ($stateServer in @($rawStates.Keys)) {
+                if ([string]$rawStates[$stateServer] -notin $script:ValidServerStates) { $errors.Add("ServerStates.$stateServer must be Active or Inactive.") }
+                if (@($servers).Count -gt 0 -and ([string]$stateServer).Trim().ToUpperInvariant() -notin $servers) { $warnings.Add("Server state exists for non-expected server '$stateServer'.") }
+            }
+            $declaredStateServers = @($rawStates.Keys | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() })
+            foreach ($server in @($servers | Where-Object { $_ -notin $declaredStateServers })) { $warnings.Add("Server '$server' has no ServerStates entry: it is Inactive and takes no job.") }
+        }
+        $stateTable = Get-SmartM365OrchestratorServerStateTable -ClusterDocument $Document
+        if (@($servers).Count -gt 0 -and @($stateTable.Keys | Where-Object { $stateTable[$_] -eq 'Active' }).Count -eq 0) { $warnings.Add('No server is Active: no job will run.') }
+    }
     if ($Document.PSObject.Properties['ElectionWeightsByServer'] -and $null -ne $Document.ElectionWeightsByServer) {
         foreach ($property in @($Document.ElectionWeightsByServer.PSObject.Properties)) {
             if ([double]$property.Value -le 0) { $errors.Add("Election weight for '$($property.Name)' must be greater than zero.") }
@@ -415,12 +470,14 @@ function Test-SmartM365OrchestratorConfigurationConsistency {
     param([Parameter(Mandatory)]$JobsDocument, [Parameter(Mandatory)]$ClusterDocument)
     $errors = [Collections.Generic.List[string]]::new(); $warnings = [Collections.Generic.List[string]]::new()
     $servers = @($ClusterDocument.ExpectedOrchestratorServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ })
+    $inactiveServers = @(Get-SmartM365OrchestratorInactiveServers -ClusterDocument $ClusterDocument)
     foreach ($job in @($JobsDocument.Jobs)) {
         $assignmentMode = if ($job.PSObject.Properties['AssignmentMode'] -and $job.AssignmentMode) { [string]$job.AssignmentMode } else { 'Legacy' }
         if ($assignmentMode -ne 'Pinned') { continue }
         $allowedServers = if ($job.PSObject.Properties['AllowedServers']) { @($job.AllowedServers) } else { @() }
         $pinnedServer = @($allowedServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ })
         if ($pinnedServer.Count -eq 1 -and $pinnedServer[0] -notin $servers) { $errors.Add("Job '$($job.Name)': pinned server '$($pinnedServer[0])' is not in ExpectedOrchestratorServers.") }
+        elseif ($pinnedServer.Count -eq 1 -and [bool]$job.Enabled -and $pinnedServer[0] -in $inactiveServers) { $warnings.Add("Job '$($job.Name)': pinned server '$($pinnedServer[0])' is Inactive; the job will not run until the server is Active.") }
     }
     if ($ClusterDocument.PSObject.Properties['ServerJobPolicies']) {
         foreach ($property in @($ClusterDocument.ServerJobPolicies.PSObject.Properties)) { if ($property.Name.ToUpperInvariant() -notin $servers) { $warnings.Add("Server policy exists for non-expected server '$($property.Name)'.") } }
@@ -458,12 +515,41 @@ function Initialize-SmartM365OrchestratorCentralConfiguration {
     if (-not (Test-Path -LiteralPath $paths.ClusterPath)) {
         try { Write-SmartM365OrchestratorJsonAtomically $paths.ClusterPath $BootstrapClusterDocument -CreateNew } catch [IO.IOException] { if (-not (Test-Path -LiteralPath $paths.ClusterPath)) { throw } }
     }
+    $serverStatesMigration = Invoke-SmartM365OrchestratorServerStatesMigration -SharedDataFolderPath $SharedDataFolderPath
     $snapshot = Get-SmartM365OrchestratorConfigurationSnapshot $SharedDataFolderPath
     $jobsValidation = Test-SmartM365OrchestratorJobsDocument $snapshot.Jobs; $clusterValidation = Test-SmartM365OrchestratorClusterDocument $snapshot.Cluster
     if (-not $jobsValidation.Valid) { throw "Central jobs configuration is invalid: $($jobsValidation.Errors -join '; ')" }
     if (-not $clusterValidation.Valid) { throw "Central cluster configuration is invalid: $($clusterValidation.Errors -join '; ')" }
     $snapshot | Add-Member -NotePropertyName ManifestSync -NotePropertyValue $manifestSync
+    $snapshot | Add-Member -NotePropertyName ServerStatesMigration -NotePropertyValue $serverStatesMigration
     $snapshot
+}
+
+function Invoke-SmartM365OrchestratorServerStatesMigration {
+    # One-time explicit migration of a pre-1.5.76 cluster: the servers already declared are published
+    # as Active (versioned and audited like any publication), so only servers added later are Inactive.
+    # Never fatal: until it succeeds the implicit rule (no ServerStates = every server Active) applies.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SharedDataFolderPath)
+    $result = [pscustomobject]@{ Migrated = $false; ActiveServers = @(); VersionId = ''; Error = '' }
+    try {
+        $snapshot = Get-SmartM365OrchestratorConfigurationSnapshot $SharedDataFolderPath
+        if ($null -eq $snapshot.Cluster -or -not (Initialize-SmartM365OrchestratorServerStates -ClusterDocument $snapshot.Cluster)) { return $result }
+        $publication = Publish-SmartM365OrchestratorConfiguration -SharedDataFolderPath $SharedDataFolderPath -JobsDocument $snapshot.Jobs -ClusterDocument $snapshot.Cluster -ExpectedClusterHash $snapshot.ClusterHash -ChangeSummary 'Migration: explicit ServerStates, servers already declared stay Active' -ClusterOnly
+        $result.Migrated = $true
+        $result.ActiveServers = @($snapshot.Cluster.ServerStates.PSObject.Properties.Name)
+        $result.VersionId = [string]$publication.VersionId
+    }
+    catch {
+        # Another resident may have migrated first (hash changed): re-check before reporting an error.
+        $migrationError = $_.Exception.Message
+        try {
+            $current = Read-SmartM365OrchestratorJson (Get-SmartM365OrchestratorConfigurationPaths $SharedDataFolderPath).ClusterPath
+            if (-not ($current.PSObject.Properties['ServerStates'] -and $null -ne $current.ServerStates)) { $result.Error = $migrationError }
+        }
+        catch { $result.Error = $migrationError }
+    }
+    return $result
 }
 
 function Enter-ConfigurationLock {
@@ -483,7 +569,9 @@ function Publish-SmartM365OrchestratorConfiguration {
         [string]$ExpectedClusterHash = '',
         [string]$ChangeSummary = 'Configuration updated',
         [int]$LockTimeoutSeconds = 15,
-        [ValidateRange(0, 300)][int]$AtomicWriteRetrySeconds = 10
+        [ValidateRange(0, 300)][int]$AtomicWriteRetrySeconds = 10,
+        # Validates against JobsDocument but never rewrites the jobs file (cluster migration).
+        [switch]$ClusterOnly
     )
     $jobsValidation = Test-SmartM365OrchestratorJobsDocument $JobsDocument; $clusterValidation = Test-SmartM365OrchestratorClusterDocument $ClusterDocument
     $consistencyValidation = Test-SmartM365OrchestratorConfigurationConsistency $JobsDocument $ClusterDocument
@@ -496,7 +584,7 @@ function Publish-SmartM365OrchestratorConfiguration {
         if ($ExpectedClusterHash -and $ExpectedClusterHash -ne $currentClusterHash) { throw 'The cluster configuration changed after it was loaded. Refresh before publishing.' }
         $desiredJobsHash = Get-SmartM365OrchestratorContentHash -Content (Get-SmartM365OrchestratorJsonContent -Document $JobsDocument)
         $desiredClusterHash = Get-SmartM365OrchestratorContentHash -Content (Get-SmartM365OrchestratorJsonContent -Document $ClusterDocument)
-        $jobsChanged = $desiredJobsHash -ne $currentJobsHash
+        $jobsChanged = (-not $ClusterOnly) -and $desiredJobsHash -ne $currentJobsHash
         $clusterChanged = $desiredClusterHash -ne $currentClusterHash
         $versionId = '{0}_{1}' -f [datetime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'), [guid]::NewGuid().ToString('N').Substring(0, 8)
         $versionFolder = Join-Path $paths.VersionsFolderPath $versionId; New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
@@ -670,6 +758,7 @@ function Get-SmartM365OrchestratorServerStatus {
     if ($selectedPlan) { $planPath = $selectedPlan }
     if (Test-Path $planPath) { try { $plan = Read-SmartM365OrchestratorJson $planPath; foreach ($assignment in @($plan.Assignments)) { $assignments[[string]$assignment.JobName] = [string]$assignment.OwnerServer } } catch {} }
     $weights = ConvertTo-SmartM365OrchestratorHashtable $ClusterDocument.ElectionWeightsByServer; $policies = ConvertTo-SmartM365OrchestratorHashtable $ClusterDocument.ServerJobPolicies
+    $serverStates = Get-SmartM365OrchestratorServerStateTable -ClusterDocument $ClusterDocument
     $result = foreach ($server in @($ClusterDocument.ExpectedOrchestratorServers | Sort-Object -Unique)) {
         $serverName = ([string]$server).ToUpperInvariant(); $serverFolder = Join-Path $SharedDataFolderPath $server
         $heartbeatPath = Join-Path $serverFolder 'Orchestrator-Heartbeat.json'; $capabilitiesPath = Join-Path $serverFolder 'Orchestrator-Capabilities.json'; $heartbeatTime = [datetime]::MinValue
@@ -711,7 +800,7 @@ function Get-SmartM365OrchestratorServerStatus {
         # The live drive value wins; an older orchestrator only has the startup reading.
         $freePercent = & $usageValue 'SystemDriveFreePercent'
         if ($null -eq $freePercent) { $freePercent = & $systemValue 'SystemDriveFreePercent' }
-        [pscustomobject]@{ Server = [string]$server; Online = ($age -le [double]$ClusterDocument.PeerHeartbeatStaleMinutes); HeartbeatUtc = if ($heartbeatTime -eq [datetime]::MinValue) { $null } else { $heartbeatTime.ToUniversalTime() }; HeartbeatAgeMinutes = if ([double]::IsPositiveInfinity($age)) { $null } else { [math]::Round($age, 1) }; Capabilities = $capabilityText; Weight = if ($weights.ContainsKey($serverName)) { [double]$weights[$serverName] } else { 1.0 }; Policy = if ($policies.ContainsKey($serverName)) { @($policies[$serverName].OnlyJobsRequiring) -join ', ' } else { '' }; AssignedJobs = $assigned.Count; AssignedJobNames = $assigned -join ', '
+        [pscustomobject]@{ Server = [string]$server; State = $(if ($serverStates.ContainsKey($serverName)) { $serverStates[$serverName] } else { 'Inactive' }); Online = ($age -le [double]$ClusterDocument.PeerHeartbeatStaleMinutes); HeartbeatUtc = if ($heartbeatTime -eq [datetime]::MinValue) { $null } else { $heartbeatTime.ToUniversalTime() }; HeartbeatAgeMinutes = if ([double]::IsPositiveInfinity($age)) { $null } else { [math]::Round($age, 1) }; Capabilities = $capabilityText; Weight = if ($weights.ContainsKey($serverName)) { [double]$weights[$serverName] } else { 1.0 }; Policy = if ($policies.ContainsKey($serverName)) { @($policies[$serverName].OnlyJobsRequiring) -join ', ' } else { '' }; AssignedJobs = $assigned.Count; AssignedJobNames = $assigned -join ', '
             Version = if ($null -ne $heartbeat -and $heartbeat.PSObject.Properties['ScriptVersion']) { [string]$heartbeat.ScriptVersion } else { '' }
             Os = [string](& $systemValue 'Os'); Cpu = $(if ((& $systemValue 'LogicalProcessors')) { '{0} ({1} logical)' -f (& $systemValue 'Cpu'), (& $systemValue 'LogicalProcessors') } else { [string](& $systemValue 'Cpu') }); LogicalProcessors = & $systemValue 'LogicalProcessors'; MemoryGB = & $systemValue 'MemoryGB'
             SystemDriveSizeGB = & $systemValue 'SystemDriveSizeGB'; SystemDriveFreePercent = $freePercent; SystemDriveLow = $null -ne $freePercent -and [double]$freePercent -lt 10
@@ -727,7 +816,8 @@ Export-ModuleMember -Function @(
     'Test-SmartM365OrchestratorClusterDocument', 'Test-SmartM365OrchestratorConfigurationConsistency', 'Get-SmartM365OrchestratorConfigurationSnapshot', 'Initialize-SmartM365OrchestratorCentralConfiguration',
     'Publish-SmartM365OrchestratorConfiguration', 'Get-SmartM365OrchestratorConfigurationVersions', 'Restore-SmartM365OrchestratorConfigurationVersion',
     'Request-SmartM365OrchestratorRebalance', 'Get-SmartM365OrchestratorHistory', 'Get-SmartM365OrchestratorServerStatus',
-    'Get-SmartM365OrchestratorTimeoutPolicyExceptions'
+    'Get-SmartM365OrchestratorTimeoutPolicyExceptions', 'Get-SmartM365OrchestratorServerStateTable', 'Get-SmartM365OrchestratorInactiveServers',
+    'Initialize-SmartM365OrchestratorServerStates', 'Invoke-SmartM365OrchestratorServerStatesMigration'
 )
 
 # SIG # Begin signature block

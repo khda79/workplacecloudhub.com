@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline tests of the Operations launch features of the orchestrator GUI.
 .VERSION
-1.1.6
+1.1.7
 .NOTES
 GUI functions are extracted by AST and bound to the real XAML. The catalog is the committed
 template (read only); the published configuration is a copy of its jobs. No orchestrator, request
@@ -12,7 +12,8 @@ fictional script in a hidden window.
 Checks: job and manual lists, resolved command preview, confirmation and interactive flags,
 execution mode of on-premises jobs in the draft (set, reset, apply to all, validation), orchestrator
 actions identical to the former Launchers\Orchestrator .cmd files, request with the selected job,
-console start with quoted arguments.
+console start with quoted arguments, Run now with the orchestrator service account (runas command,
+account read from the scheduled task, managed account refused; runas itself is never started).
 #>
 [CmdletBinding()]
 param()
@@ -30,7 +31,7 @@ $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $folder 'Sm
 if ($errors.Count) { throw 'GUI parsing failed.' }
 foreach ($name in @('ConvertFrom-OrchestratorGuiXaml', 'Get-OrchestratorGuiPropertyValue', 'Set-JsonProperty', 'Copy-JsonDocument', 'Get-ComboText', 'Select-ComboText', 'Get-GuiLaunchCatalog', 'Get-GuiJobScriptVersion', 'Get-GuiSwiRow', 'Refresh-LaunchView',
         'Get-GuiLaunchPlanText', 'Update-SelectedLaunchPreview', 'Update-GuiPrepareRequestButton', 'Start-GuiConsoleProcess', 'Get-GuiOrchestratorActionCommand', 'Set-GuiJobExecutionMode', 'Request-SelectedJobRun',
-        'New-GuiWaitDialog', 'Close-GuiWaitDialog', 'Start-GuiSendSummary', 'Receive-GuiSendSummary')) {
+        'New-GuiWaitDialog', 'Close-GuiWaitDialog', 'Start-GuiSendSummary', 'Receive-GuiSendSummary', 'Get-GuiOrchestratorServiceAccount', 'Get-GuiRunAsArgumentList')) {
     $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     if ($null -eq $definition) { throw "Missing GUI function: $name" }
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -38,7 +39,7 @@ foreach ($name in @('ConvertFrom-OrchestratorGuiXaml', 'Get-OrchestratorGuiPrope
 $assignment = $ast.Find({ param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$xaml' }, $true)
 $window = ConvertFrom-OrchestratorGuiXaml -Text $assignment.Right.Expression.Value
 $script:Controls = @{}
-foreach ($name in @('OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'RequestPrepareButton',
+foreach ($name in @('OperationsTabs', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RunJobAsServiceAccountButton', 'RequestJobButton', 'RequestPrepareButton',
         'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox', 'OrchestratorStartButton', 'OrchestratorStopButton',
         'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'StatusText', 'PlanningGrid', 'IncludeDependenciesCheck', 'OperationsRunningGrid')) {
     $script:Controls[$name] = $window.FindName($name)
@@ -85,6 +86,19 @@ try {
     $script:Controls.LaunchJobsGrid.SelectedItem = $cloud
     Update-SelectedLaunchPreview -Kind Job
     Assert-Case ($script:Controls.RunJobNowButton.IsEnabled -and $script:Controls.RequestJobButton.IsEnabled -and -not $script:Controls.JobExecutionModeCombo.IsEnabled) 'Cloud job: run and request enabled, mode disabled.'
+    Assert-Case ($script:Controls.RunJobAsServiceAccountButton.IsEnabled) 'Run now with service account follows the selection.'
+    # Service account: read from the orchestrator scheduled task (fictional tasks, nothing queried or started).
+    $fakeTask = { param($Name, $User) [pscustomobject]@{ TaskName = $Name; Principal = [pscustomobject]@{ UserId = $User } } }
+    $account = Get-GuiOrchestratorServiceAccount -Tasks @((& $fakeTask 'SmartM365 Inventory Orchestrator - other' 'CONTOSO\svc_other'), (& $fakeTask 'SmartM365 Inventory Orchestrator - demo' 'CONTOSO\svc_inventory'))
+    Assert-Case ($account.Account -eq 'CONTOSO\svc_inventory' -and $account.TaskName -eq 'SmartM365 Inventory Orchestrator - demo') 'The task of the GUI tenant gives the service account.'
+    $account = Get-GuiOrchestratorServiceAccount -Tasks @((& $fakeTask 'SmartM365 Inventory Orchestrator - demo' 'svc_inventory'))
+    Assert-Case ($account.Account -eq ('{0}\svc_inventory' -f $env:USERDOMAIN)) 'An account without domain gets the user domain.'
+    foreach ($bad in @(@(), @((& $fakeTask 'SmartM365 Inventory Orchestrator - demo' 'CONTOSO\gmsa_inventory$')))) {
+        $refused = $false; try { [void](Get-GuiOrchestratorServiceAccount -Tasks $bad) } catch { $refused = $true }
+        Assert-Case $refused 'No task or a managed account (no password) is refused with an error.'
+    }
+    $runAs = Get-GuiRunAsArgumentList -Account 'CONTOSO\svc_inventory' -Engine 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -Arguments @('-NoProfile', '-File', 'C:\Smart Inventory\Invoke-SmartM365InventoryJob.ps1', 'Job-A', '-Now', '-Tenant', 'demo')
+    Assert-Case ($runAs -ceq '/user:CONTOSO\svc_inventory "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -File \"C:\Smart Inventory\Invoke-SmartM365InventoryJob.ps1\" Job-A -Now -Tenant demo"') "runas gets the whole command as one argument with escaped inner quotes: $runAs"
     Assert-Case ($script:Controls.LaunchJobCommandBox.Text -match 'Tenant: demo \(source: Parameter\)' -and $script:Controls.LaunchJobCommandBox.Text -match 'SmartM365-ActiveUsers-Inventory\.ps1 -Tenant demo -Connect') 'The resolved command of the job must be previewed.'
     $script:Controls.LaunchJobsGrid.SelectedItem = $mailboxes
     Update-SelectedLaunchPreview -Kind Job

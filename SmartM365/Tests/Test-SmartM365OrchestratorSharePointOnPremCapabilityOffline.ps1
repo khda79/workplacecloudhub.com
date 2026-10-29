@@ -8,7 +8,7 @@ it from the snap-in registration, that the read-only probe uses the collector sn
 read-only farm call in Windows PowerShell, and that an OnlyJobsRequiring SharePointOnPrem
 policy keeps the other jobs away from that server in the election plan.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param()
@@ -97,7 +97,7 @@ Assert-Capability (@($noSharePoint.Assignments).Count -eq 0 -and @($noSharePoint
 
 # Forced Manual jobs: the resident launches them only where every required capability is ready.
 $orchestratorAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $folder 'SmartM365-Inventory-Orchestrator.ps1'), [ref]$tokens, [ref]$errors)
-foreach ($name in @('Get-ManualJobMissingCapabilities', 'Test-JobAllowedOnServer')) {
+foreach ($name in @('Get-ManualJobMissingCapabilities', 'Test-OrchestratorLocalServerActive', 'Test-JobAllowedOnServer')) {
     $definition = $orchestratorAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     Assert-Capability ($null -ne $definition) "$name exists."
     . ([scriptblock]::Create($definition.Extent.Text))

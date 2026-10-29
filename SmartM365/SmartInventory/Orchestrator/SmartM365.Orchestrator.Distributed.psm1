@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.21'
+$script:DistributedModuleVersion = '1.1.22'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -966,13 +966,22 @@ function Get-SmartM365OrchestratorElectionPlan {
         [hashtable]$DurationMinutesByJob = @{},
         [AllowNull()]$PreviousPlan = $null,
         [switch]$PreservePreviousOwners,
+        # Servers set Inactive in the cluster configuration: never candidates (orchestrator 1.5.76).
+        [string[]]$InactiveServers = @(),
         [datetime]$NowUtc = [datetime]::UtcNow
     )
 
     $electedJobs = @($Jobs | Where-Object { $_.Enabled -and [string]$_.AssignmentMode -eq 'Elected' })
+    $inactive = @{}
+    foreach ($inactiveServer in @($InactiveServers)) { if (-not [string]::IsNullOrWhiteSpace([string]$inactiveServer)) { $inactive[([string]$inactiveServer).Trim().ToUpperInvariant()] = $true } }
     $capabilitiesByServer = @{}
     foreach ($serverCapability in $ServerCapabilities) {
-        $capabilitiesByServer[[string]$serverCapability.ServerName] = $serverCapability
+        $capabilityServerName = [string]$serverCapability.ServerName
+        # Either source is enough: the shared cluster state, or the state the server itself published.
+        $publishedState = if ($serverCapability.PSObject.Properties['ServerState']) { [string]$serverCapability.ServerState } else { '' }
+        if ($publishedState -ieq 'Inactive') { $inactive[$capabilityServerName.ToUpperInvariant()] = $true }
+        if ($inactive.ContainsKey($capabilityServerName.ToUpperInvariant())) { continue }
+        $capabilitiesByServer[$capabilityServerName] = $serverCapability
     }
     $loads = @{}
     foreach ($serverName in $capabilitiesByServer.Keys) { $loads[$serverName] = 0.0 }
@@ -1044,7 +1053,7 @@ function Get-SmartM365OrchestratorElectionPlan {
     $orderedGroups = @($groups | Sort-Object @{ Expression = 'LoadMinutesPerDay'; Descending = $true }, GroupKey)
     foreach ($group in $orderedGroups) {
         if (@($group.Candidates).Count -eq 0) {
-            $unassigned += [pscustomobject]@{ GroupKey = $group.GroupKey; Jobs = $group.Jobs; Reason = 'No live server satisfies every required capability, Graph application role and server job policy.' }
+            $unassigned += [pscustomobject]@{ GroupKey = $group.GroupKey; Jobs = $group.Jobs; Reason = 'No live active server satisfies every required capability, Graph application role and server job policy.' }
             continue
         }
         if ([string]::IsNullOrWhiteSpace([string]$group.PreservedOwner)) { continue }
@@ -1084,6 +1093,7 @@ function Get-SmartM365OrchestratorElectionPlan {
         PlanId = [guid]::NewGuid().ToString('N')
         GeneratedAtUtc = $NowUtc.ToString('o')
         EligibleServers = @($capabilitiesByServer.Keys | Sort-Object)
+        InactiveServers = @($inactive.Keys | Sort-Object)
         Assignments = @($assignments | Sort-Object JobName)
         UnassignedGroups = @($unassigned)
         ServerLoads = @($loads.Keys | Sort-Object | ForEach-Object {
@@ -1100,7 +1110,8 @@ function Test-SmartM365OrchestratorCanPreserveOwners {
     [CmdletBinding()]
     param(
         [AllowNull()]$PreviousPlan = $null,
-        [Parameter(Mandatory = $true)][object[]]$ServerCapabilities
+        [Parameter(Mandatory = $true)][object[]]$ServerCapabilities,
+        [string[]]$InactiveServers = @()
     )
 
     if ($null -eq $PreviousPlan -or
@@ -1119,10 +1130,13 @@ function Test-SmartM365OrchestratorCanPreserveOwners {
             Where-Object { $_ } |
             Sort-Object -Unique
     )
+    # Inactive servers are never in EligibleServers: compare the active ones only.
+    $inactive = @($InactiveServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() })
     $currentServers = @(
         $ServerCapabilities |
+            Where-Object { -not ($_.PSObject.Properties['ServerState'] -and [string]$_.ServerState -ieq 'Inactive') } |
             ForEach-Object { ([string]$_.ServerName).Trim().ToUpperInvariant() } |
-            Where-Object { $_ } |
+            Where-Object { $_ -and $_ -notin $inactive } |
             Sort-Object -Unique
     )
     if ($previousServers.Count -ne $currentServers.Count) { return $false }

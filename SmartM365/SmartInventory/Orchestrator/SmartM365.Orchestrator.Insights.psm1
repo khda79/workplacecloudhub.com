@@ -328,6 +328,13 @@ function Get-SmartM365OrchestratorOperations {
         $maintenanceServers = @(Get-SmartM365OrchestratorMaintenanceReadiness $SharedDataFolderPath $ClusterDocument $maintenance -Now $Now)
     }
     catch { $maintenanceError = $_.Exception.Message }
+    # Cluster ServerStates (orchestrator 1.5.76): absent = every server Active; present = no Active entry means Inactive.
+    $declaredStates = $null
+    $statesProperty = if ($null -ne $ClusterDocument) { $ClusterDocument.PSObject.Properties['ServerStates'] } else { $null }
+    if ($null -ne $statesProperty -and $null -ne $statesProperty.Value) {
+        $declaredStates = @{}
+        foreach ($stateProperty in @($statesProperty.Value.PSObject.Properties)) { $declaredStates[$stateProperty.Name.Trim().ToUpperInvariant()] = [string]$stateProperty.Value }
+    }
     foreach ($serverName in @($ClusterDocument.ExpectedOrchestratorServers | ForEach-Object { [string]$_ } | Sort-Object -Unique)) {
         $folder = Join-Path $SharedDataFolderPath $serverName
         $heartbeat = Read-InsightsJson -Path (Join-Path $folder 'Orchestrator-Heartbeat.json')
@@ -345,8 +352,12 @@ function Get-SmartM365OrchestratorOperations {
             $remaining = $deadline - $Now.ToUniversalTime()
             $recycleIn = if ($remaining.TotalMinutes -gt 0) { '{0:0}h{1:00}' -f [math]::Floor($remaining.TotalHours), $remaining.Minutes } else { 'due' }
         }
+        $mode = if ($null -eq $declaredStates -or [string]$declaredStates[$serverName.ToUpperInvariant()] -eq 'Active') { 'Active' } else { 'Inactive' }
+        # The resident publishes the state it applies; a difference means it has not reloaded the configuration yet.
+        $appliedMode = [string](Get-InsightsProperty $heartbeat 'ServerState' '')
+        $modeText = if ($appliedMode -and $appliedMode -ne $mode -and $state -eq 'Online') { '{0} (applying)' -f $mode } else { $mode }
         $servers.Add([pscustomobject]@{
-            Server = $serverName; State = $state; Lifecycle = $lifecycle; HeartbeatAgeMinutes = $age
+            Server = $serverName; State = $state; Mode = $modeText; Lifecycle = $lifecycle; HeartbeatAgeMinutes = $age
             Version = [string](Get-InsightsProperty $heartbeat 'ScriptVersion' ''); Pid = [string](Get-InsightsProperty $heartbeat 'Pid' '')
             Running = $jobsRunning.Count; Pending = $jobsPending.Count
             RecycleIn = $recycleIn

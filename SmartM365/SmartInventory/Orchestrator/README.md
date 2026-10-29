@@ -323,7 +323,7 @@ Runtime files are tenant-isolated, created automatically and Git-ignored. State,
 | File | Location | Purpose |
 | --- | --- | --- |
 | `Config\Orchestrator-Jobs.json` | `{{DataAllRootPath}}\Orchestrator` | Shared operational job configuration. All servers hot reload it. |
-| `Config\Orchestrator-Cluster.json` | `{{DataAllRootPath}}\Orchestrator` | Shared expected-server list, election weights, server policies and peer-monitoring settings. |
+| `Config\Orchestrator-Cluster.json` | `{{DataAllRootPath}}\Orchestrator` | Shared expected-server list, server states (Active/Inactive), election weights, server policies and peer-monitoring settings. |
 | `Config\Versions\<VersionId>` | `{{DataAllRootPath}}\Orchestrator` | Immutable before/after snapshots created for every publication and rollback. |
 | `Audit\Orchestrator_ConfigChanges.csv` | `{{DataAllRootPath}}\Orchestrator` | User, source server, timestamp, hashes, version ID and change summary for every publication. |
 | `SmartM365-Orchestrator-GUI\<Server>\SmartM365-Orchestrator-GUI_<yyyyMMdd>.log` | `{{LogAllRootPath}}` | Persistent GUI activity and technical error details. A local `%LOCALAPPDATA%\SmartM365\Logs` fallback is used only when the central log root is unavailable. |
@@ -436,6 +436,23 @@ A full disk behind the DATA share would stop data, logs and orchestrator state a
 - `Pending jobs (why they wait)` shows `LowDiskSpace` for each job that would start now. The heartbeat publishes `DiskSpaceState` (`OK`, `Warning`, `Low`, `Unknown`), `DiskSpaceBlocked`, `DiskSpaceFreePercent`, `DiskSpaceFreeGB`, `DiskSpaceTotalGB` and `DiskSpaceDetail`; the GUI Live tab shows `DATA free %` and `Disk space` per server and the dashboard raises a critical item while launches are paused. Peer monitoring does not report missed starts of a paused peer.
 - Mails, once for the whole cluster thanks to `Orchestrator-DiskSpaceAlert.json` (shared, under `Orchestrator-DiskSpaceAlert.lock`): launches paused (repeated every `DiskSpaceAlertRepeatHours`, default 6), launches resumed, free space below `DiskSpaceWarningFreePercent` (default 15) and measurement unavailable for 30 minutes.
 - The thresholds belong in the central `Orchestrator-Cluster.json` (reloaded without restart, identical on every server); the same keys in the local configuration only serve as defaults. Validation requires 1 to 50 %, block < resume <= warning. `DiskSpaceGuardEnabled=false` disables the guard.
+
+### Active and inactive servers (1.5.76)
+
+Each server of `ExpectedOrchestratorServers` is `Active` or `Inactive` in `ServerStates` of the central `Orchestrator-Cluster.json`:
+
+```json
+"ExpectedOrchestratorServers": ["SRV01", "SRV02", "FILE01"],
+"ServerStates": { "SRV01": "Active", "SRV02": "Active", "FILE01": "Inactive" }
+```
+
+- An `Inactive` server runs as a normal resident (heartbeat, peer monitoring, maintenance, disk space guard, mails, SharePoint mirror copy, retention) but takes no job: it is never an election candidate and never launches a `Pinned`, legacy, `Manual` (`-Force`) or Pipeline job, never adopts a retry offered by another server and publishes no pending job; peers raise no `JobNotStarted` incident for it. Jobs already running when it becomes Inactive finish normally (they are re-adopted after a recycle as usual).
+- A server without an `Active` entry is `Inactive`: a server added later (GUI `Add server`, or a hand edit of `ExpectedOrchestratorServers`) never takes jobs before it has been checked and activated. When `ServerStates` is absent (cluster written before 1.5.76), every declared server is `Active`; the first 1.5.76 resident to start publishes that explicitly (versioned and audited like a GUI publication, `Migration: explicit ServerStates...`) without touching the jobs file.
+- The state is published by each resident in its heartbeat (`ServerState`, `ServerStateProtocol = 1`) and capability document (`ServerState`); a planner excludes a server that is Inactive in the cluster or that published `Inactive` itself. A state change triggers one full rebalance, and the server whose state changed republishes its capabilities at once. The start log says `Server inactive: no job will be launched on <server>`.
+- Validation: values `Active` or `Inactive` (error otherwise); warnings for a declared server without entry, an entry for a non-expected server, no Active server at all, and an enabled `Pinned` job on an Inactive server (it waits until the server is Active).
+- GUI 1.6.26: `Configuration` > `Servers and versions` shows a `State` column (inactive rows greyed) and an `Active (takes jobs)` box under `Selected server`; `Add server` adds the server Inactive; `Apply server settings to draft` then `Publish changes` apply it. `Operations` > `Live` shows a `Jobs` column (`Active`, `Inactive`, `... (applying)` until the resident has reloaded the configuration).
+- GUI 1.6.26 also adds `Operations` > `Jobs` > `Run now on this computer with service account`: the same command as `Run now`, started with `runas.exe /user:<account>` in its own console, which asks for the password (the GUI never sees it). The account is read from this computer's orchestrator scheduled task (`SmartM365 Inventory Orchestrator - <Tenant>` first); no task, or a managed account (name ending with `$`, no password), is refused with an error.
+- Update every resident to 1.5.76 before setting a server Inactive: an older resident ignores `ServerStates` and could still elect it. Offline check: `pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorServerStateOffline.ps1`.
 
 ### Distributed peer monitoring
 

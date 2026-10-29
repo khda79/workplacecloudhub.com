@@ -3,7 +3,7 @@
 Exercise real ownership tracking, schedule selection and launch admission in memory.
 The concurrency gate captures admitted occurrences and prevents every child launch.
 .VERSION
-1.0.0
+1.0.1
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -18,7 +18,7 @@ function Get-FunctionText([string]$Name){
     $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $Name},$true)
     if($null -eq $node){throw "Missing function: $Name"};$node.Extent.Text
 }
-$names=@('Get-ElectedJobOwner','Test-JobAllowedOnServer','Update-OrchestratorElectedOwnership',
+$names=@('Get-ElectedJobOwner','Test-OrchestratorLocalServerActive','Test-JobAllowedOnServer','Update-OrchestratorElectedOwnership',
     'Get-JobOccurrencesInWindow','Get-DueOccurrence','ConvertTo-StateTime','ConvertFrom-StateTime',
     'Set-OccurrenceSkipped','Invoke-LaunchPhase')
 $definitions=@($names | ForEach-Object {Get-FunctionText $_})

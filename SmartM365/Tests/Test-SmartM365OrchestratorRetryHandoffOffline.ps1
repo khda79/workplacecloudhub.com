@@ -3,7 +3,7 @@
 Offline test of the retry handoff: an elected job that failed on SRV-A is retried by a free,
 eligible server, and exactly one server runs the retry.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Real Distributed module claims in a temporary folder; the orchestrator offer and adoption
 functions run in one module instance per simulated server. No tenant initialization,
@@ -36,7 +36,7 @@ $launch = Get-FunctionText 'Invoke-LaunchPhase'
 Check ($launch -match 'Invoke-RetryHandoffAdoption -Now \$Now' -and $launch -match '\$Now -lt \$notBefore\.AddSeconds\(\$script:RetryHandoffGraceSeconds\)') 'Peers must adopt first and the failing server must wait its grace period.'
 Check ($launch -match '-RetryHandoffFrom \$retryHandoffFrom' -and $launch -match 'Remove-OrchestratorRetryOffer -JobName \$name -OfferId \$retryOfferId') 'The launch must take the claim over atomically and remove the offer.'
 
-$functions = @('ConvertTo-OrchestratorUtcTime', 'Get-OrchestratorRetryOfferPath', 'Write-OrchestratorRetryOffer', 'Get-OrchestratorRetryOffers', 'Remove-OrchestratorRetryOffer', 'Test-OrchestratorRetryHandoffEligible', 'Invoke-RetryHandoffAdoption', 'Test-JobAllowedOnServer', 'ConvertFrom-StateTime', 'ConvertTo-StateTime')
+$functions = @('ConvertTo-OrchestratorUtcTime', 'Get-OrchestratorRetryOfferPath', 'Write-OrchestratorRetryOffer', 'Get-OrchestratorRetryOffers', 'Remove-OrchestratorRetryOffer', 'Test-OrchestratorRetryHandoffEligible', 'Invoke-RetryHandoffAdoption', 'Test-OrchestratorLocalServerActive', 'Test-JobAllowedOnServer', 'ConvertFrom-StateTime', 'ConvertTo-StateTime')
 $stubs = @'
 function Get-JobState { param($JobName) if (-not $script:State.Jobs.ContainsKey($JobName)) { $script:State.Jobs[$JobName] = @{ PendingRetry = $null } }; $script:State.Jobs[$JobName] }
 function Save-OrchestratorState { }

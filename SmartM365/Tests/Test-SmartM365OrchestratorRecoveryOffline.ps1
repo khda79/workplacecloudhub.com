@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic recovery and resident-lock tests; no scheduler entry point.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param([string]$SourceRoot,[string]$ResultPath)
@@ -13,7 +13,7 @@ $source=Join-Path $SourceRoot 'SmartInventory/Orchestrator/SmartM365-Inventory-O
 $t=$null;$e=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$t,[ref]$e)
 if($e.Count){throw 'Source parse failed'}
-$definitions=foreach($name in @('Enter-OrchestratorLock','Exit-OrchestratorLock','Test-ProcessMatchesRecord','Get-CompletedJobResult','Restore-RunningJobs','Update-RunningJobs','Get-RunningJobTimeoutWindow','ConvertFrom-StateTime','ConvertTo-StateTime','Write-OrchestratorHeartbeat')){
+$definitions=foreach($name in @('Enter-OrchestratorLock','Exit-OrchestratorLock','Test-ProcessMatchesRecord','Get-CompletedJobResult','Restore-RunningJobs','Update-RunningJobs','Get-RunningJobTimeoutWindow','ConvertFrom-StateTime','ConvertTo-StateTime','Test-OrchestratorLocalServerActive','Get-OrchestratorLocalServerState','Write-OrchestratorHeartbeat')){
  $n=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
  if(-not $n){throw "Missing $name"};$n.Extent.Text
 }

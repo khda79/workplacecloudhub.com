@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.25
+1.6.26
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.25'
+$script:AppVersion = '1.6.26'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -440,6 +440,14 @@ $xaml = @'
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="160"/>
                                     <DataGridTextColumn Header="State" Binding="{Binding State}" Width="100"/>
+                                    <DataGridTextColumn Header="Jobs" Binding="{Binding Mode}" Width="110">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="ToolTip" Value="Active = takes jobs. Inactive = orchestrator running, no job launched (Configuration &gt; Servers and versions)."/>
+                                                <Style.Triggers><DataTrigger Binding="{Binding Mode}" Value="Inactive"><Setter Property="Foreground" Value="#8A5A00"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger></Style.Triggers>
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                    </DataGridTextColumn>
                                     <DataGridTextColumn Header="Heartbeat age (min)" Binding="{Binding HeartbeatAgeMinutes}" Width="140"/>
                                     <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="80"/>
                                     <DataGridTextColumn Header="Maintenance" Binding="{Binding Maintenance}" Width="100"/>
@@ -586,6 +594,7 @@ $xaml = @'
                                 </DataGrid>
                                 <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,6">
                                     <Button x:Name="RunJobNowButton" Content="Run now on this computer" IsEnabled="False" ToolTip="Runs the job in a new console on this computer, outside the orchestrators (no election, lock or dependency check)."/>
+                                    <Button x:Name="RunJobAsServiceAccountButton" Content="Run now on this computer with service account" IsEnabled="False" ToolTip="Same as Run now, started with runas under the account of this computer's orchestrator scheduled task. The runas console asks for the account password; the GUI never sees it."/>
                                     <Button x:Name="RequestJobButton" Content="Request (orchestrators)" Background="#FFF4CE" IsEnabled="False" ToolTip="Submits the job to the resident orchestrators: elected server, shared locks and dependency rules."/>
                                     <CheckBox x:Name="LaunchIncludeDependenciesCheck" Content="Also run the enabled dependencies (Request)" VerticalAlignment="Center" Margin="10,0,0,0"/>
                                 </StackPanel>
@@ -979,12 +988,18 @@ $xaml = @'
                                         <DataGrid.RowStyle>
                                             <Style TargetType="DataGridRow">
                                                 <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding State}" Value="Inactive"><Setter Property="Foreground" Value="#6B6B6B"/></DataTrigger>
                                                     <DataTrigger Binding="{Binding SystemDriveLow}" Value="True"><Setter Property="Background" Value="#FDE7E9"/></DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
                                         </DataGrid.RowStyle>
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="150"/>
+                                            <DataGridTextColumn Header="State" Binding="{Binding State}" Width="70">
+                                                <DataGridTextColumn.ElementStyle>
+                                                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="Active = takes jobs. Inactive = runs as an orchestrator (heartbeat, monitoring, maintenance) but takes no job. A new server is Inactive."/></Style>
+                                                </DataGridTextColumn.ElementStyle>
+                                            </DataGridTextColumn>
                                             <DataGridCheckBoxColumn Header="Online" Binding="{Binding Online}" Width="60"/>
                                             <DataGridTextColumn Header="Orchestrator" Binding="{Binding Version}" Width="90"/>
                                             <DataGridTextColumn Header="OS" Binding="{Binding Os}" Width="230"/>
@@ -1016,6 +1031,7 @@ $xaml = @'
                                         <GroupBox Header="Selected server">
                                             <StackPanel>
                                                 <TextBlock x:Name="SelectedServerText" FontWeight="SemiBold" Text="Select a server"/>
+                                                <CheckBox x:Name="ServerActiveCheck" Content="Active (takes jobs)" Margin="0,8,0,0" ToolTip="Inactive: the orchestrator keeps running (heartbeat, peer monitoring, maintenance, disk space guard, mails) but launches no job and is never elected. A new server is Inactive until you activate it here and publish."/>
                                                 <TextBlock Text="Election weight" Margin="0,8,0,0"/>
                                                 <TextBox x:Name="ServerWeightBox"/>
                                                 <TextBlock Text="Only jobs requiring capabilities, comma separated (blank = unrestricted)"/>
@@ -1400,7 +1416,7 @@ $script:SmartInventoryRoot = Split-Path -Path $PSScriptRoot -Parent
 
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
-    foreach ($controlName in @('MainTabs', 'PlanningGrid', 'JobArgumentsBox', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'RequestPrepareButton', 'ApplyJobButton', 'ApplyServerButton', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
+    foreach ($controlName in @('MainTabs', 'PlanningGrid', 'JobArgumentsBox', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'RequestPrepareButton', 'ApplyJobButton', 'ApplyServerButton', 'ServerActiveCheck', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
         'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
@@ -1408,7 +1424,7 @@ if ($ValidateOnly) {
         'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
         'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardMetricsCanvas', 'ServersMetricsCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
         'ConfigFilterBox', 'ConfigShowSensitiveButton', 'ConfigRefreshButton', 'ConfigOpenFolderButton', 'ConfigSummaryText', 'ConfigFileTabs', 'ConfigGlobalTab', 'ConfigTenantTab', 'ConfigMailTab', 'ConfigGlobalStatusText', 'ConfigTenantStatusText', 'ConfigMailStatusText', 'ConfigGlobalGrid', 'ConfigTenantGrid', 'ConfigMailGrid',
-        'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OperationsRequestsTab', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox')) {
+        'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OperationsRequestsTab', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RunJobAsServiceAccountButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox')) {
         if (-not $validationWindow.FindName($controlName)) { throw "Required XAML control not found: $controlName" }
     }
     $source = [IO.File]::ReadAllText($PSCommandPath)
@@ -2166,7 +2182,7 @@ function Request-SelectedJobRun {
     if ($activeRequests.Count) { $message += "`n`n$($activeRequests.Count) request(s) are active or queued (last refresh): this request is queued and starts automatically when they have finished." }
     else { $message += "`n`nIf another request becomes active first, this one is queued behind it." }
     # Displayed server rows only (last refresh): a paused server keeps the request queued.
-    $serverRows = if ($script:Controls.ContainsKey('OperationsServersGrid') -and $null -ne $script:Controls['OperationsServersGrid']) { @($script:Controls['OperationsServersGrid'].ItemsSource) } else { @() }
+    $serverRows = if ($null -ne $script:Controls['OperationsServersGrid']) { @($script:Controls['OperationsServersGrid'].ItemsSource) } else { @() }
     $diskPausedServers = @($serverRows | Where-Object { $null -ne $_ -and $_.PSObject.Properties['DiskSpace'] -and [string]$_.DiskSpace -eq 'Launches paused' } | ForEach-Object { [string]$_.Server })
     if ($diskPausedServers.Count) { $message += "`n`nLow DATA disk space: new launches are paused on $($diskPausedServers -join ', '). The request waits until free space reaches the resume threshold." }
     if (-not (Confirm-GuiJobRunRequest -Message $message)) { return $null }
@@ -2506,6 +2522,7 @@ function Update-SelectedLaunchPreview {
     if ($Kind -eq 'Job') {
         $row = $script:Controls.LaunchJobsGrid.SelectedItem
         $script:Controls.RunJobNowButton.IsEnabled = $null -ne $row
+        $script:Controls.RunJobAsServiceAccountButton.IsEnabled = $null -ne $row
         $script:Controls.RequestJobButton.IsEnabled = $null -ne $row -and [bool]$row.InManifest -and -not $script:RequestSubmitBusy
         $script:Controls.JobExecutionModeCombo.IsEnabled = $null -ne $row -and [bool]$row.OnPremises -and [bool]$row.InManifest
         $script:Controls.ApplyJobExecutionModeButton.IsEnabled = $script:Controls.JobExecutionModeCombo.IsEnabled
@@ -2609,9 +2626,34 @@ function Invoke-GuiOrchestratorAction {
     $script:Controls.StatusText.Text = "$($command.Title): started in a new console."
 }
 
+function Get-GuiOrchestratorServiceAccount {
+    # Account of this computer's orchestrator scheduled task (installer name: 'SmartM365 Inventory Orchestrator - <Tenant>').
+    # Never hard-coded: the repository is public.
+    param([AllowNull()][object[]]$Tasks = $null)
+    if ($null -eq $Tasks) { $Tasks = @(Get-ScheduledTask -TaskName 'SmartM365 Inventory Orchestrator*' -ErrorAction SilentlyContinue) }
+    $tasks = @($Tasks | Where-Object { $null -ne $_ })
+    if ($tasks.Count -eq 0) { throw "No 'SmartM365 Inventory Orchestrator' scheduled task on this computer ($env:COMPUTERNAME): the service account cannot be determined." }
+    $preferred = @($tasks | Where-Object { [string]$_.TaskName -eq ('SmartM365 Inventory Orchestrator - ' + $Tenant) })
+    $task = if ($preferred.Count) { $preferred[0] } else { $tasks[0] }
+    $account = [string]$task.Principal.UserId
+    if ([string]::IsNullOrWhiteSpace($account)) { throw "Scheduled task '$($task.TaskName)' has no account." }
+    if ($account.EndsWith('$')) { throw "Scheduled task '$($task.TaskName)' runs as a managed account ($account): it has no password, runas cannot use it." }
+    if ($account -notmatch '[\\@]') { $account = '{0}\{1}' -f $env:USERDOMAIN, $account }
+    return [pscustomobject]@{ Account = $account; TaskName = [string]$task.TaskName }
+}
+
+function Get-GuiRunAsArgumentList {
+    # runas.exe /user:<account> "<engine> <arguments>": the inner command is quoted with the same
+    # CommandLineToArgvW rules (inner quotes become \").
+    param([Parameter(Mandatory = $true)][string]$Account, [Parameter(Mandatory = $true)][string]$Engine, [string[]]$Arguments = @())
+    $inner = (@($Engine) + @($Arguments) | ForEach-Object { ConvertTo-SmartM365InventoryCommandLineArgument -Value $_ }) -join ' '
+    return '/user:{0} {1}' -f (ConvertTo-SmartM365InventoryCommandLineArgument -Value $Account), (ConvertTo-SmartM365InventoryCommandLineArgument -Value $inner)
+}
+
 function Invoke-GuiLaunch {
     # Runs a catalog job or a manual entry now on this computer, like SmartInventory.cmd <Name>.
-    param([Parameter(Mandatory = $true)][ValidateSet('Job', 'Manual')][string]$Kind)
+    # -AsServiceAccount (jobs): same command started with runas under the orchestrator task account.
+    param([Parameter(Mandatory = $true)][ValidateSet('Job', 'Manual')][string]$Kind, [switch]$AsServiceAccount)
     $row = if ($Kind -eq 'Job') { $script:Controls.LaunchJobsGrid.SelectedItem } else { $script:Controls.ManualLaunchesGrid.SelectedItem }
     if ($null -eq $row) { throw 'Select an entry first.' }
     $preview = Get-GuiLaunchPlanText -Name ([string]$row.Name)
@@ -2619,6 +2661,11 @@ function Invoke-GuiLaunch {
     $icon = 'Question'
     $message = "Run '{0}' now on this computer ({1}), outside the orchestrators?`n`n{2}" -f $row.Name, $env:COMPUTERNAME, $preview.Text
     if ($Kind -eq 'Job') { $message += "`n`nNo election, shared lock or dependency check. Use Request to run it through the orchestrators." }
+    $serviceAccount = $null
+    if ($AsServiceAccount) {
+        $serviceAccount = Get-GuiOrchestratorServiceAccount
+        $message += "`n`nAccount: {0} (scheduled task '{1}'). A runas console asks for its password; the GUI never sees it." -f $serviceAccount.Account, $serviceAccount.TaskName
+    }
     if ($preview.Plan.Interactive) { $message += "`n`nThis entry needs you in the console (interactive sign-in or prompts)." }
     if ($preview.Plan.RequiresConfirmation) {
         $icon = 'Warning'
@@ -2626,7 +2673,14 @@ function Invoke-GuiLaunch {
     }
     if ($script:OrchestratorDialog.Show($message, ('Run ' + $row.Name), 'YesNo', $icon) -ne 'Yes') { return }
     $engineScript = Join-Path $script:SmartInventoryRoot 'Orchestrator\Invoke-SmartM365InventoryJob.ps1'
-    [void](Start-GuiConsoleProcess -Runtime WindowsPowerShell -ScriptPath $engineScript -Arguments @([string]$row.Name, '-Now', '-Tenant', $Tenant) -KeepOpen)
+    $engineArguments = @([string]$row.Name, '-Now', '-Tenant', $Tenant)
+    if ($null -ne $serviceAccount) {
+        $engine = Get-SmartM365InventoryEnginePath -Runtime WindowsPowerShell
+        $runAsArguments = Get-GuiRunAsArgumentList -Account $serviceAccount.Account -Engine $engine -Arguments (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', $engineScript) + $engineArguments)
+        $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\runas.exe') -ArgumentList $runAsArguments -PassThru
+        Write-GuiActivity -Message ("Run now as {0}: runas console started (PID {1}): runas.exe {2}" -f $serviceAccount.Account, $process.Id, $runAsArguments)
+    }
+    else { [void](Start-GuiConsoleProcess -Runtime WindowsPowerShell -ScriptPath $engineScript -Arguments $engineArguments -KeepOpen) }
     Write-GuiActivity -Message ("Run now: {0} ({1}) started on {2}." -f $row.Name, $Kind, $env:COMPUTERNAME) -Level SUCCESS
     $script:Controls.StatusText.Text = "$($row.Name): started in a new console."
 }
@@ -3013,6 +3067,8 @@ function Receive-GuiRefresh {
             $script:Snapshot = $result.Snapshot
             $script:DraftJobs = Copy-JsonDocument -Document $script:Snapshot.Jobs
             $script:DraftCluster = Copy-JsonDocument -Document $script:Snapshot.Cluster
+            # Older cluster document: the servers already declared are Active (same rule as the residents).
+            [void](Initialize-SmartM365OrchestratorServerStates -ClusterDocument $script:DraftCluster)
             Update-JobHealth -Runs $result.RecentRuns
             $scriptVersionsProperty = $result.PSObject.Properties['ScriptVersions']
             if ($null -ne $scriptVersionsProperty -and $scriptVersionsProperty.Value -is [hashtable]) { $script:ScriptVersions = $scriptVersionsProperty.Value }
@@ -3088,6 +3144,7 @@ function Refresh-AllViewsSync {
         $script:Snapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $script:SharedDataFolderPath
         $script:DraftJobs = Copy-JsonDocument -Document $script:Snapshot.Jobs
         $script:DraftCluster = Copy-JsonDocument -Document $script:Snapshot.Cluster
+        [void](Initialize-SmartM365OrchestratorServerStates -ClusterDocument $script:DraftCluster)
         try { Update-JobHealth } catch { $script:HealthByName = @{}; Write-GuiException -Context 'Job health could not be computed' -ErrorRecord $_ }
         try {
             $templatePath = Join-Path $PSScriptRoot 'Orchestrator-Jobs.json.template'
@@ -3199,16 +3256,42 @@ function Apply-SelectedJobToDraft {
     $script:Controls.PlanningGrid.SelectedItem = @($script:PlanningRows | Where-Object Name -eq $job.Name)[0]
     $script:Controls.StatusText.Text = "Draft changed: $($job.Name)"
     # The draft is local until it is published: say so, the status line alone is easy to miss.
-    $script:OrchestratorDialog.Show(("Job '{0}' was changed in the draft.{1}{1}Nothing runs differently yet: click Publish changes to apply it to the orchestrators." -f $job.Name, [Environment]::NewLine), 'Draft changed', 'OK', 'Information') | Out-Null
+    # Informational only: never block the unattended smoke test.
+    if (-not $SmokeTest) { $script:OrchestratorDialog.Show(("Job '{0}' was changed in the draft.{1}{1}Nothing runs differently yet: click Publish changes to apply it to the orchestrators." -f $job.Name, [Environment]::NewLine), 'Draft changed', 'OK', 'Information') | Out-Null }
     $previousAllowedText = if ($previousAllowedServers.Count -gt 0) { $previousAllowedServers -join ',' } else { '<none>' }
     $newAllowedText = if ($newAllowedServers.Count -gt 0) { $newAllowedServers -join ',' } else { '<none>' }
     Write-GuiActivity -Message ("Job '{0}' updated in the draft. AssignmentMode={1}->{2}; AllowedServers={3}->{4}; DependsOn={5}; DependencyMode={6}; DependencyMaxAgeHours={7}" -f $job.Name, $previousMode, $mode, $previousAllowedText, $newAllowedText, ($(if ($dependsOn.Count) { $dependsOn -join ',' } else { '<none>' })), $dependencyMode, $dependencyMaxAge)
+}
+
+function Set-DraftServerState {
+    # Writes ServerStates explicitly; a server without an entry would be Inactive.
+    param([Parameter(Mandatory)][string]$Server, [Parameter(Mandatory)][ValidateSet('Active', 'Inactive')][string]$State)
+    [void](Initialize-SmartM365OrchestratorServerStates -ClusterDocument $script:DraftCluster)
+    Set-JsonProperty -Object $script:DraftCluster.ServerStates -Name $Server.ToUpperInvariant() -Value $State
+}
+
+function Add-ServerToDraft {
+    # A new server is always added Inactive: activate it after checking it (Apply server settings to draft).
+    param([Parameter(Mandatory)][string]$Server)
+    $server = $Server.Trim().ToUpperInvariant()
+    if ($server -notmatch '^[A-Z0-9._-]+$') { throw 'Enter a valid server name.' }
+    if ($server -in @($script:DraftCluster.ExpectedOrchestratorServers)) { throw 'This server already exists.' }
+    [void](Initialize-SmartM365OrchestratorServerStates -ClusterDocument $script:DraftCluster)
+    $script:DraftCluster.ExpectedOrchestratorServers = @($script:DraftCluster.ExpectedOrchestratorServers) + $server
+    if (-not $script:DraftCluster.PSObject.Properties['ElectionWeightsByServer'] -or $null -eq $script:DraftCluster.ElectionWeightsByServer) {
+        Set-JsonProperty -Object $script:DraftCluster -Name ElectionWeightsByServer -Value ([pscustomobject]@{})
+    }
+    Set-JsonProperty -Object $script:DraftCluster.ElectionWeightsByServer -Name $server -Value 1.0
+    Set-DraftServerState -Server $server -State 'Inactive'
+    return $server
 }
 
 function Apply-SelectedServerToDraft {
     $row = $script:Controls.ServersGrid.SelectedItem
     if ($null -eq $row) { throw 'Select a server first.' }
     $server = ([string]$row.Server).ToUpperInvariant()
+    $previousState = [string]$row.State
+    $newState = if ([bool]$script:Controls.ServerActiveCheck.IsChecked) { 'Active' } else { 'Inactive' }
     $weight = [double]::Parse($script:Controls.ServerWeightBox.Text, [System.Globalization.CultureInfo]::InvariantCulture)
     if ($weight -le 0) { throw 'Election weight must be greater than zero.' }
     if (-not $script:DraftCluster.PSObject.Properties['ElectionWeightsByServer']) {
@@ -3226,12 +3309,15 @@ function Apply-SelectedServerToDraft {
     else {
         Set-JsonProperty -Object $script:DraftCluster.ServerJobPolicies -Name $server -Value ([pscustomobject]@{ OnlyJobsRequiring = $policyValues })
     }
+    Set-DraftServerState -Server $server -State $newState
     $validation = Test-SmartM365OrchestratorClusterDocument -Document $script:DraftCluster
     if (-not $validation.Valid) { throw $validation.Errors -join [Environment]::NewLine }
     Refresh-ServersView | Out-Null
     $script:Controls.StatusText.Text = "Draft changed: $server"
-    $script:OrchestratorDialog.Show(("Server '{0}' was changed in the draft.{1}{1}Nothing changes yet: click Publish changes to apply it to the orchestrators." -f $server, [Environment]::NewLine), 'Draft changed', 'OK', 'Information') | Out-Null
-    Write-GuiActivity -Message "Server '$server' settings updated in the draft."
+    $stateNote = if ($newState -eq $previousState) { '' } elseif ($newState -eq 'Active') { "{0}{0}State: Active. After publication the server can be elected and take jobs; the election plan is rebalanced automatically." -f [Environment]::NewLine } else { "{0}{0}State: Inactive. After publication the server launches no new job (running jobs finish); its elected jobs move to the active servers and jobs pinned to it wait." -f [Environment]::NewLine }
+    # Informational only: never block the unattended smoke test.
+    if (-not $SmokeTest) { $script:OrchestratorDialog.Show(("Server '{0}' was changed in the draft.{2}{1}{1}Nothing changes yet: click Publish changes to apply it to the orchestrators." -f $server, [Environment]::NewLine, $stateNote), 'Draft changed', 'OK', 'Information') | Out-Null }
+    Write-GuiActivity -Message "Server '$server' settings updated in the draft. State=$previousState->$newState"
 }
 
 function Show-DraftValidation {
@@ -3362,7 +3448,7 @@ foreach ($name in @(
     'AssignmentCombo', 'PinnedServerCombo', 'TimeoutBox', 'RetriesBox', 'RetryDelayBox', 'DurationBox', 'ApplyJobButton',
     'HistoryFromPicker', 'HistoryToPicker', 'HistoryServerCombo', 'HistoryJobCombo', 'HistoryStatusCombo', 'HistoryRefreshButton',
     'ExportCsvButton', 'ExportHtmlButton', 'HistoryGrid', 'ServersGrid', 'NewServerBox', 'AddServerButton', 'RemoveServerButton',
-    'SelectedServerText', 'ServerWeightBox', 'ServerPolicyCombo', 'ApplyServerButton', 'VersionsGrid', 'RollbackButton',
+    'SelectedServerText', 'ServerActiveCheck', 'ServerWeightBox', 'ServerPolicyCombo', 'ApplyServerButton', 'VersionsGrid', 'RollbackButton',
     'ConfigurationTabs', 'ConfigurationSettingsTab', 'ConfigurationServersTab', 'FooterText', 'VersionText',
     'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
     'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
@@ -3370,7 +3456,7 @@ foreach ($name in @(
     'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
     'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
     'ConfigFilterBox', 'ConfigShowSensitiveButton', 'ConfigRefreshButton', 'ConfigOpenFolderButton', 'ConfigSummaryText', 'ConfigFileTabs', 'ConfigGlobalTab', 'ConfigTenantTab', 'ConfigMailTab', 'ConfigGlobalStatusText', 'ConfigTenantStatusText', 'ConfigMailStatusText', 'ConfigGlobalGrid', 'ConfigTenantGrid', 'ConfigMailGrid',
-    'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OperationsRequestsTab', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox'
+    'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OperationsRequestsTab', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RunJobAsServiceAccountButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox'
 )) {
     $script:Controls[$name] = $window.FindName($name)
 }
@@ -3447,6 +3533,7 @@ $script:Controls.ServersGrid.Add_SelectionChanged({
     $row = $script:Controls.ServersGrid.SelectedItem
     if ($null -eq $row) { return }
     $script:Controls.SelectedServerText.Text = [string]$row.Server
+    $script:Controls.ServerActiveCheck.IsChecked = ([string]$row.State -eq 'Active')
     $script:Controls.ServerWeightBox.Text = ([double]$row.Weight).ToString([System.Globalization.CultureInfo]::InvariantCulture)
     Select-ComboText -Combo $script:Controls.ServerPolicyCombo -Text ([string]$row.Policy)
 })
@@ -3540,6 +3627,10 @@ $script:Controls.RunJobNowButton.Add_Click({
     try { Invoke-GuiLaunch -Kind Job }
     catch { Write-GuiException -Context 'Run now failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Run now failed', 'OK', 'Error') | Out-Null }
 })
+$script:Controls.RunJobAsServiceAccountButton.Add_Click({
+    try { Invoke-GuiLaunch -Kind Job -AsServiceAccount }
+    catch { Write-GuiException -Context 'Run now with service account failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Run now with service account failed', 'OK', 'Error') | Out-Null }
+})
 $script:Controls.RunManualLaunchButton.Add_Click({
     try { Invoke-GuiLaunch -Kind Manual }
     catch { Write-GuiException -Context 'Manual launch failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Manual launch failed', 'OK', 'Error') | Out-Null }
@@ -3602,14 +3693,11 @@ $script:Controls.OperationsMailsGrid.Add_MouseDoubleClick({
 })
 $script:Controls.AddServerButton.Add_Click({
     try {
-        $server = $script:Controls.NewServerBox.Text.Trim().ToUpperInvariant()
-        if ($server -notmatch '^[A-Z0-9._-]+$') { throw 'Enter a valid server name.' }
-        if ($server -in @($script:DraftCluster.ExpectedOrchestratorServers)) { throw 'This server already exists.' }
-        $script:DraftCluster.ExpectedOrchestratorServers = @($script:DraftCluster.ExpectedOrchestratorServers) + $server
-        Set-JsonProperty -Object $script:DraftCluster.ElectionWeightsByServer -Name $server -Value 1.0
+        $server = Add-ServerToDraft -Server $script:Controls.NewServerBox.Text
         $script:Controls.NewServerBox.Clear()
         Refresh-ServersView | Out-Null
-        Write-GuiActivity -Message "Server '$server' added to the draft."
+        Write-GuiActivity -Message "Server '$server' added to the draft (Inactive)."
+        $script:OrchestratorDialog.Show(("Server '{0}' was added to the draft as Inactive.{1}{1}After Publish changes it can run the orchestrator (heartbeat, monitoring, maintenance) but takes no job. Once it is checked, select it, tick Active (takes jobs), apply and publish." -f $server, [Environment]::NewLine), 'Server added', 'OK', 'Information') | Out-Null
     }
     catch { Write-GuiException -Context 'Add server failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Add server', 'OK', 'Error') | Out-Null }
 })
@@ -3626,6 +3714,7 @@ $script:Controls.RemoveServerButton.Add_Click({
     $script:DraftCluster.ExpectedOrchestratorServers = @($script:DraftCluster.ExpectedOrchestratorServers | Where-Object { $_ -ine $server })
     [void]$script:DraftCluster.ElectionWeightsByServer.PSObject.Properties.Remove($server)
     [void]$script:DraftCluster.ServerJobPolicies.PSObject.Properties.Remove($server)
+    if ($script:DraftCluster.PSObject.Properties['ServerStates'] -and $null -ne $script:DraftCluster.ServerStates) { [void]$script:DraftCluster.ServerStates.PSObject.Properties.Remove($server) }
     Refresh-ServersView | Out-Null
     Write-GuiActivity -Message "Server '$server' removed from the draft."
 })
@@ -3803,6 +3892,17 @@ if ($SmokeTest) {
     }
     Write-GuiActivity -Message ("SMOKE_TEST_REBALANCE_OK RequestId={0}" -f $rebalanceRequest.RequestId) -Level SUCCESS
     Write-GuiActivity -Message ("SMOKE_TEST_PINNED_OK Job={0}; Server={1}; DefaultSort=JobAscending" -f $smokeJob.Name, $smokeServer) -Level SUCCESS
+    $smokeNewServer = 'SMOKE-NEW-SERVER'
+    [void](Add-ServerToDraft -Server $smokeNewServer)
+    $smokeNewRow = @(Refresh-ServersView | Where-Object { [string]$_.Server -eq $smokeNewServer })
+    if ($smokeNewRow.Count -ne 1 -or [string]$smokeNewRow[0].State -ne 'Inactive') { throw 'A server added in the GUI must be Inactive.' }
+    $smokeActiveRows = @(Refresh-ServersView | Where-Object { [string]$_.Server -ne $smokeNewServer -and [string]$_.State -eq 'Active' })
+    if (-not (Test-SmartM365OrchestratorClusterDocument -Document $script:DraftCluster).Valid) { throw 'Draft with an Inactive server is not valid.' }
+    $script:DraftCluster.ExpectedOrchestratorServers = @($script:DraftCluster.ExpectedOrchestratorServers | Where-Object { $_ -ne $smokeNewServer })
+    [void]$script:DraftCluster.ElectionWeightsByServer.PSObject.Properties.Remove($smokeNewServer)
+    [void]$script:DraftCluster.ServerStates.PSObject.Properties.Remove($smokeNewServer)
+    [void](Refresh-ServersView)
+    Write-GuiActivity -Message ("SMOKE_TEST_SERVER_STATE_OK NewServer=Inactive; ActiveServers={0}" -f $smokeActiveRows.Count) -Level SUCCESS
     Write-GuiActivity -Message ("SMOKE_TEST_OK SmartM365 Orchestrator GUI v{0} | Jobs={1} | PlanningRows={2}" -f $script:AppVersion, @($script:DraftJobs.Jobs).Count, @($script:PlanningRows).Count) -Level SUCCESS
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
 }

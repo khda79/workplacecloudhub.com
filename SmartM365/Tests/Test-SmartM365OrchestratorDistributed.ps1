@@ -2,7 +2,7 @@
 .SYNOPSIS
 Validates SmartM365 Orchestrator distributed election and claim behavior.
 .VERSION
-1.0.5
+1.0.6
 #>
 
 #Requires -Version 7.0
@@ -326,9 +326,10 @@ try {
         return @([pscustomobject]@{ ServerName = 'SERVER-A'; ElectionWeight = 1.0; ServerJobPolicy = $null })
     }
     function Test-SmartM365OrchestratorCanPreserveOwners { return $true }
+    function Get-OrchestratorInactiveServers { return @() }
     function Get-OrchestratorDurationMedians { return @{} }
     function Get-SmartM365OrchestratorElectionPlan {
-        param($Jobs, $ServerCapabilities, $ServerWeights, $ServerJobPolicies, $DurationMinutesByJob, $PreviousPlan, [switch]$PreservePreviousOwners, $NowUtc)
+        param($Jobs, $ServerCapabilities, $ServerWeights, $ServerJobPolicies, $DurationMinutesByJob, $PreviousPlan, [switch]$PreservePreviousOwners, $InactiveServers, $NowUtc)
         $script:LastPreserveOwners = [bool]$PreservePreviousOwners
         return [pscustomobject]@{
             SchemaVersion = 2
