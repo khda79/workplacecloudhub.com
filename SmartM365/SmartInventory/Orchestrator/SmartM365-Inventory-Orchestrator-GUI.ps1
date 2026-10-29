@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.16
+1.6.17
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.16'
+$script:AppVersion = '1.6.17'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -426,7 +426,6 @@ $xaml = @'
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="150"/>
                                 <RowDefinition Height="*"/>
-                                <RowDefinition Height="210"/>
                             </Grid.RowDefinitions>
                             <StackPanel Margin="0,0,0,10">
                                 <TextBlock x:Name="MaintenanceDetailText" TextWrapping="Wrap" Margin="0,0,0,6"/>
@@ -490,26 +489,6 @@ $xaml = @'
                                                     </Style>
                                                 </DataGridTextColumn.ElementStyle>
                                             </DataGridTextColumn>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </GroupBox>
-                            </Grid>
-                            <Grid Grid.Row="3" Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="9*"/><ColumnDefinition Width="11*"/></Grid.ColumnDefinitions>
-                                <GroupBox Header="Active peer-monitoring incidents" Margin="0,0,6,0">
-                                    <DataGrid x:Name="OperationsIncidentsGrid">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Observed by" Binding="{Binding ObservedBy}" Width="130"/>
-                                            <DataGridTextColumn Header="Issue" Binding="{Binding Issue}" Width="*"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </GroupBox>
-                                <GroupBox Grid.Column="1" Header="Orchestrator mails (24 h) - double-click to open" Margin="6,0,0,0">
-                                    <DataGrid x:Name="OperationsMailsGrid">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="120"/>
-                                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="120"/>
-                                            <DataGridTextColumn Header="Subject" Binding="{Binding Subject}" Width="*"/>
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 </GroupBox>
@@ -809,7 +788,7 @@ $xaml = @'
 
             <TabItem Header="Events">
                 <Grid Margin="12">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="90"/></Grid.RowDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="90"/><RowDefinition Height="220"/></Grid.RowDefinitions>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="180"/><ColumnDefinition Width="160"/><ColumnDefinition Width="160"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
@@ -843,6 +822,27 @@ $xaml = @'
                         </DataGrid.Columns>
                     </DataGrid>
                     <TextBox x:Name="EventsDetailBox" Grid.Row="3" Margin="0,8,0,0" FontFamily="Consolas" FontSize="12" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                    <!-- Moved from Operations > Live in GUI 1.6.17 so the running and pending job grids get the height. -->
+                    <Grid Grid.Row="4" Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="9*"/><ColumnDefinition Width="11*"/></Grid.ColumnDefinitions>
+                        <GroupBox Header="Active peer-monitoring incidents" Margin="0,0,6,0">
+                            <DataGrid x:Name="OperationsIncidentsGrid">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Observed by" Binding="{Binding ObservedBy}" Width="130"/>
+                                    <DataGridTextColumn Header="Issue" Binding="{Binding Issue}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Orchestrator mails (24 h) - double-click to open" Margin="6,0,0,0">
+                            <DataGrid x:Name="OperationsMailsGrid">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="120"/>
+                                    <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="120"/>
+                                    <DataGridTextColumn Header="Subject" Binding="{Binding Subject}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                    </Grid>
                 </Grid>
             </TabItem>
 

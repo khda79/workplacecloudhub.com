@@ -7,7 +7,7 @@ Builds fictional daily logs for three servers, then verifies parsing, categories
 and display filters, repeat grouping, incremental cached reads, shared reads of a file
 held open by a writer, read-only behaviour, and the background GUI refresh contract.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param()
@@ -170,6 +170,13 @@ try {
     Assert-Events ($errors.Count -eq 0) 'GUI parses.'
     $guiText = [IO.File]::ReadAllText($guiPath)
     Assert-Events ($guiText -match '<TabItem Header="Events">' -and $guiText -match "'Servers and versions','Events'[,)]") 'Events tab and demo view exist.'
+    # GUI 1.6.17 moved the peer-monitoring incidents and orchestrator mails from Operations > Live to Events.
+    $eventsTabText = $guiText.Substring($guiText.IndexOf('<TabItem Header="Events">'))
+    $eventsTabText = $eventsTabText.Substring(0, $eventsTabText.IndexOf('</TabItem>'))
+    $liveTabText = $guiText.Substring($guiText.IndexOf('<TabItem Header="Live">'))
+    $liveTabText = $liveTabText.Substring(0, $liveTabText.IndexOf('</TabItem>'))
+    Assert-Events ($eventsTabText -match 'x:Name="OperationsIncidentsGrid"' -and $eventsTabText -match 'x:Name="OperationsMailsGrid"') 'Incidents and mails are shown in the Events tab.'
+    Assert-Events ($liveTabText -notmatch 'OperationsIncidentsGrid|OperationsMailsGrid' -and $liveTabText -match 'x:Name="OperationsRunningGrid"') 'Operations Live keeps only the job grids.'
     $startRefresh = $guiAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Start-GuiRefresh' }, $true)
     Assert-Events ($startRefresh.Extent.Text -match "LogEventsHours = \`$\(if \(\`$Mode -ne 'History' -and \(Test-GuiEventsTabVisible\)\)") 'Logs are read only by live/full refreshes while the Events tab is visible.'
     $updateView = $guiAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Update-GuiEventsView' }, $true)

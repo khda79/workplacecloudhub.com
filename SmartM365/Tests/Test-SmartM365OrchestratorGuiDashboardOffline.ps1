@@ -7,7 +7,7 @@ Uses synthetic operations, job runs, election plan, requests and log events only
 banner, tiles, items to review, server rows and 24-hour timeline, the background refresh contract,
 the delayed non-blocking loading overlay and the WPF rendering of tiles and timeline. Run with -STA.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param()
@@ -100,7 +100,7 @@ Assert-Dashboard ((Get-Action 'State persistence' 'SRV03')[0].Severity -eq 'Crit
 Assert-Dashboard ((Get-Action 'Certificate' 'SRV03')[0].Severity -eq 'Critical' -and (Get-Action 'Certificate' 'SRV02')[0].Severity -eq 'Warning' -and @(Get-Action 'Certificate' 'SRV01').Count -eq 0) 'Certificate thresholds.'
 Assert-Dashboard ((Get-Action 'Job Failing' 'JobFailing')[0].Severity -eq 'Critical' -and (Get-Action 'Job Stale' 'JobStale')[0].Severity -eq 'Warning' -and (Get-Action 'Job Stale' 'JobStale')[0].Target -eq 'Planning') 'Job health items.'
 Assert-Dashboard ((Get-Action 'Election' 'JobOrphan')[0].Detail -like 'Unassigned:*') 'Unassigned election group.'
-Assert-Dashboard (@(Get-Action 'Peer monitoring' 'SRV01').Count -eq 1) 'Peer incident.'
+Assert-Dashboard (@(Get-Action 'Peer monitoring' 'SRV01').Count -eq 1 -and (Get-Action 'Peer monitoring' 'SRV01')[0].Target -eq 'Events') 'Peer incident opens Events, where the incidents grid lives since GUI 1.6.17.'
 Assert-Dashboard (@(Get-Action 'Pipeline request' 'OLD-BATCH').Count -eq 1 -and @(Get-Action 'Pipeline request' 'NEW-BATCH').Count -eq 0) 'Only requests older than 6 h are listed.'
 Assert-Dashboard ((Get-Action 'Log Heartbeat' 'SRV03')[0].Detail -like '2 line(s) in the last hour*' -and (Get-Action 'Log Heartbeat' 'SRV03')[0].Target -eq 'Events') 'Recent heartbeat log lines are grouped.'
 Assert-Dashboard (@($actions | Where-Object Area -eq 'Maintenance').Count -eq 0) 'No maintenance item while maintenance is off.'

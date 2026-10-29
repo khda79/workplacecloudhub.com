@@ -525,7 +525,7 @@ function Get-SmartM365OrchestratorDashboard {
         $reason = [string](Get-InsightsProperty $group 'Reason' 'No live server satisfies the job requirements.')
         Add-DashboardAction 'Warning' 'Election' $groupName ('Unassigned: ' + $reason) 'Servers and versions'
     }
-    foreach ($incident in @($Operations.Incidents)) { Add-DashboardAction 'Warning' 'Peer monitoring' ([string]$incident.ObservedBy) ([string]$incident.Issue) 'Operations' }
+    foreach ($incident in @($Operations.Incidents)) { Add-DashboardAction 'Warning' 'Peer monitoring' ([string]$incident.ObservedBy) ([string]$incident.Issue) 'Events' }
     # A required SWI input that WorkplaceEvidence-Prepare would refuse (Get-SmartM365OrchestratorSwiValidity).
     foreach ($swi in @($SwiRows | Where-Object { [bool](Get-InsightsProperty $_ 'Blocks' $false) })) {
         Add-DashboardAction 'Critical' 'SWI validity' ([string]$swi.Name) ('{0}. {1}' -f [string]$swi.Swi, [string](Get-InsightsProperty $swi 'Detail' '')) 'Planning'
