@@ -28,8 +28,9 @@
   A domain entry may set its own Frequency and WeekDay.
   The recovery workbook uses the email style (1.61): an Overview sheet with KPI tiles, recovery by license and sheet links,
   readable headers, AD domain and country columns, colored reasons and dates, print setup and a tenant or domain file name.
+  The script parses under Windows PowerShell 5.1 again (1.65), so SmartInventory.cmd can resolve and start it.
 .VERSION
- 1.64
+ 1.65
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -2172,7 +2173,9 @@ function New-LicensesRecoveryWorkbook {
       $body = $sheet.Cells[2, 1, $last, $Columns.Count]
       $body.Style.Border.Bottom.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
       $body.Style.Border.Bottom.Color.SetColor((& $color $palette.Row))
-      $table = $sheet.Tables.Add($sheet.Cells[1, 1, $last, $Columns.Count], $TableName)
+      # Range first: Windows PowerShell 5.1 (SmartInventory.cmd catalog check) cannot parse a multi-index inside method arguments.
+      $tableRange = $sheet.Cells[1, 1, $last, $Columns.Count]
+      $table = $sheet.Tables.Add($tableRange, $TableName)
       $table.TableStyle = [OfficeOpenXml.Table.TableStyles]::None
       $table.ShowFilter = $true
     }
@@ -4914,7 +4917,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.64"
+$ScriptVersion = "1.65"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''

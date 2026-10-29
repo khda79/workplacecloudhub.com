@@ -19,7 +19,7 @@ Checker is never executed; Exchange Online and module installation are mocked. C
 - OAuth only (Intra Organization Connector enabled): DAuth sides NotApplicable, not counted against the run.
 
 .VERSION
-1.0.6
+1.0.7
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Mocks keep the parameters of the commands they replace.')]
@@ -245,7 +245,9 @@ try {
     $directExit = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
     Assert-FreeBusy ($directExit -eq 1 -and $directRun -match 'RUN-FAILED') 'The synthetic checker fails when called directly under the runner settings (the call before runner 1.0.2).'
-    Assert-FreeBusy ($strictExit -eq 0 -and $strictRun -match 'FAKE-CHECKER-DONE SkipVersionCheck=True' -and $strictRun -match 'Synthetic non-terminating service error') "Free/Busy Checker runs to its end without strict mode and keeps its non-terminating errors: $($strictRun.Trim())"
+    # Windows PowerShell 5.1 wraps the error record it writes to stderr at its buffer width, inside the message.
+    $strictRunText = $strictRun -replace '\s+', ' '
+    Assert-FreeBusy ($strictExit -eq 0 -and $strictRun -match 'FAKE-CHECKER-DONE SkipVersionCheck=True' -and $strictRunText -match 'Synthetic non-terminating service error') "Free/Busy Checker runs to its end without strict mode and keeps its non-terminating errors: $($strictRun.Trim())"
     Assert-FreeBusy ($strictRun -match 'STRICT-STILL-ON' -and $strictRun -match 'STOP-STILL-ON') 'The runner keeps strict mode and stop-on-error for its own code.'
 
     # Exchange Management Shell: Free/Busy Checker does not load it, the runner does, before Exchange Online.

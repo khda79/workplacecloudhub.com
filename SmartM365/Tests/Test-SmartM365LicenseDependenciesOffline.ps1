@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic licensing dependency policy checks. No scheduler entry point or collector is executed.
 .VERSION
-1.0.2
+1.0.3
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -80,9 +80,9 @@ try {
  } $base
  $headerVersion=[regex]::Match($ast.Extent.Text,'(?m)^\.VERSION\s*\r?\n(?<Version>\d+\.\d+\.\d+)').Groups['Version'].Value
  Check ([string]$snapshot.ScriptVersion -ceq $headerVersion) 'Header and executable ScriptVersion differ: automatic recycle would use the wrong version.'
- Check ($snapshot.ScriptVersion -eq [version]'1.5.65') 'The delivered licensing runtime does not declare version 1.5.65.'
+ Check ($snapshot.ScriptVersion -gt [version]'1.5.64') 'The delivered runtime is not newer than the synthetic 1.5.64 baseline.'
  Check (-not (& $versionGate {param($n) Test-OrchestratorRuntimeUpdate -Now $n} $now)) 'Runtime update bypassed its first stability check.'
- Check (& $versionGate {param($n) Test-OrchestratorRuntimeUpdate -Now $n} $now.AddSeconds(61)) 'The 1.5.64 to 1.5.65 update was not accepted after two stable checks.'
+ Check (& $versionGate {param($n) Test-OrchestratorRuntimeUpdate -Now $n} $now.AddSeconds(61)) 'The update from the synthetic 1.5.64 baseline was not accepted after two stable checks.'
  New-Item -ItemType Directory -Path $claims -Force|Out-Null
  $jobsByName=@{};foreach($j in $document.Jobs){$jobsByName[$j.Name]=$j}
  & $gate {param($c,$j) $script:Settings=[pscustomobject]@{DistributedSchedulingEnabled=$true;ElectionClaimsPath=$c};$script:Manifest=[pscustomobject]@{JobsByName=$j};$script:FreshCalls=0} $claims $jobsByName
@@ -129,7 +129,7 @@ try {
 } finally {
  $global:SmartM365TenantKey=$previousTenant
  $full=[IO.Path]::GetFullPath($root);$temp=[IO.Path]::GetFullPath($env:TEMP).TrimEnd('\')+'\'
- if($full.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -and (Split-Path $full -Leaf) -match '^SmartM365-LicenseDeps-[a-f0-9]{32}$'){Remove-Item -LiteralPath $full -Recurse -Force}
+ if($full.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -and (Split-Path $full -Leaf) -match '^SmartM365-LicenseDeps-[a-f0-9]{32}$' -and (Test-Path -LiteralPath $full)){Remove-Item -LiteralPath $full -Recurse -Force}
 }
 
 # SIG # Begin signature block

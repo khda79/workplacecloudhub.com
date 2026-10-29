@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate offline the SmartInventory launch engine and its catalog against the legacy .cmd launchers.
 .VERSION
-1.5.0
+1.5.1
 .NOTES
 Runs under Windows PowerShell 5.1 and PowerShell 7. Nothing is executed outside a fictional fixture.
 Checks:
@@ -175,7 +175,23 @@ try {
         Assert-True ($lines.Count -eq 1 -and $lines[0] -ceq ($prefix + ' ' + $arguments + ' %*')) "$($record.Launcher): alias must be '$prefix $arguments %*', found '$($lines -join ' | ')'."
     }
     $aliasFiles = @(Get-ChildItem -LiteralPath (Join-Path $inventoryRoot 'Launchers'), (Join-Path $inventoryRoot 'LaunchersByOrchestrator') -Filter '*.cmd' -File -Recurse)
-    Assert-True ($aliasFiles.Count -eq $reference.Count) "Only the aliases of the legacy names may remain ($($aliasFiles.Count) .cmd files)."
+    # Jobs added after the freeze get the Start/Request aliases of New-SmartM365-OrchestratorJobLaunchers.ps1, not a reference entry.
+    $referenced = @{}
+    foreach ($record in $reference) { $referenced[$record.Launcher.ToLowerInvariant()] = $true }
+    $jobNames = @($catalog.Entries | Where-Object { $_.Kind -eq 'Job' } | ForEach-Object { $_.Name })
+    $newJobAliases = 0
+    foreach ($aliasFile in $aliasFiles) {
+        $relative = $aliasFile.FullName.Substring($inventoryRoot.Length + 1)
+        if ($referenced.ContainsKey($relative.ToLowerInvariant())) { continue }
+        $match = [regex]::Match($relative, '^(?:Launchers\\Jobs\\Start-(?<Job>[A-Za-z0-9._-]+)|LaunchersByOrchestrator\\Request-(?<Job>[A-Za-z0-9._-]+))\.cmd$')
+        Assert-True ($match.Success -and $jobNames -ccontains $match.Groups['Job'].Value) "Only the aliases of the legacy names and of the catalog jobs may remain: $relative"
+        $lines = @([IO.File]::ReadAllLines($aliasFile.FullName) | Where-Object { $_.Trim() })
+        $prefix = '@call "%~dp0' + ('..\' * ($relative.Split('\').Count - 1)) + 'SmartInventory.cmd"'
+        $arguments = if ($relative -like 'LaunchersByOrchestrator\*') { $match.Groups['Job'].Value + ' -Request' } else { $match.Groups['Job'].Value }
+        Assert-True ($lines.Count -eq 1 -and $lines[0] -ceq ($prefix + ' ' + $arguments + ' %*')) "${relative}: alias must be '$prefix $arguments %*', found '$($lines -join ' | ')'."
+        $newJobAliases++
+    }
+    Assert-True ($aliasFiles.Count -eq $reference.Count + $newJobAliases) "Only the aliases of the legacy names and of the catalog jobs may remain ($($aliasFiles.Count) .cmd files)."
 
     # Menu: every entry once, jobs first, then manual launches, then the orchestrator entries.
     $menu = @(Get-SmartM365InventoryMenu -Catalog $catalog)
@@ -185,7 +201,7 @@ try {
     Assert-True ($menu.Count -eq @($catalog.Entries).Count -and @($menu | Where-Object { $_.Domain -eq 'Other' }).Count -eq 0) 'Every catalog entry must belong to a menu domain.'
     Assert-True ($advanced.Count -eq 9 -and $advanced -contains 'WorkplaceEvidence-ConvertMetadata' -and $advanced -contains 'Orchestrator-ScheduledTask-Installer' -and $advanced -notcontains 'M365-Usage-Inventory-D180') 'Nine advanced entries: migration, repair, diagnostics and setup tools.'
     Assert-True ((($domains | Measure-Object -Property Count -Sum).Sum) -eq ($menu.Count - 9) -and (($allDomains | Measure-Object -Property Count -Sum).Sum) -eq $menu.Count) 'Advanced entries are listed only on request.'
-    Assert-True (@($domains.Domain) -join '|' -eq 'Active Directory|Exchange Online|Exchange 2016 (on-premises)|Intune|Microsoft 365|SharePoint (on-premises)|Workplace Evidence|SmartFinOps|Orchestrator') ('Unexpected menu domains: ' + (@($domains.Domain) -join '|'))
+    Assert-True (@($domains.Domain) -join '|' -eq 'Active Directory|Exchange Online|Exchange 2016 (on-premises)|Intune|Microsoft 365|SharePoint (on-premises)|Workplace Evidence|SmartFinOps|Orchestrator|Maintenance') ('Unexpected menu domains: ' + (@($domains.Domain) -join '|'))
     $adItems = @($domains[0].Items)
     Assert-True ($adItems[0].Kind -eq 'Job' -and $adItems[-1].Kind -eq 'Manual') 'Jobs come before manual entries in a domain.'
     Assert-True ((Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice ' 2 ').Domain -eq 'Exchange Online' -and (Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice 'workplaceevidence-convertmetadata').Name -eq 'WorkplaceEvidence-ConvertMetadata' -and $null -eq (Resolve-SmartM365InventoryMenuChoice -Choices $domains -Items $menu -Choice '99')) 'A choice resolves by number, or by name even for an advanced entry.'
