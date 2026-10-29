@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.11
+1.4.12
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -36,7 +36,7 @@ function New-OrchestratorDemoData {
             [pscustomobject]@{
                 Server=('CTSO-INV-{0:00}' -f $i); Online=$true; HeartbeatAgeMinutes=0.2
                 Weight=1; Policy=''; Capabilities='AD, Graph, EXO, SharePoint'; AssignedJobs=4
-                State='Running'; LastHeartbeat='2026-10-18 09:30'; Running=0; Pending=0
+                State='Running'; Mode='Active'; LastHeartbeat='2026-10-18 09:30'; Running=0; Pending=0
                 RecycleIn='02:30:00'; Pid=(4100+$i); StatePersistence='Healthy (sample)'
                 Version='1.5.47'; Maintenance='Active'; MaintenanceAcknowledgement='Ready'
                 Os='Microsoft Windows Server 2022 Standard (10.0.20348, build 20348)'; Cpu='Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz'
@@ -324,7 +324,8 @@ function Update-OrchestratorDemoViews {
         $server.Maintenance=if($d.Maintenance){'Paused'}else{'Active'}
         $server.MaintenanceAcknowledgement=if($d.Maintenance){'Applied (sample)'}else{'Ready'}
     }
-    $c.ServersGrid.ItemsSource=@($d.Servers)
+    # Servers and versions shows the configured state (Active/Inactive); Live keeps the heartbeat state.
+    $c.ServersGrid.ItemsSource=@($d.Servers | Select-Object -Property * -ExcludeProperty State | Select-Object -Property *, @{Name='State';Expression={$_.Mode}})
     $c.OperationsServersGrid.ItemsSource=@($d.Servers)
     $c.PlanningGrid.ItemsSource=@($d.Jobs)
     $c.OperationsRunningGrid.ItemsSource=@($d.Running)
@@ -389,10 +390,6 @@ function Invoke-OrchestratorDemoAction {
         'ExportCsvButton' { [void](Export-OrchestratorDemoHistory -Format Csv); return }
         'EnableMaintenanceButton' { $d.Maintenance=$true }
         'DisableMaintenanceButton' { $d.Maintenance=$false }
-        'ValidateButton' {
-            Write-OrchestratorDemoActivity 'Sample draft is valid. Validation was performed on fictional data only.'
-            return
-        }
         'ApplyJobButton' {
             $job=$c.PlanningGrid.SelectedItem; if(-not $job){return}
             $times=@($c.TimesBox.Text -split ',' | ForEach-Object {$_.Trim()})
@@ -557,11 +554,11 @@ function Invoke-OrchestratorDemo {
             [pscustomobject]@{Dependency=$dependency;State='Ready';AgeHours=0.5;MaxAgeHours=$job.DependencyMaxAgeHours;Detail='Sample successful occurrence.'}
         })
     })
-    $c.ServersGrid.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$row=$c.ServersGrid.SelectedItem;if($row){$c.SelectedServerText.Text=$row.Server;$c.ServerWeightBox.Text=[string]$row.Weight}})
+    $c.ServersGrid.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$row=$c.ServersGrid.SelectedItem;if($row){$c.SelectedServerText.Text=$row.Server;$c.ServerWeightBox.Text=[string]$row.Weight;if($c.ServerActiveCheck){$c.ServerActiveCheck.IsChecked=([string]$row.State -eq 'Active')}}})
     $c.RequestsGrid.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$row=$c.RequestsGrid.SelectedItem;$c.RequestJobsGrid.ItemsSource=if($row){@($row.Rows)}else{@()}})
     $c.AssignmentCombo.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$c.PinnedServerCombo.IsEnabled=($c.AssignmentCombo.SelectedItem.Content -eq 'Pinned')})
     $c.ScheduleTypeCombo.Add_SelectionChanged({$c=$script:OrchestratorDemo.Controls;$c.DaysPanel.IsEnabled=($c.ScheduleTypeCombo.SelectedItem.Content -eq 'Weekly')})
-    foreach($name in @('RefreshButton','ValidateButton','RebalanceButton','PublishButton','ApplyJobButton','ApplyServerButton','HistoryRefreshButton','ExportHtmlButton','ExportCsvButton','Failures24hButton','EnableMaintenanceButton','DisableMaintenanceButton','StopRunningJobButton','RequestRunButton','RequestPrepareButton','CancelRequestButton','CancelAllRequestsButton','AddServerButton','RemoveServerButton','RollbackButton')){
+    foreach($name in @('RefreshButton','RebalanceButton','PublishButton','ApplyJobButton','ApplyServerButton','HistoryRefreshButton','ExportHtmlButton','ExportCsvButton','Failures24hButton','EnableMaintenanceButton','DisableMaintenanceButton','StopRunningJobButton','RequestRunButton','RequestPrepareButton','CancelRequestButton','CancelAllRequestsButton','AddServerButton','RemoveServerButton','RollbackButton')){
         $c[$name].Tag=$name
         $c[$name].Add_Click({param($demoControl)try{Invoke-OrchestratorDemoAction -Action ([string]$demoControl.Tag)}catch{Write-OrchestratorDemoActivity $_.Exception.Message}})
     }

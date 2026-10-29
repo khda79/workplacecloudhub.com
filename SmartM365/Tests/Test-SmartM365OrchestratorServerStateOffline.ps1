@@ -4,7 +4,7 @@ Offline tests of the per-server Active/Inactive state (orchestrator 1.5.76): clu
 validation, explicit migration of an existing cluster, election, launch gate, retry adoption,
 reload with rebalance, heartbeat, Live view and GUI draft helpers.
 .VERSION
-1.0.0
+1.1.0
 .NOTES
 Runs the real module functions and the real orchestrator and GUI functions extracted from the
 scripts, with stubbed logs, in a temporary folder. Fictional server names only. No tenant
@@ -188,6 +188,34 @@ try {
     $guiText = Get-Content -LiteralPath $guiPath -Raw
     Check ($guiText -match 'x:Name="ServerActiveCheck"' -and $guiText -match 'Header="State" Binding="\{Binding State\}" Width="70"' -and $guiText -match 'Header="Jobs" Binding="\{Binding Mode\}"') 'The GUI shows the state (Servers grid, Selected server, Live).'
     Check ($guiText -match 'Initialize-SmartM365OrchestratorServerStates -ClusterDocument \$script:DraftCluster' -and $guiText -match 'SMOKE_TEST_SERVER_STATE_OK') 'The GUI draft uses explicit states and the smoke test covers them.'
+
+    # 8. GUI 1.6.27: Add server publishes at once (cluster only, from the published configuration);
+    # unpublished draft changes are detected, kept and never published with it.
+    foreach ($name in @('Copy-JsonDocument', 'Test-GuiDraftChanged', 'Publish-GuiServerAddition')) { . ([scriptblock]::Create((Get-FunctionText $guiAst $name))) }
+    function Write-GuiActivity { param([string]$Message, [string]$Level = 'INFO') $script:Logs.Add($Message) }
+    function Refresh-ServersView { param($Servers) $script:ServersViewRefreshed++ }
+    function Refresh-AllViews { $script:FullRefreshRequested++ }
+    $script:SharedDataFolderPath = $shared
+    $script:ServersViewRefreshed = 0; $script:FullRefreshRequested = 0
+    $script:Snapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $shared
+    $script:DraftJobs = Copy-JsonDocument -Document $script:Snapshot.Jobs
+    $script:DraftCluster = Copy-JsonDocument -Document $script:Snapshot.Cluster
+    Check (-not (Test-GuiDraftChanged)) 'A freshly loaded draft is not changed.'
+    $jobsHashBefore = Get-SmartM365OrchestratorFileHash $paths.JobsPath
+    $added = Publish-GuiServerAddition -Server 'srv-file' -SkipConfirmation
+    $published = Read-SmartM365OrchestratorJson $paths.ClusterPath
+    Check ($added.Server -eq 'SRV-FILE' -and $added.VersionId -and $published.ServerStates.'SRV-FILE' -eq 'Inactive' -and 'SRV-FILE' -in @($published.ExpectedOrchestratorServers) -and $published.ServerStates.'SRV-A' -eq 'Active') 'Add server publishes the server Inactive at once.'
+    Check ((Get-SmartM365OrchestratorFileHash $paths.JobsPath) -eq $jobsHashBefore -and $script:FullRefreshRequested -eq 1) 'The jobs file is untouched and a clean draft is reloaded from the publication.'
+    $script:Snapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $shared
+    $script:DraftJobs = Copy-JsonDocument -Document $script:Snapshot.Jobs
+    $script:DraftCluster = Copy-JsonDocument -Document $script:Snapshot.Cluster
+    Set-JsonProperty -Object $script:DraftCluster.ElectionWeightsByServer -Name 'SRV-A' -Value 2.5
+    Check (Test-GuiDraftChanged) 'An unpublished draft edit is detected.'
+    $added = Publish-GuiServerAddition -Server 'SRV-FILE2' -SkipConfirmation
+    $published = Read-SmartM365OrchestratorJson $paths.ClusterPath
+    Check ($published.ServerStates.'SRV-FILE2' -eq 'Inactive' -and -not ($published.ElectionWeightsByServer.PSObject.Properties['SRV-A'] -and [double]$published.ElectionWeightsByServer.'SRV-A' -eq 2.5)) 'Only the new server is published; the other draft edit is not.'
+    Check ([double]$script:DraftCluster.ElectionWeightsByServer.'SRV-A' -eq 2.5 -and 'SRV-FILE2' -in @($script:DraftCluster.ExpectedOrchestratorServers) -and $script:Snapshot.ClusterHash -eq (Get-SmartM365OrchestratorFileHash $paths.ClusterPath) -and $script:ServersViewRefreshed -eq 1) 'A changed draft is kept, gets the new server and can still be published.'
+    Check ($guiText -notmatch 'x:Name="ValidateButton"' -and $guiText -match 'function Get-DraftValidation' -and $guiText -match 'Update-GuiPublishedConfigurationState -Result \$result') 'Publish changes validates (no Validate draft button) and the live refresh updates servers and configuration.'
 }
 finally {
     $env:COMPUTERNAME = $originalComputerName

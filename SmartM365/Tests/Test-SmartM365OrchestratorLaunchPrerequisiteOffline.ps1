@@ -4,7 +4,7 @@ Offline tests for the orchestrator launch prerequisites: application certificate
 without private key, expiring soon), runtime and tenant data shares, cache, capability withdrawal,
 election exclusion, alerts, recovery and no impact when everything is ready.
 .VERSION
-1.2
+1.3
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -272,7 +272,8 @@ function Get-SmartM365OrchestratorCachedCertificateReadiness { SmartM365.Orchest
     # Expiry warning: once per day.
     Reset-Gate -TenantDataRoots $dataRoots
     $global:PrereqTestCandidates = @(New-Candidate (New-TestCertificate -NotAfterDays 10))
-    $day = Get-Date
+    # Fixed time of day: two checks 45 minutes apart must stay on the same day (failed after 23:15).
+    $day = (Get-Date).Date.AddHours(10)
     & $gate { param($n) Invoke-OrchestratorPrerequisiteMonitoring -Now $n } $day
     & $gate { param($n) Invoke-OrchestratorPrerequisiteMonitoring -Now $n } $day.AddMinutes(45)
     $mails = Get-GateValue { @($script:Mails) }

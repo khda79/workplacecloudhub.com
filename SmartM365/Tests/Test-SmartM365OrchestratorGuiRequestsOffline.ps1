@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline WPF selection and asynchronous cancellation tests with synthetic delays.
 .VERSION
-1.1.2
+1.1.3
 #>
 [CmdletBinding()]
 param()
@@ -25,7 +25,7 @@ foreach($name in @('ConvertFrom-OrchestratorGuiXaml','Update-SelectedPipelineReq
 $assignment=$ast.Find({param($node)$node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$xaml'},$true)
 $window=ConvertFrom-OrchestratorGuiXaml -Text $assignment.Right.Expression.Value
 $script:Controls=@{}
-foreach($name in @('RequestsGrid','RequestJobsGrid','CancelRequestButton','CancelAllRequestsButton','CancellationReasonBox','CancellationProgressText','RefreshButton','ValidateButton','RebalanceButton','PublishButton','HistoryRefreshButton','RequestRunButton','EnableMaintenanceButton','DisableMaintenanceButton','RollbackButton')){
+foreach($name in @('RequestsGrid','RequestJobsGrid','CancelRequestButton','CancelAllRequestsButton','CancellationReasonBox','CancellationProgressText','RefreshButton','RebalanceButton','PublishButton','HistoryRefreshButton','RequestRunButton','EnableMaintenanceButton','DisableMaintenanceButton','RollbackButton')){
     $script:Controls[$name]=$window.FindName($name)
     if(-not $script:Controls[$name]){throw "Missing XAML control: $name"}
 }

@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.26
+1.6.27
 #>
 [CmdletBinding()]
 param(
@@ -68,12 +68,16 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.26'
+$script:AppVersion = '1.6.27'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
+$script:ServerSelectionRestoring = $false
+$script:PublishedChangeWarned = $false
+# The smoke test publishes a test server only on an explicitly given (copied) shared folder.
+$script:SmokePublishAllowed = $PSBoundParameters.ContainsKey('SharedDataFolderPath')
 $script:PlanningRows = @()
 $script:HistoryRows = @()
 $script:InitialHistoryLoaded = $false
@@ -309,7 +313,6 @@ $xaml = @'
             <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <CheckBox x:Name="AutoRefreshCheck" Content="Auto-refresh (60 s)" VerticalAlignment="Center" Margin="4,0,10,0" IsChecked="True"/>
                 <Button x:Name="RefreshButton" Content="Refresh"/>
-                <Button x:Name="ValidateButton" Content="Validate draft"/>
                 <Button x:Name="RebalanceButton" Content="Rebalance now" Background="#FFF4CE"/>
                 <Button x:Name="RequestPrepareButton" Content="Refresh Power BI data" Background="#FFF4CE" IsEnabled="False" ToolTip="Asks the orchestrators to run WorkplaceEvidence-Prepare once with the current data (published configuration; the inventory jobs it depends on are not rerun)."/>
                 <Button x:Name="PublishButton" Content="Publish changes" Background="{StaticResource AccentBrush}" BorderBrush="{StaticResource AccentBrush}" Foreground="White" FontWeight="SemiBold"/>
@@ -1002,6 +1005,9 @@ $xaml = @'
                                             </DataGridTextColumn>
                                             <DataGridCheckBoxColumn Header="Online" Binding="{Binding Online}" Width="60"/>
                                             <DataGridTextColumn Header="Orchestrator" Binding="{Binding Version}" Width="90"/>
+                                            <DataGridTextColumn Header="Weight" Binding="{Binding Weight}" Width="60"/>
+                                            <DataGridTextColumn Header="Policy" Binding="{Binding Policy}" Width="160"/>
+                                            <DataGridTextColumn Header="Capabilities" Binding="{Binding Capabilities}" Width="220"/>
                                             <DataGridTextColumn Header="OS" Binding="{Binding Os}" Width="230"/>
                                             <DataGridTextColumn Header="CPU" Binding="{Binding Cpu}" Width="220"/>
                                             <DataGridTextColumn Header="CPU %" Binding="{Binding CpuPercent}" Width="60"/>
@@ -1011,14 +1017,11 @@ $xaml = @'
                                             <DataGridTextColumn Header="C: free %" Binding="{Binding SystemDriveFreePercent}" Width="75"/>
                                             <DataGridTextColumn Header="Usage at" Binding="{Binding UsageAt}" Width="120"/>
                                             <DataGridTextColumn Header="Started at (static)" Binding="{Binding SystemInfoAt}" Width="130"/>
-                                            <DataGridTextColumn Header="Weight" Binding="{Binding Weight}" Width="60"/>
-                                            <DataGridTextColumn Header="Policy" Binding="{Binding Policy}" Width="160"/>
-                                            <DataGridTextColumn Header="Capabilities" Binding="{Binding Capabilities}" Width="220"/>
                                             <DataGridTextColumn Header="Jobs" Binding="{Binding AssignedJobs}" Width="50"/>
                                         </DataGrid.Columns>
                                     </DataGrid>
                                     <GroupBox Grid.Row="1" Header="CPU and memory, last 12 hours (blue = CPU, green = RAM; sampled every 5 minutes by each orchestrator)" Margin="0,10,0,0">
-                                        <Canvas x:Name="ServersMetricsCanvas" Height="150" ClipToBounds="True" Background="White"/>
+                                        <Canvas x:Name="ServersMetricsCanvas" Height="260" ClipToBounds="True" Background="White"/>
                                     </GroupBox>
                                     <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
                                         <TextBox x:Name="NewServerBox" Width="220" Margin="0,0,8,0"/>
@@ -1026,8 +1029,8 @@ $xaml = @'
                                         <Button x:Name="RemoveServerButton" Content="Remove selected"/>
                                     </StackPanel>
                                 </Grid>
-                                <ScrollViewer Grid.Column="1" Margin="14,0,0,0" VerticalScrollBarVisibility="Auto">
-                                    <StackPanel>
+                                <Grid Grid.Column="1" Margin="14,0,0,0">
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                                         <GroupBox Header="Selected server">
                                             <StackPanel>
                                                 <TextBlock x:Name="SelectedServerText" FontWeight="SemiBold" Text="Select a server"/>
@@ -1048,9 +1051,9 @@ $xaml = @'
                                                 <Button x:Name="ApplyServerButton" Content="Apply server settings to draft" Background="#E5F1FB" Margin="0,6,0,0"/>
                                             </StackPanel>
                                         </GroupBox>
-                                        <GroupBox Header="Configuration versions">
+                                        <GroupBox Grid.Row="1" Header="Configuration versions" Margin="0,10,0,0">
                                             <Grid>
-                                                <Grid.RowDefinitions><RowDefinition Height="260"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                                <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                                 <DataGrid x:Name="VersionsGrid">
                                                     <DataGrid.Columns>
                                                         <DataGridTextColumn Header="Version" Binding="{Binding VersionId}" Width="*"/>
@@ -1060,8 +1063,7 @@ $xaml = @'
                                                 <Button x:Name="RollbackButton" Grid.Row="1" Content="Rollback to state before selected version" Margin="0,8,0,0"/>
                                             </Grid>
                                         </GroupBox>
-                                    </StackPanel>
-                                </ScrollViewer>
+                                </Grid>
                             </Grid>
                         </TabItem>
                     </TabControl>
@@ -1736,7 +1738,14 @@ function Refresh-ServersView {
     param([AllowNull()]$Servers = $null)
     if ($null -eq $Servers) { $Servers = @(Get-SmartM365OrchestratorServerStatus -SharedDataFolderPath $script:SharedDataFolderPath -ClusterDocument $script:DraftCluster) }
     $servers = @($Servers)
-    $script:Controls.ServersGrid.ItemsSource = $servers
+    $selected = $script:Controls.ServersGrid.SelectedItem
+    $selectedName = if ($null -ne $selected) { [string]$selected.Server } else { '' }
+    $script:ServerSelectionRestoring = $true
+    try {
+        $script:Controls.ServersGrid.ItemsSource = $servers
+        if ($selectedName) { $script:Controls.ServersGrid.SelectedItem = $servers | Where-Object { [string]$_.Server -eq $selectedName } | Select-Object -First 1 }
+    }
+    finally { $script:ServerSelectionRestoring = $false }
     $script:Controls.PinnedServerCombo.ItemsSource = @($script:DraftCluster.ExpectedOrchestratorServers)
     return $servers
 }
@@ -2011,7 +2020,7 @@ function Get-GuiCancellationWork {
 function Set-GuiCancellationBusy {
     param([bool]$Busy)
     $script:CancellationBusy = $Busy
-    $names = @('RefreshButton','ValidateButton','RebalanceButton','PublishButton','HistoryRefreshButton',
+    $names = @('RefreshButton','RebalanceButton','PublishButton','HistoryRefreshButton',
         'RequestRunButton','RequestPrepareButton','EnableMaintenanceButton','DisableMaintenanceButton','RollbackButton',
         'CancelRequestButton','CancelAllRequestsButton','CancellationReasonBox')
     if ($Busy) {
@@ -2936,6 +2945,16 @@ function Get-GuiRefreshWork {
         $publishedCluster = Read-SmartM365OrchestratorJson -Path (Join-Path $root 'Config/Orchestrator-Cluster.json')
         $operations = Get-SmartM365OrchestratorOperations -SharedDataFolderPath $root -ClusterDocument $publishedCluster -MailFolderPath $InputData.MailFolderPath -MailHours 24
         $requests = @(Get-SmartM365OrchestratorRecentPipelineRuns -SharedDataFolderPath $root -Count 30)
+        $liveServers = @(); $publishedHashes = $null
+        if ($InputData.Mode -eq 'Live') {
+            # Isolated: the Servers grid and the published-change check never hide the live operations.
+            try {
+                $configurationPaths = Get-SmartM365OrchestratorConfigurationPaths -SharedDataFolderPath $root
+                $publishedHashes = [pscustomobject]@{ JobsHash = Get-SmartM365OrchestratorFileHash $configurationPaths.JobsPath; ClusterHash = Get-SmartM365OrchestratorFileHash $configurationPaths.ClusterPath }
+                $liveServers = @(Get-SmartM365OrchestratorServerStatus -SharedDataFolderPath $root -ClusterDocument $publishedCluster)
+            }
+            catch { $publishedHashes = $null; $liveServers = @() }
+        }
         $logEvents = $null; $logEventsError = ''
         $eventsOption = $InputData.PSObject.Properties['LogEventsHours']
         if ($null -ne $eventsOption -and [int]$eventsOption.Value -gt 0) {
@@ -2976,6 +2995,7 @@ function Get-GuiRefreshWork {
         }
         return [pscustomobject]@{
             Mode = $InputData.Mode; Snapshot = $snapshot; RecentRuns = $recentRuns; Servers = $servers
+            LiveServers = $liveServers; PublishedHashes = $publishedHashes
             Owners = $owners; History = $history; Versions = $versions; Operations = $operations
             Requests = $requests; LogEvents = $logEvents; LogEventsError = $logEventsError
             Dashboard = $dashboard; DashboardError = $dashboardError
@@ -3101,6 +3121,10 @@ function Receive-GuiRefresh {
             if ([int]$script:RefreshContext.Input.LogEventsHours -gt 0) { Set-GuiLogEvents -Result $result.LogEvents -ErrorMessage ([string]$result.LogEventsError) }
             if ([string]$script:RefreshContext.Input.ConfigurationProfile) { Set-GuiConfiguration -View $result.Configuration -ErrorMessage ([string]$result.ConfigurationError) }
             if ([bool]$script:RefreshContext.Input.IncludeDashboard) { Set-GuiDashboard -Dashboard $result.Dashboard -ErrorMessage ([string]$result.DashboardError) }
+            if ($mode -eq 'Live') {
+                try { Update-GuiPublishedConfigurationState -Result $result }
+                catch { Write-GuiException -Context 'Servers and configuration refresh failed' -ErrorRecord $_ }
+            }
         }
         if ($mode -eq 'History') {
             $script:Controls.StatusText.Text = "History refreshed: $(@($script:HistoryRows).Count) row(s)."
@@ -3265,25 +3289,86 @@ function Apply-SelectedJobToDraft {
 
 function Set-DraftServerState {
     # Writes ServerStates explicitly; a server without an entry would be Inactive.
-    param([Parameter(Mandatory)][string]$Server, [Parameter(Mandatory)][ValidateSet('Active', 'Inactive')][string]$State)
-    [void](Initialize-SmartM365OrchestratorServerStates -ClusterDocument $script:DraftCluster)
-    Set-JsonProperty -Object $script:DraftCluster.ServerStates -Name $Server.ToUpperInvariant() -Value $State
+    param([Parameter(Mandatory)][string]$Server, [Parameter(Mandatory)][ValidateSet('Active', 'Inactive')][string]$State, $Cluster = $script:DraftCluster)
+    [void](Initialize-SmartM365OrchestratorServerStates -ClusterDocument $Cluster)
+    Set-JsonProperty -Object $Cluster.ServerStates -Name $Server.ToUpperInvariant() -Value $State
 }
 
 function Add-ServerToDraft {
     # A new server is always added Inactive: activate it after checking it (Apply server settings to draft).
-    param([Parameter(Mandatory)][string]$Server)
+    param([Parameter(Mandatory)][string]$Server, $Cluster = $script:DraftCluster)
     $server = $Server.Trim().ToUpperInvariant()
     if ($server -notmatch '^[A-Z0-9._-]+$') { throw 'Enter a valid server name.' }
-    if ($server -in @($script:DraftCluster.ExpectedOrchestratorServers)) { throw 'This server already exists.' }
-    [void](Initialize-SmartM365OrchestratorServerStates -ClusterDocument $script:DraftCluster)
-    $script:DraftCluster.ExpectedOrchestratorServers = @($script:DraftCluster.ExpectedOrchestratorServers) + $server
-    if (-not $script:DraftCluster.PSObject.Properties['ElectionWeightsByServer'] -or $null -eq $script:DraftCluster.ElectionWeightsByServer) {
-        Set-JsonProperty -Object $script:DraftCluster -Name ElectionWeightsByServer -Value ([pscustomobject]@{})
+    if ($server -in @($Cluster.ExpectedOrchestratorServers)) { throw 'This server already exists.' }
+    [void](Initialize-SmartM365OrchestratorServerStates -ClusterDocument $Cluster)
+    Set-JsonProperty -Object $Cluster -Name ExpectedOrchestratorServers -Value (@($Cluster.ExpectedOrchestratorServers) + $server)
+    if (-not $Cluster.PSObject.Properties['ElectionWeightsByServer'] -or $null -eq $Cluster.ElectionWeightsByServer) {
+        Set-JsonProperty -Object $Cluster -Name ElectionWeightsByServer -Value ([pscustomobject]@{})
     }
-    Set-JsonProperty -Object $script:DraftCluster.ElectionWeightsByServer -Name $server -Value 1.0
-    Set-DraftServerState -Server $server -State 'Inactive'
+    Set-JsonProperty -Object $Cluster.ElectionWeightsByServer -Name $server -Value 1.0
+    Set-DraftServerState -Server $server -State 'Inactive' -Cluster $Cluster
     return $server
+}
+
+function Test-GuiDraftChanged {
+    # True when the draft differs from the published configuration it was loaded from.
+    if ($null -eq $script:Snapshot -or $null -eq $script:DraftJobs -or $null -eq $script:DraftCluster) { return $false }
+    $publishedJobs = Copy-JsonDocument -Document $script:Snapshot.Jobs
+    $publishedCluster = Copy-JsonDocument -Document $script:Snapshot.Cluster
+    [void](Initialize-SmartM365OrchestratorServerStates -ClusterDocument $publishedCluster)
+    $sameJobs = ($script:DraftJobs | ConvertTo-Json -Depth 100 -Compress) -ceq ($publishedJobs | ConvertTo-Json -Depth 100 -Compress)
+    $sameCluster = ($script:DraftCluster | ConvertTo-Json -Depth 100 -Compress) -ceq ($publishedCluster | ConvertTo-Json -Depth 100 -Compress)
+    return -not ($sameJobs -and $sameCluster)
+}
+
+function Publish-GuiServerAddition {
+    # Add server publishes at once (GUI 1.6.27): the server is added Inactive to the PUBLISHED cluster,
+    # cluster file only, so other unpublished draft changes stay in the draft and are not published.
+    param([Parameter(Mandatory)][string]$Server, [switch]$SkipConfirmation)
+    if ($null -eq $script:Snapshot) { throw 'The shared configuration is not loaded yet.' }
+    $draftChanged = Test-GuiDraftChanged
+    $published = Copy-JsonDocument -Document $script:Snapshot.Cluster
+    $name = Add-ServerToDraft -Server $Server -Cluster $published
+    if (-not $SkipConfirmation) {
+        $note = if ($draftChanged) { "`n`nYour other unpublished draft changes are not published; they stay in the draft." } else { '' }
+        $question = "Add server '{0}' and publish it now?`n`nIt is added Inactive: its orchestrator runs (heartbeat, monitoring, maintenance) but takes no job until you set it Active.{1}" -f $name, $note
+        if ($script:OrchestratorDialog.Show($question, 'Add server', 'YesNo', 'Question') -ne 'Yes') { return $null }
+    }
+    $result = Publish-SmartM365OrchestratorConfiguration -SharedDataFolderPath $script:SharedDataFolderPath -JobsDocument $script:Snapshot.Jobs -ClusterDocument $published -ExpectedClusterHash $script:Snapshot.ClusterHash -ChangeSummary ("Server {0} added (Inactive) from SmartM365 Orchestrator GUI" -f $name) -ClusterOnly
+    Write-GuiActivity -Message ("Server '{0}' added Inactive and published as version {1}." -f $name, $result.VersionId) -Level SUCCESS
+    if ($draftChanged) {
+        # Keep the draft: add the server to it and move its publication base to the new version.
+        if ($name -notin @($script:DraftCluster.ExpectedOrchestratorServers)) { [void](Add-ServerToDraft -Server $name) }
+        $script:Snapshot = Get-SmartM365OrchestratorConfigurationSnapshot -SharedDataFolderPath $script:SharedDataFolderPath
+        [void](Refresh-ServersView)
+    }
+    else { Refresh-AllViews }
+    return [pscustomobject]@{ Server = $name; VersionId = [string]$result.VersionId }
+}
+
+function Update-GuiPublishedConfigurationState {
+    # Live refresh (every 60 s): a configuration published elsewhere reloads every view, unless the
+    # draft has unpublished changes (kept; Publish changes then asks for a refresh). Otherwise the
+    # Servers grid is refreshed (heartbeat, versions, CPU, RAM, drive C:).
+    param([Parameter(Mandatory)]$Result)
+    $hashes = Get-OrchestratorGuiPropertyValue -Object $Result -Name 'PublishedHashes' -DefaultValue $null
+    if ($null -eq $script:Snapshot -or $null -eq $hashes) { return }
+    $draftChanged = Test-GuiDraftChanged
+    $changed = [string]$hashes.JobsHash -ne [string]$script:Snapshot.JobsHash -or [string]$hashes.ClusterHash -ne [string]$script:Snapshot.ClusterHash
+    if ($changed) {
+        if ($draftChanged) {
+            if (-not $script:PublishedChangeWarned) { Write-GuiActivity -Level WARN -Message 'The shared configuration was published elsewhere; the draft has unpublished changes and is kept. Publish changes will ask for a refresh.' }
+            $script:PublishedChangeWarned = $true
+            $script:Controls.StatusText.Text = 'Shared configuration changed elsewhere; your draft has unpublished changes (Refresh discards them).'
+            return
+        }
+        $script:PublishedChangeWarned = $false
+        Write-GuiActivity -Message 'The shared configuration was published elsewhere: every view is reloaded.'
+        Start-GuiRefresh -Mode Full
+        return
+    }
+    $liveServers = @(Get-OrchestratorGuiPropertyValue -Object $Result -Name 'LiveServers' -DefaultValue @())
+    if (-not $draftChanged -and $liveServers.Count -gt 0) { [void](Refresh-ServersView -Servers $liveServers) }
 }
 
 function Apply-SelectedServerToDraft {
@@ -3320,26 +3405,26 @@ function Apply-SelectedServerToDraft {
     Write-GuiActivity -Message "Server '$server' settings updated in the draft. State=$previousState->$newState"
 }
 
-function Show-DraftValidation {
+function Get-DraftValidation {
+    # Run by Publish changes before anything is written (GUI 1.6.27 has no separate Validate draft button).
     $jobsValidation = Test-SmartM365OrchestratorJobsDocument -Document $script:DraftJobs
     $clusterValidation = Test-SmartM365OrchestratorClusterDocument -Document $script:DraftCluster
     $consistencyValidation = Test-SmartM365OrchestratorConfigurationConsistency -JobsDocument $script:DraftJobs -ClusterDocument $script:DraftCluster
-    $errors = @($jobsValidation.Errors) + @($clusterValidation.Errors) + @($consistencyValidation.Errors)
-    $warnings = @($jobsValidation.Warnings) + @($clusterValidation.Warnings) + @($consistencyValidation.Warnings)
-    if ($errors.Count -gt 0) {
-        $script:OrchestratorDialog.Show(($errors -join [Environment]::NewLine), 'Invalid draft', 'OK', 'Error') | Out-Null
-        return $false
+    [pscustomobject]@{
+        Errors = @(@($jobsValidation.Errors) + @($clusterValidation.Errors) + @($consistencyValidation.Errors) | Where-Object { $_ })
+        Warnings = @(@($jobsValidation.Warnings) + @($clusterValidation.Warnings) + @($consistencyValidation.Warnings) | Where-Object { $_ })
     }
-    $message = "Draft is valid.`nJobs: $($jobsValidation.JobCount)`nServers: $($clusterValidation.ServerCount)"
-    if ($warnings.Count -gt 0) { $message += "`n`nWarnings:`n" + ($warnings -join [Environment]::NewLine) }
-    $script:OrchestratorDialog.Show($message, 'Validation', 'OK', 'Information') | Out-Null
-    return $true
 }
 
 function Publish-Draft {
-    if (-not (Show-DraftValidation)) { return }
+    $validation = Get-DraftValidation
+    if ($validation.Errors.Count -gt 0) {
+        $script:OrchestratorDialog.Show(("The draft is not valid; nothing was published.`n`n" + ($validation.Errors -join [Environment]::NewLine)), 'Invalid draft', 'OK', 'Error') | Out-Null
+        return
+    }
     $enabled = @($script:DraftJobs.Jobs | Where-Object Enabled).Count
-    $confirmation = "Publish the shared configuration?`n`nJobs: $(@($script:DraftJobs.Jobs).Count) ($enabled enabled)`nServers: $(@($script:DraftCluster.ExpectedOrchestratorServers).Count)`n`nEvery Orchestrator server will reload it automatically."
+    $confirmation = "The draft is valid. Publish the shared configuration?`n`nJobs: $(@($script:DraftJobs.Jobs).Count) ($enabled enabled)`nServers: $(@($script:DraftCluster.ExpectedOrchestratorServers).Count)`n`nEvery Orchestrator server will reload it automatically."
+    if ($validation.Warnings.Count -gt 0) { $confirmation += "`n`nWarnings:`n" + ($validation.Warnings -join [Environment]::NewLine) }
     if ($script:OrchestratorDialog.Show($confirmation, 'Publish shared configuration', 'YesNo', 'Warning') -ne 'Yes') { return }
     try {
         Write-GuiActivity -Message ("Publication requested. ExpectedJobsHash={0}; ExpectedClusterHash={1}" -f $script:Snapshot.JobsHash, $script:Snapshot.ClusterHash)
@@ -3441,7 +3526,7 @@ Write-GuiActivity -Message ('Startup timing (ms): splash={0}; context={1}; log={
 $window = ConvertFrom-OrchestratorGuiXaml -Text $xaml
 $script:Controls = @{}
 foreach ($name in @(
-    'MainTabs', 'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'ValidateButton', 'RebalanceButton', 'RequestPrepareButton', 'PublishButton',
+    'MainTabs', 'HeaderLogo', 'SharedPathText', 'ConnectionText', 'LastRefreshText', 'StatusText', 'RefreshButton', 'RebalanceButton', 'RequestPrepareButton', 'PublishButton',
     'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardMetricsCanvas', 'ServersMetricsCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
     'PlanningGrid', 'SelectedJobText', 'JobArgumentsBox', 'JobEnabledCheck', 'ScheduleTypeCombo', 'TimesBox', 'DaysPanel',
     'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck', 'MissedPolicyCombo',
@@ -3531,7 +3616,7 @@ $script:Controls.PlanningGrid.Add_SelectionChanged({
 })
 $script:Controls.ServersGrid.Add_SelectionChanged({
     $row = $script:Controls.ServersGrid.SelectedItem
-    if ($null -eq $row) { return }
+    if ($null -eq $row -or $script:ServerSelectionRestoring) { return }
     $script:Controls.SelectedServerText.Text = [string]$row.Server
     $script:Controls.ServerActiveCheck.IsChecked = ([string]$row.State -eq 'Active')
     $script:Controls.ServerWeightBox.Text = ([double]$row.Weight).ToString([System.Globalization.CultureInfo]::InvariantCulture)
@@ -3539,8 +3624,10 @@ $script:Controls.ServersGrid.Add_SelectionChanged({
 })
 $script:Controls.ApplyJobButton.Add_Click({ try { Apply-SelectedJobToDraft } catch { Write-GuiException -Context 'Invalid job draft' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Invalid job', 'OK', 'Error') | Out-Null } })
 $script:Controls.ApplyServerButton.Add_Click({ try { Apply-SelectedServerToDraft } catch { Write-GuiException -Context 'Invalid server draft' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Invalid server', 'OK', 'Error') | Out-Null } })
-$script:Controls.RefreshButton.Add_Click({ Refresh-AllViews })
-$script:Controls.ValidateButton.Add_Click({ [void](Show-DraftValidation) })
+$script:Controls.RefreshButton.Add_Click({
+    if ((Test-GuiDraftChanged) -and $script:OrchestratorDialog.Show("The draft has unpublished changes.`n`nRefresh reloads the published configuration and discards them. Continue?", 'Discard draft changes', 'YesNo', 'Warning') -ne 'Yes') { return }
+    Refresh-AllViews
+})
 $script:Controls.RebalanceButton.Add_Click({ [void](Request-ElectionRebalance) })
 $script:Controls.PublishButton.Add_Click({ Publish-Draft })
 $script:Controls.HistoryRefreshButton.Add_Click({ Refresh-HistoryView })
@@ -3693,11 +3780,10 @@ $script:Controls.OperationsMailsGrid.Add_MouseDoubleClick({
 })
 $script:Controls.AddServerButton.Add_Click({
     try {
-        $server = Add-ServerToDraft -Server $script:Controls.NewServerBox.Text
+        $added = Publish-GuiServerAddition -Server $script:Controls.NewServerBox.Text
+        if ($null -eq $added) { return }
         $script:Controls.NewServerBox.Clear()
-        Refresh-ServersView | Out-Null
-        Write-GuiActivity -Message "Server '$server' added to the draft (Inactive)."
-        $script:OrchestratorDialog.Show(("Server '{0}' was added to the draft as Inactive.{1}{1}After Publish changes it can run the orchestrator (heartbeat, monitoring, maintenance) but takes no job. Once it is checked, select it, tick Active (takes jobs), apply and publish." -f $server, [Environment]::NewLine), 'Server added', 'OK', 'Information') | Out-Null
+        $script:OrchestratorDialog.Show(("Server '{0}' was added Inactive and published (version {1}).{2}{2}Install its orchestrator task, check it in Operations > Live, then select it here, tick Active (takes jobs), apply and publish." -f $added.Server, $added.VersionId, [Environment]::NewLine), 'Server added', 'OK', 'Information') | Out-Null
     }
     catch { Write-GuiException -Context 'Add server failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Add server', 'OK', 'Error') | Out-Null }
 })
@@ -3903,6 +3989,13 @@ if ($SmokeTest) {
     [void]$script:DraftCluster.ServerStates.PSObject.Properties.Remove($smokeNewServer)
     [void](Refresh-ServersView)
     Write-GuiActivity -Message ("SMOKE_TEST_SERVER_STATE_OK NewServer=Inactive; ActiveServers={0}" -f $smokeActiveRows.Count) -Level SUCCESS
+    if ($script:SmokePublishAllowed) {
+        $smokeAdded = Publish-GuiServerAddition -Server 'SMOKE-PUBLISHED-SERVER' -SkipConfirmation
+        $smokePublishedCluster = Read-SmartM365OrchestratorJson -Path (Get-SmartM365OrchestratorConfigurationPaths -SharedDataFolderPath $script:SharedDataFolderPath).ClusterPath
+        if ([string]$smokePublishedCluster.ServerStates.'SMOKE-PUBLISHED-SERVER' -ne 'Inactive' -or 'SMOKE-PUBLISHED-SERVER' -notin @($script:DraftCluster.ExpectedOrchestratorServers)) { throw 'Add server must publish the server Inactive and keep it in the draft.' }
+        Write-GuiActivity -Message ("SMOKE_TEST_ADD_SERVER_PUBLISHED_OK Version={0}" -f $smokeAdded.VersionId) -Level SUCCESS
+    }
+    else { Write-GuiActivity -Message 'SMOKE_TEST_ADD_SERVER_PUBLISHED_SKIPPED No explicit -SharedDataFolderPath (never published to the real share).' -Level WARN }
     Write-GuiActivity -Message ("SMOKE_TEST_OK SmartM365 Orchestrator GUI v{0} | Jobs={1} | PlanningRows={2}" -f $script:AppVersion, @($script:DraftJobs.Jobs).Count, @($script:PlanningRows).Count) -Level SUCCESS
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
 }
