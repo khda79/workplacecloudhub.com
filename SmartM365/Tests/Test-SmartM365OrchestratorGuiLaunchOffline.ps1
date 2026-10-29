@@ -185,10 +185,12 @@ try {
     $shortcutPath = Join-Path $root 'Start Menu\WorkplaceCloudHub\SmartM365 Orchestrator - demo.lnk'
     $guiPath = Join-Path $folder 'SmartM365-Inventory-Orchestrator-GUI.ps1'
     $pwshPath = Get-SmartM365InventoryEnginePath -Runtime PowerShell7
-    Set-OrchestratorGuiShortcut -ShortcutPath $shortcutPath -PowerShell7Path $pwshPath -GuiPath $guiPath -TenantName 'demo' -IconPath (Join-Path $folder 'WorkplaceCloudHub.ico') -WorkingDirectory $root
+    Set-OrchestratorGuiShortcut -ShortcutPath $shortcutPath -PowerShell7Path $pwshPath -GuiPath $guiPath -TenantName 'demo' -IconPath (Join-Path $folder 'WorkplaceCloudHub.ico') -WorkingDirectory $root -LocalIconDirectory (Join-Path $root 'ProgramData\WorkplaceCloudHub\SmartM365')
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
-    Assert-Case ($shortcut.TargetPath -ieq $pwshPath -and $shortcut.WindowStyle -eq 7 -and $shortcut.IconLocation -like '*WorkplaceCloudHub.ico*') 'The GUI shortcut must start PowerShell 7 minimized with the WorkplaceCloudHub icon.'
+    $localIconPath = Join-Path $root 'ProgramData\WorkplaceCloudHub\SmartM365\WorkplaceCloudHub.ico'
+    Assert-Case ($shortcut.TargetPath -ieq $pwshPath -and $shortcut.WindowStyle -eq 7) 'The GUI shortcut must start PowerShell 7 minimized.'
+    Assert-Case ((Test-Path -LiteralPath $localIconPath -PathType Leaf) -and $shortcut.IconLocation -ieq ('{0},0' -f $localIconPath)) "The GUI shortcut icon must be the local WorkplaceCloudHub.ico copy, not the code share: $($shortcut.IconLocation)"
     Assert-Case ($shortcut.Arguments -ceq ('-NoProfile -NoLogo -WindowStyle Hidden -STA -ExecutionPolicy Bypass -File "{0}" -Tenant demo' -f $guiPath)) "The GUI shortcut arguments must hide the console: $($shortcut.Arguments)"
     [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
 }

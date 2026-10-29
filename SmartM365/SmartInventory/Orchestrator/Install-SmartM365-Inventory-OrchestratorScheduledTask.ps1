@@ -18,7 +18,9 @@ Task Scheduler retries a failed start three times at one-minute intervals.
 
 The installation also creates the Start menu shortcut
 "WorkplaceCloudHub\SmartM365 Orchestrator - <Tenant>" to the orchestrator GUI. It starts
-PowerShell 7 hidden (no console window); uninstalling removes it.
+PowerShell 7 hidden (no console window); uninstalling removes it. Its WorkplaceCloudHub
+icon is copied to %ProgramData%\WorkplaceCloudHub\SmartM365 because the Start menu does not
+display an icon read from the UNC code share.
 
 .PARAMETER Tenant
 Tenant profile passed to the orchestrator. Valid values are prod and test.
@@ -46,7 +48,7 @@ Forces the guided interactive workflow. This is used by the CMD launcher.
 ./Install-SmartM365-Inventory-OrchestratorScheduledTask.ps1 -Tenant prod -Uninstall
 
 .VERSION
-1.2.0
+1.2.1
 
 .REQUIREMENTS
     Windows PowerShell 5.1 or PowerShell 7. The script requests UAC elevation when needed.
@@ -160,16 +162,29 @@ function Set-OrchestratorGuiShortcut {
         [Parameter(Mandatory = $true)][string]$GuiPath,
         [Parameter(Mandatory = $true)][string]$TenantName,
         [string]$IconPath = '',
-        [string]$WorkingDirectory = ''
+        [string]$WorkingDirectory = '',
+        [string]$LocalIconDirectory = ''
     )
     New-Item -ItemType Directory -Path (Split-Path -Path $ShortcutPath -Parent) -Force | Out-Null
+    # The Start menu does not render an icon read from a UNC code share: use a local copy when possible.
+    if (-not [string]::IsNullOrWhiteSpace($IconPath) -and -not [string]::IsNullOrWhiteSpace($LocalIconDirectory) -and (Test-Path -LiteralPath $IconPath -PathType Leaf)) {
+        try {
+            New-Item -ItemType Directory -Path $LocalIconDirectory -Force | Out-Null
+            $localIconPath = Join-Path -Path $LocalIconDirectory -ChildPath (Split-Path -Path $IconPath -Leaf)
+            Copy-Item -LiteralPath $IconPath -Destination $localIconPath -Force
+            $IconPath = $localIconPath
+        }
+        catch {
+            Write-Warning "Local copy of the shortcut icon failed, the shared icon is used: $($_.Exception.Message)"
+        }
+    }
     $shell = New-Object -ComObject WScript.Shell
     try {
         $shortcut = $shell.CreateShortcut($ShortcutPath)
         $shortcut.TargetPath = $PowerShell7Path
         $shortcut.Arguments = '-NoProfile -NoLogo -WindowStyle Hidden -STA -ExecutionPolicy Bypass -File {0} -Tenant {1}' -f (ConvertTo-QuotedArgument -Value $GuiPath), $TenantName
         if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) { $shortcut.WorkingDirectory = $WorkingDirectory }
-        if (-not [string]::IsNullOrWhiteSpace($IconPath) -and (Test-Path -LiteralPath $IconPath -PathType Leaf)) { $shortcut.IconLocation = $IconPath }
+        if (-not [string]::IsNullOrWhiteSpace($IconPath) -and (Test-Path -LiteralPath $IconPath -PathType Leaf)) { $shortcut.IconLocation = '{0},0' -f $IconPath }
         $shortcut.WindowStyle = 7
         $shortcut.Description = "SmartM365 Orchestrator console for tenant '$TenantName'."
         $shortcut.Save()
@@ -520,7 +535,7 @@ try {
     Write-InstallerMessage "Action: $powerShell7Path $actionArguments"
     # A missing shortcut does not invalidate the task registration: warn and continue.
     try {
-        Set-OrchestratorGuiShortcut -ShortcutPath $guiShortcutPath -PowerShell7Path $powerShell7Path -GuiPath (Join-Path -Path $scriptDirectory -ChildPath 'SmartM365-Inventory-Orchestrator-GUI.ps1') -TenantName $Tenant -IconPath (Join-Path -Path $scriptDirectory -ChildPath 'WorkplaceCloudHub.ico') -WorkingDirectory $taskWorkingDirectory
+        Set-OrchestratorGuiShortcut -ShortcutPath $guiShortcutPath -PowerShell7Path $powerShell7Path -GuiPath (Join-Path -Path $scriptDirectory -ChildPath 'SmartM365-Inventory-Orchestrator-GUI.ps1') -TenantName $Tenant -IconPath (Join-Path -Path $scriptDirectory -ChildPath 'WorkplaceCloudHub.ico') -WorkingDirectory $taskWorkingDirectory -LocalIconDirectory (Join-Path -Path $env:ProgramData -ChildPath 'WorkplaceCloudHub\SmartM365')
         Write-InstallerMessage "GUI shortcut created (no console window): $guiShortcutPath"
     }
     catch {
