@@ -116,7 +116,9 @@ function Invoke-SemtPsExecEndpoint {
     $stderrPath = '{0}.stderr.txt' -f $LogPath
     $psexecArguments = @(('\\{0}' -f $ConnectionTarget),'-accepteula','-nobanner','-s')
     if ($UseElevatedToken) { $psexecArguments += '-h' }
-    $psexecArguments += @('powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',(ConvertTo-SemtPsExecArgument -Value $RemoteScriptPath))
+    # RemoteSigned, not Bypass: the endpoint script is a local signed file on the target, so it runs
+    # the same way, without the Bypass switch that endpoint protection products watch closely.
+    $psexecArguments += @('powershell.exe','-NoProfile','-ExecutionPolicy','RemoteSigned','-File',(ConvertTo-SemtPsExecArgument -Value $RemoteScriptPath))
     $psexecArguments += @($Arguments | ForEach-Object { ConvertTo-SemtPsExecArgument -Value $_ })
     Write-SemtLogLine -Path $LogPath -Message ("PsExec command: {0} {1}" -f $PsExecPath,($psexecArguments -join ' '))
     $process = Start-Process -FilePath $PsExecPath -ArgumentList $psexecArguments -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath

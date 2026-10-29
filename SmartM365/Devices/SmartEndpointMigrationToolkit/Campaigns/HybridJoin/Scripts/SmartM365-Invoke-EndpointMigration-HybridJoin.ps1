@@ -146,7 +146,7 @@ try {
 
             $argList = @(
                 "-NoProfile",
-                "-ExecutionPolicy", "Bypass",
+                "-ExecutionPolicy", "RemoteSigned",
                 "-File", "`"$($MyInvocation.MyCommand.Path)`""
             )
             if ($AllowDsregLeave) { $argList += "-AllowDsregLeave" }
@@ -3767,7 +3767,7 @@ function Register-RetryAfterRebootTask {
     if (-not $programTrust.Trusted) { throw ("SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} ({1}) {2}" -f $script:RetryAfterRebootProgramDir,$programTrust.State,$programTrust.Detail) }
 
     $taskPowerShell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
-    $taskCommand = '"{0}" -NoProfile -ExecutionPolicy Bypass -File "{1}"' -f $taskPowerShell,$script:RetryAfterRebootRunnerPath
+    $taskCommand = '"{0}" -NoProfile -ExecutionPolicy RemoteSigned -File "{1}"' -f $taskPowerShell,$script:RetryAfterRebootRunnerPath
     $createOutput = & schtasks.exe /Create /TN $script:RetryAfterRebootTaskName /SC ONSTART /RU SYSTEM /RL HIGHEST /TR $taskCommand /F 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw ("schtasks.exe failed with exit code {0}: {1}" -f $LASTEXITCODE,(@($createOutput) -join " "))

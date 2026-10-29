@@ -419,6 +419,10 @@ $script:HostLines.Clear()
     Test-Step 'Run engine: a stop requested during an inventory refresh does not start the next refresh' {
         $engineText -match '(?s)foreach \(\$kind in @\(\$script:CampaignProfile\.InventoryKinds\)\) \{\s*# A stop requested[^\n]*\n\s*if \(\(Get-SemtCancellationState\)\.Requested\)'
     }
+    Test-Step 'target launches use RemoteSigned, never Bypass (PsExec, 64-bit relaunch, retry-after-reboot tasks)' {
+        $remoteText = [IO.File]::ReadAllText((Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\Functions\Semt.Remote.ps1'))
+        $remoteText -match "'powershell\.exe','-NoProfile','-ExecutionPolicy','RemoteSigned','-File'" -and $remoteText -notmatch "'-ExecutionPolicy','Bypass'" -and $hjEndpointText -notmatch '(?i)ExecutionPolicy"?,?\s*"?Bypass' -and $w11EndpointText -notmatch '(?i)ExecutionPolicy Bypass' -and $hjEndpointText -match '-ExecutionPolicy RemoteSigned -File' -and $w11EndpointText -match '-ExecutionPolicy RemoteSigned -File'
+    }
     Test-Step 'Run engine: report names omit the Wave name; a cycle HTML report failure never fails the Run' {
         $engineText -match "'SEMT_\{0\}_cycle\{1\}_\{2\}\.csv' -f \`$Campaign,\`$cycle" -and $engineText -match "'SEMT_\{0\}_\{1\}_final\.html' -f \`$Campaign,\`$script:RunId" -and $engineText -match 'HTML report update failed' -and $engineText -match 'Final report failed'
     }

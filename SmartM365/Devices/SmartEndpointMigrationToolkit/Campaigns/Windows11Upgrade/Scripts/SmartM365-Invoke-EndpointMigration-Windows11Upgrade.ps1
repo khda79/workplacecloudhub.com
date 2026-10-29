@@ -5310,7 +5310,7 @@ function Register-RetryAfterRebootTask {
     $programTrust = Test-SemtTrustedProgramPath -Path $script:RetryAfterRebootProgramDir -Recurse
     if (-not $programTrust.Trusted) { throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} ({1}) {2}' -f $script:RetryAfterRebootProgramDir,$programTrust.State,$programTrust.Detail) }
 
-    $taskCommand = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $script:RetryAfterRebootRunnerPath
+    $taskCommand = 'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "{0}"' -f $script:RetryAfterRebootRunnerPath
     $createArgs = @('/Create','/TN',$script:RetryAfterRebootTaskName,'/SC','ONSTART','/RU','SYSTEM','/RL','HIGHEST','/TR',$taskCommand,'/F')
     $output = & schtasks.exe @createArgs 2>&1
     if ($LASTEXITCODE -ne 0) {
