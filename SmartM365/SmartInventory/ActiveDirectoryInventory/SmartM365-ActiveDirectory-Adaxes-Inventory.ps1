@@ -8,7 +8,7 @@ attributes (adm-*) are available. The attributes and their CSV column names come
 Attributes list of the script configuration. AD_Adaxes_Users.csv is joined to the AD inventory
 on ObjectGUID. Exception to the folder rule: reads go through Adaxes, not the ActiveDirectory module.
 .VERSION
-1.0.0
+1.0.1
 .REQUIREMENTS
 Adaxes PowerShell module (Adaxes installer component) on the collection server, and read access
 in Adaxes to the configured attributes for the running account.
@@ -29,8 +29,8 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$ScriptVersion='1.0.0'
-$script:CompletionStatus='Success'; $script:CompletionError=$null; $script:Runtime=$null; $script:ServiceFailover=$false
+$ScriptVersion='1.0.1'
+$script:CompletionStatus='Success'; $script:CompletionError=$null; $script:Runtime=$null; $script:ReadWarnings=$false
 $script:FixedColumns=@('RunId','CollectedAtUtc','CollectionStatus','IsPartialInventory','SourceScriptVersion','Domain','ObjectGUID')
 
 # Attributes entries: { "Column": "<CSV column>", "Attribute": "<LDAP or adm-* name>" }.
@@ -86,20 +86,55 @@ function Get-AdaxesServiceList {
     return @($services)
 }
 
-function Get-AdaxesDomainUsers {
-    param([Parameter(Mandatory)][string[]]$Services,[Parameter(Mandatory)][string]$Domain,[Parameter(Mandatory)][string]$LdapFilter,[Parameter(Mandatory)][string[]]$Properties,[scriptblock]$Reader={param($s,$d,$f,$p) Get-AdmUser -AdaxesService $s -Server $d -LDAPFilter $f -Properties $p -ErrorAction Stop})
-    $errors=[System.Collections.Generic.List[string]]::new()
-    foreach($service in $Services){
-        try{
-            $users=@(& $Reader $service $Domain $LdapFilter $Properties)
-            return [pscustomobject]@{Service=$service;Users=$users;Errors=@($errors)}
-        }
-        catch{
-            if($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]){throw}
-            $errors.Add(('{0}: {1}' -f $service,$_.Exception.Message))
+# Get-AdmUser cannot build a user whose objectClass the running account cannot read, and that error ends the
+# whole domain read on every service. Such an object is named in the error, excluded by DN and the domain is read again.
+function Get-AdaxesUnreadableObjectDn {
+    param([AllowNull()][string]$Message)
+    $match=[regex]::Match([string]$Message,"attribute 'objectClass' of the directory object '(?<Dn>.+)' is unavailable")
+    if($match.Success){return $match.Groups['Dn'].Value}
+    return $null
+}
+
+function ConvertTo-AdaxesLdapFilterValue {
+    param([Parameter(Mandatory)][string]$Value)
+    $builder=[System.Text.StringBuilder]::new()
+    foreach($char in $Value.ToCharArray()){
+        switch($char){
+            '\' {[void]$builder.Append('\5c')}
+            '*' {[void]$builder.Append('\2a')}
+            '(' {[void]$builder.Append('\28')}
+            ')' {[void]$builder.Append('\29')}
+            ([char]0) {[void]$builder.Append('\00')}
+            default {[void]$builder.Append($char)}
         }
     }
-    throw ($errors -join ' | ')
+    return $builder.ToString()
+}
+
+function Get-AdaxesDomainUsers {
+    param([Parameter(Mandatory)][string[]]$Services,[Parameter(Mandatory)][string]$Domain,[Parameter(Mandatory)][string]$LdapFilter,[Parameter(Mandatory)][string[]]$Properties,[ValidateRange(0,1000)][int]$MaxUnreadableObjects=25,[scriptblock]$Reader={param($s,$d,$f,$p) Get-AdmUser -AdaxesService $s -Server $d -LDAPFilter $f -Properties $p -ErrorAction Stop})
+    $serviceErrors=[System.Collections.Generic.List[string]]::new()
+    $excluded=[System.Collections.Generic.List[string]]::new()
+    while($true){
+        $filter=if($excluded.Count -eq 0){$LdapFilter}else{'(&{0}{1})' -f $LdapFilter,(($excluded | ForEach-Object { '(!(distinguishedName={0}))' -f (ConvertTo-AdaxesLdapFilterValue $_) }) -join '')}
+        $attemptErrors=[System.Collections.Generic.List[string]]::new(); $unreadable=$null
+        foreach($service in $Services){
+            try{
+                $users=@(& $Reader $service $Domain $filter $Properties)
+                return [pscustomobject]@{Service=$service;Users=$users;Errors=@($serviceErrors);Unreadable=@($excluded)}
+            }
+            catch{
+                if($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]){throw}
+                $unreadable=Get-AdaxesUnreadableObjectDn $_.Exception.Message
+                if($unreadable){break}
+                $attemptErrors.Add(('{0}: {1}' -f $service,$_.Exception.Message)); $serviceErrors.Add($attemptErrors[-1])
+            }
+        }
+        if(-not $unreadable){throw ($attemptErrors -join ' | ')}
+        if($excluded -contains $unreadable){throw "Excluding the unreadable object did not remove it from the search: $unreadable"}
+        if($excluded.Count -ge $MaxUnreadableObjects){throw ("More than {0} unreadable object(s) (MaxUnreadableObjectsPerDomain); last: {1}" -f $MaxUnreadableObjects,$unreadable)}
+        $excluded.Add($unreadable)
+    }
 }
 
 function Get-AdaxesDomainList {
@@ -129,6 +164,17 @@ if($SelfTest){
     if($read.Service -ne 'up' -or $read.Users.Count -ne 1 -or $read.Errors.Count -ne 1 -or $read.Errors[0] -notlike 'down:*'){throw 'Adaxes service failover self-test failed.'}
     $rejected=$false; try{$null=Get-AdaxesDomainUsers -Services @('down') -Domain 'contoso.local' -LdapFilter '(x)' -Properties @('a') -Reader $reader}catch{$rejected=$_.Exception.Message -like 'down: service unavailable'}
     if(-not $rejected){throw 'Adaxes all-services-down self-test failed.'}
+    $denied='CN=svc\, test (old),OU=A*,DC=contoso,DC=local'
+    $unreadableMessage="An instance of 'Softerra.Adaxes.PowerShellModule.Directory.ADUser' can't be created because the attribute 'objectClass' of the directory object '$denied' is unavailable."
+    if((Get-AdaxesUnreadableObjectDn $unreadableMessage) -ne $denied -or $null -ne (Get-AdaxesUnreadableObjectDn 'other error')){throw 'Adaxes unreadable object parsing self-test failed.'}
+    if((ConvertTo-AdaxesLdapFilterValue $denied) -ne 'CN=svc\5c, test \28old\29,OU=A\2a,DC=contoso,DC=local'){throw 'Adaxes LDAP filter escaping self-test failed.'}
+    $script:SelfTestServices=[System.Collections.Generic.List[string]]::new()
+    $reader={param($s,$d,$f,$p) $script:SelfTestServices.Add($s); if($f -notlike '*distinguishedName=*'){throw $unreadableMessage}; @([pscustomobject]@{ObjectGUID=$f})}
+    $read=Get-AdaxesDomainUsers -Services @('adx1','adx2') -Domain 'contoso.local' -LdapFilter '(x)' -Properties @('a') -Reader $reader
+    if($read.Service -ne 'adx1' -or (@($read.Unreadable) -join ';') -ne $denied -or $read.Errors.Count -ne 0 -or ($script:SelfTestServices -join ',') -ne 'adx1,adx1' -or $read.Users[0].ObjectGUID -ne '(&(x)(!(distinguishedName=CN=svc\5c, test \28old\29,OU=A\2a,DC=contoso,DC=local)))'){throw 'Adaxes unreadable object exclusion self-test failed.'}
+    $always={param($s,$d,$f,$p) throw ($unreadableMessage -replace [regex]::Escape($denied),('CN=u{0},DC=c' -f [regex]::Matches($f,'distinguishedName').Count))}
+    $rejected=$false; try{$null=Get-AdaxesDomainUsers -Services @('adx1') -Domain 'contoso.local' -LdapFilter '(x)' -Properties @('a') -MaxUnreadableObjects 2 -Reader $always}catch{$rejected=$_.Exception.Message -like 'More than 2 unreadable*'}
+    if(-not $rejected){throw 'Adaxes unreadable object limit self-test failed.'}
     Write-Output 'PASS: Adaxes users offline contract'; $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
 }
 
@@ -145,6 +191,7 @@ try{
     if([string]::IsNullOrWhiteSpace($ldapFilter)){throw 'LdapFilter is not configured.'}
     $attributeMap=Get-AdaxesAttributeMap (Get-SmartM365EvidenceProperty $config @('Attributes') @())
     $nonBlocking=@(@(Get-SmartM365EvidenceProperty $config @('NonBlockingDomainErrors') @()) | ForEach-Object { ([string]$_).Trim() })
+    $maxUnreadable=[int](Get-SmartM365EvidenceProperty $config @('MaxUnreadableObjectsPerDomain') 25)
     if(-not (Get-Module -ListAvailable -Name Adaxes)){throw 'Adaxes PowerShell module is not installed on this server. Install the Adaxes PowerShell Module component from the Adaxes installer.'}
     Import-Module Adaxes -ErrorAction Stop
     $domains=Get-AdaxesDomainList (Get-SmartM365EvidenceProperty $config @('Domains') @())
@@ -155,15 +202,15 @@ try{
     $usersByDomain=[ordered]@{}; $failed=[System.Collections.Generic.List[string]]::new()
     foreach($domain in $domains){
         try{
-            $read=Get-AdaxesDomainUsers -Services $services -Domain $domain -LdapFilter $ldapFilter -Properties $properties
+            $read=Get-AdaxesDomainUsers -Services $services -Domain $domain -LdapFilter $ldapFilter -Properties $properties -MaxUnreadableObjects $maxUnreadable
             foreach($skipped in $read.Errors){Write-SmartM365EvidenceLog -Message ("{0}: Adaxes service failed, next one tried: {1}" -f $domain,$skipped) -Level WARNING}
-            if($read.Errors.Count -gt 0){$script:ServiceFailover=$true}
+            foreach($dn in $read.Unreadable){Write-SmartM365EvidenceLog -Message ("{0}: user skipped, its objectClass is not readable by the running account: {1}" -f $domain,$dn) -Level WARNING}
+            if($read.Errors.Count -gt 0 -or $read.Unreadable.Count -gt 0){$script:ReadWarnings=$true}
             $usersByDomain[$domain]=$read.Users
             Write-SmartM365EvidenceLog -Message ("{0}: {1} user(s) through {2}." -f $domain,$read.Users.Count,$read.Service) -Level SUCCESS
         }
         catch{
             if($_.Exception -is [Management.Automation.PipelineStoppedException] -or $_.Exception -is [OperationCanceledException]){throw}
-            # A partial domain read is never published: one unreadable object stops the whole domain.
             if($nonBlocking -notcontains $domain){throw ("Adaxes read failed for domain {0}: {1}" -f $domain,$_.Exception.Message)}
             $failed.Add($domain)
             Write-SmartM365EvidenceLog -Message ("{0}: skipped (NonBlockingDomainErrors): {1}" -f $domain,$_.Exception.Message) -Level WARNING
@@ -176,7 +223,7 @@ try{
     if($ValidateOnly){ Write-SmartM365EvidenceLog -Message ("Adaxes read returned {0} user(s). No CSV published." -f $rows.Count) -Level SUCCESS; $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return }
     Export-SmartM365EvidenceDataset $script:Runtime 'AD_Adaxes_Users' @($rows) (@($script:FixedColumns) + @($attributeMap | ForEach-Object Column)) | Out-Null
     Write-SmartM365EvidenceLog -Message ("AD_Adaxes_Users: {0} user(s) from {1} domain(s); skipped domain(s): {2}." -f $rows.Count,$usersByDomain.Count,$(if($isPartial){$failed -join ', '}else{'none'})) -Level SUCCESS
-    if($isPartial -or $script:ServiceFailover){$script:CompletionStatus='CompletedWithWarnings'}
+    if($isPartial -or $script:ReadWarnings){$script:CompletionStatus='CompletedWithWarnings'}
 
     $smartM365RunGuard.ReachedTerminal=$true
 }

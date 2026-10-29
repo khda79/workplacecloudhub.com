@@ -19,6 +19,7 @@
   "Domains": [],
   "LdapFilter": "(&(sAMAccountType=805306368)(!(adminCount=1)))",
   "NonBlockingDomainErrors": [],
+  "MaxUnreadableObjectsPerDomain": 25,
   "Attributes": [
     { "Column": "AdaxesCustomText1", "Attribute": "adm-CustomAttributeText1" },
     { "Column": "AdaxesCustomBoolean1", "Attribute": "adm-CustomAttributeBoolean1" }
