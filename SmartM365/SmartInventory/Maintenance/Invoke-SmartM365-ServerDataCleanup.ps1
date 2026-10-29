@@ -24,11 +24,15 @@ Daily capture roots (folders with DailyCaptureRecords) keep their own seven-day
 retention, which only removes the CSVs it recorded. Timestamped CSVs at the top
 of such a root that no record owns (written before adoption or by an unqualified
 run) are retired once older than the seven-day window, and only when a recorded
-capture inside the window still holds the same export. Every capture retention
-lock of the root is held while they are removed.
+capture inside the window still holds the same export. CSVs of run folders
+(yyyyMMdd_HHmmss, such as the Usage and Copilot runs) that no record owns, raw
+extracts included, are retired the same way once the producer has a recorded
+capture inside the window; a run folder left empty is removed. Every capture
+retention lock of the root is held while they are removed. A file another rule
+already removes is reported as PlannedByAnotherRule and counted once.
 
 .VERSION
-1.3.0
+1.4.0
 
 .EXAMPLE
 ./Invoke-SmartM365-ServerDataCleanup.ps1 -Tenant prod -DataRootPath '<server DATA root>'
@@ -138,6 +142,24 @@ function Get-DirectoryState {
     return (ConvertTo-Json -InputObject $entries -Compress -Depth 3)
 }
 
+$script:captureRootCache = @{}
+function Test-InDailyCaptureRoot {
+    # A daily capture root (a folder with DailyCaptureRecords) is cleaned only by the capture rules:
+    # deleting a recorded payload there would make its own retention refuse every later purge.
+    param([Parameter(Mandatory)][string]$Folder)
+    $cursor = [IO.Path]::GetFullPath($Folder).TrimEnd('\', '/')
+    $visited = [Collections.Generic.List[string]]::new()
+    $result = $false
+    while ($cursor -and $cursor.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        if ($script:captureRootCache.ContainsKey($cursor)) { $result = $script:captureRootCache[$cursor]; break }
+        $visited.Add($cursor)
+        if (Test-Path -LiteralPath (Join-Path $cursor 'DailyCaptureRecords') -PathType Container) { $result = $true; break }
+        $cursor = [IO.Path]::GetDirectoryName($cursor)
+    }
+    foreach ($folder in $visited) { $script:captureRootCache[$folder] = $result }
+    return $result
+}
+
 function Get-TimestampedCsvDecisions {
     $cutoff = (Get-Date).AddDays(-7)
     $latestNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -158,6 +180,7 @@ function Get-TimestampedCsvDecisions {
         $week = ''
         if (@($segments | Where-Object { $_ -in @('WeeklyHistory','Corrections','Archive','Orchestrator') -or
             $_ -match '^\d{8}[-_]\d{6}$' }).Count) { $reason = 'ExcludedFolder' }
+        if (-not $reason -and (Test-InDailyCaptureRoot $file.DirectoryName)) { $reason = 'DailyCaptureRoot' }
         $stamp = [datetime]::MinValue
         if (-not $reason -and -not [datetime]::TryParseExact($match.Groups['Stamp'].Value,
             [string[]]@('yyyyMMdd_HHmmss','yyyyMMdd-HHmmss'), [Globalization.CultureInfo]::InvariantCulture,
@@ -321,6 +344,7 @@ function Get-DailyCaptureLegacyDecision {
         $owned = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         # Export names with a recorded, not retired capture inside the window whose payload is present.
         $recentExports = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $recentCaptureCount = 0
         try {
             $null = Assert-OwnedPath $recordsFolder.FullName
             foreach ($meta in @(Get-ChildItem -LiteralPath $recordsFolder.FullName -File -Recurse -Force -Filter '*.json.txt')) {
@@ -336,23 +360,38 @@ function Get-DailyCaptureLegacyDecision {
                     [void]$owned.Add($full)
                     if ([string]$record.Day -lt $cutoff -or $relative -in $removed) { continue }
                     $payload = Get-Item -LiteralPath $full -Force -ErrorAction SilentlyContinue
-                    if ($null -ne $payload -and $payload.Length -eq [int64]$file.Bytes) { [void]$recentExports.Add([string]$file.File) }
+                    if ($null -ne $payload -and $payload.Length -eq [int64]$file.Bytes) { [void]$recentExports.Add([string]$file.File); $recentCaptureCount++ }
                 }
             }
         } catch { $rootState = 'UnreadableCaptureRecords' }
+        # Top-level timestamped CSVs, then CSVs of run folders (yyyyMMdd_HHmmss) such as the Usage and
+        # Copilot runs: their raw extracts and pre-adoption exports are never recorded by a capture.
+        $candidates = [Collections.Generic.List[object]]::new()
         foreach ($file in @(Get-ChildItem -LiteralPath $captureRoot -File -Force -Filter '*.csv')) {
             $match = [regex]::Match($file.Name, '^(?<Base>.+)_(?<Stamp>\d{8})[-_]\d{6}\.csv$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
-            if (-not $match.Success) { continue }
+            if ($match.Success) { $candidates.Add([pscustomobject]@{ File = $file; Stamp = $match.Groups['Stamp'].Value; Export = $match.Groups['Base'].Value + '.csv'; RunFolder = '' }) }
+        }
+        foreach ($run in @(Get-ChildItem -LiteralPath $captureRoot -Directory -Force | Where-Object { $_.Name -match '^\d{8}_\d{6}$' })) {
+            if ($run.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+            foreach ($file in @(Get-ChildItem -LiteralPath $run.FullName -File -Force -Filter '*.csv')) {
+                $candidates.Add([pscustomobject]@{ File = $file; Stamp = $run.Name.Substring(0, 8); Export = ''; RunFolder = $run.FullName })
+            }
+        }
+        foreach ($candidate in $candidates) {
+            $file = $candidate.File
             $stampDay = ''
             $stampDate = [datetime]::MinValue
-            if ([datetime]::TryParseExact($match.Groups['Stamp'].Value, 'yyyyMMdd', [Globalization.CultureInfo]::InvariantCulture,
+            if ([datetime]::TryParseExact($candidate.Stamp, 'yyyyMMdd', [Globalization.CultureInfo]::InvariantCulture,
                 [Globalization.DateTimeStyles]::None, [ref]$stampDate)) { $stampDay = $stampDate.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) }
             $reason = $rootState
             if (-not $reason -and $owned.Contains($file.FullName)) { $reason = 'CaptureOwned' }
+            if (-not $reason -and $file.Name -match '(?i)receipt|manifest') { $reason = 'ReceiptOrManifest' }
             if (-not $reason -and -not $stampDay) { $reason = 'InvalidTimestamp' }
             if (-not $reason -and $stampDay -ge $cutoff) { $reason = 'WithinCaptureWindow' }
             if (-not $reason -and (Get-ParisDay $file.LastWriteTimeUtc) -ge $cutoff) { $reason = 'RecentWrite' }
-            if (-not $reason -and -not $recentExports.Contains($match.Groups['Base'].Value + '.csv')) { $reason = 'NoRecentRecordedCapture' }
+            # A top-level copy needs a newer capture of the same export; a run file needs a newer capture of the producer.
+            if (-not $reason -and $candidate.Export -and -not $recentExports.Contains($candidate.Export)) { $reason = 'NoRecentRecordedCapture' }
+            if (-not $reason -and -not $candidate.Export -and $recentCaptureCount -eq 0) { $reason = 'NoRecentRecordedCapture' }
             if (-not $reason) {
                 try {
                     $null = Assert-OwnedPath $file.FullName
@@ -363,8 +402,8 @@ function Get-DailyCaptureLegacyDecision {
                 Action = if ($reason) { 'Keep' } else { 'Remove' }
                 Reason = $reason; Result = ''
                 CaptureRoot = [IO.Path]::GetRelativePath($root, $captureRoot); CaptureRootPath = $captureRoot
-                Name = $file.Name; StampDay = $stampDay; WindowStartDay = $cutoff; SizeBytes = $file.Length
-                FullName = $file.FullName; LastWriteTimeUtc = $file.LastWriteTimeUtc
+                Name = [IO.Path]::GetRelativePath($captureRoot, $file.FullName); StampDay = $stampDay; WindowStartDay = $cutoff; SizeBytes = $file.Length
+                FullName = $file.FullName; LastWriteTimeUtc = $file.LastWriteTimeUtc; RunFolderPath = $candidate.RunFolder
             }
         }
     }
@@ -432,7 +471,11 @@ if (Test-Path -LiteralPath $appsWeekly -PathType Container) {
 
 # A Usage run is redundant only when every file matches its same-week copy.
 $usage = Join-Path $dataAll 'M365\Usage'
-if (Test-Path -LiteralPath $usage -PathType Container) {
+# Once Usage keeps daily captures, its run folders hold recorded payloads: the capture rules own them.
+if ((Test-Path -LiteralPath $usage -PathType Container) -and (Test-InDailyCaptureRoot $usage)) {
+    Write-CleanupLog 'Usage run folders: daily capture root; duplicate-run retirement left to the capture rules.'
+}
+elseif (Test-Path -LiteralPath $usage -PathType Container) {
     foreach ($run in @(Get-ChildItem -LiteralPath $usage -Directory -Force |
         Where-Object { $_.Name -match '^\d{8}_\d{6}$' })) {
         if ($run.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
@@ -590,6 +633,14 @@ Write-CleanupLog ('Orphan temporaries: {0} matched, {1} eligible (minimum age {2
     $OrphanTemporaryMinimumAgeDays, $OrphanPreviousMinimumAgeDays)
 $legacyCaptureReport = Join-Path $reportRoot 'daily-capture-legacy.csv'
 $legacyCaptureDecisions = @(Get-DailyCaptureLegacyDecision)
+# A file another rule already removes is reported, not planned twice.
+$coveringFolders = @($actions | Where-Object { $_.Category -in 'DiscoveredAppsWeek','DuplicateUsageRun','LinkedPreparedBatch' } | ForEach-Object { $_.Path + [IO.Path]::DirectorySeparatorChar })
+foreach ($decision in @($legacyCaptureDecisions | Where-Object Action -eq 'Remove')) {
+    if ($timestampedCandidates.Contains($decision.FullName) -or
+        @($coveringFolders | Where-Object { $decision.FullName.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count) {
+        $decision.Action = 'Keep'; $decision.Reason = 'PlannedByAnotherRule'
+    }
+}
 $legacyCaptureDecisions | Select-Object Action,Reason,Result,CaptureRoot,Name,StampDay,WindowStartDay,SizeBytes |
     Export-Csv -LiteralPath $legacyCaptureReport -NoTypeInformation -Encoding utf8
 $legacyCaptureByPath = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -597,9 +648,12 @@ foreach ($decision in $legacyCaptureDecisions) { $legacyCaptureByPath[$decision.
 $legacyCaptureEligible = @($legacyCaptureDecisions | Where-Object Action -eq 'Remove')
 $legacyCaptureBytes = [int64]0
 foreach ($decision in $legacyCaptureEligible) { $legacyCaptureBytes += $decision.SizeBytes }
-Write-CleanupLog ('Daily capture legacy CSVs: {0} unrecorded timestamped file(s) in {1} capture root(s), {2} eligible ({3:N3} GiB).' -f
-    $legacyCaptureDecisions.Count, @($legacyCaptureDecisions | Select-Object -ExpandProperty CaptureRoot -Unique).Count,
-    $legacyCaptureEligible.Count, ($legacyCaptureBytes / 1GB))
+Write-CleanupLog ('Daily capture legacy CSVs: {0} recorded and {1} unrecorded timestamped or run-folder file(s) in {2} capture root(s); {3} eligible ({4:N3} GiB), {5} left to another rule.' -f
+    @($legacyCaptureDecisions | Where-Object Reason -eq 'CaptureOwned').Count, @($legacyCaptureDecisions | Where-Object Reason -ne 'CaptureOwned').Count,
+    @($legacyCaptureDecisions | Select-Object -ExpandProperty CaptureRoot -Unique).Count,
+    $legacyCaptureEligible.Count, ($legacyCaptureBytes / 1GB), @($legacyCaptureDecisions | Where-Object Reason -eq 'PlannedByAnotherRule').Count)
+$script:removedRunFolders = 0
+$script:failedRunFolders = 0
 $plannedFolders = @($actions | Where-Object { $_.Category -in 'DiscoveredAppsWeek','DuplicateUsageRun','LinkedPreparedBatch' })
 $plannedFileReasons = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($item in @($actions | Where-Object { $_.Category -in 'RetiredCmdbLock' })) {
@@ -839,6 +893,21 @@ if ($Execute) {
                     Write-CleanupLog ('Daily capture legacy CSV removal failed for {0}: {1}' -f $relativePath, $_.Exception.Message)
                 }
             }
+            # A run folder left without any entry is removed; anything still inside keeps it.
+            foreach ($runFolder in @($group.Group | Where-Object { $_.RunFolderPath -and $_.Result -in 'Removed','AlreadyAbsent' } | Select-Object -ExpandProperty RunFolderPath -Unique)) {
+                try {
+                    if (-not (Test-Path -LiteralPath $runFolder -PathType Container)) { continue }
+                    $folderItem = Get-Item -LiteralPath (Assert-OwnedPath $runFolder) -Force
+                    if ($folderItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+                    if (@(Get-ChildItem -LiteralPath $runFolder -Force).Count) { continue }
+                    Remove-Item -LiteralPath $runFolder -Force -ErrorAction Stop
+                    $script:removedRunFolders++
+                    Write-CleanupLog ('Removed empty daily capture run folder {0}.' -f [IO.Path]::GetRelativePath($root, $runFolder))
+                } catch {
+                    $script:failedRunFolders++
+                    Write-CleanupLog ('Daily capture run folder removal failed for {0}: {1}' -f $runFolder, $_.Exception.Message)
+                }
+            }
         } finally { foreach ($handle in $handles) { $handle.Dispose() } }
     }
     $legacyCaptureDecisions | Select-Object Action,Reason,Result,CaptureRoot,Name,StampDay,WindowStartDay,SizeBytes |
@@ -854,9 +923,11 @@ $result = [pscustomobject]@{
     RemovedActions = @($actions | Where-Object Status -eq 'Removed').Count + @($timestampedDecisions | Where-Object Result -eq 'Removed').Count +
         @($orphanDecisions | Where-Object Result -eq 'Removed').Count + @($legacyCaptureDecisions | Where-Object Result -eq 'Removed').Count
     FailedActions = @($actions | Where-Object Status -like 'Failed:*').Count + @($timestampedDecisions | Where-Object Result -like 'Failed:*').Count +
-        @($orphanDecisions | Where-Object Result -like 'Failed:*').Count + @($legacyCaptureDecisions | Where-Object Result -like 'Failed:*').Count
+        @($orphanDecisions | Where-Object Result -like 'Failed:*').Count + @($legacyCaptureDecisions | Where-Object Result -like 'Failed:*').Count +
+        $script:failedRunFolders
     SkippedOrphanTemporaries = @($orphanDecisions | Where-Object Result -like 'Skipped:*').Count
     SkippedDailyCaptureLegacy = @($legacyCaptureDecisions | Where-Object Result -like 'Skipped:*').Count
+    RemovedRunFolders = $script:removedRunFolders
     ReportDirectory = $reportRoot
 }
 $result
