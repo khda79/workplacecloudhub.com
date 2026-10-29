@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.21
+1.6.22
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.21'
+$script:AppVersion = '1.6.22'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -494,9 +494,10 @@ $xaml = @'
                                 <GroupBox Grid.Row="1" Header="Pending jobs (why they wait)" Margin="0,6,0,0">
                                     <DataGrid x:Name="OperationsPendingGrid">
                                         <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="110"/>
-                                            <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="90"/>
-                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="220"/>
+                                            <!-- Same leading columns as Running jobs: Server, Job, Server state (GUI 1.6.22). -->
+                                            <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="120"/>
+                                            <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="260"/>
+                                            <DataGridTextColumn Header="Server state" Binding="{Binding ServerState}" Width="85"/>
                                             <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="125"/>
                                             <DataGridTextColumn Header="Waiting (min)" Binding="{Binding WaitingMinutes}" Width="85"/>
                                             <DataGridTextColumn Header="Est. duration (min)" Binding="{Binding EstimatedMinutes}" Width="120">
@@ -1608,11 +1609,11 @@ function Get-GuiJobDurationEstimate {
     param([Parameter(Mandatory = $true)][string]$JobName)
     if ($script:HealthByName.ContainsKey($JobName)) {
         $average = Get-OrchestratorGuiPropertyValue -Object $script:HealthByName[$JobName] -Name 'AverageDurationMinutes' -DefaultValue $null
-        if ($null -ne $average -and [double]$average -gt 0) { return [pscustomobject]@{ Minutes = [math]::Round([double]$average); Source = 'Average of the recent successful runs' } }
+        if ($null -ne $average -and [double]$average -gt 0) { return [pscustomobject]@{ Minutes = [math]::Max(1, [math]::Round([double]$average)); Source = 'Average of the recent successful runs' } }
     }
     $job = if ($null -ne $script:DraftJobs) { @(Get-OrchestratorGuiPropertyValue -Object $script:DraftJobs -Name 'Jobs' -DefaultValue @() | Where-Object { [string]$_.Name -eq $JobName })[0] } else { $null }
     $estimate = Get-OrchestratorGuiPropertyValue -Object $job -Name 'EstimatedDurationMinutes' -DefaultValue $null
-    if ($null -ne $estimate -and [double]$estimate -gt 0) { return [pscustomobject]@{ Minutes = [math]::Round([double]$estimate); Source = 'Catalog EstimatedDurationMinutes (no recent successful run)' } }
+    if ($null -ne $estimate -and [double]$estimate -gt 0) { return [pscustomobject]@{ Minutes = [math]::Max(1, [math]::Round([double]$estimate)); Source = 'Catalog EstimatedDurationMinutes (no recent successful run)' } }
     return $null
 }
 

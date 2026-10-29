@@ -3,7 +3,7 @@
 Offline test of the duration estimates of the orchestrator GUI: estimated time left in Running
 jobs, estimated duration in Pending jobs, both frames stacked in Operations > Live.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Runs the GUI helpers extracted from the script on synthetic rows. No WPF window, tenant
 initialization, shared folder or orchestrator.
@@ -26,10 +26,11 @@ foreach ($name in @('Get-OrchestratorGuiPropertyValue', 'Get-GuiJobDurationEstim
 }
 
 # Average of the recent successful runs first, then the catalog estimate, else nothing.
-$script:HealthByName = @{ 'Avg-Job' = [pscustomobject]@{ AverageDurationMinutes = 30.4 }; 'Zero-Job' = [pscustomobject]@{ AverageDurationMinutes = 0 } }
+$script:HealthByName = @{ 'Avg-Job' = [pscustomobject]@{ AverageDurationMinutes = 30.4 }; 'Zero-Job' = [pscustomobject]@{ AverageDurationMinutes = 0 }; 'Fast-Job' = [pscustomobject]@{ AverageDurationMinutes = 0.3 } }
 $script:DraftJobs = [pscustomobject]@{ Jobs = @([pscustomobject]@{ Name = 'Avg-Job'; EstimatedDurationMinutes = 90 }, [pscustomobject]@{ Name = 'Zero-Job'; EstimatedDurationMinutes = 12 }, [pscustomobject]@{ Name = 'Bare-Job' }) }
 Check ((Get-GuiJobDurationEstimate -JobName 'Avg-Job').Minutes -eq 30) 'The average of the recent runs must win over the catalog estimate.'
 Check ((Get-GuiJobDurationEstimate -JobName 'Zero-Job').Minutes -eq 12 -and (Get-GuiJobDurationEstimate -JobName 'Zero-Job').Source -like 'Catalog*') 'Without a usable average the catalog estimate must be used.'
+Check ((Get-GuiJobDurationEstimate -JobName 'Fast-Job').Minutes -eq 1) 'A job shorter than a minute must be estimated at 1 minute, not 0.'
 Check ($null -eq (Get-GuiJobDurationEstimate -JobName 'Bare-Job') -and $null -eq (Get-GuiJobDurationEstimate -JobName 'Unknown-Job')) 'A job without history or catalog estimate has no estimate.'
 
 $operations = [pscustomobject]@{
@@ -53,6 +54,9 @@ Check (([regex]::Matches($guiText, '(?i)Add-GuiJobDurationEstimates -Operations 
 Check ($guiText -match 'Header="Est\. remaining" Binding="\{Binding EstimatedRemaining\}"' -and $guiText -match 'Header="Est\. duration \(min\)" Binding="\{Binding EstimatedMinutes\}"') 'The estimate columns are missing.'
 $live = $guiText.Substring($guiText.IndexOf('<TabItem Header="Live">'))
 $live = $live.Substring(0, $live.IndexOf('</TabItem>'))
+$runningColumns = @([regex]::Matches($live.Substring($live.IndexOf('x:Name="OperationsRunningGrid"')), 'DataGridTextColumn Header="([^"]+)"') | Select-Object -First 3 | ForEach-Object { $_.Groups[1].Value })
+$pendingColumns = @([regex]::Matches($live.Substring($live.IndexOf('x:Name="OperationsPendingGrid"')), 'DataGridTextColumn Header="([^"]+)"') | Select-Object -First 3 | ForEach-Object { $_.Groups[1].Value })
+Check (($runningColumns -join ',') -eq 'Server,Job,Server state' -and ($pendingColumns -join ',') -eq 'Server,Job,Server state') "Running and pending jobs must start with the same columns ($($runningColumns -join ',') / $($pendingColumns -join ','))."
 Check ($live -match '<GroupBox Header="Running jobs" Margin="0,0,0,6">' -and $live -match '<GroupBox Grid\.Row="1" Header="Pending jobs \(why they wait\)"' -and $live -notmatch 'Grid\.Column="1" Header="Pending jobs') 'Running and pending jobs must be stacked.'
 "PASS: GUI duration estimates, $($script:passed) offline checks."
 
