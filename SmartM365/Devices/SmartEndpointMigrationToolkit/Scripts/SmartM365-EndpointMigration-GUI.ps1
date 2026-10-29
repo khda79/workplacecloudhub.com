@@ -268,19 +268,27 @@ function Get-InventoryRefreshPlan {
     (one delegated sign-in). HybridJoin uses the combined Graph exporter (Intune, then Entra on the
     same connection); Windows11Upgrade needs Intune only.
     #>
-    param([Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade')][string]$Campaign)
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade')][string]$Campaign,
+        # Inventories to refresh ("Refresh old inventories only"); all of the Campaign when omitted.
+        [ValidateSet('AD','Intune','Entra')][string[]]$Kinds
+    )
 
+    if (-not $PSBoundParameters.ContainsKey('Kinds')) { $Kinds = if ($Campaign -eq 'HybridJoin') { @('AD','Intune','Entra') } else { @('AD','Intune') } }
+    if ($Campaign -ne 'HybridJoin') { $Kinds = @($Kinds | Where-Object { $_ -ne 'Entra' }) }
     $ad = [pscustomobject]@{ Label = 'AD'; Script = 'SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }
-    $graph = if ($Campaign -eq 'HybridJoin') {
+    $intune = [pscustomobject]@{ Label = 'Intune'; Script = 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }
+    $entra = [pscustomobject]@{ Label = 'Entra'; Script = 'SmartM365-EndpointMigration-Export-EntraDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }
+    $graph = if ($Kinds -contains 'Intune' -and $Kinds -contains 'Entra') {
         [pscustomobject]@{ Label = 'Intune and Entra'; Script = 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1'; Arguments = @() }
     }
-    else {
-        [pscustomobject]@{ Label = 'Intune'; Script = 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }
-    }
-    return @(
-        [pscustomobject]@{ Name = 'AD'; Title = 'Active Directory'; Exports = @($ad) }
-        [pscustomobject]@{ Name = 'Graph'; Title = ('Microsoft Graph ({0})' -f $graph.Label); Exports = @($graph) }
-    )
+    elseif ($Kinds -contains 'Intune') { $intune }
+    elseif ($Kinds -contains 'Entra') { $entra }
+    else { $null }
+    $plan = @()
+    if ($Kinds -contains 'AD') { $plan += [pscustomobject]@{ Name = 'AD'; Title = 'Active Directory'; Exports = @($ad) } }
+    if ($null -ne $graph) { $plan += [pscustomobject]@{ Name = 'Graph'; Title = ('Microsoft Graph ({0})' -f $graph.Label); Exports = @($graph) } }
+    return $plan
 }
 
 function Get-InventoryRefreshCommandText {
@@ -685,7 +693,10 @@ $xaml = @'
                             <StackPanel>
                                 <TextBlock Text="Selection" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,10"/>
                                 <TextBlock x:Name="AutomaticInventoryStatusText" Text="-" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                                <Button x:Name="AutomaticRefreshInventoryButton" Content="Refresh shared inventories" HorizontalAlignment="Left"/>
+                                <WrapPanel>
+                                    <Button x:Name="AutomaticRefreshInventoryButton" Content="Refresh shared inventories"/>
+                                    <Button x:Name="AutomaticRefreshStaleInventoryButton" Content="Refresh old inventories only"/>
+                                </WrapPanel>
                                 <TextBlock Text="Wave name" Margin="0,8,0,0"/>
                                 <TextBox x:Name="AutomaticWaveNameText"/>
                                 <TextBlock Text="Computer name prefixes (separated by ;)"/>
@@ -851,6 +862,11 @@ function Show-GuiError {
 function Show-GuiQuestion {
     param([string]$Message,[string]$Title = 'Confirm')
     return ([System.Windows.MessageBox]::Show($window, $Message, $Title, 'YesNo', 'Question') -eq [System.Windows.MessageBoxResult]::Yes)
+}
+
+function Show-GuiWarningQuestion {
+    param([string]$Message,[string]$Title = 'Warning')
+    return ([System.Windows.MessageBox]::Show($window, $Message, $Title, 'YesNo', 'Warning') -eq [System.Windows.MessageBoxResult]::Yes)
 }
 
 function Open-ShellPath {
@@ -1139,14 +1155,44 @@ function Update-RunsView {
     $controls.SingleRunFolderText.Text = $singleRoot
 }
 
+function Get-AutomaticInventoryChecks {
+    <#
+    Freshness of the shared inventories read by the Automatic Wave (AD: 12 hours, Graph: 2 hours).
+    Windows 11 reads AD, Intune or both depending on the Source; Hybrid Join reads AD, Intune and Entra.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Campaign,[string]$Source = 'Both')
+
+    $kinds = if ($Campaign -eq 'Windows11Upgrade') { switch ($Source) { 'AD' { @('AD') } 'Intune' { @('Intune') } default { @('AD','Intune') } } } else { @('AD','Intune','Entra') }
+    foreach ($kind in $kinds) {
+        $maxAge = if ($kind -eq 'AD') { 12 } else { 2 }
+        $check = Test-SemtSharedInventoryUsable -Path (Get-SemtSharedInventoryPath -PackageRoot $script:PackageRoot -Kind $kind) -Kind $kind -MaxAgeHours $maxAge
+        [pscustomobject]@{ Kind = $kind; MaxAgeHours = $maxAge; Usable = [bool]$check.Usable; Reason = [string]$check.Reason; AgeHours = $check.AgeHours }
+    }
+}
+
+function Get-AutomaticInventoryWarning {
+    <#
+    Text of the warning shown before Preview and Create when a shared inventory read by the selection
+    is missing, older than its limit or of unverified provenance; empty when they are all fresh.
+    #>
+    param([Parameter(Mandatory = $true)][object[]]$Checks)
+
+    $lines = foreach ($check in @($Checks | Where-Object { -not $_.Usable })) {
+        switch -Regex ($check.Reason) {
+            '^Missing$' { '- {0}: no shared inventory' -f $check.Kind }
+            '^Stale' { '- {0}: {1} hours old (limit {2} hours)' -f $check.Kind,$check.AgeHours,$check.MaxAgeHours }
+            default { '- {0}: {1}' -f $check.Kind,$check.Reason }
+        }
+    }
+    if (@($lines).Count -eq 0) { return '' }
+    return ('The shared inventories are not up to date:{0}{1}{0}{0}The selection may not match the current state of the devices. Use "Refresh old inventories only" first, or continue with these inventories.' -f [Environment]::NewLine,(@($lines) -join [Environment]::NewLine))
+}
+
 function Update-AutomaticView {
     $isWindows11 = ($script:CurrentCampaign -eq 'Windows11Upgrade')
     $controls.AutomaticSourcePanel.Visibility = if ($isWindows11) { 'Visible' } else { 'Collapsed' }
-    $kinds = if ($isWindows11) { @('AD','Intune') } else { @('AD','Intune','Entra') }
-    $parts = foreach ($kind in $kinds) {
-        $maxAge = if ($kind -eq 'AD') { 12 } else { 2 }
-        $check = Test-SemtSharedInventoryUsable -Path (Get-SemtSharedInventoryPath -PackageRoot $script:PackageRoot -Kind $kind) -Kind $kind -MaxAgeHours $maxAge
-        '{0}: {1}' -f $kind,$(if ($null -ne $check.AgeHours) { '{0} ({1} h)' -f $check.Reason,$check.AgeHours } else { $check.Reason })
+    $parts = foreach ($check in @(Get-AutomaticInventoryChecks -Campaign $script:CurrentCampaign)) {
+        '{0}: {1}' -f $check.Kind,$(if ($null -ne $check.AgeHours) { '{0} ({1} h)' -f $check.Reason,$check.AgeHours } else { $check.Reason })
     }
     $controls.AutomaticInventoryStatusText.Text = 'Shared inventories - ' + ($parts -join '; ')
     # AD domain list: read again only when the shared AD inventory file changed.
@@ -1235,7 +1281,16 @@ function Invoke-AutomaticWave {
     if (-not (Test-SemtWaveName -Name $filters.WaveName)) { throw ("'{0}' is not a valid Wave name." -f $filters.WaveName) }
     $signature = Get-AutomaticFilterSignature -Campaign $campaign -Filters $filters
     if ($Create -and $signature -ne $script:AutomaticPreviewSignature) { throw 'The filters changed since the last preview. Run Preview again before Create.' }
-    if ($Create -and -not (Show-GuiQuestion -Message ("Create Wave '{0}' from the previewed selection?{1}{1}The Wave is created but NOT launched." -f $filters.WaveName,[Environment]::NewLine) -Title 'Create Wave')) { return }
+    # Old inventories: warn before Preview, and again in the Create confirmation (Preview may be old).
+    $inventoryWarning = Get-AutomaticInventoryWarning -Checks @(Get-AutomaticInventoryChecks -Campaign $campaign -Source $filters.Source)
+    if ($Create) {
+        $question = "Create Wave '{0}' from the previewed selection?{1}{1}The Wave is created but NOT launched." -f $filters.WaveName,[Environment]::NewLine
+        $confirmed = if ($inventoryWarning) { Show-GuiWarningQuestion -Message ('{0}{1}{1}{2}' -f $inventoryWarning,[Environment]::NewLine,$question) -Title 'Create Wave - old inventories' } else { Show-GuiQuestion -Message $question -Title 'Create Wave' }
+        if (-not $confirmed) { return }
+    }
+    elseif ($inventoryWarning -and -not (Show-GuiWarningQuestion -Message ('{0}{1}{1}Run the Preview anyway?' -f $inventoryWarning,[Environment]::NewLine) -Title 'Preview - old inventories')) {
+        return
+    }
     $evidence = Join-Path $script:PackageRoot ("Runs\{0}\_AutomaticWave\{1}" -f $campaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
     New-SemtDirectory -Path $evidence
     $commandText = Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot $evidence -Create:$Create -PreviewEvidencePath $(if ($Create) { $script:AutomaticPreviewEvidence } else { '' })
@@ -1425,8 +1480,12 @@ function Start-InventoryRefresh {
     <#
     Runs the AD and Microsoft Graph exports in parallel, each in a hidden Windows PowerShell, and
     shows their output in a GUI window. Closing the window while the refresh runs only hides it; the
-    button shows it again.
+    button shows it again. -Kinds limits the refresh to these inventories (old inventories only).
     #>
+    param([ValidateSet('AD','Intune','Entra')][string[]]$Kinds)
+
+    $plan = if ($PSBoundParameters.ContainsKey('Kinds')) { @(Get-InventoryRefreshPlan -Campaign $script:CurrentCampaign -Kinds $Kinds) } else { @(Get-InventoryRefreshPlan -Campaign $script:CurrentCampaign) }
+    if ($plan.Count -eq 0) { return }
     $evidence = Join-Path $script:PackageRoot ("Runs\{0}\_InventoryRefresh\{1}" -f $script:CurrentCampaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
     New-SemtDirectory -Path $evidence
     $popup = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new($inventoryRefreshXaml)))
@@ -1434,7 +1493,12 @@ function Start-InventoryRefresh {
     if ($window.Icon) { $popup.Icon = $window.Icon }
     $popup.Height = [Math]::Max([Math]::Min($popup.MinHeight, [System.Windows.SystemParameters]::WorkArea.Height), [System.Windows.SystemParameters]::WorkArea.Height * 0.9)
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $streams = foreach ($item in @(Get-InventoryRefreshPlan -Campaign $script:CurrentCampaign)) {
+    foreach ($name in @('AD','Graph')) {
+        if (@($plan | Where-Object { $_.Name -eq $name }).Count -eq 0) {
+            $popup.FindName(('InventoryRefresh{0}StateText' -f $name)).Text = ('{0}: up to date, not refreshed.' -f $(if ($name -eq 'AD') { 'Active Directory' } else { 'Microsoft Graph' }))
+        }
+    }
+    $streams = foreach ($item in $plan) {
         $logPath = Join-Path $evidence ('InventoryRefresh-{0}.log' -f $item.Name)
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-InventoryRefreshCommandText -Exports $item.Exports -LogPath $logPath)))
         $process = Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru
@@ -1447,7 +1511,11 @@ function Start-InventoryRefresh {
         Streams = @($streams); Evidence = $evidence; Window = $popup; Finished = $false
         StateText = $popup.FindName('InventoryRefreshStateText'); StopButton = $popup.FindName('InventoryRefreshStopButton'); Timer = New-Object System.Windows.Threading.DispatcherTimer
     }
-    $script:InventoryRefresh.StateText.Text = 'AD and Microsoft Graph exports run in parallel. AD needs the ActiveDirectory module; the Microsoft Graph sign-in window opens now.'
+    $script:InventoryRefresh.StateText.Text = switch (($plan | ForEach-Object { $_.Name }) -join '+') {
+        'AD' { 'Active Directory export only (the Microsoft Graph inventories are up to date). AD needs the ActiveDirectory module.' }
+        'Graph' { 'Microsoft Graph export only (the AD inventory is up to date); the Microsoft Graph sign-in window opens now.' }
+        default { 'AD and Microsoft Graph exports run in parallel. AD needs the ActiveDirectory module; the Microsoft Graph sign-in window opens now.' }
+    }
     $popup.FindName('InventoryRefreshOpenFolderButton').Add_Click({ Open-ShellPath $script:InventoryRefresh.Evidence })
     $script:InventoryRefresh.StopButton.Add_Click({
         if (Show-GuiQuestion -Message 'Stop the inventory refresh? The exports in progress are interrupted.' -Title 'Stop refresh') { Stop-InventoryRefresh }
@@ -1572,6 +1640,18 @@ $controls.AutomaticRefreshInventoryButton.Add_Click({
         if (-not (Show-GuiQuestion -Message ('Refresh the shared {0} inventories? AD and Microsoft Graph run in parallel and their output is shown in a window of the GUI. AD needs the ActiveDirectory module; Microsoft Graph opens one interactive sign-in.' -f $kinds) -Title 'Refresh shared inventories')) { return }
         if ($script:InventoryRefresh) { $script:InventoryRefresh.Window.Close() }
         Start-InventoryRefresh
+    }
+    catch { Show-GuiError $_.Exception.Message }
+})
+$controls.AutomaticRefreshStaleInventoryButton.Add_Click({
+    try {
+        if ($script:InventoryRefresh -and -not $script:InventoryRefresh.Finished) { $script:InventoryRefresh.Window.Show(); [void]$script:InventoryRefresh.Window.Activate(); return }
+        $old = @(Get-AutomaticInventoryChecks -Campaign $script:CurrentCampaign | Where-Object { -not $_.Usable })
+        if ($old.Count -eq 0) { [void][System.Windows.MessageBox]::Show($window, 'All the shared inventories of this Campaign are up to date. Nothing to refresh.', 'Refresh old inventories', 'OK', 'Information'); return }
+        $list = (@($old | ForEach-Object { if ($null -ne $_.AgeHours) { '- {0}: {1} hours old (limit {2} hours)' -f $_.Kind,$_.AgeHours,$_.MaxAgeHours } else { '- {0}: {1}' -f $_.Kind,$_.Reason } }) -join [Environment]::NewLine)
+        if (-not (Show-GuiQuestion -Message ('Refresh only these shared inventories?{0}{1}{0}{0}The up-to-date inventories are kept. Microsoft Graph opens one interactive sign-in when Intune or Entra is refreshed.' -f [Environment]::NewLine,$list) -Title 'Refresh old inventories')) { return }
+        if ($script:InventoryRefresh) { $script:InventoryRefresh.Window.Close() }
+        Start-InventoryRefresh -Kinds @($old | ForEach-Object { $_.Kind })
     }
     catch { Show-GuiError $_.Exception.Message }
 })

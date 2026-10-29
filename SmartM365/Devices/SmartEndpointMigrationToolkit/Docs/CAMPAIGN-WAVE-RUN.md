@@ -51,6 +51,12 @@ PowerShell 5.1 with the engine. `Update-WaveCmdWrappers.cmd` regenerates them fo
    **AD domain** list of the Automatic Wave view chooses one domain for the Wave. Computers of
    other domains are filter exclusions `AD_DOMAIN_NOT_MATCHED`; devices without an AD record
    (Intune only) are `AD_DOMAIN_UNKNOWN`.
+   **Refresh old inventories only** exports only the inventories that are missing, older than
+   their limit (AD 12 hours, Intune and Entra 2 hours) or of unverified provenance: AD alone needs
+   no Microsoft Graph sign-in; Intune and Entra together still share one sign-in. Before
+   **Preview** and in the **Create** confirmation, the GUI warns when an inventory read by the
+   selection is old (Windows 11: the inventories of the chosen Source) and lets the operator
+   continue or cancel.
 2. **Preview** runs the Automatic Wave engine without `-Create`: it writes evidence under
    `Runs\<Campaign>\_AutomaticWave\` (selected, excluded with reason code, summary) and creates
    nothing.

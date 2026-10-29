@@ -186,7 +186,26 @@ try {
     $w11Plan = @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade)
     Test-Step 'inventory refresh runs two parallel streams: AD and Microsoft Graph' { ($hjPlan.Name -join ',') -eq 'AD,Graph' -and ($w11Plan.Name -join ',') -eq 'AD,Graph' -and @($hjPlan + $w11Plan | Where-Object { @($_.Exports).Count -ne 1 }).Count -eq 0 }
     Test-Step 'HybridJoin Graph stream exports Intune and Entra on one connection; Windows 11 exports Intune only' { $hjPlan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and $w11Plan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' }
-    $planProblems = foreach ($export in @($hjPlan + $w11Plan | ForEach-Object { $_.Exports })) {
+    # "Refresh old inventories only": only the old inventories are exported.
+    $adOnly = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds AD)
+    $entraOnly = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds Entra)
+    $intuneOnly = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds Intune)
+    $graphBoth = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds Intune,Entra)
+    $w11Intune = @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade -Kinds Intune,Entra)
+    Test-Step 'old inventories only: AD alone runs no Graph sign-in; one Graph inventory runs its own exporter' { ($adOnly.Name -join ',') -eq 'AD' -and ($entraOnly.Name -join ',') -eq 'Graph' -and $entraOnly[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-EntraDevicesCsv.ps1' -and $intuneOnly[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' }
+    Test-Step 'old inventories only: Intune and Entra share one sign-in; Windows 11 ignores Entra' { $graphBoth.Count -eq 1 -and $graphBoth[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and $w11Intune.Count -eq 1 -and $w11Intune[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' -and @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade -Kinds Entra).Count -eq 0 }
+    Test-Step 'Automatic Wave view offers "Refresh old inventories only"' { $xaml -match 'x:Name="AutomaticRefreshStaleInventoryButton" Content="Refresh old inventories only"' -and $guiText -match 'Start-InventoryRefresh -Kinds @\(\$old' }
+    foreach ($functionName in @('Get-AutomaticInventoryWarning')) {
+        $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+        . ([scriptblock]::Create($definition.Extent.Text))
+    }
+    $freshChecks = @([pscustomobject]@{ Kind = 'AD'; MaxAgeHours = 12; Usable = $true; Reason = 'Fresh'; AgeHours = 3 }, [pscustomobject]@{ Kind = 'Intune'; MaxAgeHours = 2; Usable = $true; Reason = 'FreshVerifiedProvenance'; AgeHours = 1 })
+    $oldChecks = @([pscustomobject]@{ Kind = 'AD'; MaxAgeHours = 12; Usable = $false; Reason = 'Stale:16.4h>12h'; AgeHours = 16.4 }, [pscustomobject]@{ Kind = 'Entra'; MaxAgeHours = 2; Usable = $false; Reason = 'Missing'; AgeHours = $null }, [pscustomobject]@{ Kind = 'Intune'; MaxAgeHours = 2; Usable = $true; Reason = 'Fresh'; AgeHours = 1 })
+    $oldWarning = Get-AutomaticInventoryWarning -Checks $oldChecks
+    Test-Step 'no inventory warning when the inventories are fresh' { (Get-AutomaticInventoryWarning -Checks $freshChecks) -eq '' }
+    Test-Step 'inventory warning lists only the old or missing inventories, with age and limit' { $oldWarning -match 'AD: 16[.,]4 hours old \(limit 12 hours\)' -and $oldWarning -match 'Entra: no shared inventory' -and $oldWarning -notmatch 'Intune' -and $oldWarning -match 'Refresh old inventories only' }
+    Test-Step 'Preview and Create warn about old inventories before running (Windows 11 follows the Source)' { $guiText -match 'Get-AutomaticInventoryChecks -Campaign \$campaign -Source \$filters\.Source' -and $guiText -match "Run the Preview anyway\?" -and $guiText -match "'Create Wave - old inventories'" }
+    $planProblems = foreach ($export in @($hjPlan + $w11Plan + $entraOnly + $intuneOnly + $adOnly | ForEach-Object { $_.Exports })) {
         $exportPath = Join-Path $packageRoot ('Scripts\' + $export.Script)
         if (-not (Test-Path -LiteralPath $exportPath -PathType Leaf)) { 'missing ' + $export.Script; continue }
         $exportParameters = @([System.Management.Automation.Language.Parser]::ParseFile($exportPath, [ref]$null, [ref]$null).ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })

@@ -149,6 +149,7 @@ function script:Invoke-SmartM365DemoProfileAction {
         }
         '^AutomaticPreviewButton$' { [void](Show-SmartM365DemoDetail -Title 'Automatic Wave preview' -Text $c.AutomaticSummaryText.Text); Write-SmartM365DemoActivity 'Automatic preview ready - fictional evidence only. Create is available for these filters.'; return $true }
         '^AutomaticRefreshInventoryButton$' { Write-SmartM365DemoActivity 'Shared inventory refresh simulated. No AD or Microsoft Graph query was made.'; return $true }
+        '^AutomaticRefreshStaleInventoryButton$' { Write-SmartM365DemoActivity 'Refresh of the old shared inventories only simulated. No AD or Microsoft Graph query was made.'; return $true }
         '^(StopAllButton|StopSelectedRunButton)$' { Write-SmartM365DemoActivity 'Controlled stop simulated: no new computer starts; running workers finish. No real process was contacted.'; return $true }
         '^ForceStopSelectedRunButton$' { Write-SmartM365DemoActivity 'Forced local stop simulated. Remote endpoints are reported separately and must be verified before relaunch.'; return $true }
         '^(OpenWaveComputersButton|OpenNewWaveComputersButton)$' { [void](Show-SmartM365DemoDetail -Title 'Computers.txt' -Text ((1..12 | ForEach-Object { 'CTSO-LAP-{0:0000}' -f $_ }) -join [Environment]::NewLine)); return $true }
