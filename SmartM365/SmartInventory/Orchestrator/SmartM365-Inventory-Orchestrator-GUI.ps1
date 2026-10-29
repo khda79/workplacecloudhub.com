@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.20
+1.6.21
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.20'
+$script:AppVersion = '1.6.21'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -451,9 +451,10 @@ $xaml = @'
                                     <DataGridTextColumn Header="State persistence" Binding="{Binding StatePersistence}" Width="*"/>
                                 </DataGrid.Columns>
                             </DataGrid>
+                            <!-- Running and pending jobs stacked at full width (GUI 1.6.21). -->
                             <Grid Grid.Row="2" Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="11*"/><ColumnDefinition Width="9*"/></Grid.ColumnDefinitions>
-                                <GroupBox Header="Running jobs" Margin="0,0,6,0">
+                                <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <GroupBox Header="Running jobs" Margin="0,0,0,6">
                                     <Grid>
                                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                                         <StackPanel Orientation="Horizontal" Margin="6,4,6,5">
@@ -477,6 +478,11 @@ $xaml = @'
                                             <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="55"/>
                                             <DataGridTextColumn Header="Started" Binding="{Binding Started}" Width="110"/>
                                             <DataGridTextColumn Header="Duration (min)" Binding="{Binding DurationMinutes}" Width="95"/>
+                                            <DataGridTextColumn Header="Est. remaining" Binding="{Binding EstimatedRemaining}" Width="130">
+                                                <DataGridTextColumn.ElementStyle>
+                                                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding EstimateSource}"/></Style>
+                                                </DataGridTextColumn.ElementStyle>
+                                            </DataGridTextColumn>
                                             <DataGridTextColumn Header="Activity" Binding="{Binding Activity}" Width="65"/>
                                             <DataGridTextColumn Header="Silent (min)" Binding="{Binding SilentMinutes}" Width="80"/>
                                             <DataGridTextColumn Header="CPU (s)" Binding="{Binding CpuSeconds}" Width="65"/>
@@ -485,7 +491,7 @@ $xaml = @'
                                     </DataGrid>
                                     </Grid>
                                 </GroupBox>
-                                <GroupBox Grid.Column="1" Header="Pending jobs (why they wait)" Margin="6,0,0,0">
+                                <GroupBox Grid.Row="1" Header="Pending jobs (why they wait)" Margin="0,6,0,0">
                                     <DataGrid x:Name="OperationsPendingGrid">
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="110"/>
@@ -493,6 +499,11 @@ $xaml = @'
                                             <DataGridTextColumn Header="Job" Binding="{Binding Job}" Width="220"/>
                                             <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="125"/>
                                             <DataGridTextColumn Header="Waiting (min)" Binding="{Binding WaitingMinutes}" Width="85"/>
+                                            <DataGridTextColumn Header="Est. duration (min)" Binding="{Binding EstimatedMinutes}" Width="120">
+                                                <DataGridTextColumn.ElementStyle>
+                                                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding EstimateSource}"/></Style>
+                                                </DataGridTextColumn.ElementStyle>
+                                            </DataGridTextColumn>
                                             <DataGridTextColumn Header="Details" Binding="{Binding Details}" Width="*">
                                                 <DataGridTextColumn.ElementStyle>
                                                     <Style TargetType="TextBlock">
@@ -1591,6 +1602,41 @@ function Get-GuiSwiRow {
     return [pscustomobject]@{ Swi = $text; DaysLeft = $null; Blocks = $false; Detail = $(if ($script:SwiValidityError) { "SWI validity unavailable: $($script:SwiValidityError)" } else { '' }) }
 }
 
+function Get-GuiJobDurationEstimate {
+    # Same source as the Dashboard timeline: average successful duration of the recent runs
+    # (job health), else the catalog EstimatedDurationMinutes.
+    param([Parameter(Mandatory = $true)][string]$JobName)
+    if ($script:HealthByName.ContainsKey($JobName)) {
+        $average = Get-OrchestratorGuiPropertyValue -Object $script:HealthByName[$JobName] -Name 'AverageDurationMinutes' -DefaultValue $null
+        if ($null -ne $average -and [double]$average -gt 0) { return [pscustomobject]@{ Minutes = [math]::Round([double]$average); Source = 'Average of the recent successful runs' } }
+    }
+    $job = if ($null -ne $script:DraftJobs) { @(Get-OrchestratorGuiPropertyValue -Object $script:DraftJobs -Name 'Jobs' -DefaultValue @() | Where-Object { [string]$_.Name -eq $JobName })[0] } else { $null }
+    $estimate = Get-OrchestratorGuiPropertyValue -Object $job -Name 'EstimatedDurationMinutes' -DefaultValue $null
+    if ($null -ne $estimate -and [double]$estimate -gt 0) { return [pscustomobject]@{ Minutes = [math]::Round([double]$estimate); Source = 'Catalog EstimatedDurationMinutes (no recent successful run)' } }
+    return $null
+}
+
+function Add-GuiJobDurationEstimates {
+    # Running rows get the estimated time left, pending rows the estimated duration.
+    param([AllowNull()]$Operations)
+    if ($null -eq $Operations) { return }
+    foreach ($row in @(Get-OrchestratorGuiPropertyValue -Object $Operations -Name 'Running' -DefaultValue @())) {
+        $estimate = Get-GuiJobDurationEstimate -JobName ([string]$row.Job)
+        $elapsed = Get-OrchestratorGuiPropertyValue -Object $row -Name 'DurationMinutes' -DefaultValue $null
+        $text = if ($null -eq $estimate) { '' }
+            elseif ($null -eq $elapsed) { '~{0} min' -f $estimate.Minutes }
+            elseif ([double]$elapsed -le $estimate.Minutes) { '~{0} min' -f [math]::Max(0, $estimate.Minutes - [double]$elapsed) }
+            else { 'over by {0} min' -f [math]::Round([double]$elapsed - $estimate.Minutes) }
+        $row | Add-Member -NotePropertyName EstimatedRemaining -NotePropertyValue $text -Force
+        $row | Add-Member -NotePropertyName EstimateSource -NotePropertyValue $(if ($null -ne $estimate) { '{0}: {1} min' -f $estimate.Source, $estimate.Minutes } else { 'No duration history or catalog estimate' }) -Force
+    }
+    foreach ($row in @(Get-OrchestratorGuiPropertyValue -Object $Operations -Name 'Pending' -DefaultValue @())) {
+        $estimate = Get-GuiJobDurationEstimate -JobName ([string]$row.Job)
+        $row | Add-Member -NotePropertyName EstimatedMinutes -NotePropertyValue $(if ($null -ne $estimate) { $estimate.Minutes } else { $null }) -Force
+        $row | Add-Member -NotePropertyName EstimateSource -NotePropertyValue $(if ($null -ne $estimate) { $estimate.Source } else { 'No duration history or catalog estimate' }) -Force
+    }
+}
+
 function Update-JobHealth {
     param([AllowNull()]$Runs = $null)
     if ($null -eq $Runs) { $Runs = @(Get-SmartM365OrchestratorRecentRuns -SharedDataFolderPath $script:SharedDataFolderPath -Days 21) }
@@ -1604,6 +1650,7 @@ function Refresh-OperationsView {
         $publishedCluster = Read-SmartM365OrchestratorJson -Path (Join-Path $script:SharedDataFolderPath 'Config/Orchestrator-Cluster.json')
         $operations = Get-SmartM365OrchestratorOperations -SharedDataFolderPath $script:SharedDataFolderPath -ClusterDocument $publishedCluster -MailFolderPath $script:MailFolderPath -MailHours 24
         Refresh-MaintenanceView -Operations $operations
+        Add-GuiJobDurationEstimates -Operations $operations
         $script:Controls.OperationsServersGrid.ItemsSource = @($operations.Servers)
         $script:Controls.OperationsRunningGrid.ItemsSource = @($operations.Running)
         $script:Controls.StopRunningJobButton.IsEnabled = $false
@@ -2780,6 +2827,7 @@ function Start-GuiRefresh {
 function Set-GuiOperations {
     param([Parameter(Mandatory = $true)]$Operations)
     Refresh-MaintenanceView -Operations $Operations
+    Add-GuiJobDurationEstimates -Operations $Operations
     $script:Controls.OperationsServersGrid.ItemsSource = @($Operations.Servers)
     $script:Controls.OperationsRunningGrid.ItemsSource = @($Operations.Running)
     $script:Controls.StopRunningJobButton.IsEnabled = $false
