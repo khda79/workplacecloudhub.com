@@ -158,7 +158,9 @@ function New-SemtReportState {
         AttemptRowCount = 0
         ProgressRows = (New-Object System.Collections.ArrayList)
         LogoUri = Get-SemtBrandLogoDataUri -PackageRoot $RunContext.PackageRoot
-        HtmlPath = Join-Path -Path $RunContext.ReportRoot -ChildPath ('SEMT_{0}_{1}_{2}.html' -f $RunContext.Campaign,(Get-SemtSafeName -Value $RunContext.WaveName),$RunContext.RunId)
+        # Short name: the Wave and the Run are already in the folder path; repeating the Wave name
+        # exceeded the 260-character path limit of Windows PowerShell 5.1 with long Wave names.
+        HtmlPath = Join-Path -Path $RunContext.ReportRoot -ChildPath ('SEMT_{0}_{1}.html' -f $RunContext.Campaign,$RunContext.RunId)
     }
 }
 
@@ -318,9 +320,15 @@ tr:nth-child(even) td { background: #F5F8FB; }
     [void]$html.Append(("<div class='footer'>{0} - <a href='https://workplacecloudhub.com'>workplacecloudhub.com</a></div></div>" -f (ConvertTo-SemtHtmlText $script:SemtProductDisplayName)))
     [void]$html.Append('</body></html>')
     New-SemtDirectory -Path (Split-Path -Path $Path -Parent)
-    $temp = '{0}.{1}.tmp' -f $Path,([guid]::NewGuid().ToString('N'))
-    [System.IO.File]::WriteAllText($temp, $html.ToString(), (New-Object System.Text.UTF8Encoding($true)))
-    Move-Item -LiteralPath $temp -Destination $Path -Force
+    # Short temporary name in the same folder (atomic replace without lengthening the path).
+    $temp = Join-Path -Path (Split-Path -Path $Path -Parent) -ChildPath ('.{0}.tmp' -f [guid]::NewGuid().ToString('N').Substring(0, 12))
+    try {
+        [System.IO.File]::WriteAllText($temp, $html.ToString(), (New-Object System.Text.UTF8Encoding($true)))
+        Move-Item -LiteralPath $temp -Destination $Path -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temp -PathType Leaf) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+    }
     return $Path
 }
 

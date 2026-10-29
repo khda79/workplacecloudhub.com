@@ -342,7 +342,8 @@ function Write-SemtJsonFileAtomic {
     $encoding = New-Object System.Text.UTF8Encoding($true)
     $lastError = $null
     for ($attempt = 1; $attempt -le 8; $attempt++) {
-        $tempPath = Join-Path -Path $parent -ChildPath ('.{0}.{1}.tmp' -f (Split-Path -Path $Path -Leaf),([guid]::NewGuid().ToString('N')))
+        # Short temporary name: the final path length is not increased (260-character limit in PowerShell 5.1).
+        $tempPath = Join-Path -Path $parent -ChildPath ('.{0}.tmp' -f [guid]::NewGuid().ToString('N').Substring(0, 12))
         try {
             [System.IO.File]::WriteAllText($tempPath, $json, $encoding)
             Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop

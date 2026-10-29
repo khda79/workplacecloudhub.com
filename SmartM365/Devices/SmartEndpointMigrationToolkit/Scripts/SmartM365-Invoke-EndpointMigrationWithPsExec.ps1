@@ -638,11 +638,13 @@ try {
         $rows = @($cycleRows.ToArray())
         try { & $script:CampaignProfile.Hooks.PostCycle $hookContext $rows } catch { Write-Host ("WARNING: Cycle {0}: post-cycle step failed: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
         Invoke-CompletedRules -Rows $rows -CycleNumber $cycle
-        $csvPath = Join-Path $script:RunContext.ReportRoot ('SEMT_{0}_{1}_cycle{2}_{3}.csv' -f $Campaign,(Get-SemtSafeName -Value $script:RunContext.WaveName),$cycle,(Get-Date -Format 'yyyyMMdd-HHmmss'))
+        $csvPath = Join-Path $script:RunContext.ReportRoot ('SEMT_{0}_cycle{1}_{2}.csv' -f $Campaign,$cycle,(Get-Date -Format 'yyyyMMdd-HHmmss'))
         Export-SemtReportCsv -Rows $rows -Columns $script:CampaignProfile.ReportColumns -Path $csvPath
         Add-SemtReportAttemptRows -State $script:Report -Rows $rows
         [void]$script:Report.ProgressRows.Add((New-SemtProgressRow -CycleNumber $cycle -CycleStart $cycleStart -Total ($computers.Count + $preRows.Count) -Queued $computers.Count -Completed $rows.Count -Running 0 -ComputerListStats $listStats))
-        [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle -IsLive)
+        # The HTML report is a view of the results already saved in the cycle CSV: its failure never fails the Run.
+        try { [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle -IsLive) }
+        catch { Write-Host ("WARNING: Cycle {0}: HTML report update failed: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
         Write-Host ("Cycle {0} report: {1}" -f $cycle,$csvPath) -ForegroundColor Green
         foreach ($group in @($rows | Group-Object -Property Status | Sort-Object Count -Descending)) { Write-Host ("  {0,-48} {1,5}" -f $group.Name,$group.Count) }
         $lastCycleRows = $rows
@@ -664,11 +666,15 @@ catch {
 }
 finally {
     try {
-        $finalPath = Join-Path $script:RunContext.ReportRoot ('SEMT_{0}_{1}_{2}_final.html' -f $Campaign,(Get-SemtSafeName -Value $script:RunContext.WaveName),$script:RunId)
+        $finalPath = Join-Path $script:RunContext.ReportRoot ('SEMT_{0}_{1}_final.html' -f $Campaign,$script:RunId)
         if ($script:Report.AttemptRowCount -gt 0) {
-            [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle -Path $finalPath)
-            [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle)
-            Write-Host ("Final report: {0}" -f $finalPath) -ForegroundColor Green
+            # A report failure must not prevent the Run history and active state updates below.
+            try {
+                [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle -Path $finalPath)
+                [void](Write-SemtRunHtmlReport -State $script:Report -CycleNumber $cycle)
+                Write-Host ("Final report: {0}" -f $finalPath) -ForegroundColor Green
+            }
+            catch { Microsoft.PowerShell.Utility\Write-Host ("Final report failed: {0}" -f $_.Exception.Message) }
         }
         $historyStatus = if ($runStatus -eq 'Failed') { 'Failed' } else { $stopReason }
         Update-SemtRunHistory -RunContext $script:RunContext -Status $historyStatus -ReportPath $finalPath -Cycles $cycle

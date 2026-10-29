@@ -360,6 +360,28 @@ $script:HostLines.Clear()
         Write-SemtJsonFileAtomic -Path $path -InputObject ([pscustomobject]@{ Value = 'ok' })
         (Read-SemtJsonFile -Path $path).Value -eq 'ok'
     }
+    # Run folders repeat the Wave name (Runs\<Campaign>\<Wave>\<RunId>): report names and temporary
+    # files must not add to the path (Windows PowerShell 5.1 fails above 260 characters).
+    $nearLimit = $tempRoot
+    while ($nearLimit.Length -lt 200) { $nearLimit = Join-Path $nearLimit ('WAVE-AUTO-HJ-FR-TEST-' + ('x' * 20)) }
+    $nearLimit = $nearLimit.Substring(0, 200).TrimEnd('\')
+    $reportRoot = Join-Path $nearLimit 'Reports'
+    New-Item -ItemType Directory -Path $reportRoot -Force | Out-Null
+    Test-Step 'JSON atomic write of a 250-character path (short temporary name)' {
+        $path = Join-Path $nearLimit ('S' * (249 - $nearLimit.Length) + '.json')
+        Write-SemtJsonFileAtomic -Path $path -InputObject ([pscustomobject]@{ Value = 'near-limit' })
+        $path.Length -ge 249 -and (Read-SemtJsonFile -Path $path).Value -eq 'near-limit' -and @(Get-ChildItem -LiteralPath $nearLimit -Force -Filter '*.tmp').Count -eq 0
+    }
+    $reportContext = [pscustomobject]@{ Campaign = 'HybridJoin'; RunId = '20261029-102531-2cf749'; WaveName = 'WAVE-AUTO-HJ-FR-TEST-' + ('L' * 59); PackageRoot = $packageRoot; ReportRoot = $reportRoot; RunRoot = $nearLimit; SinglePc = $false; WavePath = $nearLimit; LauncherLogPath = (Join-Path $nearLimit 'Launcher.log') }
+    $reportState = New-SemtReportState -RunContext $reportContext -Columns @('ComputerName','Status') -CampaignTitle 'Hybrid Join'
+    Test-Step 'Run report name holds the Campaign and RunId only (the Wave is in the folder path)' { (Split-Path -Leaf $reportState.HtmlPath) -eq 'SEMT_HybridJoin_20261029-102531-2cf749.html' }
+    Test-Step 'Run HTML report is written in a folder near the path limit and leaves no temporary file' {
+        [void](Write-SemtRunHtmlReport -State $reportState -CycleNumber 1 -IsLive)
+        (Test-Path -LiteralPath $reportState.HtmlPath -PathType Leaf) -and @(Get-ChildItem -LiteralPath $reportRoot -Force -Filter '*.tmp').Count -eq 0
+    }
+    Test-Step 'Run engine: report names omit the Wave name; a cycle HTML report failure never fails the Run' {
+        $engineText -match "'SEMT_\{0\}_cycle\{1\}_\{2\}\.csv' -f \`$Campaign,\`$cycle" -and $engineText -match "'SEMT_\{0\}_\{1\}_final\.html' -f \`$Campaign,\`$script:RunId" -and $engineText -match 'HTML report update failed' -and $engineText -match 'Final report failed'
+    }
     Test-Step 'SHA256 works on a path longer than 260 characters' {
         $deep = $tempRoot
         while ($deep.Length -lt 300) { $deep = Join-Path $deep ('segment-' + ('x' * 30)) }
