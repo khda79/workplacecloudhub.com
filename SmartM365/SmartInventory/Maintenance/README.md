@@ -2,7 +2,7 @@
 
 ## Orchestrator server acceptance
 
-`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.11, PowerShell 7.2+) qualifies a server before it
+`SmartM365-OrchestratorServerAcceptance.ps1` (1.1.0, PowerShell 7.2+) qualifies a server before it
 is switched from Inactive to Active in the orchestrator GUI. The orchestrator capability probe only
 signs in or loads a module; this script makes a real, limited read for each capability, checks the
 rows, then drops them.
@@ -13,8 +13,25 @@ What it guarantees:
 - Nothing written to the tenant: the SharePoint log upload and the Teams notifications of the log
   are disabled; a mail is sent only with `-SendTestMail`.
 - The only writes are the run log under `LogAllRootPath` (folder `SmartM365-OrchestratorServerAcceptance`),
-  a witness folder under `WorkspaceRootPath` (removed at the end) and a work folder under `%TEMP%`
-  (removed at the end).
+  a witness folder under `WorkspaceRootPath` (removed at the end), a work folder under `%TEMP%`
+  (removed at the end) and, after a full run, the result for the orchestrator console (below).
+
+### Result for the orchestrator console
+
+A full run (`-Capability All`) writes its statuses, never row values, in the folder of the server under
+the orchestrator shared data folder (`<OrchestratorDataFolderPath>\<SERVER>`, next to
+`Orchestrator-Capabilities.json` and `Orchestrator-Heartbeat.json`), replaced at each run:
+
+- `Orchestrator-Acceptance.json` when the run account is the account of the orchestrator scheduled task:
+  this is the result that validates the server;
+- `Orchestrator-Acceptance.OtherAccount.json` for any other account (an administrator run never replaces
+  the validating result).
+
+Schema 1: `SchemaVersion`, `ServerName`, `GeneratedAtUtc`, `AcceptanceVersion`, `RunAccount`,
+`ServiceAccount`, `Results` (`Name`, `Status` PASS/WARN/FAIL/SKIPPED, `Detail`). Capability entries use the
+orchestrator capability names (SharedRuntime, AD, Graph, EXO, ExchangeOnPrem, SharePointOnPrem,
+TeamsPowerShell, Adaxes, Python); a non-blocking Teams failure is published as FAIL. The console displays it
+next to the probe capabilities; it has no effect on the election.
 
 ### Checks
 

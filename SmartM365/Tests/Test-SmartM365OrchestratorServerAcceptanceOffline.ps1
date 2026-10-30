@@ -4,7 +4,7 @@
     module assessment, child output parsing, Graph roles and job eligibility. Nothing is read
     from a directory, a tenant or a share.
 .VERSION
-    1.0.7
+    1.1.0
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -154,6 +154,34 @@ Assert-True ((Get-SmartM365AcceptanceVerdict -Results @($sample | Where-Object S
 Assert-True ((Get-SmartM365AcceptanceVerdict -Results @($sample | Where-Object Status -in @('PASS', 'SKIPPED'))).Status -eq 'PASS') 'PASS and SKIPPED give READY.'
 $assessment = Get-SmartM365AcceptanceChildAssessment -Child $child -SampleSize 100
 Assert-True (@($assessment.Extractions).Count -eq 2 -and @($assessment.Extractions | Where-Object Rows -eq '-').Count -eq 2) 'Failed scopes are listed in the extraction table.'
+
+# Result published for the orchestrator console: one file per server, service account apart from other accounts.
+$published = @(
+    [pscustomobject]@{ Capability = 'Graph'; Status = 'PASS'; PublishedStatus = 'PASS'; Detail = 'Graph app-only sign-in' }
+    [pscustomobject]@{ Capability = 'TeamsPowerShell'; Status = 'WARN'; PublishedStatus = 'FAIL'; Detail = 'non-blocking failure | blocked' }
+    [pscustomobject]@{ Capability = 'RunAccount'; Status = 'PASS'; Detail = 'x' * 1500 }
+)
+$document = New-SmartM365AcceptanceResultDocument -Results $published -ServerName 'srv-test' -AcceptanceVersion '1.1.0' -RunAccount 'EXAMPLE\svc-test' -ServiceAccount $true -Python ([pscustomobject]@{ Status = 'PASS'; Detail = 'Python 3.12.1' }) -GeneratedAtUtc ([datetime]::new(2026, 10, 30, 10, 0, 0, [DateTimeKind]::Utc))
+Assert-True ($document.SchemaVersion -eq 1 -and $document.ServerName -eq 'SRV-TEST' -and $document.GeneratedAtUtc -eq '2026-10-30T10:00:00.0000000Z' -and $document.ServiceAccount) 'Result document header.'
+$names = @($document.Results | ForEach-Object { $_.Name })
+Assert-True (($names -join ',') -eq 'Graph,TeamsPowerShell,RunAccount,Python') "Result entries ($($names -join ','))."
+Assert-True (@($document.Results | Where-Object { $_.Name -eq 'TeamsPowerShell' })[0].Status -eq 'FAIL') 'A non-blocking failure is published as FAIL for the console.'
+Assert-True (@($document.Results | Where-Object { $_.Name -eq 'RunAccount' })[0].Detail.Length -eq 1000) 'Long details are cut.'
+$resultFolder = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365AcceptanceResult-' + [guid]::NewGuid().ToString('N'))
+try {
+    $path = Write-SmartM365AcceptanceResultFile -ServerFolder (Join-Path $resultFolder 'SRV-TEST') -Document $document
+    Assert-True ([IO.Path]::GetFileName($path) -eq 'Orchestrator-Acceptance.json') 'Service account result file name.'
+    $bytes = [IO.File]::ReadAllBytes($path)
+    Assert-True (-not ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) 'Result file has no BOM.'
+    $read = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    Assert-True ($read.ServerName -eq 'SRV-TEST' -and @($read.Results).Count -eq 4 -and [bool]$read.ServiceAccount) 'Result file reads back.'
+    $document.ServiceAccount = $false
+    $other = Write-SmartM365AcceptanceResultFile -ServerFolder (Join-Path $resultFolder 'SRV-TEST') -Document $document
+    Assert-True ([IO.Path]::GetFileName($other) -eq 'Orchestrator-Acceptance.OtherAccount.json' -and [bool](Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).ServiceAccount) 'Another account never overwrites the service account result.'
+    $null = Write-SmartM365AcceptanceResultFile -ServerFolder (Join-Path $resultFolder 'SRV-TEST') -Document $document
+    Assert-True (@(Get-ChildItem -LiteralPath (Join-Path $resultFolder 'SRV-TEST') -File).Count -eq 2) 'Rewriting leaves no temporary file.'
+}
+finally { Remove-Item -LiteralPath $resultFolder -Recurse -Force -ErrorAction SilentlyContinue }
 
 # Modules.
 $installed = @(

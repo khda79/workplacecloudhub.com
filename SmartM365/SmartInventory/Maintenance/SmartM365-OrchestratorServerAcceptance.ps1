@@ -6,7 +6,9 @@ Acceptance test of a server before it becomes an active SmartM365 orchestrator s
 For each capability the orchestrator can assign, the script runs a real but limited read
 (about 100 objects), checks the returned data, then discards it: rows stay in memory and no CSV
 is written. Nothing is written to the tenant: no SharePoint log upload, no Teams notification,
-and no mail unless -SendTestMail is given.
+and no mail unless -SendTestMail is given. A full run publishes its statuses (no row value) for the
+orchestrator console in <orchestrator shared data folder>\<SERVER>: Orchestrator-Acceptance.json under
+the account of the orchestrator scheduled task, Orchestrator-Acceptance.OtherAccount.json otherwise.
 
 Capabilities, in order:
 - RunAccount: running identity; -ExpectedAccount fails the run under another account.
@@ -39,7 +41,7 @@ the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.11
+1.1.0
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -540,6 +542,53 @@ function Format-SmartM365AcceptanceTable {
     return $lines.ToArray()
 }
 
+function New-SmartM365AcceptanceResultDocument {
+    <# Result published for the orchestrator console (display only): one entry per tested capability.
+       Status is what the election would see: a non-blocking failure is published as FAIL. #>
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Results,
+        [Parameter(Mandatory = $true)][string]$ServerName,
+        [string]$AcceptanceVersion = '',
+        [string]$RunAccount = '',
+        [bool]$ServiceAccount = $false,
+        [AllowNull()]$Python = $null,
+        [datetime]$GeneratedAtUtc = [datetime]::UtcNow
+    )
+    $entries = [System.Collections.Generic.List[object]]::new()
+    foreach ($result in $Results) {
+        $status = if ($result.PSObject.Properties['PublishedStatus'] -and [string]$result.PublishedStatus) { [string]$result.PublishedStatus } else { [string]$result.Status }
+        $detail = [string]$result.Detail
+        if ($detail.Length -gt 1000) { $detail = $detail.Substring(0, 997) + '...' }
+        $entries.Add([ordered]@{ Name = [string]$result.Capability; Status = $status; Detail = $detail })
+    }
+    if ($null -ne $Python) { $entries.Add([ordered]@{ Name = 'Python'; Status = [string]$Python.Status; Detail = [string]$Python.Detail }) }
+    return [ordered]@{
+        SchemaVersion = 1
+        ServerName = $ServerName.ToUpperInvariant()
+        GeneratedAtUtc = $GeneratedAtUtc.ToUniversalTime().ToString('o')
+        AcceptanceVersion = $AcceptanceVersion
+        RunAccount = $RunAccount
+        ServiceAccount = $ServiceAccount
+        Results = $entries.ToArray()
+    }
+}
+
+function Write-SmartM365AcceptanceResultFile {
+    <# Writes <server folder>\Orchestrator-Acceptance.json (orchestrator service account) or
+       Orchestrator-Acceptance.OtherAccount.json (any other account) atomically, UTF-8 without BOM. #>
+    param([Parameter(Mandatory = $true)][string]$ServerFolder, [Parameter(Mandatory = $true)]$Document)
+    $name = if ([bool]$Document.ServiceAccount) { 'Orchestrator-Acceptance.json' } else { 'Orchestrator-Acceptance.OtherAccount.json' }
+    $null = [IO.Directory]::CreateDirectory($ServerFolder)
+    $target = Join-Path $ServerFolder $name
+    $temporary = Join-Path $ServerFolder ('{0}.{1}.tmp' -f $name, [guid]::NewGuid().ToString('N'))
+    try {
+        [IO.File]::WriteAllText($temporary, (ConvertTo-Json -InputObject $Document -Depth 6), [Text.UTF8Encoding]::new($false))
+        [IO.File]::Move($temporary, $target, $true)
+    }
+    finally { if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) } }
+    return $target
+}
+
 function Get-SmartM365AcceptanceVerdict {
     param([AllowEmptyCollection()][object[]]$Results = @())
     $failed = @($Results | Where-Object Status -eq 'FAIL' | ForEach-Object Capability)
@@ -964,6 +1013,15 @@ Write-AcceptanceResult $result
 
 #region Capability checks
 
+function Get-AcceptanceTaskAccountMatch {
+    <# Accounts of the orchestrator scheduled task of this computer and whether the running account is one of them. #>
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $taskAccounts = @(Get-ScheduledTask -TaskName 'SmartM365 Inventory Orchestrator*' -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.Principal.UserId } | Where-Object { $_ } | Sort-Object -Unique)
+    $userName = $identity.Name.Split('\')[-1]
+    $match = @($taskAccounts | Where-Object { [string]::Equals($_, $identity.Name, [StringComparison]::OrdinalIgnoreCase) -or [string]::Equals($_.Split('\')[-1], $userName, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+    return [pscustomobject]@{ TaskAccounts = $taskAccounts; IsTaskAccount = $match }
+}
+
 function Test-AcceptanceRunAccount {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $elevated = ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -975,13 +1033,10 @@ function Test-AcceptanceRunAccount {
         return [pscustomobject]@{ Status = 'PASS'; Detail = "$detail (expected account)" }
     }
     # Without -ExpectedAccount, the account of the orchestrator scheduled task of this computer is the reference.
-    $taskAccounts = @(Get-ScheduledTask -TaskName 'SmartM365 Inventory Orchestrator*' -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.Principal.UserId } | Where-Object { $_ } | Sort-Object -Unique)
-    if ($taskAccounts.Count -eq 0) { return [pscustomobject]@{ Status = 'PASS'; Detail = "$detail; no orchestrator scheduled task on this computer to compare with" } }
-    $userName = $identity.Name.Split('\')[-1]
-    if (@($taskAccounts | Where-Object { [string]::Equals($_, $identity.Name, [StringComparison]::OrdinalIgnoreCase) -or [string]::Equals($_.Split('\')[-1], $userName, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
-        return [pscustomobject]@{ Status = 'PASS'; Detail = "$detail (account of the orchestrator scheduled task)" }
-    }
-    return [pscustomobject]@{ Status = 'PASS'; Detail = ('{0}; the orchestrator scheduled task runs as {1}: run the test again as that account' -f $detail, ($taskAccounts -join ', ')) }
+    $task = Get-AcceptanceTaskAccountMatch
+    if ($task.TaskAccounts.Count -eq 0) { return [pscustomobject]@{ Status = 'PASS'; Detail = "$detail; no orchestrator scheduled task on this computer to compare with" } }
+    if ($task.IsTaskAccount) { return [pscustomobject]@{ Status = 'PASS'; Detail = "$detail (account of the orchestrator scheduled task)" } }
+    return [pscustomobject]@{ Status = 'PASS'; Detail = ('{0}; the orchestrator scheduled task runs as {1}: run the test again as that account' -f $detail, ($task.TaskAccounts -join ', ')) }
 }
 
 function Test-AcceptanceModules {
@@ -1012,6 +1067,7 @@ function Test-AcceptanceModules {
     $python = Test-AcceptancePython
     # Orchestrator capability Python (orchestrator 1.5.80): ready when Python 3.10+ answers.
     $script:PythonReady = ($python.Status -eq 'PASS')
+    $script:PythonResult = $python
     $statuses.Add($python.Status); $parts.Add($python.Detail)
     Add-AcceptanceMeasurement -Section 'Modules' -Item 'Python 3.10+ (WorkplaceEvidence-Prepare)' -Value $python.Detail -Status $python.Status
     $windows = Invoke-AcceptanceChildProcess -EnginePath $script:WindowsPowerShellPath -ScriptText $script:WindowsPowerShellInventoryScript -Environment $script:ChildEnvironment -TimeoutSeconds 120
@@ -1260,6 +1316,20 @@ function Get-AcceptanceCollectorConfig {
     return (Read-SmartM365JsonDocument -Path $path).Document
 }
 
+function Get-AcceptanceOrchestratorServerFolder {
+    <# <orchestrator shared data folder>\<SERVER>: where the orchestrator publishes its heartbeat and capabilities. #>
+    $orchestratorFolder = Join-Path $script:SmartInventoryRoot 'Orchestrator'
+    $config = Get-AcceptanceCollectorConfig -RelativePath 'Orchestrator\SmartM365-Inventory-Orchestrator.local.json'
+    if ($null -eq $config) { $config = Get-Content -LiteralPath (Join-Path $orchestratorFolder 'SmartM365-Inventory-Orchestrator.local.json.template') -Raw | ConvertFrom-Json }
+    $dataFolder = '{{DataAllRootPath}}\Orchestrator'
+    if ($config.PSObject.Properties['OrchestratorDataFolderPath'] -and -not [string]::IsNullOrWhiteSpace([string]$config.OrchestratorDataFolderPath) -and [string]$config.OrchestratorDataFolderPath -notin @('__USE_GLOBAL__', 'USE_GLOBAL')) { $dataFolder = [string]$config.OrchestratorDataFolderPath }
+    $tokens = @{} + $script:Tokens
+    foreach ($item in $script:DataRoots.GetEnumerator()) { $tokens[$item.Key] = $item.Value }
+    $dataFolder = Resolve-SmartM365AcceptanceTokens -Value $dataFolder -Tokens $tokens
+    if ((Split-Path -Path $dataFolder -Leaf) -eq $env:COMPUTERNAME) { $dataFolder = Split-Path -Path $dataFolder -Parent }
+    return (Join-Path $dataFolder $env:COMPUTERNAME.ToUpperInvariant())
+}
+
 function Get-AcceptanceAdaxesConfig { Get-AcceptanceCollectorConfig -RelativePath 'ActiveDirectoryInventory\SmartM365-ActiveDirectory-Adaxes-Inventory.local.json' }
 
 function Test-AcceptancePython {
@@ -1428,6 +1498,7 @@ $global:EnableSharePointUpload = $false
 
 $results = [System.Collections.Generic.List[object]]::new()
 $script:PythonReady = $false
+$script:PythonResult = $null
 $extractionRows = [System.Collections.Generic.List[object]]::new()
 $script:Measurements = [System.Collections.Generic.List[object]]::new()
 $startedAt = Get-Date
@@ -1443,6 +1514,7 @@ try {
     if ($script:MailMode -notin @('Graph', 'SMTP', 'Both')) { $script:MailMode = 'Graph' }
 
     $tokens = @{ SmartM365RootPath = $script:SmartM365Root }
+    $script:Tokens = $tokens
     $configProperties = if ($script:TenantConfig -is [System.Collections.IDictionary]) { $script:TenantConfig.Keys } else { $script:TenantConfig.PSObject.Properties.Name }
     foreach ($name in $configProperties) { $value = Get-AcceptanceConfigValue -Name $name -Default $null; if ($value -is [string]) { $tokens[$name] = $value } }
     $script:WorkspaceRootPath = Resolve-SmartM365AcceptanceTokens -Value ([string](Get-AcceptanceConfigValue -Name 'WorkspaceRootPath')) -Tokens $tokens
@@ -1487,6 +1559,7 @@ try {
         $nonBlocking = $status -eq 'FAIL' -and $name -in $script:NonBlockingCapabilities -and $script:Requested -notcontains $name
         if ($nonBlocking) { $status = 'WARN'; $detail = 'non-blocking failure (the orchestrator keeps the jobs needing it on other servers) | ' + $detail }
         $result = New-AcceptanceResult -Name $name -Status $status -Detail $detail -DurationSeconds $seconds -Ready $isReady
+        $result | Add-Member -NotePropertyName PublishedStatus -NotePropertyValue ([string]$outcome.Status)
         $results.Add($result)
         if ($outcome.PSObject.Properties['Extractions']) {
             foreach ($row in @($outcome.Extractions)) {
@@ -1565,6 +1638,17 @@ try {
     }
     $overall = Get-SmartM365AcceptanceWorstStatus -Status @($results | Where-Object Status -ne 'SKIPPED' | ForEach-Object Status)
     if ($overall -eq 'FAIL') { $exitCode = 1 }
+
+    # Published for the orchestrator console only after a full run: a partial run would hide capabilities.
+    if ($Capability -contains 'All') {
+        try {
+            $document = New-SmartM365AcceptanceResultDocument -Results @($results) -ServerName $env:COMPUTERNAME -AcceptanceVersion ([string]$global:SmartM365ScriptVersion) -RunAccount ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -ServiceAccount ([bool](Get-AcceptanceTaskAccountMatch).IsTaskAccount) -Python $script:PythonResult
+            $published = Write-SmartM365AcceptanceResultFile -ServerFolder (Get-AcceptanceOrchestratorServerFolder) -Document $document
+            Write-AcceptanceLog ('Acceptance result published for the orchestrator console: {0}{1}' -f $published, $(if ($document.ServiceAccount) { '' } else { ' (not the orchestrator service account: shown apart, it does not validate the server)' }))
+        }
+        catch { Write-AcceptanceLog ('Acceptance result not published: {0}' -f $_.Exception.Message) 'WARNING' }
+    }
+    else { Write-AcceptanceLog 'Acceptance result not published: only a full run (-Capability All) is published for the orchestrator console.' }
     Write-AcceptanceLog ('Acceptance result: {0} ({1} PASS, {2} WARN, {3} FAIL, {4} SKIPPED).' -f $overall,
         @($results | Where-Object Status -eq 'PASS').Count, @($results | Where-Object Status -eq 'WARN').Count,
         @($results | Where-Object Status -eq 'FAIL').Count, @($results | Where-Object Status -eq 'SKIPPED').Count) $(if ($overall -eq 'FAIL') { 'ERROR' } elseif ($overall -eq 'WARN') { 'WARNING' } else { 'SUCCESS' })
