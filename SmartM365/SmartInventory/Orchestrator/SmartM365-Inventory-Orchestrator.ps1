@@ -108,7 +108,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.78
+1.5.79
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -158,7 +158,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.78"
+$ScriptVersion = "1.5.79"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2999,11 +2999,44 @@ function Get-OrchestratorPeerRecycleGrace {
     return [math]::Max([int]$script:Settings.PeerHeartbeatStaleMinutes, [int]$script:Settings.PeerRecycleGraceMinutes)
 }
 
+function Find-OrchestratorClusterOccurrenceActivity {
+    # First server (other than -ExcludeServer) that runs the occurrence, or lists it in its PendingJobs.
+    param(
+        [AllowNull()][object[]]$Activity,
+        [Parameter(Mandatory = $true)][string]$JobName,
+        [Parameter(Mandatory = $true)][datetime]$ExpectedOccurrence,
+        [string]$ExcludeServer = ''
+    )
+    $pendingFound = $null
+    foreach ($serverActivity in @($Activity)) {
+        if ($null -eq $serverActivity -or [string]$serverActivity.Server -ieq $ExcludeServer) { continue }
+        foreach ($entry in @($serverActivity.RunningJobs)) {
+            if ($null -eq $entry -or [string]$entry.Name -ine $JobName) { continue }
+            $occurrence = ConvertFrom-StateTime -Text ([string]$entry.ScheduledOccurrence)
+            if ($null -ne $occurrence -and $occurrence -ge $ExpectedOccurrence.AddSeconds(-1)) {
+                return [pscustomobject]@{ Server = [string]$serverActivity.Server; Kind = 'Running'; Entry = $entry }
+            }
+        }
+        if ($null -ne $pendingFound) { continue }
+        foreach ($entry in @($serverActivity.PendingJobs)) {
+            if ($null -eq $entry -or [string]$entry.Name -ine $JobName) { continue }
+            $occurrence = ConvertFrom-StateTime -Text ([string]$entry.ScheduledOccurrence)
+            if ($null -ne $occurrence -and ($occurrence - $ExpectedOccurrence).TotalSeconds -ge -60) {
+                $pendingFound = [pscustomobject]@{ Server = [string]$serverActivity.Server; Kind = 'Pending'; Entry = $entry }
+                break
+            }
+        }
+    }
+    return $pendingFound
+}
+
 function Get-OrchestratorPeerHealthSnapshot {
     param([Parameter(Mandatory = $true)][datetime]$Now)
 
     $issues = [System.Collections.Generic.List[object]]::new()
     $peerDetails = [System.Collections.Generic.List[object]]::new()
+    $clusterActivity = [System.Collections.Generic.List[object]]::new()
+    $jobAuditPeers = [System.Collections.Generic.List[object]]::new()
     $sharedRoot = [string]$script:Settings.SharedDataFolderPath
     try {
         if (-not (Test-Path -LiteralPath $sharedRoot -PathType Container)) {
@@ -3035,7 +3068,7 @@ function Get-OrchestratorPeerHealthSnapshot {
         $heartbeat = $null
         $heartbeatTime = [datetimeoffset]::MinValue
         try {
-            $heartbeat = (Read-SmartM365JsonDocument $heartbeatPath).Document
+            $heartbeat = Read-OrchestratorSharedJsonDocument -Path $heartbeatPath
             if (-not $heartbeat.PSObject.Properties['Timestamp']) { throw 'Heartbeat Timestamp is missing.' }
             $timestampValue = $heartbeat.Timestamp
             if ($timestampValue -is [datetimeoffset]) {
@@ -3062,6 +3095,13 @@ function Get-OrchestratorPeerHealthSnapshot {
             continue
         }
         $peerLifecycle = if ($heartbeat.PSObject.Properties['Lifecycle']) { [string]$heartbeat.Lifecycle } else { 'Running' }
+        $runningJobs = if ($heartbeat.PSObject.Properties['RunningJobs']) { @($heartbeat.RunningJobs) } else { @() }
+        $pendingJobs = if ($heartbeat.PSObject.Properties['PendingJobs']) { @($heartbeat.PendingJobs) } else { @() }
+        # What every server still in the election runs or waits for, even with a slightly stale heartbeat:
+        # after an election change the old owner may still hold the occurrence (1.5.79).
+        if ($ageMinutes -le [double](Get-OrchestratorElectionExclusionMinutes)) {
+            $clusterActivity.Add([pscustomobject]@{ Server = $peerServer; RunningJobs = $runningJobs; PendingJobs = $pendingJobs })
+        }
         if (($peerLifecycle -eq 'Recycling' -and $ageMinutes -le [double](Get-OrchestratorPeerRecycleGrace)) -or
             ($peerLifecycle -eq 'Starting' -and $ageMinutes -le [double]$script:Settings.PeerHeartbeatStaleMinutes)) {
             # Planned restart in progress: no stale alert, and no job audit until the peer runs its tick loop again.
@@ -3082,8 +3122,6 @@ function Get-OrchestratorPeerHealthSnapshot {
             continue
         }
 
-        $runningJobs = if ($heartbeat.PSObject.Properties['RunningJobs']) { @($heartbeat.RunningJobs) } else { @() }
-        $pendingJobs = if ($heartbeat.PSObject.Properties['PendingJobs']) { @($heartbeat.PendingJobs) } else { @() }
         $peerDetails.Add([pscustomobject]@{
             Server = $peerServer
             LastSeen = $lastSeenText
@@ -3100,6 +3138,25 @@ function Get-OrchestratorPeerHealthSnapshot {
         }
 
         if (-not $script:Settings.PeerJobMonitoringEnabled) { continue }
+        $jobAuditPeers.Add([pscustomobject]@{ Server = $peerServer; Folder = $peerFolder; Heartbeat = $heartbeat; LastSeen = $lastSeenText; RunningJobs = $runningJobs; PendingJobs = $pendingJobs })
+    }
+
+    # Jobs are audited once every heartbeat is read, so an occurrence held by another server is known.
+    $localRunning = @(
+        foreach ($localName in @($script:RunningJobs.Keys)) {
+            $localOccurrence = $script:RunningJobs[$localName].Occurrence
+            [pscustomobject]@{ Name = [string]$localName; ScheduledOccurrence = $(if ($localOccurrence -is [datetime]) { ConvertTo-StateTime -Value $localOccurrence } else { '' }) }
+        }
+    )
+    $clusterActivity.Add([pscustomobject]@{ Server = $localServer; RunningJobs = $localRunning; PendingJobs = @() })
+
+    foreach ($auditPeer in $jobAuditPeers) {
+        $peerServer = [string]$auditPeer.Server
+        $peerFolder = [string]$auditPeer.Folder
+        $heartbeat = $auditPeer.Heartbeat
+        $lastSeenText = [string]$auditPeer.LastSeen
+        $runningJobs = @($auditPeer.RunningJobs)
+        $pendingJobs = @($auditPeer.PendingJobs)
         if ($heartbeat.PSObject.Properties['MaintenanceHealthy'] -and -not $heartbeat.MaintenanceHealthy) {
             $issues.Add((New-OrchestratorPeerIssue -Key ("MaintenanceUnavailable|{0}" -f $peerServer) -Type 'MaintenanceControlUnavailable' -Server $peerServer -Status 'Launches paused' -LastSeen $lastSeenText -Details ([string]$heartbeat.MaintenanceError)))
         }
@@ -3111,7 +3168,7 @@ function Get-OrchestratorPeerHealthSnapshot {
 
         $peerState = $null
         try {
-            $peerState = ConvertTo-SmartM365OrchestratorHashtable (Read-SmartM365JsonDocument $peerStatePath).Document
+            $peerState = ConvertTo-SmartM365OrchestratorHashtable (Read-OrchestratorSharedJsonDocument -Path $peerStatePath)
             if ($peerState -isnot [hashtable] -or -not $peerState.ContainsKey('Jobs')) { throw 'State file has an unexpected shape.' }
         }
         catch {
@@ -3198,6 +3255,27 @@ function Get-OrchestratorPeerHealthSnapshot {
                 }
             }
 
+            # The occurrence may be held by another server still in the election (old owner after a
+            # plan change, or a server whose plan is not refreshed yet): not a missed start (1.5.79).
+            $elsewhere = Find-OrchestratorClusterOccurrenceActivity -Activity $clusterActivity -JobName ([string]$job.Name) -ExpectedOccurrence $expectedOccurrence -ExcludeServer $peerServer
+            if ($null -ne $elsewhere) {
+                if ($elsewhere.Kind -eq 'Running') { continue }
+                $otherReason = [string]$elsewhere.Entry.Reason
+                if ($otherReason -in @('PendingRetry', 'BlockedByServerConcurrency', 'WaitingConcurrency', 'LowDiskSpace')) { continue }
+                if ($otherReason -eq 'BlockedByConcurrencyKey') {
+                    $otherSafeUntilUtc = if ($elsewhere.Entry.PSObject.Properties['BlockSafeUntilUtc']) { ConvertTo-OrchestratorUtcTime -Value $elsewhere.Entry.BlockSafeUntilUtc } else { $null }
+                    if ($null -ne $otherSafeUntilUtc -and ([datetimeoffset]$Now).ToUniversalTime() -le $otherSafeUntilUtc) { continue }
+                }
+                if ($otherReason -eq 'WaitingDependencies') {
+                    $dependencyTimeout = [int]$job.DependencyWaitTimeoutMinutes
+                    if ($dependencyTimeout -le 0) { $dependencyTimeout = [int]$script:Settings.DependencyWaitTimeoutMinutes }
+                    $otherFirstSeen = ConvertFrom-StateTime -Text ([string]$elsewhere.Entry.FirstSeen)
+                    if ($dependencyTimeout -le 0 -or ($null -ne $otherFirstSeen -and ($Now - $otherFirstSeen).TotalMinutes -lt $dependencyTimeout)) { continue }
+                    $issues.Add((New-OrchestratorPeerIssue -Key ("JobDependencyTimeout|{0}|{1}" -f ([string]$elsewhere.Server).ToUpperInvariant(), $job.Name) -Type 'JobWaitingTooLong' -Server ([string]$elsewhere.Server) -Job ([string]$job.Name) -Status $otherReason -LastSeen $lastSeenText -AgeMinutes ([math]::Round(($Now - $expectedOccurrence).TotalMinutes, 1)) -Details ([string]$elsewhere.Entry.Details)))
+                    continue
+                }
+            }
+
             # The peer heartbeat and its PendingJobs snapshot are written separately. Read the
             # shared lease directly so a short publication race cannot become JobNotStarted.
             $leaseBlock = Get-OrchestratorConcurrencyBlockState -Job $job -Now $Now
@@ -3212,9 +3290,12 @@ function Get-OrchestratorPeerHealthSnapshot {
         }
     }
 
+    # A wait seen on another server can be reported while auditing several peers: one issue per key.
+    $uniqueIssues = [ordered]@{}
+    foreach ($issue in $issues) { if (-not $uniqueIssues.Contains([string]$issue.Key)) { $uniqueIssues[[string]$issue.Key] = $issue } }
     return [pscustomobject]@{
         CheckedAt = $Now
-        Issues = @($issues.ToArray())
+        Issues = @($uniqueIssues.Values)
         Peers = @($peerDetails.ToArray())
     }
 }
@@ -5998,8 +6079,46 @@ function New-OrchestratorPrerequisiteSummaryHtml {
     return "<table style='border-collapse:collapse;width:100%;'><thead><tr><th $cell>Server</th><th $cell>Application certificate</th><th $cell>Open launch prerequisite blocks</th></tr></thead><tbody>$($rows -join '')</tbody></table>"
 }
 
+function Test-OrchestratorTransientReadError {
+    # Sharing violation, lock or torn read on the share: worth a short retry. Any other error is final.
+    param([AllowNull()][Exception]$Exception)
+    for ($current = $Exception; $null -ne $current; $current = $current.InnerException) {
+        if ($current -is [System.IO.IOException]) { return $true }
+        if ($current.Data.Contains('SmartM365JsonInvalidSyntax')) { return $true }
+    }
+    return $false
+}
+
+function Read-OrchestratorSharedJsonDocument {
+    # Shared heartbeat, capability and plan files are replaced while peers read them (1.5.79):
+    # a sharing violation is retried briefly instead of being taken as a missing server or plan.
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int[]]$RetryDelaysMilliseconds = @(250, 500, 1000)
+    )
+    $attempt = 0
+    while ($true) {
+        try { return (Read-SmartM365JsonDocument $Path).Document }
+        catch {
+            if ($attempt -ge $RetryDelaysMilliseconds.Count -or -not (Test-OrchestratorTransientReadError -Exception $_.Exception)) { throw }
+            Start-Sleep -Milliseconds $RetryDelaysMilliseconds[$attempt]
+            $attempt++
+        }
+    }
+}
+
+function Get-OrchestratorElectionExclusionMinutes {
+    # A server leaves the election plan only once its heartbeat is clearly older than the peer
+    # stale threshold (1.5.79): a slow share or a long tick must not reshuffle every job.
+    $stale = [int]$script:Settings.PeerHeartbeatStaleMinutes
+    $configured = if ($script:Settings.PSObject.Properties['ElectionServerExclusionMinutes']) { [int]$script:Settings.ElectionServerExclusionMinutes } else { 15 }
+    return [math]::Max($stale, $configured)
+}
+
 function Get-LiveOrchestratorServerCapabilities {
     $nowUtc = [datetime]::UtcNow
+    if (-not (Test-Path -LiteralPath 'variable:script:LiveCapabilityCache') -or $script:LiveCapabilityCache -isnot [hashtable]) { $script:LiveCapabilityCache = @{} }
+    $exclusionMinutes = Get-OrchestratorElectionExclusionMinutes
     $servers = @($script:Settings.ExpectedOrchestratorServers + $env:COMPUTERNAME | Sort-Object -Unique)
     $results = @()
     foreach ($server in $servers) {
@@ -6008,21 +6127,38 @@ function Get-LiveOrchestratorServerCapabilities {
             $results += $script:ServerCapabilities
             continue
         }
-        $serverFolder = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath $serverName
-        $capabilityPath = Join-Path -Path $serverFolder -ChildPath 'Orchestrator-Capabilities.json'; $selectedPeerPath = Get-SmartM365JsonReadPath $capabilityPath -Optional; if ($selectedPeerPath) { $capabilityPath = $selectedPeerPath }
-        $heartbeatPath = Join-Path -Path $serverFolder -ChildPath 'Orchestrator-Heartbeat.json'; $selectedPeerPath = Get-SmartM365JsonReadPath $heartbeatPath -Optional; if ($selectedPeerPath) { $heartbeatPath = $selectedPeerPath }
         try {
-            if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf) -or -not (Test-Path -LiteralPath $heartbeatPath -PathType Leaf)) { continue }
-            $capabilities = (Read-SmartM365JsonDocument $capabilityPath).Document
-            $heartbeat = (Read-SmartM365JsonDocument $heartbeatPath).Document
+            $serverFolder = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath $serverName
+            $capabilityPath = Join-Path -Path $serverFolder -ChildPath 'Orchestrator-Capabilities.json'; $selectedPeerPath = Get-SmartM365JsonReadPath $capabilityPath -Optional; if ($selectedPeerPath) { $capabilityPath = $selectedPeerPath }
+            $heartbeatPath = Join-Path -Path $serverFolder -ChildPath 'Orchestrator-Heartbeat.json'; $selectedPeerPath = Get-SmartM365JsonReadPath $heartbeatPath -Optional; if ($selectedPeerPath) { $heartbeatPath = $selectedPeerPath }
+            if (-not (Test-Path -LiteralPath $capabilityPath -PathType Leaf) -or -not (Test-Path -LiteralPath $heartbeatPath -PathType Leaf)) {
+                $script:LiveCapabilityCache.Remove($serverName)
+                continue
+            }
+            $capabilities = Read-OrchestratorSharedJsonDocument -Path $capabilityPath
+            $heartbeat = Read-OrchestratorSharedJsonDocument -Path $heartbeatPath
             $capabilityAge = ($nowUtc - ([datetime]$capabilities.GeneratedAtUtc).ToUniversalTime()).TotalMinutes
-            $heartbeatAge = ($nowUtc - ([datetime]$heartbeat.Timestamp).ToUniversalTime()).TotalMinutes
+            $heartbeatUtc = ([datetime]$heartbeat.Timestamp).ToUniversalTime()
+            $heartbeatAge = ($nowUtc - $heartbeatUtc).TotalMinutes
             # A planned recycle keeps its assignments so a short restart does not reshuffle the plan.
-            $maxHeartbeatAge = if ($heartbeat.PSObject.Properties['Lifecycle'] -and [string]$heartbeat.Lifecycle -eq 'Recycling') { Get-OrchestratorPeerRecycleGrace } else { $script:Settings.PeerHeartbeatStaleMinutes }
-            if ($capabilityAge -gt $script:Settings.CapabilityMaxAgeMinutes -or $heartbeatAge -gt $maxHeartbeatAge) { continue }
+            $maxHeartbeatAge = if ($heartbeat.PSObject.Properties['Lifecycle'] -and [string]$heartbeat.Lifecycle -eq 'Recycling') { [math]::Max((Get-OrchestratorPeerRecycleGrace), $exclusionMinutes) } else { $exclusionMinutes }
+            if ($capabilityAge -gt $script:Settings.CapabilityMaxAgeMinutes -or $heartbeatAge -gt $maxHeartbeatAge) {
+                $script:LiveCapabilityCache.Remove($serverName)
+                continue
+            }
+            $script:LiveCapabilityCache[$serverName] = [pscustomobject]@{ Capabilities = $capabilities; HeartbeatUtc = $heartbeatUtc }
             $results += $capabilities
         }
         catch {
+            # A read that still fails after the retries keeps the last known state of the server
+            # until its last good heartbeat is older than the exclusion window.
+            $cached = $script:LiveCapabilityCache[$serverName]
+            if ($null -ne $cached -and ($nowUtc - $cached.HeartbeatUtc).TotalMinutes -le $exclusionMinutes) {
+                Write-OrchestratorRuntimeUpdateWarning -Key ("capability-read-cached:{0}:{1}" -f $serverName, $_.Exception.Message) -Message ("Server {0} kept in the election from its last known state; its capability or heartbeat file cannot be read: {1}" -f $serverName, $_.Exception.Message) -Level INFO
+                $results += $cached.Capabilities
+                continue
+            }
+            $script:LiveCapabilityCache.Remove($serverName)
             Write-OrchestratorRuntimeUpdateWarning -Key ("capability-read:{0}:{1}" -f $serverName, $_.Exception.Message) -Message ("Server {0} excluded from election because its capability or heartbeat file is invalid: {1}" -f $serverName, $_.Exception.Message)
         }
     }
@@ -6030,10 +6166,23 @@ function Get-LiveOrchestratorServerCapabilities {
 }
 
 function Read-SharedElectionPlan {
+    # Returns the shared plan, or the last plan read successfully when the file cannot be read
+    # (1.5.79). $script:SharedElectionPlanReadFailed tells the planner not to rewrite it then.
+    $script:SharedElectionPlanReadFailed = $false
     if (-not $script:Settings.DistributedSchedulingEnabled) { return $null }
-    if (-not (Get-SmartM365JsonReadPath $script:Settings.ElectionPlanPath -Optional)) { return $null }
-    try { return (Read-SmartM365JsonDocument $script:Settings.ElectionPlanPath).Document }
+    try {
+        if (-not (Get-SmartM365JsonReadPath $script:Settings.ElectionPlanPath -Optional)) { return $null }
+        $plan = Read-OrchestratorSharedJsonDocument -Path $script:Settings.ElectionPlanPath
+        $script:LastReadElectionPlan = $plan
+        return $plan
+    }
     catch {
+        $script:SharedElectionPlanReadFailed = $true
+        $lastKnown = if (Test-Path -LiteralPath 'variable:script:LastReadElectionPlan') { $script:LastReadElectionPlan } else { $null }
+        if ($null -ne $lastKnown) {
+            Write-OrchestratorRuntimeUpdateWarning -Key ("plan-read-cached:{0}" -f $_.Exception.Message) -Message ("Shared election plan cannot be read; the last known plan {0} is kept: {1}" -f [string]$lastKnown.PlanId, $_.Exception.Message) -Level INFO
+            return $lastKnown
+        }
         Write-OrchestratorRuntimeUpdateWarning -Key ("plan-read:{0}" -f $_.Exception.Message) -Message ("Shared election plan cannot be read; elected jobs fail closed: {0}" -f $_.Exception.Message)
         return $null
     }
@@ -6130,6 +6279,12 @@ function Update-OrchestratorElectionPlan {
     try {
         $lockStream = [System.IO.File]::Open($script:Settings.ElectionPlanLockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
         $sharedPlan = Read-SharedElectionPlan
+        if ((Test-Path -LiteralPath 'variable:script:SharedElectionPlanReadFailed') -and $script:SharedElectionPlanReadFailed) {
+            # Never replan from a plan we could not read: a newer one may exist. Keep the last
+            # known plan (or fail closed without one) and try again at the next tick.
+            $script:ElectionPlan = $sharedPlan
+            return
+        }
         $rebalanceRequest = Read-SharedElectionRebalanceRequest
         $pendingRebalanceRequest = Test-OrchestratorElectionRebalanceRequestPending -Request $rebalanceRequest -Plan $sharedPlan
         $capabilities = @(Get-LiveOrchestratorServerCapabilities)
@@ -7970,6 +8125,7 @@ function Set-OrchestratorCentralClusterSettings {
         PeerMonitoringConfirmationChecks = 'Int32'
         PeerJobStartGraceMinutes = 'Int32'
         PeerRecycleGraceMinutes = 'Int32'
+        ElectionServerExclusionMinutes = 'Int32'
         PeerAlertReminderMinutes = 'Int32'
         PeerAlertMailRetryMinutes = 'Int32'
         PeerRecoveryEmailEnabled = 'Boolean'
@@ -8081,6 +8237,10 @@ $script:PrerequisiteCache = @{}
 $script:PrerequisiteBlockedOccurrences = @{}
 $script:LastCertificateReadiness = $null
 $script:ElectionPlan = $null
+# Last plan read from the share and last good capability/heartbeat per server (election hysteresis, 1.5.79).
+$script:LastReadElectionPlan = $null
+$script:SharedElectionPlanReadFailed = $false
+$script:LiveCapabilityCache = @{}
 $script:ElectedOwnershipSince = @{}
 $script:LastCapabilityRefreshUtc = [datetime]::MinValue
 $script:LastElectionPlanRefreshUtc = [datetime]::MinValue
@@ -8349,6 +8509,8 @@ try {
         PeerMonitoringConfirmationChecks = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerMonitoringConfirmationChecks' -DefaultValue 2))
         PeerJobStartGraceMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerJobStartGraceMinutes' -DefaultValue 15))
         PeerRecycleGraceMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerRecycleGraceMinutes' -DefaultValue 15))
+        # Optional (not in the template): heartbeat age after which a server leaves the election plan.
+        ElectionServerExclusionMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'ElectionServerExclusionMinutes' -DefaultValue 15))
         PeerAlertReminderMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerAlertReminderMinutes' -DefaultValue 240))
         PeerAlertMailRetryMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'PeerAlertMailRetryMinutes' -DefaultValue 15))
         PeerRecoveryEmailEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'PeerRecoveryEmailEnabled' -DefaultValue $true
