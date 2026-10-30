@@ -4,7 +4,7 @@
     module assessment, child output parsing, Graph roles and job eligibility. Nothing is read
     from a directory, a tenant or a share.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -14,10 +14,10 @@ $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
 if (@($parseErrors).Count -gt 0) { throw 'The acceptance script has PowerShell parse errors.' }
-foreach ($definition in @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -like '*-SmartM365Acceptance*' }, $true))) {
+foreach ($definition in @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and ($node.Name -like '*-SmartM365Acceptance*' -or $node.Name -eq 'Invoke-AcceptanceChildProcess') }, $true))) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }
-foreach ($assignment in @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -in @('$script:GuidPattern', '$script:SmtpPattern', '$script:ResultMarker', '$script:ExpectedModules') }, $false))) {
+foreach ($assignment in @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -in @('$script:GuidPattern', '$script:SmtpPattern', '$script:ResultMarker', '$script:ExpectedModules', '$script:ChildPreamble') }, $false))) {
     . ([scriptblock]::Create($assignment.Extent.Text))
 }
 
@@ -94,6 +94,15 @@ Assert-True ((Get-SmartM365AcceptanceChildAssessment -Child $missing -SampleSize
 $broken = ConvertFrom-SmartM365AcceptanceChildOutput -StandardOutput '' -StandardError 'Import-Module : boom' -ExitCode 1
 Assert-True (-not [bool]$broken.Ready -and $broken.Detail -match 'boom') 'No marker reports stderr.'
 Assert-True ((Get-SmartM365AcceptanceChildAssessment -Child $broken -SampleSize 100).Status -eq 'FAIL') 'Child without result fails.'
+
+# Steps announced by a child, and the step reported after a real time-out.
+$stdout = "SMARTM365_ACCEPTANCE_STAGE:importing the Adaxes module (09:40:01)`r`nnoise`r`nSMARTM365_ACCEPTANCE_STAGE:Get-AdmUser through service adx1 on a.example.test (09:40:03)`r`n"
+Assert-True ((Get-SmartM365AcceptanceLastStage -StandardOutput $stdout) -eq 'Get-AdmUser through service adx1 on a.example.test (09:40:03)') 'Last announced step is found.'
+Assert-True ((Get-SmartM365AcceptanceLastStage -StandardOutput 'no stage') -eq '') 'No step gives an empty text.'
+$hung = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText "Write-AcceptanceStage 'waiting on a hung call'; Start-Sleep -Seconds 60" -TimeoutSeconds 8
+Assert-True (-not [bool]$hung.Ready -and [bool]$hung.TimedOut -and $hung.Detail -match 'during: waiting on a hung call') "Time-out names the hung step ($($hung.Detail))."
+$quick = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText "Invoke-AcceptanceDataset 'X' '' { [pscustomobject]@{ A = 1 } } | Out-Null; Write-AcceptanceResult @{ Ready = `$true; Detail = 'ok'; Datasets = @(Invoke-AcceptanceDataset 'TeamsUsers' '' { [pscustomobject]@{ Identity = 'i'; UserPrincipalName = 'u@example.test' } }) }" -TimeoutSeconds 60
+Assert-True ([bool]$quick.Ready -and @($quick.Datasets[0].Rows).Count -eq 1) 'Step lines do not leak into the rows of a data set.'
 
 # Modules.
 $installed = @(

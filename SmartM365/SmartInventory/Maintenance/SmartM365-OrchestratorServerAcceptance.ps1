@@ -27,15 +27,17 @@ Capabilities, in order:
 - SharePointOnPrem: farm and up to SmallSampleSize site collections (Windows PowerShell 5.1).
 - TeamsPowerShell: tenant (same TenantId) and up to SmallSampleSize users.
 - Adaxes: services, domains and LDAP filter of the Adaxes collector configuration; up to
-  SampleSize users per domain.
+  SampleSize users per domain, one child process per domain (-AdaxesDomainTimeoutSeconds); the
+  domains after a timed-out one are not read.
 - Mail: mail configuration (Graph Mail.Send or SMTP banner); a test mail only with -SendTestMail.
 
 A capability whose component is not installed is SKIPPED, or FAIL when it was requested with
--Capability. Extractions run in a child PowerShell process with a time limit. The jobs of the
+-Capability. Extractions run in a child PowerShell process with a time limit; after a time-out
+the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.0
+1.0.1
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -56,6 +58,7 @@ param(
     [ValidateRange(1, 1000)][int]$SampleSize = 100,
     [ValidateRange(1, 100)][int]$SmallSampleSize = 10,
     [ValidateRange(30, 3600)][int]$CapabilityTimeoutSeconds = 600,
+    [ValidateRange(30, 3600)][int]$AdaxesDomainTimeoutSeconds = 120,
     [ValidateRange(5, 500)][int]$SmbIterations = 20,
     [ValidateRange(1, 10000)][double]$SmbWarningMilliseconds = 15,
     [ValidateRange(1, 10000)][double]$SmbFailureMilliseconds = 50,
@@ -277,6 +280,14 @@ function ConvertFrom-SmartM365AcceptanceChildOutput {
     return $result
 }
 
+function Get-SmartM365AcceptanceLastStage {
+    <# Children announce each step on stdout; after a time-out the last one tells where it hung. #>
+    param([AllowEmptyString()][string]$StandardOutput)
+    $stages = [regex]::Matches([string]$StandardOutput, '(?m)^SMARTM365_ACCEPTANCE_STAGE:(?<Stage>.+?)\r?$')
+    if ($stages.Count -eq 0) { return '' }
+    return $stages[$stages.Count - 1].Groups['Stage'].Value.Trim()
+}
+
 function Get-SmartM365AcceptanceChildAssessment {
     <# Turns a child result into a capability status. Datasets with the same Name and several scopes
        (domains) are partial when only some scopes fail: WARN; all scopes failing is FAIL. #>
@@ -460,7 +471,11 @@ function Invoke-AcceptanceChildProcess {
         $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit([math]::Max(1, $TimeoutSeconds) * 1000)) {
             try { $process.Kill($true) } catch { Write-Verbose ("Child process kill failed: {0}" -f $_.Exception.Message) }
-            return [pscustomobject]@{ Ready = $false; ComponentMissing = $false; Detail = "No result within $TimeoutSeconds second(s); the child process was stopped."; Roles = @(); Datasets = @(); Info = [pscustomobject]@{} }
+            # The output written before the stop names the step that hung.
+            $partial = if ($stdoutTask.Wait(5000)) { $stdoutTask.Result } else { '' }
+            $stage = Get-SmartM365AcceptanceLastStage -StandardOutput $partial
+            $detail = "No result within $TimeoutSeconds second(s); the child process was stopped" + $(if ($stage) { " during: $stage." } else { ' before its first step.' })
+            return [pscustomobject]@{ Ready = $false; ComponentMissing = $false; TimedOut = $true; Detail = $detail; Roles = @(); Datasets = @(); Info = [pscustomobject]@{} }
         }
         return ConvertFrom-SmartM365AcceptanceChildOutput -StandardOutput $stdoutTask.GetAwaiter().GetResult() -StandardError $stderrTask.GetAwaiter().GetResult() -ExitCode $process.ExitCode
     }
@@ -513,7 +528,14 @@ function Invoke-AcceptanceWebProbe {
     $target = [uri]$Uri
     $proxy = [System.Net.WebRequest]::DefaultWebProxy
     $proxyText = 'direct'
-    if ($null -ne $proxy -and -not $proxy.IsBypassed($target)) { $proxyText = 'proxy ' + $proxy.GetProxy($target).Authority }
+    # PowerShell 7 returns no proxy URI (null) for a direct connection.
+    try {
+        if ($null -ne $proxy -and -not $proxy.IsBypassed($target)) {
+            $proxyUri = $proxy.GetProxy($target)
+            if ($null -ne $proxyUri -and $proxyUri.AbsoluteUri -ne $target.AbsoluteUri) { $proxyText = 'proxy ' + $proxyUri.Authority }
+        }
+    }
+    catch { $proxyText = 'proxy unknown' }
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         $response = Invoke-WebRequest -Uri $Uri -Method Get -TimeoutSec $TimeoutSeconds -SkipHttpErrorCheck -UseBasicParsing -ErrorAction Stop
@@ -546,7 +568,13 @@ function ConvertTo-AcceptanceText($Value) {
 function Write-AcceptanceResult($Result) {
     'SMARTM365_ACCEPTANCE_JSON:' + (ConvertTo-Json -InputObject $Result -Compress -Depth 8)
 }
+function Write-AcceptanceStage([string]$Text) {
+    # Straight to stdout, outside the pipeline: the parent reads the last step after a time-out.
+    [Console]::Out.WriteLine('SMARTM365_ACCEPTANCE_STAGE:' + $Text + ' (' + (Get-Date -Format 'HH:mm:ss') + ')')
+    [Console]::Out.Flush()
+}
 function Invoke-AcceptanceDataset([string]$Name, [string]$Scope, [scriptblock]$Read) {
+    Write-AcceptanceStage ('reading {0} {1}' -f $Name, $Scope)
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     try { $rows = @(& $Read); $errorText = '' }
     catch { $rows = @(); $errorText = $_.Exception.Message }
@@ -569,6 +597,7 @@ $script:AdChildScript = @'
 try {
     if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'ActiveDirectory PowerShell module is not installed on this server.' }; return }
     Import-Module ActiveDirectory -ErrorAction Stop -WarningAction SilentlyContinue
+    Write-AcceptanceStage 'Get-ADForest'
     $forest = Get-ADForest -ErrorAction Stop
     $domains = @($forest.Domains | ForEach-Object { [string]$_ } | Sort-Object)
     $datasets = @(foreach ($domain in $domains) {
@@ -598,6 +627,7 @@ try {
     if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'Microsoft.Graph.Authentication PowerShell module is not installed on this server.' }; return }
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { }
+    Write-AcceptanceStage 'Graph sign-in'
     Invoke-AcceptanceRetry { Connect-MgGraph -TenantId $env:SMART_TENANT_ID -ClientId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -NoWelcome -ErrorAction Stop }
     $context = Get-MgContext
     $roles = @($context.Scopes | Sort-Object -Unique)
@@ -633,6 +663,7 @@ try {
     if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'ExchangeOnlineManagement PowerShell module is not installed on this server.' }; return }
     Import-Module ExchangeOnlineManagement -ErrorAction Stop
     try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch { }
+    Write-AcceptanceStage 'Exchange Online connection'
     Invoke-AcceptanceRetry { Connect-ExchangeOnline -AppId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -Organization $env:SMART_ORGANIZATION -ShowBanner:$false -ErrorAction Stop }
     $datasets = @(
         Invoke-AcceptanceDataset 'EXOMailboxes' '' {
@@ -689,6 +720,7 @@ $script:TeamsChildScript = @'
 try {
     if (-not (Get-Module -ListAvailable -Name MicrosoftTeams)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'MicrosoftTeams PowerShell module is not installed on this server.' }; return }
     Import-Module MicrosoftTeams -MinimumVersion 4.7.1 -ErrorAction Stop
+    Write-AcceptanceStage 'Teams connection'
     Invoke-AcceptanceRetry { Connect-MicrosoftTeams -TenantId $env:SMART_TENANT_ID -ApplicationId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -ErrorAction Stop | Out-Null }
     $tenant = Get-CsTenant -ErrorAction Stop
     if ([string]$tenant.TenantId -ne [string]$env:SMART_TENANT_ID) { throw ('Get-CsTenant returned TenantId {0}, not the configured tenant.' -f $tenant.TenantId) }
@@ -714,6 +746,7 @@ try {
     if ($services.Count -eq 0) { throw 'AdaxesService is not configured in the Adaxes collector configuration.' }
     $ldapFilter = [string]$env:SMART_ADAXES_LDAP_FILTER
     if ([string]::IsNullOrWhiteSpace($ldapFilter)) { throw 'LdapFilter is not configured in the Adaxes collector configuration.' }
+    Write-AcceptanceStage 'importing the Adaxes module'
     Import-Module Adaxes -ErrorAction Stop
     $domains = @($env:SMART_ADAXES_DOMAINS | ConvertFrom-Json | Where-Object { $_ } | Sort-Object -Unique)
     $domainSource = 'configuration'
@@ -727,6 +760,7 @@ try {
                 $errors = @()
                 foreach ($service in $services) {
                     try {
+                        Write-AcceptanceStage ('Get-AdmUser through service {0} on {1} (ResultSetSize supported: {2})' -f $service, $domain, $hasResultSetSize)
                         $parameters = @{ AdaxesService = $service; Server = $domain; LDAPFilter = $ldapFilter; Properties = @('userPrincipalName', 'sAMAccountName', 'objectGUID'); ErrorAction = 'Stop' }
                         if ($hasResultSetSize) { $parameters['ResultSetSize'] = $sampleSize }
                         return @(Get-AdmUser @parameters | Select-Object -First $sampleSize | ForEach-Object {
@@ -738,7 +772,7 @@ try {
                 throw ($errors -join ' | ')
             }
         })
-    Write-AcceptanceResult @{ Ready = $true; Detail = ('Adaxes module {0}; service(s) {1}; {2} domain(s) from the {3}' -f (Get-Module -Name Adaxes).Version, ($services -join ', '), $domains.Count, $domainSource); Datasets = $datasets }
+    Write-AcceptanceResult @{ Ready = $true; Detail = ('Adaxes module {0}; service(s) {1}' -f (Get-Module -Name Adaxes).Version, ($services -join ', ')); Datasets = $datasets; Info = @{ DomainSource = $domainSource } }
 }
 catch { Write-AcceptanceResult @{ Ready = $false; Detail = $_.Exception.Message } }
 '@
@@ -846,7 +880,11 @@ function Test-AcceptanceCertificate {
     if (-not $script:Thumbprint) { return [pscustomobject]@{ Status = 'FAIL'; Detail = 'Thumbprint is not configured for this tenant.' } }
     $readiness = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $script:Thumbprint -Cache @{} -CacheMinutes 0 -ExpiryWarningDays 30
     $status = if (-not $readiness.Ready) { 'FAIL' } elseif ($readiness.ExpiresSoon) { 'WARN' } else { 'PASS' }
-    return [pscustomobject]@{ Status = $status; Detail = ('{0} (tested as {1})' -f $readiness.Detail, [Environment]::UserName) }
+    $hint = ''
+    if ([string]$readiness.Reason -in @('NotFound', 'PrivateKeyInaccessible') -and -not $ExpectedAccount) {
+        $hint = '; expected when the certificate is in the personal store of the service account: run the test as that account'
+    }
+    return [pscustomobject]@{ Status = $status; Detail = ('{0} (tested as {1}){2}' -f $readiness.Detail, [Environment]::UserName, $hint) }
 }
 
 function Test-AcceptanceSharedRuntime {
@@ -990,10 +1028,48 @@ function Test-AcceptanceAdaxes {
         if ($config.PSObject.Properties['LdapFilter']) { $filter = [string]$config.LdapFilter }
     }
     $environment['SMART_ADAXES_SERVICES'] = ConvertTo-Json -InputObject @($services) -Compress
-    $environment['SMART_ADAXES_DOMAINS'] = ConvertTo-Json -InputObject @($domains) -Compress
     $environment['SMART_ADAXES_LDAP_FILTER'] = $filter
-    $child = Invoke-AcceptanceChildProcess -EnginePath $script:PowerShellPath -ScriptText $script:AdaxesChildScript -Environment $environment -TimeoutSeconds $CapabilityTimeoutSeconds
-    $assessment = Get-SmartM365AcceptanceChildAssessment -Child $child -SampleSize $SampleSize -Requested:($script:Requested -contains 'Adaxes')
+    $domainSource = 'configuration'
+    if ($domains.Count -eq 0) {
+        $domainSource = 'current forest'
+        try { $domains = @([System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest().Domains | ForEach-Object { [string]$_.Name } | Sort-Object -Unique) }
+        catch { return [pscustomobject]@{ Status = 'FAIL'; Detail = 'Domains is empty in the Adaxes configuration and the current forest cannot be read: ' + $_.Exception.Message } }
+    }
+
+    # One child per domain with its own time limit: a hung domain or service does not hide the others.
+    $datasets = [System.Collections.Generic.List[object]]::new()
+    $childDetail = ''
+    $timedOutDomain = ''
+    $child = $null
+    foreach ($domain in $domains) {
+        if ($timedOutDomain) {
+            $datasets.Add([pscustomobject]@{ Name = 'AdaxesUsers'; Scope = $domain; Error = "not read: $timedOutDomain timed out first"; DurationSeconds = 0; Rows = @() })
+            continue
+        }
+        $environment['SMART_ADAXES_DOMAINS'] = ConvertTo-Json -InputObject @($domain) -Compress
+        $child = Invoke-AcceptanceChildProcess -EnginePath $script:PowerShellPath -ScriptText $script:AdaxesChildScript -Environment $environment -TimeoutSeconds ([math]::Min($AdaxesDomainTimeoutSeconds, $CapabilityTimeoutSeconds))
+        if ([bool]$child.ComponentMissing) { break }
+        if (-not [bool]$child.Ready) {
+            # A configuration or module error is the same for every domain: report it once.
+            if (-not ($child.PSObject.Properties['TimedOut'] -and [bool]$child.TimedOut)) {
+                if ($datasets.Count -eq 0) { break }
+                $datasets.Add([pscustomobject]@{ Name = 'AdaxesUsers'; Scope = $domain; Error = [string]$child.Detail; DurationSeconds = 0; Rows = @() })
+                continue
+            }
+            $timedOutDomain = $domain
+            $datasets.Add([pscustomobject]@{ Name = 'AdaxesUsers'; Scope = $domain; Error = [string]$child.Detail; DurationSeconds = [math]::Min($AdaxesDomainTimeoutSeconds, $CapabilityTimeoutSeconds); Rows = @() })
+            continue
+        }
+        if (-not $childDetail) { $childDetail = [string]$child.Detail }
+        foreach ($dataset in @($child.Datasets)) { $datasets.Add($dataset) }
+    }
+    if ($null -ne $child -and ([bool]$child.ComponentMissing -or (-not [bool]$child.Ready -and $datasets.Count -eq 0))) {
+        $assessment = Get-SmartM365AcceptanceChildAssessment -Child $child -SampleSize $SampleSize -Requested:($script:Requested -contains 'Adaxes')
+    }
+    else {
+        $combined = [pscustomobject]@{ Ready = $true; ComponentMissing = $false; Detail = ('{0}; {1} domain(s) from the {2}' -f $childDetail, $domains.Count, $domainSource).TrimStart('; '); Roles = @(); Datasets = @($datasets); Info = [pscustomobject]@{} }
+        $assessment = Get-SmartM365AcceptanceChildAssessment -Child $combined -SampleSize $SampleSize -Requested:($script:Requested -contains 'Adaxes')
+    }
     if ($configError) { $assessment.Detail = 'Adaxes collector configuration unreadable: ' + $configError + ' | ' + $assessment.Detail }
     elseif ($null -eq $config -and $assessment.Status -ne 'SKIPPED') { $assessment.Detail = 'Adaxes collector configuration not found | ' + $assessment.Detail }
     return $assessment

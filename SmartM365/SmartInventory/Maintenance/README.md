@@ -2,7 +2,7 @@
 
 ## Orchestrator server acceptance
 
-`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.0, PowerShell 7.2+) qualifies a server before it
+`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.1, PowerShell 7.2+) qualifies a server before it
 is switched from Inactive to Active in the orchestrator GUI. The orchestrator capability probe only
 signs in or loads a module; this script makes a real, limited read for each capability, checks the
 rows, then drops them.
@@ -34,7 +34,7 @@ What it guarantees:
 | ExchangeOnPrem | Snap-in in Windows PowerShell 5.1, `Get-Mailbox -ResultSize 100` | Guid, ExchangeGuid, PrimarySmtpAddress, Database |
 | SharePointOnPrem | Snap-in, farm, web applications, `Get-SPSite -Limit 10` | Id, Url |
 | TeamsPowerShell | `Get-CsTenant` (same TenantId), `Get-CsOnlineUser -ResultSize 10` | Identity, UPN |
-| Adaxes | Services, domains and LDAP filter of the Adaxes collector configuration; 100 users per domain | ObjectGUID, SamAccountName, UPN |
+| Adaxes | Services, domains and LDAP filter of the Adaxes collector configuration; 100 users per domain, one child process per domain limited by `-AdaxesDomainTimeoutSeconds` (default 120; the next domains are not read after a time-out) | ObjectGUID, SamAccountName, UPN |
 | Mail | From and recipient; Graph: Mail.Send granted; SMTP: port 25 answers 220 | test mail only with `-SendTestMail` |
 
 Each data set must return 1 to N rows, with key columns filled, values in the expected format
@@ -42,7 +42,8 @@ Each data set must return 1 to N rows, with key columns filled, values in the ex
 succeed is WARN; every domain failing is FAIL.
 
 A capability whose component is not installed (module or snap-in) is SKIPPED, or FAIL when it was
-named with `-Capability`. The run ends with the catalog jobs this server could run (same rule as the
+named with `-Capability`. After a time-out, the detail names the last step the child process
+announced (for example the Adaxes service and domain being read). The run ends with the catalog jobs this server could run (same rule as the
 election) and a PASS/WARN/FAIL/SKIPPED table with durations. Exit code 1 when a capability is FAIL.
 
 ### Running it
@@ -66,6 +67,7 @@ Other entry points:
 
 Useful parameters: `-Capability AD, ExchangeOnPrem` (subset), `-SampleSize` (default 100),
 `-SmallSampleSize` (Teams and SharePoint, default 10), `-CapabilityTimeoutSeconds` (default 600),
+`-AdaxesDomainTimeoutSeconds` (default 120),
 `-SmbIterations`, `-SmbWarningMilliseconds`, `-SmbFailureMilliseconds`, `-SendTestMail`, `-TestMailTo`.
 
 Offline test: `SmartM365/Tests/Test-SmartM365OrchestratorServerAcceptanceOffline.ps1`.
