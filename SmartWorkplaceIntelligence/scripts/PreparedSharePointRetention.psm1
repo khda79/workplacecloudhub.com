@@ -2,7 +2,7 @@
 .SYNOPSIS
     Qualified, coupled server/SharePoint batch retention. Preview is the default.
 .VERSION
-    1.5.0
+    1.5.1
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -744,14 +744,27 @@ function Assert-RetentionGraphDeleteSupport {
         }
     }
 }
+function Get-RetentionGraphErrorDetail($Body) {
+    # Graph refusal bodies explain the cause (for example a retention hold); keep a short single-line copy for the journal.
+    try {
+        $graphError=Get-RetentionValue $Body 'error' $null
+        if($null -eq $graphError){return ''}
+        $code=[string](Get-RetentionValue $graphError 'code' '');$message=[string](Get-RetentionValue $graphError 'message' '')
+        $text=(@($code,$message) | Where-Object {$_}) -join ': '
+        $text=($text -replace '[\r\n\t]+',' ').Trim()
+        if($text.Length -gt 400){$text=$text.Substring(0,400)+'...'}
+        if($code -ceq 'accessDenied' -and $message -match '\bhold\b'){$text+=' (a Purview retention policy or hold on the site blocks non-empty folder deletion; exclude the site or release the hold)'}
+        $text
+    } catch {''}
+}
 function Invoke-RetentionGraphDelete([string]$Uri,[string]$ETag) {
     Assert-RetentionGraphDeleteSupport
     # Never Set-MgRequestContext here: SDK 2.30 then rebuilds its client from a session environment that an
     # earlier absolute-URI request left without an authority, and the certificate credential fails with Invalid URI.
     # The status comes from -StatusCodeVariable, never from a disposable HttpResponseMessage.
-    $deleteStatus=$null
+    $deleteStatus=$null;$body=$null
     try {
-        $null=Invoke-MgGraphRequest -Method DELETE -Uri $Uri -Headers @{'If-Match'=$ETag} -OutputType PSObject -SkipHttpErrorCheck -StatusCodeVariable 'deleteStatus' -ErrorAction Stop
+        $body=Invoke-MgGraphRequest -Method DELETE -Uri $Uri -Headers @{'If-Match'=$ETag} -OutputType PSObject -SkipHttpErrorCheck -StatusCodeVariable 'deleteStatus' -ErrorAction Stop
     } catch {
         $types=[Collections.Generic.List[string]]::new();$exception=$_.Exception
         for($depth=0;$depth -lt 8 -and $exception;$depth++){$types.Add($exception.GetType().FullName);$exception=$exception.InnerException}
@@ -765,7 +778,9 @@ function Invoke-RetentionGraphDelete([string]$Uri,[string]$ETag) {
     $outcome=switch($code){204 {'Recycled'};404 {'NotFound'};412 {'PreconditionFailed'};default {'HttpError'}}
     # A refusal (4xx, or 503 throttling) changed nothing; other 2xx (202 = asynchronous) and 5xx may have acted.
     $mayHaveActed=$outcome -ceq 'HttpError' -and -not (($code -ge 400 -and $code -le 499) -or $code -eq 503)
-    [pscustomobject]@{Outcome=$outcome;HttpStatus=$code;MayHaveReachedService=$mayHaveActed;Error=$(if($outcome -ceq 'HttpError'){"Graph DELETE returned HTTP $code; only 204 confirms removal."}else{$null})}
+    $detail=if($outcome -cne 'Recycled'){Get-RetentionGraphErrorDetail $body}else{''}
+    $message=if($outcome -ceq 'HttpError'){"Graph DELETE returned HTTP $code; only 204 confirms removal.$(if($detail){' Graph error: '+$detail})"}else{$null}
+    [pscustomobject]@{Outcome=$outcome;HttpStatus=$code;MayHaveReachedService=$mayHaveActed;Error=$message;GraphError=$detail}
 }
 function New-PreparedRetentionGraphTransport {
     [CmdletBinding()]

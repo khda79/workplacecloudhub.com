@@ -445,6 +445,16 @@ request sent. The DELETE uses `-OutputType PSObject -SkipHttpErrorCheck
 | Folder absent after an unconfirmed result | `Recycled`, `Outcome=AbsentAfterError`, with a warning |
 | HTTP 204 while the folder is still visible, other 2xx/5xx, timeout/connection failure, or unreadable state | `Uncertain`: operator reconciliation required |
 
+A refusal also keeps Graph's `error.code` and `error.message` (one line, at most 400
+characters) in the exception and the journal event `Error`. Incident 2026-10-29:
+manual Apply got HTTP 403 `accessDenied` "Request was cancelled by event received. If
+attempting to delete a non-empty folder, it's possible that it's on hold". A Purview
+retention policy covering the site blocks deletion of non-empty folders even with the
+`Sites.Selected` write grant (single files and empty folders can still be deleted). The
+journal then adds a hint; exclude the site from the policy or release the hold, keep
+`Mode=Preview` meanwhile, then requalify with a fresh Full plan. Until SharePoint
+retirement succeeds, the server copy is not retired either.
+
 Incident 2026-10-22: the first Auto run failed with `Invoke-MgGraphRequest: Invalid URI`
 during the DELETE, before any request reached SharePoint (folder intact, journal
 `Uncertain`). Cause, read in the Microsoft.Graph.Authentication 2.30.0 source and
@@ -498,7 +508,7 @@ plus the retention counts, per-run limit, journal root and every DELETE outcome.
 `Test-PreparedRetentionGraphTransport.ps1` (PowerShell 7, no parameter) calls the
 installed `Invoke-MgGraphRequest` with the module's exact DELETE shape against a
 localhost listener and a synthetic token: 204/404/412/429/500 classification,
-`If-Match`, an invalid URI reported as a pre-send failure, and a refused connection
+a 403 retention-hold body kept in the error text, `If-Match`, an invalid URI reported as a pre-send failure, and a refused connection
 kept uncertain. It prints `NOT RUN` (exit 3) without the SDK. Use
 `-GraphAuthenticationVersion 2.30.0` (or the server's version) to select an installed
 SDK; with 2.30.0 it also replays the incident: the former `Set-MgRequestContext`

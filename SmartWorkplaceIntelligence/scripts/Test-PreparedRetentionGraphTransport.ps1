@@ -10,7 +10,7 @@
     after an absolute-URI request the session is switched to an app-only certificate context with
     an absent thumbprint, so a client rebuild fails exactly as on the server, without any network.
 .VERSION
-    1.0.0
+    1.1.0
 #>
 [CmdletBinding()]
 param([string]$GraphAuthenticationVersion)
@@ -40,8 +40,14 @@ $null=$server.AddScript({param($Listener,$Responses,$Seen)
         $status=0;if(-not $Responses.TryDequeue([ref]$status)){$status=500}
         $Seen.Enqueue([pscustomobject]@{Method=$context.Request.HttpMethod;Path=$context.Request.RawUrl;IfMatch=$context.Request.Headers['If-Match']})
         $context.Response.StatusCode=$status
-        if($status -eq 200){
-            $bytes=[Text.Encoding]::UTF8.GetBytes('{"id":"item"}');$context.Response.ContentType='application/json'
+        $body=switch($status){
+            200 {'{"id":"item"}'}
+            # Body observed on 2026-10-29 when a Purview retention policy covered the site.
+            403 {'{"error":{"code":"accessDenied","message":"Request was cancelled by event received. If attempting to delete a non-empty folder, it''s possible that it''s on hold"}}'}
+            default {$null}
+        }
+        if($body){
+            $bytes=[Text.Encoding]::UTF8.GetBytes($body);$context.Response.ContentType='application/json'
             $context.Response.OutputStream.Write($bytes,0,$bytes.Length)
         }
         $context.Response.Close()
@@ -80,6 +86,17 @@ try {
         Check ($null -ne $request -and $request.Method -ceq 'DELETE' -and $request.Path -ceq '/v1.0/drives/b%21synthetic/items/01SYNTHETICITEM' -and $request.IfMatch -ceq $etag) "HTTP $($case.Status): the real cmdlet did not send the exact conditional DELETE"
         Check ($result.Outcome -ceq $case.Outcome -and $result.HttpStatus -eq $case.Status -and $result.MayHaveReachedService -eq $case.Reached) "HTTP $($case.Status): -StatusCodeVariable outcome was $($result.Outcome)/$($result.HttpStatus) instead of $($case.Outcome)/$($case.Status)"
     }
+    # A refusal keeps the Graph error code and message in the journaled error, with the retention-hold hint.
+    $responses.Enqueue(403)
+    $result=Invoke-Delete $uri $etag
+    $null=Get-NextRequest
+    Check ($result.Outcome -ceq 'HttpError' -and $result.HttpStatus -eq 403 -and -not $result.MayHaveReachedService) "HTTP 403: outcome was $($result.Outcome)/$($result.HttpStatus)"
+    Check ($result.Error -match 'HTTP 403' -and $result.Error -match 'Graph error: accessDenied: Request was cancelled' -and $result.Error -match 'Purview retention policy or hold') "HTTP 403: Graph error detail missing from '$($result.Error)'"
+    # Without a body the message stays the plain status text.
+    $responses.Enqueue(429)
+    $result=Invoke-Delete $uri $etag
+    $null=Get-NextRequest
+    Check ($result.Error -ceq 'Graph DELETE returned HTTP 429; only 204 confirms removal.' -and $result.GraphError -ceq '') "HTTP 429 without body: unexpected error text '$($result.Error)'"
     # Regression: a URI the SDK cannot use fails before sending, is reported explicitly and is never 'in flight'.
     # A relative string is unsafe here: the SDK resolves it against the host of the previous absolute request.
     $result=Invoke-Delete 'https://graph.microsoft.com:99999/v1.0/drives/b%21synthetic/items/01SYNTHETICITEM' $etag
