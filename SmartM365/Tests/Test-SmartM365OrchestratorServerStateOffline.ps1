@@ -4,7 +4,7 @@ Offline tests of the per-server Active/Inactive state (orchestrator 1.5.76): clu
 validation, explicit migration of an existing cluster, election, launch gate, retry adoption,
 reload with rebalance, heartbeat, Live view and GUI draft helpers.
 .VERSION
-1.1.0
+1.1.1
 .NOTES
 Runs the real module functions and the real orchestrator and GUI functions extracted from the
 scripts, with stubbed logs, in a temporary folder. Fictional server names only. No tenant
@@ -138,8 +138,10 @@ try {
     Check ((@(Get-OrchestratorInactiveServers) -join ',') -eq 'SRV-A') 'The resident lists the inactive servers for the election.'
     Check (-not (Test-JobAllowedOnNamedServer -Job $legacyJob -ServerName 'srv-a') -and (Test-JobAllowedOnNamedServer -Job $legacyJob -ServerName 'SRV-B')) 'Peer job monitoring expects no job from an inactive peer.'
     $script:Logs.Clear()
+    $script:InactiveSummaryLogged = $false
     Write-ServerAllowlistSummary
-    Check (@($script:Logs | Where-Object { $_ -match '^\[WARN\] Server inactive: no job will be launched on SRV-A' }).Count -eq 1) 'The resident logs clearly that it launches no job.'
+    Write-ServerAllowlistSummary
+    Check (@($script:Logs | Where-Object { $_ -match '^\[INFO\] Server inactive: no job will be launched on SRV-A' }).Count -eq 1 -and $script:Logs.Count -eq 1) 'The resident logs once, as INFO, that it launches no job.'
 
     $script:Logs.Clear()
     $script:LastCapabilityRefreshUtc = [datetime]::UtcNow

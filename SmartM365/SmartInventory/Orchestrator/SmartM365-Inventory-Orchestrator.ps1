@@ -108,7 +108,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.76
+1.5.77
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -158,7 +158,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.76"
+$ScriptVersion = "1.5.77"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -3418,6 +3418,20 @@ function Install-OrchestratorAuthenticodeTrustedCertificates {
         }
 
         foreach ($storeName in $targetStores) {
+            # Already trusted machine-wide (Install-WorkplaceCloudHub-CodeSigningCertificate.cmd): adding it to
+            # CurrentUser\Root needs an interactive confirmation that a scheduled task cannot give (1.5.77).
+            $machineStore = [System.Security.Cryptography.X509Certificates.X509Store]::new($storeName, [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
+            $machineTrusted = $false
+            try {
+                $machineStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+                $machineTrusted = @($machineStore.Certificates | Where-Object { ([string]$_.Thumbprint).Replace(' ', '').ToUpperInvariant() -eq $thumbprint }).Count -gt 0
+            }
+            catch { $machineTrusted = $false }
+            finally { $machineStore.Close() }
+            if ($machineTrusted) {
+                Write-OrchestratorLog -Message ("Authenticode trusted certificate already present: store=LocalMachine\{0}; thumbprint={1}; subject={2}" -f $storeName, $thumbprint, $cert.Subject)
+                continue
+            }
             $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($storeName, [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
             try {
                 $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
@@ -6101,9 +6115,14 @@ function Update-OrchestratorElectionPlan {
 }
 function Write-ServerAllowlistSummary {
     if (-not (Test-OrchestratorLocalServerActive)) {
-        Write-OrchestratorLog -Message ("Server inactive: no job will be launched on {0} (cluster ServerStates). Heartbeat, peer monitoring, maintenance, disk space guard, mails and mirror copy keep running; set the server Active in the Orchestrator GUI to give it jobs." -f $env:COMPUTERNAME) -Level WARN
+        # A chosen state, not a fault: INFO, once per instance and again only after the server was Active (1.5.77).
+        if (-not $script:InactiveSummaryLogged) {
+            Write-OrchestratorLog -Message ("Server inactive: no job will be launched on {0} (cluster ServerStates). Heartbeat, peer monitoring, maintenance, disk space guard, mails and mirror copy keep running; set the server Active in the Orchestrator GUI to give it jobs." -f $env:COMPUTERNAME)
+            $script:InactiveSummaryLogged = $true
+        }
         return
     }
+    $script:InactiveSummaryLogged = $false
     $blocked = @($script:Manifest.OrderedJobs | Where-Object { -not (Test-JobAllowedOnServer -Job $_) } | ForEach-Object { $_.Name })
     if ($blocked.Count -gt 0) {
         Write-OrchestratorLog -Message ("Jobs not owned by this server under the active assignment policy ({0}): {1}" -f $env:COMPUTERNAME, ($blocked -join ', '))
@@ -7953,6 +7972,7 @@ $script:StatePersistenceLastError = ''
 $script:LastStatePersistenceWarningUtc = [datetime]::MinValue
 $script:ServerCapabilities = $null
 $script:ServerStatesMigration = $null
+$script:InactiveSummaryLogged = $false
 $script:ServerCapabilitiesBase = $null
 $script:PrerequisiteCache = @{}
 $script:PrerequisiteBlockedOccurrences = @{}

@@ -35,7 +35,9 @@ Removes the certificate from the target stores instead of installing it.
 #requires -Version 5.1
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string]$CertificatePath = (Join-Path -Path $PSScriptRoot -ChildPath 'Certificates\workplacecloudhub.com-CodeSigning-D70ECB7B00377EBFB76B304C08DFC6620584E114.cer'),
+    # Empty = Certificates\<default .cer> next to this script (resolved below: Windows PowerShell 5.1
+    # leaves $PSScriptRoot empty in parameter defaults when started through the .cmd launcher).
+    [string]$CertificatePath = '',
 
     [string]$Thumbprint = 'D70ECB7B00377EBFB76B304C08DFC6620584E114',
 
@@ -91,6 +93,10 @@ function Open-CertificateStore {
     return $store
 }
 
+if ([string]::IsNullOrWhiteSpace($CertificatePath)) {
+    $scriptFolder = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } else { Split-Path -Path $MyInvocation.MyCommand.Path -Parent }
+    $CertificatePath = Join-Path -Path $scriptFolder -ChildPath 'Certificates\workplacecloudhub.com-CodeSigning-D70ECB7B00377EBFB76B304C08DFC6620584E114.cer'
+}
 $resolvedCertificatePath = [System.IO.Path]::GetFullPath($CertificatePath)
 if (-not (Test-Path -LiteralPath $resolvedCertificatePath -PathType Leaf)) {
     throw "Certificate file not found: $resolvedCertificatePath"
