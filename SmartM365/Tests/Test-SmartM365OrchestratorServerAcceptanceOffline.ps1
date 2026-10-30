@@ -4,7 +4,7 @@
     module assessment, child output parsing, Graph roles and job eligibility. Nothing is read
     from a directory, a tenant or a share.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -109,6 +109,12 @@ $installed = @(
     [pscustomobject]@{ Name = 'Microsoft.Graph.Authentication'; Version = '2.37.0' }
     [pscustomobject]@{ Name = 'Microsoft.Graph.Authentication'; Version = '2.25.0' }
     [pscustomobject]@{ Name = 'Microsoft.Graph.Users'; Version = '2.37.0' }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Groups'; Version = '2.37.0' }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Identity.DirectoryManagement'; Version = '2.37.0' }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Reports'; Version = '2.37.0' }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.DeviceManagement'; Version = '2.37.0' }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Beta.Groups'; Version = '2.37.0' }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Beta.DeviceManagement'; Version = '2.37.0' }
     [pscustomobject]@{ Name = 'ExchangeOnlineManagement'; Version = '3.9.0' }
     [pscustomobject]@{ Name = 'ImportExcel'; Version = '7.8.10' }
     [pscustomobject]@{ Name = 'MicrosoftTeams'; Version = '7.1.0' }
@@ -116,14 +122,19 @@ $installed = @(
     [pscustomobject]@{ Name = 'Adaxes'; Version = '2025.1' }
 )
 Assert-True ((Get-SmartM365AcceptanceModuleAssessment -Installed $installed -Expected $script:ExpectedModules).Status -eq 'PASS') 'Expected modules pass.'
-$oldExo = @($installed | Where-Object Name -ne 'ExchangeOnlineManagement') + [pscustomobject]@{ Name = 'ExchangeOnlineManagement'; Version = '3.4.0' }
-$assessment = Get-SmartM365AcceptanceModuleAssessment -Installed $oldExo -Expected $script:ExpectedModules
-Assert-True ($assessment.Status -eq 'FAIL' -and $assessment.Detail -match 'ExchangeOnlineManagement 3\.4\.0 below 3\.7\.2') 'Old required module fails.'
+$oldTeams = @($installed | Where-Object Name -ne 'MicrosoftTeams') + [pscustomobject]@{ Name = 'MicrosoftTeams'; Version = '4.5.0' }
+$assessment = Get-SmartM365AcceptanceModuleAssessment -Installed $oldTeams -Expected $script:ExpectedModules
+Assert-True ($assessment.Status -eq 'WARN' -and $assessment.Detail -match 'MicrosoftTeams 4\.5\.0 below 4\.7\.1') 'Optional module below its minimum warns.'
+$authenticationOnly = @($installed | Where-Object { $_.Name -notlike 'Microsoft.Graph.*' -or $_.Name -eq 'Microsoft.Graph.Authentication' })
+$assessment = Get-SmartM365AcceptanceModuleAssessment -Installed $authenticationOnly -Expected $script:ExpectedModules
+Assert-True ($assessment.Status -eq 'FAIL' -and $assessment.Detail -match 'Microsoft\.Graph\.Users missing') 'Graph submodules the jobs import are required.'
+$production = @($installed | ForEach-Object { if ($_.Name -like 'Microsoft.Graph*') { [pscustomobject]@{ Name = $_.Name; Version = '2.32.0' } } else { $_ } })
+Assert-True ((Get-SmartM365AcceptanceModuleAssessment -Installed $production -Expected $script:ExpectedModules).Status -eq 'PASS') 'Graph 2.32.0 used by the active servers passes.'
 $noAdaxes = @($installed | Where-Object Name -ne 'Adaxes')
 Assert-True ((Get-SmartM365AcceptanceModuleAssessment -Installed $noAdaxes -Expected $script:ExpectedModules).Status -eq 'WARN') 'Missing optional module warns.'
-$mixedGraph = @($installed) + [pscustomobject]@{ Name = 'Microsoft.Graph.Groups'; Version = '2.30.0' }
+$mixedGraph = @($installed) + [pscustomobject]@{ Name = 'Microsoft.Graph.Sites'; Version = '2.30.0' }
 $assessment = Get-SmartM365AcceptanceModuleAssessment -Installed $mixedGraph -Expected $script:ExpectedModules
-Assert-True ($assessment.Status -eq 'WARN' -and $assessment.Detail -match 'Microsoft\.Graph\.Groups 2\.30\.0') 'Graph submodule at another version warns.'
+Assert-True ($assessment.Status -eq 'WARN' -and $assessment.Detail -match 'Microsoft.Graph.Sites 2.30.0') 'Graph submodule at another version warns.'
 
 # Graph roles and job eligibility.
 $jobs = @(

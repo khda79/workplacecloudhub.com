@@ -2,7 +2,7 @@
 
 ## Orchestrator server acceptance
 
-`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.2, PowerShell 7.2+) qualifies a server before it
+`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.3, PowerShell 7.2+) qualifies a server before it
 is switched from Inactive to Active in the orchestrator GUI. The orchestrator capability probe only
 signs in or loads a module; this script makes a real, limited read for each capability, checks the
 rows, then drops them.
@@ -21,7 +21,7 @@ What it guarantees:
 | Capability | Real test | Data checks |
 |---|---|---|
 | RunAccount | Running identity; `-ExpectedAccount` fails another account | |
-| Modules | PowerShell 7 and 5.1; Microsoft.Graph.Authentication >= 2.37.0, ExchangeOnlineManagement >= 3.7.2, MicrosoftTeams >= 4.7.1, ImportExcel, ActiveDirectory, Adaxes; every Microsoft.Graph module at the Authentication version; Exchange and SharePoint snap-ins | |
+| Modules | PowerShell 7 and 5.1; the modules the jobs import: Microsoft.Graph Authentication, Users, Groups, Identity.DirectoryManagement, Reports, DeviceManagement, Beta.Groups, Beta.DeviceManagement, ExchangeOnlineManagement, ImportExcel (required), MicrosoftTeams >= 4.7.1, ActiveDirectory, Adaxes (optional); every Microsoft.Graph module at the Authentication version; Exchange and SharePoint snap-ins | missing required module = FAIL |
 | CodeSigning | Authenticode status of the script, Core, distributed module and orchestrator; execution policy | |
 | Network | HTTPS to login, Graph, Exchange Online and the SharePoint host; proxy used; latency | any HTTP answer = reachable |
 | Clock | Offset against the Date header of the Entra sign-in endpoint | WARN 60 s, FAIL 300 s |

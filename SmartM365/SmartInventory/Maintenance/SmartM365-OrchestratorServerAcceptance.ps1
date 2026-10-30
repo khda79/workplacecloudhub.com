@@ -10,8 +10,8 @@ and no mail unless -SendTestMail is given.
 
 Capabilities, in order:
 - RunAccount: running identity; -ExpectedAccount fails the run under another account.
-- Modules: PowerShell 7 and Windows PowerShell 5.1, module versions against the minimums used by
-  the collectors, same version for every installed Microsoft.Graph module, snap-ins.
+- Modules: PowerShell 7 and Windows PowerShell 5.1, the modules the jobs import (Graph submodules
+  included), same version for every installed Microsoft.Graph module, snap-ins.
 - CodeSigning: Authenticode status of this script, the Core module and the orchestrator files.
 - Network: HTTPS reachability of the Microsoft 365 endpoints, proxy in use, latency.
 - Clock: offset against the Date header of the Entra sign-in endpoint (certificate sign-in).
@@ -37,7 +37,7 @@ the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.2
+1.0.3
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -73,10 +73,18 @@ $ErrorActionPreference = 'Stop'
 $script:CapabilityOrder = @('RunAccount', 'Modules', 'CodeSigning', 'Network', 'Clock', 'Certificate', 'SharedRuntime', 'AD', 'Graph', 'GraphPermissions', 'EXO', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes', 'Mail')
 # Capability names the orchestrator election uses.
 $script:OrchestratorCapabilities = @('SharedRuntime', 'AD', 'Graph', 'EXO', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes')
-# Minimums taken from the collectors (Import-Module -MinimumVersion); an empty minimum checks presence only.
+# Modules the SmartInventory jobs import; a minimum only where a collector or the orchestrator probe sets one.
+# Every Microsoft.Graph module must also be at the Microsoft.Graph.Authentication version (checked below).
 $script:ExpectedModules = @(
-    [pscustomobject]@{ Name = 'Microsoft.Graph.Authentication'; Minimum = '2.37.0'; Required = $true }
-    [pscustomobject]@{ Name = 'ExchangeOnlineManagement'; Minimum = '3.7.2'; Required = $true }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Authentication'; Minimum = ''; Required = $true }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Users'; Minimum = ''; Required = $true }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Groups'; Minimum = ''; Required = $true }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Identity.DirectoryManagement'; Minimum = ''; Required = $true }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Reports'; Minimum = ''; Required = $true }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.DeviceManagement'; Minimum = ''; Required = $true }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Beta.Groups'; Minimum = ''; Required = $true }
+    [pscustomobject]@{ Name = 'Microsoft.Graph.Beta.DeviceManagement'; Minimum = ''; Required = $true }
+    [pscustomobject]@{ Name = 'ExchangeOnlineManagement'; Minimum = ''; Required = $true }
     [pscustomobject]@{ Name = 'ImportExcel'; Minimum = ''; Required = $true }
     [pscustomobject]@{ Name = 'MicrosoftTeams'; Minimum = '4.7.1'; Required = $false }
     [pscustomobject]@{ Name = 'ActiveDirectory'; Minimum = ''; Required = $false }
