@@ -67,6 +67,12 @@ From the root of the extracted standalone release:
 Start-SmartEndpointMigrationToolkit-GUI.cmd
 ```
 
+To refresh the shared users and licenses inventory independently, run
+`Export-UserLicensesCsv.cmd`. A delegated Graph sign-in identifies the tenant before an existing
+cache is reused. A verified same-tenant cache is reused for 24 hours; pass `-ForceRefresh` to
+refresh it immediately, or pass `-TenantId <tenant-guid>` to select the tenant explicitly. The
+cache contains personal data under `Inventory\UsersLicenses.csv` and is excluded from Git.
+
 Offline demonstration with fictional Contoso data (nothing is launched or queried):
 
 ```bat

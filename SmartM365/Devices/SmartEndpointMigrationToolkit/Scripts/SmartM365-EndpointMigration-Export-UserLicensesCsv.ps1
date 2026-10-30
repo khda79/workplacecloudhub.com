@@ -18,16 +18,26 @@ $root = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $root 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
 if (-not $OutputPath) { $OutputPath = Join-Path $root 'Inventory\UsersLicenses.csv' }
 
-# Cache provenance is carried in each row; an empty or partial export is never trusted.
-if (-not $ForceRefresh -and $TenantId -and (Test-Path -LiteralPath $OutputPath -PathType Leaf)) {
-    $age = ((Get-Date).ToUniversalTime() - (Get-Item -LiteralPath $OutputPath).LastWriteTimeUtc).TotalHours
-    if ($age -ge 0 -and $age -lt 24) {
-        $first = Import-Csv -LiteralPath $OutputPath | Select-Object -First 1
-        if ($first -and $first.InventoryTenantId -eq $TenantId -and $first.InventoryScope -eq 'AllUsers' -and $first.InventoryComplete -eq 'True') {
-            Write-Host "Using verified user inventory: $OutputPath"
-            return
-        }
-    }
+# Cache provenance is carried in each row; an empty, incomplete or stale export is never trusted.
+function Test-UserLicenseCache {
+    param([string]$Path,[string]$ExpectedTenant)
+    if (-not $ExpectedTenant -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    try {
+        $age = ([datetime]::UtcNow - (Get-Item -LiteralPath $Path -ErrorAction Stop).LastWriteTimeUtc).TotalHours
+        if ($age -lt 0 -or $age -ge 24) { return $false }
+        $first = Import-Csv -LiteralPath $Path -ErrorAction Stop | Select-Object -First 1
+        if (-not $first -or $first.InventoryTenantId -ine $ExpectedTenant -or $first.InventoryScope -ne 'AllUsers' -or $first.InventoryComplete -ne 'True') { return $false }
+        $stamp = ([string]$first.CollectedUtc).Trim()
+        if ($stamp -notmatch '(?i)(Z|[+-]\d{2}:\d{2})$') { return $false }
+        $collected = ConvertTo-SemtUtcDateTime -Value $stamp
+        if ($null -eq $collected) { return $false }
+        $recordAge = ([datetime]::UtcNow - $collected).TotalHours
+        return ($recordAge -ge 0 -and $recordAge -lt 24)
+    } catch { return $false }
+}
+if (-not $ForceRefresh -and (Test-UserLicenseCache -Path $OutputPath -ExpectedTenant $TenantId)) {
+    Write-Host "Using verified user inventory: $OutputPath"
+    return
 }
 $module = Find-SemtGraphAuthenticationModule
 if (-not $module) { throw 'Microsoft.Graph.Authentication is not installed.' }
@@ -43,6 +53,10 @@ try {
     if (-not $context -or $context.AuthType -ne 'Delegated' -or ($TenantId -and $context.TenantId -ne $TenantId)) { throw 'Delegated Graph context or tenant mismatch.' }
     $tenant = [string]$context.TenantId
     if (-not $tenant) { throw 'Graph tenant unavailable.' }
+    if (-not $ForceRefresh -and (Test-UserLicenseCache -Path $OutputPath -ExpectedTenant $tenant)) {
+        Write-Host "Using verified user inventory: $OutputPath"
+        return
+    }
     $next = 'https://graph.microsoft.com/v1.0/users?$select=id,userPrincipalName,onPremisesSamAccountName,onPremisesDomainName,onPremisesSecurityIdentifier,accountEnabled,usageLocation,assignedPlans,assignedLicenses&$top=999'
     $rows = New-Object 'System.Collections.Generic.List[object]'
     $seenPages = @{}
@@ -63,6 +77,7 @@ try {
                 InventoryTenantId=$tenant; InventoryScope='AllUsers'; InventoryComplete='True'; CollectedUtc=[datetime]::UtcNow.ToString('o')
             })
         }
+        Write-Host ("Users and licenses: {0} user(s) read across {1} page(s)." -f $rows.Count,$seenPages.Count)
         $next = [string]$page['@odata.nextLink']
     }
     if ($rows.Count -eq 0) { throw 'Empty user inventory; existing cache was retained.' }
@@ -83,8 +98,8 @@ try {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCf9ZByf9N8m1t3
-# q1XndZsfajfVGZjyeWcbgon041+N3qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBP4Kg9u7+4P+Fm
+# A/zdpC18vszudYIu/Uf61rcwURcojaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -114,14 +129,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCjq+mjVhdSCuNNxjts5scd
-# Y3UDCUKZawyTfl8N+hZi/zANBgkqhkiG9w0BAQEFAASCAYBkHDLUXl8yyDwEVGSm
-# 35+JrkdSvxfhv7PZRPKiBM3OL8FbPbTEitiq17bI1CEDVtKDcxDY5a7wkLiJ2zOj
-# f7xKDhuTBsecbLoNS1F3fEImpMzVFtUXYcGgkQCXI8Miyu6KVwS6qy/EHJFgGf4W
-# Mmmjv0dBwa3BW+BG1lzITMs0njJRMItsuH8fmKTOZmW7tDqzGxFharm9NYrToNZM
-# DoXDoy9rOLQ4pfubBh7rOl8HxaUGwe5Nk+boxJDpXPuqUtPaSddHhm0I20mzefNK
-# Asju2YmnR5RjeVbB8at6MU2Fn0JYUJbwrwq/oa+oWUCYxkBVoslCHBh2uJtvwWaV
-# GcVE6LWe45LOuLVr1RYMBzwlmh1ipfAxDvutqxE5rCoRBlW8qrUP3TfJhwHM/OmP
-# 4b8sKmp5zF5PSwvPfLG4vfQ/SRYaFOwj3G6ALwmaxlmK5Mm4WVsh2m07YN8LUmWx
-# eXQQuAV1OAIpDX6sPqj4XOpr3Oi4wMKkq/LImKgy5K4K3o8=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDt2FbYpif3TY9VUPtusgoe
+# m8Of0s/nxKgW88O9yzk70jANBgkqhkiG9w0BAQEFAASCAYBOnu/BZZtCB9Jl6OZP
+# DqaibB/Clzii4hjwmgXxwR+OBQmGglAxnmiPjQMA1nNPiQ6YGPEhF5s73wzvSWuT
+# AlG79wnr73+UejW4KgA760EyU9xJS43CT+0OSfKUNXj6Hen4P8An9ASRImqgPLQp
+# Ag4fRi85/C8Uk156l9+kGYXSkGsTPAOTwi5Pq11UykofsVeZiItnA3cU1nFB4mU+
+# WX/R7LIp4xddhpA5P//lR/JcxX2PfO+VYYnzvewhxbSUJXWRw0ylkV6L/SKACZ2Q
+# UAqRm/MwsXVv6mgX0ILQb2EECL0qgNyDV143KDfZdlHCWyOFDd9yvDpUNeq26xPy
+# Km2exc50pR6VSR7K5PmwVxsH673IRbZ7S2NAG7KypRhQGhqsvnogs4m7PJotPrCE
+# EBWis2XsFGaqzEkLhPOHX2fD5VfhUaF8gwmQlMMc4DnSIRIU9dHpYGEQZaQW9ThN
+# xmUs2I3iy+0xORibh3vG9KkuuyAkst9AvUIVYZ+8dqFySqQ=
 # SIG # End signature block

@@ -106,7 +106,7 @@ try {
     $shipped = @(Get-ChildItem -LiteralPath $pkg -Recurse -File | ForEach-Object { $_.FullName.Substring($pkg.Length).TrimStart('\') })
     foreach ($relative in $planted) { Write-TestResult -Condition ($shipped -notcontains $relative) -Message ("private/operational file excluded: {0}" -f $relative) }
     Test-Step 'no file of the package contains the planted private marker' { @(Get-ChildItem -LiteralPath $pkg -Recurse -File | Where-Object { $_.Name -ne 'Test-SemtPackaging.ps1' -and [IO.File]::ReadAllText($_.FullName).Contains('PRIVATE-CONTENT-MUST-NOT-SHIP') }).Count -eq 0 }
-    foreach ($required in @('README.md','Start-SmartEndpointMigrationToolkit-GUI.cmd','Start-SmartEndpointMigrationToolkit-Demo.cmd','SmartEndpointMigrationToolkit.version.json.txt','SmartEndpointMigrationToolkit.components.json.txt','Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1','Scripts\SmartM365-EndpointMigration-PsExecWorker.ps1','Scripts\SmartM365-EndpointMigration-GUI.ps1','Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1','Campaigns\Windows11Upgrade\Scripts\SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1','Docs\PROVENANCE.json.txt','Assets\WorkplaceCloudHub-lockup-WPF.png')) {
+    foreach ($required in @('README.md','Start-SmartEndpointMigrationToolkit-GUI.cmd','Start-SmartEndpointMigrationToolkit-Demo.cmd','Export-UserLicensesCsv.cmd','SmartEndpointMigrationToolkit.version.json.txt','SmartEndpointMigrationToolkit.components.json.txt','Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1','Scripts\SmartM365-EndpointMigration-PsExecWorker.ps1','Scripts\SmartM365-EndpointMigration-GUI.ps1','Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1','Campaigns\Windows11Upgrade\Scripts\SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1','Docs\PROVENANCE.json.txt','Assets\WorkplaceCloudHub-lockup-WPF.png')) {
         Write-TestResult -Condition ($shipped -contains $required) -Message ("shipped: {0}" -f $required)
     }
     $manifest = Get-Content -LiteralPath (Join-Path $pkg 'SmartEndpointMigrationToolkit.components.json.txt') -Raw | ConvertFrom-Json
@@ -177,8 +177,8 @@ exit 0
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCC7NGzjQeiySHL
-# 0f0au5t/XWXPBEegkMiRTlRkKogre6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtQ2Gt2l+VzUvO
+# 1z8h/ahU/RTBJgHHYgMSzn/XdA0fbKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -208,14 +208,14 @@ exit 0
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAm5G3GbryrblHptS8mgbwc
-# zYKFCMACgrGgNriN4i0xrDANBgkqhkiG9w0BAQEFAASCAYBnnni57PlC3NqEkpZx
-# OsSWa3Cl+nXwk31zKPfQbHV09S5BMmacvMCGW8FKVBrTAB6pK8j6AohfCWicdoaH
-# uIpJCcO+oEVxlPsuLjQT/dei2GaZQrzNtZfJ0uOR8VP3kjl7ZdlnUSSZAcZQAQRE
-# 9GrQ5vspTc9p4/9ebl8DzX3oK4rCQmMIrI++mzqSzf2zVHv6vf1Vml+9CMz5wdFU
-# IWmz1DSAJ7TWr48/xjL9hw7+PiEPldnAGAhzn78BwiJ765FeLD/aUngDnczXuCdO
-# gejvm1zLj+MFAk2+31x1XViruzSEFt6yDz3XnDv1xUcut5DCtpDDaRCKbE2Cw/kr
-# 9PVOHZsBZaTJR8Ee8xsDGTRo1sWteiBofSwxRPR5DyT3b4cFlFxM7MhbiqJiBgCT
-# EwLuEaWKOqvx69pAIYN/yac9+3WcpY85Z+FU5ajAmJ0Zjqk9PKtBQ+oyyA7kXYDS
-# dnjkJA/FHjaO9cERFD8QfGKhJp9Zqcojt7HqjCwDvdQjEnE=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAKKiQoFchjf6sL+bDQOfcy
+# GoaJNdEdOLDiz0e5JuNX0zANBgkqhkiG9w0BAQEFAASCAYAw62KAFZkGE7OQ1Jkm
+# OTLTSFOdNbIaPG42FtilyeP0K6sPPJV19iZotzLhhbJRnIjFFF6PuyuugGN6h4Lm
+# dMYkyjvCjaJbkDi2DqlHLoRHUOKcKHosUguK46ZqYGZ3K4UqVWp0S+EvlHmi6TDE
+# 0XgqsRsDpYTmecj0MBtt+JsY+xUpy5Ws5dPLazFQnkMumgN+OpI3YYSqrRuV1scl
+# +z0bpTs1kqJWLmkPK8QuabntaWpe5m5xdko/Z3dZWmj7b0kjGQXVyZp0UqbfBHXt
+# 6nL8lPz55Mp7ZuvPJq2lWqOPXfSpn/HV9YxBhshzPKf2R/44iOfNBvhmsnF9z6Cc
+# 8LrzdU0sdiJY8TuOwVkKPdKcZGbibDskqywq8QsP6b7R2jyuydaXuXSavpioQ/Ig
+# xbjJ2bIxIvylKtmbvXQHgfOp29ePEXIi3m2EhTlRY6LL1LTsmU6o1/ZX33WbeppP
+# cwEb1+2olaBJIrzFYLXhgAnYVmLvYP/5PcVfZQV8nprcDUg=
 # SIG # End signature block

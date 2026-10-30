@@ -11,7 +11,7 @@ try {
     $moduleDir = Join-Path $testRoot 'Modules\Microsoft.Graph.Authentication'
     New-Item -ItemType Directory -Path $moduleDir -Force | Out-Null
     $moduleSource = @'
-function Get-MgContext { @{ AuthType='Delegated'; TenantId='22222222-2222-2222-2222-222222222222' } }
+function Get-MgContext { @{ AuthType='Delegated'; TenantId=$(if($env:SEMT_TEST_TENANT_ID){$env:SEMT_TEST_TENANT_ID}else{'22222222-2222-2222-2222-222222222222'}) } }
 function Invoke-MgGraphRequest {
     param($Method,$Uri,$Headers)
     if ($Uri -like '*/licenseDetails') { return @{ value=@(@{skuId='sku1';servicePlans=@()}) } }
@@ -44,6 +44,24 @@ Export-ModuleMember -Function Get-MgContext,Invoke-MgGraphRequest
     & $exporter -NoConnect -TenantId '22222222-2222-2222-2222-222222222222' -OutputPath $output
     if ((Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash -ne $before) { throw 'Fresh cache was changed.' }
     Write-Host 'PASS: fresh user cache reused'
+    & $exporter -NoConnect -OutputPath $output
+    if ((Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash -ne $before) { throw 'Same-tenant context did not reuse cache.' }
+    Write-Host 'PASS: a fresh cache is reused after confirming the signed-in tenant'
+    $env:SEMT_TEST_TENANT_ID='33333333-3333-3333-3333-333333333333'
+    $crossTenantFailed=$false
+    try { & $exporter -NoConnect -OutputPath $output } catch { $crossTenantFailed=$true }
+    Remove-Item Env:\SEMT_TEST_TENANT_ID -ErrorAction SilentlyContinue
+    if (-not $crossTenantFailed -or (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash -ne $before) { throw 'Cache was reused across tenants or replaced after a failed refresh.' }
+    Write-Host 'PASS: a different tenant does not reuse or damage the existing cache'
+    $staleEvidence=Join-Path $testRoot 'StaleEvidence.csv'
+    $staleRows=@(Import-Csv -LiteralPath $output)
+    foreach ($entry in $staleRows) { $entry.CollectedUtc=[datetime]::UtcNow.AddHours(-25).ToString('o') }
+    $staleRows | Export-Csv -LiteralPath $staleEvidence -NoTypeInformation -Encoding UTF8
+    $staleHash=(Get-FileHash -LiteralPath $staleEvidence -Algorithm SHA256).Hash
+    $staleFailed=$false
+    try { & $exporter -NoConnect -OutputPath $staleEvidence } catch { $staleFailed=$true }
+    if (-not $staleFailed -or (Get-FileHash -LiteralPath $staleEvidence -Algorithm SHA256).Hash -ne $staleHash) { throw 'Stale collection metadata was accepted or overwritten after a failed refresh.' }
+    Write-Host 'PASS: recently touched files do not make stale user evidence fresh'
     (Get-Item -LiteralPath $output).LastWriteTimeUtc = [datetime]::UtcNow.AddHours(-25)
     $failed = $false
     try { & $exporter -NoConnect -TenantId '22222222-2222-2222-2222-222222222222' -OutputPath $output } catch { $failed = $true }
@@ -52,14 +70,15 @@ Export-ModuleMember -Function Get-MgContext,Invoke-MgGraphRequest
 } finally {
     $env:PSModulePath = $oldModulePath
     Remove-Item Env:\SEMT_TEST_FAIL_PAGE -ErrorAction SilentlyContinue
+    Remove-Item Env:\SEMT_TEST_TENANT_ID -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5xBRGh7d0YBA4
-# Kc9aoFfi31Fab6KvfFHAOeafGwH+iqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+BCuyueHNDi9Y
+# iiI2pN9KgXVMxn2um2qr0cUK7UGdwKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -89,14 +108,14 @@ Export-ModuleMember -Function Get-MgContext,Invoke-MgGraphRequest
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDeHkL8NV85DWPoXEvE/v4O
-# WGE3lrx46W19cPJX2FMmWTANBgkqhkiG9w0BAQEFAASCAYCRafZSSAcm6n4D4xCY
-# MgkXPCrp8q9Ieu9payoqViB+EONttmS4kk47QuKErq7NjI/TJJcupw6+YmerpY3X
-# 6/hS8kSVtGEIjEG1GBs+vmXXXT8H/GMjbF+swwhEr+eu83vWrPFbW/89EEqnZB3y
-# BQ2b4y73wEjTXOSRtBkV0NX9uPb+DCqzCC2GaARBhpWttHZ+Bw0eoigVVtFV28r8
-# vAApL0R7AkPsp++VDqYjvdgZghvbyMVR5jZLq9HdgWG4PU2vDq2HglK1Il/Ti92J
-# QaDm6KGetwX40W8DfSbxB8vqQ0FRV+S75AYlwO6R1NZkSzHUlEIV8j/7kH6zPbO7
-# fkRx6A8MiFYJ0FcyaF+HmyM1H5arjwaA6Rele3AdMAMsd26VaYGDzGsF/OzlGM4x
-# qFOLGPf4lLY7ADnQBIclO0Y3ZPODmEwpUHLtL+n3Dgc1wDbIBJGwpcobreALzSZ9
-# DPfIhijeAmSevtoK4amPEJyuEoNJnTsVncaQUifyn1maHyY=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAESOuy2Vq9uFJzpPe0IXX0
+# C1M8X4KvrmOSf2MKkTFUQTANBgkqhkiG9w0BAQEFAASCAYArhJnyJdhOLPvoRgOo
+# TnXBXYW5rPTw6S2kBQRZDVud18aziPuRlex3/FogRHtpDS479aMQi/NZ/UbADsh3
+# zOAbsLwztpKpmNDrDv1kK9i/CddZtv4pkTvr5+ByzJ+zxjqnASwXA0yYLfkuDvga
+# KkYh6OldBwN9isafrx12iNziQBoKURXtra6LQ1eSegioyYhXPr5k8AmCO1g34FMy
+# XW6p+3TNEaobbfZtQUSciwQhWuPD9wSzny9aTqRkEWilgwCNdsUAQAVOW1cOWSnd
+# jeqCaXtTau+XvSlDzoxFQHT5XfsUJOURsN1VAtZPznsU+MUAuk0vghXCKEYMgdK+
+# XoemtiY4mKTTq2jDWUjVg9jG1j5QrjPysqa5e2uZ1y3H0fHXt2qjstyeeIpB+IN4
+# LGKN8y6RkMecUmTSv/4z1Nbb2bhmdAJT7ma/dd7MORozrdovRJxVAcms9icrp5Ep
+# 0EaeaUW0eDeqZsULJ5aIws79Yn5uXZhi4hOIn1g0bzrR/fg=
 # SIG # End signature block
