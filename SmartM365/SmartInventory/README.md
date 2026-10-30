@@ -203,14 +203,7 @@ By default the private files of SmartInventory stay next to their scripts, in th
 - Fail-closed: when the setting is set, a private file still present only next to its script stops the run with an explicit error instead of being read from a second place.
 - The setting belongs to the deployment: tenant profiles do not change it. `SmartM365\Config` (global, tenant and transport policy files) is not moved.
 
-Switch an existing deployment with `Maintenance\SmartM365-Move-InventoryConfigToRoot.ps1` (temporary tool), on one server, elevated:
-
-1. Disable the orchestrator scheduled task on every server, stop the orchestrators and wait until no SmartInventory run is in progress.
-2. Preview: `SmartM365-Move-InventoryConfigToRoot.ps1 -Tenant prod`. It lists the files to move, the obsolete configurations (no owner script and no template) and manual backups (`.bak`, `.backup-`, `.before-`) to archive, and the interrupted `.pending`/`.previous` files it only reports.
-3. Switch: `SmartM365-Move-InventoryConfigToRoot.ps1 -Tenant prod -Apply -OtherServersStopped`. It writes and verifies a ZIP backup of every listed file in `{{WorkspaceRootPath}}\SmartInventory\Archive` (`-ArchiveDirectory`), copies the files with a SHA256 check, renames each original to `<name>.moved-<timestamp>`, removes the archived files, then sets `SmartInventoryConfigRootPath` (`-ConfigRootPath`) and checks the mapping. A failure before the activation restores the renamed originals.
-4. Enable the orchestrator task again and check the first runs.
-
-Return with `-Rollback -OtherServersStopped`: the `.moved-*` originals get their name back and the setting is cleared; changes made under the root after the switch are reported, not copied back.
+To switch an existing deployment, stop the orchestrators on every server, copy each private file to the same relative path under the root (with its `.transport.lock` and `.migration.log`), remove the originals from the code folder, then set `SmartInventoryConfigRootPath` and restart. The temporary switch tool used for the first deployments was retired once they had switched; retrieve it from Git history if needed.
 
 ## License pricing
 
