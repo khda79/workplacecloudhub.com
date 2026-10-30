@@ -29,7 +29,9 @@ function Copy-OrchestratorConfigurationSnapshot {
     if ($receipt.SHA256 -ne $sourceDocument.SHA256) { throw 'Configuration source changed while saving version snapshot.' }
 }
 
-$script:ValidCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes')
+$script:ValidCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes', 'Python')
+# Added by the template to an existing job of the central manifest (never removed): a job that needs them fails elsewhere.
+$script:TemplateSyncedCapabilities = @('Python')
 $script:ValidDays = @('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')
 $script:ValidServerStates = @('Active', 'Inactive')
 
@@ -302,6 +304,14 @@ function Sync-SmartM365OrchestratorJobsManifest {
                     $existingJob | Add-Member -NotePropertyName $policyKey -NotePropertyValue $templateJobsByName[$jobName].$policyKey
                     if (-not $updatedJobNames.Contains($jobName)) { $updatedJobNames.Add($jobName) | Out-Null }
                 }
+            }
+            # Add the template-synced capabilities (a job that cannot run without them); other capabilities stay local.
+            $templateCapabilities = if ($templateJobsByName[$jobName].PSObject.Properties['RequiredCapabilities']) { @($templateJobsByName[$jobName].RequiredCapabilities | ForEach-Object { [string]$_ }) } else { @() }
+            $existingCapabilities = if ($existingJob.PSObject.Properties['RequiredCapabilities'] -and $null -ne $existingJob.RequiredCapabilities) { @($existingJob.RequiredCapabilities | ForEach-Object { [string]$_ }) } else { @() }
+            $addedCapabilities = @($script:TemplateSyncedCapabilities | Where-Object { $_ -in $templateCapabilities -and $_ -notin $existingCapabilities })
+            if ($addedCapabilities.Count -gt 0) {
+                $existingJob | Add-Member -NotePropertyName RequiredCapabilities -NotePropertyValue @($existingCapabilities + $addedCapabilities) -Force
+                if (-not $updatedJobNames.Contains($jobName)) { $updatedJobNames.Add($jobName) | Out-Null }
             }
         }
 

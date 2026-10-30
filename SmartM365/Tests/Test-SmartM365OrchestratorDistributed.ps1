@@ -2,7 +2,7 @@
 .SYNOPSIS
 Validates SmartM365 Orchestrator distributed election and claim behavior.
 .VERSION
-1.0.6
+1.0.7
 #>
 
 #Requires -Version 7.0
@@ -136,7 +136,7 @@ $productionCapabilities = @(
     }
     [pscustomobject]@{
         ServerName = 'SRV02'
-        ReadyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'TeamsPowerShell')
+        ReadyCapabilities = @('SharedRuntime', 'Graph', 'EXO', 'AD', 'TeamsPowerShell', 'Python')
         GraphAppRoles = $allGraphRoles
     }
     [pscustomobject]@{

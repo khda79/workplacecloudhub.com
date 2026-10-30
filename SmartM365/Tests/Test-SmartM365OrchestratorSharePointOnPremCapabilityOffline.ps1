@@ -8,7 +8,7 @@ it from the snap-in registration, that the read-only probe uses the collector sn
 read-only farm call in Windows PowerShell, and that an OnlyJobsRequiring SharePointOnPrem
 policy keeps the other jobs away from that server in the election plan.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param()
@@ -25,7 +25,7 @@ function Assert-Capability {
 }
 
 # Every hard-coded capability list must stay identical and include SharePointOnPrem.
-$expected = "'SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes'"
+$expected = "'SharedRuntime', 'Graph', 'EXO', 'AD', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes', 'Python'"
 $orchestratorText = [IO.File]::ReadAllText((Join-Path $folder 'SmartM365-Inventory-Orchestrator.ps1'))
 $managementText = [IO.File]::ReadAllText((Join-Path $folder 'SmartM365.Orchestrator.Management.psm1'))
 $guiText = [IO.File]::ReadAllText((Join-Path $folder 'SmartM365-Inventory-Orchestrator-GUI.ps1'))

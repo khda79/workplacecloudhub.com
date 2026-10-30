@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.22'
+$script:DistributedModuleVersion = '1.1.23'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -647,6 +647,68 @@ function Test-SmartM365OrchestratorCapabilityComponentMissing {
     return (-not [bool]$Result.Ready) -and ([string]$Result.Detail -match '(?i)\bis not (registered|installed) on this server\.$')
 }
 
+function Get-SmartM365OrchestratorPythonCommand {
+    <# Python command of WorkplaceEvidence-Prepare: PreparedPythonCommand of its configuration, read (never migrated)
+       where the job reads it; python when the file or the key is absent. #>
+    $path = ConvertTo-SmartM365InventoryConfigLocation -Path (Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'PreparedEvidence\SmartM365-WorkplaceEvidence-Prepare.local.json')
+    if (-not (Get-SmartM365JsonReadPath -Path $path -Optional)) { return 'python' }
+    $config = (Read-SmartM365JsonDocument -Path $path).Document
+    if ($null -ne $config -and $config.PSObject.Properties['PreparedPythonCommand'] -and -not [string]::IsNullOrWhiteSpace([string]$config.PreparedPythonCommand)) {
+        return ([string]$config.PreparedPythonCommand).Trim()
+    }
+    return 'python'
+}
+
+function Get-PythonCapabilityResult {
+    <# Python 3.10+ for WorkplaceEvidence-Prepare, from the version printed by the command itself (read-only, bounded). #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [int]$TimeoutSeconds = 30
+    )
+
+    $python = Get-Command -Name $Command -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $python) {
+        return Get-CapabilityProbeResult -Name 'Python' -Ready $false -Detail ("Python command '{0}' (PreparedPythonCommand) is not installed on this server." -f $Command)
+    }
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new($python.Source, '-c "import sys; print(''%d.%d.%d'' % sys.version_info[:3])"')
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) { throw "Could not start $($python.Source)." }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit([math]::Max(1, $TimeoutSeconds) * 1000)) {
+            try { $process.Kill($true) } catch { Write-Verbose ("Python probe kill failed: {0}" -f $_.Exception.Message) }
+            return Get-CapabilityProbeResult -Name 'Python' -Ready $false -Detail ("{0} did not answer within {1} seconds." -f $python.Source, $TimeoutSeconds)
+        }
+        $version = ([string]$stdoutTask.GetAwaiter().GetResult()).Trim()
+        $stderr = ([string]$stderrTask.GetAwaiter().GetResult()).Trim() -replace '[\r\n]+', ' '
+        $exitCode = $process.ExitCode
+    }
+    catch {
+        return Get-CapabilityProbeResult -Name 'Python' -Ready $false -Detail $_.Exception.Message
+    }
+    finally {
+        $process.Dispose()
+    }
+    if ($version -notmatch '^\d+\.\d+\.\d+$') {
+        # The Microsoft Store alias (WindowsApps) answers without a version: no Python is installed.
+        if ($python.Source -match '(?i)\\WindowsApps\\') {
+            return Get-CapabilityProbeResult -Name 'Python' -Ready $false -Detail ("Python command '{0}' resolves to the Microsoft Store alias {1}: Python is not installed on this server." -f $Command, $python.Source)
+        }
+        if ($stderr.Length -gt 300) { $stderr = $stderr.Substring(0, 300) }
+        return Get-CapabilityProbeResult -Name 'Python' -Ready $false -Detail ("{0} gave no Python version (exit code {1}): {2}" -f $python.Source, $exitCode, $stderr)
+    }
+    if ([version]$version -lt [version]'3.10') {
+        return Get-CapabilityProbeResult -Name 'Python' -Ready $false -Detail ("Python {0} at {1} is below 3.10, required by WorkplaceEvidence-Prepare." -f $version, $python.Source)
+    }
+    return Get-CapabilityProbeResult -Name 'Python' -Ready $true -Detail ("Python {0} at {1}." -f $version, $python.Source)
+}
+
 function Get-SmartM365OrchestratorServerCapability {
     [CmdletBinding()]
     param(
@@ -660,7 +722,9 @@ function Get-SmartM365OrchestratorServerCapability {
         [int]$ProbeTimeoutSeconds = 90,
         [AllowEmptyCollection()][object[]]$DataPathChecks = @(),
         [int]$PathTimeoutSeconds = 10,
-        [int]$CertificateExpiryWarningDays = 0
+        [int]$CertificateExpiryWarningDays = 0,
+        # Blank: PreparedPythonCommand of the WorkplaceEvidence-Prepare configuration, else python.
+        [string]$PythonCommand = ''
     )
 
     $generatedAtUtc = [datetime]::UtcNow
@@ -839,6 +903,15 @@ catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message 
 "SMARTM365_CAPABILITY_JSON:$($result | ConvertTo-Json -Compress -Depth 5)"
 '@
         $results.Add((Invoke-IsolatedCapabilityProbe -Name 'Adaxes' -EnginePath $pwshPath -ScriptText $adaxesScript -TimeoutSeconds $ProbeTimeoutSeconds))
+    }
+
+    # Python is checked the same way in both modes: the command only prints its version.
+    try {
+        $pythonCommandToProbe = if ([string]::IsNullOrWhiteSpace($PythonCommand)) { Get-SmartM365OrchestratorPythonCommand } else { $PythonCommand.Trim() }
+        $results.Add((Get-PythonCapabilityResult -Command $pythonCommandToProbe -TimeoutSeconds ([math]::Min(30, [math]::Max(1, $ProbeTimeoutSeconds)))))
+    }
+    catch {
+        $results.Add((Get-CapabilityProbeResult -Name 'Python' -Ready $false -Detail ("WorkplaceEvidence-Prepare configuration could not be read for PreparedPythonCommand: {0}" -f $_.Exception.Message)))
     }
 
     foreach ($result in $results) { $result | Add-Member -NotePropertyName ComponentMissing -NotePropertyValue (Test-SmartM365OrchestratorCapabilityComponentMissing -Result $result) -Force }
