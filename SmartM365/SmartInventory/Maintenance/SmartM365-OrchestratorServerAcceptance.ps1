@@ -37,7 +37,7 @@ the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.1
+1.0.2
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -368,7 +368,7 @@ function Get-SmartM365AcceptanceRequiredGraphRole {
     param([AllowEmptyCollection()][object[]]$Jobs = @(), [AllowEmptyCollection()][string[]]$AdditionalRoles = @())
     $byRole = [ordered]@{}
     foreach ($job in @($Jobs | Where-Object { -not $_.PSObject.Properties['Enabled'] -or [bool]$_.Enabled })) {
-        $roles = if ($job.PSObject.Properties['RequiredGraphAppRoles']) { ConvertTo-SmartM365AcceptanceStringList $job.RequiredGraphAppRoles } else { @() }
+        $roles = if ($job.PSObject.Properties['RequiredGraphAppRoles']) { @(ConvertTo-SmartM365AcceptanceStringList $job.RequiredGraphAppRoles) } else { @() }
         foreach ($role in $roles) {
             if (-not $byRole.Contains($role)) { $byRole[$role] = [System.Collections.Generic.List[string]]::new() }
             $byRole[$role].Add([string]$job.Name)
@@ -385,8 +385,8 @@ function Get-SmartM365AcceptanceJobEligibility {
     <# Same rule as Test-SmartM365OrchestratorCapabilityMatch: every capability ready and every Graph role granted. #>
     param([AllowEmptyCollection()][object[]]$Jobs = @(), [AllowEmptyCollection()][string[]]$ReadyCapabilities = @(), [AllowEmptyCollection()][string[]]$GraphRoles = @())
     foreach ($job in @($Jobs | Where-Object { -not $_.PSObject.Properties['Enabled'] -or [bool]$_.Enabled })) {
-        $capabilities = if ($job.PSObject.Properties['RequiredCapabilities']) { ConvertTo-SmartM365AcceptanceStringList $job.RequiredCapabilities } else { @() }
-        $roles = if ($job.PSObject.Properties['RequiredGraphAppRoles']) { ConvertTo-SmartM365AcceptanceStringList $job.RequiredGraphAppRoles } else { @() }
+        $capabilities = if ($job.PSObject.Properties['RequiredCapabilities']) { @(ConvertTo-SmartM365AcceptanceStringList $job.RequiredCapabilities) } else { @() }
+        $roles = if ($job.PSObject.Properties['RequiredGraphAppRoles']) { @(ConvertTo-SmartM365AcceptanceStringList $job.RequiredGraphAppRoles) } else { @() }
         $missingCapabilities = @($capabilities | Where-Object { $_ -notin $ReadyCapabilities } | Sort-Object -Unique)
         $missingRoles = @($roles | Where-Object { $_ -notin $GraphRoles } | Sort-Object -Unique)
         [pscustomobject]@{
@@ -1023,8 +1023,8 @@ function Test-AcceptanceAdaxes {
     $environment = $script:ChildEnvironment.Clone()
     $services = @(); $domains = @(); $filter = ''
     if ($null -ne $config) {
-        if ($config.PSObject.Properties['AdaxesService']) { $services = ConvertTo-SmartM365AcceptanceStringList $config.AdaxesService }
-        if ($config.PSObject.Properties['Domains']) { $domains = ConvertTo-SmartM365AcceptanceStringList $config.Domains }
+        if ($config.PSObject.Properties['AdaxesService']) { $services = @(ConvertTo-SmartM365AcceptanceStringList $config.AdaxesService) }
+        if ($config.PSObject.Properties['Domains']) { $domains = @(ConvertTo-SmartM365AcceptanceStringList $config.Domains) }
         if ($config.PSObject.Properties['LdapFilter']) { $filter = [string]$config.LdapFilter }
     }
     $environment['SMART_ADAXES_SERVICES'] = ConvertTo-Json -InputObject @($services) -Compress

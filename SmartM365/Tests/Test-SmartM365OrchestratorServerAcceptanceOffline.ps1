@@ -4,7 +4,7 @@
     module assessment, child output parsing, Graph roles and job eligibility. Nothing is read
     from a directory, a tenant or a share.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -142,6 +142,10 @@ $devices = @($eligibility | Where-Object Name -eq 'Devices')[0]
 Assert-True (-not $devices.Eligible -and ($devices.MissingGraphAppRoles -join ',') -eq 'Device.Read.All') 'Missing role is reported.'
 $exchange = @($eligibility | Where-Object Name -eq 'Exchange2016')[0]
 Assert-True (-not $exchange.Eligible -and ($exchange.MissingCapabilities -join ',') -eq 'AD,ExchangeOnPrem') 'Missing capabilities are reported.'
+
+# Empty configuration lists stay arrays under strict mode (Adaxes Domains = [] gave a null Count in 1.0.1).
+Assert-True (@(ConvertTo-SmartM365AcceptanceStringList @()).Count -eq 0 -and @(ConvertTo-SmartM365AcceptanceStringList 'a').Count -eq 1) 'String lists wrapped in @() always have a Count.'
+Assert-True (-not ([regex]::IsMatch((Get-Content -LiteralPath $scriptPath -Raw), '=\s*ConvertTo-SmartM365AcceptanceStringList'))) 'Every assignment from a string list is wrapped in @().'
 
 # Tokens.
 $tokenValues = @{ WorkspaceRootPath = 'D:\Data'; TenantKey = 'contoso-test'; DataAllRootPath = '{{WorkspaceRootPath}}\Data\Tenants\{{TenantKey}}\DATA-ALL' }
