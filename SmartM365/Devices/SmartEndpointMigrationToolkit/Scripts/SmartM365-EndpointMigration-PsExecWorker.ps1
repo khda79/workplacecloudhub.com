@@ -125,10 +125,14 @@ try {
     $result.AdminShareFailureType = [string]$access.FailureType
 
     $licensePreflight = $null
-    if ($campaign -eq 'HybridJoin' -and -not [bool]$contract.Flags.DryRun -and $access.AdminShareReachable -and @($contract.Endpoint.Arguments) -notcontains '-AuditOnly') {
+    if ($campaign -eq 'HybridJoin' -and -not [bool]$contract.Flags.DryRun -and $access.AdminShareReachable) {
         $licensePreflight = Invoke-SemtUserLicensePreflight -ComputerName $target -InventoryPath (Join-Path $packageRoot 'Inventory\UsersLicenses.csv')
         $result['UserLicensePreflightState'] = $licensePreflight.State
         $result['UserLicensePreflightDetail'] = $licensePreflight.Detail
+        if ($licensePreflight.Block) {
+            $result['UserLicenseUpn'] = [string](Get-SemtPropertyValue -InputObject $licensePreflight -Name 'UserPrincipalName' -Default '')
+            $result['UserLicenseInventoryUtc'] = [string](Get-SemtPropertyValue -InputObject $licensePreflight -Name 'CollectedUtc' -Default '')
+        }
         Write-SemtLogLine -Path $logPath -Message ("User license preflight: {0}; {1}" -f $licensePreflight.State,$licensePreflight.Detail)
     }
     if ([bool]$contract.Flags.DryRun) {
@@ -136,7 +140,7 @@ try {
         else { Set-WorkerStatus -Status 'DRYRUN_ADMIN_SHARE_UNREACHABLE' -Detail $access.Detail }
     }
     elseif ($null -ne $licensePreflight -and $licensePreflight.Block) {
-        Set-WorkerStatus -Status 'USER_LICENSE_REVIEW_REQUIRED' -NextAction 'VERIFY_USER_LICENSE_AND_MDM_SCOPE' -Detail $licensePreflight.Detail
+        Set-WorkerStatus -Status 'USER_LICENSE_REVIEW_REQUIRED' -NextAction 'ASSIGN_INTUNE_LICENSE_THEN_RETRY' -Detail $licensePreflight.Detail
     }
     else {
         $remoteDataRoot = [string]$contract.Endpoint.RemoteDataRoot
@@ -288,8 +292,8 @@ Write-SemtLogLine -Path $logPath -Message ("Worker completed. Status={0}; NextAc
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfZnmV8UfATY8d
-# eEVihsjYqvLh+xHx831yiewjNC5A5qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC0cZCmiyjVsw7z
+# YxScemVqWXvyGaP/A5/7lABn6+sjXKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -319,14 +323,14 @@ Write-SemtLogLine -Path $logPath -Message ("Worker completed. Status={0}; NextAc
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBg/QvctclOQWpmPkKmZdrq
-# 4hdAUo/uyh/WMF2+plCHzjANBgkqhkiG9w0BAQEFAASCAYBy6kiZtuPmdNvogy5C
-# 5I7C658LFMPTPEzs/fNzC9AUjJz0emyQE/oEiqjOiRDvSEHnD8Ke+7iFXGiGGRYA
-# 5UNR9Vmfychy9SjkiBu4ODenIV+n1g0W4PcmbE1pHQQCuGvIzen1Ki24EEewCQbI
-# fLG99R2AGKnaUUtcqmTQXiRay/9lrw8IZ9ch8GXBHnkG+YlhtufoFQHHrgtwbOLE
-# hJSfLNEUCPcy+ybnGSkC8uBTzOFt+lbLxtcQ9IlYWbCwsVHosljxtGu37NwsK0ql
-# QbzuWPvDD8x7lEYzGVm1QD1j60lBM4G0Y7tXvSAcEq8UsEEIdPAPD7YzwETLDUST
-# VvA/pbxrO0OCjWJrA66LOK4lq1acElfU7VgwCzSYtxfbzdi8v7RJruWhc+NqU+YF
-# 5Yh8WDmtoTz5yKOp310hA0vO6WptBwVxCuFrxYQLwi/o4nSH+V3XpTUJtyVKwyfB
-# 6I95Z2vxpJ7F3N+I+JHaDZNX++E1gnBmFSxQH0jw6APl9Fo=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDgvEo46V6eriohM1rpTX1q
+# bV0WfyVsQ27l4VxV0kaO9DANBgkqhkiG9w0BAQEFAASCAYCTXUIA1JPqIfXTzolf
+# FbyAWT/DVO1Ri8MEmUgAg1PGZz163Y75rBYDJzAbftoNAqEk6ELjCfgbudK86W1N
+# DE7m0GEwhXyeb8YOmJjs/ptskDr9SWWk2VnlNZR2e1tdCQi4b1m1rIyvD5K5azjj
+# WJrsGc8hfczXIzj+gog35bRVVGjjzM72RGexSVCCr5FWkdlOpd6Yon5TNwvaWAm3
+# GIoi7gNr+tofIveJHGl0xPSVuGM6BdbJTPbheqAUQ6bWcU4NcXQHAbgTRYVxMqRp
+# Pzk2rdwPBpK74Yi25iHIIKNNxIqCYTc9VGVR4XvZ+LOKDxAA+NtNYH4uKffJfA+3
+# /PrUl9Wi3XHH659V9hmgvul0ar7hxWUrkMxd80WyMltUxtT1hI86FiYtfpEqF9sF
+# NrJm+DGvU4rtk+i1K5UXlkiqhwYWJe3uyz6yPL7zsCFsaJ31INi5lMsuResmIfO5
+# 2MNLWBn4Ba/Cnud1Aden6y7oXrhdpNmqRxdnHxm86plfChM=
 # SIG # End signature block

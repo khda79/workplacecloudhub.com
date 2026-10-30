@@ -429,6 +429,7 @@ Write-Host ("Technician run guard: Effective={0}; Hours={1}; History={2}" -f $us
 $cycle = 0
 $stopReason = 'Finished'
 $lastCycleRows = @()
+$licenseBlockedThisRun = @{}
 $runStatus = 'Finished'
 
 try {
@@ -450,6 +451,14 @@ try {
         $computers = @(Get-SemtComputerList -Path $computerListPath)
         $listStats = Get-SemtComputerListStats -Path $computerListPath
         if ($computers.Count -eq 0) { Write-Host 'No computer left in Computers.txt. The Run is complete.' -ForegroundColor Green; break }
+        if ($Campaign -eq 'HybridJoin' -and $licenseBlockedThisRun.Count -gt 0) {
+            $computers = @($computers | Where-Object { -not $licenseBlockedThisRun.ContainsKey(([string]$_).Trim().ToUpperInvariant()) })
+            if ($computers.Count -eq 0) {
+                Write-Host 'No eligible computer remains in this Run: user licensing must be resolved before a new Run.' -ForegroundColor Yellow
+                $stopReason = 'BlockedUserLicense'
+                break
+            }
+        }
         Write-Host ("Cycle {0}: {1} computer(s)." -f $cycle,$computers.Count) -ForegroundColor Cyan
 
         foreach ($kind in @($script:CampaignProfile.InventoryKinds)) {
@@ -645,6 +654,13 @@ try {
         }
 
         $rows = @($cycleRows.ToArray())
+        if ($Campaign -eq 'HybridJoin') {
+            foreach ($row in $rows) {
+                if ([string]$row.Status -eq 'USER_LICENSE_REVIEW_REQUIRED') {
+                    $licenseBlockedThisRun[([string]$row.ComputerName).Trim().ToUpperInvariant()] = $true
+                }
+            }
+        }
         try { & $script:CampaignProfile.Hooks.PostCycle $hookContext $rows } catch { Write-Host ("WARNING: Cycle {0}: post-cycle step failed: {1}" -f $cycle,$_.Exception.Message) -ForegroundColor Yellow }
         Invoke-CompletedRules -Rows $rows -CycleNumber $cycle
         $csvPath = Join-Path $script:RunContext.ReportRoot ('SEMT_{0}_cycle{1}_{2}.csv' -f $Campaign,$cycle,(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -700,8 +716,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0WhJ0LpdCyqX0
-# PXjx8PLha2FBCsohQqW0riHsmizcH6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHI5nqPFlHKLav
+# ySThCtkI1IWfUNOwFzITE+3Sm5u51qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -731,14 +747,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBwko+uRRqomUrPHP7ZEXZ/
-# g0LoROA/XWZ1xzxOvjIvTDANBgkqhkiG9w0BAQEFAASCAYAdPSqhOoHflejHShY7
-# f0i6/twtrfHVTOJ9Jgm49P0+/EpVc9EepvDef2onXDZH58qPE2JTSHUaZFAN6X+P
-# 4OiDybgfiSku2UOAgRW6VmX0JzjUWDjM2KbQhZg817gexd5J9JrGfV/oja5gkqUY
-# W5MxKAPBdbmuJtxUMFMvAjJAzVF9ION01kmQeoCDAC0qE4XvJHQT9Jjv4VbkMcUq
-# HBiGVWQ2DA6RGt5qLdI/NUPqyZdoVtiGFEl+VD0YAgcC8+dvQ3hepgw0yedftDAV
-# 3cC9DGKgiV9CUJy3uJyd5I1J1h2vqCJsfg1V8BqbS4w/7j4xXH8ytYR7GTaILXDy
-# kREMXHy86Q7VX4yYFPSkU/PGQauJHX/6po0OpZNQhJdAKnsp9+JVtGTKNcl3lbOn
-# HnGPKJq3gPxKoM/FuSxVSjWtCI14CMBvTC1p8Kbsmgfb73E22jF1SzTfTvHABLF+
-# kG+P0LQl4nUCgyNenfpAoWv9jqwIOhvBwsEhg8i30h7tn5Y=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDVeqhWYFA5y2OIrE3pU83Y
+# TGJWERenbeWLjVZHTZYdBTANBgkqhkiG9w0BAQEFAASCAYAjdN3hnHm96pdZNqxL
+# /UFniHBDiUS3cYZBV7K8rw4aypHjTk9rcyVm7jJG1EncBHJalttZ8DaboBZdoAg1
+# d5wLm1ioFISI9RzZy/YPsTQX59VL/qo3pnXCQa4bWkbBH+Q5xFjRymF6N5Na6rSh
+# Tr9bkYXWsneBJMMMvTXrSx4lBqrrABbC0vUKNsmdRuPrmCtPazIFjoPmeFBOTh1M
+# BsMfIl4GdIM6tiaAw/OEZOJLVrK1v+rnWuNkWKmrRbPR6HgaSbshNGmsfZrpA2xT
+# hgKewsdbnHoa1JkaGJR7zP7TKwaqYx/ahg2S7/cQHshALPj07pGFexkylcgeDnnY
+# QFS/LJ835z79t/vWp7UVJnTZlZ66BGsI7WxilvQWFDGGiQgoi6p58CWVMhCd80Tj
+# oq5jaVTwAvUS/UG+nMIiSTEE1ub9zBrKHLV5WNjIS2beaZYrwX/YK2RaLAbDm7pu
+# Z5+4/S0c9VdToJrpaM+OqW40dL58y/BxjLrp6oDV+KPfFEE=
 # SIG # End signature block

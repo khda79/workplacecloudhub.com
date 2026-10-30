@@ -236,6 +236,10 @@ function Invoke-HybridJoinPostCycle {
         Set-SemtResultField -Result $row -Name 'UserLicenseState' -Value 'Unknown'
         Set-SemtResultField -Result $row -Name 'UserLicenseDetail' -Value 'Fresh same-tenant inventory or unique user SID unavailable'
         Set-SemtResultField -Result $row -Name 'MdmUserScopeState' -Value 'Unknown: verify MDM user scope in Entra'
+        if ([string](Get-SemtPropertyValue -InputObject $row -Name 'UserLicensePreflightState' -Default '') -eq 'NoAssignedLicense') {
+            Set-SemtResultField -Result $row -Name 'UserLicenseState' -Value 'NoAssignedLicense'
+            Set-SemtResultField -Result $row -Name 'UserLicenseDetail' -Value ([string](Get-SemtPropertyValue -InputObject $row -Name 'UserLicensePreflightDetail' -Default 'No assigned user license'))
+        }
         $sid = [string](Get-SemtPropertyValue -InputObject $row -Name 'InteractiveUserSid' -Default '')
         $tenant = [string](Get-SemtPropertyValue -InputObject $row -Name 'Dsreg_TenantId' -Default '')
         if ($userInventoryValid -and $sid -and $tenant) {
@@ -264,7 +268,7 @@ function Invoke-HybridJoinPostCycle {
         }
     }
     if ($Context.DryRun -or $allRows.Count -eq 0) { return }
-    $cloudRows = @($allRows | Where-Object { [string]$_.Status -notmatch '^(ADMIN_SHARE_UNREACHABLE|DNS_PREFLIGHT_ALL_SAMPLES_FAILED|REMOTE_PAYLOAD_COPY_FAILED|REMOTE_SCRIPT_MISSING|CANCELLED_|SKIPPED_|DRYRUN_|TARGET_|LEGACY_)' })
+    $cloudRows = @($allRows | Where-Object { [string]$_.Status -notmatch '^(USER_LICENSE_REVIEW_REQUIRED|ADMIN_SHARE_UNREACHABLE|DNS_PREFLIGHT_ALL_SAMPLES_FAILED|REMOTE_PAYLOAD_COPY_FAILED|REMOTE_SCRIPT_MISSING|CANCELLED_|SKIPPED_|DRYRUN_|TARGET_|LEGACY_)' })
     $log = $Context.Log
     if ($cloudRows.Count -eq 0) { & $log ('Cycle {0}: post-cycle Graph confirmation skipped: no result could have changed Intune or Entra.' -f $Context.CycleNumber) 'DarkGray'; return }
     if (-not (Get-SemtOption -Options $Context.Options -Name 'HybridJoin.PostCycleCloudInventoryRefresh')) { & $log ('Cycle {0}: post-cycle Graph confirmation disabled by option.' -f $Context.CycleNumber) 'DarkGray'; return }
@@ -383,8 +387,8 @@ function Get-SemtHybridJoinProfile {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmw3NKg9+/tPxQ
-# 8vrLtpRCgi7PA47+wO8CA4VPbGIKuaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDFmwbigzdD8RGH
+# uyNxoVAxJ87280zY5cVcPPUuHUP63KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -414,14 +418,14 @@ function Get-SemtHybridJoinProfile {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAtV2Rtorf8AeKgblISiBKN
-# 7oy35oj9SJa3vL7PYFP/1jANBgkqhkiG9w0BAQEFAASCAYAluGx93wygD9fLTajr
-# FYYfBXfuEmmhzqnUOg3ArjB9lChc17Fca+a2a3Qb87tBEuzey2kXaKbLOv3AAfic
-# LOEca/nVN1ByZQrSTHtga8/1Z8F8+SxpjvTb+wKXAnn40HOS47thcvsEuHVaUVum
-# 3Ey0K5531gALtxql15c8WTYxJnTLW6lZX9GPuq4y56JsoTflRZywx5SLflXC+TbN
-# a/jJOyzwavEUGh56qWmo41wz/Uyl/j8TIPNXWY6vCeekyAbwvIGvKlc1puZe/AGz
-# ulVIhd2Y0PFdyqBQJu0d7A+/rQgVw7adJfuMqLhToi2pQGA3M08WbDA3oTpIsb0R
-# o0Am2zOIWPbzUW1HkfPrFJJkELXUwojkFsD2xvEag/cTyVNKhkx52j6Dcqnmxl0i
-# 6bEKllgCMHQwPVhqlkzPynoXWB5ywG9qk6EBnF6BWOkQmG7BGCh21vW5WKWF5tbV
-# qUnOawYU3F3U0RSiGq6S5bZDNFkzsxFr6AjlkQJALExidAc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAK7FYj6Qk2uqYlO9YLXH7s
+# v0noU9GgHgqCAxjc069uHzANBgkqhkiG9w0BAQEFAASCAYBhyjj+3s+hDd5e/4G2
+# 9g8JLgb44feNJOpFualBGakhfOinhOykyic02c6DYfCbiGywf+ALuqSQpuwmKbIK
+# 8E5cbCbGSJ71D3xyqtcoo6nSdgi/nXeAkx8mQfz8pZDHZsCC8ehaa+W4swtqWh09
+# B9ZKWRmUBNxlD4cJctaMQNUlUOWVhVEYY+Den7GMnkWnJgvuSWC9P320PVRfCumB
+# NkLWkJqCX0CHsjQg82Ng5GJ7BZh46fX0NI7L8YvXT8/2XjuDnxr739dLCJI8oUSK
+# aqtpJWdaKmMM8FXHGj9N6RxreXdZf+dwylmalK9yQOi9QAXXqcY0KmEGbEuDSlhk
+# QmFjBD4bEqohAjetekJO8gmXQgsRM6wfVzGrUUul25DMbI+wYgdxskPsVPLrL64+
+# khUKskMV4IefH+2xPuzEfqh2ITeTKVyQk6SvbMy7ecX2ZbicfzcYTAkzwd07TWPI
+# HZuXToVe2erCockvxOsVO9FDTVbrYkiqQDe8wCH6M11Ykak=
 # SIG # End signature block

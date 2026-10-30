@@ -117,6 +117,15 @@ Select the transport in the GUI Options, or pass `-Option @{ RemoteExecutionMode
 `-ValidateOnly` resolves options, checks rules and component integrity, writes the Run
 manifest and contacts no target.
 
+For Hybrid Join, both audit and repair perform a user-license preflight before copying or
+starting the endpoint. When a fresh, complete same-tenant user inventory uniquely identifies
+the console user and that user has no
+assigned SKU, SEMT reports `USER_LICENSE_REVIEW_REQUIRED` with `NoAssignedLicense` and stops
+processing that computer. It stays in the Wave but is not retried during the same Loop Run.
+Missing, stale or ambiguous evidence remains `Unknown` and is not reported as an absent
+license. Refresh the users and licenses inventory from the GUI when needed; an assigned SKU
+alone does not confirm that its Intune service plan is enabled.
+
 ## Options
 
 All options come from [Config/SmartEndpointMigrationToolkit.options.json.txt](Config/SmartEndpointMigrationToolkit.options.json.txt).

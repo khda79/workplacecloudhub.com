@@ -36,12 +36,19 @@ function Get-SemtUserLicensePreflightDecision {
     [CmdletBinding()]
     param([AllowNull()]$Evidence,[object[]]$Users)
     $unknown = [pscustomobject]@{ State='Unknown'; Detail='Preflight identity, policy or inventory is incomplete'; Block=$false }
-    if ($null -eq $Evidence -or $Evidence.Tenants.Count -ne 1 -or -not $Evidence.Sid -or $Evidence.AutoEnroll -ne 1 -or $Evidence.CredentialType -ne 1) { return $unknown }
+    if ($null -eq $Evidence -or $Evidence.Tenants.Count -ne 1 -or -not $Evidence.Sid) { return $unknown }
     $tenant = [string]$Evidence.Tenants[0]
-    $matches = @($Users | Where-Object { $_.InventoryTenantId -ieq $tenant -and $_.InventoryScope -eq 'AllUsers' -and $_.InventoryComplete -eq 'True' -and $_.OnPremisesSecurityIdentifier -ieq $Evidence.Sid })
-    if ($matches.Count -ne 1) { return $unknown }
-    if ([string]::IsNullOrWhiteSpace([string]$matches[0].AssignedSkuIds)) {
-        return [pscustomobject]@{ State='NoAssignedLicense'; Detail='Current console SID has no user SKU in the fresh same-tenant inventory; review licensing and MDM scope. Tenant is inferred from registry and must be confirmed.'; Block=$true }
+    $userMatches = @($Users | Where-Object { $_.InventoryTenantId -ieq $tenant -and $_.InventoryScope -eq 'AllUsers' -and $_.InventoryComplete -eq 'True' -and $_.OnPremisesSecurityIdentifier -ieq $Evidence.Sid })
+    if ($userMatches.Count -ne 1) { return $unknown }
+    if ($null -eq $userMatches[0].PSObject.Properties['AssignedSkuIds'] -or $null -eq $userMatches[0].PSObject.Properties['CollectedUtc'] -or $null -eq $userMatches[0].AssignedSkuIds) { return $unknown }
+    $collectedText = ([string]$userMatches[0].CollectedUtc).Trim()
+    if ($collectedText -notmatch '(?i)(Z|[+-]\d{2}:\d{2})$') { return $unknown }
+    $collected = ConvertTo-SemtUtcDateTime -Value $collectedText
+    if ($null -eq $collected) { return $unknown }
+    $age = ([datetime]::UtcNow - $collected).TotalHours
+    if ($age -lt 0 -or $age -ge 24) { return $unknown }
+    if ([string]::IsNullOrWhiteSpace([string]$userMatches[0].AssignedSkuIds)) {
+        return [pscustomobject]@{ State='NoAssignedLicense'; Detail='Current console user has no assigned license in the fresh same-tenant inventory. Assign an appropriate Intune license before a new Run. Tenant is inferred from registry and must be confirmed.'; Block=$true; UserPrincipalName=[string](Get-SemtPropertyValue -InputObject $userMatches[0] -Name 'UserPrincipalName' -Default ''); CollectedUtc=$collectedText }
     }
     return [pscustomobject]@{ State='HasAssignedLicense'; Detail='A user SKU exists; Intune plan and MDM scope are not confirmed by this preflight.'; Block=$false }
 }
@@ -76,11 +83,8 @@ function Invoke-SemtUserLicensePreflight {
             $reg=Get-CimClass -CimSession $s -Namespace root/default -ClassName StdRegProv -OperationTimeoutSec 15 -ErrorAction Stop
             $hive=[uint32]2147483650
             $tenantKeys=Invoke-CimMethod -CimSession $s -CimClass $reg -MethodName EnumKey -Arguments @{hDefKey=$hive;sSubKeyName='SYSTEM\CurrentControlSet\Control\CloudDomainJoin\TenantInfo'} -OperationTimeoutSec 15 -ErrorAction Stop
-            $policy='SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\MDM'
-            $auto=Invoke-CimMethod -CimSession $s -CimClass $reg -MethodName GetDWORDValue -Arguments @{hDefKey=$hive;sSubKeyName=$policy;sValueName='AutoEnrollMDM'} -OperationTimeoutSec 15 -ErrorAction Stop
-            $kind=Invoke-CimMethod -CimSession $s -CimClass $reg -MethodName GetDWORDValue -Arguments @{hDefKey=$hive;sSubKeyName=$policy;sValueName='UseAADCredentialType'} -OperationTimeoutSec 15 -ErrorAction Stop
-            if ($tenantKeys.ReturnValue -ne 0 -or $auto.ReturnValue -ne 0 -or $kind.ReturnValue -ne 0) { return }
-            [pscustomobject]@{ Sid=$sids[0]; Tenants=@($tenantKeys.sNames); AutoEnroll=$auto.uValue; CredentialType=$kind.uValue }
+            if ($tenantKeys.ReturnValue -ne 0) { return }
+            [pscustomobject]@{ Sid=$sids[0]; Tenants=@($tenantKeys.sNames) }
         } finally { if ($s) { Remove-CimSession $s -ErrorAction SilentlyContinue } }
     }
     try {
@@ -321,8 +325,8 @@ function Add-SemtInventoryFieldsToResult {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZPsDjPgzHpQpz
-# bkpIILjTIxS14o7//VpMIk9WVGpC26CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAXfBxeMBceuss5
+# XJeZM1YYtCwQgd+syb0EsqXXX8imV6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -352,14 +356,14 @@ function Add-SemtInventoryFieldsToResult {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB+okYSnJNiPFyxp6OHR7nO
-# Z78J44wWH+XDW/qarMz9MzANBgkqhkiG9w0BAQEFAASCAYCiutGfEC68yPzorpg3
-# mhrmyCqaDdWp908QaD2hV4LgW+A/ytwYZhPwNEduvlLUjLAHM1Uy6mrstYIb3rAy
-# rAPjT+XQIOjy8LBqdQlqSi7KkXtha9rBo5H4xiGabDpF1wsgwBG1s7oPZ8A+6EDz
-# jX1DGfyP+ClDkdlJH2sC4/iAJCPRYfwNuNZWqZK1gAaOZtkGbznZRGBfE2LHrmmT
-# 3f0TF8dBaN83pcvb5tIWNC6ss/Zafzple0Ios9fl1FziYFmc0I/P2Fda8H556brp
-# 0Ev2K7t17AwIPEi0OmU7kJi2DApk2OtD6eOePyqvk6EYF0ra+xzB7if5eDrFhrzs
-# FVVlJ89lLcsCEnClhjQnqjgXYmsALZhwQYVdFXz4rxSkE4AjN29c7A98fPfIM6Et
-# JpeU6rAksukjL1eBDse2jQZLmg/DrNFFFcHCydvSnk8PgZJ9PUC2h9hCFQunTIlB
-# gH0oJ5YU3nS2MTqkzqzFr7uyah47wqiIy2Jcs2y8IxqUYOw=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD7HtUxoCSgr0AygJL3qCxU
+# 5/g4FpKNCA2v5ZkxP1ROmTANBgkqhkiG9w0BAQEFAASCAYCn6OmTysl+3+zCk/BH
+# NuCwnX2N/zmJ9YzY+CeyuqucLa2ieSY8SGNCcFESbwT5NLCrXaNF8wp+XXLS/38H
+# iJuT5VbA5P+vod49P2pDFrFyMGsABvEnRFjRhCsCPN2isA0dujx71gPOzRXPWWil
+# HAI8JZfEHrFz2BvQBcP0L3vkkj189VEn9XX0wbF/F1gocouU10D69l8doSLZs/25
+# lU4cVxDBH6ClF0QY/aQ8zxu78M7SsiO6zrK8DAfifw3A8ahWN1GkQKFWlZQfVdo/
+# CKGOABxjZJlV5xUvbctk2UIiwiF+LJqwB1smHwWVvNOkaIoEAcFO0Y1TyaQOs8kS
+# SkEhvLMk8E50ceO7fKzJarC/ncMV5ovs5NUYdr69fkcwz0h677N6eH4tkYpLCBVv
+# gxRV6JMfIcbMaZOgpgK+Zjta2dM5MAXvS3vtuC/LcZPqSd73oM6eJQRw2LlI5WEb
+# 9u12FOBoJs/HEM4o0UvpsDcT4bOzjhoHoiJmx0nTgBEaz24=
 # SIG # End signature block
