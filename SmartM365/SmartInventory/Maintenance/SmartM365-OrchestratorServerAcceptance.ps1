@@ -26,7 +26,8 @@ Capabilities, in order:
 - ExchangeOnPrem: up to SampleSize mailboxes through the Exchange snap-in (Windows PowerShell 5.1).
 - SharePointOnPrem: farm and up to SmallSampleSize site collections (Windows PowerShell 5.1).
 - TeamsPowerShell: same calls as the Teams job: connection (same TenantId) and up to
-  SmallSampleSize phone number assignments.
+  SmallSampleSize phone number assignments. A failure is a non-blocking WARN (the election keeps
+  the Teams job on other servers), FAIL only when requested with -Capability.
 - Adaxes: services, domains and LDAP filter of the Adaxes collector configuration; up to
   SampleSize users per domain, one child process per domain (-AdaxesDomainTimeoutSeconds); the
   domains after a timed-out one are not read.
@@ -38,7 +39,7 @@ the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.10
+1.0.11
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -76,6 +77,9 @@ $ErrorActionPreference = 'Stop'
 $script:CapabilityOrder = @('RunAccount', 'Modules', 'CodeSigning', 'Network', 'Clock', 'Certificate', 'SharedRuntime', 'AD', 'Graph', 'GraphPermissions', 'EXO', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes', 'Mail')
 # Capability names the orchestrator election uses.
 $script:OrchestratorCapabilities = @('SharedRuntime', 'AD', 'Graph', 'EXO', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes')
+# A failure of these capabilities does not block the activation (WARN): the election simply keeps
+# their jobs (M365-TeamsPhonePstnUsage-Inventory) on other servers. FAIL only when requested with -Capability.
+$script:NonBlockingCapabilities = @('TeamsPowerShell')
 # Modules the SmartInventory jobs import; a minimum only where a collector or the orchestrator probe sets one.
 # Every Microsoft.Graph module must also be at the Microsoft.Graph.Authentication version (checked below).
 $script:ExpectedModules = @(
@@ -484,6 +488,7 @@ function Get-SmartM365AcceptanceShortResult {
                 $rows = 0; foreach ($match in $read) { $rows += [int]$match.Groups[1].Value }
                 $notes = @()
                 if ($failedScopes) { $notes += '{0} read failure(s)' -f $failedScopes }
+                if ($text -match '^non-blocking failure') { $notes += 'non-blocking' }
                 if ($text -match 'unexpected format') { $notes += 'format warnings' }
                 if ($text -match 'duplicated') { $notes += 'duplicates' }
                 if ($text -match 'users skipped because') { $notes += 'unreadable users skipped' }
@@ -570,8 +575,9 @@ function Write-AcceptanceLog {
 }
 
 function New-AcceptanceResult {
-    param([string]$Name, [string]$Status, [string]$Detail, [double]$DurationSeconds = 0)
-    [pscustomobject]@{ Capability = $Name; Status = $Status; DurationSeconds = [math]::Round($DurationSeconds, 1); Detail = $Detail }
+    # Ready: what the election would see (PASS or WARN before a non-blocking failure is downgraded).
+    param([string]$Name, [string]$Status, [string]$Detail, [double]$DurationSeconds = 0, [bool]$Ready = $false)
+    [pscustomobject]@{ Capability = $Name; Status = $Status; DurationSeconds = [math]::Round($DurationSeconds, 1); Detail = $Detail; Ready = $Ready }
 }
 
 function Invoke-AcceptanceChildProcess {
@@ -1475,10 +1481,18 @@ try {
         try { $outcome = & $checks[$name] }
         catch { $outcome = [pscustomobject]@{ Status = 'FAIL'; Detail = $_.Exception.Message } }
         $seconds = $watch.Elapsed.TotalSeconds
-        $result = New-AcceptanceResult -Name $name -Status ([string]$outcome.Status) -Detail ([string]$outcome.Detail) -DurationSeconds $seconds
+        $status = [string]$outcome.Status
+        $detail = [string]$outcome.Detail
+        $isReady = $status -in @('PASS', 'WARN')
+        $nonBlocking = $status -eq 'FAIL' -and $name -in $script:NonBlockingCapabilities -and $script:Requested -notcontains $name
+        if ($nonBlocking) { $status = 'WARN'; $detail = 'non-blocking failure (the orchestrator keeps the jobs needing it on other servers) | ' + $detail }
+        $result = New-AcceptanceResult -Name $name -Status $status -Detail $detail -DurationSeconds $seconds -Ready $isReady
         $results.Add($result)
         if ($outcome.PSObject.Properties['Extractions']) {
-            foreach ($row in @($outcome.Extractions)) { $extractionRows.Add([pscustomobject]@{ Status = $row.Status; Capability = $name; Dataset = $row.Dataset; Scope = $row.Scope; Rows = $row.Rows; Seconds = $row.Seconds; Checks = $row.Checks }) }
+            foreach ($row in @($outcome.Extractions)) {
+                $rowStatus = if ($nonBlocking -and $row.Status -eq 'FAIL') { 'WARN' } else { $row.Status }
+                $extractionRows.Add([pscustomobject]@{ Status = $rowStatus; Capability = $name; Dataset = $row.Dataset; Scope = $row.Scope; Rows = $row.Rows; Seconds = $row.Seconds; Checks = $row.Checks })
+            }
         }
         $level = switch ($result.Status) { 'PASS' { 'SUCCESS' } 'FAIL' { 'ERROR' } 'WARN' { 'WARNING' } default { 'INFO' } }
         $graphNote = if ($script:GraphChildSeconds -ne $graphBefore) { ' (includes the shared Graph sign-in and reads)' } else { '' }
@@ -1488,7 +1502,7 @@ try {
     $eligibleCount = -1
     $notEligibleRows = @()
     if ($Capability -contains 'All') {
-        $ready = @($results | Where-Object { $_.Capability -in $script:OrchestratorCapabilities -and $_.Status -in @('PASS', 'WARN') } | ForEach-Object Capability)
+        $ready = @($results | Where-Object { $_.Capability -in $script:OrchestratorCapabilities -and [bool]$_.Ready } | ForEach-Object Capability)
         if ($script:PythonReady) { $ready += 'Python' }
         $roles = if ($null -ne $script:GraphChild -and [bool]$script:GraphChild.Ready) { @($script:GraphChild.Roles | ForEach-Object { [string]$_ }) } else { @() }
         $eligibility = @(Get-SmartM365AcceptanceJobEligibility -Jobs $script:CatalogJobs -ReadyCapabilities $ready -GraphRoles $roles)

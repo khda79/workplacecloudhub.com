@@ -2,7 +2,7 @@
 
 ## Orchestrator server acceptance
 
-`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.10, PowerShell 7.2+) qualifies a server before it
+`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.11, PowerShell 7.2+) qualifies a server before it
 is switched from Inactive to Active in the orchestrator GUI. The orchestrator capability probe only
 signs in or loads a module; this script makes a real, limited read for each capability, checks the
 rows, then drops them.
@@ -33,7 +33,7 @@ What it guarantees:
 | EXO | `Get-EXOMailbox -ResultSize 100` | Guid, PrimarySmtpAddress, ExternalDirectoryObjectId |
 | ExchangeOnPrem | Snap-in in Windows PowerShell 5.1, `Get-Mailbox -ResultSize 100` | Guid, ExchangeGuid, PrimarySmtpAddress, RecipientTypeDetails |
 | SharePointOnPrem | Snap-in, farm, web applications, `Get-SPSite -Limit 10` | Id, Url |
-| TeamsPowerShell | Same calls as the Teams job: `Connect-MicrosoftTeams` (same TenantId), `Get-CsPhoneNumberAssignment -Top 10` (`Get-CsTenant` is not available app-only with recent modules) | TelephoneNumber, NumberType; no number = WARN |
+| TeamsPowerShell | Same calls as the Teams job: `Connect-MicrosoftTeams` (same TenantId), `Get-CsPhoneNumberAssignment -Top 10` (`Get-CsTenant` is not available app-only with recent modules) | TelephoneNumber, NumberType; no number = WARN; a failure is a non-blocking WARN (FAIL only with `-Capability TeamsPowerShell`): the election keeps M365-TeamsPhonePstnUsage-Inventory on servers where Teams works |
 | Adaxes | Services, domains and LDAP filter of the Adaxes collector configuration; 100 users per domain, one child process per domain limited by `-AdaxesDomainTimeoutSeconds` (default 120; the next domains are not read after a time-out; 0 or 1 user in every domain points to missing Adaxes permissions of the account; like the collector, a user whose objectClass the account cannot read is excluded by DN and the domain read again, 25 at most, reported as WARN with a count only) | ObjectGUID, SamAccountName, UPN |
 | Mail | From and recipient; Graph: Mail.Send granted; SMTP: port 25 answers 220 | test mail only with `-SendTestMail` |
 
