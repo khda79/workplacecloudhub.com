@@ -423,6 +423,18 @@ $script:HostLines.Clear()
         $remoteText = [IO.File]::ReadAllText((Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\Functions\Semt.Remote.ps1'))
         $remoteText -match "'powershell\.exe','-NoProfile','-ExecutionPolicy','RemoteSigned','-File'" -and $remoteText -notmatch "'-ExecutionPolicy','Bypass'" -and $hjEndpointText -notmatch '(?i)ExecutionPolicy"?,?\s*"?Bypass' -and $w11EndpointText -notmatch '(?i)ExecutionPolicy Bypass' -and $hjEndpointText -match '-ExecutionPolicy RemoteSigned -File' -and $w11EndpointText -match '-ExecutionPolicy RemoteSigned -File'
     }
+    # Retry-after-reboot task: Windows PowerShell 5.1 split a /TR value that starts and ends with a quote
+    # ("C:\Program Files\..." became two arguments) and schtasks.exe failed with "Invalid argument/option".
+    foreach ($endpointText in @($hjEndpointText,$w11EndpointText)) {
+        $quotingAst = [System.Management.Automation.Language.Parser]::ParseInput($endpointText, [ref]$null, [ref]$null)
+        . ([scriptblock]::Create($quotingAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'ConvertTo-SemtCommandLineArgument' }, $true).Extent.Text))
+        Test-Step 'endpoint native arguments: quotes and spaces are escaped for schtasks.exe /TR' {
+            (ConvertTo-SemtCommandLineArgument -Value '"C:\P\ps.exe" -File "C:\Program Files\r.ps1"') -eq '"\"C:\P\ps.exe\" -File \"C:\Program Files\r.ps1\""' -and (ConvertTo-SemtCommandLineArgument -Value '/Create') -eq '/Create' -and (ConvertTo-SemtCommandLineArgument -Value 'C:\a b\') -eq '"C:\a b\\"' -and (ConvertTo-SemtCommandLineArgument -Value '') -eq '""'
+        }
+    }
+    Test-Step 'endpoints create the retry-after-reboot task through Invoke-SemtSchtasks (no direct schtasks.exe /Create)' {
+        $hjEndpointText -match "Invoke-SemtSchtasks -Arguments @\('/Create','/TN',\`$script:RetryAfterRebootTaskName" -and $w11EndpointText -match 'Invoke-SemtSchtasks -Arguments \$createArgs' -and $hjEndpointText -notmatch '& schtasks\.exe /Create' -and $w11EndpointText -notmatch '& schtasks\.exe @createArgs'
+    }
     Test-Step 'Run engine: report names omit the Wave name; a cycle HTML report failure never fails the Run' {
         $engineText -match "'SEMT_\{0\}_cycle\{1\}_\{2\}\.csv' -f \`$Campaign,\`$cycle" -and $engineText -match "'SEMT_\{0\}_\{1\}_final\.html' -f \`$Campaign,\`$script:RunId" -and $engineText -match 'HTML report update failed' -and $engineText -match 'Final report failed'
     }

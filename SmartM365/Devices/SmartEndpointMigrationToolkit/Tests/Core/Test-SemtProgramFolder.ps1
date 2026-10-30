@@ -457,6 +457,8 @@ try {
         function Write-SmartLog { param([string]$Message, [string]$Level = 'INFO') }
         function Write-RunLog { param([string]$Message) }
         function schtasks.exe { $script:Schtasks.Add(($args -join ' ')); $global:LASTEXITCODE = 0 }
+        # The task is created through Invoke-SemtSchtasks (explicit native command line); recorded the same way.
+        function Invoke-SemtSchtasks { param([string[]]$Arguments) $script:Schtasks.Add(($Arguments -join ' ')); return [pscustomobject]@{ ExitCode = 0; Output = '' } }
         $outcome = [pscustomobject]@{ Error = ''; Case = $case; TaskRunError = ''; Unregistered = $false }
         try { Register-RetryAfterRebootTask -Reason 'qualification' } catch { $outcome.Error = $_.Exception.Message }
         if (-not $outcome.Error) {

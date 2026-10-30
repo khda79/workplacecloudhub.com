@@ -5270,6 +5270,40 @@ exit `$exitCode
     $runnerContent | Set-Content -LiteralPath $script:RetryAfterRebootRunnerPath -Encoding UTF8
 }
 
+function ConvertTo-SemtCommandLineArgument {
+    <#
+    Quotes one argument for a native command line (CommandLineToArgvW rules: quotes escaped as \",
+    backslashes doubled before a quote and at the end). Windows PowerShell 5.1 passes an argument
+    that starts and ends with a quote without quoting it, so a /TR value such as
+    "C:\...\powershell.exe" -File "C:\Program Files\..." was split and schtasks.exe failed with
+    "Invalid argument/option".
+    #>
+    param([AllowEmptyString()][string]$Value)
+
+    if (-not [string]::IsNullOrEmpty($Value) -and $Value -notmatch '[\s"]') { return $Value }
+    $escaped = [regex]::Replace([string]$Value, '(\\*)"', { param($match) ($match.Groups[1].Value * 2) + '\"' })
+    $escaped = [regex]::Replace($escaped, '(\\+)$', { param($match) $match.Groups[1].Value * 2 })
+    return ('"{0}"' -f $escaped)
+}
+
+function Invoke-SemtSchtasks {
+    <# Runs schtasks.exe with an explicit command line (see ConvertTo-SemtCommandLineArgument). #>
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = Join-Path $env:WINDIR 'System32\schtasks.exe'
+    $startInfo.Arguments = (@($Arguments | ForEach-Object { ConvertTo-SemtCommandLineArgument -Value $_ }) -join ' ')
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    $standardError = $process.StandardError.ReadToEndAsync()
+    $standardOutput = $process.StandardOutput.ReadToEnd()
+    $process.WaitForExit()
+    return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = ('{0} {1}' -f $standardOutput,$standardError.Result).Trim() }
+}
+
 function Register-RetryAfterRebootTask {
     param([Parameter(Mandatory = $true)][string]$Reason)
 
@@ -5312,9 +5346,9 @@ function Register-RetryAfterRebootTask {
 
     $taskCommand = 'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "{0}"' -f $script:RetryAfterRebootRunnerPath
     $createArgs = @('/Create','/TN',$script:RetryAfterRebootTaskName,'/SC','ONSTART','/RU','SYSTEM','/RL','HIGHEST','/TR',$taskCommand,'/F')
-    $output = & schtasks.exe @createArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw ("schtasks.exe failed with exit code {0}: {1}" -f $LASTEXITCODE,(@($output) -join ' '))
+    $create = Invoke-SemtSchtasks -Arguments $createArgs
+    if ($create.ExitCode -ne 0) {
+        throw ("schtasks.exe failed with exit code {0}: {1}" -f $create.ExitCode,$create.Output)
     }
 
     $script:RetryAfterRebootAction = 'Scheduled'

@@ -2104,42 +2104,38 @@ function Invoke-SchtasksRun {
     }
 }
 
-function Invoke-SchtasksCreate {
-    param(
-        [Parameter(Mandatory=$true)][string]$TaskName,
-        [Parameter(Mandatory=$true)][string]$Trigger,
-        [Parameter(Mandatory=$true)][string]$RunAs,
-        [Parameter(Mandatory=$true)][string]$RunLevel,
-        [Parameter(Mandatory=$true)][string]$TaskRun
-    )
+function ConvertTo-SemtCommandLineArgument {
+    <#
+    Quotes one argument for a native command line (CommandLineToArgvW rules: quotes escaped as \",
+    backslashes doubled before a quote and at the end). Windows PowerShell 5.1 passes an argument
+    that starts and ends with a quote without quoting it, so a /TR value such as
+    "C:\...\powershell.exe" -File "C:\Program Files\..." was split and schtasks.exe failed with
+    "Invalid argument/option".
+    #>
+    param([AllowEmptyString()][string]$Value)
 
-    $arguments = @(
-        "/Create",
-        "/TN", $TaskName,
-        "/SC", $Trigger,
-        "/RU", $RunAs,
-        "/RL", $RunLevel,
-        "/TR", $TaskRun,
-        "/F"
-    )
+    if (-not [string]::IsNullOrEmpty($Value) -and $Value -notmatch '[\s"]') { return $Value }
+    $escaped = [regex]::Replace([string]$Value, '(\\*)"', { param($match) ($match.Groups[1].Value * 2) + '\"' })
+    $escaped = [regex]::Replace($escaped, '(\\+)$', { param($match) $match.Groups[1].Value * 2 })
+    return ('"{0}"' -f $escaped)
+}
 
-    $tempStdOut = Join-Path $env:TEMP ("SEMT_HJ_schtasks_create_{0}_stdout.tmp" -f ([guid]::NewGuid().ToString("N")))
-    $tempStdErr = Join-Path $env:TEMP ("SEMT_HJ_schtasks_create_{0}_stderr.tmp" -f ([guid]::NewGuid().ToString("N")))
-    try {
-        $process = Start-Process -FilePath "schtasks.exe" -ArgumentList $arguments -PassThru -Wait -WindowStyle Hidden -RedirectStandardOutput $tempStdOut -RedirectStandardError $tempStdErr
-        $parts = @()
-        if (Test-Path -LiteralPath $tempStdOut) { $parts += Get-Content -LiteralPath $tempStdOut -ErrorAction SilentlyContinue }
-        if (Test-Path -LiteralPath $tempStdErr) { $parts += Get-Content -LiteralPath $tempStdErr -ErrorAction SilentlyContinue }
+function Invoke-SemtSchtasks {
+    <# Runs schtasks.exe with an explicit command line (see ConvertTo-SemtCommandLineArgument). #>
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-        return [PSCustomObject]@{
-            ExitCode = $process.ExitCode
-            Output = (($parts | Out-String).Trim())
-        }
-    }
-    finally {
-        Remove-Item -LiteralPath $tempStdOut -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $tempStdErr -Force -ErrorAction SilentlyContinue
-    }
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = Join-Path $env:WINDIR 'System32\schtasks.exe'
+    $startInfo.Arguments = (@($Arguments | ForEach-Object { ConvertTo-SemtCommandLineArgument -Value $_ }) -join ' ')
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    $standardError = $process.StandardError.ReadToEndAsync()
+    $standardOutput = $process.StandardOutput.ReadToEnd()
+    $process.WaitForExit()
+    return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = ('{0} {1}' -f $standardOutput,$standardError.Result).Trim() }
 }
 
 function Ensure-ScheduledTaskFolder {
@@ -3768,9 +3764,9 @@ function Register-RetryAfterRebootTask {
 
     $taskPowerShell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
     $taskCommand = '"{0}" -NoProfile -ExecutionPolicy RemoteSigned -File "{1}"' -f $taskPowerShell,$script:RetryAfterRebootRunnerPath
-    $createOutput = & schtasks.exe /Create /TN $script:RetryAfterRebootTaskName /SC ONSTART /RU SYSTEM /RL HIGHEST /TR $taskCommand /F 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw ("schtasks.exe failed with exit code {0}: {1}" -f $LASTEXITCODE,(@($createOutput) -join " "))
+    $create = Invoke-SemtSchtasks -Arguments @('/Create','/TN',$script:RetryAfterRebootTaskName,'/SC','ONSTART','/RU','SYSTEM','/RL','HIGHEST','/TR',$taskCommand,'/F')
+    if ($create.ExitCode -ne 0) {
+        throw ("schtasks.exe failed with exit code {0}: {1}" -f $create.ExitCode,$create.Output)
     }
 
     $script:RetryAfterRebootAction = "Scheduled"
