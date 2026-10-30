@@ -98,7 +98,7 @@ and the engine can be called directly:
 | Mode | Technician side | Endpoint side |
 | --- | --- | --- |
 | Dry run (`DryRun`) | DNS, ping, SMB 445, administrative share | Nothing is copied or executed |
-| Remote audit (`AuditOnly`) | Full checks, copy, PsExec | Diagnostics only: no repair, cleanup, upgrade or reboot |
+| Remote audit (`AuditOnly`) | Checks, copy, PsExec | Hybrid Join skips gpupdate; no repair, MDM cleanup, upgrade or reboot. It may flush DNS and register diagnostic tasks. |
 | Repair (default) | Full checks, copy, PsExec | Applies the enabled actions only |
 
 `-ValidateOnly` resolves options, checks rules and component integrity, writes the Run

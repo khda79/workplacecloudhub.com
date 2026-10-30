@@ -4231,108 +4231,114 @@ try {
 
     $domainPreflightComplete = $true
 
-    # Refresh computer policy before checking local MDM/GPO state.
-    $gpUpdateAttempted = $true
-    $gpUpdateOutputFile = Join-Path $OutputDir ("{0}_gpupdate_{1}.txt" -f $ComputerName, $RunId)
-    Write-Host "Refreshing computer Group Policy..." -ForegroundColor Cyan
-    Write-RunLog "Running gpupdate /target:computer /force."
+    if ($AuditOnly) {
+        Write-RunLog "AuditOnly: skipping gpupdate; collecting existing Entra and MDM state."
+    }
+    else {
+        # Refresh computer policy before checking local MDM/GPO state.
+        $gpUpdateAttempted = $true
+        $gpUpdateOutputFile = Join-Path $OutputDir ("{0}_gpupdate_{1}.txt" -f $ComputerName, $RunId)
+        Write-Host "Refreshing computer Group Policy..." -ForegroundColor Cyan
+        Write-RunLog "Running gpupdate /target:computer /force."
 
-    try {
-        $gpResultProcess = Invoke-ProcessWithTimeout -FilePath 'gpupdate.exe' -Arguments @('/target:computer','/force') -TimeoutSeconds $GpUpdateTimeoutSeconds -OutputFile $gpUpdateOutputFile
-        $gpUpdateExitCode = $gpResultProcess.ExitCode
-        $gpupdateOutput = $gpResultProcess.Output
-        $gpUpdateTimedOut = $gpResultProcess.TimedOut
-        $gpUpdateStopDetail = $gpResultProcess.StopDetail
-        Write-RunLog ("gpupdate finished. TimedOut={0}; ExitCode={1}; OutputFile={2}" -f $gpUpdateTimedOut,$gpUpdateExitCode,$gpUpdateOutputFile)
+        try {
+            $gpResultProcess = Invoke-ProcessWithTimeout -FilePath 'gpupdate.exe' -Arguments @('/target:computer','/force') -TimeoutSeconds $GpUpdateTimeoutSeconds -OutputFile $gpUpdateOutputFile
+            $gpUpdateExitCode = $gpResultProcess.ExitCode
+            $gpupdateOutput = $gpResultProcess.Output
+            $gpUpdateTimedOut = $gpResultProcess.TimedOut
+            $gpUpdateStopDetail = $gpResultProcess.StopDetail
+            Write-RunLog ("gpupdate finished. TimedOut={0}; ExitCode={1}; OutputFile={2}" -f $gpUpdateTimedOut,$gpUpdateExitCode,$gpUpdateOutputFile)
 
-        $gpupdateText = (($gpupdateOutput | Out-String).Trim())
-        if (-not $gpUpdateTimedOut -and $gpupdateText -match "MDM Policy") {
-            $gpUpdateMdmPolicyWarning = $true
-            $gpUpdateMdmPolicyState = "Warning"
-            $gpUpdateMdmPolicyDetail = "gpupdate reported MDM Policy processing issue."
-            $gpResult = Export-ComputerGpResultEvidence -ComputerName $ComputerName -RunId $RunId -OutputDir $OutputDir -Reason "gpupdate reported an MDM Policy warning"
-            $gpResultHtmlFile = $gpResult.HtmlFile
-            $gpResultTextFile = $gpResult.TextFile
+            $gpupdateText = (($gpupdateOutput | Out-String).Trim())
+            if (-not $gpUpdateTimedOut -and $gpupdateText -match "MDM Policy") {
+                $gpUpdateMdmPolicyWarning = $true
+                $gpUpdateMdmPolicyState = "Warning"
+                $gpUpdateMdmPolicyDetail = "gpupdate reported MDM Policy processing issue."
+                $gpResult = Export-ComputerGpResultEvidence -ComputerName $ComputerName -RunId $RunId -OutputDir $OutputDir -Reason "gpupdate reported an MDM Policy warning"
+                $gpResultHtmlFile = $gpResult.HtmlFile
+                $gpResultTextFile = $gpResult.TextFile
 
-            $gpPolicyDiagnosticText = $gpupdateText
-            try {
-                if (Test-Path -LiteralPath $gpResultHtmlFile) {
-                    $gpPolicyDiagnosticText += "`r`n" + (Get-Content -LiteralPath $gpResultHtmlFile -Raw -ErrorAction Stop)
+                $gpPolicyDiagnosticText = $gpupdateText
+                try {
+                    if (Test-Path -LiteralPath $gpResultHtmlFile) {
+                        $gpPolicyDiagnosticText += "`r`n" + (Get-Content -LiteralPath $gpResultHtmlFile -Raw -ErrorAction Stop)
+                    }
                 }
-            }
-            catch {
-                Write-RunLog ("gpresult HTML read failed for MDM Policy classification: {0}" -f $_.Exception.Message)
-            }
-
-            try {
-                if (Test-Path -LiteralPath $gpResultTextFile) {
-                    $gpPolicyDiagnosticText += "`r`n" + (Get-Content -LiteralPath $gpResultTextFile -Raw -ErrorAction Stop)
+                catch {
+                    Write-RunLog ("gpresult HTML read failed for MDM Policy classification: {0}" -f $_.Exception.Message)
                 }
-            }
-            catch {
-                Write-RunLog ("gpresult text read failed for MDM Policy classification: {0}" -f $_.Exception.Message)
-            }
 
-            try {
-                $gpPolicyDiagnosticText = [System.Net.WebUtility]::HtmlDecode($gpPolicyDiagnosticText)
-            }
-            catch {
-                Write-RunLog ("HTML decode failed for MDM Policy classification: {0}" -f $_.Exception.Message)
-            }
+                try {
+                    if (Test-Path -LiteralPath $gpResultTextFile) {
+                        $gpPolicyDiagnosticText += "`r`n" + (Get-Content -LiteralPath $gpResultTextFile -Raw -ErrorAction Stop)
+                    }
+                }
+                catch {
+                    Write-RunLog ("gpresult text read failed for MDM Policy classification: {0}" -f $_.Exception.Message)
+                }
 
-            $gpPolicyDiagnosticFolded = $gpPolicyDiagnosticText `
-                -replace ([string][char]0x00E0), "a" `
-                -replace ([string][char]0x00E1), "a" `
-                -replace ([string][char]0x00E2), "a" `
-                -replace ([string][char]0x00E3), "a" `
-                -replace ([string][char]0x00E4), "a" `
-                -replace ([string][char]0x00E7), "c" `
-                -replace ([string][char]0x00E8), "e" `
-                -replace ([string][char]0x00E9), "e" `
-                -replace ([string][char]0x00EA), "e" `
-                -replace ([string][char]0x00EB), "e" `
-                -replace ([string][char]0x00ED), "i" `
-                -replace ([string][char]0x00EE), "i" `
-                -replace ([string][char]0x00EF), "i" `
-                -replace ([string][char]0x00F3), "o" `
-                -replace ([string][char]0x00F4), "o" `
-                -replace ([string][char]0x00F5), "o" `
-                -replace ([string][char]0x00F6), "o" `
-                -replace ([string][char]0x00FA), "u" `
-                -replace ([string][char]0x00F9), "u" `
-                -replace ([string][char]0x00FB), "u" `
-                -replace ([string][char]0x00FC), "u"
+                try {
+                    $gpPolicyDiagnosticText = [System.Net.WebUtility]::HtmlDecode($gpPolicyDiagnosticText)
+                }
+                catch {
+                    Write-RunLog ("HTML decode failed for MDM Policy classification: {0}" -f $_.Exception.Message)
+                }
 
-            if (($gpPolicyDiagnosticFolded -match "(?i)deja\s+inscrit") -or
-                ($gpPolicyDiagnosticFolded -match "(?i)already\s+(enrolled|registered)") -or
-                ($gpPolicyDiagnosticFolded -match "(?i)\b(ja|ya)\s+esta\s+(inscrit|inscrito|registrad)") -or
-                ($gpPolicyDiagnosticFolded -match "(?i)\bgia\s+(iscritto|registrat)") -or
-                ($gpPolicyDiagnosticFolded -match "(?i)bereits\s+(registriert|angemeldet|eingeschrieben)") -or
-                ($gpPolicyDiagnosticFolded -match "(?i)(al\s+ingeschreven|reeds\s+ingeschreven)") -or
-                ($gpPolicyDiagnosticFolded -match "(?i)juz\s+(zarejestrowan|zapisany)")) {
-                $gpUpdateMdmPolicyState = "AlreadyEnrolled"
-                $gpUpdateMdmPolicyDetail = "The local Windows MDM policy client reports an existing enrollment. This is a weak local signal only; it does not prove confirmed Intune enrollment."
-                Write-RunLog ("gpupdate MDM Policy classification: State={0}; Detail={1}" -f $gpUpdateMdmPolicyState,$gpUpdateMdmPolicyDetail)
-            }
-            else {
-                Write-RunLog ("gpupdate MDM Policy classification: State={0}; Detail={1}" -f $gpUpdateMdmPolicyState,$gpUpdateMdmPolicyDetail)
+                $gpPolicyDiagnosticFolded = $gpPolicyDiagnosticText `
+                    -replace ([string][char]0x00E0), "a" `
+                    -replace ([string][char]0x00E1), "a" `
+                    -replace ([string][char]0x00E2), "a" `
+                    -replace ([string][char]0x00E3), "a" `
+                    -replace ([string][char]0x00E4), "a" `
+                    -replace ([string][char]0x00E7), "c" `
+                    -replace ([string][char]0x00E8), "e" `
+                    -replace ([string][char]0x00E9), "e" `
+                    -replace ([string][char]0x00EA), "e" `
+                    -replace ([string][char]0x00EB), "e" `
+                    -replace ([string][char]0x00ED), "i" `
+                    -replace ([string][char]0x00EE), "i" `
+                    -replace ([string][char]0x00EF), "i" `
+                    -replace ([string][char]0x00F3), "o" `
+                    -replace ([string][char]0x00F4), "o" `
+                    -replace ([string][char]0x00F5), "o" `
+                    -replace ([string][char]0x00F6), "o" `
+                    -replace ([string][char]0x00FA), "u" `
+                    -replace ([string][char]0x00F9), "u" `
+                    -replace ([string][char]0x00FB), "u" `
+                    -replace ([string][char]0x00FC), "u"
+
+                if (($gpPolicyDiagnosticFolded -match "(?i)deja\s+inscrit") -or
+                    ($gpPolicyDiagnosticFolded -match "(?i)already\s+(enrolled|registered)") -or
+                    ($gpPolicyDiagnosticFolded -match "(?i)\b(ja|ya)\s+esta\s+(inscrit|inscrito|registrad)") -or
+                    ($gpPolicyDiagnosticFolded -match "(?i)\bgia\s+(iscritto|registrat)") -or
+                    ($gpPolicyDiagnosticFolded -match "(?i)bereits\s+(registriert|angemeldet|eingeschrieben)") -or
+                    ($gpPolicyDiagnosticFolded -match "(?i)(al\s+ingeschreven|reeds\s+ingeschreven)") -or
+                    ($gpPolicyDiagnosticFolded -match "(?i)juz\s+(zarejestrowan|zapisany)")) {
+                    $gpUpdateMdmPolicyState = "AlreadyEnrolled"
+                    $gpUpdateMdmPolicyDetail = "The local Windows MDM policy client reports an existing enrollment. This is a weak local signal only; it does not prove confirmed Intune enrollment."
+                    Write-RunLog ("gpupdate MDM Policy classification: State={0}; Detail={1}" -f $gpUpdateMdmPolicyState,$gpUpdateMdmPolicyDetail)
+                }
+                else {
+                    Write-RunLog ("gpupdate MDM Policy classification: State={0}; Detail={1}" -f $gpUpdateMdmPolicyState,$gpUpdateMdmPolicyDetail)
+                }
             }
         }
-    }
-    catch {
-        $gpUpdateExitCode = ""
-        Write-RunLog ("gpupdate failed to start: {0}" -f $_.Exception.Message)
-    }
+        catch {
+            $gpUpdateExitCode = ""
+            Write-RunLog ("gpupdate failed to start: {0}" -f $_.Exception.Message)
+        }
 
-    if ($gpUpdateTimedOut) {
-        $status = 'GPUPDATE_TIMEOUT'
-        $ExitCode = 1
-        throw ("Initial gpupdate exceeded {0} seconds; repair stopped. Termination requested; stop detail: {1}. OutputFile={2}" -f $GpUpdateTimeoutSeconds,$gpUpdateStopDetail,$gpUpdateOutputFile)
-    }
+        if ($gpUpdateTimedOut) {
+            $status = 'GPUPDATE_TIMEOUT'
+            $ExitCode = 1
+            throw ("Initial gpupdate exceeded {0} seconds; repair stopped. Termination requested; stop detail: {1}. OutputFile={2}" -f $GpUpdateTimeoutSeconds,$gpUpdateStopDetail,$gpUpdateOutputFile)
+        }
 
-    if ($GpUpdateWaitSeconds -gt 0) {
-        Write-RunLog ("Waiting {0} seconds after gpupdate." -f $GpUpdateWaitSeconds)
-        Start-Sleep -Seconds $GpUpdateWaitSeconds
+        if ($GpUpdateWaitSeconds -gt 0) {
+            Write-RunLog ("Waiting {0} seconds after gpupdate." -f $GpUpdateWaitSeconds)
+            Start-Sleep -Seconds $GpUpdateWaitSeconds
+        }
+
     }
 
     if ($domainPreflightComplete) {
@@ -5219,7 +5225,7 @@ try {
         [void]$finalGpUpdateReasons.Add("InitialGpUpdateMdmPolicyWarning")
     }
 
-    if ($finalGpUpdateReasons.Count -gt 0) {
+    if (-not $AuditOnly -and $finalGpUpdateReasons.Count -gt 0) {
         $finalGpUpdateReason = ($finalGpUpdateReasons -join ";")
         if ($rebootAttempted) {
             Write-RunLog ("Final gpupdate skipped because a reboot is already scheduled. Reason={0}" -f $finalGpUpdateReason)
@@ -5716,8 +5722,8 @@ exit $ExitCode
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDknjyGyuVf5T8e
-# baIRzZPAQ0B2RGYsTLIpjF+yEaHWKaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUmTVpKHhw9ChA
+# sAAMXT6KzNJ1gru8lZeVvxKXP1YUgaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5747,14 +5753,14 @@ exit $ExitCode
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDbLh2HdUU+/ivQsJhkJ1L3
-# CQLkLiProKKObVe7PXOyoTANBgkqhkiG9w0BAQEFAASCAYCEXsNsddDNLKZRcjuG
-# zskV8l89Kh3DactzBLmkOKtNYW79GVWbq5P0fzvxj59M59GKz4lynxPyqbNsFJV1
-# 8HkihsgxCQGtolA1yshYCcjG9ZAu9jBs4XfzovfV77gYGA0UKuH/UCgsMOZyowm9
-# cPKdiZ9y3Wqd0ITzrACsuWaPOUcDt6/hDfgHN/E8H97IqZtYozp7n6rgBhbm549f
-# fs+lART4ZE30ngiIg/wmcmUh741Ld2Nzr/sRwEkXU9QOIkD5MBtd9K+XrgJvw2jZ
-# Rfzv4DggHYuBuUL3qyOtSzoDkEqOjoU2lR0vaqecpl8uLN17djrz7GXtf3sh43Sg
-# pafByZ/6gqsiSZr73j2sv6v8hqr2vsbIP964a9rcosXKOLaMpNbWjyfXQLTzXU7j
-# IcbEGzWByDuh0MbJblmqrSrDEwwJsTOhyWHlMmvay6kuLodutBrz7X1J9Jq/lyd0
-# 7KkJLtK+3QVjJjyVVCVeE76VlaGjBQY2J6rlxLFSm/F8440=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCALrazr4xor2MiqrthI8y3U
+# lgxqc9qeNovy5eaW1h7msjANBgkqhkiG9w0BAQEFAASCAYAdx5KBMjLRebC/8tuL
+# IXQprNd42ezPrtNg23i58liAEGDFwVlm+hm96ZNqVQUBgEIyNPFHawS2/HL+KP01
+# Vkeoz/UzHZvJ8scGItVmOMNThh60Znez5ubrbJ5oJU1n1+NXfZeLq9AMX6REesEb
+# +SbGa32nqytlkOgL139Xg7LQCPzWbTAs6XanSttwQub/+KqNIkrbxZCQCXNRGd05
+# cwW/iX8+kNv6UNLLXxlQC8SNK//lB1HGPkBtATaPxOvZooP8xks5NfSZB7hEqr9H
+# CLCuvJaXRyDH74g5Djs6ueuMaYRj6A5eR/8JNIta9SNX26PPaMhBx+fWZ7UuD+5b
+# fqCVcMN8V127LOXXpsMgd5ImjKAPGOl+FuKQkIDsqTqhMH+J+1amrgFwTcIXYzdQ
+# spobEgXLW5dAKZM09GfQs3S83WbLszwSfx8Ti/g1x3EIZRNkI7VEIRS6z+9N1Vx8
+# Gxa+WeIdFopNO/OJwUWjYDkm4CqCGjoNPK/rD3UMV27F264=
 # SIG # End signature block
