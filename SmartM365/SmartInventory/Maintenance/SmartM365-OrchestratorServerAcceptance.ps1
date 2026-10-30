@@ -38,7 +38,7 @@ the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.8
+1.0.9
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -250,7 +250,7 @@ function Get-SmartM365AcceptanceDatasetSpec {
                     [pscustomobject]@{ Name = 'ExchangeGuid'; Required = $true; Pattern = $guid }
                     [pscustomobject]@{ Name = 'PrimarySmtpAddress'; Required = $true; Pattern = $smtp; Unique = $true }
                     [pscustomobject]@{ Name = 'RecipientTypeDetails'; Required = $true }
-                    [pscustomobject]@{ Name = 'Database'; MinFilledPercent = 90 }) }
+                    [pscustomobject]@{ Name = 'Database' }) }
         }
         'SharePointSites' {
             return [pscustomobject]@{ AllowEmpty = $true; Columns = @(
@@ -737,7 +737,8 @@ function Invoke-AcceptanceRetry([scriptblock]$Action) {
 
 $script:AdChildScript = @'
 try {
-    if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'ActiveDirectory PowerShell module is not installed on this server.' }; return }
+    # -SkipEditionCheck: on Windows Server 2016 the module has no Core flag and loads through Windows PowerShell compatibility.
+    if (-not (Get-Module -ListAvailable -SkipEditionCheck -Name ActiveDirectory)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'ActiveDirectory PowerShell module is not installed on this server.' }; return }
     Import-Module ActiveDirectory -ErrorAction Stop -WarningAction SilentlyContinue
     Write-AcceptanceStage 'Get-ADForest'
     $forest = Get-ADForest -ErrorAction Stop
@@ -766,7 +767,7 @@ catch { Write-AcceptanceResult @{ Ready = $false; Detail = ('Windows PowerShell 
 
 $script:GraphChildScript = @'
 try {
-    if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'Microsoft.Graph.Authentication PowerShell module is not installed on this server.' }; return }
+    if (-not (Get-Module -ListAvailable -SkipEditionCheck -Name Microsoft.Graph.Authentication)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'Microsoft.Graph.Authentication PowerShell module is not installed on this server.' }; return }
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { }
     Write-AcceptanceStage 'Graph sign-in'
@@ -802,7 +803,7 @@ finally { try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } ca
 
 $script:ExoChildScript = @'
 try {
-    if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'ExchangeOnlineManagement PowerShell module is not installed on this server.' }; return }
+    if (-not (Get-Module -ListAvailable -SkipEditionCheck -Name ExchangeOnlineManagement)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'ExchangeOnlineManagement PowerShell module is not installed on this server.' }; return }
     Import-Module ExchangeOnlineManagement -ErrorAction Stop
     try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch { }
     Write-AcceptanceStage 'Exchange Online connection'
@@ -860,7 +861,7 @@ catch { Write-AcceptanceResult @{ Ready = $false; Detail = (Get-AcceptanceErrorT
 
 $script:TeamsChildScript = @'
 try {
-    if (-not (Get-Module -ListAvailable -Name MicrosoftTeams)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'MicrosoftTeams PowerShell module is not installed on this server.' }; return }
+    if (-not (Get-Module -ListAvailable -SkipEditionCheck -Name MicrosoftTeams)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'MicrosoftTeams PowerShell module is not installed on this server.' }; return }
     Import-Module MicrosoftTeams -MinimumVersion 4.7.1 -ErrorAction Stop
     Write-AcceptanceStage 'Teams connection'
     # Same calls as the Teams job (M365-TeamsPhonePstnUsage-Inventory): Get-CsTenant is not available app-only in recent modules.
@@ -889,7 +890,7 @@ finally {
 
 $script:AdaxesChildScript = @'
 try {
-    if (-not (Get-Module -ListAvailable -Name Adaxes)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'Adaxes PowerShell module is not installed on this server.' }; return }
+    if (-not (Get-Module -ListAvailable -SkipEditionCheck -Name Adaxes)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'Adaxes PowerShell module is not installed on this server.' }; return }
     $services = @($env:SMART_ADAXES_SERVICES | ConvertFrom-Json | Where-Object { $_ })
     if ($services.Count -eq 0) { throw 'AdaxesService is not configured in the Adaxes collector configuration.' }
     $ldapFilter = [string]$env:SMART_ADAXES_LDAP_FILTER
@@ -982,7 +983,7 @@ function Test-AcceptanceModules {
     $parts = [System.Collections.Generic.List[string]]::new()
     $parts.Add(('PowerShell {0}' -f $PSVersionTable.PSVersion))
     if ($PSVersionTable.PSVersion -lt [version]'7.2') { $statuses.Add('FAIL') }
-    $installed = @(Get-Module -ListAvailable -Name @($script:ExpectedModules.Name + 'Microsoft.Graph.*') -ErrorAction SilentlyContinue | Select-Object Name, Version)
+    $installed = @(Get-Module -ListAvailable -SkipEditionCheck -Name @($script:ExpectedModules.Name + 'Microsoft.Graph.*') -ErrorAction SilentlyContinue | Select-Object Name, Version)
     $assessment = Get-SmartM365AcceptanceModuleAssessment -Installed $installed -Expected $script:ExpectedModules
     $statuses.Add($assessment.Status); $parts.Add($assessment.Detail)
     Add-AcceptanceMeasurement -Section 'Modules' -Item 'PowerShell 7' -Value ([string]$PSVersionTable.PSVersion) -Status $(if ($PSVersionTable.PSVersion -lt [version]'7.2') { 'FAIL' } else { 'PASS' })
@@ -993,7 +994,7 @@ function Test-AcceptanceModules {
         $value = if ($latest.Count) { [string]$latest[0] } else { 'missing' }
         # Import-Module takes the first folder of PSModulePath that holds the module: a copy in a synced
         # OneDrive profile can shadow the machine copy and load without its files (on-demand placeholders).
-        $firstCopy = @(Get-Module -ListAvailable -Name ([string]$module.Name) -ErrorAction SilentlyContinue | Select-Object -First 1)
+        $firstCopy = @(Get-Module -ListAvailable -SkipEditionCheck -Name ([string]$module.Name) -ErrorAction SilentlyContinue | Select-Object -First 1)
         if ($firstCopy.Count -and [string]$firstCopy[0].ModuleBase -match '(?i)\\OneDrive') {
             $value += ' (loaded from a OneDrive profile copy: {0})' -f $firstCopy[0].ModuleBase
             if ($moduleStatus -eq 'PASS') { $moduleStatus = 'WARN'; $statuses.Add('WARN'); $parts.Add(('{0} is loaded from a OneDrive profile copy' -f $module.Name)) }

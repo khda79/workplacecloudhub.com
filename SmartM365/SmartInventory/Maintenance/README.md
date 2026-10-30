@@ -2,7 +2,7 @@
 
 ## Orchestrator server acceptance
 
-`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.8, PowerShell 7.2+) qualifies a server before it
+`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.9, PowerShell 7.2+) qualifies a server before it
 is switched from Inactive to Active in the orchestrator GUI. The orchestrator capability probe only
 signs in or loads a module; this script makes a real, limited read for each capability, checks the
 rows, then drops them.
@@ -31,7 +31,7 @@ What it guarantees:
 | Graph | 100 users, 100 Entra devices, 100 Intune managed devices | Id, UPN, DeviceId, DeviceName, dates |
 | GraphPermissions | Roles of the token against `RequiredGraphAppRoles` of the enabled catalog jobs, plus Mail.Send (Graph mail) and Sites.Selected (SharePoint upload) | missing roles = WARN with the jobs concerned |
 | EXO | `Get-EXOMailbox -ResultSize 100` | Guid, PrimarySmtpAddress, ExternalDirectoryObjectId |
-| ExchangeOnPrem | Snap-in in Windows PowerShell 5.1, `Get-Mailbox -ResultSize 100` | Guid, ExchangeGuid, PrimarySmtpAddress, Database |
+| ExchangeOnPrem | Snap-in in Windows PowerShell 5.1, `Get-Mailbox -ResultSize 100` | Guid, ExchangeGuid, PrimarySmtpAddress, RecipientTypeDetails |
 | SharePointOnPrem | Snap-in, farm, web applications, `Get-SPSite -Limit 10` | Id, Url |
 | TeamsPowerShell | Same calls as the Teams job: `Connect-MicrosoftTeams` (same TenantId), `Get-CsPhoneNumberAssignment -Top 10` (`Get-CsTenant` is not available app-only with recent modules) | TelephoneNumber, NumberType; no number = WARN |
 | Adaxes | Services, domains and LDAP filter of the Adaxes collector configuration; 100 users per domain, one child process per domain limited by `-AdaxesDomainTimeoutSeconds` (default 120; the next domains are not read after a time-out; 0 or 1 user in every domain points to missing Adaxes permissions of the account; like the collector, a user whose objectClass the account cannot read is excluded by DN and the domain read again, 25 at most, reported as WARN with a count only) | ObjectGUID, SamAccountName, UPN |
