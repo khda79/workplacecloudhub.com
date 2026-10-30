@@ -35,13 +35,14 @@ class SemtFakeFolder {
     [int]$Flags
     [bool]$Collide = $false
     [bool]$ChangeAction = $false
+    [string]$ReplacementPrincipal = ''
     [object] RegisterTaskDefinition([string]$name,[object]$definition,[int]$flags,[object]$user,[object]$password,[int]$logon,[object]$sddl) {
         if ($this.Collide) { throw 'task already exists' }
         $this.Flags = $flags
         $this.Task = [SemtFakeTask]::new(); $this.Task.Definition = $definition
         return $this.Task
     }
-    [object] GetTask([string]$name) { if ($this.ChangeAction) { $this.Task.Definition.Actions.Action.Arguments = 'changed' }; return $this.Task }
+    [object] GetTask([string]$name) { if ($this.ChangeAction) { $this.Task.Definition.Actions.Action.Arguments = 'changed' }; if ($this.ReplacementPrincipal) { $this.Task.Definition.Principal.UserId = $this.ReplacementPrincipal }; return $this.Task }
     [void] DeleteTask([string]$name,[int]$flags) { $this.Deleted = $true }
 }
 class SemtFakeService {
@@ -76,6 +77,26 @@ foreach ($mode in @('ScheduledTask','WinRM')) {
     if ($script:fake.Folder.Flags -ne 2 -or $script:fake.Folder.Task.Definition.Principal.UserId -ne 'SYSTEM' -or $script:fake.Folder.Task.Definition.Principal.LogonType -ne 5) { throw "$mode SYSTEM or collision guard failed" }
     $passed++
 }
+$systemSid = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+$localizedName = $systemSid.Translate([System.Security.Principal.NTAccount]).Value
+$shortName = ($localizedName -split '\\')[-1]
+foreach ($principal in @('S-1-5-18',$localizedName,$shortName)) {
+    $script:fake=[SemtFakeService]::new()
+    $script:fake.Folder.ReplacementPrincipal=$principal
+    $dir=Join-Path ([IO.Path]::GetTempPath()) ('SEMT-transport-test-' + [guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($dir)
+    $file=Join-Path $dir 'endpoint.ps1'; [IO.File]::WriteAllText($file,'synthetic')
+    $hash=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+    $result=& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Script=$file;ShareScript=$file;Sha256=$hash;Mode='ScheduledTask'}
+    if (-not $result.Cleaned -or -not $script:fake.Folder.Deleted -or (Test-Path -LiteralPath $dir)) { throw "SYSTEM principal '$principal' was not accepted" }
+    $passed++
+}
+$script:fake=[SemtFakeService]::new()
+$script:fake.Folder.ReplacementPrincipal='S-1-5-19'
+try { & $operation @{Target='x';Name='x';Arguments='x';Mode='ScheduledTask'}; throw 'Expected rejection of non-SYSTEM principal' }
+catch { if ($_.Exception.Message -notmatch 'identity changed') { throw } }
+if ($script:fake.Folder.Deleted) { throw 'Non-SYSTEM task was deleted' }
+$passed++
 $script:fake=[SemtFakeService]::new()
 $script:fake.Folder.Collide=$true
 try { & $operation @{Target='x';Name='x';Arguments='x';Mode='ScheduledTask'}; throw 'Expected a collision' }
@@ -141,13 +162,30 @@ try {
     if (-not $timeout.TimedOut -or $timeout.Completed -or $timeout.Detail -notmatch 'verify before retrying') { throw 'Timeout did not leave the remote state unconfirmed' }
     $passed++
 } finally { Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue }
+$worker = Join-Path $root 'Scripts\SmartM365-EndpointMigration-PsExecWorker.ps1'
+$tokens=$null; $errors=$null
+$workerAst=[Management.Automation.Language.Parser]::ParseFile($worker,[ref]$tokens,[ref]$errors)
+if ($errors.Count) { throw $errors[0].Message }
+$statusBranch=$workerAst.Find({param($n) $n -is [Management.Automation.Language.IfStatementAst] -and $n.Extent.Text.StartsWith('if ($attemptResult.Completed)') -and $n.Extent.Text.Contains('REMOTE_EXECUTION_ACCESS_DENIED')},$true)
+if (-not $statusBranch) { throw 'Transport status branch not found' }
+$classify=[scriptblock]::Create($statusBranch.Extent.Text)
+function Set-WorkerStatus { param($Status,$Detail,$NextAction); $script:observedStatus=$Status; $script:observedNextAction=$NextAction }
+foreach ($exitCode in @('-1073741790','3221225506')) {
+    $attemptResult=[pscustomobject]@{Completed=$false;Detail='no result'}
+    $transport=[pscustomobject]@{Completed=$true;ExitCode=$exitCode;Detail=''}
+    $result=[ordered]@{ExitCode='';JobErrorMessage=''}
+    $remoteMode='ScheduledTask'
+    & $classify
+    if ($script:observedStatus -ne 'REMOTE_EXECUTION_ACCESS_DENIED' -or $script:observedNextAction -ne 'CHECK_TARGET_EXECUTION_ACCESS' -or $result.ExitCode -ne $exitCode) { throw "Incorrect status for exit $exitCode" }
+    $passed++
+}
 Write-Host "Summary: Passed=$passed; Failed=0"
 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDolToO9nxMn20B
-# RfHTMIwCrP2rOdQ/T47FAet+BSUwD6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD8Q9I2MvB62lGT
+# fh7kA1OejgPrNRtDWirRvt2pJJOehKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -177,14 +215,14 @@ Write-Host "Summary: Passed=$passed; Failed=0"
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBbVXJ709aM3cl0V/kLDO7z
-# WgwFy8FdzBvuPNgbgc+3izANBgkqhkiG9w0BAQEFAASCAYB9MRr7Xj9Uw5lvkYY4
-# /luWAFlyfxrmNZWTNhB46yPdRLojGHdA6Pk3PFHTXWceRj5EAIojErrpCZ82DkUQ
-# lI8RFwWkqI4FebDvy75QmguT93HBIy/qE6Z2g8Y1YPRhTeSYvku4fcyeTTADXnMQ
-# THrNqIgYy/RY9MCyQZnAotVl+63J32S04qpDCoIFa+TJn7gn+ttmpkVS1kvD051b
-# 7vjZkbBDVe8jY3zYm6yd7T8Qq3m0zM+SX2LNbQKijTo4xJguNMecERhYLh2y7Gpo
-# Z2u/+j14u3eeHkhr0Wh4k20qgZaXSg59dczxfLg2Q8mdJIG/SSA9QhwkBUJpJtXA
-# OvKPGqmFtCBKM3HtYhMROvz5shszxOk//y7jPxqZlauqZYsuiXEgCcmZVJaE5euC
-# wsrHv9DB6av9Ju7Tlgjzly/J1kEz9HY06qWyuVbHyHbCVqvkpQKJVZwni4Gfd/Lw
-# CLz8kg6qjWUFgvQ7oStefOnVf0eWPpSmwDUIO802TZyip/s=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB68wZazcqzHyit/s38DAOR
+# E/Bj3DsRK58UuGYakvXA0zANBgkqhkiG9w0BAQEFAASCAYCOGneVh8mpC32Y9ZEv
+# biC8o0N2nWU8X8KWbnMqurWD8/CqmHQkBkzzUQ0KwuU3wx2rhQsXw5fD2YEuGlYn
+# O/hCI/CuXZ9fZP8Z/88ZQuZS2iubD7HX/2IAlSBUEd1fXPHvoiv21/I0AcFIdYGQ
+# iDN4nuV9PSPyITO28jYas/xDgTNaSgqiDfK4ok6PjuOiVHVpfozvM/S3LpKZtoyl
+# c8V/5gzGbOtYg7pbBXEz2OmdxusO9fRKeqA3TrLRz/ykJjeLKsi/GyA6D7nHyioK
+# gegkr8E8OygxP7S1qWvJVN/8QNnPaUcVbMHMAWCiPPEQZc0mEYFS7ptIIHX00FrE
+# DH01IOYLrV6YN/DeYDa80r8QRJEwmIe8a0je2ErHGPnCJCctCft28fuZctOr984w
+# OdQVh+YUP7/xBZieiiuolgKHMP0YX+qIhgMpUXi0nL8767xS8LZAUEynYlmBL/2V
+# 92OxcQ3rx3kU1azQXOkyZpcObHPMzuLkaw1iLLtQls7a3pY=
 # SIG # End signature block

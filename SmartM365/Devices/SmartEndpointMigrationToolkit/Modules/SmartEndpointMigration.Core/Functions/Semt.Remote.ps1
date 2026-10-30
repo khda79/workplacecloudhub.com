@@ -160,7 +160,16 @@ function Invoke-SemtSystemTaskEndpoint {
         $exitCode = [string]$task.LastTaskResult
         # Re-read the definition and refuse cleanup if the identity has changed.
         $actual = $task.Definition
-        if ($actual.Actions.Count -ne 1 -or $actual.Actions.Item(1).Path -ine '%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe' -or $actual.Actions.Item(1).Arguments -cne $r.Arguments -or $actual.Principal.LogonType -ne 5 -or $actual.Principal.UserId -notin @('SYSTEM','S-1-5-18')) {
+        $principalSid = ''
+        try {
+            $principal = [string]$actual.Principal.UserId
+            if ($principal -match '^S-\d-') {
+                $principalSid = ([System.Security.Principal.SecurityIdentifier]::new($principal)).Value
+            } else {
+                $principalSid = ([System.Security.Principal.NTAccount]::new($principal)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+            }
+        } catch { $principalSid = '' }
+        if ($actual.Actions.Count -ne 1 -or $actual.Actions.Item(1).Path -ine '%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe' -or $actual.Actions.Item(1).Arguments -cne $r.Arguments -or $actual.Principal.LogonType -ne 5 -or $principalSid -ne 'S-1-5-18') {
             throw 'Task identity changed; cleanup refused.'
         }
         $scriptPath = if ($r.Mode -eq 'WinRM') { $r.Script } else { $r.ShareScript }
@@ -847,8 +856,8 @@ function Test-SemtTrustedDataFolder {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3ga/URnHzvpdm
-# VEDMq35wdB4QNRtIdeh8zcdSknMwbKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKsS0cxFP3f4Jj
+# PWJJ4o5F+KSjjjKVHWlzOoUsumDxDaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -878,14 +887,14 @@ function Test-SemtTrustedDataFolder {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCADUaVSZvYF+H+DqEPdca6X
-# zhpZhkleE20TRK617bMPJDANBgkqhkiG9w0BAQEFAASCAYAaFk7WKnpVYJNn95Hs
-# d541f55Sg9ogt4nfVM/EUmpJSKRiW5cKViACTLNoGt8bXGpTsfD+RZeyYNS5uJIE
-# W5ROgk0I5zkEeVYcpnkiwkcC2PY5gCzbwi5T5ceMnz2jt3vLhmYKfvNF1h4qrXAd
-# GPYekiomIFXLbqy2GygHfhMBjRr4ceEeisA+Jg1yAYg+IslzaT/G9xkFBRQY8eHn
-# MFKnAXhBuFRzb4rDI7GABaOrCORHd7OxtaFaHU0zzWngK86KUS/Na8WXBtNt3zOE
-# YNzIEFoQF1IJRFc49/GCwjVt7zKqmoBbj6zcGYBiHOqeD/ZD7qRLjreUYs2R8BOq
-# HUizGVjKrvUJy1ulAppZq0iz1KcCj0VA4Rebzv2VDcnG/khHnbn2yAVW84gaeJZ3
-# 3W1GVQZZGxGd8mK1ggiaFHw9iuC36U7dMSrEdq5Kjdw/r6huWX6Ewf9Zt0bG0cg9
-# JC+YVDLHY8PU2Ed42/VW+9yakKfEcm5i5erMwc69A9gyBwc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBVjOvDtneFK3b9HbWOc7Yl
+# +fTi6IkPo280G5hUqb35FTANBgkqhkiG9w0BAQEFAASCAYAfbPE5UFik6U9JdZxr
+# 0gnwjB5ZAhk+mlO2kKYnluzQ82WVLINzAzMIcH8yOHlaQl75BT+NUYhKoW8z17/x
+# V5qTpUC6hgoNH0W7o+fuX4LS7J/0LQTBM6VOZtj1WuPNTUikxiPebDiZVtk/nlx4
+# TYE5I35nJnNo5TmlAPiSh7HONMaq+TSmYKF20S+04acGS6yTUTX8rvMqZqMB0PAg
+# 24kOuaCBF0b6HJcBQd4D4KyuPWZ9XlPUs2J8mEtjEqsscEAX05rH+PCenFllmrUK
+# xStfrMRPh7N89f3DTJ6BNAJggncGjyWRykvu3IP+RimhnhlrcEUGsB3BZ6Tvcegm
+# PsFw3D2ujj/MHn5jVlJI/cVY0iMP26Mz75rX7weeYkS4kcexMx900bHKMLI5rB9+
+# H7+TFws1nIODngqAY6it8A0E/TNGz7iUrZtIhvHfQjJfEM7KLwXEXojufIgrA8Zy
+# elvIyrkK4C3vsSmfXGnRUgwEpk1Zvr78T49Odna6GMLiFiw=
 # SIG # End signature block

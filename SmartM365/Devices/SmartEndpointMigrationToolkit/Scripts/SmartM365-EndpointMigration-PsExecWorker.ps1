@@ -234,6 +234,9 @@ try {
                 if ($attemptResult.Completed) {
                     Set-ResultFromAttempt -Attempt $attemptResult.Result
                     if (-not $transport.Completed) { $result.JobErrorMessage = ('Remote cleanup unconfirmed: {0}' -f $transport.Detail) }
+                } elseif ($transport.Completed -and $transport.ExitCode -in @('-1073741790','3221225506')) {
+                    Set-WorkerStatus -Status 'REMOTE_EXECUTION_ACCESS_DENIED' -Detail ("{0} task returned 0xC0000022 (access denied), with no completed result for this attempt." -f $remoteMode) -NextAction 'CHECK_TARGET_EXECUTION_ACCESS'
+                    $result.ExitCode = $transport.ExitCode
                 } elseif ($transport.Completed) {
                     Set-WorkerStatus -Status 'REMOTE_RESULT_INCOMPLETE' -Detail ("{0} task finished with exit code {1}, but no completed result was found. {2}" -f $remoteMode,$transport.ExitCode,$attemptResult.Detail) -NextAction 'CHECK_TARGET_ENDPOINT_LOG'
                     $result.ExitCode = $transport.ExitCode
@@ -285,8 +288,8 @@ Write-SemtLogLine -Path $logPath -Message ("Worker completed. Status={0}; NextAc
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+q4dW41pLZnDH
-# uBZ5X9eaNmQgPe+0FGNjjs/ta25XqKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfZnmV8UfATY8d
+# eEVihsjYqvLh+xHx831yiewjNC5A5qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -316,14 +319,14 @@ Write-SemtLogLine -Path $logPath -Message ("Worker completed. Status={0}; NextAc
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDyjntsXRAIb8DkSeDrXX+k
-# br1XybGjgUPU9ljHWQSfmTANBgkqhkiG9w0BAQEFAASCAYAcFrfwtn2zwwl1B4tK
-# cklgUuetPTu07AXefHsNK9EUea6FAAtrbOQ207hS1rqzbx5IUdWht0vL16L5eg+C
-# FuvgvrieHjZL9p2ed2R/CsS4q5aBLeqm1+S13+E2J+DprG39CZOHpcYXlkMg8yUa
-# 9F+k1DrJhRwz0+VCF+poKjTzMHUxLmj59KpBtagw7+dS2jX+dd80g22DHE4RvtnA
-# UW1MXmIRFH2kQ9I2MECeBr2oZaxcE4AnAgYJj9Tui0O8N44DuTgRSpm0Rvps3swd
-# j0sTEUToAPc09SsbZXav5ftTSo7t8wILIv3DJP5QakptBJcq2eHNlPodILKj3xuv
-# 1KXVgRFXHKSJmtiEWtfBd9QE/2c0qvs/p2Aopc49rrr62xeEKZhf0jWwTZMZVYud
-# Ppy+/p+U/8MIXu7iEqo4GLFFFOyPuI9qxbnrs/gkpADfxOqtB69yw5uNwxcAZlIg
-# NoDQASjViiBG53rKIGtCrJQQ59OLFPf5d86/+4tv2tLy9Sc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBg/QvctclOQWpmPkKmZdrq
+# 4hdAUo/uyh/WMF2+plCHzjANBgkqhkiG9w0BAQEFAASCAYBy6kiZtuPmdNvogy5C
+# 5I7C658LFMPTPEzs/fNzC9AUjJz0emyQE/oEiqjOiRDvSEHnD8Ke+7iFXGiGGRYA
+# 5UNR9Vmfychy9SjkiBu4ODenIV+n1g0W4PcmbE1pHQQCuGvIzen1Ki24EEewCQbI
+# fLG99R2AGKnaUUtcqmTQXiRay/9lrw8IZ9ch8GXBHnkG+YlhtufoFQHHrgtwbOLE
+# hJSfLNEUCPcy+ybnGSkC8uBTzOFt+lbLxtcQ9IlYWbCwsVHosljxtGu37NwsK0ql
+# QbzuWPvDD8x7lEYzGVm1QD1j60lBM4G0Y7tXvSAcEq8UsEEIdPAPD7YzwETLDUST
+# VvA/pbxrO0OCjWJrA66LOK4lq1acElfU7VgwCzSYtxfbzdi8v7RJruWhc+NqU+YF
+# 5Yh8WDmtoTz5yKOp310hA0vO6WptBwVxCuFrxYQLwi/o4nSH+V3XpTUJtyVKwyfB
+# 6I95Z2vxpJ7F3N+I+JHaDZNX++E1gnBmFSxQH0jw6APl9Fo=
 # SIG # End signature block
