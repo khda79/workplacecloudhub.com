@@ -668,7 +668,7 @@ function Get-SmartM365OrchestratorTimeoutPolicyExceptions {
     [CmdletBinding()]
     param()
     [ordered]@{
-        'AD-Inventory'                  = 'Shares the AD-WorkplaceScope key; 240 minutes bounds how long AD holds WorkplaceScope back.'
+        'AD-Inventory'                  = 'Shares the AD-WorkplaceScope key; 360 minutes bounds how long AD holds WorkplaceScope back.'
         'M365-WorkplaceScope-Inventory' = 'Shares the AD-WorkplaceScope key; 480 minutes bounds how long WorkplaceScope holds AD back.'
         'EXO-Mailboxes-Inventory'       = 'Shares the EXOMailboxes key; 2160 minutes bounds how long a full run holds the daily Fast chain back.'
         'Exchange2016-FreeBusy-Check'   = 'Short weekly check; keeps its own timeout.'

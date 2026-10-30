@@ -250,7 +250,7 @@ foreach ($path in $paths) {
     $ad = @($document.Jobs | Where-Object Name -eq 'AD-Inventory')[0]
     $scope = @($document.Jobs | Where-Object Name -eq 'M365-WorkplaceScope-Inventory')[0]
     Assert-True ($ad.ConcurrencyKey -eq 'AD-WorkplaceScope' -and $scope.ConcurrencyKey -eq $ad.ConcurrencyKey) 'AD and WorkplaceScope collections can run at the same time.'
-    Assert-True ($ad.TimeoutMinutes -eq 240 -and $scope.TimeoutMinutes -eq 480) 'AD or WorkplaceScope timeout changed.'
+    Assert-True ($ad.TimeoutMinutes -eq 360 -and $scope.TimeoutMinutes -eq 480) 'AD or WorkplaceScope timeout changed.'
     $sync = @($document.Jobs | Where-Object Name -eq 'M365-SyncHealth-Inventory')[0]
     Assert-True ($sync.Schedule.MissedRunPolicy -eq 'Skip') 'SyncHealth can accumulate catch-up monitoring runs.'
     if ($isTemplate) {

@@ -63,7 +63,8 @@ evening because collection can take several hours. It shares the `AD-WorkplaceSc
 concurrency key with AD-Inventory: the two memory-heavy collections never run at the
 same time anywhere in the cluster. WorkplaceScope normally ends long before AD starts at
 00:10; its 480-minute timeout bounds how long it can hold AD back (02:00 without a
-retry). AD-Inventory has a 240-minute timeout. A server restart during the evening can
+retry). AD-Inventory has a 360-minute timeout (240 before 30/10/2026: slower reads and merges
+of CSV files on the shared data folder brought a run to 3 h 36). A server restart during the evening can
 interrupt WorkplaceScope; its catch-up run then delays AD by the remaining collection
 time. AD and WorkplaceScope are therefore intentional exceptions of the timeout policy:
 `Set-SmartM365-OrchestratorTimeoutPolicy.ps1` keeps them unchanged and the audit lists
