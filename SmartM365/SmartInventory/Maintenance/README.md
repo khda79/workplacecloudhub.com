@@ -2,7 +2,7 @@
 
 ## Orchestrator server acceptance
 
-`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.5, PowerShell 7.2+) qualifies a server before it
+`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.6, PowerShell 7.2+) qualifies a server before it
 is switched from Inactive to Active in the orchestrator GUI. The orchestrator capability probe only
 signs in or loads a module; this script makes a real, limited read for each capability, checks the
 rows, then drops them.
@@ -21,7 +21,7 @@ What it guarantees:
 | Capability | Real test | Data checks |
 |---|---|---|
 | RunAccount | Running identity; `-ExpectedAccount` fails another account, otherwise compared with the account of the orchestrator scheduled task | |
-| Modules | PowerShell 7 and 5.1; the modules the jobs import: Microsoft.Graph Authentication, Users, Groups, Identity.DirectoryManagement, Reports, DeviceManagement, Beta.Groups, Beta.DeviceManagement, ExchangeOnlineManagement, ImportExcel (required), MicrosoftTeams >= 4.7.1, ActiveDirectory, Adaxes (optional); every Microsoft.Graph module at the Authentication version; Exchange and SharePoint snap-ins | missing required module = FAIL |
+| Modules | PowerShell 7 and 5.1; Python 3.10+ from `PreparedPythonCommand` of the WorkplaceEvidence-Prepare configuration (WARN when missing: no orchestrator capability covers it); the modules the jobs import: Microsoft.Graph Authentication, Users, Groups, Identity.DirectoryManagement, Reports, DeviceManagement, Beta.Groups, Beta.DeviceManagement, ExchangeOnlineManagement, ImportExcel (required), MicrosoftTeams >= 4.7.1, ActiveDirectory, Adaxes (optional); every Microsoft.Graph module at the Authentication version; Exchange and SharePoint snap-ins | missing required module = FAIL |
 | CodeSigning | Authenticode status of the script, Core, distributed module and orchestrator; execution policy | |
 | Network | HTTPS to login, Graph, Exchange Online and the SharePoint host; Teams endpoints (teams.microsoft.com, api.interfaces.records.teams.microsoft.com); proxy used; latency | any HTTP answer = reachable; unreachable Teams endpoint = WARN |
 | Clock | Offset against the Date header of the Entra sign-in endpoint | WARN 60 s, FAIL 300 s |
@@ -40,6 +40,13 @@ What it guarantees:
 Each data set must return 1 to N rows, with key columns filled, values in the expected format
 (GUID, SMTP address, URL, plausible dates) and no duplicate key. A domain that fails while others
 succeed is WARN; every domain failing is FAIL.
+
+The run ends with a summary in several tables: 1. server and run (server, OS, account, tenant,
+PowerShell versions, code and data roots, duration); 2. capabilities (status, seconds, one-line result);
+3. real extractions (capability, data set, domain or scope, rows, seconds, checks); 4. measurements
+(modules and versions, code signing, network endpoints, clock and certificate, shares, latency and
+disks); 5. catalog jobs this server could not run and what they miss; then the totals and a verdict
+(READY, READY WITH WARNINGS or NOT READY with the capabilities to fix).
 
 A capability whose component is not installed (module or snap-in) is SKIPPED, or FAIL when it was
 named with `-Capability`. After a time-out, the detail names the last step the child process

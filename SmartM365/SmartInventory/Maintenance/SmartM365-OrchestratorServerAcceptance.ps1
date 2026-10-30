@@ -37,7 +37,7 @@ the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.5
+1.0.6
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -302,12 +302,14 @@ function Get-SmartM365AcceptanceChildAssessment {
     param([Parameter(Mandatory = $true)]$Child, [Parameter(Mandatory = $true)][int]$SampleSize, [switch]$Requested)
 
     if ([bool]$Child.ComponentMissing) {
-        return [pscustomobject]@{ Status = $(if ($Requested) { 'FAIL' } else { 'SKIPPED' }); Detail = [string]$Child.Detail }
+        return [pscustomobject]@{ Status = $(if ($Requested) { 'FAIL' } else { 'SKIPPED' }); Detail = [string]$Child.Detail; Extractions = @() }
     }
-    if (-not [bool]$Child.Ready) { return [pscustomobject]@{ Status = 'FAIL'; Detail = [string]$Child.Detail } }
+    if (-not [bool]$Child.Ready) { return [pscustomobject]@{ Status = 'FAIL'; Detail = [string]$Child.Detail; Extractions = @() } }
 
     $statuses = [System.Collections.Generic.List[string]]::new()
     $parts = [System.Collections.Generic.List[string]]::new()
+    # One line per data set and scope for the final extraction table (counts and checks only).
+    $extractions = [System.Collections.Generic.List[object]]::new()
     if ([string]$Child.Detail) { $parts.Add([string]$Child.Detail) }
     foreach ($group in @(@($Child.Datasets) | Group-Object Name)) {
         $failedScopes = 0
@@ -316,6 +318,7 @@ function Get-SmartM365AcceptanceChildAssessment {
             if ([string]$dataset.Error) {
                 $failedScopes++
                 $parts.Add(('{0}: read failed: {1}' -f $label, $dataset.Error))
+                $extractions.Add([pscustomobject]@{ Dataset = [string]$dataset.Name; Scope = [string]$dataset.Scope; Rows = '-'; Seconds = $dataset.DurationSeconds; Status = 'FAIL'; Checks = 'read failed: ' + [string]$dataset.Error })
                 continue
             }
             $spec = Get-SmartM365AcceptanceDatasetSpec -Name ([string]$dataset.Name)
@@ -324,10 +327,16 @@ function Get-SmartM365AcceptanceChildAssessment {
             $text = '{0}: {1} row(s) in {2} s' -f $label, $check.Count, $dataset.DurationSeconds
             if ($check.Issues.Count -gt 0) { $text += ' (' + ($check.Issues -join '; ') + ')' }
             $parts.Add($text)
+            $extractions.Add([pscustomobject]@{ Dataset = [string]$dataset.Name; Scope = [string]$dataset.Scope; Rows = $check.Count; Seconds = $dataset.DurationSeconds; Status = $check.Status; Checks = $(if ($check.Issues.Count) { $check.Issues -join '; ' } else { 'keys filled, formats valid, no duplicate' }) })
         }
-        if ($failedScopes -gt 0) { $statuses.Add($(if ($failedScopes -eq $group.Count) { 'FAIL' } else { 'WARN' })) }
+        if ($failedScopes -gt 0) {
+            $groupStatus = if ($failedScopes -eq $group.Count) { 'FAIL' } else { 'WARN' }
+            $statuses.Add($groupStatus)
+            # A domain failing while others read is a warning for the capability, not a failure.
+            foreach ($row in @($extractions | Where-Object { $_.Dataset -eq [string]$group.Name -and $_.Rows -eq '-' })) { $row.Status = $groupStatus }
+        }
     }
-    return [pscustomobject]@{ Status = Get-SmartM365AcceptanceWorstStatus -Status @($statuses); Detail = ($parts -join ' | ') }
+    return [pscustomobject]@{ Status = Get-SmartM365AcceptanceWorstStatus -Status @($statuses); Detail = ($parts -join ' | '); Extractions = $extractions.ToArray() }
 }
 
 function Get-SmartM365AcceptanceModuleAssessment {
@@ -424,9 +433,120 @@ function Resolve-SmartM365AcceptanceTokens {
     return $resolved
 }
 
+function Get-SmartM365AcceptanceShortResult {
+    <# One short line per capability for the final table, read from the detail of the check. #>
+    param([Parameter(Mandatory = $true)][string]$Capability, [string]$Status, [AllowEmptyString()][string]$Detail)
+    $text = [string]$Detail
+    $first = (($text -split ' \| ')[0] -split '; ')[0]
+    if ($Status -eq 'SKIPPED') { return 'component not installed on this server' }
+    $short = switch ($Capability) {
+        'RunAccount' {
+            $account = [regex]::Match($text, 'running as (\S+?);').Groups[1].Value
+            if ($text -match 'account of the orchestrator scheduled task\)') { '{0} (orchestrator service account)' -f $account }
+            elseif ($text -match 'scheduled task runs as (\S+?):') { '{0}, not the service account {1}' -f $account, $Matches[1] }
+            else { $account }
+        }
+        'Modules' {
+            $problems = @($text -split '; ' | Where-Object { $_ -match 'missing|below|not at|Windows PowerShell 5\.1:' })
+            if ($problems.Count) { $problems -join '; ' } else { 'required modules present' }
+        }
+        'CodeSigning' {
+            $unsigned = @($text -split '; ' | Where-Object { $_ -match '\.ps[dm]?1: ' -and $_ -notmatch ': Valid' } | ForEach-Object { ($_ -split ' by ')[0] })
+            if ($unsigned.Count) { $unsigned -join '; ' } else { 'checked files signed (Valid)' }
+        }
+        'Network' {
+            $reachable = [regex]::Matches($text, ': HTTP \d+').Count
+            $down = @([regex]::Matches($text, '(?:^|; )(\S+?)(?: \(Teams\))?: unreachable') | ForEach-Object { $_.Groups[1].Value })
+            '{0} of {1} endpoint(s) reachable{2}' -f $reachable, ($reachable + $down.Count), $(if ($down.Count) { '; unreachable: ' + ($down -join ', ') } else { '' })
+        }
+        'Clock' { $offset = [regex]::Match($text, 'local clock (\S+) s'); if ($offset.Success) { 'offset {0} s' -f $offset.Groups[1].Value } else { $first } }
+        'Certificate' {
+            $expiry = [regex]::Match($text, 'expires (\S+) \S+ UTC \((-?\d+) day')
+            if ($Status -ne 'FAIL' -and $expiry.Success) { 'private key usable, expires {0} ({1} days)' -f $expiry.Groups[1].Value, $expiry.Groups[2].Value } else { $first }
+        }
+        'SharedRuntime' {
+            $parts = @(@($text -split '; ' | Where-Object { $_ -match 'not accessible|unreachable|could not|No answer|witness: ' }))
+            $smb = [regex]::Match($text, 'witness[^:]*: median (\S+) ms'); if ($smb.Success) { $parts += 'DATA SMB median {0} ms' -f $smb.Groups[1].Value }
+            $code = [regex]::Match($text, 'read/metadata/list: median (\S+) ms'); if ($code.Success) { $parts += 'code {0} ms' -f $code.Groups[1].Value }
+            $free = [regex]::Match($text, 'DATA free (\S+) %'); if ($free.Success) { $parts += 'DATA free {0} %' -f $free.Groups[1].Value }
+            $parts -join ', '
+        }
+        { $_ -in @('AD', 'Graph', 'EXO', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes') } {
+            $read = [regex]::Matches($text, ': (\d+) row\(s\)')
+            $failedScopes = [regex]::Matches($text, ': read failed').Count
+            if ($read.Count -eq 0 -and $failedScopes -eq 0) { $first }
+            else {
+                $rows = 0; foreach ($match in $read) { $rows += [int]$match.Groups[1].Value }
+                $notes = @()
+                if ($failedScopes) { $notes += '{0} read failure(s)' -f $failedScopes }
+                if ($text -match 'unexpected format') { $notes += 'format warnings' }
+                if ($text -match 'duplicated') { $notes += 'duplicates' }
+                if ($text -match 'users skipped because') { $notes += 'unreadable users skipped' }
+                if ($text -match 'check the Adaxes permissions') { $notes += 'check Adaxes permissions' }
+                if ($text -match 'Windows PowerShell 5\.1 ActiveDirectory read failed') { $notes += 'AD read failed in Windows PowerShell 5.1' }
+                '{0} of {1} data set(s) read, {2} row(s){3}' -f $read.Count, ($read.Count + $failedScopes), $rows, $(if ($notes.Count) { ' (' + ($notes -join ', ') + ')' } else { '' })
+            }
+        }
+        default { $first }
+    }
+    $short = [string]$short
+    if ($short.Length -gt 90) { $short = $short.Substring(0, 87) + '...' }
+    return $short
+}
+
+function Format-SmartM365AcceptanceTable {
+    <# Text table for the final summary. Returns { Status; Text } lines; Status (when the row has one) colors the line. #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Title,
+        [Parameter(Mandatory = $true)][string[]]$Columns,
+        [AllowEmptyCollection()][object[]]$Rows = @(),
+        [int]$MaxColumnWidth = 70
+    )
+    $cells = @(foreach ($row in $Rows) {
+            , @(foreach ($column in $Columns) {
+                    $property = $row.PSObject.Properties[$column]
+                    $value = if ($null -eq $property -or $null -eq $property.Value) { '' } elseif ($property.Value -is [double] -or $property.Value -is [decimal]) { ([double]$property.Value).ToString('0.0', [Globalization.CultureInfo]::InvariantCulture) } elseif ($property.Value -is [IFormattable]) { $property.Value.ToString($null, [Globalization.CultureInfo]::InvariantCulture) } else { [string]$property.Value }
+                    $value = $value -replace '[\r\n]+', ' '
+                    if ($value.Length -gt $MaxColumnWidth) { $value.Substring(0, $MaxColumnWidth - 3) + '...' } else { $value }
+                })
+        })
+    $widths = @(for ($index = 0; $index -lt $Columns.Count; $index++) {
+            $width = $Columns[$index].Length
+            foreach ($rowCells in $cells) { if ($rowCells[$index].Length -gt $width) { $width = $rowCells[$index].Length } }
+            $width
+        })
+    $join = { param($values) ((@(for ($index = 0; $index -lt $values.Count; $index++) { ([string]$values[$index]).PadRight($widths[$index]) }) -join '  ').TrimEnd()) }
+    $lines = [System.Collections.Generic.List[object]]::new()
+    $lines.Add([pscustomobject]@{ Status = ''; Text = '' })
+    $lines.Add([pscustomobject]@{ Status = ''; Text = $Title })
+    $lines.Add([pscustomobject]@{ Status = ''; Text = (& $join $Columns) })
+    $lines.Add([pscustomobject]@{ Status = ''; Text = (& $join @($widths | ForEach-Object { '-' * $_ })) })
+    if ($cells.Count -eq 0) { $lines.Add([pscustomobject]@{ Status = ''; Text = '(none)' }) }
+    for ($rowIndex = 0; $rowIndex -lt $cells.Count; $rowIndex++) {
+        $statusProperty = $Rows[$rowIndex].PSObject.Properties['Status']
+        $lines.Add([pscustomobject]@{ Status = $(if ($statusProperty) { [string]$statusProperty.Value } else { '' }); Text = (& $join $cells[$rowIndex]) })
+    }
+    return $lines.ToArray()
+}
+
+function Get-SmartM365AcceptanceVerdict {
+    param([AllowEmptyCollection()][object[]]$Results = @())
+    $failed = @($Results | Where-Object Status -eq 'FAIL' | ForEach-Object Capability)
+    $warned = @($Results | Where-Object Status -eq 'WARN' | ForEach-Object Capability)
+    if ($failed.Count) { return [pscustomobject]@{ Status = 'FAIL'; Text = ('NOT READY: fix {0} before activating this server, or keep the jobs that need them away from it.' -f ($failed -join ', ')) } }
+    if ($warned.Count) { return [pscustomobject]@{ Status = 'WARN'; Text = ('READY WITH WARNINGS: review {0}.' -f ($warned -join ', ')) } }
+    return [pscustomobject]@{ Status = 'PASS'; Text = 'READY: every tested capability passed.' }
+}
+
 #endregion
 
 #region Runtime helpers
+
+function Add-AcceptanceMeasurement {
+    <# Collects one measured value for the final summary (no row value of the tenant). #>
+    param([string]$Section, [string]$Item, [AllowEmptyString()][string]$Value, [string]$Status = 'PASS')
+    $script:Measurements.Add([pscustomobject]@{ Section = $Section; Item = $Item; Value = $Value; Status = $Status })
+}
 
 function Get-AcceptanceConfigValue {
     param([Parameter(Mandatory = $true)][string]$Name, $Default = '')
@@ -853,13 +973,33 @@ function Test-AcceptanceModules {
     $installed = @(Get-Module -ListAvailable -Name @($script:ExpectedModules.Name + 'Microsoft.Graph.*') -ErrorAction SilentlyContinue | Select-Object Name, Version)
     $assessment = Get-SmartM365AcceptanceModuleAssessment -Installed $installed -Expected $script:ExpectedModules
     $statuses.Add($assessment.Status); $parts.Add($assessment.Detail)
+    Add-AcceptanceMeasurement -Section 'Modules' -Item 'PowerShell 7' -Value ([string]$PSVersionTable.PSVersion) -Status $(if ($PSVersionTable.PSVersion -lt [version]'7.2') { 'FAIL' } else { 'PASS' })
+    foreach ($module in $script:ExpectedModules) {
+        $latest = @($installed | Where-Object { [string]$_.Name -eq [string]$module.Name } | ForEach-Object { [version][string]$_.Version } | Sort-Object -Descending | Select-Object -First 1)
+        $missingStatus = if ([bool]$module.Required) { 'FAIL' } else { 'WARN' }
+        $moduleStatus = if ($latest.Count -eq 0) { $missingStatus } elseif ([string]$module.Minimum -and $latest[0] -lt [version][string]$module.Minimum) { $missingStatus } else { 'PASS' }
+        $value = if ($latest.Count) { [string]$latest[0] } else { 'missing' }
+        if ([string]$module.Minimum) { $value += ' (minimum {0})' -f $module.Minimum }
+        if (-not [bool]$module.Required) { $value += ', optional' }
+        Add-AcceptanceMeasurement -Section 'Modules' -Item ([string]$module.Name) -Value $value -Status $moduleStatus
+    }
+    $python = Test-AcceptancePython
+    $statuses.Add($python.Status); $parts.Add($python.Detail)
+    Add-AcceptanceMeasurement -Section 'Modules' -Item 'Python 3.10+ (WorkplaceEvidence-Prepare)' -Value $python.Detail -Status $python.Status
     $windows = Invoke-AcceptanceChildProcess -EnginePath $script:WindowsPowerShellPath -ScriptText $script:WindowsPowerShellInventoryScript -Environment $script:ChildEnvironment -TimeoutSeconds 120
-    if (-not [bool]$windows.Ready) { $statuses.Add('FAIL'); $parts.Add('Windows PowerShell 5.1: ' + $windows.Detail) }
+    if (-not [bool]$windows.Ready) {
+        $statuses.Add('FAIL'); $parts.Add('Windows PowerShell 5.1: ' + $windows.Detail)
+        Add-AcceptanceMeasurement -Section 'Modules' -Item 'Windows PowerShell 5.1' -Value ([string]$windows.Detail) -Status 'FAIL'
+    }
     else {
         $info = $windows.Info
         if ([version][string]$info.Version -lt [version]'5.1') { $statuses.Add('FAIL') }
         $parts.Add(('Windows PowerShell {0} (ActiveDirectory={1}, Exchange snap-in={2}, SharePoint snap-in={3})' -f $info.Version, $info.ActiveDirectory, $info.ExchangeSnapIn, $info.SharePointSnapIn))
         $script:WindowsPowerShellInfo = $info
+        Add-AcceptanceMeasurement -Section 'Modules' -Item 'Windows PowerShell' -Value ([string]$info.Version)
+        Add-AcceptanceMeasurement -Section 'Modules' -Item 'ActiveDirectory (5.1)' -Value $(if ([bool]$info.ActiveDirectory) { 'present' } else { 'missing' }) -Status $(if ([bool]$info.ActiveDirectory) { 'PASS' } else { 'WARN' })
+        Add-AcceptanceMeasurement -Section 'Modules' -Item 'Exchange snap-in (5.1)' -Value $(if ([bool]$info.ExchangeSnapIn) { 'registered' } else { 'not registered' }) -Status $(if ([bool]$info.ExchangeSnapIn) { 'PASS' } else { 'SKIPPED' })
+        Add-AcceptanceMeasurement -Section 'Modules' -Item 'SharePoint snap-in (5.1)' -Value $(if ([bool]$info.SharePointSnapIn) { 'registered' } else { 'not registered' }) -Status $(if ([bool]$info.SharePointSnapIn) { 'PASS' } else { 'SKIPPED' })
     }
     return [pscustomobject]@{ Status = Get-SmartM365AcceptanceWorstStatus -Status @($statuses); Detail = ($parts -join '; ') }
 }
@@ -878,10 +1018,13 @@ function Test-AcceptanceCodeSigning {
     foreach ($file in $files) {
         $signature = Get-AuthenticodeSignature -LiteralPath $file
         $status = [string]$signature.Status
-        if ($status -ne 'Valid') { $statuses.Add($(if ($policy -eq 'AllSigned') { 'FAIL' } else { 'WARN' })) }
+        $fileStatus = if ($status -eq 'Valid') { 'PASS' } elseif ($policy -eq 'AllSigned') { 'FAIL' } else { 'WARN' }
+        if ($fileStatus -ne 'PASS') { $statuses.Add($fileStatus) }
         $signer = if ($signature.SignerCertificate) { ' by ' + $signature.SignerCertificate.Subject } else { '' }
         $parts.Add(('{0}: {1}{2}' -f [IO.Path]::GetFileName($file), $status, $signer))
+        Add-AcceptanceMeasurement -Section 'Code signing' -Item ([IO.Path]::GetFileName($file)) -Value $status -Status $fileStatus
     }
+    Add-AcceptanceMeasurement -Section 'Code signing' -Item 'Execution policy' -Value $policy
     return [pscustomobject]@{ Status = Get-SmartM365AcceptanceWorstStatus -Status @($statuses); Detail = ($parts -join '; ') }
 }
 
@@ -897,12 +1040,18 @@ function Test-AcceptanceNetwork {
     $parts = [System.Collections.Generic.List[string]]::new()
     foreach ($uri in $endpoints) {
         $probe = Invoke-AcceptanceWebProbe -Uri $uri
+        $item = '{0}{1}' -f ([uri]$uri).Host, $(if ($uri -in $optional) { ' (Teams)' } else { '' })
         if (-not $probe.Reachable) {
-            $statuses.Add($(if ($uri -in $optional) { 'WARN' } else { 'FAIL' }))
-            $parts.Add(('{0}{1}: unreachable through {2}: {3}' -f ([uri]$uri).Host, $(if ($uri -in $optional) { ' (Teams)' } else { '' }), $probe.Proxy, $probe.Error)); continue
+            $endpointStatus = if ($uri -in $optional) { 'WARN' } else { 'FAIL' }
+            $statuses.Add($endpointStatus)
+            $parts.Add(('{0}: unreachable through {1}: {2}' -f $item, $probe.Proxy, $probe.Error))
+            Add-AcceptanceMeasurement -Section 'Network' -Item $item -Value ('unreachable ({0}): {1}' -f $probe.Proxy, $probe.Error) -Status $endpointStatus
+            continue
         }
-        if ($probe.Milliseconds -ge 2000) { $statuses.Add('WARN') }
+        $endpointStatus = if ($probe.Milliseconds -ge 2000) { 'WARN' } else { 'PASS' }
+        if ($endpointStatus -ne 'PASS') { $statuses.Add($endpointStatus) }
         $parts.Add(('{0}: HTTP {1} in {2} ms ({3})' -f ([uri]$uri).Host, $probe.StatusCode, $probe.Milliseconds, $probe.Proxy))
+        Add-AcceptanceMeasurement -Section 'Network' -Item $item -Value ('HTTP {0} in {1} ms ({2})' -f $probe.StatusCode, $probe.Milliseconds, $probe.Proxy) -Status $endpointStatus
     }
     return [pscustomobject]@{ Status = Get-SmartM365AcceptanceWorstStatus -Status @($statuses); Detail = ($parts -join '; ') }
 }
@@ -920,6 +1069,7 @@ function Test-AcceptanceClock {
     $status = Get-SmartM365AcceptanceClockStatus -OffsetSeconds $offset
     $source = ''
     try { $source = (& w32tm /query /source 2>$null | Select-Object -First 1) } catch { $source = '' }
+    Add-AcceptanceMeasurement -Section 'Clock and certificate' -Item 'Clock offset from Entra' -Value ('{0} s (source {1})' -f $offset, $(if ($source) { ([string]$source).Trim() } else { 'unknown' })) -Status $status
     return [pscustomobject]@{ Status = $status; Detail = ('local clock {0} s from Entra time (warning 60 s, failure 300 s); time source {1}' -f $offset, $(if ($source) { ([string]$source).Trim() } else { 'unknown' })) }
 }
 
@@ -927,6 +1077,7 @@ function Test-AcceptanceCertificate {
     if (-not $script:Thumbprint) { return [pscustomobject]@{ Status = 'FAIL'; Detail = 'Thumbprint is not configured for this tenant.' } }
     $readiness = Get-SmartM365OrchestratorCachedCertificateReadiness -Thumbprint $script:Thumbprint -Cache @{} -CacheMinutes 0 -ExpiryWarningDays 30
     $status = if (-not $readiness.Ready) { 'FAIL' } elseif ($readiness.ExpiresSoon) { 'WARN' } else { 'PASS' }
+    Add-AcceptanceMeasurement -Section 'Clock and certificate' -Item 'Application certificate' -Value $(if ($readiness.Ready) { '{0}, private key usable, expires {1} ({2} days)' -f $readiness.StorePath, ([datetime]$readiness.NotAfterUtc).ToUniversalTime().ToString('yyyy-MM-dd'), $readiness.DaysRemaining } else { [string]$readiness.Reason }) -Status $status
     $hint = ''
     if ([string]$readiness.Reason -in @('NotFound', 'PrivateKeyInaccessible') -and -not $ExpectedAccount) {
         $hint = '; expected when the certificate is in the personal store of the service account: run the test as that account'
@@ -942,6 +1093,7 @@ function Test-AcceptanceSharedRuntime {
     foreach ($probe in @(Test-SmartM365OrchestratorPathAccess -Checks $checks -TimeoutSeconds 30)) {
         if (-not $probe.Ready) { $statuses.Add('FAIL') }
         $parts.Add(('{0}: {1}' -f $probe.Name, $(if ($probe.Ready) { 'read/write OK' } else { $probe.Detail })))
+        Add-AcceptanceMeasurement -Section 'Shares and disks' -Item $probe.Name -Value $(if ($probe.Ready) { 'read/write OK' } else { $probe.Detail }) -Status $(if ($probe.Ready) { 'PASS' } else { 'FAIL' })
     }
 
     # Witness folder under WorkspaceRootPath: created, measured, removed.
@@ -954,8 +1106,12 @@ function Test-AcceptanceSharedRuntime {
         $median = Get-SmartM365AcceptancePercentile -Values $samples -Percent 50
         $statuses.Add((Get-SmartM365AcceptanceLatencyStatus -MedianMilliseconds $median -WarningMilliseconds $SmbWarningMilliseconds -FailureMilliseconds $SmbFailureMilliseconds))
         $parts.Add(('DATA witness write/read/metadata/delete: {0}' -f (Format-AcceptanceLatency $samples)))
+        Add-AcceptanceMeasurement -Section 'Shares and disks' -Item 'DATA SMB latency' -Value (Format-AcceptanceLatency $samples) -Status (Get-SmartM365AcceptanceLatencyStatus -MedianMilliseconds $median -WarningMilliseconds $SmbWarningMilliseconds -FailureMilliseconds $SmbFailureMilliseconds)
     }
-    catch { $statuses.Add('FAIL'); $parts.Add(('DATA witness: {0}' -f $_.Exception.Message)) }
+    catch {
+        $statuses.Add('FAIL'); $parts.Add(('DATA witness: {0}' -f $_.Exception.Message))
+        Add-AcceptanceMeasurement -Section 'Shares and disks' -Item 'DATA SMB latency' -Value $_.Exception.Message -Status 'FAIL'
+    }
     finally {
         if ([IO.Directory]::Exists($witnessFolder)) {
             try { [IO.Directory]::Delete($witnessFolder, $true) }
@@ -970,20 +1126,31 @@ function Test-AcceptanceSharedRuntime {
         $statuses.Add((Get-SmartM365AcceptanceLatencyStatus -MedianMilliseconds $median -WarningMilliseconds $SmbWarningMilliseconds -FailureMilliseconds $SmbFailureMilliseconds))
         $location = if ($script:SmartM365Root.StartsWith('\\')) { 'code share' } else { 'local code folder' }
         $parts.Add(('{0} read/metadata/list: {1}' -f $location, (Format-AcceptanceLatency $samples)))
+        Add-AcceptanceMeasurement -Section 'Shares and disks' -Item ('{0} latency' -f $location) -Value (Format-AcceptanceLatency $samples) -Status (Get-SmartM365AcceptanceLatencyStatus -MedianMilliseconds $median -WarningMilliseconds $SmbWarningMilliseconds -FailureMilliseconds $SmbFailureMilliseconds)
     }
-    catch { $statuses.Add('FAIL'); $parts.Add(('code share read: {0}' -f $_.Exception.Message)) }
+    catch {
+        $statuses.Add('FAIL'); $parts.Add(('code share read: {0}' -f $_.Exception.Message))
+        Add-AcceptanceMeasurement -Section 'Shares and disks' -Item 'code share latency' -Value $_.Exception.Message -Status 'FAIL'
+    }
 
     $space = Get-SmartM365OrchestratorVolumeFreeSpace -Path $script:WorkspaceRootPath -TimeoutSeconds 30
-    if (-not $space.Ready) { $statuses.Add('WARN'); $parts.Add(('DATA free space not measured: {0}' -f $space.Error)) }
+    if (-not $space.Ready) {
+        $statuses.Add('WARN'); $parts.Add(('DATA free space not measured: {0}' -f $space.Error))
+        Add-AcceptanceMeasurement -Section 'Shares and disks' -Item 'DATA free space' -Value ('not measured: {0}' -f $space.Error) -Status 'WARN'
+    }
     else {
-        $statuses.Add($(if ([double]$space.FreePercent -lt 10) { 'FAIL' } elseif ([double]$space.FreePercent -lt 15) { 'WARN' } else { 'PASS' }))
+        $spaceStatus = if ([double]$space.FreePercent -lt 10) { 'FAIL' } elseif ([double]$space.FreePercent -lt 15) { 'WARN' } else { 'PASS' }
+        $statuses.Add($spaceStatus)
         $parts.Add(('DATA free {0} % ({1} GiB of {2} GiB)' -f $space.FreePercent, $space.FreeGB, $space.TotalGB))
+        Add-AcceptanceMeasurement -Section 'Shares and disks' -Item 'DATA free space' -Value ('{0} % ({1} GiB of {2} GiB)' -f $space.FreePercent, $space.FreeGB, $space.TotalGB) -Status $spaceStatus
     }
     foreach ($drive in @(@([IO.Path]::GetPathRoot($env:SystemRoot), [IO.Path]::GetPathRoot([IO.Path]::GetTempPath())) | Sort-Object -Unique)) {
         $info = [IO.DriveInfo]::new($drive)
         $freeGB = [math]::Round($info.AvailableFreeSpace / 1GB, 1)
-        $statuses.Add($(if ($freeGB -lt 2) { 'FAIL' } elseif ($freeGB -lt 10) { 'WARN' } else { 'PASS' }))
+        $driveStatus = if ($freeGB -lt 2) { 'FAIL' } elseif ($freeGB -lt 10) { 'WARN' } else { 'PASS' }
+        $statuses.Add($driveStatus)
         $parts.Add(('local {0} free {1} GiB' -f $drive.TrimEnd('\'), $freeGB))
+        Add-AcceptanceMeasurement -Section 'Shares and disks' -Item ('Local {0} free space' -f $drive.TrimEnd('\')) -Value ('{0} GiB' -f $freeGB) -Status $driveStatus
     }
     return [pscustomobject]@{ Status = Get-SmartM365AcceptanceWorstStatus -Status @($statuses); Detail = ($parts -join '; ') }
 }
@@ -995,7 +1162,8 @@ function Test-AcceptanceAd {
     # The Exchange on-premises collectors read AD from Windows PowerShell 5.1.
     $windows = Invoke-AcceptanceChildProcess -EnginePath $script:WindowsPowerShellPath -ScriptText $script:AdWindowsPowerShellScript -Environment $script:ChildEnvironment -TimeoutSeconds 180
     $windowsStatus = if ([bool]$windows.Ready) { 'PASS' } else { 'WARN' }
-    return [pscustomobject]@{ Status = Get-SmartM365AcceptanceWorstStatus -Status @($assessment.Status, $windowsStatus); Detail = ('{0} | {1}' -f $assessment.Detail, $windows.Detail) }
+    Add-AcceptanceMeasurement -Section 'Modules' -Item 'ActiveDirectory read (5.1)' -Value ([string]$windows.Detail) -Status $windowsStatus
+    return [pscustomobject]@{ Status = Get-SmartM365AcceptanceWorstStatus -Status @($assessment.Status, $windowsStatus); Detail = ('{0} | {1}' -f $assessment.Detail, $windows.Detail); Extractions = $assessment.Extractions }
 }
 
 function Get-AcceptanceGraphChild {
@@ -1055,12 +1223,41 @@ function Test-AcceptanceTeams {
     return Get-SmartM365AcceptanceChildAssessment -Child $child -SampleSize $SmallSampleSize -Requested:($script:Requested -contains 'TeamsPowerShell')
 }
 
-function Get-AcceptanceAdaxesConfig {
-    # Read-only: the collector configuration is read where the collector reads it, never migrated here.
-    $path = ConvertTo-SmartM365InventoryConfigLocation -Path (Join-Path $script:SmartInventoryRoot 'ActiveDirectoryInventory\SmartM365-ActiveDirectory-Adaxes-Inventory.local.json')
+function Get-AcceptanceCollectorConfig {
+    # Read-only: a script configuration is read where its script reads it, never migrated here.
+    param([Parameter(Mandatory = $true)][string]$RelativePath)
+    $path = ConvertTo-SmartM365InventoryConfigLocation -Path (Join-Path $script:SmartInventoryRoot $RelativePath)
     $readPath = Get-SmartM365JsonReadPath -Path $path -Optional
     if (-not $readPath) { return $null }
     return (Read-SmartM365JsonDocument -Path $path).Document
+}
+
+function Get-AcceptanceAdaxesConfig { Get-AcceptanceCollectorConfig -RelativePath 'ActiveDirectoryInventory\SmartM365-ActiveDirectory-Adaxes-Inventory.local.json' }
+
+function Test-AcceptancePython {
+    <# Python 3.10+ for WorkplaceEvidence-Prepare: no orchestrator capability covers it, so the job could be elected here. #>
+    $command = 'python'
+    try {
+        $prepareConfig = Get-AcceptanceCollectorConfig -RelativePath 'PreparedEvidence\SmartM365-WorkplaceEvidence-Prepare.local.json'
+        if ($null -ne $prepareConfig -and $prepareConfig.PSObject.Properties['PreparedPythonCommand'] -and [string]$prepareConfig.PreparedPythonCommand) { $command = [string]$prepareConfig.PreparedPythonCommand }
+    }
+    catch { Write-Verbose ("Prepare configuration not read: {0}" -f $_.Exception.Message) }
+    $python = Get-Command -Name $command -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $impact = 'WorkplaceEvidence-Prepare would fail on this server'
+    if ($null -eq $python) { return [pscustomobject]@{ Status = 'WARN'; Detail = ("'{0}' not found: {1}" -f $command, $impact) } }
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new($python.Source, '-c "import sys; print(\"%d.%d.%d\" % sys.version_info[:3])"')
+    $startInfo.UseShellExecute = $false; $startInfo.RedirectStandardOutput = $true; $startInfo.RedirectStandardError = $true; $startInfo.CreateNoWindow = $true
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    try {
+        $outputTask = $process.StandardOutput.ReadToEndAsync()
+        if (-not $process.WaitForExit(20000)) { try { $process.Kill($true) } catch { Write-Verbose 'Python probe kill failed.' }; return [pscustomobject]@{ Status = 'WARN'; Detail = ('{0} did not answer within 20 s: {1}' -f $python.Source, $impact) } }
+        $version = ([string]$outputTask.GetAwaiter().GetResult()).Trim()
+    }
+    finally { $process.Dispose() }
+    # The Microsoft Store alias answers without a version.
+    if ($version -notmatch '^\d+\.\d+\.\d+$') { return [pscustomobject]@{ Status = 'WARN'; Detail = ('{0} gives no Python version (Store alias?): {1}' -f $python.Source, $impact) } }
+    if ([version]$version -lt [version]'3.10') { return [pscustomobject]@{ Status = 'WARN'; Detail = ('Python {0} at {1} is below 3.10: {2}' -f $version, $python.Source, $impact) } }
+    return [pscustomobject]@{ Status = 'PASS'; Detail = ('Python {0} at {1}' -f $version, $python.Source) }
 }
 
 function Test-AcceptanceAdaxes {
@@ -1202,6 +1399,9 @@ $global:EnableSharePointUpload = $false
 & (Get-Module -Name SmartM365.Core) { $script:SmartM365TeamsNotificationInProgress = $true }
 
 $results = [System.Collections.Generic.List[object]]::new()
+$extractionRows = [System.Collections.Generic.List[object]]::new()
+$script:Measurements = [System.Collections.Generic.List[object]]::new()
+$startedAt = Get-Date
 $exitCode = 0
 try {
     $script:AppId = [string](Get-AcceptanceConfigValue -Name 'AppId')
@@ -1254,11 +1454,16 @@ try {
         $seconds = $watch.Elapsed.TotalSeconds
         $result = New-AcceptanceResult -Name $name -Status ([string]$outcome.Status) -Detail ([string]$outcome.Detail) -DurationSeconds $seconds
         $results.Add($result)
+        if ($outcome.PSObject.Properties['Extractions']) {
+            foreach ($row in @($outcome.Extractions)) { $extractionRows.Add([pscustomobject]@{ Status = $row.Status; Capability = $name; Dataset = $row.Dataset; Scope = $row.Scope; Rows = $row.Rows; Seconds = $row.Seconds; Checks = $row.Checks }) }
+        }
         $level = switch ($result.Status) { 'PASS' { 'SUCCESS' } 'FAIL' { 'ERROR' } 'WARN' { 'WARNING' } default { 'INFO' } }
         $graphNote = if ($script:GraphChildSeconds -ne $graphBefore) { ' (includes the shared Graph sign-in and reads)' } else { '' }
         Write-AcceptanceLog ('{0}: {1} in {2} s{3}: {4}' -f $name, $result.Status, $result.DurationSeconds, $graphNote, $result.Detail) $level
     }
 
+    $eligibleCount = -1
+    $notEligibleRows = @()
     if ($Capability -contains 'All') {
         $ready = @($results | Where-Object { $_.Capability -in $script:OrchestratorCapabilities -and $_.Status -in @('PASS', 'WARN') } | ForEach-Object Capability)
         $roles = if ($null -ne $script:GraphChild -and [bool]$script:GraphChild.Ready) { @($script:GraphChild.Roles | ForEach-Object { [string]$_ }) } else { @() }
@@ -1271,13 +1476,54 @@ try {
             if ($job.MissingGraphAppRoles.Count) { $reasons += 'Graph roles ' + ($job.MissingGraphAppRoles -join ', ') }
             Write-AcceptanceLog ('  not eligible: {0}: missing {1}' -f $job.Name, ($reasons -join '; '))
         }
+        $eligibleCount = $eligible.Count
+        $notEligibleRows = @($eligibility | Where-Object { -not $_.Eligible } | ForEach-Object {
+                [pscustomobject]@{ Job = $_.Name; 'Missing capabilities' = ($_.MissingCapabilities -join ', '); 'Missing Graph roles' = ($_.MissingGraphAppRoles -join ', ') }
+            })
     }
 
-    Write-AcceptanceLog 'Summary:'
-    Write-AcceptanceLog ('  {0,-8} {1,-17} {2,8}  {3}' -f 'Status', 'Capability', 'Seconds', 'Detail')
-    foreach ($result in $results) {
-        $detail = if ($result.Detail.Length -gt 160) { $result.Detail.Substring(0, 157) + '...' } else { $result.Detail }
-        Write-AcceptanceLog ('  {0,-8} {1,-17} {2,8}  {3}' -f $result.Status, $result.Capability, $result.DurationSeconds, $detail)
+    # Final summary in several tables; the full details are in the lines above.
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $runAccount = @($results | Where-Object Capability -eq 'RunAccount' | Select-Object -First 1)
+    $serverRows = @(
+        [pscustomobject]@{ Item = 'Server'; Value = $env:COMPUTERNAME }
+        [pscustomobject]@{ Item = 'Operating system'; Value = [string](Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption }
+        [pscustomobject]@{ Item = 'Account'; Value = $(if ($runAccount.Count) { Get-SmartM365AcceptanceShortResult -Capability 'RunAccount' -Status $runAccount[0].Status -Detail $runAccount[0].Detail } else { $identity }) }
+        [pscustomobject]@{ Item = 'Tenant profile'; Value = $Tenant }
+        [pscustomobject]@{ Item = 'PowerShell'; Value = ('{0} (Windows PowerShell {1})' -f $PSVersionTable.PSVersion, $(if ($script:WindowsPowerShellInfo) { $script:WindowsPowerShellInfo.Version } else { 'not checked' })) }
+        [pscustomobject]@{ Item = 'Code'; Value = $script:SmartM365Root }
+        [pscustomobject]@{ Item = 'Data root'; Value = $script:WorkspaceRootPath }
+        [pscustomobject]@{ Item = 'Acceptance script'; Value = ('{0}, sample {1} (small {2})' -f $global:SmartM365ScriptVersion, $SampleSize, $SmallSampleSize) }
+        [pscustomobject]@{ Item = 'Started / duration'; Value = ('{0} / {1:hh\:mm\:ss}' -f $startedAt.ToString('yyyy-MM-dd HH:mm:ss'), ((Get-Date) - $startedAt)) }
+    )
+    $capabilityRows = @($results | ForEach-Object {
+            [pscustomobject]@{ Status = $_.Status; Capability = $_.Capability; Seconds = [double]$_.DurationSeconds; Result = (Get-SmartM365AcceptanceShortResult -Capability $_.Capability -Status $_.Status -Detail $_.Detail) }
+        })
+    $tables = [System.Collections.Generic.List[object]]::new()
+    $rule = [pscustomobject]@{ Status = ''; Text = ('=' * 110) }
+    $tables.Add($rule)
+    $tables.Add([pscustomobject]@{ Status = ''; Text = ('ACCEPTANCE SUMMARY - {0}' -f $env:COMPUTERNAME) })
+    $tables.Add($rule)
+    foreach ($line in @(Format-SmartM365AcceptanceTable -Title '1. Server and run' -Columns @('Item', 'Value') -Rows $serverRows -MaxColumnWidth 90)) { $tables.Add($line) }
+    foreach ($line in @(Format-SmartM365AcceptanceTable -Title '2. Capabilities' -Columns @('Status', 'Capability', 'Seconds', 'Result') -Rows $capabilityRows -MaxColumnWidth 90)) { $tables.Add($line) }
+    foreach ($line in @(Format-SmartM365AcceptanceTable -Title '3. Real extractions (rows kept in memory only, then dropped)' -Columns @('Status', 'Capability', 'Dataset', 'Scope', 'Rows', 'Seconds', 'Checks') -Rows @($extractionRows) -MaxColumnWidth 60)) { $tables.Add($line) }
+    foreach ($section in @($script:Measurements | ForEach-Object Section | Select-Object -Unique)) {
+        $sectionRows = @($script:Measurements | Where-Object Section -eq $section | ForEach-Object { [pscustomobject]@{ Status = $_.Status; Item = $_.Item; Value = $_.Value } })
+        foreach ($line in @(Format-SmartM365AcceptanceTable -Title ('4. Measurements - {0}' -f $section) -Columns @('Status', 'Item', 'Value') -Rows $sectionRows -MaxColumnWidth 80)) { $tables.Add($line) }
+    }
+    if ($eligibleCount -ge 0) {
+        $jobTitle = '5. Catalog jobs: {0} of {1} could run on this server; the others need' -f $eligibleCount, ($eligibleCount + $notEligibleRows.Count)
+        foreach ($line in @(Format-SmartM365AcceptanceTable -Title $jobTitle -Columns @('Job', 'Missing capabilities', 'Missing Graph roles') -Rows $notEligibleRows -MaxColumnWidth 60)) { $tables.Add($line) }
+    }
+    $tables.Add([pscustomobject]@{ Status = ''; Text = '' })
+    $tables.Add($rule)
+    $verdict = Get-SmartM365AcceptanceVerdict -Results @($results)
+    $tables.Add([pscustomobject]@{ Status = ''; Text = ('Totals: {0} PASS, {1} WARN, {2} FAIL, {3} SKIPPED' -f @($results | Where-Object Status -eq 'PASS').Count, @($results | Where-Object Status -eq 'WARN').Count, @($results | Where-Object Status -eq 'FAIL').Count, @($results | Where-Object Status -eq 'SKIPPED').Count) })
+    $tables.Add([pscustomobject]@{ Status = $verdict.Status; Text = ('Verdict: {0}' -f $verdict.Text) })
+    $tables.Add($rule)
+    foreach ($line in $tables) {
+        $level = switch ($line.Status) { 'PASS' { 'SUCCESS' } 'FAIL' { 'ERROR' } 'WARN' { 'WARNING' } default { 'INFO' } }
+        Write-AcceptanceLog $line.Text $level
     }
     $overall = Get-SmartM365AcceptanceWorstStatus -Status @($results | Where-Object Status -ne 'SKIPPED' | ForEach-Object Status)
     if ($overall -eq 'FAIL') { $exitCode = 1 }

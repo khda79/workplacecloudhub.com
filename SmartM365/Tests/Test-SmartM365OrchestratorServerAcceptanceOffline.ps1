@@ -4,7 +4,7 @@
     module assessment, child output parsing, Graph roles and job eligibility. Nothing is read
     from a directory, a tenant or a share.
 .VERSION
-    1.0.5
+    1.0.6
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -125,6 +125,35 @@ try {
     Assert-True ([bool]$adaxes.Ready -and @($adaxes.Datasets[0].Rows).Count -eq 3 -and [int]$adaxes.Info.ExcludedObjects -eq 1) "Unreadable object is excluded and the domain read again ($($adaxes.Detail) $(@($adaxes.Datasets)[0].Error))."
 }
 finally { Remove-Item -LiteralPath $fakeRoot -Recurse -Force -ErrorAction SilentlyContinue }
+
+# Final summary: short results, tables and verdict.
+$sample = @(
+    [pscustomobject]@{ Capability = 'RunAccount'; Status = 'PASS'; DurationSeconds = 0; Detail = 'running as EXAMPLE\svc-test; elevated=True (account of the orchestrator scheduled task)' }
+    [pscustomobject]@{ Capability = 'Modules'; Status = 'FAIL'; DurationSeconds = 11.7; Detail = 'PowerShell 7.6.6; Microsoft.Graph.Authentication 2.32.0; ImportExcel missing; Windows PowerShell 5.1 (ActiveDirectory=True)' }
+    [pscustomobject]@{ Capability = 'Network'; Status = 'WARN'; DurationSeconds = 1.3; Detail = 'login.microsoftonline.com: HTTP 200 in 496 ms (direct); teams.microsoft.com (Teams): unreachable through direct: reset' }
+    [pscustomobject]@{ Capability = 'SharedRuntime'; Status = 'PASS'; DurationSeconds = 1.4; Detail = 'DataAllRootPath: read/write OK; DATA witness write/read/metadata/delete: median 1.2 ms, p95 2.7 ms over 80 call(s); code share read/metadata/list: median 1.1 ms, p95 2 ms over 60 call(s); DATA free 39.2 % (49.5 GiB of 126.4 GiB)' }
+    [pscustomobject]@{ Capability = 'Certificate'; Status = 'PASS'; DurationSeconds = 0.2; Detail = 'Usable certificate 9875...21D4 found in Cert:\CurrentUser\My; private key usable; expires 2027-10-15 19:18 UTC (350 day(s)). (tested as svc-test)' }
+    [pscustomobject]@{ Capability = 'AD'; Status = 'WARN'; DurationSeconds = 16.7; Detail = 'forest example.test | ADUsers a.example.test: 100 row(s) in 0.5 s | ADUsers b.example.test: 100 row(s) in 0.3 s (UserPrincipalName has 2 value(s) in an unexpected format) | ADUsers c.example.test: read failed: denied' }
+    [pscustomobject]@{ Capability = 'ExchangeOnPrem'; Status = 'SKIPPED'; DurationSeconds = 9; Detail = 'snap-in is not registered on this server.' }
+)
+$short = @{}; foreach ($item in $sample) { $short[$item.Capability] = Get-SmartM365AcceptanceShortResult -Capability $item.Capability -Status $item.Status -Detail $item.Detail }
+Assert-True ($short.RunAccount -eq 'EXAMPLE\svc-test (orchestrator service account)') "RunAccount short result ($($short.RunAccount))."
+Assert-True ($short.Modules -eq 'ImportExcel missing') "Modules short result lists the problems ($($short.Modules))."
+Assert-True ($short.Network -eq '1 of 2 endpoint(s) reachable; unreachable: teams.microsoft.com') "Network short result ($($short.Network))."
+Assert-True ($short.SharedRuntime -eq 'DATA SMB median 1.2 ms, code 1.1 ms, DATA free 39.2 %') "SharedRuntime short result ($($short.SharedRuntime))."
+Assert-True ($short.Certificate -eq 'private key usable, expires 2027-10-15 (350 days)') "Certificate short result ($($short.Certificate))."
+Assert-True ($short.AD -eq '2 of 3 data set(s) read, 200 row(s) (1 read failure(s), format warnings)') "Extraction short result ($($short.AD))."
+Assert-True ($short.ExchangeOnPrem -eq 'component not installed on this server') 'Skipped short result.'
+$table = @(Format-SmartM365AcceptanceTable -Title 'T' -Columns @('Status', 'Capability', 'Seconds') -Rows @([pscustomobject]@{ Status = 'WARN'; Capability = 'AD'; Seconds = [double]16.7 }))
+Assert-True ($table.Count -eq 5 -and $table[2].Text -eq 'Status  Capability  Seconds' -and $table[4].Text -eq 'WARN    AD          16.7' -and $table[4].Status -eq 'WARN') "Single-row table is aligned ($(($table | ForEach-Object Text) -join ' / '))."
+$table = @(Format-SmartM365AcceptanceTable -Title 'T' -Columns @('Item', 'Value') -Rows @([pscustomobject]@{ Item = 'a'; Value = 'x' * 200 }, [pscustomobject]@{ Item = 'bb'; Value = 'y' }) -MaxColumnWidth 20)
+Assert-True ($table.Count -eq 6 -and $table[4].Text -eq ('a     ' + ('x' * 17) + '...') -and $table[5].Text -eq 'bb    y') "Long values are cut and columns aligned ($(($table | ForEach-Object Text) -join ' / '))."
+Assert-True ((@(Format-SmartM365AcceptanceTable -Title 'T' -Columns @('A') -Rows @()) | Select-Object -Last 1).Text -eq '(none)') 'Empty table says none.'
+Assert-True ((Get-SmartM365AcceptanceVerdict -Results $sample).Text -match '^NOT READY: fix Modules') 'A FAIL gives NOT READY.'
+Assert-True ((Get-SmartM365AcceptanceVerdict -Results @($sample | Where-Object Status -ne 'FAIL')).Status -eq 'WARN') 'Warnings give READY WITH WARNINGS.'
+Assert-True ((Get-SmartM365AcceptanceVerdict -Results @($sample | Where-Object Status -in @('PASS', 'SKIPPED'))).Status -eq 'PASS') 'PASS and SKIPPED give READY.'
+$assessment = Get-SmartM365AcceptanceChildAssessment -Child $child -SampleSize 100
+Assert-True (@($assessment.Extractions).Count -eq 2 -and @($assessment.Extractions | Where-Object Rows -eq '-').Count -eq 2) 'Failed scopes are listed in the extraction table.'
 
 # Modules.
 $installed = @(
