@@ -107,6 +107,20 @@ $null=Publish-PreparedEvidenceBatch @argsForPublish
 Write-Host 'PASS: current-week snapshot date and per-user activity changes are accepted.'
 WeekFixture @([pscustomobject]@{'Snapshot Date'='2026-10-01';'Week Label'='2026-W40';User='u1';'Last Activity Date'='2026-09-30'})
 ExpectFailure 'Lost historical week' { Publish-PreparedEvidenceBatch @argsForPublish } '*missing Week Label=2026-W39*'
+# Rolling window: a week at or before the cutoff may leave; a later week still may not.
+function IsoWeek([int]$WeeksAgo) { $d=[datetime]::UtcNow.Date.AddDays(-7*$WeeksAgo); '{0:D4}-W{1:D2}' -f [Globalization.ISOWeek]::GetYear($d),[Globalization.ISOWeek]::GetWeekOfYear($d) }
+$expired=IsoWeek 12; $inside=IsoWeek 11; $current=IsoWeek 0
+$output=Join-Path $weekRoot 'window\DATA-POWERBI'; $argsForPublish.OutputRoot=$output
+WeekFixture @([pscustomobject]@{'Snapshot Date'='2026-09-24';'Week Label'=$expired;User='u1';'Last Activity Date'='2026-09-20'},[pscustomobject]@{'Snapshot Date'='2026-09-28';'Week Label'=$inside;User='u1';'Last Activity Date'='2026-09-27'},[pscustomobject]@{'Snapshot Date'='2026-10-01';'Week Label'=$current;User='u1';'Last Activity Date'='2026-09-30'})
+$null=Publish-PreparedEvidenceBatch @argsForPublish -HistoryWindowWeeks 12 -InformationAction SilentlyContinue
+WeekFixture @([pscustomobject]@{'Snapshot Date'='2026-10-01';'Week Label'=$current;User='u1';'Last Activity Date'='2026-09-30'})
+ExpectFailure 'Lost week inside the window' { Publish-PreparedEvidenceBatch @argsForPublish -HistoryWindowWeeks 12 } "*missing Week Label=$inside*"
+ExpectFailure 'Lost expired week without a window' { Publish-PreparedEvidenceBatch @argsForPublish } "*missing Week Label=$expired*"
+WeekFixture @([pscustomobject]@{'Snapshot Date'='2026-09-28';'Week Label'=$inside;User='u1';'Last Activity Date'='2026-09-27'},[pscustomobject]@{'Snapshot Date'='2026-10-01';'Week Label'=$current;User='u1';'Last Activity Date'='2026-09-30'})
+$windowed=Publish-PreparedEvidenceBatch @argsForPublish -HistoryWindowWeeks 12 -InformationAction SilentlyContinue
+$expiration=@((Get-Content (Join-Path $windowed.BatchPath 'batch.json.txt') -Raw | ConvertFrom-Json).HistoryWindowExpirations)
+if ($expiration.Count -ne 1 -or $expiration[0].Table -ne 'Week History' -or $expiration[0].WindowWeeks -ne 12 -or $expiration[0].CutoffWeek -ne $expired -or @($expiration[0].Weeks) -join ',' -ne $expired) { throw 'Window expiration was not recorded.' }
+Write-Host 'PASS: a week past the rolling window leaves the history and is recorded; a week inside it is still protected.'
 WeekContract -WithoutKey
 WeekFixture @([pscustomobject]@{'Snapshot Date'='2026-09-24';'Week Label'='2026-W39';User='u1';'Last Activity Date'='2026-09-20'},[pscustomobject]@{'Snapshot Date'='2026-10-01';'Week Label'='2026-W40';User='u1';'Last Activity Date'='2026-09-30'})
 ExpectFailure 'History table without a declared key' { Publish-PreparedEvidenceBatch @argsForPublish } '*No historical comparison key*'

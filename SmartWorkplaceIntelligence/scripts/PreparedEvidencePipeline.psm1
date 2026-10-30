@@ -1,5 +1,5 @@
 # Offline, single-tenant preparation and versioned local publication. No tenant APIs.
-# Version: 1.2.4
+# Version: 1.2.5
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ProductRoot = Split-Path -Parent $PSScriptRoot
@@ -529,6 +529,7 @@ function Publish-PreparedEvidenceBatch {
         [string]$PreservePublishedFilesFrom,
         [string[]]$ReplacePublishedFiles = @(),
         [string]$ArtifactSnapshotRoot,
+        [ValidateRange(0,520)][int]$HistoryWindowWeeks=0,
         [switch]$SkipRetention)
     if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 is required.' }
     $output = [IO.Path]::GetFullPath($OutputRoot)
@@ -670,6 +671,13 @@ function Publish-PreparedEvidenceBatch {
         }
         $historyKeyResets = [Collections.Generic.List[object]]::new()
         $historyKeyInitializations = [Collections.Generic.List[object]]::new()
+        $historyWindowExpirations = [Collections.Generic.List[object]]::new()
+        # Rolling window of the weekly sources (WeeklyHistoryMaxRetentionWeeks); 0 keeps every week.
+        $historyCutoffWeek = $null
+        if ($HistoryWindowWeeks -gt 0) {
+            $cutoffDate = [datetime]::UtcNow.Date.AddDays(-7 * $HistoryWindowWeeks)
+            $historyCutoffWeek = '{0:D4}-W{1:D2}' -f [Globalization.ISOWeek]::GetYear($cutoffDate), [Globalization.ISOWeek]::GetWeekOfYear($cutoffDate)
+        }
         if ($previous) {
             $previousManifestPath = Get-PreparedChildPath $output "batches/$($previous.BatchId)/batch.json.txt"
             if (-not (Test-Path -LiteralPath $previousManifestPath -PathType Leaf)) { throw "Previous batch manifest is missing: $($previous.BatchId)" }
@@ -700,11 +708,19 @@ function Publish-PreparedEvidenceBatch {
                 $keyColumns = $historyKeys[$table.table]
                 $keyOf = { param($row) ($keyColumns | ForEach-Object { $v=[string]$row.$_; $v.Length.ToString()+':'+$v }) -join '|' }
                 Import-Csv -LiteralPath $newPath | ForEach-Object { $null=$newKeys.Add((& $keyOf $_)) }
+                $expiredWeeks = [Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
                 Import-Csv -LiteralPath $oldPath | ForEach-Object {
                     if (-not $newKeys.Contains((& $keyOf $_))) {
                         $oldRow = $_
+                        # Only a week at or before the rolling window cutoff may leave the history.
+                        $expiredWeek = if ($historyCutoffWeek) { @($keyColumns | ForEach-Object { [string]$oldRow.$_ } | Where-Object { $_ -match '^\d{4}-W\d{2}$' -and [string]::CompareOrdinal($_, $historyCutoffWeek) -le 0 }) | Select-Object -First 1 }
+                        if ($expiredWeek) { $null=$expiredWeeks.Add($expiredWeek); return }
                         throw ("Historical coverage would regress: {0} (missing {1})" -f $table.table, (($keyColumns | ForEach-Object { '{0}={1}' -f $_, $oldRow.$_ }) -join ', '))
                     }
+                }
+                if ($expiredWeeks.Count -gt 0) {
+                    $historyWindowExpirations.Add([ordered]@{Table=$table.table;PreviousBatchId=$previous.BatchId;WindowWeeks=$HistoryWindowWeeks;CutoffWeek=$historyCutoffWeek;Weeks=@($expiredWeeks)})
+                    Write-Information ("Historical weeks expired by the {0}-week window: {1} ({2})." -f $HistoryWindowWeeks, $table.table, (@($expiredWeeks) -join ', ')) -InformationAction Continue
                 }
             }
         }
@@ -719,7 +735,7 @@ function Publish-PreparedEvidenceBatch {
             if($licenseQualification.State -eq 'Qualified'){Write-Information ("License report qualified by licensing receipt run {0} (snapshot {1})." -f $licenseQualification.ReceiptRunId,$licenseQualification.SnapshotId) -InformationAction Continue}
             else{Write-Warning ("License report Not qualified; license tables are published empty. Reason: {0}" -f $licenseQualification.Reason)}
         }
-        $manifest = [ordered]@{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;CreatedUtc=[datetime]::UtcNow.ToString('O');Provenance=$Provenance;ContractSHA256=(Get-FileHash $ContractPath).Hash;HistoryKeyVersions=$historyKeyVersions;HistoryKeyResets=@($historyKeyResets);HistoryKeyInitializations=@($historyKeyInitializations);Files=@($validation.Files | ForEach-Object { @{File=$_.File;Rows=$_.Rows;Bytes=(Get-Item (Join-Path $batch $_.File)).Length;SHA256=$_.SHA256} })}
+        $manifest = [ordered]@{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;CreatedUtc=[datetime]::UtcNow.ToString('O');Provenance=$Provenance;ContractSHA256=(Get-FileHash $ContractPath).Hash;HistoryKeyVersions=$historyKeyVersions;HistoryKeyResets=@($historyKeyResets);HistoryKeyInitializations=@($historyKeyInitializations);HistoryWindowExpirations=@($historyWindowExpirations);Files=@($validation.Files | ForEach-Object { @{File=$_.File;Rows=$_.Rows;Bytes=(Get-Item (Join-Path $batch $_.File)).Length;SHA256=$_.SHA256} })}
         if($ArtifactSnapshotRoot){$manifest.Artifacts=$artifacts;$manifest.LicenseReportQualification=$licenseQualification;$manifest.ArtifactContractSHA256=(Get-FileHash -LiteralPath (Join-Path $script:ProductRoot 'config/prepared-artifact-contract.json.txt')).Hash}
         Write-PreparedJson (Join-Path $batch 'batch.json.txt') $manifest
         $pointer = @{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;ManifestSHA256=(Get-FileHash (Join-Path $batch 'batch.json.txt')).Hash;PreviousBatchId=if($previous){$previous.BatchId}else{$null}}
@@ -793,7 +809,8 @@ function Invoke-PreparedEvidencePipeline {
         [Nullable[double]]$DeviceSystemMaxObservationAgeHours, [string]$DeviceSystemOffsetlessGraphTimeZoneId,
         [ValidateRange(1,8760)][int]$OfficeActivationWarningAgeHours=72,
         [AllowNull()][string[]]$HybridAllowedTargetDomains=@(),
-        [ValidateRange(1,8)][int]$MaxParallelGenerators=1)
+        [ValidateRange(1,8)][int]$MaxParallelGenerators=1,
+        [ValidateRange(0,520)][int]$HistoryWindowWeeks=0)
     # Read only the two non-secret preparation settings from the effective tenant profile.
     if ($null -eq $DeviceSystemMaxObservationAgeHours -and $null -ne $AdCountryConfiguration) {
         $policyValue=if ($AdCountryConfiguration -is [Collections.IDictionary]) {$AdCountryConfiguration['DeviceSystemMaxObservationAgeHours']} else {$property=$AdCountryConfiguration.PSObject.Properties['DeviceSystemMaxObservationAgeHours']; if($null -ne $property){$property.Value}}
@@ -947,7 +964,7 @@ function Invoke-PreparedEvidencePipeline {
         $provenance.WorkforceActivity=@{DefinitionVersion='AD-M365-Console-v1';CurrentSources=@('Active Directory','Microsoft 365','Qualified local console');ConsoleIdentity='Exact unique tenant-scoped AD SID and unique AD-to-Entra link';ConsoleScope='Last observed local interactive user per device; partial coverage; RDP excluded';HistoricalSources=@('Active Directory','Microsoft 365');CurrentConsoleInjectedIntoHistory=$false}
         if ($endpointPolicy.Enabled) {$provenance.EndpointProtectionPolicy=@{PolicyVersion=$endpointPolicy.PolicyVersion;SHA256=(Get-FileHash -LiteralPath $endpointPolicyPath).Hash;Qualification='Antivirus and EDR evaluated separately; unknown is not healthy.'}}
         $migrationPublicationArgs=@{ExpectedPreviousBatchId=$migrationPrevious.BatchId}
-        Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables -ArtifactSnapshotRoot $snapshot @endpointContractArgs @migrationPublicationArgs
+        Publish-PreparedEvidenceBatch -StagingRoot $staging -OutputRoot $OutputRoot -TenantKey $TenantKey -Provenance $provenance -AllowEmptyTables $AllowEmptyTables -ArtifactSnapshotRoot $snapshot -HistoryWindowWeeks $HistoryWindowWeeks @endpointContractArgs @migrationPublicationArgs
     } catch {
         if ($run) { try { Write-PreparedJson (Join-Path $run 'failure.json') @{Error=$_.Exception.Message;Utc=[datetime]::UtcNow.ToString('O')} } catch { Write-Warning 'Could not write run failure diagnostic.' } }
         throw

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.4.10
+    0.4.11
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -336,6 +336,8 @@ try {
         PythonCommand=$preparedPython
         MaxParallelGenerators=$preparedParallel
         OfficeActivationWarningAgeHours=$officeActivationWarning
+        # Weeks pruned by the WeeklyHistory ceiling leave the published history instead of blocking it.
+        HistoryWindowWeeks=[int](Get-SmartM365WeeklyHistoryMaxRetentionWeeks)
         HybridAllowedTargetDomains=[string[]]@(ConfigValue 'PreparedHybridAllowedTargetDomains' | Where-Object { $_ })
         MailboxMigrationExceptionsEnabled=[bool](ConfigValue 'PreparedMailboxMigrationExceptionsEnabled')
         SharePointMigrationEnabled=[bool](ConfigValue 'PreparedSharePointMigrationEnabled')
