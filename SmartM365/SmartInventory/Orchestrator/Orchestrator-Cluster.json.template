@@ -20,5 +20,7 @@
   "DiskSpaceWarningFreePercent": 15,
   "DiskSpaceCheckMinutes": 5,
   "DiskSpaceCheckTimeoutSeconds": 10,
-  "DiskSpaceAlertRepeatHours": 6
+  "DiskSpaceAlertRepeatHours": 6,
+  "AcceptanceDailyEnabled": true,
+  "AcceptanceDailyTime": "17:00"
 }

@@ -472,6 +472,9 @@ function Test-SmartM365OrchestratorClusterDocument {
     }
     if ($diskThresholds.DiskSpaceResumeFreePercent -le $diskThresholds.DiskSpaceBlockFreePercent) { $errors.Add('DiskSpaceResumeFreePercent must be greater than DiskSpaceBlockFreePercent.') }
     if ($diskThresholds.DiskSpaceWarningFreePercent -lt $diskThresholds.DiskSpaceResumeFreePercent) { $errors.Add('DiskSpaceWarningFreePercent must be greater than or equal to DiskSpaceResumeFreePercent.') }
+    # Daily server acceptance run by every resident (orchestrator 1.5.81).
+    if ($Document.PSObject.Properties['AcceptanceDailyTime'] -and [string]$Document.AcceptanceDailyTime -notmatch '^([01]\d|2[0-3]):[0-5]\d$') { $errors.Add('AcceptanceDailyTime must be a local time HH:mm.') }
+    if ($Document.PSObject.Properties['AcceptanceDailyEnabled'] -and $Document.AcceptanceDailyEnabled -isnot [bool]) { $errors.Add('AcceptanceDailyEnabled must be true or false.') }
     [pscustomobject]@{ Valid = ($errors.Count -eq 0); Errors = @($errors); Warnings = @($warnings); ServerCount = @($servers).Count }
 }
 

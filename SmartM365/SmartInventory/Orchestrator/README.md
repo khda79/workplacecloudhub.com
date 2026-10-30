@@ -437,6 +437,18 @@ A full disk behind the DATA share would stop data, logs and orchestrator state a
 - Mails, once for the whole cluster thanks to `Orchestrator-DiskSpaceAlert.json` (shared, under `Orchestrator-DiskSpaceAlert.lock`): launches paused (repeated every `DiskSpaceAlertRepeatHours`, default 6), launches resumed, free space below `DiskSpaceWarningFreePercent` (default 15) and measurement unavailable for 30 minutes.
 - The thresholds belong in the central `Orchestrator-Cluster.json` (reloaded without restart, identical on every server); the same keys in the local configuration only serve as defaults. Validation requires 1 to 50 %, block < resume <= warning. `DiskSpaceGuardEnabled=false` disables the guard.
 
+### Daily server acceptance (1.5.81)
+
+Each resident, Active or Inactive, runs the server acceptance test (`Maintenance\SmartM365-OrchestratorServerAcceptance.ps1 -Tenant <tenant>`, see `Maintenance\README.md`) once a day in a hidden child `pwsh` process, under its own account. The run therefore publishes `<server>\Orchestrator-Acceptance.json`, the result that validates the `Functional (acceptance)` column of `Servers and versions`.
+
+- When: `AcceptanceDailyTime` (local time `HH:mm`, default `17:00`) plus 5 minutes per rank of the server in the sorted `ExpectedOrchestratorServers`, so the servers do not test at the same minute. A day missed while the resident was stopped runs as soon as it is back the same day. At the first check after a start, a catch-up run starts when the published result is missing or older than 24 hours (`GeneratedAtUtc`) and no run started in the last 6 hours.
+- Outside the election, `MaxConcurrency`, the server state and the maintenance pause: it is read-only and takes no job slot. Never two runs at a time on a server: the PID and start time are kept in the state file, so a recycled resident follows the run started by the previous instance.
+- Limit 60 minutes (a normal run takes 1 to 3 minutes, up to about 15 when Adaxes blocks); after it the process tree is stopped and a WARN is logged. Optional local key `AcceptanceDailyTimeoutMinutes` (not in the templates, minimum 5).
+- Orchestrator log: start (reason daily or catch-up, PID, log path), end with the exit code (0 = PASS or WARN, INFO; 1 = at least one FAIL, WARN) and duration. The console output of the run goes to `Acceptance-<server>_<yyyyMMdd_HHmmss>.log` in the job log folder, its exit code to the same name plus `.exitcode` (kept across a recycle); both follow `JobLogRetentionDays`. No mail and no Teams notification: a failing capability shows in `Not functional`.
+- Keys `AcceptanceDailyEnabled` (default `true`) and `AcceptanceDailyTime` belong in the central `Orchestrator-Cluster.json` (reloaded without restart); the same keys in the local configuration only serve as defaults. Validation rejects a time that is not `HH:mm` and a non-boolean `AcceptanceDailyEnabled`.
+
+Offline check: `pwsh -NoProfile -ExecutionPolicy Bypass -File ./SmartM365/Tests/Test-SmartM365OrchestratorAcceptanceDailyOffline.ps1`.
+
 ### Active and inactive servers (1.5.76)
 
 Each server of `ExpectedOrchestratorServers` is `Active` or `Inactive` in `ServerStates` of the central `Orchestrator-Cluster.json`:

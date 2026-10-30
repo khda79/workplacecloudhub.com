@@ -49,6 +49,8 @@ Features:
 - Optional Authenticode validation before job launch, configurable and usable
   in Audit mode before switching to Enforce.
 - Shared maintenance pauses automatic launches/retries, not supervision or Pipeline requests.
+- Daily server acceptance (1.5.81): every resident, Active or Inactive, runs the acceptance test once a day
+  at AcceptanceDailyTime (staggered 5 min per server) under its own account, outside the election.
 - Disk space guard: below DiskSpaceBlockFreePercent free on the DATA share every new launch
   (scheduled, retry, Pipeline, -Force) waits until DiskSpaceResumeFreePercent; running jobs continue.
   Resume can catch up all suspended occurrences after explicit GUI confirmation;
@@ -108,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.80
+1.5.81
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -158,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.80"
+$ScriptVersion = "1.5.81"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -6555,6 +6557,138 @@ function Update-OrchestratorMaintenance {
     }
 }
 
+# ==========================================================
+# Daily server acceptance (1.5.81)
+# ==========================================================
+function Get-OrchestratorAcceptanceScriptPath {
+    return Join-Path -Path $script:SmartInventoryRoot -ChildPath 'Maintenance\SmartM365-OrchestratorServerAcceptance.ps1'
+}
+
+function Get-OrchestratorAcceptanceDailyOffsetMinutes {
+    # Servers are staggered by 5 minutes in the order of ExpectedOrchestratorServers (sorted).
+    $servers = @($script:Settings.ExpectedOrchestratorServers | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
+    $index = [array]::IndexOf([string[]]$servers, ([string]$env:COMPUTERNAME).ToUpperInvariant())
+    if ($index -lt 0) { return 0 }
+    return ($index * 5) % 60
+}
+
+function Get-OrchestratorAcceptanceLastResultUtc {
+    # GeneratedAtUtc of the published service account result; MinValue when absent or unreadable.
+    $path = Join-Path -Path (Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath ([string]$env:COMPUTERNAME).ToUpperInvariant()) -ChildPath 'Orchestrator-Acceptance.json'
+    try {
+        $selected = Get-SmartM365JsonReadPath $path -Optional
+        if ($selected) { $path = $selected }
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return [datetime]::MinValue }
+        $document = Read-SmartM365OrchestratorJson $path
+        $parsed = [datetimeoffset]::MinValue
+        if ($document.PSObject.Properties['GeneratedAtUtc'] -and [datetimeoffset]::TryParse([string]$document.GeneratedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsed)) { return $parsed.UtcDateTime }
+    }
+    catch { Write-OrchestratorLog -Message ("Daily server acceptance: published result not readable, a catch-up run is allowed: {0}" -f $_.Exception.Message) }
+    return [datetime]::MinValue
+}
+
+function Test-OrchestratorAcceptanceDailyDue {
+    <# 'Daily' once the local daily time (plus the server offset) is reached and no run started since;
+       'CatchUp' at the first check after startup when the published result is older than 24 hours
+       (and no run started in the last 6 hours); '' otherwise. #>
+    param(
+        [Parameter(Mandatory = $true)][datetime]$Now,
+        [Parameter(Mandatory = $true)][string]$DailyTime,
+        [int]$OffsetMinutes = 0,
+        [datetime]$LastStartUtc = [datetime]::MinValue,
+        [datetime]$LastResultUtc = [datetime]::MinValue,
+        [switch]$StartupCheck
+    )
+    $time = [datetime]::ParseExact($DailyTime, 'HH:mm', [Globalization.CultureInfo]::InvariantCulture)
+    $scheduled = $Now.Date.AddHours($time.Hour).AddMinutes($time.Minute + $OffsetMinutes)
+    $lastStartLocal = if ($LastStartUtc -eq [datetime]::MinValue) { [datetime]::MinValue } else { [datetime]::SpecifyKind($LastStartUtc, [DateTimeKind]::Utc).ToLocalTime() }
+    if ($Now -ge $scheduled -and $lastStartLocal -lt $scheduled) { return 'Daily' }
+    $nowUtc = $Now.ToUniversalTime()
+    if ($StartupCheck -and ($LastResultUtc -eq [datetime]::MinValue -or ($nowUtc - $LastResultUtc).TotalHours -gt 24) -and
+        ($LastStartUtc -eq [datetime]::MinValue -or ($nowUtc - $LastStartUtc).TotalHours -ge 6)) { return 'CatchUp' }
+    return ''
+}
+
+function Get-OrchestratorAcceptanceDailyRecord {
+    if ($script:State -is [hashtable] -and $script:State['AcceptanceDaily'] -is [System.Collections.IDictionary]) { return $script:State['AcceptanceDaily'] }
+    return $null
+}
+
+function Update-OrchestratorAcceptanceDaily {
+    # Runs the server acceptance test once a day on every resident, Active or Inactive, outside the
+    # election and MaxConcurrency, under the account of the orchestrator (the result that validates).
+    param([Parameter(Mandatory = $true)][datetime]$Now)
+
+    if (-not $script:Settings.AcceptanceDailyEnabled) { return }
+    $record = Get-OrchestratorAcceptanceDailyRecord
+    $lastStartUtc = [datetime]::MinValue
+    if ($null -ne $record -and $record['LastStartUtc']) { $lastStartUtc = ([datetimeoffset]::Parse([string]$record['LastStartUtc'], [Globalization.CultureInfo]::InvariantCulture)).UtcDateTime }
+
+    if ($null -ne $record -and $record['Pid']) {
+        $alive = $false
+        try {
+            $process = Get-Process -Id ([int]$record['Pid']) -ErrorAction Stop
+            $expectedStart = ([datetimeoffset]::Parse([string]$record['ProcessStartUtc'], [Globalization.CultureInfo]::InvariantCulture)).UtcDateTime
+            $alive = [math]::Abs(($process.StartTime.ToUniversalTime() - $expectedStart).TotalSeconds) -le 5
+        }
+        catch { $alive = $false }
+        $elapsedMinutes = ($Now.ToUniversalTime() - $lastStartUtc).TotalMinutes
+        if ($alive -and $elapsedMinutes -lt [int]$script:Settings.AcceptanceDailyTimeoutMinutes) { return }
+        if ($alive) {
+            Stop-ProcessTree -TargetPid ([int]$record['Pid'])
+            Write-OrchestratorLog -Message ("Daily server acceptance stopped after {0} minutes (limit {1}); log: {2}" -f [math]::Round($elapsedMinutes), $script:Settings.AcceptanceDailyTimeoutMinutes, $record['LogPath']) -Level WARN
+        }
+        else {
+            $exitCodePath = [string]$record['LogPath'] + '.exitcode'
+            $exitText = if (Test-Path -LiteralPath $exitCodePath -PathType Leaf) { ([IO.File]::ReadAllText($exitCodePath)).Trim() } else { '' }
+            $level = if ($exitText -eq '0') { 'INFO' } else { 'WARN' }
+            $meaning = switch ($exitText) { '0' { 'PASS or WARN' } '1' { 'at least one FAIL' } '' { 'exit code unknown' } default { 'unexpected exit code' } }
+            Write-OrchestratorLog -Message ("Daily server acceptance finished: exit code {0} ({1}); duration {2} min; log: {3}" -f $(if ($exitText) { $exitText } else { '?' }), $meaning, [math]::Round($elapsedMinutes, 1), $record['LogPath']) -Level $level
+        }
+        $script:State['AcceptanceDaily'] = @{ LastStartUtc = [string]$record['LastStartUtc']; LastLogPath = [string]$record['LogPath'] }
+        Save-OrchestratorState
+        return
+    }
+
+    $startupCheck = -not $script:AcceptanceDailyStartupChecked
+    $script:AcceptanceDailyStartupChecked = $true
+    $lastResultUtc = if ($startupCheck) { Get-OrchestratorAcceptanceLastResultUtc } else { [datetime]::MinValue }
+    $reason = Test-OrchestratorAcceptanceDailyDue -Now $Now -DailyTime ([string]$script:Settings.AcceptanceDailyTime) -OffsetMinutes (Get-OrchestratorAcceptanceDailyOffsetMinutes) -LastStartUtc $lastStartUtc -LastResultUtc $lastResultUtc -StartupCheck:$startupCheck
+    if (-not $reason) { return }
+
+    $scriptPath = Get-OrchestratorAcceptanceScriptPath
+    $startUtc = $Now.ToUniversalTime()
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        Write-OrchestratorLog -Message ("Daily server acceptance not started: script not found: {0}" -f $scriptPath) -Level WARN
+        $script:State['AcceptanceDaily'] = @{ LastStartUtc = $startUtc.ToString('o') }
+        Save-OrchestratorState
+        return
+    }
+    $logFolder = $script:Settings.JobLogFolderPath
+    if (-not (Test-Path -LiteralPath $logFolder)) { New-Item -ItemType Directory -Path $logFolder -Force | Out-Null }
+    $logPath = Join-Path -Path $logFolder -ChildPath ("Acceptance-{0}_{1}.log" -f $env:COMPUTERNAME, $Now.ToString('yyyyMMdd_HHmmss'))
+    $enginePath = Get-PwshPath
+    # The wrapper keeps the exit code in <log>.exitcode, so a recycled orchestrator still reports it.
+    $command = "`$ErrorActionPreference = 'Continue'; " +
+        "`$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'; " +
+        "& '" + $enginePath.Replace("'", "''") + "' -NoProfile -ExecutionPolicy Bypass -File '" + $scriptPath.Replace("'", "''") + "' -Tenant '" + ([string]$Tenant).Replace("'", "''") + "' *>> '" + $logPath.Replace("'", "''") + "'; " +
+        "`$code = if (`$null -ne `$LASTEXITCODE) { [int]`$LASTEXITCODE } else { 1 }; " +
+        "[IO.File]::WriteAllText('" + ($logPath + '.exitcode').Replace("'", "''") + "', [string]`$code); exit `$code"
+    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    try {
+        $process = Start-Process -FilePath $enginePath -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand) -WindowStyle Hidden -PassThru
+        $processStartUtc = $startUtc
+        try { $processStartUtc = $process.StartTime.ToUniversalTime() } catch { Write-Verbose 'Acceptance process start time not readable.' }
+        $script:State['AcceptanceDaily'] = @{ Pid = $process.Id; ProcessStartUtc = $processStartUtc.ToString('o'); LastStartUtc = $startUtc.ToString('o'); LogPath = $logPath }
+        Write-OrchestratorLog -Message ("Daily server acceptance started ({0}): PID {1}, tenant {2}, limit {3} min; log: {4}" -f $(if ($reason -eq 'CatchUp') { 'catch-up, published result older than 24 h' } else { 'daily' }), $process.Id, $Tenant, $script:Settings.AcceptanceDailyTimeoutMinutes, $logPath)
+    }
+    catch {
+        $script:State['AcceptanceDaily'] = @{ LastStartUtc = $startUtc.ToString('o') }
+        Write-OrchestratorLog -Message ("Daily server acceptance could not start: {0}" -f $_.Exception.Message) -Level WARN
+    }
+    Save-OrchestratorState
+}
+
 function Get-OrchestratorDiskSpaceThresholds {
     # Local defaults are repaired here; the central cluster configuration is validated before use.
     $block = [math]::Min(49, [math]::Max(1, [int]$script:Settings.DiskSpaceBlockFreePercent))
@@ -7789,6 +7923,7 @@ function Invoke-RetentionCleanup {
     $targets = @(
         @{ Folder = $script:Settings.OrchestratorLogFolderPath; Filter = 'SmartM365-Inventory-Orchestrator_*.log'; Days = $script:Settings.OrchestratorLogRetentionDays; Recurse = $false },
         @{ Folder = $script:Settings.JobLogFolderPath; Filter = 'Job-*.log'; Days = $script:Settings.JobLogRetentionDays; Recurse = $false },
+        @{ Folder = $script:Settings.JobLogFolderPath; Filter = 'Acceptance-*.log*'; Days = $script:Settings.JobLogRetentionDays; Recurse = $false },
         @{ Folder = $script:Settings.JobRunsFolderPath; Filter = 'Orchestrator_JobRuns_*.csv'; Days = $script:Settings.JobRunsCsvRetentionDays; Recurse = $false },
         @{ Folder = $script:Settings.OrchestratorTranscriptFolderPath; Filter = ($ScriptName + '_*.transcript.log'); Days = $script:Settings.OrchestratorTranscriptRetentionDays; Recurse = $false }
     )
@@ -8136,11 +8271,16 @@ function Set-OrchestratorCentralClusterSettings {
         DiskSpaceCheckMinutes = 'Int32'
         DiskSpaceCheckTimeoutSeconds = 'Int32'
         DiskSpaceAlertRepeatHours = 'Int32'
+        AcceptanceDailyEnabled = 'Boolean'
+        AcceptanceDailyTime = 'String'
     }
     foreach ($propertyName in $mapping.Keys) {
         if (-not $ClusterDocument.PSObject.Properties[$propertyName]) { continue }
         if ($mapping[$propertyName] -eq 'Boolean') {
             $script:Settings.$propertyName = [bool]$ClusterDocument.$propertyName
+        }
+        elseif ($mapping[$propertyName] -eq 'String') {
+            $script:Settings.$propertyName = ([string]$ClusterDocument.$propertyName).Trim()
         }
         else {
             $script:Settings.$propertyName = [math]::Max(1, [int]$ClusterDocument.$propertyName)
@@ -8190,6 +8330,7 @@ $script:SystemInfo = $null
 # Last disk space decision for the DATA share (persisted in the state to keep the pause across recycles).
 $script:DiskSpaceGuard = $null
 $script:LastDiskSpaceCheckAt = [datetime]::MinValue
+$script:AcceptanceDailyStartupChecked = $false
 $script:DiskSpaceDeferredForced = @{}
 # CPU and memory use sampled every 5 minutes; samples older than 12 hours are not kept.
 $script:ResourceSamples = [System.Collections.Generic.List[object]]::new()
@@ -8526,6 +8667,10 @@ try {
         DiskSpaceCheckMinutes = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DiskSpaceCheckMinutes' -DefaultValue 5))
         DiskSpaceCheckTimeoutSeconds = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DiskSpaceCheckTimeoutSeconds' -DefaultValue 10))
         DiskSpaceAlertRepeatHours = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'DiskSpaceAlertRepeatHours' -DefaultValue 6))
+        # Daily server acceptance; the central cluster configuration overrides these defaults.
+        AcceptanceDailyEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'AcceptanceDailyEnabled' -DefaultValue $true
+        AcceptanceDailyTime = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'AcceptanceDailyTime' -DefaultValue '17:00')
+        AcceptanceDailyTimeoutMinutes = [math]::Max(5, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'AcceptanceDailyTimeoutMinutes' -DefaultValue 60))
         SendDailySummaryEmail = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'SendDailySummaryEmail' -DefaultValue $false
         DailySummaryTime = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'DailySummaryTime' -DefaultValue '07:00')
         OrchestratorLogRetentionDays = Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorLogRetentionDays' -DefaultValue 30
@@ -8698,6 +8843,11 @@ try {
     Write-OrchestratorLog -Message ("Runtime update context: autoRecycle={0}; checkIntervalSeconds={1}; stableChecks={2}; cooldownMinutes={3}; monitorCoreModule={4}; sendUpdateEmail={5}; baselineOrchestrator={6}; baselineCore={7}." -f $script:Settings.AutoRecycleOnRuntimeUpdate, $script:Settings.RuntimeUpdateCheckIntervalSeconds, $script:Settings.RuntimeUpdateStableChecks, $script:Settings.RuntimeUpdateCooldownMinutes, $script:Settings.MonitorCoreModuleVersion, $script:Settings.SendRuntimeUpdateEmail, $script:RuntimeUpdateBaseline.ScriptVersion, $script:RuntimeUpdateBaseline.CoreVersion)
     $diskSpaceThresholds = Get-OrchestratorDiskSpaceThresholds
     Write-OrchestratorLog -Message ("Disk space guard: enabled={0}; path={1}; pause below {2} %; resume at {3} %; warning below {4} %; check every {5} min (timeout {6} s); alert repeat {7} h." -f $script:Settings.DiskSpaceGuardEnabled, $script:Settings.DiskSpaceDataPath, $diskSpaceThresholds.Block, $diskSpaceThresholds.Resume, $diskSpaceThresholds.Warning, $script:Settings.DiskSpaceCheckMinutes, $script:Settings.DiskSpaceCheckTimeoutSeconds, $script:Settings.DiskSpaceAlertRepeatHours)
+    if ([string]$script:Settings.AcceptanceDailyTime -notmatch '^([01]\d|2[0-3]):[0-5]\d$') {
+        Write-OrchestratorLog -Message ("AcceptanceDailyTime '{0}' is not HH:mm; 17:00 is used." -f $script:Settings.AcceptanceDailyTime) -Level WARN
+        $script:Settings.AcceptanceDailyTime = '17:00'
+    }
+    Write-OrchestratorLog -Message ("Daily server acceptance: enabled={0}; time={1} local + {2} min offset for this server; limit {3} min; script={4}." -f $script:Settings.AcceptanceDailyEnabled, $script:Settings.AcceptanceDailyTime, (Get-OrchestratorAcceptanceDailyOffsetMinutes), $script:Settings.AcceptanceDailyTimeoutMinutes, (Get-OrchestratorAcceptanceScriptPath))
     Write-OrchestratorLog -Message ("Retention context: orchestratorLogDays={0}; jobLogDays={1}; jobRunsCsvDays={2}; transcript={3}; transcriptDays={4}; transcriptFolder={5}; electionClaimDays={6}; pipelineRunArchiveDays={7}; pipelineRunArchiveRetentionDays={8}; mailHtmlCopyHours={9} (LOG-ALL configured={10})." -f $script:Settings.OrchestratorLogRetentionDays, $script:Settings.JobLogRetentionDays, $script:Settings.JobRunsCsvRetentionDays, $script:TranscriptStarted, $script:Settings.OrchestratorTranscriptRetentionDays, $script:Settings.OrchestratorTranscriptFolderPath, $script:Settings.ElectionClaimRetentionDays, $script:Settings.PipelineRunArchiveDays, $script:Settings.PipelineRunArchiveRetentionDays, $script:Settings.MailHtmlCopyRetentionHours, (-not [string]::IsNullOrWhiteSpace([string]$script:Settings.LogAllRootPath)))
     Install-OrchestratorAuthenticodeTrustedCertificates
     if (-not $script:Settings.MailEnabled) {
@@ -8827,6 +8977,12 @@ try {
         if (Test-OrchestratorRuntimeUpdate -Now $now) {
             $script:OrchestratorStopReason = 'RuntimeUpdate'
             break
+        }
+        try {
+            Update-OrchestratorAcceptanceDaily -Now $now
+        }
+        catch {
+            Write-OrchestratorLog -Message ("Daily server acceptance check failed without stopping the scheduler: {0}" -f $_.Exception.Message) -Level ERROR
         }
         try {
             Update-OrchestratorDiskSpaceGuard -Now $now

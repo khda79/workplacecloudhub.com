@@ -9,7 +9,7 @@ orchestrator service account (Orchestrator-Acceptance.json); a run under another
 (Orchestrator-Acceptance.OtherAccount.json) is reported but never validates. Display only.
 Synthetic files in a temporary folder; no tenant, collector or publication.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -80,9 +80,11 @@ try {
         Assert-Display ($guiText.Contains($column)) "GUI column: $column"
     }
     Assert-Display (-not $guiText.Contains('nothing kept')) 'GUI no longer says that the acceptance test keeps nothing.'
-    foreach ($file in @('SmartM365.Orchestrator.Distributed.psm1', 'SmartM365-Inventory-Orchestrator.ps1')) {
-        Assert-Display (-not ([IO.File]::ReadAllText((Join-Path $base $file))).Contains('Orchestrator-Acceptance')) "$file does not read the acceptance result (election unchanged)."
-    }
+    Assert-Display (-not ([IO.File]::ReadAllText((Join-Path $base 'SmartM365.Orchestrator.Distributed.psm1'))).Contains('Orchestrator-Acceptance')) 'The election module does not read the acceptance result.'
+    # The resident reads only GeneratedAtUtc, for the daily acceptance catch-up (orchestrator 1.5.81).
+    $orchestratorText = [IO.File]::ReadAllText((Join-Path $base 'SmartM365-Inventory-Orchestrator.ps1'))
+    $readers = @([regex]::Matches($orchestratorText, '(?ms)^function ([\w-]+)\s*\{(?:(?!^function ).)*?Orchestrator-Acceptance\.json') | ForEach-Object { $_.Groups[1].Value })
+    Assert-Display (($readers -join ',') -eq 'Get-OrchestratorAcceptanceLastResultUtc') "Only the daily catch-up reads the result in the resident: $($readers -join ',')"
 }
 finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
 
