@@ -25,6 +25,13 @@ products stay installed and usable; nothing is migrated from them (see
 
 A **Single PC** Run uses a one-computer Wave created inside its Run folder
 (`Runs\<Campaign>\_SinglePC\<RunId>\Wave`) and goes through the same engine and protections.
+
+The technician may set `Storage.WavesPath` and `Storage.RunsPath` in
+`Config\SmartEndpointMigrationToolkit.local.json` to independent absolute local or UNC paths.
+Both default to empty: Waves and Runs then remain under the toolkit directory. These paths are
+the Waves and Runs directories themselves, each retaining the Campaign subdirectories. Change
+them only when no Runs are active. Existing content is not moved automatically; copy it if needed
+and regenerate existing Wave launchers using the GUI or `Scripts\SmartM365-EndpointMigration-Update-WaveCmdWrappers.ps1`.
 Details: [Docs/CAMPAIGN-WAVE-RUN.md](Docs/CAMPAIGN-WAVE-RUN.md).
 
 ## Requirements

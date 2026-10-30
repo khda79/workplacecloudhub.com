@@ -194,6 +194,36 @@ try {
         @($bytes | Where-Object { $_ -gt 126 }).Count -eq 0 -and ([Text.Encoding]::ASCII.GetString($bytes) -match "`r`n")
     }
     Test-Step 'no Batch/LOT wording in Wave launchers' { $wrapper -notmatch '\b(LOT|Batch)\b' }
+    $configDir = Join-Path $packageCopy 'Config'
+    New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    Copy-Item (Join-Path $script:PackageRoot 'Config\SmartEndpointMigrationToolkit.local.json.template') $configDir
+    $externalWaves = Join-Path $tempRoot 'External Waves'
+    $externalRuns = Join-Path $tempRoot 'External Runs'
+    $runtimePath = Join-Path $configDir 'SmartEndpointMigrationToolkit.local.json'
+    Write-SemtJsonFileAtomic -Path $runtimePath -InputObject @{ Storage = @{ WavesPath = $externalWaves; RunsPath = $externalRuns } }
+    $externalWave = New-SemtWave -PackageRoot $packageCopy -Campaign Windows11Upgrade -Name 'WAVE-EXTERNAL' -Computers @('PC-3')
+    Test-Step 'configured Waves path is used and existing runtime config is healed' {
+        $externalWave.Path -eq (Join-Path $externalWaves 'Windows11Upgrade\WAVE-EXTERNAL') -and
+        (Read-SemtJsonFile -Path $runtimePath).Options -and @(Get-SemtWaves -PackageRoot $packageCopy -Campaign Windows11Upgrade).Count -eq 1
+    }
+    $externalRun = New-SemtRunContext -PackageRoot $packageCopy -Campaign Windows11Upgrade -WavePath $externalWave.Path -RunId 'TEST-RUN'
+    Test-Step 'configured Runs path is used for Wave and Single PC Runs' {
+        $single = New-SemtEphemeralWave -PackageRoot $packageCopy -Campaign HybridJoin -ComputerName PC-4 -RunId 'TEST-SINGLE'
+        $externalRun.RunRoot -eq (Join-Path $externalRuns 'Windows11Upgrade\WAVE-EXTERNAL\TEST-RUN') -and $single.RunRoot -eq (Join-Path $externalRuns 'HybridJoin\_SinglePC\TEST-SINGLE')
+    }
+    $scriptDir = Join-Path $packageCopy 'Scripts'
+    New-Item -ItemType Directory -Path $scriptDir -Force | Out-Null
+    $stub = '@echo off' + "`r`n" + 'echo %~1^|%~2^|%~3 > "%SEMT_WRAPPER_RESULT%"' + "`r`n" + 'exit /b 7' + "`r`n"
+    [IO.File]::WriteAllText((Join-Path $scriptDir 'Run-EndpointMigrationWave.cmd'),$stub,[Text.Encoding]::ASCII)
+    $env:SEMT_WRAPPER_RESULT = Join-Path $tempRoot 'wrapper-result.txt'
+    & (Join-Path $externalWave.Path 'Start-Wave-Once-IgnoreRunGuard.cmd') | Out-Null
+    Test-Step 'external Wave launcher calls the package and propagates its exit code' {
+        $LASTEXITCODE -eq 7 -and (Get-Content -LiteralPath $env:SEMT_WRAPPER_RESULT -Raw) -match 'WAVE-EXTERNAL.*\|Once\|IgnoreRunGuard'
+    }
+    Remove-Item Env:SEMT_WRAPPER_RESULT -ErrorAction SilentlyContinue
+    Write-SemtJsonFileAtomic -Path $runtimePath -InputObject @{ Storage = @{ WavesPath = 'relative'; RunsPath = '' } }
+    Test-Throws 'relative storage path is rejected' { Get-SemtStorageRoot -PackageRoot $packageCopy -Kind Waves } 'SEMT_STORAGE_PATH_INVALID'
+    Write-SemtJsonFileAtomic -Path $runtimePath -InputObject @{ Storage = @{ WavesPath = ''; RunsPath = '' } }
     Test-Step 'Move-SemtComputersFromList archives completed computers' {
         $moved = Move-SemtComputersFromList -ComputerListPath $wave.ComputersPath -ComputerNames @('PC-0001') -ArchiveFileName 'Computers.Completed.txt' -Label 'Completed'
         $left = @(Get-SemtComputerList -Path $wave.ComputersPath)
@@ -573,8 +603,8 @@ exit 0
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBRz46eGnpqjdMa
-# /53jRj7nSa+5wd/lCLpm8pDDmIRRR6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCIXE7D8LX5TpgF
+# md1MbXzkaZ2zu+A6m1q8SKijICH6KKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -604,14 +634,14 @@ exit 0
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCA4kVq+DIsN2u0A5r1Q54V
-# GwqEUceIPE6eMFZijEOt0jANBgkqhkiG9w0BAQEFAASCAYBnxiO9KfUSW+bbBNJ9
-# i02W/7G8fP174HKQ2zMDpVJBgrtKcsUTgZ4P5HMaANRmqYks0YLwhKxo3cro5lAV
-# 6RjrEE0Wkdv8G9gsa1NYFtvdCylWAvb37hPBdFtAFHJiFkKpwQTgitIEZpYEUOjv
-# ET3Psnpy5/4YtCLXAggFRjdgarDnmC4O2yClNUVTIhH9AdXHLVjRIaMyI4HKdD+D
-# RQ63/Uw1z9z3eLyk0iNGn0/W9ncW+9y9RAyiuvHK1JGYZxITWt2MkOBjz6SgHLKw
-# Z5i1UB1DIYwChMHSXPbjfc1akEh2tqBNJi8lLQGWNkZGyKyQOJAZheX0X6/w4C3T
-# qbxhOkLHIGzx27+J2oH++8TYx+6BOhmljQE5ANBT0bzro1ckMFHXbyW1T9DyTS5i
-# a9nkCszc86LfOz0+Lh9x1aJ/OVwaNFW2kNoshbEY8TzQuUtC/W7ciFRNw319ODwZ
-# DhpbbNWTfJD/eAkV70p0ifV0L+b6wecyWiFuM0p5renbP6A=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDXVmQt6uzJd3ME6Z7lyU5o
+# z5opPCzuVonJSSebNeXBFjANBgkqhkiG9w0BAQEFAASCAYBZOVGOPzZ6lO9kkyTr
+# 8+5ZMiSwY7UpzkpNWCX4dn1OZkBOiEyb/Za4H+zYu2dRzRyhcaVYIHVXIpmay91m
+# Xkcd2XayzhXo2eq6osRqVkfYUPSSJUSQNXXvcOGBoYQdvUz4x0NfJKU9o/rogcri
+# PX2K33Pic72XrGY2Cg7BwF2ryESr9DxJJOcdMYtyhQEyMlI8igz6BTfLbSCTgcFw
+# iwqjR54r9dcYTsN9D9stCBQ5h/lyzfPVazR7VspCDImk7aIeTQa7S7Hzdhyrq9aQ
+# j4XL5/+fmfzf8qM4AOVOaaUX+VFW3s11L4TYFCiTbURBCS8KTF8yM7LHyo4pUKGL
+# n+XuwFSRZmXfk/8tvwH1JGF34YHgYO6zYTTj3GNtI2pduqDphQWIKpTKQ6RxkR5A
+# m/47oYqLoBhzbzxwnH1zv+XPdMm0p4MG82gcZrjMwUXQuY16G7FRkKtPq8nnhmR2
+# iUR8e9KXiTH4yCiHKaDPT6vVd/4v6sdk2zQKFEEk4BRmI7Y=
 # SIG # End signature block

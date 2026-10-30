@@ -572,7 +572,7 @@ function New-AutomaticWaveFromPreview {
     $evidencePath = ''
     if (-not $NoEvidence) {
         if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-            $EvidenceRoot = Join-Path $PackageRoot ('Runs\{0}\_AutomaticWave' -f $script:AutomaticWaveCampaign)
+            $EvidenceRoot = Join-Path (Get-SemtStorageRoot -PackageRoot $PackageRoot -Kind Runs) ('{0}\_AutomaticWave' -f $script:AutomaticWaveCampaign)
         }
         $evidencePath = Join-Path $EvidenceRoot (Get-Date -Format 'yyyyMMdd-HHmmssfff')
         Publish-AutomaticWaveProgress -Stage 'Copying the preview evidence...' -Detail $evidencePath
@@ -824,7 +824,7 @@ if ($Create) {
 $evidencePath = ''
 if (-not $NoEvidence) {
     if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-        $EvidenceRoot = Join-Path $effectivePackageRoot ('Runs\{0}\_AutomaticWave' -f $script:AutomaticWaveCampaign)
+        $EvidenceRoot = Join-Path (Get-SemtStorageRoot -PackageRoot $effectivePackageRoot -Kind Runs) ('{0}\_AutomaticWave' -f $script:AutomaticWaveCampaign)
     }
     $evidencePath = Join-Path $EvidenceRoot (Get-Date -Format 'yyyyMMdd-HHmmssfff')
     Publish-AutomaticWaveProgress -Stage 'Preparing automatic Wave evidence...' -Detail $evidencePath
@@ -908,8 +908,8 @@ Publish-AutomaticWaveProgress -Stage $(if ($Create) { 'Automatic Wave created.' 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAcAl4yEz3j1bLT
-# lQ6UVFzx4F3wpSzhlg9Sy/gRwlSpZKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWFXrQnPA8/LRG
+# pq2YedGEcsPkx7rBwQNE/iNBI5NhQKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -939,14 +939,14 @@ Publish-AutomaticWaveProgress -Stage $(if ($Create) { 'Automatic Wave created.' 
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC9dcPg0mCO4uTk9QRn8q4Y
-# 9BCcjfU0cDwGrFOF3gm7UDANBgkqhkiG9w0BAQEFAASCAYCgdIZCPX/+9WQ6fo2e
-# /uOpiiuzAVZ5sJZhpNNXZgRrA3hz6RFV20NruS65xJnFflhGwYrd+I2Tyy9SlGcB
-# d3VyAvJGHB0uoiNj5zhCe0qRok23RbGWQu5SqJZV1NOUGF9Cxk4g4I+w84Si3sja
-# 7vcgAwPGIIlPjuKLgp/lOMJkyG7JPGpSwCZOqxIDDcK33SACDGZYGK5V0F185oDQ
-# 7mehTjDMG8ogw3RG+0m4xRS3fYQT+/dc1ytER33wMqZFR8+b6YjAwQbZkyLCQGes
-# WB38j6viwKO/DHZZfWudW7js+MywlUcy+pH/9fM+8K7tfxK0MXJGucxg9dQZkcAz
-# TcK6+9UeraDakR1yRnvmPSssFHLPR92HF6IbgFb6s4/U/gb7uftCA+CApARfeCHr
-# GD6josOozYVoAKKUkVvpKT/OIUybRKJh9+MRg8KzjJ3/wSjOsZkKKMTbsw0nmXSG
-# z/0EcLHDCsvV1oliPUc7pFndnljY/tnC8GTvIy5O1KVIq+E=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB6Qn2t815BSOU9PgtkKDHL
+# gREhpl3xCSmPvy9/mx5bYzANBgkqhkiG9w0BAQEFAASCAYCTmvIGAfgVrrFV4HxE
+# ZwwK1f3JkwfRLXcRYc2sN7wVFPjUtRgmm/jt0B9/lJujWuf1PIq5uGCEspkqt+7I
+# bKOrNXx3e65/rFHZlEUJR0P8PnTIm2+rp4E689lBBMNYd5+I6BFZRo8/fg+kXvi7
+# Eq4dvHf1v2RDTrjRcClhw7n1qVvDxffXHFNZhYDN6IWKkhKTTJEU43RK71ZLzTA0
+# eP4gwyXxh93EjQz0bdlnSZi9vXIYwrQZLmdws1nptqZY04AQ9XCCMR7114L+r0yO
+# 1vfmL5vlxau2wuQp19Cv1VdLu3SUzn3Idmivm/bNrAe3xvVtqzVb423OyqFHyAd3
+# /rwolEmrsMcRYDjQb4ZlrmS594O0xn2s4j6+470rrf2UvbejftRLFvZWLSP+kU1p
+# DILCTRgMVetaEvsbQqyE1FxeVAIk+DBzBxff3hU2Wv/qh9fopc66D7vaj1iGvcqC
+# Ppsu8Pb/TXKJD2gKM9D44gIM0vhTtUD0GAGVCeys6RNo+xk=
 # SIG # End signature block

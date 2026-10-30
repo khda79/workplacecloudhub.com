@@ -30,6 +30,27 @@ function Test-SemtWaveName {
     return $true
 }
 
+function Get-SemtStorageRoot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageRoot,
+        [Parameter(Mandatory = $true)][ValidateSet('Waves','Runs')][string]$Kind
+    )
+    $template = Join-Path $PackageRoot 'Config\SmartEndpointMigrationToolkit.local.json.template'
+    $configured = ''
+    if (Test-Path -LiteralPath $template -PathType Leaf) {
+        $config = Read-SemtGlobalConfig -PackageRoot $PackageRoot
+        $storage = Get-SemtPropertyValue -InputObject $config.Data -Name 'Storage' -Default $null
+        $configured = [string](Get-SemtPropertyValue -InputObject $storage -Name ($Kind + 'Path') -Default '')
+    }
+    if ([string]::IsNullOrWhiteSpace($configured)) { return (Join-Path $PackageRoot $Kind) }
+    $configured = [Environment]::ExpandEnvironmentVariables($configured.Trim())
+    if ($configured -notmatch '^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)') {
+        throw ("SEMT_STORAGE_PATH_INVALID: {0}Path must be an absolute path: {1}" -f $Kind,$configured)
+    }
+    return [System.IO.Path]::GetFullPath($configured)
+}
+
 function Get-SemtWaveRoot {
     [CmdletBinding()]
     param(
@@ -37,7 +58,7 @@ function Get-SemtWaveRoot {
         [Parameter(Mandatory = $true)][string]$Campaign
     )
     [void](Assert-SemtCampaign -Campaign $Campaign)
-    return (Join-Path -Path (Join-Path -Path $PackageRoot -ChildPath 'Waves') -ChildPath $Campaign)
+    return (Join-Path -Path (Get-SemtStorageRoot -PackageRoot $PackageRoot -Kind Waves) -ChildPath $Campaign)
 }
 
 function Get-SemtWaves {
@@ -89,10 +110,18 @@ function Write-SemtWaveWrappers {
     the engine from the catalog, the configuration files and the environment.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string]$WavePath)
+    param([Parameter(Mandatory = $true)][string]$WavePath, [string]$PackageRoot)
 
     $written = New-Object System.Collections.Generic.List[string]
     $expected = @{}
+    $launcher = '%~dp0..\..\..\Scripts\Run-EndpointMigrationWave.cmd'
+    $defaultWaves = if ($PackageRoot) { [System.IO.Path]::GetFullPath((Join-Path $PackageRoot 'Waves')).TrimEnd('\') + '\' } else { '' }
+    if ($PackageRoot -and -not [System.IO.Path]::GetFullPath($WavePath).StartsWith($defaultWaves,[StringComparison]::OrdinalIgnoreCase)) {
+        $launcherPath = Join-Path ([System.IO.Path]::GetFullPath($PackageRoot)) 'Scripts\Run-EndpointMigrationWave.cmd'
+        # Encode the path to keep the generated CMD ASCII even for Unicode paths and different drives.
+        $encodedPath = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launcherPath))
+        $launcher = $null
+    }
     foreach ($wrapper in @(Get-SemtWaveWrapperDefinitions)) {
         $expected[$wrapper.FileName] = $true
         $extra = if ($wrapper.IgnoreRunGuard) { 'IgnoreRunGuard' } else { 'Default' }
@@ -101,7 +130,8 @@ function Write-SemtWaveWrappers {
             ('rem Smart Endpoint Migration Toolkit - {0}' -f $wrapper.Description),
             'rem Generated launcher: options are resolved by the engine, never by this file.',
             'setlocal DisableDelayedExpansion',
-            ('call "%~dp0..\..\..\Scripts\Run-EndpointMigrationWave.cmd" "%~dp0." {0} {1}' -f $wrapper.RunMode,$extra),
+            'set "SEMT_WAVE_WRAPPER_PATH=%~dp0."',
+            $(if ($launcher) { ('call "{0}" "%~dp0." {1} {2}' -f $launcher,$wrapper.RunMode,$extra) } else { ('powershell.exe -NoProfile -Command "$p=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String(''{0}'')); & $p $env:SEMT_WAVE_WRAPPER_PATH ''{1}'' ''{2}''; exit $LASTEXITCODE"' -f $encodedPath,$wrapper.RunMode,$extra) }),
             'exit /b %ERRORLEVEL%'
         )
         $path = Join-Path -Path $WavePath -ChildPath $wrapper.FileName
@@ -150,7 +180,7 @@ function New-SemtWave {
     $data['CreatedUtc'] = Get-SemtUtcNowText
     if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) { $data['EvidencePath'] = $EvidencePath }
     Write-SemtJsonFileAtomic -Path $config.Path -InputObject $data
-    [void](Write-SemtWaveWrappers -WavePath $path)
+    [void](Write-SemtWaveWrappers -WavePath $path -PackageRoot $PackageRoot)
     return (@(Get-SemtWaves -PackageRoot $PackageRoot -Campaign $Campaign | Where-Object { $_.Name -eq $Name }) | Select-Object -First 1)
 }
 
@@ -170,7 +200,7 @@ function New-SemtRunContext {
     $wavePathFull = [System.IO.Path]::GetFullPath($WavePath).TrimEnd('\')
     $waveName = if ($SinglePc) { '_SinglePC' } else { Split-Path -Path $wavePathFull -Leaf }
     if ([string]::IsNullOrWhiteSpace($RunRoot)) {
-        $RunRoot = Join-Path -Path (Join-Path -Path (Join-Path -Path (Join-Path -Path $PackageRoot -ChildPath 'Runs') -ChildPath $Campaign) -ChildPath $waveName) -ChildPath $RunId
+        $RunRoot = Join-Path -Path (Join-Path -Path (Join-Path -Path (Get-SemtStorageRoot -PackageRoot $PackageRoot -Kind Runs) -ChildPath $Campaign) -ChildPath $waveName) -ChildPath $RunId
     }
     $context = [pscustomobject]@{
         PackageRoot = $PackageRoot
@@ -211,7 +241,7 @@ function New-SemtEphemeralWave {
 
     $name = ConvertTo-SemtComputerName -Line $ComputerName
     if ([string]::IsNullOrWhiteSpace($name) -or $name -match '[\s;,|<>"]') { throw "SEMT_SINGLE_PC_INVALID: '$ComputerName' is not a valid computer name." }
-    $runRoot = Join-Path -Path (Join-Path -Path (Join-Path -Path (Join-Path -Path $PackageRoot -ChildPath 'Runs') -ChildPath $Campaign) -ChildPath '_SinglePC') -ChildPath $RunId
+    $runRoot = Join-Path -Path (Join-Path -Path (Join-Path -Path (Get-SemtStorageRoot -PackageRoot $PackageRoot -Kind Runs) -ChildPath $Campaign) -ChildPath '_SinglePC') -ChildPath $RunId
     $wavePath = Join-Path -Path $runRoot -ChildPath 'Wave'
     New-SemtDirectory -Path $wavePath
     Write-SemtTextLinesAtomic -Path (Join-Path -Path $wavePath -ChildPath 'Computers.txt') -Lines @($name)
@@ -262,7 +292,7 @@ function Get-SemtRuns {
         [ValidateRange(1, 1000)][int]$Last = 50
     )
 
-    $root = Join-Path -Path (Join-Path -Path $PackageRoot -ChildPath 'Runs') -ChildPath $Campaign
+    $root = Join-Path -Path (Get-SemtStorageRoot -PackageRoot $PackageRoot -Kind Runs) -ChildPath $Campaign
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { return @() }
     $rows = New-Object System.Collections.Generic.List[object]
     foreach ($historyFile in @(Get-ChildItem -LiteralPath $root -Filter 'RunHistory.json' -File -Recurse -Depth 1 -ErrorAction SilentlyContinue)) {
@@ -644,8 +674,8 @@ function Get-SemtRunGuardFqdn {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDfQS/Z6P1vUYxd
-# cYRkYtkLNJFMQm2DyswCgMJsikkcxaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCALISgspWj9EiFB
+# awc4UFi0fpMRzlQCd/A9mrENho7/xKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -675,14 +705,14 @@ function Get-SemtRunGuardFqdn {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBq/d1w3OCIityaoH4l83ZY
-# /YjjFhfOQSEgGdXbM1XZSDANBgkqhkiG9w0BAQEFAASCAYB7r5ei9hTGRmz3Gzt5
-# Qa9bGryUvHz3zjEP+jYCviVK2tpxKEnOQcgy+Eyc2PTk7bB3XUqy5tT6H++iEKFs
-# Ktt2nxopsvfn6K2Yr4RNyiUAle+IAyH9N4OyOpl6Zx2qUSNQ/iBn/NdJRkf502y2
-# 7tU/17hv5fnNBYYRLzCbTXgYBFLlbqGEYmQUfrXNWuEpJJdYiVaWWj5CFXmgjpdm
-# RJr8gXCQqrKGUj3QzqZ2ywTsdgU6dyQi/WW5OqWt0RbqF6YAKmtp5H8mOEV3deeG
-# oVBT4VGOuYQDOCqJO5QbwHlPa50O/qpuhFuEQSmRciAW8p3/tHvFCxz1z3vQ34RS
-# O5srWg0kDDkMViEl1vdCK2TnUj2rqTkigNZRlRKdZWZngpXgL+bLbb/19DqD+xRU
-# imnc4b3dZtq84KFaRyXFxIwIM334wyF7Qvh1qFo9wFk+RcJVZ2WZJu0hjISRiy/f
-# g2bNgf7lHktKjMfBDmxImMFiKhHZcowJc+2Ubk4d91TJ5wM=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCpvvtCNVmhn7ym1aQnzo3F
+# rVtkczv366mzNhha443HVTANBgkqhkiG9w0BAQEFAASCAYCWb6q3+YpTtf0jPg04
+# e7xzkcLPh0SBfYExBFRGnR+uvcQY39a6fkmGiiVqapF/IVnHqXf83i53k7ACwbWE
+# vzPrwLlEn5khRont3WxHhEWOtcFc03E8uWYsfZqMN0c2Qz5dvem3Qmu06vsUyDsm
+# COVgouU41L/RNLlJuv+1/1Pf3JUqvDHB3K0Mr1QpfEQCFImWwFwgotuFDAIzGMUL
+# b4kn1wvcsJCOon6VGTh4+hEFzKI7kHhrO+dNe1Mp7kv6QM8ivsWjy+YtDdsJD+dS
+# 07vfA+4W7grd63Ig+nHvT+C8LURMlYzJZ532VC5BqvstiPDpOl+evwcWt05ABuQv
+# hq9g7LohKcEqdoEH/7PpfXydUOWZW1Gt/Z5IBGfHAScHYLZSDaCiRKnNtEi5MDwG
+# dqHOQENZUquWJ013cNtCw1/lS3RYKT+yPgb3ylUdCo+ZP+cG7zEMyoxhU8+WAYBZ
+# 54wBvE2jBma3DH/a0YuRdzOQAW+RDNCV1t9oLxVRjU16sa4=
 # SIG # End signature block

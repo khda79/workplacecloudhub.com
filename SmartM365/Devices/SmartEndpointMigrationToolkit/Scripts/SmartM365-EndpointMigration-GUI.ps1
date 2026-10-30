@@ -171,7 +171,7 @@ function New-GuiSelectionFile {
         if ($definition.Type -in @('String','Path') -and [string]::IsNullOrWhiteSpace([string]$value)) { continue }
         $captured[$name] = ConvertTo-SemtOptionValue -Definition $definition -Value $value -Source 'Gui'
     }
-    $root = Join-Path $script:PackageRoot ("Runs\{0}\_GuiSelections" -f $Campaign)
+    $root = Join-Path (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) ("{0}\_GuiSelections" -f $Campaign)
     $path = Join-Path $root ('{0}-{1}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'),([guid]::NewGuid().ToString('N').Substring(0, 6)))
     Write-SemtJsonFileAtomic -Path $path -InputObject ([pscustomobject]@{ SchemaVersion = 1; Product = 'SmartEndpointMigrationToolkit'; Campaign = $Campaign; CapturedUtc = (Get-SemtUtcNowText); CapturedBy = [Environment]::UserName; Options = $captured })
     return $path
@@ -1153,9 +1153,9 @@ function Update-WaveList {
 function Update-RunsView {
     $runs = @(Get-SemtRuns -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Last 100)
     $controls.RunsGrid.ItemsSource = $runs
-    $active = @(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') -Campaign $script:CurrentCampaign | Where-Object { $_.Alive })
+    $active = @(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) -Campaign $script:CurrentCampaign | Where-Object { $_.Alive })
     $controls.ActiveRunsText.Text = if ($active.Count -eq 0) { 'No Run of this Campaign is active on this technician computer.' } else { '{0} active Run(s): {1}' -f $active.Count,((@($active) | ForEach-Object { '{0} [{1}]' -f $_.WaveName,$_.Status }) -join ', ') }
-    $singleRoot = Join-Path $script:PackageRoot ("Runs\{0}\_SinglePC" -f $script:CurrentCampaign)
+    $singleRoot = Join-Path (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) ("{0}\_SinglePC" -f $script:CurrentCampaign)
     $controls.SingleRunFolderText.Text = $singleRoot
 }
 
@@ -1306,7 +1306,7 @@ function Invoke-AutomaticWave {
     elseif ($inventoryWarning -and -not (Show-GuiWarningQuestion -Message ('{0}{1}{1}Run the Preview anyway?' -f $inventoryWarning,[Environment]::NewLine) -Title 'Preview - old inventories')) {
         return
     }
-    $evidence = Join-Path $script:PackageRoot ("Runs\{0}\_AutomaticWave\{1}" -f $campaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $evidence = Join-Path (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) ("{0}\_AutomaticWave\{1}" -f $campaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
     New-SemtDirectory -Path $evidence
     $commandText = Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot $evidence -Create:$Create -PreviewEvidencePath $(if ($Create) { $script:AutomaticPreviewEvidence } else { '' })
     $logFile = Join-Path $evidence 'GuiAutomaticWave.log'
@@ -1501,7 +1501,7 @@ function Start-InventoryRefresh {
 
     $plan = if ($PSBoundParameters.ContainsKey('Kinds')) { @(Get-InventoryRefreshPlan -Campaign $script:CurrentCampaign -Kinds $Kinds) } else { @(Get-InventoryRefreshPlan -Campaign $script:CurrentCampaign) }
     if ($plan.Count -eq 0) { return }
-    $evidence = Join-Path $script:PackageRoot ("Runs\{0}\_InventoryRefresh\{1}" -f $script:CurrentCampaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $evidence = Join-Path (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) ("{0}\_InventoryRefresh\{1}" -f $script:CurrentCampaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
     New-SemtDirectory -Path $evidence
     $popup = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new($inventoryRefreshXaml)))
     $popup.Owner = $window
@@ -1564,14 +1564,14 @@ $controls.LaunchWaveButton.Add_Click({
     try {
         $wave = $script:SelectedWave
         if ($null -eq $wave) { return }
-        if (@(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') -Campaign $script:CurrentCampaign | Where-Object { $_.Alive -and $_.WaveName -eq $wave.Name }).Count -gt 0) { Show-GuiError ("Wave '{0}' is already running." -f $wave.Name); return }
+        if (@(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) -Campaign $script:CurrentCampaign | Where-Object { $_.Alive -and $_.WaveName -eq $wave.Name }).Count -gt 0) { Show-GuiError ("Wave '{0}' is already running." -f $wave.Name); return }
         [void](Start-GuiRun -WavePath $wave.Path -ModeKey ([string]$controls.WaveModeCombo.SelectedItem) -TargetText ("Wave '{0}' ({1} computer(s))" -f $wave.Name,$wave.ComputerCount))
     }
     catch { Show-GuiError $_.Exception.Message }
 })
 $controls.LaunchAllButton.Add_Click({
     try {
-        $active = @(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') -Campaign $script:CurrentCampaign | Where-Object { $_.Alive } | ForEach-Object { $_.WaveName })
+        $active = @(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) -Campaign $script:CurrentCampaign | Where-Object { $_.Alive } | ForEach-Object { $_.WaveName })
         $ready = @($script:Waves | Where-Object { $_.Launchable -and $active -notcontains $_.Name })
         if ($ready.Count -eq 0) { Show-GuiError 'No launchable Wave of this Campaign is waiting.'; return }
         $values = Get-SemtGuiOptionValues -Editors $script:Editors
@@ -1591,7 +1591,7 @@ $controls.LaunchAllButton.Add_Click({
 })
 $controls.StopAllButton.Add_Click({
     try {
-        $active = @(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') -Campaign $script:CurrentCampaign | Where-Object { $_.Alive })
+        $active = @(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) -Campaign $script:CurrentCampaign | Where-Object { $_.Alive })
         if ($active.Count -eq 0) { Add-Status -Message 'No active Run of this Campaign.'; return }
         $force = (@($active | Where-Object { Test-Path -LiteralPath $_.SignalPath -PathType Leaf }).Count -gt 0)
         $question = if ($force) { 'A controlled stop was already requested. Force the local stop of running workers? Remote endpoints may continue and must be verified before relaunch.' } else { 'Request a controlled stop of {0} active Run(s) of this Campaign? No new computer starts; running workers finish.' -f $active.Count }
@@ -1614,7 +1614,7 @@ $controls.InheritWaveOptionsButton.Add_Click({
 $controls.RefreshWrappersButton.Add_Click({
     try {
         if ($null -eq $script:SelectedWave) { return }
-        [void](Write-SemtWaveWrappers -WavePath $script:SelectedWave.Path)
+        [void](Write-SemtWaveWrappers -WavePath $script:SelectedWave.Path -PackageRoot $script:PackageRoot)
         Update-WaveList -SelectName $script:SelectedWave.Name
         Add-Status -Message ("Launchers refreshed for Wave '{0}'." -f $script:SelectedWave.Name)
     }
@@ -1681,7 +1681,7 @@ foreach ($pair in @(@('StopSelectedRunButton',$false),@('ForceStopSelectedRunBut
         try {
             $run = $controls.RunsGrid.SelectedItem
             if ($null -eq $run) { return }
-            $active = @(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') -Campaign $script:CurrentCampaign | Where-Object { $_.Alive -and $_.RunId -eq [string]$run.RunId })
+            $active = @(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) -Campaign $script:CurrentCampaign | Where-Object { $_.Alive -and $_.RunId -eq [string]$run.RunId })
             if ($active.Count -eq 0) { Add-Status -Message ('Run {0} is not active.' -f $run.RunId); return }
             $force = [bool]$eventSource.Tag
             $question = if ($force) { 'Force the local stop of running workers? Remote endpoints may continue and must be verified before relaunch.' } else { 'Request a controlled stop? No new computer starts; running workers finish.' }
@@ -1712,7 +1712,7 @@ $window.Add_Closing({
         if ($choice -eq [System.Windows.MessageBoxResult]::Yes) { Stop-InventoryRefresh }
     }
     $script:GuiClosing = $true
-    $active = @(Get-SemtActiveRuns -RunsRoot (Join-Path $script:PackageRoot 'Runs') | Where-Object { $_.Alive })
+    $active = @(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) | Where-Object { $_.Alive })
     if ($active.Count -eq 0) { return }
     $choice = [System.Windows.MessageBox]::Show($window, ("{0} Run(s) are still active.`n`nYes: request a controlled stop, then close.`nNo: close and leave them running.`nCancel: keep the GUI open." -f $active.Count), 'Active Runs', 'YesNoCancel', 'Warning')
     if ($choice -eq [System.Windows.MessageBoxResult]::Cancel) { $script:GuiClosing = $false; $routedEventArgs.Cancel = $true; return }
@@ -1744,8 +1744,8 @@ if (Get-Command -Name Set-SmartM365WpfWindowVisible -ErrorAction SilentlyContinu
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2ujBn80PBCvKi
-# EXziPD9NPFl+fpGEBB7rrEg9n5eUMqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCIu18Eg/3UTQF1
+# YGf3bzuXDlWn924CTqVZoDgMTk6gLaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1775,14 +1775,14 @@ if (Get-Command -Name Set-SmartM365WpfWindowVisible -ErrorAction SilentlyContinu
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCA77QjD00BpnBpWD2cvJavF
-# 4yi9Ht+zFhgUzOmr0pQFbDANBgkqhkiG9w0BAQEFAASCAYB39nc+R1R9VbCmx6u+
-# eR8wzYRGnmBPbDzUwNy3aFkGkmkpzWanJebKJGrItSZRsqzkmX+Hyp96Ug1Jk8I8
-# i1N++Y4Oametj3M10KgptgtiZDHSaUMs6fBXbAL0NHlJ9oONeGmz46sGQMmpYdz1
-# ryBrDo8MjyIdEB6mZTp32KualAaClokazBsqoMf+f4ueNnLVGZdnagg0Ak95+Pc8
-# XKfKDSObfDN7XlvUPbqIttx11lVyX4cZgxfdHbG/fcf8IBqxwfQX+3anfbKCqrZ3
-# 0OFY/m0y1qRJMUZFCGN2iS/LtA6y5qMPvTtpX2hLsbLQETC98mUR1Xdv0EDwNFm7
-# cgQ3CxYEU/GKpF6G7PVQWjnrwSlUHcN6rTgVm76kZBCTOuX4Em49F4JccggvVZ9L
-# lSNYB8qxm3+hFTFbzAdp9qOLPsat2/EMeNSCWV2JqNreSTVNRDGCvo60uZB5AMYk
-# EMeJXR5yWA2BnecOxy6VaUPrfVG+XwR0ynTPyJnJ5N40avc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBpVIQpcmXVP44VWRtcLB+O
+# yU8L4sk2sj3sxGgwv667HTANBgkqhkiG9w0BAQEFAASCAYCDGI2HSLqUfKp2DC0m
+# m7OtVaoHkJfiZ7SS6Y5JRgN0UMas4TuvRhEZYmmhAT/F/MkdPc3Fr7F76ORxl6Wk
+# u3hgcOi346INRyR6qB7fr/+0gzpFramDtk0bRU95GnM5PPczOMYXehA6+OmuxL/x
+# RSsNH4w/ImTmOdI/2xOYx2zoijqSin5+EX1YQWftgex9vd75Mp6rYl7rRQp2i33J
+# Z1p5aP+I9TbCccgZcseyzktrUF2/5MZIX15aM4xLHGWEvyvqUpNxutNIAoLUHdu9
+# 4+riH+KI0Zi7GmmgKGUfxJarOffWUGE4YpUPA38859gtN5mrGLZ5NtgNK1pOIZJt
+# LIyK+Blzyo4mVy0YAc0VfXO3jcahzEfhk93lF3vE41o/Fs1zBr+F9IwgQlPWJF5K
+# Zhsm5pIq5leCfbWI5/njklRuSSR9Pm8Z0CiUqmrL/+n3oHEW5XUV6FlZPJJMbgaE
+# ix5Yi9NeGp3P/yNfrd4Ot1akD5cHV7tbdGXTKlkO7CNmjMo=
 # SIG # End signature block
