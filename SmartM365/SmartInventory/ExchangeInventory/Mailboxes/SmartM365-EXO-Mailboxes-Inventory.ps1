@@ -21,6 +21,8 @@
       - AssignedLicenses no longer fetched (column kept empty)
       - Graph HTTP code logging and NOC-style error summary
       - -PermissionsOnly (with -IncludePerm) accelerates by collecting permissions only; other columns are left empty (NOT "N/A")
+      - Parallel permission collection logs "Mailbox permissions progress" every 1,000 mailboxes or after 5 minutes
+        with new work (processed/total, errors, rate, ETA, per-worker counts), so long runs are not reported as stalled
       - Live stats (-IncludeStats) are prefetched by persistent parallel EXO workers (StatsParallelThrottle,
         default 4 from local config; 1 = former sequential collection); rows keep their order and values
       - LastUserActionTime: populated from Stats snapshot when available. In live stats mode (-IncludeStats),
@@ -28,7 +30,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.29
+1.30
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ExchangeOnlineManagement; Microsoft.Graph.Authentication when Graph enrichment is used. SmartM365 mail/SharePoint upload uses Graph REST direct from SmartM365.Core.
@@ -411,7 +413,7 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.29"
+$ScriptVersion = "1.30"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
@@ -1474,6 +1476,73 @@ function Convert-ToMBInteger {
         return $summary
     }
 
+    # ====== Parallel permission collection progress ======
+    function New-MailboxPermissionProgressTracker {
+        param(
+            [Parameter(Mandatory)][int]$Total,
+            [int]$EveryMailboxes = 1000,
+            [int]$EveryMinutes = 5,
+            [int[]]$WorkerTotals = @()
+        )
+        return @{
+            Total               = $Total
+            EveryMailboxes      = [math]::Max(1, $EveryMailboxes)
+            EveryMinutes        = [math]::Max(1, $EveryMinutes)
+            Processed           = 0
+            Errors              = 0
+            ConnectionFailures  = 0
+            WorkerTotals        = [int[]]@($WorkerTotals)
+            WorkerProcessed     = (New-Object 'int[]' @($WorkerTotals).Count)
+            Stopwatch           = [System.Diagnostics.Stopwatch]::StartNew()
+            LastLoggedProcessed = 0
+            LastLoggedSeconds   = 0.0
+        }
+    }
+
+    function Get-MailboxPermissionProgressLine {
+        # Returns a log line when a mailbox-count step is crossed, when EveryMinutes elapsed since the
+        # previous line with new work, or on the last mailbox; otherwise $null. No progress, no line:
+        # a collection that stops advancing must still trip the orchestrator stalled-job alert.
+        param(
+            [Parameter(Mandatory)][hashtable]$Tracker,
+            [double]$ElapsedSeconds = -1,
+            [datetime]$Now = [datetime]::MinValue
+        )
+        $elapsed = if ($ElapsedSeconds -ge 0) { $ElapsedSeconds } else { $Tracker.Stopwatch.Elapsed.TotalSeconds }
+        $processedCount = [int]$Tracker.Processed
+        $lastProcessed = [int]$Tracker.LastLoggedProcessed
+        if ($processedCount -le $lastProcessed) { return $null }
+        $total = [int]$Tracker.Total
+        $step = [int]$Tracker.EveryMailboxes
+        $countDue = [math]::Floor($processedCount / $step) -gt [math]::Floor($lastProcessed / $step)
+        $timeDue = ($elapsed - [double]$Tracker.LastLoggedSeconds) -ge (60.0 * [int]$Tracker.EveryMinutes)
+        if (-not $countDue -and -not $timeDue -and $processedCount -lt $total) { return $null }
+
+        $Tracker.LastLoggedProcessed = $processedCount
+        $Tracker.LastLoggedSeconds = $elapsed
+        $culture = [System.Globalization.CultureInfo]::InvariantCulture
+        $percent = if ($total -gt 0) { 100.0 * $processedCount / $total } else { 100.0 }
+        $rate = if ($elapsed -gt 0) { $processedCount / $elapsed } else { 0.0 }
+        $remaining = [math]::Max(0, $total - $processedCount)
+        $etaText = 'n/a'
+        if ($remaining -eq 0) { $etaText = 'done' }
+        elseif ($rate -gt 0) {
+            $remainingSeconds = $remaining / $rate
+            $clock = if ($Now -ne [datetime]::MinValue) { $Now } else { Get-Date }
+            $etaText = [string]::Format($culture, '~{0:F0} min ({1:HH:mm})', ($remainingSeconds / 60.0), $clock.AddSeconds($remainingSeconds))
+        }
+        $line = [string]::Format($culture, 'Mailbox permissions progress: {0}/{1} mailboxes ({2:F1}%); errors={3}; connectionFailures={4}; rate={5:F2} mailbox/s; elapsed={6:F1} min; ETA {7}',
+            $processedCount, $total, $percent, [int]$Tracker.Errors, [int]$Tracker.ConnectionFailures, $rate, ($elapsed / 60.0), $etaText)
+        $workerTotals = @($Tracker.WorkerTotals)
+        if ($workerTotals.Count -gt 0) {
+            $workerParts = for ($workerIndex = 0; $workerIndex -lt $workerTotals.Count; $workerIndex++) {
+                '{0}/{1}' -f $Tracker.WorkerProcessed[$workerIndex], $workerTotals[$workerIndex]
+            }
+            $line += '; workers ' + ($workerParts -join ' ')
+        }
+        return $line + '.'
+    }
+
     # ====== Permissions snapshot (UPN) ======
     function Load-PermissionsSnapshot {
         param([string]$ScriptCsvLogFolderPath)
@@ -1846,7 +1915,11 @@ return @{
         $p_OrgDomain = $OrgDomain
         $p_ConnectRetries = $PermissionWorkerConnectRetries
 
-        $parallelPermissionOutput = @($permissionWorkItems | ForEach-Object -ThrottleLimit $workerCount -Parallel {
+        # Worker results stream to this runspace as they complete, so progress is counted here without shared state.
+        $permissionProgress = New-MailboxPermissionProgressTracker -Total $mailboxesForPerm.Count `
+            -WorkerTotals ([int[]]@($permissionWorkItems | ForEach-Object { @($_.Mailboxes).Count }))
+        $parallelPermissionOutput = [System.Collections.Generic.List[object]]::new()
+        $permissionWorkItems | ForEach-Object -ThrottleLimit $workerCount -Parallel {
             $workItem = $_
             $workerId = [int]$workItem.WorkerId
             $workerMailboxes = @($workItem.Mailboxes)
@@ -1929,7 +2002,20 @@ return @{
                     }
                 }
             # Disconnect only once in the parent cleanup; worker disconnects clear sibling EXO connections.
-        })
+        } | ForEach-Object {
+            $permissionOutput = $_
+            [void]$parallelPermissionOutput.Add($permissionOutput)
+            $permissionProgress.Processed++
+            $permissionErrorText = [string]$permissionOutput.CollectionError
+            if (-not [string]::IsNullOrWhiteSpace($permissionErrorText)) {
+                $permissionProgress.Errors++
+                if ($permissionErrorText -match 'EXO connection failed') { $permissionProgress.ConnectionFailures++ }
+            }
+            $workerSlot = [int]$permissionOutput.WorkerId - 1
+            if ($workerSlot -ge 0 -and $workerSlot -lt $permissionProgress.WorkerProcessed.Count) { $permissionProgress.WorkerProcessed[$workerSlot]++ }
+            $progressLine = Get-MailboxPermissionProgressLine -Tracker $permissionProgress
+            if ($progressLine) { WriteLog $progressLine "INFO" }
+        }
 
         $resultsPerm = @($parallelPermissionOutput | Select-Object UserPrincipalName,PrimarySmtpAddress,OrganizationalUnit,SendAs,FullAccess,GrantSendOnBehalfTo)
         $parallelPermissionErrors = @($parallelPermissionOutput | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.CollectionError) })

@@ -5,7 +5,7 @@ Synthetic checks of the parallel live statistics prefetch of the EXO mailboxes p
 equal the sequential ones, partial errors, simulated throttling, worker connection failure, deadline,
 one persistent session per worker, and unchanged Fast and permissions-only paths.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Synthetic mailboxes and mocked Exchange cmdlets only. No tenant, Exchange, API, mail or synchronized data access.
 #>
@@ -25,7 +25,7 @@ $evidenceAst = [Management.Automation.Language.Parser]::ParseFile($evidencePath,
 function Get-FunctionText($Tree, [string]$Name) { $Tree.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $Name }, $true).Extent.Text }
 
 # ---------- Static wiring ----------
-Check ($text -match '\.VERSION\r?\n1\.29\r?\n' -and $text -match '\$ScriptVersion = "1\.29"') 'EXO mailboxes version is not 1.29.'
+Check ($text -match '\.VERSION\r?\n1\.30\r?\n' -and $text -match '\$ScriptVersion = "1\.30"') 'EXO mailboxes version is not 1.30.'
 Check ($text -match "Get-ScriptLocalConfigValue -Config \`$ScriptLocalConfig -Name 'StatsParallelThrottle' -DefaultValue 4") 'StatsParallelThrottle does not default to 4 from the local configuration.'
 $template = Get-Content -LiteralPath (Join-Path (Split-Path $producerPath) 'SmartM365-EXO-Mailboxes-Inventory.local.json.template') -Raw | ConvertFrom-Json
 Check ($template.StatsParallelThrottle -eq 4) 'The local configuration template does not expose StatsParallelThrottle = 4.'
