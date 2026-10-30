@@ -1,7 +1,7 @@
 ﻿Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.0.2' -Global -ErrorAction Stop
 
-$script:DistributedModuleVersion = '1.1.23'
+$script:DistributedModuleVersion = '1.1.24'
 
 function Resolve-DistributedJsonPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -873,9 +873,12 @@ $ErrorActionPreference = 'Stop'
 try {
     if (-not (Get-Module -ListAvailable -Name MicrosoftTeams)) { throw 'MicrosoftTeams PowerShell module is not installed on this server.' }
     Import-Module MicrosoftTeams -MinimumVersion 4.7.1 -ErrorAction Stop
-    Connect-MicrosoftTeams -TenantId $env:SMART_TENANT_ID -ApplicationId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT | Out-Null
-    $null = Get-CsTenant -ErrorAction Stop
-    $result = @{ Ready = $true; Roles = @(); Detail = 'Read-only Teams PowerShell probe succeeded.' }
+    # Same app-only call as M365-TeamsPhonePstnUsage-Inventory, so the probe checks what the job uses.
+    # Connect at script level before looking for the cmdlet, whether the module exports it at import or on connection.
+    Connect-MicrosoftTeams -TenantId $env:SMART_TENANT_ID -ApplicationId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -ErrorAction Stop | Out-Null
+    if (-not (Get-Command -Name Get-CsPhoneNumberAssignment -ErrorAction SilentlyContinue)) { throw 'Get-CsPhoneNumberAssignment is not available in the installed MicrosoftTeams module after Connect-MicrosoftTeams.' }
+    $null = @(Get-CsPhoneNumberAssignment -Top 1 -ErrorAction Stop)
+    $result = @{ Ready = $true; Roles = @(); Detail = "Read-only Teams PowerShell probe succeeded (MicrosoftTeams $((Get-Module -Name MicrosoftTeams).Version), Get-CsPhoneNumberAssignment)." }
 }
 catch { $result = @{ Ready = $false; Roles = @(); Detail = $_.Exception.Message } }
 finally {
