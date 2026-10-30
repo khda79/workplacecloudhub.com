@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.4.9
+    0.4.10
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -137,7 +137,7 @@ function Send-PreparedSuccessMail {
     $rows=foreach($label in $details.Keys) {
         '<tr><th>{0}</th><td>{1}</td></tr>' -f [Net.WebUtility]::HtmlEncode($label),[Net.WebUtility]::HtmlEncode([string]$details[$label])
     }
-    $body='<h2>Workplace evidence completed</h2><table>'+($rows -join '')+'</table><p>Review the execution log for source-quality and retention warnings. Power BI refresh and publication are separate operations.</p>'
+    $body='<h2>Workplace evidence completed</h2><table>'+($rows -join '')+'</table><p>Review the execution log for source-quality warnings. Batch retention runs after this notification; its result and any warning are in the same log. Power BI refresh and publication are separate operations.</p>'
     # Use the shared sender/recipient and Graph/SMTP configuration; no attachments.
     SendEmailHtmlReport -Subject "$scriptName completed - batch $BatchId" -BodyHtml $body -MailPurpose Report -AllowAttachments:$false
 }
@@ -265,10 +265,10 @@ try {
         $phase='SharePoint existing-batch transfer'
         $transfer=Invoke-PreparedStep { Send-PreparedEvidenceBatch @transferParameters -ExpectedBatchId $ExpectedBatchId }
         Assert-PreparedTransferResult -Result $transfer -ExpectedBatchId $ExpectedBatchId
-        Invoke-PostTransferRetention $transfer
         WriteLog -Message "Transfer complete: batch=$($transfer.BatchId); CSVs=$($transfer.CsvFiles); verified files=$($transfer.VerifiedFiles); pointer verified=$($transfer.PointerVerified); audit=$($transfer.AuditPath). No collection, mapping download or CSV generation." -Level INFO
         $phase='Success email notification'
         Send-PreparedSuccessMail -BatchId $transfer.BatchId -CsvFiles $transfer.CsvFiles -VerifiedTransfer $transfer
+        Invoke-PostTransferRetention $transfer
         $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return
     }
     if ($RepairLegacyHistory) {
@@ -364,17 +364,18 @@ try {
         $phase='SharePoint batch transfer'
         $transfer=Invoke-PreparedStep { Send-PreparedEvidenceBatch @transferParameters -ExpectedBatchId $result.BatchId }
         Assert-PreparedTransferResult -Result $transfer -ExpectedBatchId $result.BatchId
-        Invoke-PostTransferRetention $transfer
         WriteLog -Message "SharePoint batch and pointer verified: $($transfer.BatchId); files=$($transfer.VerifiedFiles); audit=$($transfer.AuditPath)." -Level INFO
     }
     $recap = if ($ValidateOnly) { "Source preflight: $($result.SourceFiles) files; $($result.Identity.CsvFiles) CSVs and $($result.Identity.Rows) rows checked; no generation/publication." } else { "$($result.Files) prepared CSVs; observed history retained; batch $($result.BatchId)." }
     WriteLog -Message $recap -Level INFO
+    # The verified pointer already exposes the batch, so notify before the long retention run.
     if (-not ($Offline -or $ValidateOnly -or $WorkforceDiagnostic)) {
         $phase='Success email notification'
         Send-PreparedSuccessMail -BatchId $result.BatchId -CsvFiles $result.Files -VerifiedTransfer $transfer
         $phase='Success Teams notification'
         Send-SmartM365TeamsNotification -Title $scriptName -Message 'Preparation completed.' -Level SUCCESS -Channel Infos -ResultSummary $recap -Facts @{Tenant=$effective.TenantKey;Output=$output} | Out-Null
     }
+    if ($transfer) { Invoke-PostTransferRetention $transfer }
 
     $smartM365RunGuard.ReachedTerminal=$true
 } catch {
