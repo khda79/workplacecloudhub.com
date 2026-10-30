@@ -3,7 +3,7 @@
 .SYNOPSIS
 Checks that non-started scheduled occurrences remain visible in history.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -28,6 +28,8 @@ try {
         $row = @($history | Where-Object JobName -eq $name)[0]
         if ($null -eq $row -or $null -ne $row.StartTime -or $row.EventTime -lt $date) { throw "Non-started $name occurrence was lost or assigned a false start time." }
     }
+    $succeeded = @($history | Where-Object JobName -eq 'Succeeded')[0]
+    if ($succeeded.DurationMinutes -ne 1 -or $succeeded.Scheduled -ne $scheduled.ToString('yyyy-MM-dd HH:mm')) { throw "History rows must carry the duration in minutes and the local scheduled time ($($succeeded.DurationMinutes); $($succeeded.Scheduled))." }
     $filtered = @(Get-SmartM365OrchestratorHistory -SharedDataFolderPath $root -From $date -To $date.AddDays(1).AddTicks(-1) -Status BlockedDependencyFailed)
     if ($filtered.Count -ne 1 -or $filtered[0].JobName -ne 'Blocked') { throw 'Blocked status filter is incorrect.' }
     'PASS: non-started occurrences remain visible with scheduled event time and no false start.'

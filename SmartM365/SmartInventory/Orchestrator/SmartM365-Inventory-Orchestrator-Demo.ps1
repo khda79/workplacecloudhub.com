@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.13
+1.4.14
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -102,9 +102,10 @@ function New-OrchestratorDemoData {
                 # The Healthy scene keeps every sample run successful.
                 $status = if ($Scenario -eq 'Healthy') {'Success'} elseif (($day+$i) % 19 -eq 0) {'Failed'} elseif (($day+$i) % 11 -eq 0) {'CompletedWithWarnings'} else {'Success'}
                 [pscustomobject]@{
-                    EventTime=$start.AddMinutes($duration).ToString('yyyy-MM-dd HH:mm:ss')
-                    StartTime=$start.ToString('yyyy-MM-dd HH:mm:ss'); Server=$jobs[$i].Server
-                    JobName=$jobs[$i].Name; Status=$status; DurationSec=($duration*60)
+                    # As the real history: Time is the start, Scheduled the occurrence, duration in minutes.
+                    EventTime=$start.ToString('yyyy-MM-dd HH:mm:ss')
+                    StartTime=$start.ToString('yyyy-MM-dd HH:mm:ss'); Scheduled=$start.ToString('yyyy-MM-dd HH:mm'); Server=$jobs[$i].Server
+                    JobName=$jobs[$i].Name; Status=$status; DurationSec=($duration*60); DurationMinutes=[double]$duration
                     ExitCode=$(if ($status -eq 'Failed') {1} elseif ($status -eq 'CompletedWithWarnings') {3} else {0})
                     RetryCount=0; LogPath=('Demo/Logs/{0}.log' -f $jobs[$i].Name)
                 }
@@ -376,7 +377,7 @@ function Export-OrchestratorDemoHistory {
     $s=$script:OrchestratorDemo
     # The only disk output in the demo. The root is generated per launch, never read from runtime config.
     [void][IO.Directory]::CreateDirectory($s.OutputRoot)
-    $columns=@('EventTime','StartTime','Server','JobName','Status','DurationSec','ExitCode','RetryCount','LogPath')
+    $columns=@(@{Name='Time';Expression={$_.EventTime}},'Scheduled','Server','JobName','Status','DurationMinutes','ExitCode','RetryCount','LogPath')
     $path=Join-Path $s.OutputRoot ('SmartM365-Orchestrator-History-DEMO.'+$Format.ToLowerInvariant())
     if($Format -eq 'Html') {
         $body=$s.FilteredHistory | Select-Object $columns | ConvertTo-Html -Title 'SmartM365 Orchestrator history - DEMO' -PreContent '<h1>SmartM365 Orchestrator history</h1><p><strong>DEMO - Sample data</strong> | Contoso | 2026-10-18 09:30 | Synthetic execution history</p>'

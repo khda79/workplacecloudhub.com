@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.30
+1.6.31
 #>
 [CmdletBinding()]
 param(
@@ -68,12 +68,14 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.30'
+$script:AppVersion = '1.6.31'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
 $script:DraftJobs = $null
 $script:DraftCluster = $null
+# History exports: same columns as the grid (Time = start, or scheduled time when the run never started).
+$script:HistoryExportColumns = @(@{ Name = 'Time'; Expression = { $_.EventTime } }, 'Scheduled', 'Server', 'JobName', 'Status', 'DurationMinutes', 'ExitCode', 'RetryCount', 'LogPath')
 $script:ServerSelectionRestoring = $false
 $script:PublishedChangeWarned = $false
 # The smoke test publishes a test server only on an explicitly given (copied) shared folder.
@@ -824,12 +826,21 @@ $xaml = @'
                     </Grid>
                     <DataGrid x:Name="HistoryGrid" Grid.Row="1" Margin="0,10,0,0">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Event time" Binding="{Binding EventTime}" Width="145"/>
-                            <DataGridTextColumn Header="Start" Binding="{Binding StartTime}" Width="145"/>
+                            <!-- One time column (GUI 1.6.31): the start, or the scheduled time for a run that never started. -->
+                            <DataGridTextColumn Header="Time" Binding="{Binding EventTime}" Width="145">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="Start time of the run; for a skipped or blocked occurrence (no start), its scheduled time."/></Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Header="Scheduled" Binding="{Binding Scheduled}" Width="115">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="Scheduled occurrence the run belongs to (differs from Time for a catch-up, retry, forced or pipeline run)."/></Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
                             <DataGridTextColumn Header="Server" Binding="{Binding Server}" Width="150"/>
                             <DataGridTextColumn Header="Job" Binding="{Binding JobName}" Width="250"/>
                             <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100"/>
-                            <DataGridTextColumn Header="Duration (sec)" Binding="{Binding DurationSec}" Width="110"/>
+                            <DataGridTextColumn Header="Duration (min)" Binding="{Binding DurationMinutes}" Width="105"/>
                             <DataGridTextColumn Header="Exit" Binding="{Binding ExitCode}" Width="60"/>
                             <DataGridTextColumn Header="Retry" Binding="{Binding RetryCount}" Width="60"/>
                             <DataGridTextColumn Header="Log" Binding="{Binding LogPath}" Width="*"/>
@@ -3839,7 +3850,7 @@ $script:Controls.ExportCsvButton.Add_Click({
     $dialog.Filter = 'CSV files (*.csv)|*.csv'
     $dialog.FileName = 'SmartM365-Orchestrator-History-{0}.csv' -f (Get-Date).ToString('yyyyMMdd-HHmmss')
     if ($dialog.ShowDialog()) {
-        $script:HistoryRows | Export-Csv -LiteralPath $dialog.FileName -NoTypeInformation -Encoding utf8
+        $script:HistoryRows | Select-Object -Property $script:HistoryExportColumns | Export-Csv -LiteralPath $dialog.FileName -NoTypeInformation -Encoding utf8
         Write-GuiActivity -Message "History exported to $($dialog.FileName)." -Level SUCCESS
     }
 })
@@ -3848,7 +3859,7 @@ $script:Controls.ExportHtmlButton.Add_Click({
     $dialog.Filter = 'HTML files (*.html)|*.html'
     $dialog.FileName = 'SmartM365-Orchestrator-History-{0}.html' -f (Get-Date).ToString('yyyyMMdd-HHmmss')
     if ($dialog.ShowDialog()) {
-        $body = $script:HistoryRows | Select-Object EventTime, StartTime, Server, JobName, Status, DurationSec, ExitCode, RetryCount, LogPath | ConvertTo-Html -Title 'SmartM365 Orchestrator history' -PreContent '<h1>SmartM365 Orchestrator history</h1>'
+        $body = $script:HistoryRows | Select-Object -Property $script:HistoryExportColumns | ConvertTo-Html -Title 'SmartM365 Orchestrator history' -PreContent '<h1>SmartM365 Orchestrator history</h1>'
         [System.IO.File]::WriteAllText($dialog.FileName, ($body -join [Environment]::NewLine), [System.Text.UTF8Encoding]::new($false))
         Write-GuiActivity -Message "History exported to $($dialog.FileName)." -Level SUCCESS
     }

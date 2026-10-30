@@ -743,7 +743,10 @@ function Get-SmartM365OrchestratorHistory {
                         -not [datetime]::TryParse([string]$row.EndTime, [ref]$eventTime)) { continue }
                 }
                 if ($eventTime -lt $From -or $eventTime -gt $To) { continue }; if ($JobName -and $row.JobName -ine $JobName) { continue }; if ($Status -and $row.Status -ine $Status) { continue }
-                $result.Add([pscustomobject]@{ Server = $serverFolder.Name; JobName = [string]$row.JobName; ScheduledTime = [string]$row.ScheduledTime; StartTime = $(if ($hasStart) { $start } else { $null }); EventTime = $eventTime; EndTime = [string]$row.EndTime; DurationSec = [double]$row.DurationSec; ExitCode = [string]$row.ExitCode; Status = [string]$row.Status; RetryCount = [int]$row.RetryCount; LogPath = [string]$row.LogPath })
+                # Display helpers (GUI 1.6.31): scheduled occurrence in local time and duration in minutes.
+                $scheduledLocal = [datetime]::MinValue
+                $scheduledText = if ([datetime]::TryParse([string]$row.ScheduledTime, [ref]$scheduledLocal)) { $scheduledLocal.ToString('yyyy-MM-dd HH:mm') } else { '' }
+                $result.Add([pscustomobject]@{ Server = $serverFolder.Name; JobName = [string]$row.JobName; ScheduledTime = [string]$row.ScheduledTime; Scheduled = $scheduledText; StartTime = $(if ($hasStart) { $start } else { $null }); EventTime = $eventTime; EndTime = [string]$row.EndTime; DurationSec = [double]$row.DurationSec; DurationMinutes = [math]::Round([double]$row.DurationSec / 60, 1); ExitCode = [string]$row.ExitCode; Status = [string]$row.Status; RetryCount = [int]$row.RetryCount; LogPath = [string]$row.LogPath })
             }
         }
     }

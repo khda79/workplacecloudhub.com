@@ -108,7 +108,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.77
+1.5.78
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -158,7 +158,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.77"
+$ScriptVersion = "1.5.78"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -2901,6 +2901,8 @@ function Get-OrchestratorPeerMonitoringState {
         LastRecoveryAttemptUtc = ''
         IssueLastAlertUtc = @{}
         IssueLastAttemptUtc = @{}
+        # Consecutive checks that saw each issue (1.5.78: every issue is confirmed on its own).
+        IssueSeenCount = @{}
     }
     foreach ($key in $defaults.Keys) {
         if (-not $state.ContainsKey($key)) { $state[$key] = $defaults[$key] }
@@ -3268,53 +3270,69 @@ function Invoke-OrchestratorPeerMonitoring {
     $monitorState = Get-OrchestratorPeerMonitoringState
     $snapshot = Get-OrchestratorPeerHealthSnapshot -Now $Now
     $issues = @($snapshot.Issues)
-    $issueKey = @($issues | ForEach-Object { [string]$_.Key } | Sort-Object -Unique) -join "`n"
-    $summary = @($issues | ForEach-Object { if ($_.Job) { "$($_.Server)/$($_.Job): $($_.Type)" } elseif ($_.Server) { "$($_.Server): $($_.Type)" } else { [string]$_.Type } }) -join '; '
+    $required = [math]::Max(1, [int]$script:Settings.PeerMonitoringConfirmationChecks)
 
-    if ($issues.Count -eq 0) {
-        $monitorState.CandidateIssueKey = ''
-        $monitorState.CandidateCount = 0
+    # Every issue is confirmed on its own (1.5.78): an issue that appears or clears elsewhere does not
+    # restart the count of the others, so an evolving incident is not reported as 1/2 again and again.
+    if ($monitorState.IssueSeenCount -isnot [hashtable]) { $monitorState.IssueSeenCount = @{} }
+    $seen = @{}
+    foreach ($issue in $issues) {
+        $key = [string]$issue.Key
+        $previous = if ($monitorState.IssueSeenCount.ContainsKey($key)) { [int]$monitorState.IssueSeenCount[$key] } else { 0 }
+        $seen[$key] = $previous + 1
+    }
+    $monitorState.IssueSeenCount = $seen
+    $confirmed = @($issues | Where-Object { [int]$seen[[string]$_.Key] -ge $required })
+    $candidates = @($issues | Where-Object { [int]$seen[[string]$_.Key] -lt $required })
+    if ($candidates.Count -gt 0) {
+        # Unconfirmed observations (share latency, file being written) usually clear at the next check: INFO.
+        $candidateSummary = @($candidates | ForEach-Object { '{0} ({1}/{2})' -f (Format-OrchestratorPeerIssue -Issue $_), $seen[[string]$_.Key], $required }) -join '; '
+        Write-OrchestratorLog -Message ("Peer monitoring candidate issue: {0}" -f $candidateSummary)
+    }
+    $issueKey = @($confirmed | ForEach-Object { [string]$_.Key } | Sort-Object -Unique) -join "`n"
+    $summary = @($confirmed | ForEach-Object { Format-OrchestratorPeerIssue -Issue $_ }) -join '; '
+    $alertPaths = Get-OrchestratorPeerAlertPaths
+
+    if ($confirmed.Count -eq 0) {
         $monitorState.HealthyCount = [int]$monitorState.HealthyCount + 1
-        if (-not [string]::IsNullOrWhiteSpace([string]$monitorState.ActiveIssueKey) -and [int]$monitorState.HealthyCount -ge [int]$script:Settings.PeerMonitoringConfirmationChecks) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$monitorState.ActiveIssueKey) -and [int]$monitorState.HealthyCount -ge $required) {
             if (-not $script:Settings.PeerRecoveryEmailEnabled) {
                 Write-OrchestratorLog -Message ("Peer monitoring recovered; recovery email disabled. Previous issues: {0}" -f $monitorState.ActiveIssueSummary)
-                $monitorState.ActiveIssueKey = ''
-                $monitorState.ActiveIssueSummary = ''
-                $monitorState.IssueLastAlertUtc = @{}
-                $monitorState.IssueLastAttemptUtc = @{}
+                Reset-OrchestratorPeerMonitoringIncident -State $monitorState
                 return
             }
             $lastAttempt = ConvertFrom-OrchestratorPeerMonitorTime -Value ([string]$monitorState.LastRecoveryAttemptUtc)
             if ($null -ne $lastAttempt -and ($Now - $lastAttempt).TotalMinutes -lt [int]$script:Settings.PeerAlertMailRetryMinutes) { return }
-            $monitorState.LastRecoveryAttemptUtc = $Now.ToUniversalTime().ToString('o')
-            if (Send-OrchestratorPeerMonitoringEmail -Snapshot $snapshot -Recovery -PreviousSummary ([string]$monitorState.ActiveIssueSummary)) {
-                Write-OrchestratorLog -Message ("Peer monitoring recovery email sent. Previous issues: {0}" -f $monitorState.ActiveIssueSummary)
-                $monitorState.ActiveIssueKey = ''
-                $monitorState.ActiveIssueSummary = ''
-                $monitorState.IssueLastAlertUtc = @{}
-                $monitorState.IssueLastAttemptUtc = @{}
-                $monitorState.LastRecoveryAttemptUtc = ''
+            # One recovery mail for the cluster: the first server that recovers sends it and clears the
+            # shared alert entries; the others then only close their own incident.
+            $lock = Enter-OrchestratorSharePointMirrorLock -Path $alertPaths.LockPath -StaleMinutes 10
+            if ($null -eq $lock) { return }
+            try {
+                $monitorState.LastRecoveryAttemptUtc = $Now.ToUniversalTime().ToString('o')
+                $shared = Read-OrchestratorPeerAlertState -Path $alertPaths.Path -Now $Now
+                $activeKeys = @(([string]$monitorState.ActiveIssueKey) -split "`n" | Where-Object { $_ })
+                $stillShared = @($activeKeys | Where-Object { $shared.ContainsKey($_) })
+                if ($stillShared.Count -eq 0) {
+                    Write-OrchestratorLog -Message ("Peer monitoring recovered; the recovery email was already sent by another server. Previous issues: {0}" -f $monitorState.ActiveIssueSummary)
+                    Reset-OrchestratorPeerMonitoringIncident -State $monitorState
+                    return
+                }
+                if (Send-OrchestratorPeerMonitoringEmail -Snapshot $snapshot -Recovery -PreviousSummary ([string]$monitorState.ActiveIssueSummary)) {
+                    Write-OrchestratorLog -Message ("Peer monitoring recovery email sent. Previous issues: {0}" -f $monitorState.ActiveIssueSummary)
+                    foreach ($key in $stillShared) { $shared.Remove($key) }
+                    Save-OrchestratorPeerAlertState -Path $alertPaths.Path -Issues $shared
+                    Reset-OrchestratorPeerMonitoringIncident -State $monitorState
+                }
             }
+            finally { Exit-OrchestratorSharePointMirrorLock -LockStream $lock -Path $alertPaths.LockPath }
         }
         return
     }
 
     $monitorState.HealthyCount = 0
-    if ([string]$monitorState.CandidateIssueKey -eq $issueKey) {
-        $monitorState.CandidateCount = [int]$monitorState.CandidateCount + 1
-    }
-    else {
-        $monitorState.CandidateIssueKey = $issueKey
-        $monitorState.CandidateCount = 1
-    }
-    if ([int]$monitorState.CandidateCount -lt [int]$script:Settings.PeerMonitoringConfirmationChecks) {
-        Write-OrchestratorLog -Message ("Peer monitoring candidate issue {0}/{1}: {2}" -f $monitorState.CandidateCount, $script:Settings.PeerMonitoringConfirmationChecks, $summary) -Level WARN
-        return
-    }
-
     if ($monitorState.IssueLastAlertUtc -isnot [hashtable]) { $monitorState.IssueLastAlertUtc = @{} }
     if ($monitorState.IssueLastAttemptUtc -isnot [hashtable]) { $monitorState.IssueLastAttemptUtc = @{} }
-    $currentIssueKeys = @($issues | ForEach-Object { [string]$_.Key } | Sort-Object -Unique)
+    $currentIssueKeys = @($confirmed | ForEach-Object { [string]$_.Key } | Sort-Object -Unique)
     foreach ($storedKey in @($monitorState.IssueLastAlertUtc.Keys)) {
         if ($storedKey -notin $currentIssueKeys) { $monitorState.IssueLastAlertUtc.Remove($storedKey) }
     }
@@ -3323,7 +3341,7 @@ function Invoke-OrchestratorPeerMonitoring {
     }
 
     $dueIssues = @(
-        foreach ($issue in $issues) {
+        foreach ($issue in $confirmed) {
             $key = [string]$issue.Key
             $lastAlert = if ($monitorState.IssueLastAlertUtc.ContainsKey($key)) { ConvertFrom-OrchestratorPeerMonitorTime -Value ([string]$monitorState.IssueLastAlertUtc[$key]) } else { $null }
             $lastAttempt = if ($monitorState.IssueLastAttemptUtc.ContainsKey($key)) { ConvertFrom-OrchestratorPeerMonitorTime -Value ([string]$monitorState.IssueLastAttemptUtc[$key]) } else { $null }
@@ -3334,28 +3352,113 @@ function Invoke-OrchestratorPeerMonitoring {
     )
     if ($dueIssues.Count -eq 0) { return }
 
-    $alertGroups = @(
-        [pscustomobject]@{ Category = 'Server'; Issues = @($dueIssues | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.Job) }) }
-        [pscustomobject]@{ Category = 'Jobs'; Issues = @($dueIssues | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Job) }) }
-    )
+    # One alert per issue for the cluster (1.5.78): every server monitors every peer, so the alerts
+    # already sent are shared in Orchestrator-PeerAlert.json under a lock. An issue alerted by another
+    # server within PeerAlertReminderMinutes is only acknowledged here.
+    $lock = Enter-OrchestratorSharePointMirrorLock -Path $alertPaths.LockPath -StaleMinutes 10
+    if ($null -eq $lock) { return }
     $sentAny = $false
-    foreach ($group in $alertGroups) {
-        if ($group.Issues.Count -eq 0) { continue }
-        $attemptUtc = $Now.ToUniversalTime().ToString('o')
-        foreach ($issue in $group.Issues) { $monitorState.IssueLastAttemptUtc[[string]$issue.Key] = $attemptUtc }
-        $groupSnapshot = [pscustomobject]@{ CheckedAt = $snapshot.CheckedAt; Issues = @($group.Issues); Peers = @($snapshot.Peers) }
-        if (Send-OrchestratorPeerMonitoringEmail -Snapshot $groupSnapshot -Category $group.Category) {
-            foreach ($issue in $group.Issues) { $monitorState.IssueLastAlertUtc[[string]$issue.Key] = $attemptUtc }
-            $groupSummary = @($group.Issues | ForEach-Object { if ($_.Job) { "$($_.Server)/$($_.Job): $($_.Type)" } elseif ($_.Server) { "$($_.Server): $($_.Type)" } else { [string]$_.Type } }) -join '; '
-            Write-OrchestratorLog -Message ("Peer monitoring {0} alert sent: {1}" -f $group.Category.ToLowerInvariant(), $groupSummary) -Level WARN
-            $sentAny = $true
+    $acknowledged = $false
+    try {
+        $shared = Read-OrchestratorPeerAlertState -Path $alertPaths.Path -Now $Now
+        $toSend = [System.Collections.Generic.List[object]]::new()
+        $alreadySent = [System.Collections.Generic.List[string]]::new()
+        foreach ($issue in $dueIssues) {
+            $key = [string]$issue.Key
+            $entry = if ($shared.ContainsKey($key)) { $shared[$key] } else { $null }
+            $sharedSent = if ($null -ne $entry) { ConvertFrom-OrchestratorPeerMonitorTime -Value ([string]$entry.SentAtUtc) } else { $null }
+            if ($null -ne $sharedSent -and ($Now.ToUniversalTime() - $sharedSent.ToUniversalTime()).TotalMinutes -lt [int]$script:Settings.PeerAlertReminderMinutes) {
+                $monitorState.IssueLastAlertUtc[$key] = $sharedSent.ToUniversalTime().ToString('o')
+                $alreadySent.Add(('{0} (by {1})' -f (Format-OrchestratorPeerIssue -Issue $issue), [string]$entry.Observer))
+                $acknowledged = $true
+            }
+            else { $toSend.Add($issue) }
         }
+        if ($alreadySent.Count -gt 0) {
+            Write-OrchestratorLog -Message ("Peer monitoring alert already sent by another server: {0}" -f ($alreadySent -join '; '))
+        }
+        $alertGroups = @(
+            [pscustomobject]@{ Category = 'Server'; Issues = @($toSend | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.Job) }) }
+            [pscustomobject]@{ Category = 'Jobs'; Issues = @($toSend | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Job) }) }
+        )
+        foreach ($group in $alertGroups) {
+            if ($group.Issues.Count -eq 0) { continue }
+            $attemptUtc = $Now.ToUniversalTime().ToString('o')
+            foreach ($issue in $group.Issues) { $monitorState.IssueLastAttemptUtc[[string]$issue.Key] = $attemptUtc }
+            $groupSnapshot = [pscustomobject]@{ CheckedAt = $snapshot.CheckedAt; Issues = @($group.Issues); Peers = @($snapshot.Peers) }
+            if (Send-OrchestratorPeerMonitoringEmail -Snapshot $groupSnapshot -Category $group.Category) {
+                foreach ($issue in $group.Issues) {
+                    $monitorState.IssueLastAlertUtc[[string]$issue.Key] = $attemptUtc
+                    $shared[[string]$issue.Key] = [pscustomobject]@{ SentAtUtc = $attemptUtc; Observer = [string]$env:COMPUTERNAME }
+                }
+                $groupSummary = @($group.Issues | ForEach-Object { Format-OrchestratorPeerIssue -Issue $_ }) -join '; '
+                Write-OrchestratorLog -Message ("Peer monitoring {0} alert sent: {1}" -f $group.Category.ToLowerInvariant(), $groupSummary) -Level WARN
+                $sentAny = $true
+            }
+        }
+        if ($sentAny) { Save-OrchestratorPeerAlertState -Path $alertPaths.Path -Issues $shared }
     }
-    if ($sentAny) {
+    finally { Exit-OrchestratorSharePointMirrorLock -LockStream $lock -Path $alertPaths.LockPath }
+    if ($sentAny -or $acknowledged) {
         $monitorState.ActiveIssueKey = $issueKey
         $monitorState.ActiveIssueSummary = $summary
         $monitorState.LastAlertUtc = $Now.ToUniversalTime().ToString('o')
     }
+}
+
+function Format-OrchestratorPeerIssue {
+    param([Parameter(Mandatory = $true)]$Issue)
+    if ($Issue.Job) { return "$($Issue.Server)/$($Issue.Job): $($Issue.Type)" }
+    if ($Issue.Server) { return "$($Issue.Server): $($Issue.Type)" }
+    return [string]$Issue.Type
+}
+
+function Reset-OrchestratorPeerMonitoringIncident {
+    param([Parameter(Mandatory = $true)][hashtable]$State)
+    $State.ActiveIssueKey = ''
+    $State.ActiveIssueSummary = ''
+    $State.IssueLastAlertUtc = @{}
+    $State.IssueLastAttemptUtc = @{}
+    $State.LastRecoveryAttemptUtc = ''
+}
+
+function Get-OrchestratorPeerAlertPaths {
+    [pscustomobject]@{
+        Path = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath 'Orchestrator-PeerAlert.json'
+        LockPath = Join-Path -Path $script:Settings.SharedDataFolderPath -ChildPath 'Orchestrator-PeerAlert.lock'
+    }
+}
+
+function Read-OrchestratorPeerAlertState {
+    # Shared alerts already sent, by issue key: @{ SentAtUtc; Observer }. Entries older than two reminder
+    # periods are dropped (an incident without recovery mail must not block the next alert forever).
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][datetime]$Now)
+    $result = @{}
+    try {
+        $selected = Get-SmartM365JsonReadPath $Path -Optional
+        if (-not $selected) { return $result }
+        $document = (Read-SmartM365JsonDocument -Path $selected).Document
+        if ($null -eq $document -or -not $document.PSObject.Properties['Issues'] -or $null -eq $document.Issues) { return $result }
+        $maximumAgeMinutes = 2 * [math]::Max(1, [int]$script:Settings.PeerAlertReminderMinutes)
+        foreach ($property in @($document.Issues.PSObject.Properties)) {
+            $sentAt = ConvertFrom-OrchestratorPeerMonitorTime -Value ([string]$property.Value.SentAtUtc)
+            if ($null -eq $sentAt -or ($Now.ToUniversalTime() - $sentAt.ToUniversalTime()).TotalMinutes -gt $maximumAgeMinutes) { continue }
+            $result[$property.Name] = [pscustomobject]@{ SentAtUtc = [string]$property.Value.SentAtUtc; Observer = [string]$property.Value.Observer }
+        }
+    }
+    catch {
+        Write-OrchestratorRuntimeUpdateWarning -Key ('peer-alert-read:' + $_.Exception.Message) -Message ("Shared peer alert state unreadable; it restarts empty: {0}" -f $_.Exception.Message) -Now $Now
+    }
+    return $result
+}
+
+function Save-OrchestratorPeerAlertState {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][hashtable]$Issues)
+    $ordered = [ordered]@{}
+    foreach ($key in @($Issues.Keys | Sort-Object)) { $ordered[$key] = $Issues[$key] }
+    $document = [ordered]@{ SchemaVersion = 1; UpdatedAtUtc = [datetime]::UtcNow.ToString('o'); UpdatedBy = [string]$env:COMPUTERNAME; Issues = [pscustomobject]$ordered }
+    try { Write-FileAtomically -Path $Path -Content ($document | ConvertTo-Json -Depth 5) }
+    catch { Write-OrchestratorLog -Message ("Shared peer alert state could not be saved; another server may repeat the mail: {0}" -f $_.Exception.Message) -Level WARN }
 }
 # ==========================================================
 # Authenticode validation (optional, audit/enforce)
