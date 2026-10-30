@@ -2,7 +2,7 @@
 
 ## Orchestrator server acceptance
 
-`SmartM365-OrchestratorServerAcceptance.ps1` (1.1.0, PowerShell 7.2+) qualifies a server before it
+`SmartM365-OrchestratorServerAcceptance.ps1` (1.2.0, PowerShell 7.2+) qualifies a server before it
 is switched from Inactive to Active in the orchestrator GUI. The orchestrator capability probe only
 signs in or loads a module; this script makes a real, limited read for each capability, checks the
 rows, then drops them.
@@ -10,8 +10,10 @@ rows, then drops them.
 What it guarantees:
 
 - No CSV and no data file: rows stay in memory and only counts and check results are logged.
-- Nothing written to the tenant: the SharePoint log upload and the Teams notifications of the log
-  are disabled; a mail is sent only with `-SendTestMail`.
+- Only the run log and the result file reach SharePoint, when the tenant enables `EnableSharePointUpload`
+  (same upload as the other scripts, `-NoSharePointUpload` skips it). No Teams notification; a mail is
+  sent only with `-SendTestMail`. Nothing else is written to the tenant. With the JsonText transport
+  policy, the SharePoint result uses `.json.txt`; the local console result keeps its `.json` name.
 - The only writes are the run log under `LogAllRootPath` (folder `SmartM365-OrchestratorServerAcceptance`),
   a witness folder under `WorkspaceRootPath` (removed at the end), a work folder under `%TEMP%`
   (removed at the end) and, after a full run, the result for the orchestrator console (below).
@@ -92,6 +94,13 @@ Other entry points:
 Useful parameters: `-Capability AD, ExchangeOnPrem` (subset), `-SampleSize` (default 100),
 `-SmallSampleSize` (Teams and SharePoint, default 10), `-CapabilityTimeoutSeconds` (default 600),
 `-AdaxesDomainTimeoutSeconds` (default 120),
-`-SmbIterations`, `-SmbWarningMilliseconds`, `-SmbFailureMilliseconds`, `-SendTestMail`, `-TestMailTo`.
+`-SmbIterations`, `-SmbWarningMilliseconds`, `-SmbFailureMilliseconds`, `-SendTestMail`, `-TestMailTo`,
+`-NoSharePointUpload`.
 
 Offline test: `SmartM365/Tests/Test-SmartM365OrchestratorServerAcceptanceOffline.ps1`.
+
+Acceptance logs are stored under `LOG-ALL/SmartM365-OrchestratorServerAcceptance/<SERVER>/`;
+only the two most recently modified acceptance logs are retained per server after a run. A second simultaneous run on the same server is refused. Legacy logs at the script folder root are moved only when their
+`MachineName` identifies this server and they have not changed for two hours; ambiguous, recent,
+or name-colliding files are left untouched. This retention applies to the shared log folder, not
+to copies already uploaded to SharePoint.

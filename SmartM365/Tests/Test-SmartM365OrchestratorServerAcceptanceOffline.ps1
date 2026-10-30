@@ -4,7 +4,7 @@
     module assessment, child output parsing, Graph roles and job eligibility. Nothing is read
     from a directory, a tenant or a share.
 .VERSION
-    1.1.0
+    1.2.0
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -26,6 +26,82 @@ function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw "Assertion failed: $Message" }
     $script:Checks++
 }
+
+# Legacy migration and per-server retention on an isolated temporary tree.
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('acceptance-logs-' + [guid]::NewGuid().ToString('N'))
+try {
+    $serverFolder = Join-Path $testRoot 'SERVER-A'
+    $otherFolder = Join-Path $testRoot 'SERVER-B'
+    [IO.Directory]::CreateDirectory($serverFolder) | Out-Null
+    [IO.Directory]::CreateDirectory($otherFolder) | Out-Null
+    $prefix = 'SmartM365-OrchestratorServerAcceptance'
+    foreach ($n in 1..3) {
+        $path = Join-Path $testRoot (('{0}-2026-01-01_00-00-0{1}.log' -f $prefix, $n))
+        Set-Content -LiteralPath $path -Value '[INFO] MachineName: SERVER-A'
+        (Get-Item -LiteralPath $path).LastWriteTimeUtc = [datetime]::UtcNow.AddHours(-4).AddMinutes($n)
+    }
+    $other = Join-Path $testRoot ($prefix + '-2026-01-01_00-00-04.log')
+    Set-Content -LiteralPath $other -Value '[INFO] MachineName: SERVER-B'
+    (Get-Item -LiteralPath $other).LastWriteTimeUtc = [datetime]::UtcNow.AddHours(-4)
+    $ambiguous = Join-Path $testRoot ($prefix + '-2026-01-01_00-00-05.log')
+    Set-Content -LiteralPath $ambiguous -Value 'no machine identity'
+    (Get-Item -LiteralPath $ambiguous).LastWriteTimeUtc = [datetime]::UtcNow.AddHours(-4)
+    $recent = Join-Path $testRoot ($prefix + '-2026-01-01_00-00-06.log')
+    Set-Content -LiteralPath $recent -Value '[INFO] MachineName: SERVER-A'
+    $otherOwned = Join-Path $otherFolder ($prefix + '-2026-01-01_00-00-07.log')
+    Set-Content -LiteralPath $otherOwned -Value 'other server'
+    $conflictName = $prefix + '-2026-01-01_00-00-08.log'
+    $conflict = Join-Path $testRoot $conflictName
+    Set-Content -LiteralPath $conflict -Value '[INFO] MachineName: SERVER-A'
+    (Get-Item -LiteralPath $conflict).LastWriteTimeUtc = [datetime]::UtcNow.AddHours(-4)
+    Set-Content -LiteralPath (Join-Path $serverFolder $conflictName) -Value 'existing file'
+    $lockPath = Join-Path $serverFolder '.acceptance.lock'
+    $heldLock = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    try {
+        $lockRejected = $false
+        try { $secondLock = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None); $secondLock.Dispose() } catch [IO.IOException] { $lockRejected = $true }
+        Assert-True $lockRejected 'A second run cannot acquire the same server lock.'
+    }
+    finally { $heldLock.Dispose() }
+    Move-SmartM365AcceptanceLegacyLogs -LogRoot $testRoot -ServerFolder $serverFolder -ServerName 'SERVER-A' -ScriptName $prefix
+    Assert-True ((Test-Path $conflict) -and ((Get-Content -LiteralPath (Join-Path $serverFolder $conflictName) -Raw).Trim() -eq 'existing file')) 'A legacy name collision is never overwritten.'
+    Remove-Item -LiteralPath (Join-Path $serverFolder $conflictName)
+    Assert-True (@(Get-ChildItem -LiteralPath $serverFolder -File -Filter *.log).Count -eq 3) 'Only identifiable old server A logs are migrated.'
+    Assert-True ((Test-Path $other) -and (Test-Path $ambiguous) -and (Test-Path $recent)) 'Other, ambiguous and recent legacy logs stay untouched.'
+    Remove-SmartM365AcceptanceOldLogs -ServerFolder $serverFolder -ScriptName $prefix
+    Assert-True (@(Get-ChildItem -LiteralPath $serverFolder -File -Filter *.log).Count -eq 2) 'Only two server A logs remain.'
+    Assert-True ((Test-Path $otherOwned) -and -not (Test-Path (Join-Path $serverFolder ($prefix + '-2026-01-01_00-00-01.log')))) 'Oldest server A log is removed and server B is untouched.'
+}
+finally { if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force } }
+
+# Verify the SharePoint transport without connecting to a tenant.
+$uploadRoot = Join-Path ([IO.Path]::GetTempPath()) ('acceptance-upload-' + [guid]::NewGuid().ToString('N'))
+try {
+    $sourceFolder = Join-Path $uploadRoot 'source/DATA-ALL/Orchestrator/SERVER-A'
+    $stageFolder = Join-Path $uploadRoot 'stage'
+    [IO.Directory]::CreateDirectory($sourceFolder) | Out-Null
+    $source = Join-Path $sourceFolder 'Orchestrator-Acceptance.json'
+    [IO.File]::WriteAllText($source, '{"status":"PASS"}')
+    function Get-SmartM365JsonTransportPolicy { return @{ Mode = $script:TestTransportMode } }
+    function Get-SmartM365SharePointRelativeFilePath([string]$LocalFilePath) {
+        $normalized = $LocalFilePath.Replace('\','/')
+        return $normalized.Substring($normalized.IndexOf('DATA-ALL/', [StringComparison]::OrdinalIgnoreCase))
+    }
+    function Invoke-SmartM365SharePointCsvUpload([string]$LocalFilePath, [switch]$EnsureParentFolders) {
+        $script:TestUploadedPath = $LocalFilePath
+        $script:TestUploadContent = [IO.File]::ReadAllText($LocalFilePath)
+        $script:TestEnsureFolders = [bool]$EnsureParentFolders
+    }
+    $script:TestTransportMode = 'JsonText'
+    Publish-SmartM365AcceptanceSharePointResult -ResultPath $source -WorkFolder $stageFolder
+    Assert-True ($script:TestUploadedPath.Replace('\','/') -match '/DATA-ALL/Orchestrator/SERVER-A/Orchestrator-Acceptance\.json\.txt$') 'JsonText upload retains DATA-ALL path with the .json.txt suffix.'
+    Assert-True ($script:TestUploadContent -eq '{"status":"PASS"}' -and $script:TestEnsureFolders) 'Upload stages the exact result and ensures parent folders.'
+    Assert-True ([IO.File]::Exists($source) -and -not [IO.File]::Exists($source + '.txt')) 'The console result is preserved without creating a second shared file.'
+    $script:TestTransportMode = 'Readers'
+    Publish-SmartM365AcceptanceSharePointResult -ResultPath $source -WorkFolder $stageFolder
+    Assert-True ($script:TestUploadedPath -eq $source -and $script:TestEnsureFolders) 'Readers mode uploads the legacy result with parent folders.'
+}
+finally { if (Test-Path -LiteralPath $uploadRoot) { Remove-Item -LiteralPath $uploadRoot -Recurse -Force } }
 
 # Worst status and latency/clock thresholds.
 Assert-True ((Get-SmartM365AcceptanceWorstStatus -Status @('PASS', 'WARN', 'SKIPPED')) -eq 'WARN') 'WARN wins over PASS and SKIPPED.'
@@ -105,7 +181,7 @@ $quick = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -
 Assert-True ([bool]$quick.Ready -and @($quick.Datasets[0].Rows).Count -eq 1) 'Step lines do not leak into the rows of a data set.'
 
 # Inner exception messages reach the detail (Teams only said 'see inner exception' in 1.0.3).
-$inner = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText "try { throw [System.Net.Http.HttpRequestException]::new('The SSL connection could not be established, see inner exception.', [System.Security.Authentication.AuthenticationException]::new('The remote certificate is invalid')) } catch { Write-AcceptanceResult @{ Ready = `$false; Detail = (Get-AcceptanceErrorText `$_) } }" -TimeoutSeconds 60
+$inner = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText "Add-Type -AssemblyName System.Net.Http; try { throw [System.Net.Http.HttpRequestException]::new('The SSL connection could not be established, see inner exception.', [System.Security.Authentication.AuthenticationException]::new('The remote certificate is invalid')) } catch { Write-AcceptanceResult @{ Ready = `$false; Detail = (Get-AcceptanceErrorText `$_) } }" -TimeoutSeconds 60
 Assert-True ($inner.Detail -match 'see inner exception\. -> The remote certificate is invalid') "Inner exception is reported ($($inner.Detail))."
 
 # Adaxes child with a fake module: an unreadable objectClass is excluded by DN and the domain read again (like the collector).
@@ -122,7 +198,7 @@ try {
     $environment = @{ PSModulePath = $fakeRoot + [IO.Path]::PathSeparator + $env:PSModulePath; SMART_SAMPLE_SIZE = '100'; SMART_SMALL_SAMPLE_SIZE = '10'
         SMART_ADAXES_SERVICES = '["adx1"]'; SMART_ADAXES_DOMAINS = '["example.test"]'; SMART_ADAXES_LDAP_FILTER = '(sAMAccountType=805306368)' }
     $adaxes = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText $adaxesScript -Environment $environment -TimeoutSeconds 120
-    Assert-True ([bool]$adaxes.Ready -and @($adaxes.Datasets[0].Rows).Count -eq 3 -and [int]$adaxes.Info.ExcludedObjects -eq 1) "Unreadable object is excluded and the domain read again ($($adaxes.Detail) $(@($adaxes.Datasets)[0].Error))."
+    Assert-True ([bool]$adaxes.Ready -and @($adaxes.Datasets[0].Rows).Count -eq 3 -and [int]$adaxes.Info.ExcludedObjects -eq 1) "Unreadable object is excluded and the domain read again ($($adaxes.Detail))."
 }
 finally { Remove-Item -LiteralPath $fakeRoot -Recurse -Force -ErrorAction SilentlyContinue }
 
@@ -247,7 +323,8 @@ Assert-True $rejected 'Unknown token is refused.'
 # The script must never export data.
 $text = Get-Content -LiteralPath $scriptPath -Raw
 Assert-True ($text -notmatch '(?i)\bExport-Csv\b|Export-SmartM365Csv|Publish-SmartM365Csv|Out-File') 'The acceptance script writes no data file.'
-Assert-True ($text -match '\$global:EnableSharePointUpload = \$false') 'The SharePoint log upload is disabled.'
+Assert-True ($text -match '\$global:EnableSharePointUpload = \(-not \$NoSharePointUpload\)' -and $text -match 'Publish-SmartM365AcceptanceSharePointResult -ResultPath \$published') 'SharePoint upload follows the tenant setting and -NoSharePointUpload.'
+Assert-True ($text -notmatch 'Export-SmartM365Csv|Publish-SmartM365Csv') 'No data set reaches SharePoint, only the result file and the log.'
 
 # Catalog entry used by Manual launches and the GUI buttons.
 $catalog = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'SmartInventory\Orchestrator\Orchestrator-Jobs.json.template') -Raw | ConvertFrom-Json
@@ -260,8 +337,8 @@ Write-Host ("Orchestrator server acceptance offline test passed ({0} checks)." -
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjU3s5j6aD3pyW
-# jCUi/e9HXCKvGlH8MnkxJkUlB1PLqqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAT2sTL92eZ8bpp
+# HPLpLSu7HVnQdLgsNG3f1KEf07pBGaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -394,31 +471,31 @@ Write-Host ("Orchestrator server acceptance offline test passed ({0} checks)." -
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAzglu7StEv1FvdLD9PKn8Dll4/72Ii1ZDrco7behKVcMA0GCSqG
-# SIb3DQEBAQUABIIBgHtDs7MMj5V6n6XSDfgoYneSczS3RMxyS2ziJVfP97yaARop
-# dpRqo3k8p5XdQyUTZYceK0r2aaKWKg/ZVyaVGzYgnv6KAcc9ZrDkJSsHAWKayxQv
-# E5eRUrRMRTWmXADrcVZPjo+9IyGa5wQUVd8kMBixzjgh0e9bzrm1zX4YY1+O/1KL
-# fye8tZclrt24GANYzlWB2jbPX6q+U8qlxnfaBiYuFBwe1FYiWOsLwoEJV0HKmqsc
-# sQ6aXkGd4ZiSo044gzMJXfUrCfyIWeAM5LAqXntB8+3SU2MogyFDJgvBAEk8fuji
-# RR2QoymQP70W0aVKyHGw6wrLrCoKhV0WU9b2BLAFhqELs9IbuBtKgP74+dztxsEE
-# V0J5n1AxUFmiKCzgN7I/6C4faEBpXm6Uo73ev/64TVhhbyAD31kPgqWEoGMmoHIa
-# 4gUKX2rwOP6QLd+ual6PxS+/qcdpbsggPn5+bS6pmsqaEWwVcDslSG51kxf6llLO
-# YPZm9a8ramS1NK44X6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOBhyv9vIitp+kH6CR2u3Ltmq/jm7eMmNew2aDL/MFpzMA0GCSqG
+# SIb3DQEBAQUABIIBgG0qt2VR/T6RkD5/bGLiBbQkKLDAmXAmetza82f46xNTuIdT
+# GJhVUC5j3gbIgZsA8CrDmmxMRKg9VmRAjZZshWwEdDmJ3ptIh95KYZouTXy321YD
+# CWYosI9yLiL7gaXFMu4gELhn5htRzHWD8D2b+hWHeIKmrs43uKIAXKpkeH23iPe6
+# zJHU7x8dCKcwD5QZZ/qq0H2gW3KwmijqQqG0s6ZW1zO0/ptOWbgo4tok9RZyDql2
+# Ie4DcvX7u9RwRGqrQJmIg/+BnO/xtGsZHfrllYqmnXaaIJ26WOa3zVMJDzM4I+UU
+# UR1odFM6g3z3s7+nFI9jea0Vv+NqhPR/YyWZpYQKd2I6seZpmv/3DNKci9s8u6hq
+# tFJ2fkd4lj3vfUB5cNeqXPkrTCHdVRfYH9P9B1nGbPQ6txgcB3VNjalDyKSeRzZl
+# mMYx+uWBowWt0lLItF3VqMLYV4F7grtGCtqijy7w+7G27fi+xtGhX8EOEOVEEiK8
+# Z/dN41R3fRad9MivL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAxMDQ4
-# MzBaMC8GCSqGSIb3DQEJBDEiBCB8zZVhXPJw880YWFZOjnWQoDaVjOuP/zpmcKeO
-# ukXWQDANBgkqhkiG9w0BAQEFAASCAgAMYpnnA5dO6GirYhF5j/VIU7S3MXC8QSoW
-# N6ZEfbnXmVyxjHAzPiK/KuqowHCMTLYmxMiCnBFBZXpkn+Inpi8+tm2Q6zXIC2Nr
-# XOJj7JNBe9izRj0IQvoGWl5O2gFdmJMibhFyr9le1SmpGclDavcX7CdImcFRmR4M
-# BTbpVrX14cKlQnla7tlxZ+XdMxqOLeTYOV41vOyAJRovfqJddXo8kropnfEdUllY
-# p5Uy5fKwEbWbkutxbZ+0BwZ6Xdz/8RlVJ8wBeI8putPNtllU2kJqN5pxqO5S9VLa
-# /hnvvl+2Rd0ze4lt+50HIEdV9gepMWD1r0dzfW6HoeJsEzv6la5254+BD6/hQ1jw
-# vpwIKoZFJUcNGBeL0Ty9qHF8/gGbB6jyOHudMSo2QUfqNKfWnIkDW5GXC2mvA7y6
-# bqwf+Dx5VKOphL+FJYKgp8+hn1TLiOevVOnVgFewMPlaE9+me2ZhKNhIfDacrbxF
-# MSsXusmJyH75TAV9JyiC02NfyM6ddJvbdxguCYTIgWl6f/BSzfv2WBJNb7AKBiKL
-# 9KOgrfH8NPjFXz52IY82UcXomdTdtDUtDJvBSmrxrS7PJv2svTqoCpLPa4+mEwRB
-# BJCx1kOgGYy6OgdxCLaNw43Iv5mtGIECLtwyFVMjzUDorDnsrp53Pq6Jk4yV7Co4
-# xKe+m/cimA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAxMjI0
+# NDVaMC8GCSqGSIb3DQEJBDEiBCA3Q7u/VhG9Z7EsmkTz4U5rzIGqcygT7mU3V8w3
+# 7t2VMDANBgkqhkiG9w0BAQEFAASCAgBSQU9W4Q1BfeCqllDRREnYZ/9tNf789AMl
+# wRM1kgY0PCT7Z41DS6jFzvAUnAbaDOniDyKKMwdd0UlHBZUXpvqdpjKbP5n1H7xo
+# cVOKyCdfmNxPeGX1pixHzqkDP/MVKYhh/7liUCLYQIDHZxmAsMQUpJ31jDDd4jIH
+# oiRRC55+Yccfmzxvoc1PgLisc3bb1fSYfMmGSVAB7iD621ywd/vTFOuOV3JCZ2UJ
+# oRXgvS1XzJBUofuH79P34qKSksQ0aKjGSRBCCoTpo0Xfkf+wzvYDxAV+sOuLG1l+
+# fF3FQSXeFNkOZSSRmPBRnUhb3E6+4q6MK0k95shZuaeFN3CdKr+rHJkfdgp6TiDk
+# BTmS6UkajXmV6PncA5F8R/wzhNe0EP5chdz0nukeon9wMoRf2qoiHHfcleEw09ra
+# NbIUw01wgV9JucX+qeckpGDc8oURSN+H+ED+tXowr1FkT5cLS/cPUlMYMEN6hYQY
+# YVTPzIVYP+JoGaZy0Tk7hBi9GY3ejQMyiO6ULJXLnCv4rTjckieErIddQCS9CUU6
+# c1/INZrQ33JVOeuiF+zPFqfI7Vi/D42uaKaNlKpiWwhYHzqXSHKZ59Phn9cDAU3a
+# h0+mV6h3MNsdNZX2GGEhO2xsorosVMJ3JB99W/j8y56TscBlx8w9sD1LIUcY6hGm
+# V384qCWXyA==
 # SIG # End signature block
