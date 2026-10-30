@@ -763,6 +763,49 @@ function Get-SmartM365OrchestratorHistory {
     @($result | Sort-Object EventTime -Descending)
 }
 
+function Get-SmartM365OrchestratorAcceptanceSummary {
+    <# Functional capabilities from the server acceptance test (display only, never used by the election).
+       Orchestrator-Acceptance.json is a run under the orchestrator task account and validates; a run under
+       another account (Orchestrator-Acceptance.OtherAccount.json) is only reported. #>
+    param([Parameter(Mandatory)][string]$ServerFolder)
+    $readRun = {
+        param($Leaf)
+        $path = Join-Path $ServerFolder $Leaf
+        $selected = Get-SmartM365JsonReadPath $path -Optional
+        if ($selected) { $path = $selected }
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+        $run = Read-SmartM365OrchestratorJson $path
+        $at = ''
+        $parsedTime = [datetimeoffset]::MinValue
+        if ($run.PSObject.Properties['GeneratedAtUtc'] -and [datetimeoffset]::TryParse([string]$run.GeneratedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsedTime)) {
+            $at = $parsedTime.LocalDateTime.ToString('yyyy-MM-dd HH:mm')
+        }
+        $results = @(if ($run.PSObject.Properties['Results']) { @($run.Results) | Where-Object { $null -ne $_ -and $_.PSObject.Properties['Name'] -and [string]$_.Name -in $script:ValidCapabilities } })
+        [pscustomobject]@{
+            At = $at
+            Version = $(if ($run.PSObject.Properties['AcceptanceVersion']) { [string]$run.AcceptanceVersion } else { '' })
+            Account = $(if ($run.PSObject.Properties['RunAccount']) { [string]$run.RunAccount } else { '' })
+            Functional = @($results | Where-Object { [string]$_.Status -eq 'PASS' } | ForEach-Object { [string]$_.Name } | Sort-Object -Unique)
+            NotFunctional = @($results | Where-Object { [string]$_.Status -in @('WARN', 'FAIL') } | Sort-Object Name | ForEach-Object { '{0} ({1})' -f $_.Name, $_.Status })
+        }
+    }
+    $summary = [pscustomobject]@{ FunctionalCapabilities = ''; NotFunctionalCapabilities = ''; Acceptance = 'Never run as the service account' }
+    try {
+        $service = & $readRun 'Orchestrator-Acceptance.json'
+        $other = & $readRun 'Orchestrator-Acceptance.OtherAccount.json'
+        if ($null -ne $service) {
+            $summary.FunctionalCapabilities = $service.Functional -join ', '
+            $summary.NotFunctionalCapabilities = $service.NotFunctional -join ', '
+            $summary.Acceptance = (@($service.At, ('service account ' + $service.Account).Trim(), $(if ($service.Version) { 'acceptance ' + $service.Version })) | Where-Object { $_ }) -join ', '
+        }
+        elseif ($null -ne $other) {
+            $summary.Acceptance = 'Not validating: ' + ((@($other.At, ('run as ' + $(if ($other.Account) { $other.Account } else { 'another account' }) + ', not the service account'), $(if ($other.Version) { 'acceptance ' + $other.Version })) | Where-Object { $_ }) -join ', ')
+        }
+    }
+    catch { $summary.Acceptance = 'Acceptance result unreadable: ' + $_.Exception.Message }
+    return $summary
+}
+
 function Get-SmartM365OrchestratorServerStatus {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$SharedDataFolderPath, [Parameter(Mandatory)]$ClusterDocument)
@@ -812,13 +855,15 @@ function Get-SmartM365OrchestratorServerStatus {
         $usageValue = { param($Name) if ($null -ne $usage -and $usage.PSObject.Properties[$Name]) { $usage.PSObject.Properties[$Name].Value } else { $null } }
         # The live drive value wins; an older orchestrator only has the startup reading.
         $freePercent = & $usageValue 'SystemDriveFreePercent'
+        $acceptance = Get-SmartM365OrchestratorAcceptanceSummary -ServerFolder $serverFolder
         if ($null -eq $freePercent) { $freePercent = & $systemValue 'SystemDriveFreePercent' }
         [pscustomobject]@{ Server = [string]$server; State = $(if ($serverStates.ContainsKey($serverName)) { $serverStates[$serverName] } else { 'Inactive' }); Online = ($age -le [double]$ClusterDocument.PeerHeartbeatStaleMinutes); HeartbeatUtc = if ($heartbeatTime -eq [datetime]::MinValue) { $null } else { $heartbeatTime.ToUniversalTime() }; HeartbeatAgeMinutes = if ([double]::IsPositiveInfinity($age)) { $null } else { [math]::Round($age, 1) }; Capabilities = $capabilityText; Weight = if ($weights.ContainsKey($serverName)) { [double]$weights[$serverName] } else { 1.0 }; Policy = if ($policies.ContainsKey($serverName)) { @($policies[$serverName].OnlyJobsRequiring) -join ', ' } else { '' }; AssignedJobs = $assigned.Count; AssignedJobNames = $assigned -join ', '
             Version = if ($null -ne $heartbeat -and $heartbeat.PSObject.Properties['ScriptVersion']) { [string]$heartbeat.ScriptVersion } else { '' }
             Os = [string](& $systemValue 'Os'); Cpu = $(if ((& $systemValue 'LogicalProcessors')) { '{0} ({1} logical)' -f (& $systemValue 'Cpu'), (& $systemValue 'LogicalProcessors') } else { [string](& $systemValue 'Cpu') }); LogicalProcessors = & $systemValue 'LogicalProcessors'; MemoryGB = & $systemValue 'MemoryGB'
             SystemDriveSizeGB = & $systemValue 'SystemDriveSizeGB'; SystemDriveFreePercent = $freePercent; SystemDriveLow = $null -ne $freePercent -and [double]$freePercent -lt 10
             SystemInfoAt = $collectedText; SystemInfoError = [string](& $systemValue 'Error')
-            CpuPercent = & $usageValue 'Cpu'; MemoryPercent = & $usageValue 'Memory'; UsageAt = & $localTime (& $usageValue 'TimeUtc') }
+            CpuPercent = & $usageValue 'Cpu'; MemoryPercent = & $usageValue 'Memory'; UsageAt = & $localTime (& $usageValue 'TimeUtc')
+            FunctionalCapabilities = $acceptance.FunctionalCapabilities; NotFunctionalCapabilities = $acceptance.NotFunctionalCapabilities; Acceptance = $acceptance.Acceptance }
     }
     @($result)
 }

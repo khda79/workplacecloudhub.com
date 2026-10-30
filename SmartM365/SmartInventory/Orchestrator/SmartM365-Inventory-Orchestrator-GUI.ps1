@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.33
+1.6.34
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.33'
+$script:AppVersion = '1.6.34'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -938,7 +938,11 @@ $xaml = @'
                                             <DataGridTextColumn Header="Orchestrator" Binding="{Binding Version}" Width="90"/>
                                             <DataGridTextColumn Header="Weight" Binding="{Binding Weight}" Width="60"/>
                                             <DataGridTextColumn Header="Policy" Binding="{Binding Policy}" Width="160"/>
-                                            <DataGridTextColumn Header="Capabilities" Binding="{Binding Capabilities}" Width="220"/>
+                                            <!-- Present = ready for the orchestrator probes (election); Functional = PASS in the last acceptance test run as the service account (GUI 1.6.34, display only). -->
+                                            <DataGridTextColumn Header="Present (probe)" Binding="{Binding Capabilities}" Width="220"/>
+                                            <DataGridTextColumn Header="Functional (acceptance)" Binding="{Binding FunctionalCapabilities}" Width="220"/>
+                                            <DataGridTextColumn Header="Not functional" Binding="{Binding NotFunctionalCapabilities}" Width="170"/>
+                                            <DataGridTextColumn Header="Acceptance" Binding="{Binding Acceptance}" Width="260"/>
                                             <DataGridTextColumn Header="OS" Binding="{Binding Os}" Width="230"/>
                                             <DataGridTextColumn Header="CPU" Binding="{Binding Cpu}" Width="220"/>
                                             <DataGridTextColumn Header="CPU %" Binding="{Binding CpuPercent}" Width="60"/>
@@ -987,7 +991,7 @@ $xaml = @'
                                                 </ComboBox>
                                                 <Button x:Name="ApplyServerButton" Content="Apply server settings to draft" Background="#E5F1FB" Margin="0,6,0,0"/>
                                                 <!-- Acceptance test before activation (GUI 1.6.32): it reads from the computer it runs on. -->
-                                                <TextBlock Text="Acceptance test (limited real reads, nothing kept)" Margin="0,12,0,0"/>
+                                                <TextBlock Text="Acceptance test (limited real reads; only the result per capability is kept)" Margin="0,12,0,0"/>
                                                 <TextBlock x:Name="ServerTestHintText" Foreground="#5F6B7A" TextWrapping="Wrap" Text="Select a server"/>
                                                 <Button x:Name="TestServerButton" Content="Test this server" IsEnabled="False" Margin="0,6,0,0" ToolTip="Runs the Orchestrator-ServerAcceptance manual launch in a new console on this computer."/>
                                                 <Button x:Name="TestServerAsServiceAccountButton" Content="Test as service account" IsEnabled="False" Margin="0,6,0,0" ToolTip="Same test started with runas under the account of the orchestrator scheduled task of this computer."/>
