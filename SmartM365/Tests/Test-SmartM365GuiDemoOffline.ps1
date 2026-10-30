@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercises the two pilot demos with WPF events and forbidden operational commands.
 .VERSION
-1.0.8
+1.0.9
 .NOTES
 Run RebootManager on PS5.1 or PS7; Orchestrator requires PS7.
 #>
@@ -125,7 +125,7 @@ try {
         $expectedHistory=$expectedJobs*7
         $originalTimes=$s.Data.Jobs[0].Times
         Assert-Demo ($result.Mode -eq 'Demo') 'Demo validation did not return its model.'
-        Assert-Demo ($s.Data.Jobs.Count -eq $expectedJobs -and $s.Data.Servers.Count -eq 3) 'Sample model incomplete.'
+        Assert-Demo ($s.Data.Jobs.Count -eq $expectedJobs -and $s.Data.Servers.Count -eq 4 -and @($s.Data.Servers | Where-Object Mode -eq 'Inactive').Count -eq 1) 'Sample model incomplete.'
         Assert-Demo (@(Compare-Object @($catalog.Jobs.Name|Sort-Object) @($s.Data.Jobs.Name|Sort-Object)).Count -eq 0) 'Planning does not match the complete shipped catalog.'
         Assert-Demo ($c.PlanningGrid.Items.Count -eq $expectedJobs) 'Planning grid omitted catalog jobs.'
         Assert-Demo (@($s.Data.Jobs|Where-Object {-not $_.Enabled}).Count -eq @($catalog.Jobs|Where-Object {-not $_.Enabled}).Count) 'Disabled catalog jobs are missing.'
@@ -159,7 +159,7 @@ try {
             }
             Export-DemoPreview $s.Window ('orchestrator-'+($view -replace ' ','-').ToLowerInvariant())
         }
-        Assert-Demo (@($c.DashboardTilesList.ItemsSource).Count -eq 9 -and @($c.DashboardGrid.ItemsSource).Count -eq 3 -and @($c.DashboardTimelineCanvas.Tag.Items).Count -gt 0) 'Dashboard tiles, servers or timeline missing.'
+        Assert-Demo (@($c.DashboardTilesList.ItemsSource).Count -eq 9 -and @($c.DashboardGrid.ItemsSource).Count -eq 4 -and @($c.DashboardTimelineCanvas.Tag.Items).Count -gt 0) 'Dashboard tiles, servers or timeline missing.'
         Assert-Demo ($c.DashboardBannerText.Text -like '*DEMO*' -and @($c.DashboardActionsGrid.ItemsSource).Count -eq @($s.Dashboard.Actions).Count) 'Dashboard banner or items to review missing.'
         Select-OrchestratorDemoTarget 'Failures24h'
         Assert-Demo ($c.MainTabs.SelectedItem.Header -eq 'History' -and @($s.FilteredHistory | Where-Object Status -NE 'Failed').Count -eq 0) 'Dashboard failure tile navigation failed.'
@@ -228,7 +228,7 @@ try {
         Export-DemoPreview $s.Window 'orchestrator-dashboard-healthy'
         $c.DemoScenarioCombo.SelectedItem='Issues'
         Assert-Demo ($c.OperationsIncidentsGrid.Items.Count -eq 1) 'Issues selector failed.'
-        Assert-Demo ($c.EventsGrid.Items.Count -eq 14) 'Issues events missing.'
+        Assert-Demo ($c.EventsGrid.Items.Count -eq 17) 'Issues events missing.'
         $c.EventsLevelCombo.SelectedIndex=2
         Assert-Demo (@($s.FilteredEvents | Where-Object Level -NE 'ERROR').Count -eq 0 -and $s.FilteredEvents.Count -eq 2) 'Events level filter failed.'
         $c.EventsLevelCombo.SelectedIndex=0;$c.EventsServerCombo.SelectedItem='CTSO-INV-03';$c.EventsCategoryCombo.SelectedItem='StopRequest'

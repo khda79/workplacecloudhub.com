@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic data and simulated commands for the existing Orchestrator WPF window.
 .VERSION
-1.4.12
+1.4.13
 .NOTES
 No tenant context, management modules, shared folders or resident workers.
 #>
@@ -36,7 +36,8 @@ function New-OrchestratorDemoData {
             [pscustomobject]@{
                 Server=('CTSO-INV-{0:00}' -f $i); Online=$true; HeartbeatAgeMinutes=0.2
                 Weight=1; Policy=''; Capabilities='AD, Graph, EXO, SharePoint'; AssignedJobs=4
-                State='Running'; Mode='Active'; LastHeartbeat='2026-10-18 09:30'; Running=0; Pending=0
+                State='Online'; Mode='Active'; LastHeartbeat='2026-10-18 09:30'; Running=0; Pending=0
+                DataFreePercent=38.6; DiskSpace='OK'; DiskSpaceDetail='DATA free 38.6 % (sample)'
                 RecycleIn='02:30:00'; Pid=(4100+$i); StatePersistence='Healthy (sample)'
                 Version='1.5.47'; Maintenance='Active'; MaintenanceAcknowledgement='Ready'
                 Os='Microsoft Windows Server 2022 Standard (10.0.20348, build 20348)'; Cpu='Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz'
@@ -80,6 +81,19 @@ function New-OrchestratorDemoData {
             $row
         }
     )
+    # A fourth sample server, added after the job assignment: Inactive (orchestrator running, no job), as a
+    # newly added server is until it is activated (orchestrator 1.5.76 / GUI 1.6.26+).
+    $servers += [pscustomobject]@{
+        Server='CTSO-INV-04'; Online=$true; HeartbeatAgeMinutes=0.3
+        Weight=1; Policy=''; Capabilities='AD, ExchangeOnPrem, SharedRuntime'; AssignedJobs=0
+        State='Online'; Mode='Inactive'; LastHeartbeat='2026-10-18 09:30'; Running=0; Pending=0
+        DataFreePercent=38.6; DiskSpace='OK'; DiskSpaceDetail='DATA free 38.6 % (sample)'
+        RecycleIn='23:10:00'; Pid=4104; StatePersistence='Healthy (sample)'
+        Version='1.5.47'; Maintenance='Active'; MaintenanceAcknowledgement='Ready'
+        Os='Microsoft Windows Server 2022 Datacenter (10.0.20348, build 20348)'; Cpu='Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz'
+        CpuPercent=$null; MemoryPercent=$null
+        MemoryGB=32; SystemDriveSizeGB=126.4; SystemDriveFreePercent=27.4; SystemDriveLow=$false; SystemInfoAt='2026-10-18 08:50'; UsageAt='2026-10-18 09:30'
+    }
     $history = @(
         for ($day=0; $day -lt 7; $day++) {
             for ($i=0; $i -lt $jobs.Count; $i++) {
@@ -259,7 +273,7 @@ function New-OrchestratorDemoMetrics {
             # A collection burst at night, then a quieter day; the second server misses one hour (restart).
             if ($index -eq 2 -and $minute -le 300 -and $minute -gt 240) { continue }
             $phase = ($minute / 60.0 + $index) / 2.0
-            [pscustomobject]@{ Time = $time; Cpu = [math]::Round(20 + 12 * $index + 18 * [math]::Sin($phase) + $(if ($time.Hour -lt 4) { 25 } else { 0 }), 1); Memory = [math]::Round(50 + 6 * $index + 4 * [math]::Cos($phase / 2), 1) }
+            [pscustomobject]@{ Time = $time; Cpu = $(if ($server.Mode -eq 'Inactive') { [math]::Round(3 + 2 * [math]::Abs([math]::Sin($phase)), 1) } else { [math]::Round(20 + 12 * $index + 18 * [math]::Sin($phase) + $(if ($time.Hour -lt 4) { 25 } else { 0 }), 1) }); Memory = [math]::Round(50 + 6 * $index + 4 * [math]::Cos($phase / 2), 1) }
         })
         [pscustomobject]@{ Server = $server.Server; From = $clock.AddHours(-12); To = $clock; SampleMinutes = 5; Samples = $samples }
     }
@@ -341,7 +355,7 @@ function Update-OrchestratorDemoViews {
     # Same colours as the live banner: normal scheduling is muted, a pause is amber.
     $c.MaintenanceBannerText.Foreground=[System.Windows.Media.BrushConverter]::new().ConvertFromString($(if($d.Maintenance){'#92400E'}else{'#5D6B78'}))
     $c.MaintenanceBannerText.FontWeight=if($d.Maintenance){[System.Windows.FontWeights]::SemiBold}else{[System.Windows.FontWeights]::Normal}
-    $c.MaintenanceDetailText.Text=if($d.Maintenance){'Contoso demo maintenance window. Running sample jobs remain visible.'}else{'All three sample residents are ready. Actions affect this demonstration only.'}
+    $c.MaintenanceDetailText.Text=if($d.Maintenance){'Contoso demo maintenance window. Running sample jobs remain visible.'}else{'All four sample residents are ready (CTSO-INV-04 is Inactive: no job). Actions affect this demonstration only.'}
     $c.EnableMaintenanceButton.IsEnabled=-not $d.Maintenance
     $c.DisableMaintenanceButton.IsEnabled=$d.Maintenance
     $c.StopRunningJobButton.IsEnabled=$d.Running.Count -gt 0
