@@ -31,6 +31,7 @@ Defaults were taken from the real behaviour of the two previous toolkits, then r
 
 | Option | Default | Why |
 | --- | --- | --- |
+| `RemoteExecutionMode` | ScheduledTask | Remote Task Scheduler is the default for both campaigns; WinRM and PsExec are explicit alternatives. |
 | `HybridJoin.AllowRebootAfterDsregLeave` | false | The previous Hybrid Join toolkit rebooted after `dsregcmd /leave` even with a user connected. A reboot now requires an explicit choice. |
 | `HybridJoin.RebootDelaySeconds` | 300 | Same as before; gives a connected user time to save. |
 | `HybridJoin.StaleCleanupDelaySeconds` | 60 | Same as before. |
@@ -47,12 +48,13 @@ Defaults were taken from the real behaviour of the two previous toolkits, then r
 | `GlobalWorkerLimit` | 15 | Shared by both Campaigns on the technician computer; 0 disables the shared cap. |
 ## Option reference
 
-Generated from catalog SHA256 `A587713B499D1D85BB1B3A3352BB1BDCD41D8CD26CD83A0AD88ED7ADB0ECA331`.
+Generated from catalog SHA256 `466140DF637E8CADE5F99FF8730BB5BCFD83A89045DA3EE7E01D5022FCB7B3E8`.
 
 ### Common options
 
 | Option | Type | Default | Range / choices | Env var | Category | GUI |
 | --- | --- | --- | --- | --- | --- | --- |
+| `RemoteExecutionMode` | Choice | ScheduledTask | ScheduledTask, WinRM, PsExec | `SEMT_REMOTE_EXECUTION_MODE` | Mode | yes |
 | `DryRun` | Boolean | False |  | `SEMT_DRY_RUN` | Mode | yes |
 | `AuditOnly` | Boolean | False |  | `SEMT_AUDIT_ONLY` | Mode | yes |
 | `IgnoreEndpointRunGuard` | Boolean | False |  | `SEMT_IGNORE_ENDPOINT_RUN_GUARD` | Mode | yes |

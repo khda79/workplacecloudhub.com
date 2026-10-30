@@ -334,7 +334,7 @@ function Get-SemtWindows11UpgradeProfile {
     [CmdletBinding()]
     param()
 
-    $coreColumns = @('Timestamp','CycleNumber','ComputerName','ConnectionTarget','Status','NextAction','LauncherStatus','RemoteStatus','RemoteNextAction','ExitCode','Detail','RetryAfterUtc','FailureCategory','ConsecutiveFailureCount','DnsResolved','DnsAddressList','PingReachable','SmbPort445Reachable','AdminShareReachable','AdminShareFailureType','RemotePayloadCopyAttempts','LocalScriptVersion','LocalScriptSha256','RemoteScriptSha256','PsExecExitCode','TargetGuardStatus','LegacyActivityStatus','LegacyActivityDetail')
+    $coreColumns = @('Timestamp','CycleNumber','ComputerName','ConnectionTarget','RemoteExecutionMode','Status','NextAction','LauncherStatus','RemoteStatus','RemoteNextAction','ExitCode','Detail','RetryAfterUtc','FailureCategory','ConsecutiveFailureCount','DnsResolved','DnsAddressList','PingReachable','SmbPort445Reachable','AdminShareReachable','AdminShareFailureType','RemotePayloadCopyAttempts','LocalScriptVersion','LocalScriptSha256','RemoteScriptSha256','PsExecExitCode','TargetGuardStatus','LegacyActivityStatus','LegacyActivityDetail')
     $tail = @('RemoteLogsPath','PsExecLogPath','JobErrorMessage','CorrelationId','RunId','WaveName','Campaign','WorkerContractVersion')
     $columns = @($coreColumns) + @($script:Windows11ExtensionFields) + @(Get-SemtInventoryFieldNames -Kind AD) + @(Get-SemtInventoryFieldNames -Kind Intune) + $tail
     return [pscustomobject]@{
@@ -380,8 +380,8 @@ function Get-SemtWindows11UpgradeProfile {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/T2wAUsO9mAXg
-# 63fe/xeZMHUds5v7DGL4lOeRy13euKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGKsrACCVjjSn+
+# dpKCbEFDiht8ALLVc8v+Dau9pXja66CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -411,14 +411,14 @@ function Get-SemtWindows11UpgradeProfile {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDlSmO0S8A6FLSRF9mwNDYj
-# uXp7YI+rY+pLSy6LypIxtTANBgkqhkiG9w0BAQEFAASCAYCnCvdh4PqLB5Yn3YOL
-# SOZSifqUsv8GGWe3k18wr503ZnkzubfzJRM4gU84dF0/hKru6/UqSHrVMBNwqaVy
-# CSN7pog4XUvkiUbxZ9mQBI9KPxt/lp9TAzb/YbHFe7IlFb6hZD+8S/GoMnY6HzO1
-# 6KGNDt1Ao5uoyUatR3zFcoiEF68zTI/MaIZIao52FgYyolfr9ndJ+YhMdH3hwHW2
-# nann0RKau6/hKOgc5akxmf/wa+R58fI3UmSm1/KDuCcijNaH1cw78HQ/ci6GpW81
-# mMqpKOdlYxCJUYrqN1FDNwlT6ozAtrBNBIzN9HqtEwGmjnqNSFSekOdoBUd4Rr7A
-# VhBPISF7IdZ5GPTRRUzVCNzE/i6dCQFtrq9zc+/X47yWlLJoqhw54L1lFSZ+rq/J
-# l8k2ffLSdToazXRHEXrX2vHc3kHuGRvxnIdC0WQwB4vL/+kGFCk2Do75QbOow8jY
-# Z6mrW4VzEB8uXXTkl5gTLfsHyWVkGZqk/Sp4AaT/StpSgs4=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAoQtJzJvCpErpLhoKo2hE2
+# mkyVba8m5qYzNbDuARrm3DANBgkqhkiG9w0BAQEFAASCAYA9ME3Mk1JfwuOCKcGu
+# jH4C4lfOdwv6zCO7r9X1ShmMS2i4/ZNhHMFAwKQoLw7uyNOCH89MdkvVfJ/JT97r
+# LDZKisY11XQJngF7+rWBqe0oKTKQm7SU9mQvPjrbveQL1bTpDsZq2cnYV7Nxl4hq
+# DT2u6kWF8SqnkqZ1sZUgHDeS9pAsXEekAZ+WjTq9X+2P2Dk1NsYaOiCPiEvs0vcD
+# +rP5phFFmAYXxmpJKlmD1V5wtO0J8XEy0m/9RwtOoZ/rF1x13Myb0IVtUGonMsXC
+# 4/0opY6BnyM3tLYkgxeIlAwuUS9YRnr2ihW0zDKrU2Et9dEvEhC2T9BkMby1KLwa
+# GHoN9+GX5PvCFQTYgd6IcbxCXbT2+fVwQ3V2M+mwW5QApuV+kzacQfRMpSPVkuSH
+# 5pjEkqf9jYcZzKZfrKcv+oE9HncrMeVKd/B95uFwrRX0eXM/Y2ntQLNWNwsMChlE
+# n7IEnniClzkv701C3MOTJQQTVT9SvoA5kXiFF2Fu6JllRfM=
 # SIG # End signature block

@@ -6,6 +6,7 @@
     "Source":  "Manual",
     "CreatedUtc":  "",
     "Options":  {
+                    "RemoteExecutionMode":  "__INHERIT__",
                     "DryRun":  "__INHERIT__",
                     "AuditOnly":  "__INHERIT__",
                     "IgnoreEndpointRunGuard":  "__INHERIT__",

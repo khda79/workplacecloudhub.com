@@ -45,6 +45,8 @@ $computer = [string]$contract.Computer
 $target = [string]$contract.ConnectionTarget
 $cycle = [int]$contract.CycleNumber
 $correlationId = [string]$contract.CorrelationId
+$remoteMode = [string](Get-SemtPropertyValue -InputObject $contract.Flags -Name 'RemoteExecutionMode' -Default 'PsExec')
+if ($remoteMode -notin @('ScheduledTask','WinRM','PsExec')) { throw 'SEMT_CONTRACT_INVALID: unknown remote execution mode.' }
 $leasePath = [string](Get-SemtPropertyValue -InputObject $contract.Gate -Name 'LeasePath' -Default '')
 $workerStartedUtc = (Get-Date).ToUniversalTime()
 $pathKey = Get-SemtComputerPathKey -ComputerName $computer
@@ -55,6 +57,7 @@ New-SemtDirectory -Path ([string]$contract.Evidence.LogRoot)
 
 $result = New-SemtResult -Campaign $campaign -ComputerName $computer -CycleNumber $cycle -WaveName ([string]$contract.WaveName) -RunId ([string]$contract.RunId) -LauncherStatus 'UNKNOWN' -ExtensionFields @($campaignProfile.ExtensionFields)
 $result.ConnectionTarget = $target
+$result.RemoteExecutionMode = $remoteMode
 $result.CorrelationId = $correlationId
 $result.PsExecLogPath = $logPath
 
@@ -141,6 +144,8 @@ try {
         # The endpoint started by PsExec as SYSTEM is copied under Program Files on the target.
         $remoteProgramRoot = [string](Get-SemtPropertyValue -InputObject $contract.Endpoint -Name 'RemoteProgramRoot' -Default '')
         if ([string]::IsNullOrWhiteSpace($remoteProgramRoot)) { throw 'SEMT_CONTRACT_INVALID: Endpoint.RemoteProgramRoot is missing; the endpoint is never started from ProgramData.' }
+        if ($correlationId -notmatch '^[a-fA-F0-9]{32}$') { throw 'SEMT_CONTRACT_INVALID: invalid correlation ID.' }
+        $remoteProgramRoot = Join-Path (Join-Path $remoteProgramRoot 'Attempts') $correlationId
         $copied = $null
         $copyError = ''
         for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -170,6 +175,7 @@ try {
             $result.RemoteScriptSha256 = $copied.RemoteSha256
             $remoteDataShare = $copied.RemoteDataShare
             $arguments = @($contract.Endpoint.Arguments | ForEach-Object { [string]$_ })
+            if ($remoteMode -eq 'PsExec') {
             $psexec = Invoke-SemtPsExecEndpoint -PsExecPath ([string]$contract.PsExec.Path) -ConnectionTarget $target -RemoteScriptPath ([string]$copied.RemoteScriptPath) -Arguments $arguments -LogPath $logPath -TimeoutMinutes ([int]$contract.PsExec.TimeoutMinutes) -UseElevatedToken ([bool]$contract.PsExec.UseElevatedToken) -LeasePath $leasePath
             $result.PsExecExitCode = [string]$psexec.ExitCode
             Start-Sleep -Seconds 3
@@ -217,6 +223,24 @@ try {
                     }
                 }
             }
+            if ($attemptResult.Completed -and -not $psexec.TimedOut -and [string]::IsNullOrWhiteSpace($psexec.CommunicationFailureDetail) -and -not [string]::IsNullOrWhiteSpace($psexec.ExitCode)) {
+                try { Remove-SemtTemporaryPayload -Path ([string]$copied.RemoteSharePath) -ExpectedSha256 $endpointSha; Write-SemtLogLine -Path $logPath -Message 'Temporary PsExec endpoint payload removed.' }
+                catch { $result.JobErrorMessage = ('Temporary payload cleanup failed: {0}' -f $_.Exception.Message); Write-SemtLogLine -Path $logPath -Level WARN -Message $result.JobErrorMessage }
+            }
+            }
+            else {
+                $transport = Invoke-SemtSystemTaskEndpoint -Mode $remoteMode -ConnectionTarget $target -CorrelationId $correlationId -RemoteScriptPath ([string]$copied.RemoteScriptPath) -RemoteSharePath ([string]$copied.RemoteSharePath) -ExpectedSha256 $endpointSha -Arguments $arguments -LogPath $logPath -TimeoutMinutes ([int]$contract.PsExec.TimeoutMinutes) -LeasePath $leasePath
+                $attemptResult = Read-SemtRemoteAttemptResult -RemoteDataShare $remoteDataShare -CorrelationId $correlationId
+                if ($attemptResult.Completed) {
+                    Set-ResultFromAttempt -Attempt $attemptResult.Result
+                    if (-not $transport.Completed) { $result.JobErrorMessage = ('Remote cleanup unconfirmed: {0}' -f $transport.Detail) }
+                } elseif ($transport.Completed) {
+                    Set-WorkerStatus -Status 'REMOTE_RESULT_INCOMPLETE' -Detail ("{0} task finished with exit code {1}, but no completed result was found. {2}" -f $remoteMode,$transport.ExitCode,$attemptResult.Detail) -NextAction 'CHECK_TARGET_ENDPOINT_LOG'
+                    $result.ExitCode = $transport.ExitCode
+                } else {
+                    Set-WorkerStatus -Status 'REMOTE_EXECUTION_UNCONFIRMED' -Detail ("{0}: {1}; {2}" -f $remoteMode,$transport.Detail,$attemptResult.Detail) -NextAction 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH'
+                }
+            }
             [void](Complete-SemtResultStatus -Result $result)
             if ([string]::IsNullOrWhiteSpace([string]$result.NextAction)) { $result.NextAction = Get-WorkerNextAction -Status ([string]$result.Status) }
 
@@ -261,8 +285,8 @@ Write-SemtLogLine -Path $logPath -Message ("Worker completed. Status={0}; NextAc
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCeR2g88kqhUGOq
-# C4miq/uDHsmEeXRVBzkhTWtVoM5SsqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+q4dW41pLZnDH
+# uBZ5X9eaNmQgPe+0FGNjjs/ta25XqKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -292,14 +316,14 @@ Write-SemtLogLine -Path $logPath -Message ("Worker completed. Status={0}; NextAc
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDdpydTFHHuiQwyFYYqD6kp
-# L9kD/dgQiPMpGG3820HfEzANBgkqhkiG9w0BAQEFAASCAYASYyWMuqkVupxY2hKc
-# FYYrErH6jNbmOxFpQ3b+0tYtUJf37thxFFZeycs24GqQTwo1T7Q6bU5Gs9kp+vtN
-# Efqp4lS7KZcDQkytIYt8Q4w00oyoxvL3xWGzimMO1ZYCgNUvEQNtptn1rYRLOodI
-# kRt5AJsaHcjQ1wQSj0+raXThQTzmT81EVXMwqLH5sEdluy858F5l4fhlzwVLERsE
-# tCuOLL+EqBF1ZquMGUHv9jkxNj4b4xjj3Qy1fGSDSJH3dkfAeRUdPZ85pSzOg0BI
-# tz/REa2tXzKJsr2RqhLX1+fUgMcLLgWun1l+7e2bgjQu0L12XYTTntbiqCqJTd04
-# 7upvNvldcjXGrWwhTpwxo9kADEGqHoxDOceszX8EDrM0cfLxpTEcknND55MKPVhG
-# 6QuZTJNYMoBibzjBnNWcYCheh3tQSOus4UtDYHcbgO5yYZYwjkj0ENAbemRlyE9f
-# dlkMxIY61d8wdmhucqvAh6f9uRI3Q7oLYX8P/N03CeHA21w=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDyjntsXRAIb8DkSeDrXX+k
+# br1XybGjgUPU9ljHWQSfmTANBgkqhkiG9w0BAQEFAASCAYAcFrfwtn2zwwl1B4tK
+# cklgUuetPTu07AXefHsNK9EUea6FAAtrbOQ207hS1rqzbx5IUdWht0vL16L5eg+C
+# FuvgvrieHjZL9p2ed2R/CsS4q5aBLeqm1+S13+E2J+DprG39CZOHpcYXlkMg8yUa
+# 9F+k1DrJhRwz0+VCF+poKjTzMHUxLmj59KpBtagw7+dS2jX+dd80g22DHE4RvtnA
+# UW1MXmIRFH2kQ9I2MECeBr2oZaxcE4AnAgYJj9Tui0O8N44DuTgRSpm0Rvps3swd
+# j0sTEUToAPc09SsbZXav5ftTSo7t8wILIv3DJP5QakptBJcq2eHNlPodILKj3xuv
+# 1KXVgRFXHKSJmtiEWtfBd9QE/2c0qvs/p2Aopc49rrr62xeEKZhf0jWwTZMZVYud
+# Ppy+/p+U/8MIXu7iEqo4GLFFFOyPuI9qxbnrs/gkpADfxOqtB69yw5uNwxcAZlIg
+# NoDQASjViiBG53rKIGtCrJQQ59OLFPf5d86/+4tv2tLy9Sc=
 # SIG # End signature block

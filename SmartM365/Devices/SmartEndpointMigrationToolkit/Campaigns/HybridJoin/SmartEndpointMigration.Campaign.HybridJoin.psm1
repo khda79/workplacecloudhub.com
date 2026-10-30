@@ -336,7 +336,7 @@ function Get-SemtHybridJoinProfile {
     [CmdletBinding()]
     param()
 
-    $coreColumns = @('Timestamp','CycleNumber','ComputerName','ConnectionTarget','Status','NextAction','LauncherStatus','RemoteStatus','RemoteNextAction','ExitCode','Detail','StatusBeforePostCycle','BackoffStatus','BackoffUntilUtc','BackoffCount','DnsResolved','DnsAddressList','PingReachable','SmbPort445Reachable','AdminShareReachable','AdminShareFailureType','RemotePayloadCopyAttempts','LocalScriptVersion','LocalScriptSha256','RemoteScriptSha256','PsExecExitCode','TargetGuardStatus','LegacyActivityStatus','LegacyActivityDetail')
+    $coreColumns = @('Timestamp','CycleNumber','ComputerName','ConnectionTarget','RemoteExecutionMode','Status','NextAction','LauncherStatus','RemoteStatus','RemoteNextAction','ExitCode','Detail','StatusBeforePostCycle','BackoffStatus','BackoffUntilUtc','BackoffCount','DnsResolved','DnsAddressList','PingReachable','SmbPort445Reachable','AdminShareReachable','AdminShareFailureType','RemotePayloadCopyAttempts','LocalScriptVersion','LocalScriptSha256','RemoteScriptSha256','PsExecExitCode','TargetGuardStatus','LegacyActivityStatus','LegacyActivityDetail')
     $tail = @('RemoteLogsPath','PsExecLogPath','JobErrorMessage','CorrelationId','RunId','WaveName','Campaign','WorkerContractVersion')
     $columns = @($coreColumns) + @($script:HybridJoinExtensionFields) + @(Get-SemtInventoryFieldNames -Kind AD) + @(Get-SemtInventoryFieldNames -Kind Intune) + @(Get-SemtInventoryFieldNames -Kind Entra) + @($script:HybridJoinEngineFields | Where-Object { $coreColumns -notcontains $_ }) + $tail
     return [pscustomobject]@{
@@ -383,8 +383,8 @@ function Get-SemtHybridJoinProfile {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/3xuKXp545lxW
-# WoGkMgYmIJuNEG/U+QbW83z9INaCZKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmw3NKg9+/tPxQ
+# 8vrLtpRCgi7PA47+wO8CA4VPbGIKuaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -414,14 +414,14 @@ function Get-SemtHybridJoinProfile {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCASGFXlEsi9iL68IXoUS0Kx
-# kGH77e16YeWhBLH4JNs8mDANBgkqhkiG9w0BAQEFAASCAYAS+95lnPSBk8n8USET
-# eDl2a0YrK24bcnZvU9/JqRr57ew64gISK52Wd1/FC3aYBDpz/Ie9n/w4WJEApjdt
-# Nhmo8NMkNqQu3UCZqMt9bCQUV8BmGoFyaMmjdwl4y2grPuqkX5ThHOyqs+uSpWig
-# rpzkEya7arwJJYHgpS5KmbCRdcvfqillg8nODVo4k6HjAUVPdaAIFBydR67NQqd4
-# FhMnCrcB9QD1kHB29lkBZJIev8infe45qDd6Y7oZ5eJl3zxRbKF5ekCKYJGtfpmr
-# Tgj6iZyBUHUaJpv6dRHneOcZt31WH+rhAwFina4vEz2edfy/tn9FCs3wNvC+xu6X
-# AO8HNLhSIRbxYu7/Ut+X+vVW1eWKwU9Qgjq5FmEkQyOnsAb+cGkHqqAhA8ht3oQS
-# Y1L4HNw1mxQfqLB+xalqeTYG5K2Uaj1ZVmGmOxJzd8EbqEf6i0jeWEfkLHICiJb2
-# 2CB27peENGtBiUA4WU8yf3GLHfgLhABzTV1nF75vVAilYrs=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAtV2Rtorf8AeKgblISiBKN
+# 7oy35oj9SJa3vL7PYFP/1jANBgkqhkiG9w0BAQEFAASCAYAluGx93wygD9fLTajr
+# FYYfBXfuEmmhzqnUOg3ArjB9lChc17Fca+a2a3Qb87tBEuzey2kXaKbLOv3AAfic
+# LOEca/nVN1ByZQrSTHtga8/1Z8F8+SxpjvTb+wKXAnn40HOS47thcvsEuHVaUVum
+# 3Ey0K5531gALtxql15c8WTYxJnTLW6lZX9GPuq4y56JsoTflRZywx5SLflXC+TbN
+# a/jJOyzwavEUGh56qWmo41wz/Uyl/j8TIPNXWY6vCeekyAbwvIGvKlc1puZe/AGz
+# ulVIhd2Y0PFdyqBQJu0d7A+/rQgVw7adJfuMqLhToi2pQGA3M08WbDA3oTpIsb0R
+# o0Am2zOIWPbzUW1HkfPrFJJkELXUwojkFsD2xvEag/cTyVNKhkx52j6Dcqnmxl0i
+# 6bEKllgCMHQwPVhqlkzPynoXWB5ywG9qk6EBnF6BWOkQmG7BGCh21vW5WKWF5tbV
+# qUnOawYU3F3U0RSiGq6S5bZDNFkzsxFr6AjlkQJALExidAc=
 # SIG # End signature block

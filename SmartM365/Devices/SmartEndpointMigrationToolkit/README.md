@@ -29,8 +29,9 @@ Details: [Docs/CAMPAIGN-WAVE-RUN.md](Docs/CAMPAIGN-WAVE-RUN.md).
 
 ## Requirements
 
-- Technician computer: an elevated console, network access (SMB 445 and administrative shares) to
-  the target computers, and Sysinternals PsExec (`PsExec64.exe`).
+- Technician computer: an elevated console and network access (SMB 445 and administrative shares)
+  to the targets. The default transport also needs remote Task Scheduler RPC access; WinRM needs
+  PowerShell Remoting on the target; PsExec needs the Microsoft-signed Sysinternals binary.
 - PowerShell (see "PowerShell support" below): Windows PowerShell 5.1 for the GUI (STA), the
   launchers and every endpoint script; the engine, the worker and the tools also accept
   PowerShell 7.2 and later.
@@ -98,8 +99,20 @@ and the engine can be called directly:
 | Mode | Technician side | Endpoint side |
 | --- | --- | --- |
 | Dry run (`DryRun`) | DNS, ping, SMB 445, administrative share | Nothing is copied or executed |
-| Remote audit (`AuditOnly`) | Checks, copy, PsExec | Hybrid Join skips gpupdate; no repair, MDM cleanup, upgrade or reboot. It may flush DNS and register diagnostic tasks. |
-| Repair (default) | Full checks, copy, PsExec | Applies the enabled actions only |
+| Remote audit (`AuditOnly`) | Checks, copy, selected transport | Hybrid Join skips gpupdate; no repair, MDM cleanup, upgrade or reboot. It may flush DNS and register diagnostic tasks. |
+| Repair (default) | Full checks, copy, selected transport | Applies the enabled actions only |
+
+`RemoteExecutionMode` applies to both campaigns: `ScheduledTask` (default), `WinRM`, or
+`PsExec`. The first uses remote Task Scheduler RPC. `WinRM` uses PowerShell Remoting to create
+and monitor a local scheduled task; both run the endpoint as SYSTEM. The script is copied to a
+protected per-attempt folder under Program Files. After confirmed task completion, SEMT checks
+the task identity and payload hash, then deletes the task and the temporary script and folder.
+Retry-after-reboot files remain in their separate protected folder. If the connection or wait
+expires, the target can still be running; cleanup is unconfirmed and must be checked before a
+retry. No automatic fallback to another transport is performed. A blocked execution can persist
+across transports; the selected mode never changes the endpoint security policy.
+Select the transport in the GUI Options, or pass `-Option @{ RemoteExecutionMode = 'WinRM' }`
+(or `'PsExec'`) to the command-line engine.
 
 `-ValidateOnly` resolves options, checks rules and component integrity, writes the Run
 manifest and contacts no target.
