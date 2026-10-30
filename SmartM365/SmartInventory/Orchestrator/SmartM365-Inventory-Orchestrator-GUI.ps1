@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.29
+1.6.30
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.29'
+$script:AppVersion = '1.6.30'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -907,7 +907,7 @@ $xaml = @'
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="390"/></Grid.ColumnDefinitions>
                                 <!-- Servers grid on the full width, chart and server panel below (GUI 1.6.29). -->
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                    <DataGrid x:Name="ServersGrid" Grid.ColumnSpan="2" MaxHeight="300" ToolTip="OS, CPU, RAM and drive C: are published by each orchestrator when it starts.">
+                                    <DataGrid x:Name="ServersGrid" Grid.ColumnSpan="2" MinHeight="210" MaxHeight="340" ToolTip="OS, CPU, RAM and drive C: are published by each orchestrator when it starts.">
                                         <DataGrid.RowStyle>
                                             <Style TargetType="DataGridRow">
                                                 <Style.Triggers>
@@ -941,9 +941,10 @@ $xaml = @'
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 <Grid Grid.Row="1" Margin="0,10,0,0">
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                     <GroupBox Header="CPU and memory, last 12 hours (blue = CPU, green = RAM; sampled every 5 minutes by each orchestrator)" Margin="0,10,0,0">
-                                        <Canvas x:Name="ServersMetricsCanvas" Height="230" ClipToBounds="True" Background="White"/>
+                                        <!-- No fixed height: the chart fills the free height (GUI 1.6.30). -->
+                                        <Canvas x:Name="ServersMetricsCanvas" MinHeight="120" ClipToBounds="True" Background="White"/>
                                     </GroupBox>
                                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
                                         <TextBox x:Name="NewServerBox" Width="220" Margin="0,0,8,0"/>
@@ -1350,7 +1351,10 @@ function Update-OrchestratorServerMetricsChart {
     $gap = 12.0; $panelWidth = ($width - $gap * ($servers.Count - 1)) / $servers.Count
     if ($panelWidth -lt 140) { return }
     $axisWidth = 30.0; $top = 20.0; $bottom = 16.0
-    $plotHeight = [double]$Canvas.Height - $top - $bottom
+    # A canvas without a fixed height (Servers and versions) uses its rendered height.
+    $canvasHeight = if ([double]::IsNaN([double]$Canvas.Height)) { [double]$Canvas.ActualHeight } else { [double]$Canvas.Height }
+    $plotHeight = $canvasHeight - $top - $bottom
+    if ($plotHeight -lt 40) { return }
     for ($index = 0; $index -lt $servers.Count; $index++) {
         $metric = $servers[$index]
         $left = $index * ($panelWidth + $gap); $plotLeft = $left + $axisWidth; $plotWidth = $panelWidth - $axisWidth - 4
