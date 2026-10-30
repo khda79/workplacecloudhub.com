@@ -11,5 +11,5 @@ RETURN IF(NOT ISBLANK(_stamp) && FORMAT(_stamp,"yyyyMMdd") & "T" & FORMAT(_stamp
     return [
         dict(name='Dataset Batch Timestamp UTC',expression=utc,formatString='yyyy-MM-dd HH:mm:ss',isHidden=True),
         dict(name='Dataset Batch Age Hours',expression='VAR _stamp=[Dataset Batch Timestamp UTC] RETURN IF(NOT ISBLANK(_stamp), DIVIDE(ROUND((UTCNOW()-_stamp)*86400000,0),3600000))',formatString='0.00',isHidden=True),
-        dict(name='Dataset Footer Color',expression='VAR _age=[Dataset Batch Age Hours] RETURN IF(ISBLANK(_age), "#805400", IF(_age>26, "#B42318", "#334155"))',formatString='@'),
+        dict(name='Dataset Footer Color',expression='VAR _age=[Dataset Batch Age Hours] RETURN IF(ISBLANK(_age), "#805400", IF(_age>74, "#B42318", "#334155"))',formatString='@'),
     ]

@@ -122,8 +122,8 @@ table 'Report Metadata'
 		displayFolder: Report presentation
 		lineageTag: 30622803-4848-4fed-9cf0-ffc867151cca
 
-	/// Red only when selected batch UTC age exceeds 26 hours. Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
-	measure 'Dataset Footer Color' = VAR _age=[Dataset Batch Age Hours] RETURN IF(ISBLANK(_age), "#805400", IF(_age>26, "#B42318", "#334155"))
+	/// Red only when selected batch UTC age exceeds 74 hours (a Friday batch stays normal over the weekend). Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
+	measure 'Dataset Footer Color' = VAR _age=[Dataset Batch Age Hours] RETURN IF(ISBLANK(_age), "#805400", IF(_age>74, "#B42318", "#334155"))
 		formatString: @
 		isHidden
 		displayFolder: Dataset freshness
@@ -161,7 +161,7 @@ table 'Report Metadata'
 		displayFolder: Executive display
 		lineageTag: 138f1b6e-d861-4ecf-8d00-d216feab9352
 
-	/// Red only when selected batch UTC age exceeds 26 hours. Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
+	/// Red only when selected batch UTC age exceeds 74 hours (a Friday batch stays normal over the weekend). Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
 	measure 'Dataset Batch Timestamp UTC' =
 			VAR _id = [Dataset Loaded Batch ID]
 			VAR _stamp = IF(LEN(_id)>=19 && MID(_id,9,1)="T" && MID(_id,19,1)="Z",
@@ -174,7 +174,7 @@ table 'Report Metadata'
 		displayFolder: Dataset freshness
 		lineageTag: bf8019b9-9521-444f-b2db-8b9ade085f2f
 
-	/// Red only when selected batch UTC age exceeds 26 hours. Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
+	/// Red only when selected batch UTC age exceeds 74 hours (a Friday batch stays normal over the weekend). Missing or mixed provenance is amber here; the separate Mixed batches alert is unchanged.
 	measure 'Dataset Batch Age Hours' = VAR _stamp=[Dataset Batch Timestamp UTC] RETURN IF(NOT ISBLANK(_stamp), DIVIDE(ROUND((UTCNOW()-_stamp)*86400000,0),3600000))
 		formatString: 0.00
 		isHidden
