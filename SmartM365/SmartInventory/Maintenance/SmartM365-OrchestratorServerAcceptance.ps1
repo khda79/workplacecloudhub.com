@@ -25,7 +25,8 @@ Capabilities, in order:
 - EXO: up to SampleSize mailboxes.
 - ExchangeOnPrem: up to SampleSize mailboxes through the Exchange snap-in (Windows PowerShell 5.1).
 - SharePointOnPrem: farm and up to SmallSampleSize site collections (Windows PowerShell 5.1).
-- TeamsPowerShell: tenant (same TenantId) and up to SmallSampleSize users.
+- TeamsPowerShell: same calls as the Teams job: connection (same TenantId) and up to
+  SmallSampleSize phone number assignments.
 - Adaxes: services, domains and LDAP filter of the Adaxes collector configuration; up to
   SampleSize users per domain, one child process per domain (-AdaxesDomainTimeoutSeconds); the
   domains after a timed-out one are not read.
@@ -37,7 +38,7 @@ the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.6
+1.0.7
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -69,6 +70,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Figures in the log and the tables use a dot whatever the regional settings of the server.
+[System.Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::InvariantCulture
 
 $script:CapabilityOrder = @('RunAccount', 'Modules', 'CodeSigning', 'Network', 'Clock', 'Certificate', 'SharedRuntime', 'AD', 'Graph', 'GraphPermissions', 'EXO', 'ExchangeOnPrem', 'SharePointOnPrem', 'TeamsPowerShell', 'Adaxes', 'Mail')
 # Capability names the orchestrator election uses.
@@ -254,10 +257,12 @@ function Get-SmartM365AcceptanceDatasetSpec {
                     [pscustomobject]@{ Name = 'Id'; Required = $true; Pattern = $guid; Unique = $true }
                     [pscustomobject]@{ Name = 'Url'; Required = $true; Pattern = '^https?://'; Unique = $true }) }
         }
-        'TeamsUsers' {
-            return [pscustomobject]@{ AllowEmpty = $false; Columns = @(
-                    [pscustomobject]@{ Name = 'Identity'; Required = $true; Unique = $true }
-                    [pscustomobject]@{ Name = 'UserPrincipalName'; Required = $true; Pattern = '^[^@\s]+@[^@\s]+$'; Unique = $true }) }
+        'TeamsPhoneNumbers' {
+            # A tenant without Teams Phone numbers is possible: an empty answer only warns.
+            return [pscustomobject]@{ AllowEmpty = $true; Columns = @(
+                    [pscustomobject]@{ Name = 'TelephoneNumber'; Required = $true; Pattern = '^\+?[0-9]'; Unique = $true }
+                    [pscustomobject]@{ Name = 'NumberType'; Required = $true }
+                    [pscustomobject]@{ Name = 'ActivationState'; MinFilledPercent = 90 }) }
         }
         'AdaxesUsers' {
             return [pscustomobject]@{ AllowEmpty = $false; Columns = @(
@@ -487,6 +492,7 @@ function Get-SmartM365AcceptanceShortResult {
                 '{0} of {1} data set(s) read, {2} row(s){3}' -f $read.Count, ($read.Count + $failedScopes), $rows, $(if ($notes.Count) { ' (' + ($notes -join ', ') + ')' } else { '' })
             }
         }
+        'Mail' { ($text -split '; ') -join ', ' }
         default { $first }
     }
     $short = [string]$short
@@ -857,17 +863,19 @@ try {
     if (-not (Get-Module -ListAvailable -Name MicrosoftTeams)) { Write-AcceptanceResult @{ Ready = $false; ComponentMissing = $true; Detail = 'MicrosoftTeams PowerShell module is not installed on this server.' }; return }
     Import-Module MicrosoftTeams -MinimumVersion 4.7.1 -ErrorAction Stop
     Write-AcceptanceStage 'Teams connection'
-    Invoke-AcceptanceRetry { Connect-MicrosoftTeams -TenantId $env:SMART_TENANT_ID -ApplicationId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -ErrorAction Stop | Out-Null }
-    $tenant = Get-CsTenant -ErrorAction Stop
-    if ([string]$tenant.TenantId -ne [string]$env:SMART_TENANT_ID) { throw ('Get-CsTenant returned TenantId {0}, not the configured tenant.' -f $tenant.TenantId) }
+    # Same calls as the Teams job (M365-TeamsPhonePstnUsage-Inventory): Get-CsTenant is not available app-only in recent modules.
+    if (-not (Get-Command -Name Get-CsPhoneNumberAssignment -ErrorAction SilentlyContinue)) { throw 'Get-CsPhoneNumberAssignment is not available in the installed MicrosoftTeams module.' }
+    $connection = Invoke-AcceptanceRetry { Connect-MicrosoftTeams -TenantId $env:SMART_TENANT_ID -ApplicationId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -ErrorAction Stop }
+    $connectedTenant = [string](@($connection | Where-Object { $_ } | ForEach-Object { if ($_.PSObject.Properties['TenantId']) { $_.TenantId } }) | Select-Object -First 1)
+    if ($connectedTenant -and $connectedTenant -ne [string]$env:SMART_TENANT_ID) { throw ('Connect-MicrosoftTeams returned TenantId {0}, not the configured tenant.' -f $connectedTenant) }
     $datasets = @(
-        Invoke-AcceptanceDataset 'TeamsUsers' '' {
-            Get-CsOnlineUser -ResultSize $smallSampleSize -ErrorAction Stop | ForEach-Object {
-                [pscustomobject]@{ Identity = ConvertTo-AcceptanceText $_.Identity; UserPrincipalName = ConvertTo-AcceptanceText $_.UserPrincipalName }
+        Invoke-AcceptanceDataset 'TeamsPhoneNumbers' '' {
+            Get-CsPhoneNumberAssignment -Top $smallSampleSize -ErrorAction Stop | Select-Object -First $smallSampleSize | ForEach-Object {
+                [pscustomobject]@{ TelephoneNumber = ConvertTo-AcceptanceText $_.TelephoneNumber; NumberType = ConvertTo-AcceptanceText $_.NumberType; ActivationState = ConvertTo-AcceptanceText $_.ActivationState }
             }
         }
     )
-    Write-AcceptanceResult @{ Ready = $true; Detail = 'Teams app-only connection, tenant identifier verified'; Datasets = $datasets }
+    Write-AcceptanceResult @{ Ready = $true; Detail = ('Teams app-only connection{0}' -f $(if ($connectedTenant) { ', tenant identifier verified' } else { '' })); Datasets = $datasets }
 }
 catch { Write-AcceptanceResult @{ Ready = $false; Detail = (Get-AcceptanceErrorText $_) } }
 finally {

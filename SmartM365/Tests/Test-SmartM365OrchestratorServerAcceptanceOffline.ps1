@@ -4,7 +4,7 @@
     module assessment, child output parsing, Graph roles and job eligibility. Nothing is read
     from a directory, a tenant or a share.
 .VERSION
-    1.0.6
+    1.0.7
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -74,7 +74,7 @@ Assert-True ((Test-SmartM365AcceptanceDataset -Rows @() -SampleSize 10 -Columns 
 $mailboxes = Get-SmartM365AcceptanceDatasetSpec -Name 'EXOMailboxes'
 $mailboxRows = @([pscustomobject]@{ Guid = [guid]::NewGuid().ToString(); PrimarySmtpAddress = 'no-at-sign'; ExternalDirectoryObjectId = [guid]::NewGuid().ToString(); RecipientTypeDetails = 'UserMailbox' })
 Assert-True ((Test-SmartM365AcceptanceDataset -Rows $mailboxRows -SampleSize 100 -Columns $mailboxes.Columns).Status -eq 'FAIL') 'Malformed SMTP address fails.'
-foreach ($name in @('ADUsers', 'GraphUsers', 'EntraDevices', 'IntuneDevices', 'EXOMailboxes', 'OnPremMailboxes', 'SharePointSites', 'TeamsUsers', 'AdaxesUsers')) {
+foreach ($name in @('ADUsers', 'GraphUsers', 'EntraDevices', 'IntuneDevices', 'EXOMailboxes', 'OnPremMailboxes', 'SharePointSites', 'TeamsPhoneNumbers', 'AdaxesUsers')) {
     Assert-True (@((Get-SmartM365AcceptanceDatasetSpec -Name $name).Columns | Where-Object { $_.PSObject.Properties['Required'] -and $_.Required }).Count -ge 1) "$name declares a required key column."
 }
 
@@ -101,7 +101,7 @@ Assert-True ((Get-SmartM365AcceptanceLastStage -StandardOutput $stdout) -eq 'Get
 Assert-True ((Get-SmartM365AcceptanceLastStage -StandardOutput 'no stage') -eq '') 'No step gives an empty text.'
 $hung = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText "Write-AcceptanceStage 'waiting on a hung call'; Start-Sleep -Seconds 60" -TimeoutSeconds 8
 Assert-True (-not [bool]$hung.Ready -and [bool]$hung.TimedOut -and $hung.Detail -match 'during: waiting on a hung call') "Time-out names the hung step ($($hung.Detail))."
-$quick = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText "Invoke-AcceptanceDataset 'X' '' { [pscustomobject]@{ A = 1 } } | Out-Null; Write-AcceptanceResult @{ Ready = `$true; Detail = 'ok'; Datasets = @(Invoke-AcceptanceDataset 'TeamsUsers' '' { [pscustomobject]@{ Identity = 'i'; UserPrincipalName = 'u@example.test' } }) }" -TimeoutSeconds 60
+$quick = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText "Invoke-AcceptanceDataset 'X' '' { [pscustomobject]@{ A = 1 } } | Out-Null; Write-AcceptanceResult @{ Ready = `$true; Detail = 'ok'; Datasets = @(Invoke-AcceptanceDataset 'TeamsPhoneNumbers' '' { [pscustomobject]@{ TelephoneNumber = '+33100000000'; NumberType = 'CallingPlan'; ActivationState = 'Activated' } }) }" -TimeoutSeconds 60
 Assert-True ([bool]$quick.Ready -and @($quick.Datasets[0].Rows).Count -eq 1) 'Step lines do not leak into the rows of a data set.'
 
 # Inner exception messages reach the detail (Teams only said 'see inner exception' in 1.0.3).
