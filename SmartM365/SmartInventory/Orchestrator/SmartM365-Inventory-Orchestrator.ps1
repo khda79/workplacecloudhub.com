@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.81
+1.5.82
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.81"
+$ScriptVersion = "1.5.82"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -6660,6 +6660,14 @@ function Update-OrchestratorAcceptanceDaily {
     $startUtc = $Now.ToUniversalTime()
     if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
         Write-OrchestratorLog -Message ("Daily server acceptance not started: script not found: {0}" -f $scriptPath) -Level WARN
+        $script:State['AcceptanceDaily'] = @{ LastStartUtc = $startUtc.ToString('o') }
+        Save-OrchestratorState
+        return
+    }
+    # Same code-integrity gate as job launches (Audit or Enforce, script and Core module).
+    $authenticode = Invoke-OrchestratorAuthenticodeValidation -Job ([pscustomobject]@{ Name = 'Orchestrator-ServerAcceptance (daily)'; PowerShellEdition = 'PowerShell7' }) -ScriptFullPath $scriptPath
+    if (-not $authenticode.Allowed) {
+        Write-OrchestratorLog -Message ("Daily server acceptance not started: {0}" -f $authenticode.Summary) -Level ERROR
         $script:State['AcceptanceDaily'] = @{ LastStartUtc = $startUtc.ToString('o') }
         Save-OrchestratorState
         return

@@ -9,7 +9,7 @@ older than 24 hours, one run at a time, exit code kept across a recycle (<log>.e
 limit, disabled mode, cluster keys and validation. Real hidden pwsh child processes are started;
 no tenant, collector, mail or publication.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -37,6 +37,8 @@ $script:Log = [Collections.Generic.List[object]]::new()
 function Write-OrchestratorLog { param([string]$Message, [string]$Level = 'INFO') $script:Log.Add([pscustomobject]@{ Message = $Message; Level = $Level }) }
 $script:Saves = 0
 function Save-OrchestratorState { $script:Saves++ }
+$script:AuthAllowed = $true; $script:AuthChecked = [Collections.Generic.List[string]]::new()
+function Invoke-OrchestratorAuthenticodeValidation { param($Job, [string]$ScriptFullPath) $script:AuthChecked.Add($ScriptFullPath); [pscustomobject]@{ Allowed = $script:AuthAllowed; Results = @(); Summary = 'stub: Mode=Enforce.' } }
 
 # Due time: daily after the local time plus the offset, once; catch-up only at the first check after startup.
 $day = [datetime]::new(2026, 10, 30)
@@ -92,6 +94,7 @@ try {
     Update-OrchestratorAcceptanceDaily -Now (Get-Date)
     $record = Get-OrchestratorAcceptanceDailyRecord
     Assert-Daily ($null -ne $record -and [int]$record['Pid'] -gt 0 -and $script:Log[-1].Message -like 'Daily server acceptance started (daily): PID *') "Run started: $($script:Log[-1].Message)"
+    Assert-Daily ($script:AuthChecked.Count -eq 1 -and $script:AuthChecked[0] -eq $fakeScript) 'Authenticode validation of the acceptance script before the launch.'
     $firstPid = [int]$record['Pid']
     Update-OrchestratorAcceptanceDaily -Now (Get-Date)
     Assert-Daily ([int](Get-OrchestratorAcceptanceDailyRecord)['Pid'] -eq $firstPid -and @($script:Log | Where-Object Message -like '*started*').Count -eq 1) 'No second run while the first one runs.'
@@ -128,6 +131,15 @@ try {
     Assert-Daily ($null -eq (Get-Process -Id $slowPid -ErrorAction SilentlyContinue)) 'Process tree stopped at the limit.'
     $script:Settings.AcceptanceDailyTimeoutMinutes = 60
 
+    # Authenticode rejected (Enforce): not started, ERROR, not retried the same day.
+    $script:State = @{}
+    $script:AuthAllowed = $false
+    Update-OrchestratorAcceptanceDaily -Now (Get-Date)
+    Update-OrchestratorAcceptanceDaily -Now (Get-Date)
+    $rejected = @($script:Log | Where-Object { $_.Message -like 'Daily server acceptance not started: stub*' -and $_.Level -eq 'ERROR' })
+    Assert-Daily ($rejected.Count -eq 1 -and -not (Get-OrchestratorAcceptanceDailyRecord).Contains('Pid')) 'Rejected signature: no launch, one ERROR.'
+    $script:AuthAllowed = $true
+
     # Missing script: warned once, not retried the same day.
     function Get-OrchestratorAcceptanceScriptPath { return (Join-Path $root 'Missing.ps1') }
     $script:State = @{}
@@ -143,6 +155,7 @@ finally {
 $mainLoop = [regex]::Match($orchestratorText, '(?s)Test-OrchestratorRuntimeUpdate -Now \$now.{0,400}?Update-OrchestratorAcceptanceDaily -Now \$now.{0,500}?Update-OrchestratorDiskSpaceGuard -Now \$now.{0,400}?Invoke-LaunchPhase -Now \$now')
 Assert-Daily $mainLoop.Success 'Called every tick, before and outside the launch phase.'
 $update = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Update-OrchestratorAcceptanceDaily' }, $true).Extent.Text
+Assert-Daily ($update.IndexOf('Invoke-OrchestratorAuthenticodeValidation') -gt 0 -and $update.IndexOf('Invoke-OrchestratorAuthenticodeValidation') -lt $update.IndexOf('Start-Process')) 'Code-integrity gate before Start-Process.'
 Assert-Daily ($update -notmatch '\$script:Settings\.MaxConcurrency|Get-OrchestratorLocalServerState|Test-OrchestratorLocalServerActive|Send-Orchestrator|Send-SmartM365') 'No concurrency, server state or mail involved.'
 Assert-Daily ($orchestratorText.Contains("Filter = 'Acceptance-*.log*'; Days = `$script:Settings.JobLogRetentionDays")) 'Acceptance logs follow the job log retention.'
 Assert-Daily ($orchestratorText.Contains('Write-OrchestratorLog -Message ("Daily server acceptance: enabled={0}')) 'Settings logged at startup.'
