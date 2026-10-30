@@ -28,7 +28,7 @@ $script:HybridJoinExtensionFields = @(
 )
 $script:HybridJoinEngineFields = @(
     'StatusBeforePostCycle','BackoffStatus','BackoffUntilUtc','BackoffCount',
-    'IntuneConfirmationState','IntuneConfirmationDetail','UserLicensePreflightState','UserLicensePreflightDetail','UserLicenseState','UserLicenseDetail','UserLicenseUpn','UserLicenseInventoryUtc','MdmUserScopeState','PostCycleIntuneInventoryChecked','PostCycleIntuneInventoryPresent','PostCycleIntuneEnrollmentDetected','PostCycleIntuneInventoryCsv','PostCycleIntuneInventoryError',
+    'IntuneConfirmationState','IntuneConfirmationDetail','UserLicensePreflightState','UserLicensePreflightDetail','UserLicenseAuditOnly','UserLicenseState','UserLicenseDetail','UserLicenseUpn','UserLicenseInventoryUtc','MdmUserScopeState','PostCycleIntuneInventoryChecked','PostCycleIntuneInventoryPresent','PostCycleIntuneEnrollmentDetected','PostCycleIntuneInventoryCsv','PostCycleIntuneInventoryError',
     'PostCycleEntraInventoryChecked','PostCycleEntraInventoryPresent','PostCycleEntraRegisteredState','PostCycleEntraAlternativeSecurityIdCount','PostCycleEntraPendingResolved','PostCycleEntraInventoryCsv','PostCycleEntraInventoryError',
     'PostCycleADInventoryChecked','PostCycleADInventoryPresent','PostCycleADInventoryCsv','PostCycleADInventoryError'
 )
@@ -54,7 +54,7 @@ function Get-HybridJoinNextAction {
 function Test-HybridJoinAlreadyEnrolled {
     param([Parameter(Mandatory = $true)]$Row)
     # Archival requires the same local device identity in a successful cloud result.
-    return ([string](Get-SemtPropertyValue -InputObject $Row -Name 'IntuneConfirmationState' -Default '') -eq 'Confirmed' -and [string](Get-SemtPropertyValue -InputObject $Row -Name 'Status' -Default '') -eq 'ENROLLED_DETECTED_POST_CYCLE')
+    return ([string](Get-SemtPropertyValue -InputObject $Row -Name 'UserLicensePreflightState' -Default '') -ne 'NoAssignedLicense' -and [string](Get-SemtPropertyValue -InputObject $Row -Name 'IntuneConfirmationState' -Default '') -eq 'Confirmed' -and [string](Get-SemtPropertyValue -InputObject $Row -Name 'Status' -Default '') -eq 'ENROLLED_DETECTED_POST_CYCLE')
 }
 
 function Get-HybridJoinIntuneConfirmation {
@@ -261,14 +261,14 @@ function Invoke-HybridJoinPostCycle {
         }
         Set-SemtResultField -Result $row -Name 'IntuneConfirmationState' -Value 'Unknown'
         Set-SemtResultField -Result $row -Name 'IntuneConfirmationDetail' -Value 'Cloud identity confirmation not completed'
-        if ([string]$row.Status -in @('SUCCESS','AUDIT_SUCCESS_ALREADY_INTUNE')) {
+        if ([string]$row.Status -in @('SUCCESS','AUDIT_SUCCESS_ALREADY_INTUNE') -and [string](Get-SemtPropertyValue -InputObject $row -Name 'UserLicensePreflightState' -Default '') -ne 'NoAssignedLicense') {
             Set-SemtResultField -Result $row -Name 'StatusBeforePostCycle' -Value ([string]$row.Status)
             Set-SemtResultField -Result $row -Name 'Status' -Value 'INTUNE_CLOUD_CONFIRMATION_PENDING'
             Set-SemtResultField -Result $row -Name 'NextAction' -Value 'VERIFY_INTUNE_IDENTITY'
         }
     }
     if ($Context.DryRun -or $allRows.Count -eq 0) { return }
-    $cloudRows = @($allRows | Where-Object { [string]$_.Status -notmatch '^(USER_LICENSE_REVIEW_REQUIRED|ADMIN_SHARE_UNREACHABLE|DNS_PREFLIGHT_ALL_SAMPLES_FAILED|REMOTE_PAYLOAD_COPY_FAILED|REMOTE_SCRIPT_MISSING|CANCELLED_|SKIPPED_|DRYRUN_|TARGET_|LEGACY_)' })
+    $cloudRows = @($allRows | Where-Object { [string](Get-SemtPropertyValue -InputObject $_ -Name 'UserLicensePreflightState' -Default '') -ne 'NoAssignedLicense' -and [string]$_.Status -notmatch '^(USER_LICENSE_REVIEW_REQUIRED|ADMIN_SHARE_UNREACHABLE|DNS_PREFLIGHT_ALL_SAMPLES_FAILED|REMOTE_PAYLOAD_COPY_FAILED|REMOTE_SCRIPT_MISSING|CANCELLED_|SKIPPED_|DRYRUN_|TARGET_|LEGACY_)' })
     $log = $Context.Log
     if ($cloudRows.Count -eq 0) { & $log ('Cycle {0}: post-cycle Graph confirmation skipped: no result could have changed Intune or Entra.' -f $Context.CycleNumber) 'DarkGray'; return }
     if (-not (Get-SemtOption -Options $Context.Options -Name 'HybridJoin.PostCycleCloudInventoryRefresh')) { & $log ('Cycle {0}: post-cycle Graph confirmation disabled by option.' -f $Context.CycleNumber) 'DarkGray'; return }
@@ -387,8 +387,8 @@ function Get-SemtHybridJoinProfile {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4MdTj2Vyd5t9H
-# I17H8PEFZ6Z1cQFib0fY97sZUcxCY6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMLOCOOMXjYMip
+# qF1U/QWdKEsxTLTj30BdYPxKU9gR7KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -418,14 +418,14 @@ function Get-SemtHybridJoinProfile {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB8rmIU4IiQ/u5eQmIs5ekX
-# tliH/YHSTiRyHkHG3CHxFzANBgkqhkiG9w0BAQEFAASCAYBhRPtJQzxJrcp9tSiK
-# LD5au4IoBOQqLZ75831nPRqNVMgJrU5YDVW6TsnOlJ/vI4au5K7VQsdqvepQx6jC
-# Us2p4IBamWl5Z8aRWeP6iEJM//gUEYvAILsZvoJxBLdyyCMbxTtP5Yz9fIL47Rum
-# WuXKXS8qm2U7zyTaZhUYTvYD1tv+sKYuBzjTYa7Zv4ddTQAsY+SCVSqDHXCBIrux
-# zI9R66DgF6vG2guiOBauETfCEyuDN51rEG1bRUPNyqQehcrn3KL67zMZJg26hvGf
-# ZWbl2SjcfOqIL7dleG6y713QNwP+rEL4dNRG+wYQm9s4GyEOC/2aoR30hjA5OPwP
-# 8PO0Ght7JNsBdmFYomsxFCwMvgaMVhykx4tRG95O9OeKb0Y2RcqamClGR6xf3qLe
-# oAbjEip59WCWr8HftHxok9jq9uABxjHOuSm9y+K5YNWaQR5AEYR2NUQmNe8cJvaR
-# bqoqtCsEXUTY0abZfeGSH6O7xFpF3W8KflU3llGb/WG6t94=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB5CK1OL+yQYVIH873JtL2J
+# RZcR+zzbi0+YYla4TJH0kTANBgkqhkiG9w0BAQEFAASCAYByAuwusEAYWqsfsGlp
+# zSZEPZOD6lHUVR0U+XdGKmMn68AgQGGiNKgP2/qA1vDtbd4cDOj1f2smkZ0ulRxq
+# BrhqslCwm1wsBi7O6wCS1XHNn0A1YZoEBBmrHsFDjgfjZRNxvYYhpjEa4vFOHyco
+# 8GoQJqJWy7MvcS8ZgDS51GlmtWKSihWQ0E/FXBDtVDAPeOfdXG4dalsrappql/jv
+# d1dZjKV+J2uxGbM2bjZOdOC4gCNbeCr0yX/5pliQ1BOXsHY6Bl9wF+Ba/CoWKVyD
+# 2igyUWMukpbXxSX5n4nDMvxEol6fpD+XU/2WMFIctuZ+9pOyoRElrDIH+HxS2are
+# EXPNpxtN1fmvJZcxRuRbMrSFoTQJCxCH3vMbok681gBv5NMqS/AyK8eaVvb/M+XP
+# Ij9RAphxajyp/j/mFVoNkDjHFGNRIddJPa8KGkbYMItFlsEYKjnGAc7ha+8mxPwa
+# r5LM20PO4kcjY632g48zF9Bl3wKLFpW+pUv+Ryi83cvMvKs=
 # SIG # End signature block

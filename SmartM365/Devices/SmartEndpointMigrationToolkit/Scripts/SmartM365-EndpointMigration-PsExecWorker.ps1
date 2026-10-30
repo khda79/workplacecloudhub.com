@@ -68,6 +68,18 @@ function Set-WorkerStatus {
     if (-not [string]::IsNullOrWhiteSpace($NextAction)) { $result.NextAction = $NextAction }
 }
 
+function Get-WorkerEndpointArguments {
+    param([AllowEmptyCollection()][string[]]$Arguments, [AllowNull()]$LicensePreflight)
+    $resolved = @($Arguments)
+    if ($null -ne $LicensePreflight -and [bool]$LicensePreflight.Block) {
+        if (@($resolved | Where-Object { $_ -match '^(?i)-AuditOnly:' }).Count -gt 0) {
+            throw 'SEMT_LICENSE_AUDIT_ARGUMENT_INVALID: conflicting AuditOnly argument.'
+        }
+        if ($resolved -notcontains '-AuditOnly') { $resolved += '-AuditOnly' }
+    }
+    return $resolved
+}
+
 function Get-WorkerNextAction {
     param([string]$Status)
     $campaignAction = & $campaignProfile.Hooks.NextAction $Status
@@ -132,15 +144,14 @@ try {
         if ($licensePreflight.Block) {
             $result['UserLicenseUpn'] = [string](Get-SemtPropertyValue -InputObject $licensePreflight -Name 'UserPrincipalName' -Default '')
             $result['UserLicenseInventoryUtc'] = [string](Get-SemtPropertyValue -InputObject $licensePreflight -Name 'CollectedUtc' -Default '')
+            $result['UserLicenseAuditOnly'] = 'True'
+            Write-SemtLogLine -Path $logPath -Message 'User has no assigned license: endpoint will run in audit-only mode; repair and enrollment are blocked.'
         }
         Write-SemtLogLine -Path $logPath -Message ("User license preflight: {0}; {1}" -f $licensePreflight.State,$licensePreflight.Detail)
     }
     if ([bool]$contract.Flags.DryRun) {
         if ($access.AdminShareReachable) { Set-WorkerStatus -Status 'DRYRUN_READY' -Detail ('Dry run: DNS, ping, SMB 445 and administrative shares checked. Nothing was copied or executed. {0}' -f $access.Detail) }
         else { Set-WorkerStatus -Status 'DRYRUN_ADMIN_SHARE_UNREACHABLE' -Detail $access.Detail }
-    }
-    elseif ($null -ne $licensePreflight -and $licensePreflight.Block) {
-        Set-WorkerStatus -Status 'USER_LICENSE_REVIEW_REQUIRED' -NextAction 'ASSIGN_INTUNE_LICENSE_THEN_RETRY' -Detail $licensePreflight.Detail
     }
     else {
         $remoteDataRoot = [string]$contract.Endpoint.RemoteDataRoot
@@ -178,7 +189,7 @@ try {
         else {
             $result.RemoteScriptSha256 = $copied.RemoteSha256
             $remoteDataShare = $copied.RemoteDataShare
-            $arguments = @($contract.Endpoint.Arguments | ForEach-Object { [string]$_ })
+            $arguments = @(Get-WorkerEndpointArguments -Arguments @($contract.Endpoint.Arguments | ForEach-Object { [string]$_ }) -LicensePreflight $licensePreflight)
             if ($remoteMode -eq 'PsExec') {
             $psexec = Invoke-SemtPsExecEndpoint -PsExecPath ([string]$contract.PsExec.Path) -ConnectionTarget $target -RemoteScriptPath ([string]$copied.RemoteScriptPath) -Arguments $arguments -LogPath $logPath -TimeoutMinutes ([int]$contract.PsExec.TimeoutMinutes) -UseElevatedToken ([bool]$contract.PsExec.UseElevatedToken) -LeasePath $leasePath
             $result.PsExecExitCode = [string]$psexec.ExitCode
@@ -249,6 +260,9 @@ try {
                 }
             }
             [void](Complete-SemtResultStatus -Result $result)
+            if ($null -ne $licensePreflight -and $licensePreflight.Block -and [string]$result.RemoteStatus -like 'AUDIT_*') {
+                $result.NextAction = 'ASSIGN_INTUNE_LICENSE_THEN_RETRY'
+            }
             if ([string]::IsNullOrWhiteSpace([string]$result.NextAction)) { $result.NextAction = Get-WorkerNextAction -Status ([string]$result.Status) }
 
             if ([bool]$contract.Evidence.Enabled) {
@@ -292,8 +306,8 @@ Write-SemtLogLine -Path $logPath -Message ("Worker completed. Status={0}; NextAc
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC0cZCmiyjVsw7z
-# YxScemVqWXvyGaP/A5/7lABn6+sjXKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAGhlx+a7Rzu+B
+# fPG5tyM8K9n7L/oiSfUWueJUoW4w1aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -323,14 +337,14 @@ Write-SemtLogLine -Path $logPath -Message ("Worker completed. Status={0}; NextAc
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDgvEo46V6eriohM1rpTX1q
-# bV0WfyVsQ27l4VxV0kaO9DANBgkqhkiG9w0BAQEFAASCAYCTXUIA1JPqIfXTzolf
-# FbyAWT/DVO1Ri8MEmUgAg1PGZz163Y75rBYDJzAbftoNAqEk6ELjCfgbudK86W1N
-# DE7m0GEwhXyeb8YOmJjs/ptskDr9SWWk2VnlNZR2e1tdCQi4b1m1rIyvD5K5azjj
-# WJrsGc8hfczXIzj+gog35bRVVGjjzM72RGexSVCCr5FWkdlOpd6Yon5TNwvaWAm3
-# GIoi7gNr+tofIveJHGl0xPSVuGM6BdbJTPbheqAUQ6bWcU4NcXQHAbgTRYVxMqRp
-# Pzk2rdwPBpK74Yi25iHIIKNNxIqCYTc9VGVR4XvZ+LOKDxAA+NtNYH4uKffJfA+3
-# /PrUl9Wi3XHH659V9hmgvul0ar7hxWUrkMxd80WyMltUxtT1hI86FiYtfpEqF9sF
-# NrJm+DGvU4rtk+i1K5UXlkiqhwYWJe3uyz6yPL7zsCFsaJ31INi5lMsuResmIfO5
-# 2MNLWBn4Ba/Cnud1Aden6y7oXrhdpNmqRxdnHxm86plfChM=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCCfyhPsE2L/cDTxYlw8qf2
+# MWdNEr2zaLZwB8RY2CP6STANBgkqhkiG9w0BAQEFAASCAYCqK4FgyEy/6MOYBzSz
+# u1YGGY+6SlDZDddNRK3aeHEzLj0N3DS3xYXURdMmfB6Z/3vHvbj2CByy7lPqASjt
+# OHP3vdti0S1M+ne8kPORRYnw6L6xFULaCmyGiFKdhpTf6sRMpUS2iWrnkv29AdsL
+# BSGJVR9I9q/Oj6HKTlSFYoyQVrRocqtoRmH6hw0ysStzYc1K1gDiG5cm8SJYjsJL
+# MWD6lICA6gdtkqsryoKPATTOKuIsrSxbN5JBU3CzzSuLXM+3779YoQKXoHkRwW12
+# auWFCuyQkVsa80L9qLdpvaga100VszkU9hXf9gr6bjDhN7oNn3Tuu3eY+koTlY7V
+# 8oavRyE+QAyFClHxqkwgswxICiQrhnyj77217wkaWjzrguon9XswRJx3XevqHMAk
+# a2NyngES++oEa+G28hIbgZm5gq0PeVx4j2uk3oAhIbMT7HvykUcm3OobPWvX7LpR
+# sRybxeq/opS9cyCzyrue18mCN/HtS0YinVU9NTFdosE+7wI=
 # SIG # End signature block

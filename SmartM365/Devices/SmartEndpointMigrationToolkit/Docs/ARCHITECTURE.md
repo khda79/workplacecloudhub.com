@@ -103,10 +103,10 @@ delegated `User.Read.All` session and paginated Graph user reads. It contains us
 and assigned plans and is sensitive operational data. A complete cache is eligible for 24 h;
 correlation requires an exact on-premises user SID and matching local tenant ID. An absent or
 ambiguous SID, stale cache or unknown plan remains unknown. The MDM user scope is not inferred
-from licensing and must be checked in Entra. Before a non-audit HybridJoin run, a bounded
-read-only DCOM preflight compares the console SID, user-credential MDM policy, and a unique
-registry tenant candidate with a fresh inventory. An unlicensed match stops the worker for
-review before copying or running the endpoint. Registry tenant information can be stale: this
+from licensing and must be checked in Entra. Before a HybridJoin audit or repair, a bounded
+read-only DCOM preflight compares the console SID and a unique registry tenant candidate with a
+fresh inventory. An unlicensed match forces an endpoint audit and blocks repair and enrollment;
+the report retains both the device diagnostic and the license finding. Registry tenant information can be stale: this
 is a conservative review signal, not proof of the device tenant or the enrollment identity.
 When the preflight fails or is ambiguous its state is Unknown and the run continues; this is
 not evidence that licensing or scope is correct. A successful local enrollment is cloud confirmed

@@ -656,7 +656,7 @@ try {
         $rows = @($cycleRows.ToArray())
         if ($Campaign -eq 'HybridJoin') {
             foreach ($row in $rows) {
-                if ([string]$row.Status -eq 'USER_LICENSE_REVIEW_REQUIRED') {
+                if ([string](Get-SemtPropertyValue -InputObject $row -Name 'UserLicensePreflightState' -Default '') -eq 'NoAssignedLicense') {
                     $licenseBlockedThisRun[([string]$row.ComputerName).Trim().ToUpperInvariant()] = $true
                 }
             }
@@ -716,8 +716,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLzognU+3Yhgoq
-# OwaStep4zhlFMi4hGzvIWLaOPYVY86CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuQ+G7QfjRg24l
+# IuSn9DBPA34ku8C0/rhq7aO5TDyzBKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -747,14 +747,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAa2q5E9Qca1BWuwHv8QYUh
-# 9Dym3tMajSbKjh4B3CE8SDANBgkqhkiG9w0BAQEFAASCAYAlLDm7seXJUEU8Frd4
-# 2X+1edMaPmRpjrcLzLw2S/t732Eu/eIZ/6IbtkJUG5q3VvCEHvSGF7IDZOQ4by/h
-# 3WHq/VlrJQSGSmmnKsew+/CBII7sUJT9t4krCRxHdGZBYmCLeyjwi2QfPGaoElft
-# N1YmRcsA14fWOLtkhzq4stmfGRgmikO8/fIl8VRF0wFvjbJFNMg70qmM41aKZ3Dl
-# FuLvNBXhlt3uMqNlD1vtCD+v9xr3sISr9uXBgO5BGesox0GXQyXK7zKdkI7+xRDH
-# W5vYoKMv3xfKxSLm1X9n8PVrFN6pj8GETsrhCmWf6OCAQP9RAoTh6h9oIwDswL0m
-# PzAuJB8oWgKabDxPBwc5K2QuOZOWMblPds4VxfArTB0im2ikxU5mDyNLoXjg9ZCO
-# kfP8ZhLWq7IgSuXNfF9QY5E+2xLggG9AjEsRoawbnQDzp56N2WGIkUk0RnYGZMa2
-# /Qntz99sV7Dk8c10yoYr6BeHVZm+L1Qio5vorzQSStXuoc0=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAV4HzjgsbctW8Xo+xkL6Cy
+# NB+kC0edWg/5WOP8uq21MTANBgkqhkiG9w0BAQEFAASCAYAQIKHrwLa7RPuDKpbu
+# f1N1ptOtFZTZkITxOK/6WPGiu8DJinu7DNrij4VzHG+h6JgXyWQqA901/cSJyr7W
+# 8sFmwGcIGxUKPY1BF0LlsHHSLgLWGDlLGjJLTB42OiYkwyu+TT5gXS5EapHBoWyQ
+# u7DxTSh2Ykm4evEeG8rbUlTW0DvPH/TDCY/2ucec3FCsk7xCYW4zvfI2AYgM39vZ
+# 5v8mFuTbeQnqtvDr/RE94OApIWU+XjLHigDzD0dHrccVKvO2f9r/SUGY281CCn1L
+# QAFq0XhLEeZ9WxdMAa8clh5EhHJohJLKHvKYa0n6Vo5ma18VVSAupWrDaxEQPjfd
+# 5oIwAAD8cyJP5NrwHyiKZGlNFNXFMnWKMROjKXVxFr1OXXmHW5LMdSf/FIpF/xjy
+# LaWxOYC6PGCw73f3uBa/xwdjgcQyCI4HByVu0e2dRdu+FoVDLn5q5wJHTLb8AFoq
+# sgx4LKiLd50oTBK+My92B5ffFL5XteN/C+024HCMjaP6hEQ=
 # SIG # End signature block

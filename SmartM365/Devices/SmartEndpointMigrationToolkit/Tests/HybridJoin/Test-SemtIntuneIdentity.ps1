@@ -27,6 +27,7 @@ $module = Get-Module SmartEndpointMigration.Campaign.HybridJoin
     Assert-State (Get-HybridJoinIntuneConfirmation -Row $row -CloudRows @($cloud)).State 'Unknown'
     if (Test-HybridJoinAlreadyEnrolled ([pscustomobject]@{ IntuneInventoryPresent=$true; Status='SUCCESS' })) { throw 'Name-only result was archived.' }
     if (Test-HybridJoinAlreadyEnrolled ([pscustomobject]@{ IntuneConfirmationState='Confirmed'; Status='GPUPDATE_TIMEOUT' })) { throw 'A failed run was archived.' }
+    if (Test-HybridJoinAlreadyEnrolled ([pscustomobject]@{ IntuneConfirmationState='Confirmed'; Status='ENROLLED_DETECTED_POST_CYCLE'; UserLicensePreflightState='NoAssignedLicense' })) { throw 'An unlicensed device was archived.' }
     Write-Host 'PASS: name-only result is not archived'
 }
 
@@ -74,15 +75,32 @@ foreach ($arguments in @(@('-AuditOnly'),@('-RepairFixture'))) {
     if ($result.UserLicensePreflightState -ne 'NoAssignedLicense') { throw "Preflight omitted for $arguments" }
 }
 Write-Host 'PASS: audit and repair both run the license preflight'
-$workerDecision=$workerAst.Find({param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Extent.Text.StartsWith('if ([bool]$contract.Flags.DryRun)') -and $n.Extent.Text.Contains('USER_LICENSE_REVIEW_REQUIRED')},$true)
-if (-not $workerDecision -or $workerDecision.Clauses.Count -lt 2) { throw 'Worker license-stop branch missing.' }
-$clause=$workerDecision.Clauses[1]
-$runStop=[scriptblock]::Create('if (' + $clause.Item1.Extent.Text + ') ' + $clause.Item2.Extent.Text)
-function Set-WorkerStatus { param($Status,$NextAction,$Detail); $script:observedLicenseStatus=$Status; $script:observedLicenseAction=$NextAction }
-$licensePreflight=[pscustomobject]@{Block=$true;Detail='No user license'}
-& $runStop
-if ($script:observedLicenseStatus -ne 'USER_LICENSE_REVIEW_REQUIRED' -or $script:observedLicenseAction -ne 'ASSIGN_INTUNE_LICENSE_THEN_RETRY') { throw 'Unlicensed user did not receive the stop status and corrective action.' }
-Write-Host 'PASS: a confirmed unlicensed user receives the stop status and license action'
+$argumentFunction=$workerAst.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-WorkerEndpointArguments'},$true)
+if (-not $argumentFunction) { throw 'Worker endpoint argument guard missing.' }
+. ([scriptblock]::Create($argumentFunction.Extent.Text))
+$blocked=[pscustomobject]@{Block=$true;Detail='No user license'}
+$allowed=[pscustomobject]@{Block=$false}
+$forced=@(Get-WorkerEndpointArguments -Arguments @('-AllowDsregLeave') -LicensePreflight $blocked)
+if ($forced -notcontains '-AuditOnly') { throw 'Unlicensed repair was not forced into audit mode.' }
+$audit=@(Get-WorkerEndpointArguments -Arguments @('-AuditOnly') -LicensePreflight $blocked)
+if (@($audit | Where-Object { $_ -eq '-AuditOnly' }).Count -ne 1) { throw 'Audit mode was not preserved exactly once.' }
+$repair=@(Get-WorkerEndpointArguments -Arguments @('-AllowDsregLeave') -LicensePreflight $allowed)
+if ($repair -contains '-AuditOnly') { throw 'Licensed repair was unexpectedly changed into audit.' }
+$rejected=$false
+try { [void](Get-WorkerEndpointArguments -Arguments @('-AuditOnly:$false') -LicensePreflight $blocked) } catch { $rejected=$true }
+if (-not $rejected) { throw 'Conflicting audit argument was not rejected.' }
+Write-Host 'PASS: unlicensed audit and repair both run the endpoint in audit-only mode'
+$actionIf=$workerAst.Find({param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Extent.Text.StartsWith('if ($null -ne $licensePreflight -and $licensePreflight.Block -and [string]$result.RemoteStatus')},$true)
+if (-not $actionIf) { throw 'License action after audit is missing.' }
+$applyAction=[scriptblock]::Create($actionIf.Extent.Text)
+$licensePreflight=$blocked
+$result=@{RemoteStatus='AUDIT_HYBRID_JOIN_UNHEALTHY';RemoteNextAction='FIX_HYBRID_JOIN';NextAction=''}
+& $applyAction
+if ($result.NextAction -ne 'ASSIGN_INTUNE_LICENSE_THEN_RETRY' -or $result.RemoteNextAction -ne 'FIX_HYBRID_JOIN') { throw 'License action lost the device diagnostic.' }
+$result=@{RemoteStatus='';NextAction='CHECK_TARGET_EXECUTION_ACCESS'}
+& $applyAction
+if ($result.NextAction -ne 'CHECK_TARGET_EXECUTION_ACCESS') { throw 'Audit execution failure was hidden by the license result.' }
+Write-Host 'PASS: license action preserves audit diagnostics and execution failures'
 
 # A blocked computer is not retried during a Loop Run or removed from its Wave.
 $enginePath=Join-Path $root 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'
@@ -101,16 +119,27 @@ $licenseBlockedThisRun=@{ 'PC1.FIRST.EXAMPLE' = $true }
 $computers=@('pc1.first.example','pc1.second.example'); $stopReason='Finished'; $filtered=& $runFilter
 if (@($filtered.Computers).Count -ne 1 -or $filtered.Computers[0] -ne 'pc1.second.example') { throw 'Distinct domain names were incorrectly treated as the same blocked computer.' }
 Write-Host 'PASS: Loop Run leaves unlicensed computers pending without retrying them'
+$markIf=$engineAst.Find({param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Extent.Text.StartsWith("if ([string](Get-SemtPropertyValue -InputObject `$row -Name 'UserLicensePreflightState'")},$true)
+if (-not $markIf) { throw 'Engine license-preflight retry guard missing.' }
+$markLicenseBlocked=[scriptblock]::Create($markIf.Extent.Text)
+$licenseBlockedThisRun=@{}
+$row=[pscustomobject]@{ComputerName='PC-NOLICENSE';Status='AUDIT_HYBRID_JOIN_UNHEALTHY';UserLicensePreflightState='NoAssignedLicense'}
+& $markLicenseBlocked
+if (-not $licenseBlockedThisRun.ContainsKey('PC-NOLICENSE')) { throw 'Audited unlicensed device was not marked to stop retries.' }
+Write-Host 'PASS: audit result still stops Loop retries for an unlicensed device'
 
-# A stopped unlicensed device is reported, and does not trigger post-cycle Graph calls.
+# An audited unlicensed device retains the diagnostic and does not trigger post-cycle Graph calls.
 & $module {
-    $row=[pscustomobject]@{Status='USER_LICENSE_REVIEW_REQUIRED'; UserLicensePreflightState='NoAssignedLicense'; UserLicensePreflightDetail='No user SKU'; InteractiveUserSid=''; Dsreg_TenantId=''}
+    $row=[pscustomobject]@{Status='AUDIT_HYBRID_JOIN_UNHEALTHY'; NextAction='ASSIGN_INTUNE_LICENSE_THEN_RETRY'; UserLicensePreflightState='NoAssignedLicense'; UserLicensePreflightDetail='No user SKU'; InteractiveUserSid=''; Dsreg_TenantId=''}
     $context=[pscustomobject]@{PackageRoot=(Join-Path ([IO.Path]::GetTempPath()) ('SEMT-absent-'+[guid]::NewGuid().ToString('N'))); DryRun=$false; Log={param($text,$color)}; CycleNumber=1}
     Invoke-HybridJoinPostCycle -Context $context -Rows @($row)
-    if ($row.Status -ne 'USER_LICENSE_REVIEW_REQUIRED' -or $row.UserLicenseState -ne 'NoAssignedLicense' -or $row.UserLicenseDetail -ne 'No user SKU') { throw 'License-blocked result was not preserved.' }
+    if ($row.Status -ne 'AUDIT_HYBRID_JOIN_UNHEALTHY' -or $row.NextAction -ne 'ASSIGN_INTUNE_LICENSE_THEN_RETRY' -or $row.UserLicenseState -ne 'NoAssignedLicense' -or $row.UserLicenseDetail -ne 'No user SKU') { throw 'Audit diagnostic or license result was not preserved.' }
     if ($row.PSObject.Properties['PostCycleIntuneInventoryChecked']) { throw 'License-blocked device triggered cloud confirmation.' }
+    $already=[pscustomobject]@{Status='AUDIT_SUCCESS_ALREADY_INTUNE'; NextAction='ASSIGN_INTUNE_LICENSE_THEN_RETRY'; UserLicensePreflightState='NoAssignedLicense'; UserLicensePreflightDetail='No user SKU'; InteractiveUserSid=''; Dsreg_TenantId=''}
+    Invoke-HybridJoinPostCycle -Context $context -Rows @($already)
+    if ($already.Status -ne 'AUDIT_SUCCESS_ALREADY_INTUNE' -or $already.NextAction -ne 'ASSIGN_INTUNE_LICENSE_THEN_RETRY') { throw 'Unlicensed already-enrolled audit was incorrectly reclassified.' }
 }
-Write-Host 'PASS: license-blocked device remains pending and skips post-cycle Graph confirmation'
+Write-Host 'PASS: unlicensed audit preserves the device diagnostic and skips post-cycle Graph confirmation'
 
 # Exercise the target attempt contract, not just the technician-side classifier.
 $endpoint = Join-Path $root 'Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1'
@@ -132,8 +161,8 @@ Write-Host 'PASS: endpoint attempt carries identity and MDM evidence'
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJ4ZT2BI4WqP5g
-# wmzHUaqP4IQ7Dwl6bdZrHGbMx4i09KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCVikMIflLkHn8s
+# G9ofMknLVRVmAjlzuXBwtSjnCwroYqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -163,14 +192,14 @@ Write-Host 'PASS: endpoint attempt carries identity and MDM evidence'
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAHqimwaDS3lh5wCjtXnYma
-# buu58VpT9wdKSmxi3wzmsjANBgkqhkiG9w0BAQEFAASCAYBw1rTOm75cAbS25Nd9
-# iCLdWJlsOxevskd7jktGzeQIQtieLLvfRxyZ8u7Vedfx140YwxccImYkRbUvNhPj
-# L5RRMTjgyY5Fi2cyJ2sSGeSxukIRPDNexKwn3drOfNh1AouX0eL9vFUe2h0twFKm
-# GHfp7yU8TVaHnJz172z2YBXLZzjpjYbITiHAIzG7GkV4GseHrKV5wvMGwqzeCxgf
-# ddM+11w+yTuj2VNjWb0EAxW0suEW5i7k6anVIAxkB5UGpfmbFLijyI8mO/6ylB13
-# KoYgrsb2Rxypl7oFGzpla4RIP1rNvuivCcM4I2VLodQ1KPIzXHlcvO3gze70Raj7
-# FHrf5pNEOr29TJtS/3ms49LJ1CevKn1q+LQpiuA7bl3DV7FyBHPukCRfcGcKZD2w
-# ERwhs/14Jx79mLTpYJcxnnJP5ZiyLzaqji1h6BHfTnU6IZmW3WwnibdMn5604x9I
-# qzW1y6UIuUgImb0LCFzqASGppsSRnfJWGigDc/i0332jXn4=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCefBgrao6wyp85sGrWWLUX
+# UiEoyLO14IkIGZXEJdB1DzANBgkqhkiG9w0BAQEFAASCAYCDqOFuk3zqQm5mfMoH
+# LX9jtOsG74QVGpnxvKk9LUEdwEe//PvjhVNEk+tjcYR87GVH30cCtYpVEa1SYJoG
+# 7uxOjBa+ZWpTTX3PsZcdRTvDlpGRqeuk11oxog6r2NNBz4Q0sSsnSUIYWI6bcnE/
+# omxjddE4aVVIMxk6FDxuqZPV/bP2FGACwRHNme8D9renbO6qk+xjMxnpSnA1SlZB
+# zGoGhqUOuOlY3wOl6x3QYS8zaCTISUhKuUZdPnu3LDYQ/qBT4hySb7B6FtjvJZiV
+# teib6uy5gY3Zkr8QiDOR0B/w9n0ACCm6IUGW2hmPoPn0xfYFuXN9TWlDcSiiNp3H
+# n3Tlw5s+StUMhM2PVodINvi09uBghxeh+QliQvjou0jIQuiueEBgJrN/H7J53yjX
+# Qf5F0iV2Kg0WUFdV8Wy+BLKS/cO3+QbYEAn2snTaI1exuOv5iWTg9GlJb5woxfL8
+# NLirMhQPXQYtUvYwvzpbBQYjeQ3CFNsnIAOUgHhbd1vST4A=
 # SIG # End signature block
