@@ -2,7 +2,7 @@
 
 ## Orchestrator server acceptance
 
-`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.7, PowerShell 7.2+) qualifies a server before it
+`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.8, PowerShell 7.2+) qualifies a server before it
 is switched from Inactive to Active in the orchestrator GUI. The orchestrator capability probe only
 signs in or loads a module; this script makes a real, limited read for each capability, checks the
 rows, then drops them.

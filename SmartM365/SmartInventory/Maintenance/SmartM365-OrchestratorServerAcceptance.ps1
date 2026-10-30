@@ -38,7 +38,7 @@ the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.7
+1.0.8
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -452,7 +452,7 @@ function Get-SmartM365AcceptanceShortResult {
             else { $account }
         }
         'Modules' {
-            $problems = @($text -split '; ' | Where-Object { $_ -match 'missing|below|not at|Windows PowerShell 5\.1:' })
+            $problems = @($text -split '; ' | Where-Object { $_ -match 'missing|below|not at|OneDrive profile copy|Windows PowerShell 5\.1:' })
             if ($problems.Count) { $problems -join '; ' } else { 'required modules present' }
         }
         'CodeSigning' {
@@ -864,8 +864,12 @@ try {
     Import-Module MicrosoftTeams -MinimumVersion 4.7.1 -ErrorAction Stop
     Write-AcceptanceStage 'Teams connection'
     # Same calls as the Teams job (M365-TeamsPhonePstnUsage-Inventory): Get-CsTenant is not available app-only in recent modules.
-    if (-not (Get-Command -Name Get-CsPhoneNumberAssignment -ErrorAction SilentlyContinue)) { throw 'Get-CsPhoneNumberAssignment is not available in the installed MicrosoftTeams module.' }
-    $connection = Invoke-AcceptanceRetry { Connect-MicrosoftTeams -TenantId $env:SMART_TENANT_ID -ApplicationId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -ErrorAction Stop }
+    # MicrosoftTeams 7.x loads its Cs cmdlets during Connect-MicrosoftTeams: connect at script level, then look for them.
+    $connection = Connect-MicrosoftTeams -TenantId $env:SMART_TENANT_ID -ApplicationId $env:SMART_APP_ID -CertificateThumbprint $env:SMART_CERT_THUMBPRINT -ErrorAction Stop
+    if (-not (Get-Command -Name Get-CsPhoneNumberAssignment -ErrorAction SilentlyContinue)) {
+        $csCount = @(Get-Command -Name 'Get-Cs*' -ErrorAction SilentlyContinue).Count
+        throw ('Get-CsPhoneNumberAssignment is not available after Connect-MicrosoftTeams (MicrosoftTeams {0} from {1}; {2} Get-Cs* command(s) loaded).' -f (Get-Module -Name MicrosoftTeams).Version, (Get-Module -Name MicrosoftTeams).ModuleBase, $csCount)
+    }
     $connectedTenant = [string](@($connection | Where-Object { $_ } | ForEach-Object { if ($_.PSObject.Properties['TenantId']) { $_.TenantId } }) | Select-Object -First 1)
     if ($connectedTenant -and $connectedTenant -ne [string]$env:SMART_TENANT_ID) { throw ('Connect-MicrosoftTeams returned TenantId {0}, not the configured tenant.' -f $connectedTenant) }
     $datasets = @(
@@ -875,7 +879,7 @@ try {
             }
         }
     )
-    Write-AcceptanceResult @{ Ready = $true; Detail = ('Teams app-only connection{0}' -f $(if ($connectedTenant) { ', tenant identifier verified' } else { '' })); Datasets = $datasets }
+    Write-AcceptanceResult @{ Ready = $true; Detail = ('Teams app-only connection{0}; MicrosoftTeams {1} from {2}' -f $(if ($connectedTenant) { ', tenant identifier verified' } else { '' }), (Get-Module -Name MicrosoftTeams).Version, (Get-Module -Name MicrosoftTeams).ModuleBase); Datasets = $datasets }
 }
 catch { Write-AcceptanceResult @{ Ready = $false; Detail = (Get-AcceptanceErrorText $_) } }
 finally {
@@ -987,6 +991,13 @@ function Test-AcceptanceModules {
         $missingStatus = if ([bool]$module.Required) { 'FAIL' } else { 'WARN' }
         $moduleStatus = if ($latest.Count -eq 0) { $missingStatus } elseif ([string]$module.Minimum -and $latest[0] -lt [version][string]$module.Minimum) { $missingStatus } else { 'PASS' }
         $value = if ($latest.Count) { [string]$latest[0] } else { 'missing' }
+        # Import-Module takes the first folder of PSModulePath that holds the module: a copy in a synced
+        # OneDrive profile can shadow the machine copy and load without its files (on-demand placeholders).
+        $firstCopy = @(Get-Module -ListAvailable -Name ([string]$module.Name) -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($firstCopy.Count -and [string]$firstCopy[0].ModuleBase -match '(?i)\\OneDrive') {
+            $value += ' (loaded from a OneDrive profile copy: {0})' -f $firstCopy[0].ModuleBase
+            if ($moduleStatus -eq 'PASS') { $moduleStatus = 'WARN'; $statuses.Add('WARN'); $parts.Add(('{0} is loaded from a OneDrive profile copy' -f $module.Name)) }
+        }
         if ([string]$module.Minimum) { $value += ' (minimum {0})' -f $module.Minimum }
         if (-not [bool]$module.Required) { $value += ', optional' }
         Add-AcceptanceMeasurement -Section 'Modules' -Item ([string]$module.Name) -Value $value -Status $moduleStatus
