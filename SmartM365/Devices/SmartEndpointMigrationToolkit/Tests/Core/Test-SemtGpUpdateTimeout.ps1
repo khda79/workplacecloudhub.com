@@ -68,20 +68,54 @@ try {
     function Invoke-ProcessWithTimeout {
         param($FilePath,$Arguments,$TimeoutSeconds,$OutputFile)
         $script:gpCalls++
-        return [pscustomobject]@{ ExitCode=0; Output=''; TimedOut=$false; StopDetail='' }
+        return [pscustomobject]@{ ExitCode=0; Output=''; TimedOut=$script:mockTimeout; StopDetail='' }
     }
     $OutputDir = $temp; $ComputerName = 'PC'; $RunId = 'test'; $GpUpdateTimeoutSeconds = 180
     $GpUpdateWaitSeconds = 0; $gpUpdateTimedOut = $false; $gpUpdateAttempted = $false
-    $script:gpCalls = 0; $AuditOnly = $true; $continued = $false
+    $script:gpCalls = 0; $script:mockTimeout = $false; $AuditOnly = $true; $continued = $false
     . $policyBranch
     $continued = $true
     Assert-Test 'Hybrid Join audit skips gpupdate and continues to identity checks' ($script:gpCalls -eq 0 -and -not $gpUpdateAttempted -and $continued)
     $AuditOnly = $false; $gpUpdateAttempted = $false
     . $policyBranch
     Assert-Test 'Hybrid Join repair still runs gpupdate' ($script:gpCalls -eq 1 -and $gpUpdateAttempted)
-    Assert-Test 'Hybrid Join final gpupdate also excludes audit' ($hj -match '(?m)^\s*if \(-not \$AuditOnly -and \$finalGpUpdateReasons\.Count -gt 0\)')
-    Assert-Test 'Hybrid Join stops with distinct initial and final timeout statuses' ($hj -match "status = 'GPUPDATE_TIMEOUT'" -and $hj -match "status = 'FINAL_GPUPDATE_TIMEOUT'" -and $hj -match 'INVESTIGATE_GROUP_POLICY_TIMEOUT' -and $hj -notmatch 'gpupdate\.exe /target:computer /force')
-    Assert-Test 'Windows 11 policy repair returns timeout status' ($w11 -match "status = 'GPUPDATE_TIMEOUT'" -and $w11 -match 'PolicyRepairGpUpdateTimeout' -and $w11 -notmatch 'gpupdate\.exe /target:computer /force')
+    Assert-Test 'Hybrid Join final gpupdate also excludes audit' ($hj -match '(?m)^\s*if \(-not \$AuditOnly -and -not \$gpUpdateTimedOut -and \$finalGpUpdateReasons\.Count -gt 0\)')
+    $script:mockTimeout = $true; $gpUpdateTimedOut = $false; $status = 'SUCCESS'; $ExitCode = 0
+    . $policyBranch
+    Assert-Test 'Hybrid Join continues after initial gpupdate timeout without changing enrollment status' ($script:gpCalls -eq 2 -and $gpUpdateTimedOut -and $status -eq 'SUCCESS' -and $ExitCode -eq 0)
+    $startFinal = $hj.IndexOf('    $finalGpUpdateReasons = New-Object')
+    $endFinal = $hj.IndexOf('    # Enrollment events describe observations', $startFinal)
+    if ($startFinal -lt 0 -or $endFinal -lt 0) { throw 'Final policy-refresh branch not found.' }
+    $finalBranch = [scriptblock]::Create($hj.Substring($startFinal, $endFinal - $startFinal))
+    $leaveAttempted = $true; $nonIntuneMdmRemovalAttempted = $false; $gpUpdateMdmPolicyWarning = $false
+    $intuneEnrolled = $false; $rebootAttempted = $false; $status = 'INTUNE_PENDING'; $ExitCode = 3
+    $finalGpUpdateTimedOut = $false; $AuditOnly = $false; $gpUpdateTimedOut = $false
+    . $finalBranch
+    Assert-Test 'Final gpupdate timeout preserves prior enrollment status' ($finalGpUpdateTimedOut -and $status -eq 'INTUNE_PENDING' -and $ExitCode -eq 3)
+    $priorCalls = $script:gpCalls; $gpUpdateTimedOut = $true
+    . $finalBranch
+    Assert-Test 'No second gpupdate after an initial timeout' ($script:gpCalls -eq $priorCalls)
+    Assert-Test 'Hybrid Join records both timeouts and preserves the final enrollment status' ($hj -match 'final gpupdate exceeded' -and $hj -notmatch "status = 'FINAL_GPUPDATE_TIMEOUT'" -and $hj -match 'GpUpdateTimedOut' -and $hj -match 'FinalGpUpdateTimedOut')
+    # Exercise the Windows 11 decision before the upgrade gate with simulated policy repair.
+    $startW11 = $w11.IndexOf('    # Repair the existing policy gate before choosing the upgrade path.')
+    $endW11 = $w11.IndexOf("    if (`$os.MajorFamily -eq 'Windows11') {", $startW11)
+    if ($startW11 -lt 0 -or $endW11 -lt 0) { throw 'Windows 11 policy preflight not found.' }
+    $w11Branch = [scriptblock]::Create($w11.Substring($startW11, $endW11 - $startW11))
+    function Write-SmartLog { param($Message,$Level) }
+    function Repair-WindowsUpdatePolicyBlockers { $script:repairCalls++; [pscustomobject]@{TimedOut=$true;StopDetail='';OutputFile='test.txt'} }
+    function Get-WindowsUpdatePolicySummary { [pscustomobject]@{HasLegacyBlocker=$script:blockerRemains;Issues='test'} }
+    $os=[pscustomobject]@{MajorFamily='Windows10'}; $hardwareReadinessBlocksUpgrade=$false
+    $DirectSetupUpgrade=$false; $intune=[pscustomobject]@{IsIntuneEnrolled=$true}
+    $indicators=[pscustomobject]@{ActionableBlocking=$false}; $freeGb=50; $MinimumFreeDiskGB=10
+    $pendingReboot=$false; $policy=[pscustomobject]@{HasLegacyBlocker=$true;Issues='test'}
+    $AllowPolicyRepair=$true; $AuditOnly=$false; $policyGpUpdateTimedOut=$false
+    $policyRepairCompletedNormally=$false; $script:repairCalls=0; $script:blockerRemains=$false
+    . $w11Branch
+    Assert-Test 'Windows 11 rechecks policy and can continue after gpupdate timeout' ($script:repairCalls -eq 1 -and $policyGpUpdateTimedOut -and -not $policy.HasLegacyBlocker)
+    $policy=[pscustomobject]@{HasLegacyBlocker=$true;Issues='test'}; $script:blockerRemains=$true
+    . $w11Branch
+    Assert-Test 'Windows 11 retains a real policy blocker after gpupdate timeout' ($policy.HasLegacyBlocker -and $policyGpUpdateTimedOut)
+    Assert-Test 'Windows 11 does not replace upgrade result with gpupdate timeout' ($w11 -notmatch "status = 'GPUPDATE_TIMEOUT'" -and $w11 -match 'PolicyGpUpdateTimedOut')
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Host "Summary: Passed=$passed; Failed=$failed"
 if ($failed) { exit 1 }
@@ -89,8 +123,8 @@ if ($failed) { exit 1 }
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWpC3Pqy4ZkWLx
-# tH6FOm6zkoF5jO6MLCB/vX55mClCVqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDh0Ryxe25THJw4
+# mWJfW/aUziXiO6JTdvcvq5NE6r4HhqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -120,14 +154,14 @@ if ($failed) { exit 1 }
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCA/iSn9P6Qsk67+xjTHtkhq
-# X9wL3B/fAhDHISYk1zsKfjANBgkqhkiG9w0BAQEFAASCAYCJHhMif9jQ4Uk/nYeG
-# d3I3KxSQH2BDkWkIRmPo+YcJKdcKACiyoXzICFIdmpd4otlBBQDncqVFC4+Ts1a2
-# YejbzUYwafxpbrgtRcGq3gqHWDJCTP1SxxexU5qw6u26uleeszvERToQ1xsSeJtV
-# FtzCnSApKnfYOhkgaHY1DAAgAbldhFMQxU6Wjb5uboBwW+M7vMhLHSd5EXdWFYwF
-# /64JWNFqVOLomLBDMqUjh9mNpS66TGrydYXK7ETmAzzFajuiHnP9HAJXKpIohTyu
-# CHpxy9muvEA93/bjVprd55d7X8wklGEGFy7ikmw2XJmghqx6cdOra1zaQcahWPtk
-# JP9LtzWjvyWmqmyuQJsl+xokpdZohvIWntwxV6dkVmj7mmitmQxNea9SIiFk2Q4r
-# seJw10k1uBvhe4AC0zDtIsXuKvdeGryAo6aQIqNyp4lLql8ZZf8TAlOHO5J0gl2b
-# Ex9dx4DWzJaYNM6FbazsZIag/8NxfNu8cuRZfxiaO6CxWEc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBCtLTHIMG8H/u0Fk2NZcC1
+# dcYZFooj1JHwqO03I4ki8zANBgkqhkiG9w0BAQEFAASCAYCoJLSg0PsBeKbN1IpF
+# SnlBeTTVlro/web3TeR1HTyoBALRHFmf9YcBUgsFD3IPSD6/wKMLrdBHsImYLBXl
+# uijcM6Yz1ZHYcnbNE3JztdrnX3CBG/pk6WwIGKXehwiV1D1LeseMPOVjZ3So5rPt
+# qH65Rp4amSRdz7GWPBQfcH6FOBkoOQFoW10W0SjJXur7SIuPXyC1lfevzBSxdY4p
+# K+hyNOSS/ztL6OL16YGXXAfO81J8xM0L7Z9Y31ySav51k/+483rH5WNuFe/QLpiY
+# AUwhnYtRIjY1EsZQoAZ0Ow8LIL1bcY8nHSMnsbseYbxvzRguTuyQow1EXSjDiN4V
+# sHjHEi77fUQA5dIx3GQj6PPasXfzPMdD0TQMgQsaHjkQC3NnhyuceApeKOs1tbNZ
+# xNSlKpCwIN4KXk70Zt1TzTKsPv5xtwBYUAFIG4fQbFGW51ORe6aPWE4bbBB+Z7wL
+# sOR3UEZi6eYEZL1LKXe6R+kuX824ZQhqIhHk4P2RUXeano0=
 # SIG # End signature block

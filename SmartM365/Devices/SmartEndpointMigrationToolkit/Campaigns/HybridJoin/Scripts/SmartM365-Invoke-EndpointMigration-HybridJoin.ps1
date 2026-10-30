@@ -358,7 +358,7 @@ function Write-SemtHybridJoinAttemptResult {
         LegacyActivityDetail = $script:SemtLegacyActivityDetail
         RetryAfterRebootTaskRun = [bool]$RetryAfterRebootTaskRun
     }
-    foreach ($name in @("mdmDiagnosticStatus","mdmDiagnosticZip","interactiveUserName","interactiveUserSid","mdmEnrollmentRecentEvidence","interactiveUserDomain","interactiveUserAccountName","interactiveUserAccountType","interactiveSessionName","interactiveSessionState","userIsUserAzureAD","userAzureAdPrt","userSessionIsNotRemote","intuneEnrolled","dsregAzureAdJoined","dsregDeviceAuthStatus","leaveAttempted","rebootAttempted","rebootReason")) {
+    foreach ($name in @("gpUpdateTimedOut","gpUpdateStopDetail","finalGpUpdateTimedOut","finalGpUpdateStopDetail","mdmDiagnosticStatus","mdmDiagnosticZip","interactiveUserName","interactiveUserSid","mdmEnrollmentRecentEvidence","interactiveUserDomain","interactiveUserAccountName","interactiveUserAccountType","interactiveSessionName","interactiveSessionState","userIsUserAzureAD","userAzureAdPrt","userSessionIsNotRemote","intuneEnrolled","dsregAzureAdJoined","dsregDeviceAuthStatus","leaveAttempted","rebootAttempted","rebootReason")) {
         $value = Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction SilentlyContinue
         $data[($name.Substring(0,1).ToUpperInvariant() + $name.Substring(1))] = [string]$value
     }
@@ -4329,12 +4329,12 @@ try {
         }
 
         if ($gpUpdateTimedOut) {
-            $status = 'GPUPDATE_TIMEOUT'
-            $ExitCode = 1
-            throw ("Initial gpupdate exceeded {0} seconds; repair stopped. Termination requested; stop detail: {1}. OutputFile={2}" -f $GpUpdateTimeoutSeconds,$gpUpdateStopDetail,$gpUpdateOutputFile)
+            $warning = "Initial gpupdate exceeded {0} seconds. Termination requested; stop detail: {1}. Existing policy will be checked; enrollment checks continue. OutputFile={2}" -f $GpUpdateTimeoutSeconds,$gpUpdateStopDetail,$gpUpdateOutputFile
+            Write-Host $warning -ForegroundColor Yellow
+            Write-RunLog $warning
         }
 
-        if ($GpUpdateWaitSeconds -gt 0) {
+        if ($GpUpdateWaitSeconds -gt 0 -and -not $gpUpdateTimedOut) {
             Write-RunLog ("Waiting {0} seconds after gpupdate." -f $GpUpdateWaitSeconds)
             Start-Sleep -Seconds $GpUpdateWaitSeconds
         }
@@ -5225,7 +5225,7 @@ try {
         [void]$finalGpUpdateReasons.Add("InitialGpUpdateMdmPolicyWarning")
     }
 
-    if (-not $AuditOnly -and $finalGpUpdateReasons.Count -gt 0) {
+    if (-not $AuditOnly -and -not $gpUpdateTimedOut -and $finalGpUpdateReasons.Count -gt 0) {
         $finalGpUpdateReason = ($finalGpUpdateReasons -join ";")
         if ($rebootAttempted) {
             Write-RunLog ("Final gpupdate skipped because a reboot is already scheduled. Reason={0}" -f $finalGpUpdateReason)
@@ -5247,12 +5247,15 @@ try {
                 Write-RunLog ("Final gpupdate failed to start: {0}" -f $_.Exception.Message)
             }
             if ($finalGpUpdateTimedOut) {
-                $previousStatus = $status
-                $status = 'FINAL_GPUPDATE_TIMEOUT'
-                $ExitCode = 1
-                throw ("Final gpupdate exceeded {0} seconds after repair; previous status={1}. Termination requested; stop detail: {2}. OutputFile={3}" -f $GpUpdateTimeoutSeconds,$previousStatus,$finalGpUpdateStopDetail,$finalGpUpdateOutputFile)
+                $warning = "Final gpupdate exceeded {0} seconds after repair; enrollment status remains {1}. Termination requested; stop detail: {2}. OutputFile={3}" -f $GpUpdateTimeoutSeconds,$status,$finalGpUpdateStopDetail,$finalGpUpdateOutputFile
+                Write-Host $warning -ForegroundColor Yellow
+                Write-RunLog $warning
             }
         }
+    }
+
+    if (-not $AuditOnly -and $gpUpdateTimedOut -and $finalGpUpdateReasons.Count -gt 0) {
+        Write-RunLog 'Final gpupdate skipped because the initial invocation timed out; enrollment result is preserved.'
     }
 
     # Enrollment events describe observations in a time window, not necessarily the
@@ -5398,6 +5401,10 @@ try {
         FlushDnsAttempted       = $flushDnsAttempted
         FlushDnsExitCode        = $flushDnsExitCode
         FlushDnsOutputFile      = $flushDnsOutputFile
+        GpUpdateTimedOut        = $gpUpdateTimedOut
+        GpUpdateStopDetail      = $gpUpdateStopDetail
+        FinalGpUpdateTimedOut   = $finalGpUpdateTimedOut
+        FinalGpUpdateStopDetail = $finalGpUpdateStopDetail
         GpUpdateAttempted       = $gpUpdateAttempted
         GpUpdateExitCode        = $gpUpdateExitCode
         GpUpdateOutputFile      = $gpUpdateOutputFile
@@ -5617,7 +5624,11 @@ catch {
             FlushDnsAttempted       = $flushDnsAttempted
             FlushDnsExitCode        = $flushDnsExitCode
             FlushDnsOutputFile      = $flushDnsOutputFile
-            GpUpdateAttempted       = $gpUpdateAttempted
+            GpUpdateTimedOut        = $gpUpdateTimedOut
+        GpUpdateStopDetail      = $gpUpdateStopDetail
+        FinalGpUpdateTimedOut   = $finalGpUpdateTimedOut
+        FinalGpUpdateStopDetail = $finalGpUpdateStopDetail
+        GpUpdateAttempted       = $gpUpdateAttempted
             GpUpdateExitCode        = $gpUpdateExitCode
             GpUpdateOutputFile      = $gpUpdateOutputFile
             GpUpdateMdmPolicyWarning = $gpUpdateMdmPolicyWarning
@@ -5722,8 +5733,8 @@ exit $ExitCode
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUmTVpKHhw9ChA
-# sAAMXT6KzNJ1gru8lZeVvxKXP1YUgaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCWmGG5u8K7Lerv
+# tmNkLbINoQ0QS6SpuUq2AQ70rJ7f4KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5753,14 +5764,14 @@ exit $ExitCode
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCALrazr4xor2MiqrthI8y3U
-# lgxqc9qeNovy5eaW1h7msjANBgkqhkiG9w0BAQEFAASCAYAdx5KBMjLRebC/8tuL
-# IXQprNd42ezPrtNg23i58liAEGDFwVlm+hm96ZNqVQUBgEIyNPFHawS2/HL+KP01
-# Vkeoz/UzHZvJ8scGItVmOMNThh60Znez5ubrbJ5oJU1n1+NXfZeLq9AMX6REesEb
-# +SbGa32nqytlkOgL139Xg7LQCPzWbTAs6XanSttwQub/+KqNIkrbxZCQCXNRGd05
-# cwW/iX8+kNv6UNLLXxlQC8SNK//lB1HGPkBtATaPxOvZooP8xks5NfSZB7hEqr9H
-# CLCuvJaXRyDH74g5Djs6ueuMaYRj6A5eR/8JNIta9SNX26PPaMhBx+fWZ7UuD+5b
-# fqCVcMN8V127LOXXpsMgd5ImjKAPGOl+FuKQkIDsqTqhMH+J+1amrgFwTcIXYzdQ
-# spobEgXLW5dAKZM09GfQs3S83WbLszwSfx8Ti/g1x3EIZRNkI7VEIRS6z+9N1Vx8
-# Gxa+WeIdFopNO/OJwUWjYDkm4CqCGjoNPK/rD3UMV27F264=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCE7/6A2z5pEy0P3tYEzD++
+# BTlxWwdTe4RzWUwUjwsVqzANBgkqhkiG9w0BAQEFAASCAYCml/TmVAKGjnr3agNV
+# VGeJ56AknA7v97HrtuTMPq0uftFYn1ZAr8uqchZ/rsLLV7dDCYiOJe+MJr2c8vM1
+# Hr09e5mC65pM0K39oZL1lbZWTGMMdFxsxRdaHAIRRk5zIA/taCs2QMzsDQjxWLJR
+# bhYC7JHMVY7QeCt4MF6F3nxjbyOV8IiAzkP7zu8MCX9Fjr0gF9LktZdLo6xXCTf8
+# 7drVhDtwVejLKnjlzWToVRVPow3Ew/AJZEHd9NSKhuhz0U+/pu+ehJFbm1af8RAS
+# ALxF9v1URJ9Ca+Xz3Anxxk0m3Z/P9/9VQ/LXAsP5XjUeM9nKWnTF2qWwqd7XEaFV
+# o1gYm78yWHmgcunYAg6tVFMztQHqoffxaFI6ovkYQ6FgcFQXRMuVVmapE8BT5LiV
+# HIfEATyDAnH09XJboYKKzXwH6LPH/AtoXZi7AtqZSA3oc4NRb8uR/Pz92+GoO3zK
+# VPDMv++luGY4UCy0YT6/NzJvfg5jdDa3KhZJV1Q6+wcOa8c=
 # SIG # End signature block

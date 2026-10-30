@@ -23,7 +23,7 @@ Set-StrictMode -Version 2.0
 $script:HybridJoinExtensionFields = @(
     'InteractiveUserName','InteractiveUserSid','InteractiveUserDomain','InteractiveUserAccountName','InteractiveUserAccountType',
     'InteractiveSessionName','InteractiveSessionState','UserIsUserAzureAD','UserAzureAdPrt','UserSessionIsNotRemote',
-    'MdmDiagnosticStatus','MdmDiagnosticZip','MdmEnrollmentRecentEvidence','IntuneEnrolled','Dsreg_DeviceId','Dsreg_TenantId','DsregAzureAdJoined','DsregDeviceAuthStatus','LeaveAttempted','RebootAttempted','RebootReason',
+    'GpUpdateTimedOut','GpUpdateStopDetail','FinalGpUpdateTimedOut','FinalGpUpdateStopDetail','MdmDiagnosticStatus','MdmDiagnosticZip','MdmEnrollmentRecentEvidence','IntuneEnrolled','Dsreg_DeviceId','Dsreg_TenantId','DsregAzureAdJoined','DsregDeviceAuthStatus','LeaveAttempted','RebootAttempted','RebootReason',
     'RetryAfterRebootAction','RetryAfterRebootDetail','RetryAfterRebootAttempt','RetryAfterRebootMaxAttempts','RetryAfterRebootTaskName'
 )
 $script:HybridJoinEngineFields = @(
@@ -383,8 +383,8 @@ function Get-SemtHybridJoinProfile {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDliHNrIgEGowaw
-# MQsTAk8e9/Dmhg0R3OiIHi4TUsyyQ6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/3xuKXp545lxW
+# WoGkMgYmIJuNEG/U+QbW83z9INaCZKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -414,14 +414,14 @@ function Get-SemtHybridJoinProfile {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDns4bDAm4pmZ9ZDAPoL1Rm
-# PlZnsVDEImAZhAZtu2PjGDANBgkqhkiG9w0BAQEFAASCAYCwo8pryg/e+kaTIe+Y
-# lhwZk2m9BD5wGDfu87pV6D7UVrJ7ydlYHfvsGfo+LT5d7UBiOhfCmdtP8aiDsl0R
-# GCMm8v6SscWL++IzsrJG+hIK32sOQ/0pAur+Zx//qFHYliSvp0vhmNyG03A4kbA+
-# Bmqt5FLRc1wC5ZeVIwA8P/flzL5KzLOBQzMIpvcDiNfIkI0+WVUJ1vbkQvgHYqDY
-# D96hJ8aZ0uHTaNl6p/x1B0PsB3zAZ8RHz7lT/Wz72bCwgc2j3TiqmbGD2pTwPo/j
-# O6IYnKpNjrbyQTjFLu5ZFWyW7tR0suEC7tDUKj4mdk9e+A0YixDnKg7SPV0PQGwA
-# TNGZUnB5EKOZrgODtt7fITEF9uk5MQ3vsIbK5I9jVmrvuT5BIHhDKfPQHQqSom6K
-# 4YWeYhIdgae96be88s+bf/tB0PyK3N2tyv4mhK7ZhWMEiaAJ5a6Ez8r3+KVsd2vG
-# 5TJeJSVWQhqXyxzDGvE6L/LaKyu+UhD9uwGNPqZoijXR9lM=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCASGFXlEsi9iL68IXoUS0Kx
+# kGH77e16YeWhBLH4JNs8mDANBgkqhkiG9w0BAQEFAASCAYAS+95lnPSBk8n8USET
+# eDl2a0YrK24bcnZvU9/JqRr57ew64gISK52Wd1/FC3aYBDpz/Ie9n/w4WJEApjdt
+# Nhmo8NMkNqQu3UCZqMt9bCQUV8BmGoFyaMmjdwl4y2grPuqkX5ThHOyqs+uSpWig
+# rpzkEya7arwJJYHgpS5KmbCRdcvfqillg8nODVo4k6HjAUVPdaAIFBydR67NQqd4
+# FhMnCrcB9QD1kHB29lkBZJIev8infe45qDd6Y7oZ5eJl3zxRbKF5ekCKYJGtfpmr
+# Tgj6iZyBUHUaJpv6dRHneOcZt31WH+rhAwFina4vEz2edfy/tn9FCs3wNvC+xu6X
+# AO8HNLhSIRbxYu7/Ut+X+vVW1eWKwU9Qgjq5FmEkQyOnsAb+cGkHqqAhA8ht3oQS
+# Y1L4HNw1mxQfqLB+xalqeTYG5K2Uaj1ZVmGmOxJzd8EbqEf6i0jeWEfkLHICiJb2
+# 2CB27peENGtBiUA4WU8yf3GLHfgLhABzTV1nF75vVAilYrs=
 # SIG # End signature block
