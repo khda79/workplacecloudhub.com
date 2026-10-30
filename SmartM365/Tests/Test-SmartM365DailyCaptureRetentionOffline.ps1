@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic daily capture, preservation and conditional SharePoint deletion tests.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored in finally.')]
@@ -28,7 +28,7 @@ try {
         $script:Checks=0;$script:Logs=[Collections.Generic.List[string]]::new()
         $script:RemoteCalls=[Collections.Generic.List[object]]::new();$script:RemoteRoot=Join-Path $Temporary 'fake-remote'
         $script:BadUpload=$false;$script:MutateOnDelete=$false;$script:UploadLog=[Collections.Generic.List[string]]::new()
-        $script:Limited=$false;$script:ProbeProtectedPath='';$script:ProtectedWriteBlocked=$false
+        $script:Limited=$false;$script:ProbeProtectedPath='';$script:ProtectedWriteBlocked=$false;$script:Downloads=0
         function script:WriteLog {param($Message,$Level) $script:Logs.Add("$Level|$Message")}
         function script:Check {param([bool]$Condition,[string]$Message) if(-not $Condition){throw "FAIL: $Message"};$script:Checks++}
         function script:Reject {param([scriptblock]$Action,[string]$Pattern)
@@ -59,7 +59,7 @@ try {
         }
         function script:Invoke-SmartM365GraphFileDownloadWithRetry {
             param($Uri,$OutputFilePath,$Operation)
-            $null=$Operation;[IO.File]::Copy(($Uri -replace '/content$',''),$OutputFilePath,$true)
+            $null=$Operation;$script:Downloads++;[IO.File]::Copy(($Uri -replace '/content$',''),$OutputFilePath,$true)
         }
         function script:Invoke-SmartM365GraphRestWithRetry {
             param($Method,$Uri,$AdditionalHeaders,$Operation)
@@ -271,6 +271,43 @@ try {
             foreach($path in $dated){Check ((Get-FileHash -LiteralPath (RemotePath $path)).Hash -ceq (Get-FileHash -LiteralPath $path).Hash) "$case remote bytes match"}
         }
         $global:SmartM365SharePointUploadedFiles=$null;$global:EnableSharePointUpload=$false
+        # Verification memory (1.0.4): retained files fully verified within seven days get a light check only.
+        $global:EnableSharePointUpload=$true
+        $f=New-Fixture 'light-check'
+        foreach($day in 19..21){$run=New-Run $f ([datetimeoffset]"2026-10-$($day)T08:00:00Z") "day$day";Finish $run}
+        $memoryPath=Join-Path $f.All 'DailyCaptureRecords/SmartM365-IntuneConfigurations-Inventory/.retention.verification.json'
+        Check ((Test-Path -LiteralPath $memoryPath) -and @((Records $f)).Count -eq 3) 'the verification memory sits beside the records and is not read as a record'
+        $script:Downloads=0;$script:Logs.Clear()
+        $run=New-Run $f ([datetimeoffset]'2026-10-22T08:00:00Z') 'day22';Finish $run
+        Check ($script:Downloads -eq 3) "retained files already verified are not downloaded again, only the two new files and the record ($($script:Downloads) downloads)"
+        Check (@($script:Logs | Where-Object {$_ -match 'checking 8 retained file\(s\) of 4 day\(s\)'}).Count -eq 1 -and @($script:Logs | Where-Object {$_ -match '8 light check\(s\).*0 full verification\(s\)'}).Count -eq 1) 'progress and light-check summary are logged'
+        $memory=[IO.File]::ReadAllText($memoryPath)|ConvertFrom-Json
+        Check (@($memory.Files.PSObject.Properties).Count -eq 8) 'the memory keeps the retained files only'
+        # A rewritten local file (same bytes, new write time) gets a full check that passes.
+        $retained=@(Records $f | Sort-Object Day)[0]
+        (Get-Item -LiteralPath (Join-Path $f.All $retained.Files[0].Relative)).LastWriteTimeUtc=[datetime]'2026-10-20T00:00:00Z'
+        $script:Downloads=0;$script:Logs.Clear()
+        $run=New-Run $f ([datetimeoffset]'2026-10-23T08:00:00Z') 'day23';Finish $run
+        Check ($script:Downloads -eq 4 -and @($script:Logs | Where-Object {$_ -match 'full check 1/10 \(2026-10-19'}).Count -eq 1) 'a changed write time falls back to the full verification with its progress line'
+        # A SharePoint copy changed with the same size gets a new ETag: the full check refuses it.
+        $retained=@(Records $f | Sort-Object Day)[1]
+        $remoteCopy=RemotePath (Join-Path $f.All $retained.Files[0].Relative)
+        $bytes=[IO.File]::ReadAllBytes($remoteCopy);$bytes[$bytes.Length-3]=[byte][char]'X';[IO.File]::WriteAllBytes($remoteCopy,$bytes)
+        $run=New-Run $f ([datetimeoffset]'2026-10-24T08:00:00Z') 'day24'
+        Reject {Finish $run} 'SharePoint capture SHA256 differs'
+        [IO.File]::Copy((Join-Path $f.All $retained.Files[0].Relative),$remoteCopy,$true)
+        # A full check older than seven days, or an unreadable memory, means a full verification again.
+        $memory=[IO.File]::ReadAllText($memoryPath)|ConvertFrom-Json
+        foreach($property in @($memory.Files.PSObject.Properties)){$property.Value.VerifiedAtUtcTicks=([datetimeoffset]'2026-10-10T00:00:00Z').UtcTicks}
+        [IO.File]::WriteAllText($memoryPath,($memory|ConvertTo-Json -Depth 6))
+        $script:Downloads=0;$script:Logs.Clear()
+        $run=New-Run $f ([datetimeoffset]'2026-10-24T09:00:00Z') 'day24b';Finish $run
+        Check (@($script:Logs | Where-Object {$_ -match ': 12 retained file\(s\) checked .* 2 light check\(s\).* 10 full verification\(s\)'}).Count -eq 1 -and $script:Downloads -ge 12) "a full check older than seven days is repeated, only this run's new files are light ($(@($script:Logs) -join ' // '))"
+        [IO.File]::WriteAllText($memoryPath,'{ not json')
+        $script:Logs.Clear()
+        $run=New-Run $f ([datetimeoffset]'2026-10-24T10:00:00Z') 'day24c';Finish $run
+        Check (@($script:Logs | Where-Object {$_ -match '^WARNING\|Daily capture verification memory unreadable'}).Count -eq 1 -and @($script:Logs | Where-Object {$_ -match ' 2 light check\(s\).* 10 full verification\(s\)'}).Count -eq 1) 'an unreadable memory gives full verifications, never a failure'
+        $global:EnableSharePointUpload=$false
 
         # Exercise the actual receipt finalizer: the source lock encloses the capture handoff.
         $script:SmartM365CmdbSourceContext=$null;$script:SmartM365DailyCapture=$null

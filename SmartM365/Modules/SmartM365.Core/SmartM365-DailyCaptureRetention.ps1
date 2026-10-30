@@ -2,7 +2,7 @@
 .SYNOPSIS
 Receipt-qualified daily capture retention. Internal, opt-in Core helper.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Reads the established Core publication/authentication context; does not introduce operational globals.')]
@@ -147,6 +147,64 @@ function Test-SmartM365DailyCaptureUploadedInRun {
     return $false
 }
 
+# Verification memory (1.0.4): a retained file fully verified (local SHA-256 and SharePoint read-back) less than
+# seven days ago is only checked for size, local write time and SharePoint ETag. Any difference, a missing or
+# unreadable memory, or an older full check falls back to the full verification. Deletions always verify fully.
+function Read-SmartM365DailyCaptureVerificationMemory {
+    param([string]$Path)
+    $memory = @{}
+    try {
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            $document = [IO.File]::ReadAllText($Path) | ConvertFrom-Json
+            if ($document.Owner -ceq 'SmartM365-DailyCaptureVerification' -and $document.Version -eq 1 -and $document.Files) {
+                foreach ($property in @($document.Files.PSObject.Properties)) { $memory[$property.Name] = $property.Value }
+            }
+        }
+    }
+    catch { WriteLog -Message ('Daily capture verification memory unreadable; retained files get a full check: {0}' -f $_.Exception.Message) -Level WARNING }
+    return $memory
+}
+
+function Save-SmartM365DailyCaptureVerificationMemory {
+    param([string]$Path,[hashtable]$Memory)
+    $temporary = [IO.Path]::Combine([IO.Path]::GetDirectoryName($Path), ('~sm' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '.tmp'))
+    try {
+        $files = [ordered]@{}
+        foreach ($key in @($Memory.Keys | Sort-Object)) { $files[$key] = $Memory[$key] }
+        [IO.File]::WriteAllText($temporary,([ordered]@{Owner='SmartM365-DailyCaptureVerification';Version=1;Files=$files} | ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
+        if (Test-Path -LiteralPath $Path) {[IO.File]::Replace($temporary,$Path,[Management.Automation.Language.NullString]::Value,$true)}
+        else {[IO.File]::Move($temporary,$Path)}
+    }
+    catch { WriteLog -Message ('Daily capture verification memory not saved; the next run checks retained files fully: {0}' -f $_.Exception.Message) -Level WARNING }
+    finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue } }
+}
+
+function Get-SmartM365DailyCaptureVerificationEntry {
+    param([string]$Path,$File,$RemoteItem,[datetimeoffset]$VerifiedAtUtc)
+    return [ordered]@{
+        Bytes=[int64]$File.Bytes;SHA256=[string]$File.SHA256
+        LastWriteTimeUtcTicks=(Get-Item -LiteralPath $Path -Force -ErrorAction Stop).LastWriteTimeUtc.Ticks
+        RemoteETag=if($RemoteItem){[string]$RemoteItem.ETag}else{''};VerifiedAtUtcTicks=$VerifiedAtUtc.UtcTicks
+    }
+}
+
+function Test-SmartM365DailyCaptureLightCheck {
+    param($Entry,$File,[IO.Stream]$Lease,[string]$Path,[bool]$Remote,[datetimeoffset]$ReferenceUtc)
+    try {
+        if (-not $Entry -or [string]$Entry.SHA256 -ine [string]$File.SHA256 -or [int64]$Entry.Bytes -ne [int64]$File.Bytes) { return $false }
+        $age = $ReferenceUtc.UtcTicks - [int64]$Entry.VerifiedAtUtcTicks
+        if ($age -lt 0 -or $age -ge [TimeSpan]::FromDays(7).Ticks) { return $false }
+        if ($Lease.Length -ne [int64]$File.Bytes -or (Get-Item -LiteralPath $Path -Force -ErrorAction Stop).LastWriteTimeUtc.Ticks -ne [int64]$Entry.LastWriteTimeUtcTicks) { return $false }
+        if ($Remote) {
+            if ([string]::IsNullOrEmpty([string]$Entry.RemoteETag)) { return $false }
+            $item = Get-SmartM365DailyCaptureRemoteItem $Path
+            if ([int64]$item.Bytes -ne [int64]$File.Bytes -or [string]$item.ETag -cne [string]$Entry.RemoteETag) { return $false }
+        }
+        return $true
+    }
+    catch { return $false }
+}
+
 function Invoke-SmartM365DailyCaptureRetention {
     [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)]$Context,[Parameter(Mandatory)]$Proof,[datetimeoffset]$ReferenceUtc=[datetimeoffset]::UtcNow)
@@ -231,23 +289,29 @@ function Invoke-SmartM365DailyCaptureRetention {
         foreach ($required in $Proof.RequiredFiles) { if ($required -notin @($files | ForEach-Object {$_.File})) { throw 'Required file missing from complete capture.' } }
         if (-not $files.Count) { throw 'An empty capture cannot authorize retention.' }
         $remote = [bool]$global:EnableSharePointUpload
-        if ($remote) {
-            foreach ($file in $files) {
-                $path = Resolve-SmartM365DailyCapturePath $root $file.Relative
+        $verificationPath = Join-Path $recordFolder '.retention.verification.json'
+        $verification = Read-SmartM365DailyCaptureVerificationMemory $verificationPath
+        foreach ($file in $files) {
+            $path = Resolve-SmartM365DailyCapturePath $root $file.Relative
+            $remoteItem = $null
+            if ($remote) {
                 # Uploaded earlier in this run: the SHA-256 read-back proves SharePoint holds these bytes, so the
                 # file is not sent twice. Any read-back failure falls back to the upload below.
                 if (Test-SmartM365DailyCaptureUploadedInRun $path $file) {
                     try {
-                        $null = Assert-SmartM365DailyCaptureRemoteFile $path $file
+                        $remoteItem = Assert-SmartM365DailyCaptureRemoteFile $path $file
                         WriteLog -Message ("Daily capture already uploaded in this run; SharePoint copy verified by SHA-256, upload skipped: {0}" -f $file.Relative) -Level INFO
-                        continue
                     }
                     catch { WriteLog -Message ("Daily capture read-back after this run's upload failed; uploading again: {0}" -f $_.Exception.Message) -Level WARNING }
                 }
-                $uploaded = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path -EnsureParentFolders
-                if (-not $uploaded) { throw 'Capture publication did not succeed; no purge.' }
-                $null = Assert-SmartM365DailyCaptureRemoteFile $path $file
+                if (-not $remoteItem) {
+                    $uploaded = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path -EnsureParentFolders
+                    if (-not $uploaded) { throw 'Capture publication did not succeed; no purge.' }
+                    $remoteItem = Assert-SmartM365DailyCaptureRemoteFile $path $file
+                }
             }
+            # The capture of this run was just verified in full (copy hash and SharePoint read-back).
+            $verification[[string]$file.Relative] = Get-SmartM365DailyCaptureVerificationEntry $path $file $remoteItem $ReferenceUtc
         }
         # The source receipt lock is still held. Fence all current sources again before committing the capture.
         foreach ($file in $files) {if ((Get-SmartM365DailyCaptureHash (Join-Path $Context.SourceRoot $file.File)).SHA256 -ine $file.SHA256) { throw 'Current source changed while closing the capture.' }}
@@ -269,21 +333,39 @@ function Invoke-SmartM365DailyCaptureRetention {
             if (-not $keep.ContainsKey($value.Day) -or [datetimeoffset]::Parse($value.CompletedAtUtc) -gt [datetimeoffset]::Parse($keep[$value.Day].Value.CompletedAtUtc)) {$keep[$value.Day]=$entry}
         }
         # Verify every retained payload before removing even the first obsolete file.
-        foreach ($entry in $keep.Values) {
+        $retainedTotal = @($keep.Values | ForEach-Object { @($_.Value.Files) }).Count
+        $retainedIndex = 0; $lightChecks = 0; $fullChecks = 0
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        $retainedMemory = @{}
+        WriteLog -Message ("Daily capture retention: checking {0} retained file(s) of {1} day(s)." -f $retainedTotal,$keep.Count) -Level INFO
+        foreach ($entry in @($keep.Values | Sort-Object { $_.Value.Day })) {
             if (@($entry.Value.RemovedFiles).Count) { throw 'A retained capture has retired payloads.' }
             $metadataLease=[IO.File]::Open($entry.Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
             $protectedStreams.Add($metadataLease)
             if ((Get-FileHash -LiteralPath $entry.Path -Algorithm SHA256).Hash -ine $entry.Hash) { throw 'Retained capture metadata changed.' }
             foreach ($file in $entry.Value.Files) {
+                $retainedIndex++
                 $path = Resolve-SmartM365DailyCapturePath $root $file.Relative
                 $lease=[IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
                 $protectedStreams.Add($lease)
+                $memoryEntry = $verification[[string]$file.Relative]
+                if (Test-SmartM365DailyCaptureLightCheck $memoryEntry $file $lease $path $remote $ReferenceUtc) {
+                    $lightChecks++
+                    $retainedMemory[[string]$file.Relative] = $memoryEntry
+                    continue
+                }
+                WriteLog -Message ("Daily capture retention: full check {0}/{1} ({2}, {3:N1} MiB): {4}" -f $retainedIndex,$retainedTotal,$entry.Value.Day,([int64]$file.Bytes/1MB),$file.Relative) -Level INFO
                 $sha=[Security.Cryptography.SHA256]::Create()
                 try {$hash=[BitConverter]::ToString($sha.ComputeHash($lease)).Replace('-','')} finally {$sha.Dispose()}
                 if ($lease.Length -ne $file.Bytes -or $hash -ine $file.SHA256) { throw 'Retained capture is incomplete or changed; no purge.' }
-                if ($remote) { $null = Assert-SmartM365DailyCaptureRemoteFile $path $file }
+                $remoteItem = if ($remote) { Assert-SmartM365DailyCaptureRemoteFile $path $file } else { $null }
+                $retainedMemory[[string]$file.Relative] = Get-SmartM365DailyCaptureVerificationEntry $path $file $remoteItem $ReferenceUtc
+                $fullChecks++
             }
         }
+        # Only retained files are remembered: removed or obsolete payloads drop out of the memory.
+        Save-SmartM365DailyCaptureVerificationMemory $verificationPath $retainedMemory
+        WriteLog -Message ("Daily capture retention: {0} retained file(s) checked in {1:N0} s; {2} light check(s) (size, write time, SharePoint ETag), {3} full verification(s)." -f $retainedTotal,$clock.Elapsed.TotalSeconds,$lightChecks,$fullChecks) -Level INFO
         $deletions = [Collections.Generic.List[object]]::new()
         $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($entry in $records) {
@@ -293,6 +375,7 @@ function Invoke-SmartM365DailyCaptureRetention {
                 if (-not $seen.Add([string]$file.Relative)) { throw 'Capture records share a candidate path.' }
                 foreach ($retained in $keep.Values) {if ([string]$file.Relative -in @($retained.Value.Files | ForEach-Object {$_.Relative})) { throw 'Candidate overlaps a retained capture.' }}
                 $path = Resolve-SmartM365DailyCapturePath $root $file.Relative
+                WriteLog -Message ("Daily capture retention: verifying obsolete capture file {0} ({1}): {2}" -f ($deletions.Count+1),$entry.Value.Day,$file.Relative) -Level INFO
                 $hash = Get-SmartM365DailyCaptureHash $path
                 if ($hash.Bytes -ne $file.Bytes -or $hash.SHA256 -ine $file.SHA256) { throw 'Obsolete capture changed; no purge.' }
                 $remoteItem = if ($remote) {Assert-SmartM365DailyCaptureRemoteFile $path $file} else {$null}

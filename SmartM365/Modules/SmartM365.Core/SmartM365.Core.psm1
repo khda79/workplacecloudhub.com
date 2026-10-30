@@ -7,7 +7,7 @@ Import-Module (Join-Path $PSScriptRoot 'SmartM365.JsonTransport.psd1') -MinimumV
 . (Join-Path $PSScriptRoot 'SmartM365-InventoryLifecycle.ps1')
 . (Join-Path $PSScriptRoot 'SmartM365-CsvFast.ps1')
 # SmartM365.Core.psm1
-# Version: 1.0.115
+# Version: 1.0.116
 # Core utilities: logging, initialization, cleanup, CSV export, mail, remote scheduling, cloud connections.
 
 function Get-ModuleLocalConfig {
