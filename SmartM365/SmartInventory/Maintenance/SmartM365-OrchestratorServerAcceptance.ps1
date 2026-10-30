@@ -37,7 +37,7 @@ the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.4
+1.0.5
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -771,24 +771,42 @@ try {
         $domainSource = 'current forest'
     }
     $hasResultSetSize = (Get-Command -Name Get-AdmUser).Parameters.ContainsKey('ResultSetSize')
+    # Like the collector: a user whose objectClass the account cannot read ends the whole read; it is
+    # excluded by DN and the domain is read again (25 at most). Only the count is reported.
+    $excluded = [System.Collections.Generic.List[string]]::new()
+    function ConvertTo-AcceptanceLdapValue([string]$Value) {
+        $builder = [System.Text.StringBuilder]::new()
+        foreach ($char in $Value.ToCharArray()) {
+            switch ($char) { '\' { [void]$builder.Append('\5c') } '*' { [void]$builder.Append('\2a') } '(' { [void]$builder.Append('\28') } ')' { [void]$builder.Append('\29') } ([char]0) { [void]$builder.Append('\00') } default { [void]$builder.Append($char) } }
+        }
+        return $builder.ToString()
+    }
     $datasets = @(foreach ($domain in $domains) {
             Invoke-AcceptanceDataset 'AdaxesUsers' $domain {
                 $errors = @()
                 foreach ($service in $services) {
-                    try {
-                        Write-AcceptanceStage ('Get-AdmUser through service {0} on {1} (ResultSetSize supported: {2})' -f $service, $domain, $hasResultSetSize)
-                        $parameters = @{ AdaxesService = $service; Server = $domain; LDAPFilter = $ldapFilter; Properties = @('userPrincipalName', 'sAMAccountName', 'objectGUID'); ErrorAction = 'Stop' }
-                        if ($hasResultSetSize) { $parameters['ResultSetSize'] = $sampleSize }
-                        return @(Get-AdmUser @parameters | Select-Object -First $sampleSize | ForEach-Object {
-                                [pscustomobject]@{ ObjectGUID = ConvertTo-AcceptanceText $_.ObjectGUID; SamAccountName = ConvertTo-AcceptanceText $_.SamAccountName; UserPrincipalName = ConvertTo-AcceptanceText $_.UserPrincipalName }
-                            })
+                    while ($true) {
+                        $filter = if ($excluded.Count -eq 0) { $ldapFilter } else { '(&{0}{1})' -f $ldapFilter, (($excluded | ForEach-Object { '(!(distinguishedName={0}))' -f (ConvertTo-AcceptanceLdapValue $_) }) -join '') }
+                        try {
+                            Write-AcceptanceStage ('Get-AdmUser through service {0} on {1} ({2} excluded object(s))' -f $service, $domain, $excluded.Count)
+                            $parameters = @{ AdaxesService = $service; Server = $domain; LDAPFilter = $filter; Properties = @('userPrincipalName', 'sAMAccountName', 'objectGUID'); ErrorAction = 'Stop' }
+                            if ($hasResultSetSize) { $parameters['ResultSetSize'] = $sampleSize }
+                            return @(Get-AdmUser @parameters | Select-Object -First $sampleSize | ForEach-Object {
+                                    [pscustomobject]@{ ObjectGUID = ConvertTo-AcceptanceText $_.ObjectGUID; SamAccountName = ConvertTo-AcceptanceText $_.SamAccountName; UserPrincipalName = ConvertTo-AcceptanceText $_.UserPrincipalName }
+                                })
+                        }
+                        catch {
+                            $match = [regex]::Match([string]$_.Exception.Message, "attribute 'objectClass' of the directory object '(?<Dn>.+)' is unavailable")
+                            if ($match.Success -and -not $excluded.Contains($match.Groups['Dn'].Value) -and $excluded.Count -lt 25) { $excluded.Add($match.Groups['Dn'].Value); continue }
+                            $errors += ('{0}: {1}' -f $service, (Get-AcceptanceErrorText $_))
+                            break
+                        }
                     }
-                    catch { $errors += ('{0}: {1}' -f $service, $_.Exception.Message) }
                 }
                 throw ($errors -join ' | ')
             }
         })
-    Write-AcceptanceResult @{ Ready = $true; Detail = ('Adaxes module {0}; service(s) {1}' -f (Get-Module -Name Adaxes).Version, ($services -join ', ')); Datasets = $datasets; Info = @{ DomainSource = $domainSource } }
+    Write-AcceptanceResult @{ Ready = $true; Detail = ('Adaxes module {0}; service(s) {1}' -f (Get-Module -Name Adaxes).Version, ($services -join ', ')); Datasets = $datasets; Info = @{ DomainSource = $domainSource; ExcludedObjects = $excluded.Count } }
 }
 catch { Write-AcceptanceResult @{ Ready = $false; Detail = (Get-AcceptanceErrorText $_) } }
 '@
@@ -1069,6 +1087,7 @@ function Test-AcceptanceAdaxes {
     $datasets = [System.Collections.Generic.List[object]]::new()
     $childDetail = ''
     $timedOutDomain = ''
+    $excludedNotes = [System.Collections.Generic.List[string]]::new()
     $child = $null
     foreach ($domain in $domains) {
         if ($timedOutDomain) {
@@ -1091,6 +1110,7 @@ function Test-AcceptanceAdaxes {
         }
         if (-not $childDetail) { $childDetail = [string]$child.Detail }
         foreach ($dataset in @($child.Datasets)) { $datasets.Add($dataset) }
+        if ($child.Info.PSObject.Properties['ExcludedObjects'] -and [int]$child.Info.ExcludedObjects -gt 0) { $excludedNotes.Add(('{0}: {1}' -f $domain, $child.Info.ExcludedObjects)) }
     }
     if ($null -ne $child -and ([bool]$child.ComponentMissing -or (-not [bool]$child.Ready -and $datasets.Count -eq 0))) {
         $assessment = Get-SmartM365AcceptanceChildAssessment -Child $child -SampleSize $SampleSize -Requested:($script:Requested -contains 'Adaxes')
@@ -1101,6 +1121,16 @@ function Test-AcceptanceAdaxes {
     }
     if ($configError) { $assessment.Detail = 'Adaxes collector configuration unreadable: ' + $configError + ' | ' + $assessment.Detail }
     elseif ($null -eq $config -and $assessment.Status -ne 'SKIPPED') { $assessment.Detail = 'Adaxes collector configuration not found | ' + $assessment.Detail }
+    if ($excludedNotes.Count -gt 0) {
+        # The collector skips them the same way and ends with warnings.
+        $assessment.Status = Get-SmartM365AcceptanceWorstStatus -Status @($assessment.Status, 'WARN')
+        $assessment.Detail = ('users skipped because the running account cannot read their objectClass, as the collector does ({0}) | {1}' -f ($excludedNotes -join ', '), $assessment.Detail)
+    }
+    # Adaxes answers but hides the users the account may not read: almost nothing everywhere means missing rights.
+    $readDatasets = @($datasets | Where-Object { -not [string]$_.Error })
+    if ($readDatasets.Count -gt 0 -and @($readDatasets | Where-Object { @($_.Rows).Count -ge 2 }).Count -eq 0) {
+        $assessment.Detail = ('{0} has no or almost no user in every domain read: check the Adaxes permissions of this account (security role assignment) | {1}' -f [Security.Principal.WindowsIdentity]::GetCurrent().Name, $assessment.Detail)
+    }
     return $assessment
 }
 

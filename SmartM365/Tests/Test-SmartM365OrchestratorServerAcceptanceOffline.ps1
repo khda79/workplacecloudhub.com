@@ -4,7 +4,7 @@
     module assessment, child output parsing, Graph roles and job eligibility. Nothing is read
     from a directory, a tenant or a share.
 .VERSION
-    1.0.4
+    1.0.5
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -107,6 +107,24 @@ Assert-True ([bool]$quick.Ready -and @($quick.Datasets[0].Rows).Count -eq 1) 'St
 # Inner exception messages reach the detail (Teams only said 'see inner exception' in 1.0.3).
 $inner = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText "try { throw [System.Net.Http.HttpRequestException]::new('The SSL connection could not be established, see inner exception.', [System.Security.Authentication.AuthenticationException]::new('The remote certificate is invalid')) } catch { Write-AcceptanceResult @{ Ready = `$false; Detail = (Get-AcceptanceErrorText `$_) } }" -TimeoutSeconds 60
 Assert-True ($inner.Detail -match 'see inner exception\. -> The remote certificate is invalid') "Inner exception is reported ($($inner.Detail))."
+
+# Adaxes child with a fake module: an unreadable objectClass is excluded by DN and the domain read again (like the collector).
+$fakeRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartM365AcceptanceAdaxes-' + [guid]::NewGuid().ToString('N'))
+$null = New-Item -ItemType Directory -Path (Join-Path $fakeRoot 'Adaxes') -Force
+Set-Content -LiteralPath (Join-Path $fakeRoot 'Adaxes\Adaxes.psm1') -Encoding utf8 -Value @'
+function Get-AdmUser { param($AdaxesService, $Server, $LDAPFilter, $Properties, $ResultSetSize)
+    if ($LDAPFilter -notlike '*svc\28x\29*') { throw "An instance of 'ADUser' can't be created because the attribute 'objectClass' of the directory object 'CN=svc(x),OU=Service,DC=example,DC=test' is unavailable." }
+    1..3 | ForEach-Object { [pscustomobject]@{ ObjectGUID = [guid]::NewGuid(); SamAccountName = "user$_"; UserPrincipalName = "user$_@example.test" } }
+}
+'@
+try {
+    $adaxesScript = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$script:AdaxesChildScript' }, $false))[0].Right.Expression.Value
+    $environment = @{ PSModulePath = $fakeRoot + [IO.Path]::PathSeparator + $env:PSModulePath; SMART_SAMPLE_SIZE = '100'; SMART_SMALL_SAMPLE_SIZE = '10'
+        SMART_ADAXES_SERVICES = '["adx1"]'; SMART_ADAXES_DOMAINS = '["example.test"]'; SMART_ADAXES_LDAP_FILTER = '(sAMAccountType=805306368)' }
+    $adaxes = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText $adaxesScript -Environment $environment -TimeoutSeconds 120
+    Assert-True ([bool]$adaxes.Ready -and @($adaxes.Datasets[0].Rows).Count -eq 3 -and [int]$adaxes.Info.ExcludedObjects -eq 1) "Unreadable object is excluded and the domain read again ($($adaxes.Detail) $(@($adaxes.Datasets)[0].Error))."
+}
+finally { Remove-Item -LiteralPath $fakeRoot -Recurse -Force -ErrorAction SilentlyContinue }
 
 # Modules.
 $installed = @(
