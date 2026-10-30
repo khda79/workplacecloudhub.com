@@ -28,7 +28,7 @@ prefer inferred metadata when publishing.
 | Item | Value |
 | --- | --- |
 | Data root (data only) | `C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade` |
-| Program root (scripts run as SYSTEM) | `%ProgramFiles%\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade`: endpoint script; `Intune\` runner, media helper and `PackageManifest.json` |
+| Program root (scripts run as SYSTEM) | `%ProgramFiles%\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade`: endpoint script; `Intune\` runner, media helper and `PackageManifest.json.txt` |
 | Setup media cache | `<DataRoot>\SetupMedia\<MediaId>-<Language>` (for example `SetupMedia\Win11-fr-FR`) |
 | Registry detection root (64-bit view) | `HKLM\SOFTWARE\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade\IntunePackages\<PackageId>` |
 | Scheduled task | `SmartM365 SEMT Windows 11 Upgrade - Intune` |
@@ -36,7 +36,7 @@ prefer inferred metadata when publishing.
 | Intune app name | `Smart Endpoint Migration Toolkit - Windows 11 Upgrade (<Language>)` |
 | Cache-only app name | `Smart Endpoint Migration Toolkit - Windows 11 Upgrade (<Language>, WithCacheOnly)` |
 | Install / runner logs | `<DataRoot>\Logs\Intune\SEMT-Intune-Install.log`, `SEMT-Intune-Runner.log` |
-| Endpoint attempt result | `<DataRoot>\State\Results\<CorrelationId>.json` |
+| Endpoint attempt result | `<DataRoot>\State\Results\<CorrelationId>.json.txt` |
 
 ### Program Files and ProgramData
 
@@ -104,7 +104,7 @@ Each generated package contains:
 SmartM365-EndpointMigration-Install.ps1
 SmartM365-EndpointMigration-Run-IntuneUpgrade.ps1
 SmartM365-EndpointMigration-SetupMediaIntegrity.ps1
-PackageManifest.json
+PackageManifest.json.txt
 SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1
 SetupMedia\Win11-<language>\...
 ```
@@ -119,8 +119,8 @@ Each run passes `-DataRoot`, `-SetupCacheRoot`, `-ReuseLegacySetupMedia`, the se
 cleanup switches (`-DirectSetupUpgrade`, `-AllowReboot`, `-AllowSetupCompletionRebootWhenNoUser`,
 `-AllowSetupProfileRepair`, `-AllowDiskCleanup`, `-ForceRequiredRebootWhenUptimeOverDays 7`). No
 other reboot is added. After the endpoint exits, the runner logs the attempt outcome from
-`State\Results\<CorrelationId>.json` when that attempt is `Completed`, and falls back to
-`LastRun.json` otherwise.
+`State\Results\<CorrelationId>.json.txt` when that attempt is `Completed`, and falls back to
+`LastRun.json.txt` otherwise.
 
 ## Setup media selection
 
@@ -130,7 +130,7 @@ and in the endpoint script) before any copy. For the package cache folder (for e
 `Win11-fr-FR`) it looks at the cache of this product
 (`C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade\SetupMedia\...`) and at
 the cache of the previous toolkit (`C:\ProgramData\SmartM365\Windows11UpgradeToolkit\SetupMedia\...`,
-plus the path recorded in its `LastRun.json`):
+plus the path recorded in its `LastRun.json.txt`):
 
 | Decision | Meaning | Installer | Runner / endpoint |
 | --- | --- | --- | --- |
@@ -351,7 +351,7 @@ has stopped.
 - Windows 11 has priority over cache and repair state: the installer, runner, and detection rule
   report the application as `Installed` and remove the obsolete scheduled task as soon as Windows
   11 is detected.
-- Upgrade status remains in `State\Results\<CorrelationId>.json`, `LastRun.json`, endpoint CSV
+- Upgrade status remains in `State\Results\<CorrelationId>.json.txt`, `LastRun.json.txt`, endpoint CSV
   output, and logs under the data root.
 - On every scheduled run, `Logs\Intune\Endpoint_*.log` files older than 7 days are removed and at
   most 200 of them are kept; persistent logs (`SEMT-Intune-Runner.log`, `SEMT-Intune-Install.log`,

@@ -296,7 +296,7 @@ try {
     Set-Content -LiteralPath (Join-Path $otherProduct 'Cache\data.bin') -Value 'other product' -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $legacyCache 'setup.exe') -Value 'legacy setup' -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $legacyCache 'sources\install.wim') -Value 'legacy image' -Encoding ASCII
-    Set-Content -LiteralPath (Join-Path $explicitSibling 'state.json') -Value '{}' -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $explicitSibling 'state.json.txt') -Value '{}' -Encoding ASCII
     $explicitAcl = Get-Acl -LiteralPath $explicitSibling
     $explicitAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(([Security.Principal.SecurityIdentifier]'S-1-5-32-545'), 'Modify', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
     Set-Acl -LiteralPath $explicitSibling -AclObject $explicitAcl
@@ -317,12 +317,12 @@ try {
     # the product folder only; siblings stay unchanged; the other campaign stays as it is.
     $otherCampaign = Join-Path $productRoot 'HybridJoin\Logs'; New-Item -ItemType Directory -Path $otherCampaign -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $otherCampaign 'run.log') -Value 'trusted log' -Encoding ASCII
-    New-Item -ItemType Directory -Path (Join-Path $dataRoot 'State') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $dataRoot 'State\state.json') -Value '{"trusted":true}' -Encoding ASCII
+    New-Item -ItemType Directory -Path (Join-Path $dataRoot 'State') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $dataRoot 'State\state.json.txt') -Value '{"trusted":true}' -Encoding ASCII
     Reset-ChainCase; $script:Canonical = @{}
     [void](Initialize-SemtTrustedDataFolder -Path $dataRoot -BasePath $dataBase)
     Test-Step 'data chain: trusted, non-canonical SEMT components are replaced, shared parents still untouched' { $script:AclCalls.Count -eq 2 -and $script:AclCalls -notcontains $sharedWch -and $script:AclCalls -notcontains $sharedSmart }
     Test-Step 'siblings: unchanged after a real DACL replacement with inheritance propagated below the product folder' { (Get-SiblingState) -ceq $siblingsBefore }
-    Test-Step 'trusted existing content is kept (content unchanged)' { (Get-Content -LiteralPath (Join-Path $dataRoot 'State\state.json') -Raw).Trim() -eq '{"trusted":true}' }
+    Test-Step 'trusted existing content is kept (content unchanged)' { (Get-Content -LiteralPath (Join-Path $dataRoot 'State\state.json.txt') -Raw).Trim() -eq '{"trusted":true}' }
 
     # Shared parent not protected: blocking failure, nothing changed anywhere.
     Reset-ChainCase; $script:Canonical = @{}; $script:UntrustedShared = @{ $sharedSmart = $true }
@@ -331,7 +331,7 @@ try {
     Test-Step 'verification only: an unprotected shared parent makes the data folder untrusted' { $r = Test-SemtTrustedDataFolder -Path $dataRoot -BasePath $dataBase; -not $r.Trusted -and $r.Detail -match 'SmartM365' }
 
     # Provenance: a permission replacement never makes existing content trusted.
-    $planted = Join-Path $dataRoot 'State\planted.json'; Set-Content -LiteralPath $planted -Value '{"planted":true}' -Encoding ASCII
+    $planted = Join-Path $dataRoot 'State\planted.json.txt'; Set-Content -LiteralPath $planted -Value '{"planted":true}' -Encoding ASCII
     $plantedAcl = (Get-Acl -LiteralPath $planted).Sddl
     Reset-ChainCase; $script:Canonical = @{ $productRoot = $true; $dataRoot = $true }; $script:UntrustedItems = @{ $planted = $true }
     $failure = Get-ThrowMessage { Initialize-SemtTrustedDataFolder -Path $dataRoot -BasePath $dataBase }
@@ -358,7 +358,7 @@ try {
 
     # Reproduced case: parents canonical, untrusted file listed before a junction.
     $script:OwnSddl = (Get-Acl -LiteralPath (Join-Path $tempRoot 'own')).Sddl
-    $reproFile = Join-Path $dataRoot 'A-untrusted.json'; Set-Content -LiteralPath $reproFile -Value '{}' -Encoding ASCII
+    $reproFile = Join-Path $dataRoot 'A-untrusted.json.txt'; Set-Content -LiteralPath $reproFile -Value '{}' -Encoding ASCII
     $reproAcl = (Get-Acl -LiteralPath $reproFile).Sddl
     $null = & cmd.exe /d /c ('mklink /J "{0}" "{1}"' -f (Join-Path $dataRoot 'Z-junction'),(Join-Path $tempRoot 'own')) 2>&1
     Reset-ChainCase; $script:Canonical = @{ $productRoot = $true; $dataRoot = $true }; $script:UntrustedItems = @{ $reproFile = $true }
@@ -370,10 +370,10 @@ try {
     Remove-Item -LiteralPath $reproFile -Force
 
     # Links in the propagation scope when a replacement is planned.
-    $null = & cmd.exe /d /c ('mklink /H "{0}" "{1}"' -f (Join-Path $dataRoot 'State\linked.json'),(Join-Path $dataRoot 'State\state.json')) 2>&1
+    $null = & cmd.exe /d /c ('mklink /H "{0}" "{1}"' -f (Join-Path $dataRoot 'State\linked.json.txt'),(Join-Path $dataRoot 'State\state.json.txt')) 2>&1
     Reset-ChainCase; $script:Canonical = @{}
     Test-Step 'links: a real hard link below the data root stops the operation before any permission change' { (Get-ThrowMessage { Initialize-SemtTrustedDataFolder -Path $dataRoot -BasePath $dataBase }) -like 'SEMT_DATA_FOLDER_UNTRUSTED*hard link*nothing was changed.' -and $script:AclCalls.Count -eq 0 }
-    Remove-Item -LiteralPath (Join-Path $dataRoot 'State\linked.json') -Force
+    Remove-Item -LiteralPath (Join-Path $dataRoot 'State\linked.json.txt') -Force
     $null = & cmd.exe /d /c ('mklink /H "{0}" "{1}"' -f (Join-Path $otherCampaign 'linked.log'),(Join-Path $otherCampaign 'run.log')) 2>&1
     Reset-ChainCase; $script:Canonical = @{}
     Test-Step 'links: a real hard link in another SEMT campaign stops the replacement of the product folder (zero ACL change)' { (Get-ThrowMessage { Initialize-SemtTrustedDataFolder -Path $dataRoot -BasePath $dataBase }) -like 'SEMT_DATA_FOLDER_UNTRUSTED*linked.log*hard link*' -and $script:AclCalls.Count -eq 0 }
@@ -389,12 +389,12 @@ try {
     [void](Initialize-SemtTrustedDataFolder -Path $emptyCampaign -BasePath $dataBase)
     Test-Step 'empty unprotected SEMT folder: protected and verified (nothing to adopt)' { $script:AclCalls.Count -eq 1 -and $script:AclCalls[0] -eq $emptyCampaign }
     Reset-ChainCase; $script:Canonical = @{ $productRoot = $true }; $script:UntrustedItems = @{ $emptyCampaign = $true }
-    $script:AfterAcl = { param($Path) Set-Content -LiteralPath (Join-Path $Path 'late.json') -Value '{}' -Encoding ASCII }
+    $script:AfterAcl = { param($Path) Set-Content -LiteralPath (Join-Path $Path 'late.json.txt') -Value '{}' -Encoding ASCII }
     Test-Step 'change after the read-only pass: content written before protection is detected and refused' { (Get-ThrowMessage { Initialize-SemtTrustedDataFolder -Path $emptyCampaign -BasePath $dataBase }) -like 'SEMT_DATA_FOLDER_UNTRUSTED: content appeared in*EmptyCampaign*' }
     Remove-Item -LiteralPath $emptyCampaign -Recurse -Force
     $newCampaign = Join-Path $productRoot 'NewCampaign'
     Reset-ChainCase; $script:Canonical = @{ $productRoot = $true }
-    $script:AfterAcl = { param($Path) Set-Content -LiteralPath (Join-Path $Path 'late.json') -Value '{}' -Encoding ASCII }
+    $script:AfterAcl = { param($Path) Set-Content -LiteralPath (Join-Path $Path 'late.json.txt') -Value '{}' -Encoding ASCII }
     Test-Step 'change after the read-only pass: content in a folder created here is detected and refused' { (Get-ThrowMessage { Initialize-SemtTrustedDataFolder -Path $newCampaign -BasePath $dataBase }) -like 'SEMT_DATA_FOLDER_UNTRUSTED: content appeared in*NewCampaign*' }
     Remove-Item -LiteralPath $newCampaign -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -402,7 +402,7 @@ try {
     function Set-SemtProgramFolderAcl { param([string]$Path) throw 'synthetic: owner cannot be set' }
     Test-Step 'data chain: owner and DACL that cannot be replaced: blocking failure' { (Get-ThrowMessage { Initialize-SemtTrustedDataFolder -Path $dataRoot -BasePath $dataBase }) -like 'SEMT_DATA_FOLDER_UNTRUSTED: owner and permissions of*could not be replaced*' }
     Test-Step 'siblings: unchanged after every case above' { (Get-SiblingState) -ceq $siblingsBefore }
-    $script:UntrustedItems = @{ (Join-Path $dataRoot 'State\state.json') = $true }
+    $script:UntrustedItems = @{ (Join-Path $dataRoot 'State\state.json.txt') = $true }
     Test-Step 'verification only: an untrusted item makes the data folder untrusted' { -not (Test-SemtTrustedDataFolder -Path $dataRoot -BasePath $dataBase).Trusted }
     $script:UntrustedItems = @{ $productRoot = $true }
     Test-Step 'verification only: an untrusted SEMT component makes the data folder untrusted' { $r = Test-SemtTrustedDataFolder -Path $dataRoot -BasePath $dataBase; -not $r.Trusted -and $r.Detail -match 'SmartEndpointMigrationToolkit' }
@@ -431,7 +431,7 @@ try {
         $script:DataRoot = Join-Path $case 'Data'; $DataRoot = $script:DataRoot
         New-Item -ItemType Directory -Path $script:StateDir -Force | Out-Null
         $script:RetryAfterRebootProgramDir = Join-Path $case ('ProgramFiles\WCH\SmartM365\SmartEndpointMigrationToolkit\{0}\RetryAfterReboot' -f $Campaign)
-        $script:RetryAfterRebootStatePath = Join-Path $script:RetryAfterRebootProgramDir 'RetryAfterReboot.json'
+        $script:RetryAfterRebootStatePath = Join-Path $script:RetryAfterRebootProgramDir 'RetryAfterReboot.json.txt'
         $script:RetryAfterRebootRunnerPath = Join-Path $script:RetryAfterRebootProgramDir 'RetryAfterRebootRunner.ps1'
         $script:RetryAfterRebootScriptPath = Join-Path $script:RetryAfterRebootProgramDir (Split-Path -Path $EndpointPath -Leaf)
         $script:RetryAfterRebootTaskName = ('SmartM365-SEMT-{0}-RetryAfterReboot' -f $Campaign)
@@ -479,7 +479,7 @@ try {
         $copy = Join-Path $programDir (Split-Path -Path $retry.Path -Leaf)
         Test-Step ("{0} retry: state points to the endpoint copy under Program Files (same SHA256)" -f $retry.Campaign) { $o.Error -eq '' -and [string]$o.State.ScriptPath -eq $copy -and -not $o.Unregistered -eq $false }
         Test-Step ("{0} retry: the SYSTEM task starts the runner under Program Files" -f $retry.Campaign) { @($script:Schtasks | Where-Object { $_ -like '/Create*' }).Count -eq 1 -and @($script:Schtasks | Where-Object { $_ -like ('*{0}*' -f (Join-Path $programDir 'RetryAfterRebootRunner.ps1')) }).Count -eq 1 }
-        Test-Step ("{0} retry: runner reads its state from Program Files; no script or state under ProgramData" -f $retry.Campaign) { $o.Runner.Contains((Join-Path $programDir 'RetryAfterReboot.json').Replace("'", "''")) -and @(Get-ChildItem -LiteralPath (Join-Path $o.Case 'Data\State') -Force).Count -eq 0 }
+        Test-Step ("{0} retry: runner reads its state from Program Files; no script or state under ProgramData" -f $retry.Campaign) { $o.Runner.Contains((Join-Path $programDir 'RetryAfterReboot.json.txt').Replace("'", "''")) -and @(Get-ChildItem -LiteralPath (Join-Path $o.Case 'Data\State') -Force).Count -eq 0 }
         Test-Step ("{0} retry: a task run refuses an untrusted program folder" -f $retry.Campaign) { $o.TaskRunError -like 'SEMT_PROGRAM_FOLDER_UNTRUSTED*' }
         Test-Step ("{0} retry: cleanup removes runner, state and endpoint copy" -f $retry.Campaign) { $o.Unregistered }
         $o = Invoke-RetryCase -Campaign $retry.Campaign -EndpointPath $retry.Path -ProgramFolderState 'Untrusted'
@@ -536,10 +536,10 @@ if ($script:Failed -gt 0) { exit 1 }
 exit 0
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBlVfJxwuh3mWWX
-# BjH4WX0UonmZ1Kqr3vvX8G/yqzQizKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBQfk3zezRzVjXD
+# 942u10TOjhztOt2okY5RKD9pQkUNi6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -564,139 +564,19 @@ exit 0
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEII1itGcPJETr3IWOC0xb2bpgOiRtCpbh9lWZmzY0UKnPMA0GCSqG
-# SIb3DQEBAQUABIIBgHhsC4Fdk/QjXj4UwozpFFzxb/fSkACJol7IjvK6UhGZ0b4g
-# OyTXDP9tkG7gMegAGqB2FH4nk83K4YG1+qtOlQNfeL6t4425XLbW2skOa3UXL00a
-# Ix2Cr+pgfw0lPTRDYomfBRm2EKuC9EoNHwY8AdGqQM153kiH2Qaaof7thCcvAVN3
-# FStNBM8nW3p5IqobIetf5HfEp0cnGksfAhB54OsVNkeR7rl2juS9vyzxPcm6wP1A
-# eOWZK1X5+aviff65rvHwLAh0T8QD6gvQObeZ24M/uW7ckx++4UaZnH7tA0XMc0mf
-# 5t5J3jQudNwE9kckRLtUghkwlxefhLdqsvZUNgRLbA9jWZ2NO1yWxMQIL/Ic1m4g
-# djj/TkbKmtnO+LpeUGi2l3C71CYd6wmrMeB1rKQ//8XPcpLJfrLe9dD2/4kk3j8Y
-# YmMkML27pJogBn27jdg+Su2X1jRCE/20m6XYu8LTSZA9AH2k/HB1ULl6N0+LsTUD
-# z3/9WRYNaEcqtCIlGqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAxMTU1
-# NTVaMC8GCSqGSIb3DQEJBDEiBCBhSE/xTQFfD/+UkDV1i8pgZnVEaPI8Mp8wWeHd
-# d316HTANBgkqhkiG9w0BAQEFAASCAgCMoPt1sYTsWoiBP1Qiv/WmreNb+IZu/Q5S
-# z3QeByFyHZcjk7wa6f7IIuj2hgojq2wWmqlTToKX7Th0xLS+2i3mKotYv9+hjnJr
-# bOhok8klTOwlh8gT/FFQGVPTbI019d98RxCIeFtbVbWcF9ziMOSfDUAEPbAC/e9P
-# itQbUHLlYthIjpIOktdzdSuLKtveK4aJwLRiOyn9Kbc4n49RRtpbAw/sb8ACWlgm
-# 6FjrtpqKeWcX4m06mWMgox8vVA8AwY7KG/B3a0C3j5vxPOAuct/wu3m6VmOiKJax
-# Mx0CL1VV+cmYY6wD6Pk4cujuXa9ccM+8TmSx4gR90yV86sCNkiW0JzGP0ZT1/S6n
-# C1qMWI5xugybVpuG8MBrGqwEpwl9AuVPCTHFf0R2ETPDyOP64Uw5yJyciE/BeU5l
-# YubXoPrkpABxwGszRK6SyflehZYU6r1ozv/qG0NXVNZLuIb0mCBX4wG3D1xRcAO9
-# g282QvAFKhvQPI2l88FkEIqafoDewKP+DSU1c+uVmI7QthwL0JbbVepkpqTvNNB4
-# s4djfvktb+3TixEUWiybqKHPVHKBIMKcKw2KUq1PYuIIzJetPG3fcdEOtx0bMZKP
-# PsUDrgEf5gWSksuxzGCATsknyIT+5AJ90NOo5PB07Em8DR2Z9H1JTCFhuvcxMwtw
-# iJAxNReNHQ==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAZFZCYdqAXUrDzcKUFZEyc
+# AKr+MHdZo1V/8Zm5YI2cqDANBgkqhkiG9w0BAQEFAASCAYBczDGfi/UPa9gGyn1a
+# 0czUm/9pqYGQvIHVlE56LynIwaJcB3oLPKqVEzwsDHo3ZW/SknSXevCdfmT9zhQa
+# cFSSNic7NhDp1J36Go9N5BILd59joUjdq+69JSua0qwmTUOUNW+4UxvuCVEcaRHH
+# wpQraKwiHFgSW3zUcqfXOr9n2+rxWbeQgwwWxvBJbTr5exJl/jiS2LEq/0yj7iE/
+# kywZThAZ92+SprwJeTPByTHx2fTriZWRtxuiFAtZZ5UnvQB+u0jLijhfTwPc8Nl2
+# 5icM2enWMZW8LlHxYQwpcoy4HC/yOYrSF9uNZMAoGdleZFf7jSsHZDCI5HyBsjON
+# UYYFsWeGJzuQeZb+zN3xolnVvd1OAuiVBVguAQigBJiktooJdvMMNCLa05DtGbRt
+# JLRa0mXFyk+PUYmj5FrHFkewHlxX2alEnhGjh3uAcSwCptXMzXKM5q9CWESC+elg
+# coqY6aPmXU47gQRIjN7dD0yWWCkJJbBtS/LESgNP4ZDYgow=
 # SIG # End signature block

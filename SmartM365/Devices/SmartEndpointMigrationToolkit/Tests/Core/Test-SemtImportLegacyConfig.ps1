@@ -126,13 +126,13 @@ try {
     $env:EHJIR_INTUNE_TENANT_ID = '00000000-0000-4000-8000-000000000001'
 
     # 1. Preview
-    $previewReport = Join-Path $tempRoot 'preview-report.json'
+    $previewReport = Join-Path $tempRoot 'preview-report.json.txt'
     $preview = Invoke-Import -Arguments @()
     Test-Step 'preview exits 0' { $preview.ExitCode -eq 0 }
-    Test-Step 'preview writes nothing in the SEMT Config folder' { @(Get-ChildItem -LiteralPath $configRoot -File | Where-Object { $_.Name -like '*.local.json*' -and $_.Name -notlike '*.template' }).Count -eq 0 }
-    Test-Step 'preview announces the files -Apply would write' { $preview.Output -match 'Preview: nothing written' -and $preview.Output -match 'GuiState\.HybridJoin\.local\.json' }
+    Test-Step 'preview writes nothing in the SEMT Config folder' { @(Get-ChildItem -LiteralPath $configRoot -File | Where-Object { $_.Name -like '*.local.json.txt*' -and $_.Name -notlike '*.template' }).Count -eq 0 }
+    Test-Step 'preview announces the files -Apply would write' { $preview.Output -match 'Preview: nothing written' -and $preview.Output -match 'GuiState\.HybridJoin\.local\.json.txt' }
     $previewWithReport = Invoke-Import -Arguments @('-ReportPath',$previewReport)
-    Test-Step 'preview with -ReportPath writes only that report' { $previewWithReport.ExitCode -eq 0 -and (Test-Path -LiteralPath $previewReport) -and @(Get-ChildItem -LiteralPath $configRoot -File | Where-Object { $_.Name -like '*.local.json*' -and $_.Name -notlike '*.template' }).Count -eq 0 }
+    Test-Step 'preview with -ReportPath writes only that report' { $previewWithReport.ExitCode -eq 0 -and (Test-Path -LiteralPath $previewReport) -and @(Get-ChildItem -LiteralPath $configRoot -File | Where-Object { $_.Name -like '*.local.json.txt*' -and $_.Name -notlike '*.template' }).Count -eq 0 }
     $report = Read-Json -Path $previewReport
     Test-Step 'report mode is Preview' { $report.Mode -eq 'Preview' }
 
@@ -150,16 +150,16 @@ try {
     Test-Step 'warning: gate root is not a UNC path' { @($report.Warnings | Where-Object { $_ -like 'Windows11Upgrade.SetupSubnetConcurrencyGateRoot is not a UNC path*' }).Count -eq 1 }
     Test-Step 'warning: DirectSetup with AllowReboot off no longer reboots' { @($report.Warnings | Where-Object { $_ -like 'DirectSetupUpgrade is on and AllowReboot is off*' }).Count -eq 1 }
     Test-Step 'common value equal in both toolkits goes to the global file (AdDomain)' { (Get-Row $report 'HybridJoin' 'EHJIR_AD_DOMAIN').Decision -eq 'ToGlobal' -and (Get-Row $report 'Windows11Upgrade' 'W11UT_AD_DOMAIN').Decision -eq 'ToGlobal' }
-    Test-Step 'common value that differs per Campaign goes to the GUI state (ThrottleLimit, PsExecTimeoutMinutes)' { (Get-Row $report 'HybridJoin' 'EHJIR_THROTTLE').Target -eq 'GuiState.HybridJoin.local.json' -and (Get-Row $report 'Windows11Upgrade' 'W11UT_PSEXEC_TIMEOUT_MINUTES').Target -eq 'GuiState.Windows11Upgrade.local.json' }
+    Test-Step 'common value that differs per Campaign goes to the GUI state (ThrottleLimit, PsExecTimeoutMinutes)' { (Get-Row $report 'HybridJoin' 'EHJIR_THROTTLE').Target -eq 'GuiState.HybridJoin.local.json.txt' -and (Get-Row $report 'Windows11Upgrade' 'W11UT_PSEXEC_TIMEOUT_MINUTES').Target -eq 'GuiState.Windows11Upgrade.local.json.txt' }
     Test-Step 'common value equal to the other Campaign default goes global (DelayBetweenCyclesMinutes=5, NightPauseEnabled=false)' { (Get-Row $report 'Windows11Upgrade' 'W11UT_DELAY_BETWEEN_CYCLES_MINUTES').Decision -eq 'ToGlobal' -and (Get-Row $report 'HybridJoin' 'EHJIR_DISABLE_NIGHT_PAUSE').Decision -eq 'ToGlobal' }
     Test-Step 'previous toolkit files unchanged after preview' { (Get-TreeHash -Path $script:LegacyRoot) -eq $legacyHash }
 
     # 2. Apply
     $apply = Invoke-Import -Arguments @('-Apply')
     Test-Step 'apply exits 0' { $apply.ExitCode -eq 0 }
-    $globalPath = Join-Path $configRoot 'SmartEndpointMigrationToolkit.local.json'
-    $hjStatePath = Join-Path $configRoot 'GuiState.HybridJoin.local.json'
-    $w11StatePath = Join-Path $configRoot 'GuiState.Windows11Upgrade.local.json'
+    $globalPath = Join-Path $configRoot 'SmartEndpointMigrationToolkit.local.json.txt'
+    $hjStatePath = Join-Path $configRoot 'GuiState.HybridJoin.local.json.txt'
+    $w11StatePath = Join-Path $configRoot 'GuiState.Windows11Upgrade.local.json.txt'
     Test-Step 'apply writes the global file and both GUI states' { (Test-Path $globalPath) -and (Test-Path $hjStatePath) -and (Test-Path $w11StatePath) }
     Test-Step 'written files are UTF-8 with BOM' { $bytes = [System.IO.File]::ReadAllBytes($globalPath); $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF }
     $global = Read-Json -Path $globalPath
@@ -172,7 +172,7 @@ try {
     }
     Test-Step 'values not carried stay inherited in the global file' { $global.Options.PsExecTimeoutMinutes -eq '__INHERIT__' -and $global.Options.ThrottleLimit -eq '__INHERIT__' -and $global.Options.'HybridJoin.RebootDelaySeconds' -eq '__INHERIT__' -and $global.Options.'Windows11Upgrade.SetupMediaId' -eq '__INHERIT__' }
     Test-Step 'GUI state values per Campaign' { (Read-Json $hjStatePath).Options.ThrottleLimit -eq 20 -and (Read-Json $hjStatePath).Campaign -eq 'HybridJoin' -and (Read-Json $w11StatePath).Options.PsExecTimeoutMinutes -eq 480 }
-    Test-Step 'report written next to the configuration with mode Apply' { $files = @(Get-ChildItem -LiteralPath $configRoot -Filter 'LegacyConfigImport.*.local.json'); $files.Count -eq 1 -and (Read-Json $files[0].FullName).Mode -eq 'Apply' }
+    Test-Step 'report written next to the configuration with mode Apply' { $files = @(Get-ChildItem -LiteralPath $configRoot -Filter 'LegacyConfigImport.*.local.json.txt'); $files.Count -eq 1 -and (Read-Json $files[0].FullName).Mode -eq 'Apply' }
 
     Import-Module (Join-Path $script:SemtRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
     $catalog = Import-SemtOptionCatalog -PackageRoot $script:SemtRoot
@@ -194,8 +194,8 @@ try {
     Write-SemtJsonFileAtomic -Path $globalPath -InputObject $edited
     $editedHash = (Get-FileHash -LiteralPath $globalPath).Hash
     Start-Sleep -Seconds 1
-    $kept = Invoke-Import -Arguments @('-Apply','-ReportPath',(Join-Path $tempRoot 'kept.json'))
-    Test-Step 'existing explicit SEMT value is kept by default' { $kept.ExitCode -eq 0 -and (Read-Json $globalPath).Options.AdDomain -eq 'other.test' -and (Get-FileHash -LiteralPath $globalPath).Hash -eq $editedHash -and (Get-Row (Read-Json (Join-Path $tempRoot 'kept.json')) 'HybridJoin' 'EHJIR_AD_DOMAIN').Decision -eq 'KeptExisting' }
+    $kept = Invoke-Import -Arguments @('-Apply','-ReportPath',(Join-Path $tempRoot 'kept.json.txt'))
+    Test-Step 'existing explicit SEMT value is kept by default' { $kept.ExitCode -eq 0 -and (Read-Json $globalPath).Options.AdDomain -eq 'other.test' -and (Get-FileHash -LiteralPath $globalPath).Hash -eq $editedHash -and (Get-Row (Read-Json (Join-Path $tempRoot 'kept.json.txt')) 'HybridJoin' 'EHJIR_AD_DOMAIN').Decision -eq 'KeptExisting' }
 
     Start-Sleep -Seconds 1
     $whatIf = Invoke-Import -Arguments @('-Apply','-ReplaceExistingValues','-WhatIf')
@@ -203,13 +203,13 @@ try {
 
     Start-Sleep -Seconds 1
     $replace = Invoke-Import -Arguments @('-Apply','-ReplaceExistingValues')
-    $backups = @(Get-ChildItem -LiteralPath $configRoot -Filter 'SmartEndpointMigrationToolkit.local.json.*.bak')
+    $backups = @(Get-ChildItem -LiteralPath $configRoot -Filter 'SmartEndpointMigrationToolkit.local.json.txt.*.bak')
     Test-Step '-ReplaceExistingValues replaces after a backup of the previous file' { $replace.ExitCode -eq 0 -and (Read-Json $globalPath).Options.AdDomain -eq 'contoso.test' -and $backups.Count -eq 1 -and (Get-FileHash -LiteralPath $backups[0].FullName).Hash -eq $editedHash }
 
     Start-Sleep -Seconds 1
-    $defaults = Invoke-Import -Arguments @('-IncludeLegacyDefaults','-ReportPath',(Join-Path $tempRoot 'defaults.json'))
-    $defaultsReport = Read-Json (Join-Path $tempRoot 'defaults.json')
-    Test-Step '-IncludeLegacyDefaults carries previous GUI defaults (HJ PsExec timeout 60 to the HJ GUI state)' { $defaults.ExitCode -eq 0 -and (Get-Row $defaultsReport 'HybridJoin' 'EHJIR_PSEXEC_TIMEOUT_MINUTES').Target -eq 'GuiState.HybridJoin.local.json' }
+    $defaults = Invoke-Import -Arguments @('-IncludeLegacyDefaults','-ReportPath',(Join-Path $tempRoot 'defaults.json.txt'))
+    $defaultsReport = Read-Json (Join-Path $tempRoot 'defaults.json.txt')
+    Test-Step '-IncludeLegacyDefaults carries previous GUI defaults (HJ PsExec timeout 60 to the HJ GUI state)' { $defaults.ExitCode -eq 0 -and (Get-Row $defaultsReport 'HybridJoin' 'EHJIR_PSEXEC_TIMEOUT_MINUTES').Target -eq 'GuiState.HybridJoin.local.json.txt' }
 
     $missing = Invoke-Import -Arguments @() -LegacyRoot (Join-Path $tempRoot 'Empty')
     Test-Step 'missing legacy folder fails' { $missing.ExitCode -ne 0 -and $missing.Output -match 'Legacy devices folder not found' }
@@ -230,8 +230,8 @@ if ($script:Failed -gt 0) { exit 1 }
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxbwopaUmZdXxD
-# 6ld9iEP+7lh8lqJZ7m69E7wy76vmFKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUWc7UGDXaobet
+# ctRe03VL4jMd2wPsTwG1Ut43INU026CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -261,14 +261,14 @@ if ($script:Failed -gt 0) { exit 1 }
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB6l29tnn2c+oGsP8Z4xNjR
-# Al1MGzYpKTCPDxKDUWSUJTANBgkqhkiG9w0BAQEFAASCAYAFPDXo98kaSDiSLzTo
-# tc8g1fMhOgoiMf82a0W504AVnhEPP8ZDDgcWTuzO0iVHFqs48lx/Qjd/7Vi0SBl2
-# giJE71xzzSUA+D7jvMPvaVRt4qXZGQ2YLnXu+y0lurcDu6ffVW3WGoeKYLE9qnxm
-# nz8J3hUatjRroB1zilkgIk8E+dy8GKPSRRdySD+UuG5XrJbCnOX+6icudkhs4cmb
-# 08rEwK6sZ7nLXIIEQ+JyQooZhXhsjjfi92G6lwYgHJ3RrkGMHdCpMqBV5lkNTePY
-# LSgXsnyJ6nOjNuyywAJx3MM/wpDnxzOUeDw7/RHbLnVv7KBwnHIjfEPgLgDcTago
-# Sx/vj7lBkJl+Pj44pFHIHs9Xlb73yVRcYXCDVOf+ZMCuxrfp4nrrITIh10mIy074
-# peNgLcgsYS1QDpmjZzAHUPybCYQ5HEbvY/qGzwMSirMKbFFFA+Oc64lkltjZBsa+
-# AwauNIkBrlXhOxak7BjbAg8csfv/nF1jcWIL0frpIIv1VfM=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCjIgRg4W6YyRjYE/2W3khQ
+# n3WRba6VeTVyghhp8clYwjANBgkqhkiG9w0BAQEFAASCAYCgR067V3HJgPd9rsTB
+# a1VfIGiYlhWM/RhcBI2CKPdbiEFBCr2I6iRZV/KtIBgjXJsLuf8t+7GracJk6Wae
+# xUBZOy+1/RBd2Br9D/fZ5ErNkKk2a5Dj5INmBeH+ZQhVsIrZUkToaMVPYj2whxb3
+# Df/YcpwsTAGD5GT88B/iw/S0/X2v+vbPj8sBOhOBYeFNFXeVdx0Mus2v2MlvVpX5
+# Kky7UbBXTTlvdtKthI7L6p8kvyQSCGOtubm5BGVF13CP1TtIt8sBH1bTQgifuZkO
+# gPq/uTwpWjoKmp16ULkLPb6d0QbdPkM6WWUP2ZVt1whpzCEdsPkj40vUsVakPoNj
+# el89+vHuoONM3wVeuSw2UbxLG0ThJUB1a7vSVfjbd/EGsg361fsdQRjxMpxwN92b
+# CCRfJObcq8wOqlUpqcgLE79pwukH+BT55kp9HIZdbtEpAtcqIEwcjp+JnCrp1wxB
+# LrKW/+23AReGMUBzBFggOW9mM6tXXgfnxSeucBA22mUtb7w=
 # SIG # End signature block

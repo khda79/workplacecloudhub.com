@@ -35,7 +35,7 @@ Dans la GUI, sélectionner **Windows 11 upgrade**, puis l'onglet **Options** :
 | Parallélisme / Sécurité | Workers par Wave, plafond partagé, délai PsExec, run guard, espace disque minimum (32 Go) |
 
 Les valeurs par défaut peuvent aussi être posées une fois dans
-`Config\SmartEndpointMigrationToolkit.local.json`, et par Wave dans `Wave.local.json` (par
+`Config\SmartEndpointMigrationToolkit.local.json.txt`, et par Wave dans `Wave.local.json.txt` (par
 exemple une source locale au site pour chaque Wave).
 
 Redémarrages : *Allow controlled reboots* (activé par défaut) redémarre pour un redémarrage en

@@ -26,16 +26,16 @@ Campaigns\<C>\Scripts\SmartM365-Invoke-EndpointMigration-<C>.ps1   (single-file 
 
 ## Worker contract and results
 
-- The engine writes `Runs\...\State\Contracts\<ContractId>.json` with `ContractVersion` (1),
+- The engine writes `Runs\...\State\Contracts\<ContractId>.json.txt` with `ContractVersion` (1),
   `EngineVersion`, `Campaign`, `RunId`, `CorrelationId`, `Computer`, endpoint, PsExec,
   evidence and flag sections. The worker validates every required field.
-- The endpoint writes `<DataRoot>\State\Results\<CorrelationId>.json` when it starts
+- The endpoint writes `<DataRoot>\State\Results\<CorrelationId>.json.txt` when it starts
   (`State=Running`) and when it ends (`State=Completed`), and prints
   `FINAL_STATUS=...; EXIT_CODE=...; NEXT_ACTION=...; CORRELATION_ID=...; DETAIL=...`.
 - The worker trusts only a result whose CorrelationId is its own. A result of another attempt is
   reported as foreign evidence and ignored. After a PsExec timeout or communication loss the
   worker waits for the completed result of the same attempt before classifying the computer.
-- `LastRun.json` protections of the endpoint scripts are kept; retry-after-reboot runs use
+- `LastRun.json.txt` protections of the endpoint scripts are kept; retry-after-reboot runs use
   `<CorrelationId>-R<timestamp>`.
 - Every computer row uses the common result schema (Campaign, Wave, Run, cycle, computer,
   CorrelationId, status, next action, launcher/remote status, network preflight, copy, hashes,
@@ -63,7 +63,7 @@ Campaigns\<C>\Scripts\SmartM365-Invoke-EndpointMigration-<C>.ps1   (single-file 
 | Strictest limit | Running launchers started with different caps | the smallest active `Limit` wins |
 | Stale recovery | Dead launcher/worker process (PID and start time), expired lease, missing heartbeat | removed under the gate lock, logged |
 | Wave lock | One Run per Wave | `LauncherState\WaveLocks` exclusive handle |
-| Run guard history | Per Campaign | `LauncherState\<Campaign>\RunGuardHistory.json` |
+| Run guard history | Per Campaign | `LauncherState\<Campaign>\RunGuardHistory.json.txt` |
 | Windows 11 copy gates | Per setup source and per subnet | UNC gate roots (see Windows 11 procedure) |
 
 `LauncherState` ACLs are restricted to SYSTEM and Administrators when the engine runs elevated.
@@ -72,7 +72,7 @@ crashed or other-session launcher is recognised.
 
 Stopping is three separate actions:
 
-1. **Controlled stop**: no new computer starts; running workers finish (`StopRequested_<pid>.json`).
+1. **Controlled stop**: no new computer starts; running workers finish (`StopRequested_<pid>.json.txt`).
 2. **Forced local stop**: a second request stops local workers and their PsExec process tree.
 3. **Remote state**: the endpoint may still be running; the report shows
    `CANCELLED_BY_OPERATOR_REMOTE_RUNNING` or `CANCELLED_BY_OPERATOR_REMOTE_STATE_UNCONFIRMED`,
@@ -82,10 +82,10 @@ Stopping is three separate actions:
 
 The shared region in both endpoint scripts provides:
 
-- `Global\SmartM365_SEMT_TargetOperation` mutex plus a diagnostic `State\TargetOperation.json`
+- `Global\SmartM365_SEMT_TargetOperation` mutex plus a diagnostic `State\TargetOperation.json.txt`
   lease: one toolkit operation at a time on a target, across Campaigns
   (`TARGET_OPERATION_ACTIVE`).
-- `State\TargetPendingOperation.json`: written by Windows 11 when setup started or a reboot is
+- `State\TargetPendingOperation.json.txt`: written by Windows 11 when setup started or a reboot is
   pending (up to 168 h, cleared by reboot); it blocks the other Campaign
   (`TARGET_PENDING_OPERATION`). Unreadable state gives `TARGET_STATE_UNREADABLE`.
 - `Test-SemtWindowsSetupActive`: Hybrid Join does not run during Windows Setup

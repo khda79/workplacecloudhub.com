@@ -359,7 +359,7 @@ function Get-SemtHybridJoinProfile {
         EvidenceRules = @(
             [pscustomobject]@{ Folder = 'Output'; Filter = '*'; Recurse = $true; CurrentAttemptOnly = $true; MaxFiles = 40; MaxBytes = 5MB; TargetFolder = 'Output' },
             [pscustomobject]@{ Folder = 'Output'; Filter = 'MDMDiag_*.zip'; Recurse = $false; CurrentAttemptOnly = $true; MaxFiles = 1; MaxBytes = 100MB; TargetFolder = 'Output' },
-            [pscustomobject]@{ Folder = 'State'; Filter = '*.json'; Recurse = $false; CurrentAttemptOnly = $false; Names = @('EndpointInstance.json','RebootSafety.json','RetryAfterReboot.json'); MaxFiles = 5; MaxBytes = 1MB; TargetFolder = 'State' }
+            [pscustomobject]@{ Folder = 'State'; Filter = '*.json.txt'; Recurse = $false; CurrentAttemptOnly = $false; Names = @('EndpointInstance.json.txt','RebootSafety.json.txt','RetryAfterReboot.json.txt'); MaxFiles = 5; MaxBytes = 1MB; TargetFolder = 'State' }
         )
         RemoteLogsPathTemplate = '\\{0}\C$\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\Logs'
         CommunicationLostWaitOption = 'HybridJoin.CommunicationLostEvidenceWaitMinutes'
@@ -387,8 +387,8 @@ function Get-SemtHybridJoinProfile {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDFmwbigzdD8RGH
-# uyNxoVAxJ87280zY5cVcPPUuHUP63KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4MdTj2Vyd5t9H
+# I17H8PEFZ6Z1cQFib0fY97sZUcxCY6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -418,14 +418,14 @@ function Get-SemtHybridJoinProfile {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAK7FYj6Qk2uqYlO9YLXH7s
-# v0noU9GgHgqCAxjc069uHzANBgkqhkiG9w0BAQEFAASCAYBhyjj+3s+hDd5e/4G2
-# 9g8JLgb44feNJOpFualBGakhfOinhOykyic02c6DYfCbiGywf+ALuqSQpuwmKbIK
-# 8E5cbCbGSJ71D3xyqtcoo6nSdgi/nXeAkx8mQfz8pZDHZsCC8ehaa+W4swtqWh09
-# B9ZKWRmUBNxlD4cJctaMQNUlUOWVhVEYY+Den7GMnkWnJgvuSWC9P320PVRfCumB
-# NkLWkJqCX0CHsjQg82Ng5GJ7BZh46fX0NI7L8YvXT8/2XjuDnxr739dLCJI8oUSK
-# aqtpJWdaKmMM8FXHGj9N6RxreXdZf+dwylmalK9yQOi9QAXXqcY0KmEGbEuDSlhk
-# QmFjBD4bEqohAjetekJO8gmXQgsRM6wfVzGrUUul25DMbI+wYgdxskPsVPLrL64+
-# khUKskMV4IefH+2xPuzEfqh2ITeTKVyQk6SvbMy7ecX2ZbicfzcYTAkzwd07TWPI
-# HZuXToVe2erCockvxOsVO9FDTVbrYkiqQDe8wCH6M11Ykak=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB8rmIU4IiQ/u5eQmIs5ekX
+# tliH/YHSTiRyHkHG3CHxFzANBgkqhkiG9w0BAQEFAASCAYBhRPtJQzxJrcp9tSiK
+# LD5au4IoBOQqLZ75831nPRqNVMgJrU5YDVW6TsnOlJ/vI4au5K7VQsdqvepQx6jC
+# Us2p4IBamWl5Z8aRWeP6iEJM//gUEYvAILsZvoJxBLdyyCMbxTtP5Yz9fIL47Rum
+# WuXKXS8qm2U7zyTaZhUYTvYD1tv+sKYuBzjTYa7Zv4ddTQAsY+SCVSqDHXCBIrux
+# zI9R66DgF6vG2guiOBauETfCEyuDN51rEG1bRUPNyqQehcrn3KL67zMZJg26hvGf
+# ZWbl2SjcfOqIL7dleG6y713QNwP+rEL4dNRG+wYQm9s4GyEOC/2aoR30hjA5OPwP
+# 8PO0Ght7JNsBdmFYomsxFCwMvgaMVhykx4tRG95O9OeKb0Y2RcqamClGR6xf3qLe
+# oAbjEip59WCWr8HftHxok9jq9uABxjHOuSm9y+K5YNWaQR5AEYR2NUQmNe8cJvaR
+# bqoqtCsEXUTY0abZfeGSH6O7xFpF3W8KflU3llGb/WG6t94=
 # SIG # End signature block

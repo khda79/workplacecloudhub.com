@@ -24,7 +24,7 @@ Completed computers leave `Computers.txt` and are archived next to it
 ```text
 Waves\<Campaign>\<Wave>\
   Computers.txt                       one computer per line (# comments allowed)
-  Wave.local.json                     Wave options (created from the Campaign template)
+  Wave.local.json.txt                     Wave options (created from the Campaign template)
   Start-Wave-Loop.cmd                 Loop until complete or stopped
   Start-Wave-Once.cmd                 one cycle
   Start-Wave-Loop-IgnoreRunGuard.cmd  Loop, run guards ignored on the first cycle
@@ -74,21 +74,21 @@ Default names: `WAVE-AUTO-HJ-<timestamp>`, `WAVE-AUTO-W10-<timestamp>`.
 
 ```text
 Runs\<Campaign>\<Wave>\<RunId>\
-  RunManifest.json           Campaign, Wave, engine/endpoint versions and hashes, technician, integrity
-  EffectiveOptions.json      every option with its value and source
+  RunManifest.json.txt           Campaign, Wave, engine/endpoint versions and hashes, technician, integrity
+  EffectiveOptions.json.txt      every option with its value and source
   Logs\                      SEMT-<Campaign>-Launcher_<RunId>.log, worker logs
   PsExecLogs\                one PsExec transcript per attempt
-  State\                     ActiveRun_<pid>.json, StopRequested_<pid>.json, Contracts\
+  State\                     ActiveRun_<pid>.json.txt, StopRequested_<pid>.json.txt, Contracts\
   Inventory\                 scoped inventory exports of this Run
   CentralLogs\               endpoint evidence collected per status bucket
   Reports\                   live and final HTML report, CSV per cycle and summary
-Runs\<Campaign>\<Wave>\RunHistory.json
+Runs\<Campaign>\<Wave>\RunHistory.json.txt
 ```
 
 A Single PC Run lives in `Runs\<Campaign>\_SinglePC\<RunId>\` with its one-computer Wave in
 `Wave\`. It always uses one worker (`SinglePcOneWorker` rule).
 
-GUI choices are captured for each Run in `Runs\<Campaign>\_GuiSelections\<timestamp>.json`
+GUI choices are captured for each Run in `Runs\<Campaign>\_GuiSelections\<timestamp>.json.txt`
 (empty text fields are not captured, so the Wave or global value still applies). The generated
 launcher CMD is kept next to it as evidence.
 

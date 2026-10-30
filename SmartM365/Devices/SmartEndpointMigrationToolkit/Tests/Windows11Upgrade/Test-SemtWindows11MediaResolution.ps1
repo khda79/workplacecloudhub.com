@@ -263,9 +263,9 @@ try {
 
     $case = New-Case 'lock'; New-SyntheticMedia -Path $case.LegacyCache
     $lockDir = Join-Path $case.Legacy 'Locks\SetupCache-Win11-fr-FR.lock'; New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
-    Set-Content -LiteralPath (Join-Path $lockDir 'lock.json') -Value ('{ "PID": ' + $PID + ' }') -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $lockDir 'lock.json.txt') -Value ('{ "PID": ' + $PID + ' }') -Encoding ASCII
     Test-Step 'legacy media lock held by a live process: InUse' { (Resolve-SemtIntuneSetupMedia -DataRoot $case.Data -SetupCacheFolder 'Win11-fr-FR' -Language 'fr-FR' -LegacyRoot $case.Legacy -OwnerProvider $owner).Decision -eq 'InUse' }
-    Set-Content -LiteralPath (Join-Path $lockDir 'lock.json') -Value '{ broken' -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $lockDir 'lock.json.txt') -Value '{ broken' -Encoding ASCII
     Test-Step 'unreadable legacy media lock: Indeterminate' { (Resolve-SemtIntuneSetupMedia -DataRoot $case.Data -SetupCacheFolder 'Win11-fr-FR' -Language 'fr-FR' -LegacyRoot $case.Legacy -OwnerProvider $owner).Decision -eq 'Indeterminate' }
     Remove-Item -LiteralPath $lockDir -Recurse -Force
 
@@ -376,13 +376,13 @@ try {
     $exe = Resolve-SetupUpgradeExecutable
     Test-Step 'endpoint: Intune-owned legacy media path selected by the runner is used in place' { $exe -eq (Join-Path $case.LegacyCache 'setup.exe') -and $script:SetupCacheAction -eq 'LegacyReusedInPlace' }
     Test-Step 'endpoint: no copy and no new cache created for Intune-owned legacy media' { $script:Copies.Count -eq 0 -and -not (Test-Path -LiteralPath $case.NewCache) }
-    Test-Step 'endpoint: Intune-owned legacy media not moved, cleaned, re-permissioned or marked' { (Get-TreeState $case.LegacyCache) -ceq $before -and -not (Test-Path -LiteralPath (Join-Path $case.LegacyCache 'SmartM365-SetupMedia.json')) }
+    Test-Step 'endpoint: Intune-owned legacy media not moved, cleaned, re-permissioned or marked' { (Get-TreeState $case.LegacyCache) -ceq $before -and -not (Test-Path -LiteralPath (Join-Path $case.LegacyCache 'SmartM365-SetupMedia.json')) -and -not (Test-Path -LiteralPath (Join-Path $case.LegacyCache 'SmartM365-SetupMedia.json.txt')) }
     $script:FakeOwners = @{}
 
     $case = New-Case 'ep-adopt'; New-SyntheticMedia -Path $case.LegacyCache; Set-EndpointCase $case -MediaPath $case.LegacyCache
     $exe = Resolve-SetupUpgradeExecutable
     Test-Step 'endpoint: adoptable legacy media is moved to the new cache and used, without copy' { $exe -eq (Join-Path $case.NewCache 'setup.exe') -and $script:SetupCacheAction -eq 'LegacyMovedAndValidated' -and -not (Test-Path -LiteralPath $case.LegacyCache) -and $script:Copies.Count -eq 0 }
-    Test-Step 'endpoint: adoption evidence recorded with outcome Moved' { $file = @(Get-ChildItem -LiteralPath (Join-Path $case.Data 'State\MediaAdoption') -Recurse -Filter 'adoption.json')[0]; (Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json).Outcome -eq 'Moved' }
+    Test-Step 'endpoint: adoption evidence recorded with outcome Moved' { $file = @(Get-ChildItem -LiteralPath (Join-Path $case.Data 'State\MediaAdoption') -Recurse -Filter 'adoption.json.txt')[0]; (Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json).Outcome -eq 'Moved' }
 
     $case = New-Case 'ep-absent'; $source = Join-Path $tempRoot 'source-A'; if (-not (Test-Path $source)) { New-SyntheticMedia -Path $source }; Set-EndpointCase $case -Sources @($source)
     [void](Resolve-SetupUpgradeExecutable)
@@ -415,7 +415,7 @@ try {
 
     $case = New-Case 'ep-inuse'; New-SyntheticMedia -Path $case.LegacyCache
     $lockDir = Join-Path $case.Legacy 'Locks\SetupCache-Win11-fr-FR.lock'; New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
-    Set-Content -LiteralPath (Join-Path $lockDir 'lock.json') -Value ('{ "PID": ' + $PID + ' }') -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $lockDir 'lock.json.txt') -Value ('{ "PID": ' + $PID + ' }') -Encoding ASCII
     Set-EndpointCase $case -Sources @($source)
     $before = Get-TreeState $case.LegacyCache
     Test-Step 'endpoint: legacy media in use: explicit SETUP_MEDIA_IN_USE error, nothing copied or moved' { try { [void](Resolve-SetupUpgradeExecutable); $false } catch { $_.Exception.Message -like 'Setup media is in use.*' -and $script:Copies.Count -eq 0 -and (Get-TreeState $case.LegacyCache) -ceq $before } }
@@ -514,14 +514,14 @@ if (Get-Command -Name Resolve-SemtIntuneSetupMedia -ErrorAction SilentlyContinue
         Copy-Item -LiteralPath (Join-Path $intuneSource 'SmartM365-EndpointMigration-Run-IntuneUpgrade.ps1') -Destination $pkg
         Copy-Item -LiteralPath $endpointPath -Destination $pkg
         $mode = if ($CacheOnly) { 'WithCacheOnly' } else { 'WithMedia' }
-        [pscustomobject]@{ PackageId = ('SmartM365-SEMT-Windows11Upgrade-Win11-fr-FR' + $(if ($CacheOnly) { '-WithCacheOnly' } else { '' })); PackageVersion = '1.0.0'; MediaId = 'Win11'; Language = 'fr-FR'; SetupCacheFolder = 'Win11-fr-FR'; PackageMode = $mode; RequiresExistingSetupCache = [bool]$CacheOnly; AllowSetupMediaDuplication = [bool]$AllowDuplication } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $pkg 'PackageManifest.json') -Encoding ASCII
+        [pscustomobject]@{ PackageId = ('SmartM365-SEMT-Windows11Upgrade-Win11-fr-FR' + $(if ($CacheOnly) { '-WithCacheOnly' } else { '' })); PackageVersion = '1.0.0'; MediaId = 'Win11'; Language = 'fr-FR'; SetupCacheFolder = 'Win11-fr-FR'; PackageMode = $mode; RequiresExistingSetupCache = [bool]$CacheOnly; AllowSetupMediaDuplication = [bool]$AllowDuplication } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $pkg 'PackageManifest.json.txt') -Encoding ASCII
         if (-not $CacheOnly) { New-SyntheticMedia -Path (Join-Path $pkg 'SetupMedia\Win11-fr-FR') -Build $Build }
         return $pkg
     }
 
     function Invoke-Shimmed {
         param([string]$Script, [string]$DataRoot, [string]$LegacyRoot, [string]$Owner = '', [int]$EndpointExit = 0, [string]$TrustState = '', [string]$ProgramTrust = '', [string]$DataTrust = '', [string[]]$ExtraArguments = @())
-        $record = Join-Path $tempRoot ('record-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.jsonl')
+        $record = Join-Path $tempRoot ('record-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.json.txtl')
         $env:SEMT_SHIM_RECORD = $record; $env:SEMT_SHIM_LEGACY_ROOT = $LegacyRoot; $env:SEMT_SHIM_LEGACY_OWNER = $Owner; $env:SEMT_SHIM_ENDPOINT_EXIT = [string]$EndpointExit; $env:SEMT_SHIM_TRUST_STATE = $TrustState; $env:SEMT_SHIM_PROGRAM_TRUST = $ProgramTrust; $env:SEMT_SHIM_DATA_TRUST = $DataTrust
         $arguments = @('-DataRoot', $DataRoot)
         # The case folder plays the role of the system drive: <case>\PD is ProgramData.
@@ -569,7 +569,7 @@ if (Get-Command -Name Resolve-SemtIntuneSetupMedia -ErrorAction SilentlyContinue
 
     $case = New-Case 'inst-inuse'; $pkg = New-IntunePackage 'inst-inuse'; New-SyntheticMedia -Path $case.LegacyCache
     $lockDir = Join-Path $case.Legacy 'Locks\SetupCache-Win11-fr-FR.lock'; New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
-    Set-Content -LiteralPath (Join-Path $lockDir 'lock.json') -Value ('{ "PID": ' + $PID + ' }') -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $lockDir 'lock.json.txt') -Value ('{ "PID": ' + $PID + ' }') -Encoding ASCII
     $before = Get-TreeState $case.LegacyCache
     $run = Invoke-Shimmed -Script (Join-Path $pkg 'SmartM365-EndpointMigration-Install.ps1') -DataRoot $case.Data -LegacyRoot $case.Legacy
     Test-Step 'installer: legacy operation active on the media: exit 1618, nothing copied or changed' { $run.Exit -eq 1618 -and -not (Test-Path -LiteralPath $case.NewCache) -and (Get-TreeState $case.LegacyCache) -ceq $before -and -not $run.Registry.ContainsKey('InstallState') }
@@ -624,7 +624,7 @@ if (Get-Command -Name Resolve-SemtIntuneSetupMedia -ErrorAction SilentlyContinue
         New-ShimmedScript -Source (Join-Path $intuneSource 'SmartM365-EndpointMigration-Run-IntuneUpgrade.ps1') -Destination (Join-Path $programIntune 'SmartM365-EndpointMigration-Run-IntuneUpgrade.ps1') -Anchors @('trap {', '. $integrityHelperPath')
         Copy-Item -LiteralPath $helperPath -Destination $programIntune
         Copy-Item -LiteralPath $endpointPath -Destination $Case.Program
-        [pscustomobject]@{ PackageId = 'SmartM365-SEMT-Windows11Upgrade-Win11-fr-FR'; PackageVersion = '1.0.0'; MediaId = 'Win11'; Language = 'fr-FR'; SetupCacheFolder = 'Win11-fr-FR'; PackageMode = 'WithMedia' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $programIntune 'PackageManifest.json') -Encoding ASCII
+        [pscustomobject]@{ PackageId = 'SmartM365-SEMT-Windows11Upgrade-Win11-fr-FR'; PackageVersion = '1.0.0'; MediaId = 'Win11'; Language = 'fr-FR'; SetupCacheFolder = 'Win11-fr-FR'; PackageMode = 'WithMedia' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $programIntune 'PackageManifest.json.txt') -Encoding ASCII
         return (Join-Path $programIntune 'SmartM365-EndpointMigration-Run-IntuneUpgrade.ps1')
     }
     function Get-EndpointArguments { param($Run) $start = @($Run.Calls | Where-Object Kind -eq 'EndpointStart'); if ($start.Count -eq 0) { return @() }; return @($start[0].Data.Arguments) }
@@ -661,7 +661,7 @@ if (Get-Command -Name Resolve-SemtIntuneSetupMedia -ErrorAction SilentlyContinue
 
     $case = New-Case 'run-inuse'; New-SyntheticMedia -Path $case.LegacyCache; $runner = New-RunnerData $case
     $lockDir = Join-Path $case.Legacy 'Locks\SetupCache-Win11-fr-FR.lock'; New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
-    Set-Content -LiteralPath (Join-Path $lockDir 'lock.json') -Value ('{ "PID": ' + $PID + ' }') -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $lockDir 'lock.json.txt') -Value ('{ "PID": ' + $PID + ' }') -Encoding ASCII
     $run = Invoke-Shimmed -Script $runner -DataRoot $case.Data -LegacyRoot $case.Legacy
     Test-Step 'runner: media in use: cycle skipped (exit 0), no repair, endpoint not started' { $run.Exit -eq 0 -and @($run.Calls | Where-Object Kind -eq 'EndpointStart').Count -eq 0 -and -not $run.Registry.ContainsKey('InstallState') }
 
@@ -679,7 +679,7 @@ if (Get-Command -Name Resolve-SemtIntuneSetupMedia -ErrorAction SilentlyContinue
         @{ Source = (Join-Path $pkg 'SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1'); Target = (Join-Path $case.Program 'SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1') },
         @{ Source = (Join-Path $pkg 'SmartM365-EndpointMigration-Run-IntuneUpgrade.ps1'); Target = (Join-Path $case.Program 'Intune\SmartM365-EndpointMigration-Run-IntuneUpgrade.ps1') },
         @{ Source = (Join-Path $pkg 'SmartM365-EndpointMigration-SetupMediaIntegrity.ps1'); Target = (Join-Path $case.Program 'Intune\SmartM365-EndpointMigration-SetupMediaIntegrity.ps1') },
-        @{ Source = (Join-Path $pkg 'PackageManifest.json'); Target = (Join-Path $case.Program 'Intune\PackageManifest.json') })
+        @{ Source = (Join-Path $pkg 'PackageManifest.json.txt'); Target = (Join-Path $case.Program 'Intune\PackageManifest.json.txt') })
     Test-Step 'installer: endpoint, runner, helper and manifest installed under Program Files with the package hashes' { $run.Exit -eq 0 -and @($installed | Where-Object { -not (Test-Path -LiteralPath $_.Target) -or (Get-FileSha $_.Target) -ne (Get-FileSha $_.Source) }).Count -eq 0 }
     $dataScripts = @(Get-ChildItem -LiteralPath $case.Data -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.ps1' } | ForEach-Object { $_.FullName })
     Write-TestResult -Condition (-not (Test-Path -LiteralPath $legacyRunnerCopy) -and $dataScripts.Count -eq 0) -Message 'installer: no script is written under ProgramData; the old runner copy there is removed' -Detail ($dataScripts -join '; ')
@@ -749,10 +749,10 @@ if ($script:Failed -gt 0) { exit 1 }
 exit 0
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7h52vLWK89dT4
-# aNVZtJJje/E9Cu+YLd4m8W1Iml3OVaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMkkp85RZJCfno
+# 1goqG/KlYTQFP0mrQtZZuXomHywVHKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -777,139 +777,19 @@ exit 0
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIP69+IEhUXRtIgV+3lSwN15+V9H+I/ukeUI+KJjQtFLgMA0GCSqG
-# SIb3DQEBAQUABIIBgAB++Z44aAZyzfYKPVarJuqNlTnNnW4fN+5y+IGhSThGbRs9
-# v0EMmgysdxcob2u9JjrFbyp7ST9tuxw2ANeSCtFDrR2rvd+NrI+6BLgpm1PKOkdN
-# GzJT4t0Ib/lzmVx3Kmo+aGzSnrYS5RmoxYj+pdHdC2dyMHdv1Pg9Ph0ifwJZM9WX
-# OrxHiqtc++KigcrEvOOw6ZgwzEIONcAiWPOryWJ+NTA+hcT0XtMLQ6IX5LVcp7Nw
-# 4gq+cSzMoLNhejuC9nXsfo39rO8Z4XZdWqvgCnMa/3WP5xqp8kBKjklSkzor2+gc
-# UjUwIKZoh0VVILgKUqQsFh7l1SGWCKZ/YQDRDmot0sSSP5ZX4QcgRMg9KxEYzRGE
-# 1QBfLXSFHxcKQYRhbNCiG0B5RdXuLQ76j0rQfRvtv7AjN+2evJJ31myY/F9L4gOV
-# 4vSeeSh92WyJbY2/u6xYPR34FM83YN9TZKHvwTMt86N906iWIiXfG5EsraUUqx+6
-# n4E8WUWavNVpdRoftKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjUxMzE3
-# MDBaMC8GCSqGSIb3DQEJBDEiBCDkTE7B8wWn6z6mNacDjTgo09Dd3uvF74xkxjMn
-# bUEFqTANBgkqhkiG9w0BAQEFAASCAgBYZhRk8uW36zU/K2/pwGPQy3EKXb7lPYbQ
-# jLH+IhB0u/sjSvGFassnCxiBQl6Eg6M2iGNKAVHsGM3aXt0KBPQMvVKnehzY4Gum
-# GXWnkuCFsYZ/80EDn35GQgFjp4EsCrU2nsPmCGHNuLJiHgvx6jcTpdNe92dXuh2m
-# +ELJNnpX1NbMAvvQ13X/GG4gtxTDtxG4WngbPakexH5ke3WWDDfJb/b5DTZM+aVp
-# e4z2HPAVXj/5wH1tsH9AwjNcuWfSXeGgUvevT0YWuj7Ar+szzAf70uUA2+WgCt4O
-# gP2DkduGQPEKbEXEgLjT5/btHJcMck2yCsB4P/h6Dy4oXeBWIm9Z8DGA+L51SDhw
-# 1J5UdujQ4g6BNimnSw19xOg+T9yw/cCFjce/5H626NnEsVhH8edhPkFQS2c3ve0N
-# eZ5GzmFp/5no/7OkaUoFuRlTw4AYLeJ370GjJJaUGdAiuWEbGj3XqxvwMe+i/xfZ
-# XBZEFz6jn9XPhWB2+AmuqWPA3LAhiHS16r8jinUo8dcODzVn9MBLK4Ed2bFYQjMG
-# AHS9ZLuSef0vHrTUyK1D6PWm1hJQ/bf/uzce7Q95fE61ax56P1/H8VfEAQ6nxvd0
-# 3ohtxdm+EyLdg+LVizuWjOxL4JrUtRzzK2+Ge9vmBUzE+SICn2Q8ZyMdt7CNagUs
-# RzKNU4Zjhg==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDEawvtIEku/S+xFu0xwplT
+# QmPoGKJMkrVzQMc3kktjmzANBgkqhkiG9w0BAQEFAASCAYAxFxRDWuAw5ZlEq/Po
+# 7KYfwHa8OWl7OPX3Wzw0HdufhO6ZY6mR4kNLEnbulf1N1Bo+OqP8nDa7MA+X6Hmv
+# KeUaczc4a8Z+TQ8uYkUJ0od7KMLiXG+WkN+Vr81JiGC+yY32reDsh4+tuiIolIy6
+# 5OojsCTcD0k7CWBttSv0Z2viWJ4ud9DPMmil759FJn1HJI0yXALyt5WOqiB2uQOI
+# Y9kluQh70m/1Jup05wtG3Em5/Z3Rr/GIN2O2gFjk1qnG3Yds7rr9Q/RqjEAgk3fX
+# 2213MtEa3ZVg99i8xqBtrP3fRHy6dTJMUGvyx19pGErlEgfWBY0ZUN9VXmCbDnvF
+# gPU4zkvQhl3ydOnG92uQJCMeSA+QgjIvMpyDTprjRYaeSoq3Ds/tu8DOd3CSGtEA
+# wrLpywmJieT1XtDJFjXUvdt0RQBdxBwywhzUua6YgfHH9WuXAgJCBPsdNR3YM+Mu
+# z84FBTT/e4ztZPkgr+Qk7o8DORP8X1vj5wFYcADsDTRW9IU=
 # SIG # End signature block

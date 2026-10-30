@@ -4,9 +4,9 @@
 
 .DESCRIPTION
     Each endpoint attempt receives a CorrelationId. The endpoint writes
-    <DataRoot>\State\Results\<CorrelationId>.json when it starts (State=Running) and when it
+    <DataRoot>\State\Results\<CorrelationId>.json.txt when it starts (State=Running) and when it
     ends (State=Completed). The worker only trusts a result whose CorrelationId matches the
-    attempt: older LastRun.json files, retry-after-reboot results of previous attempts and
+    attempt: older LastRun.json.txt files, retry-after-reboot results of previous attempts and
     evidence of other Runs can never be attributed to the current attempt.
 
 .VERSION
@@ -309,7 +309,7 @@ function ConvertFrom-SemtFinalStatusLine {
 
 function Read-SemtRemoteAttemptResult {
     <#
-    Reads <DataRoot>\State\Results\<CorrelationId>.json from the target. Only a document whose
+    Reads <DataRoot>\State\Results\<CorrelationId>.json.txt from the target. Only a document whose
     CorrelationId matches is returned; anything else is reported as foreign evidence.
     #>
     [CmdletBinding()]
@@ -318,7 +318,7 @@ function Read-SemtRemoteAttemptResult {
         [Parameter(Mandatory = $true)][string]$CorrelationId
     )
 
-    $path = Join-Path -Path $RemoteDataShare -ChildPath ("State\Results\{0}.json" -f $CorrelationId)
+    $path = Join-Path -Path $RemoteDataShare -ChildPath ("State\Results\{0}.json.txt" -f $CorrelationId)
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         # Say why: a missing data folder means the endpoint wrote nothing visible (not started,
         # access denied or blocked on the target), not only that the attempt has not finished.
@@ -389,6 +389,16 @@ function Copy-SemtEvidenceFile {
             Add-Content -LiteralPath (Join-Path -Path $TargetRoot -ChildPath 'CentralLogCollection.skipped.txt') -Value ('{0} Skipped large file: {1}; SizeMB={2:N2}; Source={3}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$RelativePath,($item.Length / 1MB),$SourcePath) -Encoding UTF8
             return $false
         }
+        # External diagnostic tools may still emit .json. Preserve their content while
+        # keeping the technician's evidence tree compatible with synchronised storage.
+        if ($RelativePath -match '(?i)\.json$') {
+            $RelativePath += '.txt'
+            $mapped = Join-Path -Path $TargetRoot -ChildPath $RelativePath
+            if ((Test-Path -LiteralPath ($SourcePath + '.txt') -PathType Leaf) -or (Test-Path -LiteralPath $mapped)) {
+                Add-Content -LiteralPath (Join-Path -Path $TargetRoot -ChildPath 'CentralLogCollection.skipped.txt') -Value ('{0} Skipped JSON evidence with conflicting .json.txt name: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$SourcePath) -Encoding UTF8
+                return $false
+            }
+        }
         $destination = Join-Path -Path $TargetRoot -ChildPath $RelativePath
         New-SemtDirectory -Path (Split-Path -Path $destination -Parent)
         Copy-Item -LiteralPath $SourcePath -Destination $destination -Force -ErrorAction Stop
@@ -443,7 +453,7 @@ function New-SemtCentralLogTarget {
 function Copy-SemtCentralEvidence {
     <#
     Standard mode copies only current-attempt evidence with short destination names: the
-    attempt result, LastRun.json, the endpoint log and CSV named by the attempt result, and
+    attempt result, LastRun.json.txt, the endpoint log and CSV named by the attempt result, and
     the campaign evidence rules (files newer than the attempt start). Full mode mirrors the
     endpoint Logs, Output, State and Transcripts folders.
     #>
@@ -467,15 +477,22 @@ function Copy-SemtCentralEvidence {
     }
     $count = 0
     if ($Mode -eq 'Full') {
-        foreach ($child in @('Logs','Output','State','Transcripts','LastRun.json')) {
+        foreach ($child in @('Logs','Output','State','Transcripts','LastRun.json.txt')) {
             $source = Join-Path -Path $RemoteDataShare -ChildPath $child
-            if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $TargetPath -Recurse -Force -ErrorAction SilentlyContinue; $count++ }
+            if (Test-Path -LiteralPath $source -PathType Leaf) {
+                if (Copy-SemtEvidenceFile -SourcePath $source -TargetRoot $TargetPath -RelativePath $child -Mode Full) { $count++ }
+            } elseif (Test-Path -LiteralPath $source -PathType Container) {
+                foreach ($file in @(Get-ChildItem -LiteralPath $source -File -Recurse -ErrorAction SilentlyContinue)) {
+                    $relative = Join-Path -Path $child -ChildPath ($file.FullName.Substring($source.TrimEnd('\').Length).TrimStart('\'))
+                    if (Copy-SemtEvidenceFile -SourcePath $file.FullName -TargetRoot $TargetPath -RelativePath $relative -Mode Full) { $count++ }
+                }
+            }
         }
         return $count
     }
     Add-Content -LiteralPath (Join-Path -Path $TargetPath -ChildPath 'CentralLogCollection.txt') -Value ('{0} Standard collection for CorrelationId={1}; full logs remain on the target under {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$CorrelationId,$RemoteDataShare) -Encoding UTF8
-    if (Copy-SemtEvidenceFile -SourcePath (Join-Path -Path $RemoteDataShare -ChildPath ("State\Results\{0}.json" -f $CorrelationId)) -TargetRoot $TargetPath -RelativePath 'AttemptResult.json' -MaxBytes 2MB) { $count++ }
-    if (Copy-SemtEvidenceFile -SourcePath (Join-Path -Path $RemoteDataShare -ChildPath 'LastRun.json') -TargetRoot $TargetPath -RelativePath 'LastRun.json' -MaxBytes 1MB) { $count++ }
+    if (Copy-SemtEvidenceFile -SourcePath (Join-Path -Path $RemoteDataShare -ChildPath ("State\Results\{0}.json.txt" -f $CorrelationId)) -TargetRoot $TargetPath -RelativePath 'AttemptResult.json.txt' -MaxBytes 2MB) { $count++ }
+    if (Copy-SemtEvidenceFile -SourcePath (Join-Path -Path $RemoteDataShare -ChildPath 'LastRun.json.txt') -TargetRoot $TargetPath -RelativePath 'LastRun.json.txt' -MaxBytes 1MB) { $count++ }
     foreach ($named in @(@{ Property = 'LogPath'; Name = 'Endpoint.log'; Max = 10MB },@{ Property = 'CsvPath'; Name = 'Result.csv'; Max = 2MB },@{ Property = 'TranscriptPath'; Name = 'Transcript.txt'; Max = 10MB })) {
         $localPath = [string](Get-SemtPropertyValue -InputObject $AttemptResult -Name $named.Property -Default '')
         $sharePath = ConvertTo-SemtRemoteSharePathFromLocal -RemoteDataShare $RemoteDataShare -RemoteDataRoot $RemoteDataRoot -EndpointLocalPath $localPath
@@ -856,8 +873,8 @@ function Test-SemtTrustedDataFolder {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAKsS0cxFP3f4Jj
-# PWJJ4o5F+KSjjjKVHWlzOoUsumDxDaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCt2zBlK/K0pEr3
+# ipg0nnQZMFQgelJO+kjNquk+zK4MQqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -887,14 +904,14 @@ function Test-SemtTrustedDataFolder {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBVjOvDtneFK3b9HbWOc7Yl
-# +fTi6IkPo280G5hUqb35FTANBgkqhkiG9w0BAQEFAASCAYAfbPE5UFik6U9JdZxr
-# 0gnwjB5ZAhk+mlO2kKYnluzQ82WVLINzAzMIcH8yOHlaQl75BT+NUYhKoW8z17/x
-# V5qTpUC6hgoNH0W7o+fuX4LS7J/0LQTBM6VOZtj1WuPNTUikxiPebDiZVtk/nlx4
-# TYE5I35nJnNo5TmlAPiSh7HONMaq+TSmYKF20S+04acGS6yTUTX8rvMqZqMB0PAg
-# 24kOuaCBF0b6HJcBQd4D4KyuPWZ9XlPUs2J8mEtjEqsscEAX05rH+PCenFllmrUK
-# xStfrMRPh7N89f3DTJ6BNAJggncGjyWRykvu3IP+RimhnhlrcEUGsB3BZ6Tvcegm
-# PsFw3D2ujj/MHn5jVlJI/cVY0iMP26Mz75rX7weeYkS4kcexMx900bHKMLI5rB9+
-# H7+TFws1nIODngqAY6it8A0E/TNGz7iUrZtIhvHfQjJfEM7KLwXEXojufIgrA8Zy
-# elvIyrkK4C3vsSmfXGnRUgwEpk1Zvr78T49Odna6GMLiFiw=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCChWOa+J5mchJbz9dG0krE9
+# nkIRk027mA5eG3+JNdwoRTANBgkqhkiG9w0BAQEFAASCAYCeC3W5BpkIPAT4+8HL
+# 8Lc0noQvw06wl2wXzypQxqSmRPf2WEr/FmYAgFIpopTDaavPwI/+BuA4v9qahDuY
+# n9d/TEVhkk6MxJfMpeu58b6q4iAz7JQL6em0QPHbNlcfunotmbAjBdhPJHaPYhK0
+# ACJkWxluHXcopm5o0b+AbV15kYpe8aCv5TLZVK5lGn1I8C8dalT8lH6tv6Q165R3
+# fPeivfZoO2ozqatAr4/fy7CGpEFHoLzAJJZIKKtvr6yNm0s6fGR0itRGRGUjw6CZ
+# 14mFxcmOlBVXQNVBlSyz12GjYEGkh8xzddT9UwB+LB6I1AcEiWXGT6xaxeurrnOB
+# IbJH+BeSU1l+HdN+SeQE+ZzIhsqucpSxOdTrGIw4oMYPShuPk4DbcwgnmMXvaewP
+# dPCJs8HiqfuG93b53ShWZJM8t13Au6hjE12sUb0HuZD7iN+3uOlf1uAMZvtfUDxg
+# pSiWL2MMHDjUw36FtSikAKczIoixllXCV+T/NbllGl7WurE=
 # SIG # End signature block

@@ -201,7 +201,8 @@
       "SourceSha256": "385316C86DE77F14256489AB1A25539B63C735F51E07C6C79F0D85EAD6AB3169",
       "SourceVersion": "1.0.0",
       "Destination": "SmartM365/Devices/SmartEndpointMigrationToolkit/Scripts/SmartM365.GuiUpdateCheck.ps1",
-      "SignatureRemovedForModification": false
+      "SignatureRemovedForModification": true,
+      "Modification": "SEMT uses .json.txt for the local update-check cache."
     },
     {
       "Source": "SmartM365/Devices/Windows11UpgradeToolkit/SmartM365.GuiUpdateCheck.psd1",

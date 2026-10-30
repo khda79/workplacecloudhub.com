@@ -12,7 +12,7 @@
     release notes in the output folder.
 
     The file set is the package folder minus operational and private content: Runs, the
-    content of Waves, Inventory, DemoAssets, Release\Output and Release\Work, *.local.json,
+    content of Waves, Inventory, DemoAssets, Release\Output and Release\Work, *.local.json.txt,
     LOCAL_MEMORY.md, logs, inventories, setup media and IntuneWin32 build output. The build
     fails when such a file would be shipped, when a PowerShell file does not parse, when a
     script header version differs from the version manifest or when a component is not signed
@@ -71,7 +71,7 @@ $excludedPatterns = @(
     '^Inventory\\',
     '^DemoAssets\\',
     '^Release\\(Output|Work)\\',
-    '\.local\.json$',
+    '\.local\.json(?:\.txt)?$',
     '(^|\\)LOCAL_MEMORY\.md$',
     '\.log$',
     '(^|\\)Devices(AD|Intune|Entra)[^\\]*\.csv$',
@@ -137,7 +137,7 @@ foreach ($path in $declared.Keys) {
     if ($entry.Count -ne 1) { $problems.Add(('Declared component missing from the release: {0}' -f $path)); continue }
     if ($entry[0].Version -ne [string]$declared[$path]) { $problems.Add(('Version mismatch: {0}: header={1}; version manifest={2}' -f $path,$entry[0].Version,$declared[$path])) }
 }
-# Shared SmartM365.Gui* libraries are verbatim copies; their provenance is in Docs/PROVENANCE.json.txt.
+# SmartM365.Gui* libraries derive from shared sources; SEMT's update checker uses .json.txt.
 foreach ($entry in @($entries | Where-Object { $_.Path -match '\.(ps1|psm1)$' -and $_.Path -notmatch '(^|/)SmartM365\.Gui[A-Za-z.]*\.ps1$' -and [string]::IsNullOrWhiteSpace($_.Version) })) { $problems.Add(('Missing .VERSION header: {0}' -f $entry.Path)) }
 foreach ($required in @('README.md','Start-SmartEndpointMigrationToolkit-GUI.cmd','Start-SmartEndpointMigrationToolkit-Demo.cmd','Export-UserLicensesCsv.cmd','Scripts/Run-EndpointMigrationWave.cmd','Config/SmartEndpointMigrationToolkit.options.json.txt','Docs/PROVENANCE.json.txt')) {
     if (@($entries | Where-Object { $_.Path -eq $required }).Count -eq 0) { $problems.Add(('Required release file missing: {0}' -f $required)) }
@@ -245,8 +245,8 @@ return [pscustomobject]@{ Version = $packageVersion; Files = $entries.Count; Uns
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPMRERDivkuEgL
-# 89WLDs01SUCKbI9j1FSuviI9hpSftKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAk/vNXVUhEsma9
+# a3+X3ZX5+6T7vxsLzup39aiAe0aaB6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -276,14 +276,14 @@ return [pscustomobject]@{ Version = $packageVersion; Files = $entries.Count; Uns
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCA3U5IdhCc7W3O6AFEW2DJa
-# JShMxHYfYetGcen5xoFGXzANBgkqhkiG9w0BAQEFAASCAYAKxXMzaOQVkG9R2mUG
-# qwaCdJAFLBqSTjG6PY/pCoZRgGN1iV9Ycfz48pVz9q0NEG95HGvP3HIcSIIR6vuO
-# 0BRPE3qOwvSaSTwUY1rrm8CLf36mGm4d49HCQga6j3XKz6MUEGEaUsVA9R67aPrB
-# uQNx+zs4PLFmVMQxxW7F5pntImYZQ/g3H6rANWdgaLBB6yfCG5qqse578V9i8MxQ
-# yZ8SQmbPJIA6owLSXrDMEF6aSZwtSVjmEfa4zl8AIf2VvYt8PYS/Il3H0rY5bQ4a
-# yz8lkyJdtgZhnC6hKQYYE2yORu38nrCNlfNEEQSwWkB+EzqxPz54lRgvB69p6tp4
-# TRdH0p62XtgXveNKWcCbVJgJc2zLKBxbSWSO/zAtDMXrRJyXWuxLNLLhdPYNo9EX
-# zfg9zS1eYQ9GseFiEUMT7WNO8PL7O+I3BrfvkyZOisv04o2GtM+6rBpWMFaWfd2V
-# kqwQnXk2fmbpXg6oO+B8oZdRPrsu6i6zzuKQdc3Ar/lyCGs=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBNvchaX/5U3YyMR5lMq1bL
+# 1Mq/G/xf0JfPGKoQTKjIDzANBgkqhkiG9w0BAQEFAASCAYA/mpIBJP6v6Ww+jjHP
+# uLy02etHnjHoYtGBPRyqjlkGebNWFlEuXjezu3pcn4n5rFZFMSNodepwiFcCDFcf
+# TJ89vi8e5v2I/EmAyqbBU6lZRgnKAL5bgLnKA8/zlIfF4YnDbEztG8XhivDpIyLt
+# fGbvq4/ioTsGCxP/UoidV6PgFCOUrGl1+awU6FKlZqLU6hBbjqw9T+vN67QsdZ4N
+# 7HMNwQ5EXT53LDhj9LvBXXltlrjml1TPW2P5fuQra0dbdk7GeUM4n8cQH2XSxqcI
+# S2yDxYu4C30EaQhdgf4P8AxMcBB7miN35wO9Rj3hig8+9sO7LDU/V0yEDJS8d1UC
+# s6K/4Jksukh2cUiHyivShzkulQNNpfUxQ6QKJm6ehAdCrQLC58Zeai4X5/MHbbXs
+# oo7yhvH/DPoL+AsXYWDTTCsl2FFJ8zEfk13tUND/4U6dZ52SAvG0+SLmj+IijFBj
+# DpbTiZGd0l5Tt8jh4BB7Szo4SPtC4elU9N4HcI6PVzY14W0=
 # SIG # End signature block

@@ -123,7 +123,7 @@ function Start-GuiLaunchCommandFile {
 
 function Get-GuiStatePath {
     param([Parameter(Mandatory = $true)][string]$Campaign)
-    return (Join-Path $script:PackageRoot ("Config\GuiState.{0}.local.json" -f $Campaign))
+    return (Join-Path $script:PackageRoot ("Config\GuiState.{0}.local.json.txt" -f $Campaign))
 }
 
 function Get-GuiInitialOptionValues {
@@ -172,7 +172,7 @@ function New-GuiSelectionFile {
         $captured[$name] = ConvertTo-SemtOptionValue -Definition $definition -Value $value -Source 'Gui'
     }
     $root = Join-Path (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) ("{0}\_GuiSelections" -f $Campaign)
-    $path = Join-Path $root ('{0}-{1}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'),([guid]::NewGuid().ToString('N').Substring(0, 6)))
+    $path = Join-Path $root ('{0}-{1}.json.txt' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'),([guid]::NewGuid().ToString('N').Substring(0, 6)))
     Write-SemtJsonFileAtomic -Path $path -InputObject ([pscustomobject]@{ SchemaVersion = 1; Product = 'SmartEndpointMigrationToolkit'; Campaign = $Campaign; CapturedUtc = (Get-SemtUtcNowText); CapturedBy = [Environment]::UserName; Options = $captured })
     return $path
 }
@@ -617,7 +617,7 @@ $xaml = @'
                                     </Grid.RowDefinitions>
                                     <StackPanel>
                                         <TextBlock x:Name="WaveOptionsTitleText" Text="Wave options" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
-                                        <TextBlock Text="Saved in Wave.local.json and used by the Start-Wave-*.cmd launchers of this Wave. An empty field, a check box showing a square (not set) or (inherit) keeps the global configuration or the default. A launch from this GUI uses the choices of the Options tab, which win over these values." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,8"/>
+                                        <TextBlock Text="Saved in Wave.local.json.txt and used by the Start-Wave-*.cmd launchers of this Wave. An empty field, a check box showing a square (not set) or (inherit) keeps the global configuration or the default. A launch from this GUI uses the choices of the Options tab, which win over these values." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,8"/>
                                     </StackPanel>
                                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                                         <StackPanel x:Name="WaveOptionsHost"/>
@@ -674,7 +674,7 @@ $xaml = @'
                             <TextBox x:Name="NewWaveNameText"/>
                             <TextBlock Text="Computers (one per line, optional)"/>
                             <TextBox x:Name="NewWaveComputersText" AcceptsReturn="True" Height="220" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
-                            <TextBlock Text="Create only prepares the Wave folder, Computers.txt, Wave.local.json and the Loop/Once launchers. It never launches the Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <TextBlock Text="Create only prepares the Wave folder, Computers.txt, Wave.local.json.txt and the Loop/Once launchers. It never launches the Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             <Button x:Name="CreateWaveButton" Content="Create Wave" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" MinWidth="140"/>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Margin="14,0,0,0">
@@ -998,7 +998,7 @@ function Add-SemtGuiOptionControls {
 function Get-SemtGuiOptionValues {
     <#
     Validated values of the editors. With -AllowInherit (Wave options), an inheriting editor returns
-    __INHERIT__ (the marker of the Wave.local.json template).
+    __INHERIT__ (the marker of the Wave.local.json.txt template).
     #>
     param([Parameter(Mandatory = $true)][hashtable]$Editors,[switch]$AllowInherit)
     $values = @{}
@@ -1072,10 +1072,10 @@ function Update-WaveView {
     $controls.WaveDeviceCountText.Text = [string]$wave.ComputerCount
     $source = 'Manual'
     try {
-        $config = Read-SemtJsonFile -Path (Join-Path $wave.Path 'Wave.local.json')
+        $config = Read-SemtJsonFile -Path (Join-Path $wave.Path 'Wave.local.json.txt')
         if ($config) { $source = ('{0} {1}' -f (Get-SemtPropertyValue -InputObject $config -Name 'Source' -Default 'Manual'),(Get-SemtPropertyValue -InputObject $config -Name 'Description' -Default '')).Trim() }
     }
-    catch { $source = 'Wave.local.json unreadable' }
+    catch { $source = 'Wave.local.json.txt unreadable' }
     $controls.WaveSourceText.Text = $source
     $controls.WaveWrappersText.Text = if ($wave.WrappersReady) { 'Ready' } else { 'Missing: ' + $wave.MissingWrappers }
     $last = @(Get-SemtRuns -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Last 200 | Where-Object { $_.WaveName -eq $wave.Name } | Select-Object -First 1)
@@ -1086,7 +1086,7 @@ function Update-WaveView {
 
 function Update-WaveOptionsView {
     <#
-    Wave options tab: one editor per option of the selected Wave.local.json, with inheritance
+    Wave options tab: one editor per option of the selected Wave.local.json.txt, with inheritance
     (the replacement of the former "Wave options" button that opened the file in Notepad).
     #>
     $controls.WaveOptionsHost.Children.Clear()
@@ -1097,10 +1097,10 @@ function Update-WaveOptionsView {
     if ($null -eq $wave) { $controls.WaveOptionsTitleText.Text = 'Wave options'; return }
     $controls.WaveOptionsTitleText.Text = 'Wave options - {0}' -f $wave.Name
     try {
-        $config = Read-SemtJsonFile -Path (Join-Path $wave.Path 'Wave.local.json') -Required
+        $config = Read-SemtJsonFile -Path (Join-Path $wave.Path 'Wave.local.json.txt') -Required
     }
     catch {
-        $controls.WaveOptionsTitleText.Text = 'Wave options - {0}: Wave.local.json unreadable ({1})' -f $wave.Name,$_.Exception.Message
+        $controls.WaveOptionsTitleText.Text = 'Wave options - {0}: Wave.local.json.txt unreadable ({1})' -f $wave.Name,$_.Exception.Message
         return
     }
     $values = @{}
@@ -1113,7 +1113,7 @@ function Update-WaveOptionsView {
 
 function Save-WaveOptions {
     <#
-    Writes the Wave options into Wave.local.json (atomic write). Only the edited options are
+    Writes the Wave options into Wave.local.json.txt (atomic write). Only the edited options are
     replaced; the other properties and options of the file are kept.
     #>
     param([switch]$InheritAll)
@@ -1123,7 +1123,7 @@ function Save-WaveOptions {
     $values = @{}
     if ($InheritAll) { foreach ($key in @($script:WaveEditors.Keys)) { $values[$key] = '__INHERIT__' } }
     else { $values = Get-SemtGuiOptionValues -Editors $script:WaveEditors -AllowInherit }
-    $path = Join-Path $wave.Path 'Wave.local.json'
+    $path = Join-Path $wave.Path 'Wave.local.json.txt'
     $config = Read-SemtJsonFile -Path $path -Required
     $options = [ordered]@{}
     $existing = Get-SemtPropertyValue -InputObject $config -Name 'Options' -Default $null
@@ -1336,7 +1336,7 @@ function Invoke-AutomaticWave {
         $info.Wait.Window.Tag = 'Done'
         $info.Wait.Window.Close()
         $controls.AutomaticPreviewButton.IsEnabled = $true
-        $summaryFile = Get-ChildItem -LiteralPath $info.Evidence -Filter 'AutomaticWaveSummary.json' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        $summaryFile = Get-ChildItem -LiteralPath $info.Evidence -Filter 'AutomaticWaveSummary.json.txt' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         $logText = Read-InventoryRefreshLog -Path $info.LogFile -Current ''
         if ($script:AutomaticProcess.ExitCode -ne 0 -or -not $summaryFile) {
             $controls.AutomaticSummaryText.Text = ('Automatic Wave failed (exit code {0}).{1}{2}' -f $script:AutomaticProcess.ExitCode,[Environment]::NewLine,$logText)
@@ -1744,8 +1744,8 @@ if (Get-Command -Name Set-SmartM365WpfWindowVisible -ErrorAction SilentlyContinu
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCIu18Eg/3UTQF1
-# YGf3bzuXDlWn924CTqVZoDgMTk6gLaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB92RK3KwfTLI7r
+# bYaK/pHv0RE34RxfLEGV4eypVSuZrqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1775,14 +1775,14 @@ if (Get-Command -Name Set-SmartM365WpfWindowVisible -ErrorAction SilentlyContinu
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBpVIQpcmXVP44VWRtcLB+O
-# yU8L4sk2sj3sxGgwv667HTANBgkqhkiG9w0BAQEFAASCAYCDGI2HSLqUfKp2DC0m
-# m7OtVaoHkJfiZ7SS6Y5JRgN0UMas4TuvRhEZYmmhAT/F/MkdPc3Fr7F76ORxl6Wk
-# u3hgcOi346INRyR6qB7fr/+0gzpFramDtk0bRU95GnM5PPczOMYXehA6+OmuxL/x
-# RSsNH4w/ImTmOdI/2xOYx2zoijqSin5+EX1YQWftgex9vd75Mp6rYl7rRQp2i33J
-# Z1p5aP+I9TbCccgZcseyzktrUF2/5MZIX15aM4xLHGWEvyvqUpNxutNIAoLUHdu9
-# 4+riH+KI0Zi7GmmgKGUfxJarOffWUGE4YpUPA38859gtN5mrGLZ5NtgNK1pOIZJt
-# LIyK+Blzyo4mVy0YAc0VfXO3jcahzEfhk93lF3vE41o/Fs1zBr+F9IwgQlPWJF5K
-# Zhsm5pIq5leCfbWI5/njklRuSSR9Pm8Z0CiUqmrL/+n3oHEW5XUV6FlZPJJMbgaE
-# ix5Yi9NeGp3P/yNfrd4Ot1akD5cHV7tbdGXTKlkO7CNmjMo=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDgRyd+lEBco8GWEJmMcC8e
+# /dpL46roYDjZRrciA7UZxDANBgkqhkiG9w0BAQEFAASCAYASo1+P1N4upk4GsJGu
+# 3TRqIgEnz+BQ61mLQIFo0xcSxKajzOZ3jWH3Nl2DJI9qwyA6rzNVG4OO205d0Bl9
+# p8YJC7NBgC7YUJj3shCWwuIFgEyKPN0G+Ah3KKY6Y63NRYBkZ+Ns6YfOyAdb5AAe
+# xE78yi0MbbZ4Zh1JtKpHegcgb96sCeb/v4KFJBpOCrQNx+qM3xLmPdGf2R9YruVT
+# 3U4kZEMz60hRKYRX5TU3C3PmfNZjadbWcj4szcpMx8VjxwkDhvwyvtbnoVzdnKcF
+# A2ccG00FzkR661IjHXb0PEIloLJ6BghX1ShWrvMfbLK50kJicdSzEzqKiSW/tEBQ
+# ype+5RdskkD0x1Ue8dNPG3G7EhHT0tlGR00auFELSo+5gdoUUTjw63CRBeNrr/Uq
+# ZYdlfiLnmwBQ78PwkV4WfCJWgGVy20f5zVLfTcDx9p+KoFF6eEI03Rt0f9T68GvI
+# eNDdqu/vndeoQNPGdmZcGOc9Wo9VnoiHtpq/ZwFRIxtppTc=
 # SIG # End signature block

@@ -156,7 +156,7 @@ try {
         $LASTEXITCODE -eq 0
     }
     Test-Step 'self-healing adds missing keys and keeps existing values' {
-        $config = Join-Path $tempRoot 'heal.local.json'
+        $config = Join-Path $tempRoot 'heal.local.json.txt'
         $template = Join-Path $tempRoot 'heal.local.json.template'
         Set-Content -LiteralPath $template -Value '{ "SchemaVersion": 1, "Options": { "ThrottleLimit": null, "MaxCycles": null } }' -Encoding UTF8
         Set-Content -LiteralPath $config -Value '{ "SchemaVersion": 1, "Options": { "ThrottleLimit": 4 } }' -Encoding UTF8
@@ -176,8 +176,15 @@ try {
         Copy-Item -Path (Join-Path $script:PackageRoot ("Campaigns\{0}\Templates\*" -f $campaignName)) -Destination $templateTarget -Recurse -Force
     }
     $wave = New-SemtWave -PackageRoot $packageCopy -Campaign HybridJoin -Name 'WAVE-TEST-01' -Computers @('PC-0001','pc-0001.contoso.example','PC-0002','# comment','') -Source Manual
-    Test-Step 'New-SemtWave creates Computers.txt, Wave.local.json and the four launchers' {
-        (Test-Path (Join-Path $wave.Path 'Computers.txt')) -and (Test-Path (Join-Path $wave.Path 'Wave.local.json')) -and @(Get-ChildItem -LiteralPath $wave.Path -Filter 'Start-Wave-*.cmd').Count -eq 4
+    Test-Step 'New-SemtWave creates Computers.txt, Wave.local.json.txt and the four launchers' {
+        (Test-Path (Join-Path $wave.Path 'Computers.txt')) -and (Test-Path (Join-Path $wave.Path 'Wave.local.json.txt')) -and @(Get-ChildItem -LiteralPath $wave.Path -Filter 'Start-Wave-*.cmd').Count -eq 4
+    }
+    Test-Step 'Wave configuration uses the new file and ignores an old JSON file' {
+        $path = Join-Path $tempRoot 'old-wave'
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $path 'Wave.local.json'), '{"Options":{"ThrottleLimit":123}}')
+        $cfg = Read-SemtWaveConfig -PackageRoot $packageCopy -Campaign HybridJoin -WavePath $path -CreateWhenMissing
+        $cfg.Path.EndsWith('Wave.local.json.txt') -and $cfg.Data.Options.ThrottleLimit -ne 123 -and (Test-Path (Join-Path $path 'Wave.local.json'))
     }
     Test-Step 'Wave computer list skips comments and blank lines and removes case-insensitive duplicates' {
         $listed = @(Get-SemtComputerList -Path $wave.ComputersPath)
@@ -199,7 +206,7 @@ try {
     Copy-Item (Join-Path $script:PackageRoot 'Config\SmartEndpointMigrationToolkit.local.json.template') $configDir
     $externalWaves = Join-Path $tempRoot 'External Waves'
     $externalRuns = Join-Path $tempRoot 'External Runs'
-    $runtimePath = Join-Path $configDir 'SmartEndpointMigrationToolkit.local.json'
+    $runtimePath = Join-Path $configDir 'SmartEndpointMigrationToolkit.local.json.txt'
     Write-SemtJsonFileAtomic -Path $runtimePath -InputObject @{ Storage = @{ WavesPath = $externalWaves; RunsPath = $externalRuns } }
     $externalWave = New-SemtWave -PackageRoot $packageCopy -Campaign Windows11Upgrade -Name 'WAVE-EXTERNAL' -Computers @('PC-3')
     Test-Step 'configured Waves path is used and existing runtime config is healed' {
@@ -237,17 +244,17 @@ try {
     $lease1 = Request-SemtWorkerLease -Gate $gate -Campaign HybridJoin -RunId R1 -WaveName W1 -Computer PC-1 -CycleNumber 1
     $lease2 = Request-SemtWorkerLease -Gate $gate -Campaign Windows11Upgrade -RunId R2 -WaveName W2 -Computer PC-2 -CycleNumber 1
     Test-Step 'one shared cap counts both Campaigns' { (Get-SemtWorkerGateSnapshot -Gate $gate).Active.Count -eq 2 -and $lease1 -and $lease2 }
-    $stale = Join-Path $gate.LeaseRoot 'lease_999999_stale.json'
+    $stale = Join-Path $gate.LeaseRoot 'lease_999999_stale.json.txt'
     Write-SemtJsonFileAtomic -Path $stale -InputObject ([pscustomobject]@{ SchemaVersion = 1; Campaign = 'HybridJoin'; Computer = 'PC-STALE'; Limit = 2; LauncherProcessId = 999999; LauncherProcessStartUtc = '2020-01-01T00:00:00.0000000Z'; CreatedUtc = (Get-SemtUtcNowText); HeartbeatUtc = (Get-SemtUtcNowText) })
     $snapshot = & $module { param($g) Get-SemtWorkerGateSnapshotUnlocked -Gate $g -RemoveStale } $gate
     Test-Step 'reservation of a dead launcher is recovered as stale' { @($snapshot.Removed | Where-Object { $_.Reason -eq 'LauncherProcessExited' }).Count -eq 1 -and -not (Test-Path -LiteralPath $stale) }
-    $oldLease = Join-Path $gate.LeaseRoot 'lease_heartbeat_old.json'
+    $oldLease = Join-Path $gate.LeaseRoot 'lease_heartbeat_old.json.txt'
     $selfStart = & $module { Get-SemtProcessStartUtc -ProcessId $PID }
     Write-SemtJsonFileAtomic -Path $oldLease -InputObject ([pscustomobject]@{ SchemaVersion = 1; Campaign = 'HybridJoin'; Computer = 'PC-OLD'; Limit = 2; LauncherProcessId = $PID; LauncherProcessStartUtc = $selfStart; CreatedUtc = (Get-Date).ToUniversalTime().AddMinutes(-30).ToString('o'); HeartbeatUtc = (Get-Date).ToUniversalTime().AddMinutes(-25).ToString('o') })
     $snapshot = & $module { param($g) Get-SemtWorkerGateSnapshotUnlocked -Gate $g -RemoveStale } $gate
     Test-Step 'reservation without heartbeat is recovered as stale' { @($snapshot.Removed | Where-Object { $_.Reason -eq 'HeartbeatStale' }).Count -eq 1 }
     Remove-SemtWorkerLease -LeasePath $lease2 | Out-Null
-    $strict = Join-Path $gate.LeaseRoot 'lease_strict.json'
+    $strict = Join-Path $gate.LeaseRoot 'lease_strict.json.txt'
     Write-SemtJsonFileAtomic -Path $strict -InputObject ([pscustomobject]@{ SchemaVersion = 1; Campaign = 'Windows11Upgrade'; Computer = 'PC-STRICT'; Limit = 1; LauncherProcessId = $PID; LauncherProcessStartUtc = $selfStart; CreatedUtc = (Get-SemtUtcNowText); HeartbeatUtc = (Get-SemtUtcNowText) })
     Test-Step 'strictest active limit wins when launchers use different limits' { (Get-SemtWorkerGateSnapshot -Gate $gate).StrictestActiveLimit -eq 1 }
     Remove-Item -LiteralPath $strict -Force
@@ -293,7 +300,7 @@ try {
     #endregion
 
     #region Worker contract and correlation
-    $contractPath = Join-Path $tempRoot 'contract.json'
+    $contractPath = Join-Path $tempRoot 'contract.json.txt'
     Write-SemtJsonFileAtomic -Path $contractPath -InputObject ([pscustomobject]@{ ContractVersion = 99; Campaign = 'HybridJoin'; EngineVersion = '1.0.0' })
     Test-Throws 'worker refuses a contract of another version' { Read-SemtWorkerContract -Path $contractPath } 'SEMT_WORKER_CONTRACT_VERSION_MISMATCH'
     $fullContract = [ordered]@{ ContractVersion = 1; ContractId = 'c1'; Campaign = 'HybridJoin'; RunId = 'R1'; CorrelationId = 'K1'; Computer = 'PC-1'; ConnectionTarget = 'PC-1'; CycleNumber = 1; PackageRoot = $script:PackageRoot; Endpoint = @{ a = 1 }; PsExec = @{ a = 1 }; Evidence = @{ a = 1 }; Flags = @{ a = 1 }; EngineVersion = '0.9.0' }
@@ -307,13 +314,26 @@ try {
     Test-Step 'final status line without CorrelationId (legacy format) still parses' { (ConvertFrom-SemtFinalStatusLine -Lines @('FINAL_STATUS=X; EXIT_CODE=1; NEXT_ACTION=Y; DETAIL=Z')).CorrelationId -eq '' }
     $share = Join-Path $tempRoot 'TargetShare'
     New-Item -ItemType Directory -Path (Join-Path $share 'State\Results') -Force | Out-Null
-    Write-SemtJsonFileAtomic -Path (Join-Path $share 'State\Results\attempt-1.json') -InputObject ([pscustomobject]@{ CorrelationId = 'attempt-OTHER'; State = 'Completed' })
+    Write-SemtJsonFileAtomic -Path (Join-Path $share 'State\Results\attempt-1.json.txt') -InputObject ([pscustomobject]@{ CorrelationId = 'attempt-OTHER'; State = 'Completed' })
     Test-Step 'foreign attempt result (other CorrelationId) is never trusted' { $r = Read-SemtRemoteAttemptResult -RemoteDataShare $share -CorrelationId 'attempt-1'; $r.State -eq 'Foreign' -and -not $r.Completed }
-    Write-SemtJsonFileAtomic -Path (Join-Path $share 'State\Results\attempt-2.json') -InputObject ([pscustomobject]@{ CorrelationId = 'attempt-2'; State = 'Running' })
+    Write-SemtJsonFileAtomic -Path (Join-Path $share 'State\Results\attempt-2.json.txt') -InputObject ([pscustomobject]@{ CorrelationId = 'attempt-2'; State = 'Running' })
     Test-Step 'running attempt result is reported as not completed' { $r = Read-SemtRemoteAttemptResult -RemoteDataShare $share -CorrelationId 'attempt-2'; $r.State -eq 'Running' -and -not $r.Completed }
-    Write-SemtJsonFileAtomic -Path (Join-Path $share 'State\Results\attempt-3.json') -InputObject ([pscustomobject]@{ CorrelationId = 'attempt-3'; State = 'Completed'; FinalStatus = 'ENROLLED' })
+    Write-SemtJsonFileAtomic -Path (Join-Path $share 'State\Results\attempt-3.json.txt') -InputObject ([pscustomobject]@{ CorrelationId = 'attempt-3'; State = 'Completed'; FinalStatus = 'ENROLLED' })
     Test-Step 'matching completed attempt result is accepted' { (Read-SemtRemoteAttemptResult -RemoteDataShare $share -CorrelationId 'attempt-3').Completed }
     Test-Step 'missing attempt result is reported, not invented' { -not (Read-SemtRemoteAttemptResult -RemoteDataShare $share -CorrelationId 'attempt-4').Exists }
+    Test-Step 'full evidence collects external JSON as .json.txt without overwriting a namesake' {
+        $folder = Join-Path $share 'Output'
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $folder 'external.json'), '{"source":"external"}')
+        [IO.File]::WriteAllText((Join-Path $folder 'collision.json'), '{"source":"old"}')
+        [IO.File]::WriteAllText((Join-Path $folder 'collision.json.txt'), '{"source":"new"}')
+        $dest = Join-Path $tempRoot 'FullJsonEvidence'
+        [void](Copy-SemtCentralEvidence -RemoteDataShare $share -RemoteDataRoot 'C:\Data' -TargetPath $dest -CorrelationId 'attempt-3' -AttemptResult $null -AttemptStartedUtc ([datetime]::UtcNow) -Mode Full)
+        (Test-Path (Join-Path $dest 'Output\external.json.txt')) -and
+        -not (Test-Path (Join-Path $dest 'Output\external.json')) -and
+        ([IO.File]::ReadAllText((Join-Path $dest 'Output\collision.json.txt')) -eq '{"source":"new"}') -and
+        ((Get-Content (Join-Path $dest 'CentralLogCollection.skipped.txt') -Raw) -match 'conflicting')
+    }
     # Why there is no result: data folder not visible, no Results folder, or no file for this attempt.
     $hiddenShare = Join-Path $tempRoot 'TargetShareNotVisible'
     $emptyShare = Join-Path $tempRoot 'TargetShareEmpty'
@@ -402,7 +422,7 @@ $script:HostLines.Clear()
     $unicodeFolder = Join-Path $tempRoot ('Dossier avec espaces ' + [char]0x00E9 + [char]0x4E2D)
     New-Item -ItemType Directory -Path $unicodeFolder -Force | Out-Null
     Test-Step 'JSON written and read back under a space and Unicode path' {
-        $path = Join-Path $unicodeFolder 'state.json'
+        $path = Join-Path $unicodeFolder 'state.json.txt'
         Write-SemtJsonFileAtomic -Path $path -InputObject ([pscustomobject]@{ Value = 'ok' })
         (Read-SemtJsonFile -Path $path).Value -eq 'ok'
     }
@@ -414,7 +434,7 @@ $script:HostLines.Clear()
     $reportRoot = Join-Path $nearLimit 'Reports'
     New-Item -ItemType Directory -Path $reportRoot -Force | Out-Null
     Test-Step 'JSON atomic write of a 250-character path (short temporary name)' {
-        $path = Join-Path $nearLimit ('S' * (249 - $nearLimit.Length) + '.json')
+        $path = Join-Path $nearLimit ('S' * (249 - $nearLimit.Length) + '.json.txt')
         Write-SemtJsonFileAtomic -Path $path -InputObject ([pscustomobject]@{ Value = 'near-limit' })
         $path.Length -ge 249 -and (Read-SemtJsonFile -Path $path).Value -eq 'near-limit' -and @(Get-ChildItem -LiteralPath $nearLimit -Force -Filter '*.tmp').Count -eq 0
     }
@@ -426,7 +446,7 @@ $script:HostLines.Clear()
         (Test-Path -LiteralPath $reportState.HtmlPath -PathType Leaf) -and @(Get-ChildItem -LiteralPath $reportRoot -Force -Filter '*.tmp').Count -eq 0
     }
     # A virtual machine skipped by -SkipVirtualMachines must never consume the endpoint run guard:
-    # Hybrid Join left LastRun.json at RUNNING, Windows 11 checked the guard before the skip.
+    # Hybrid Join left LastRun.json.txt at RUNNING, Windows 11 checked the guard before the skip.
     $hjEndpointText = [IO.File]::ReadAllText((Join-Path $script:PackageRoot 'Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1'))
     $w11EndpointText = [IO.File]::ReadAllText((Join-Path $script:PackageRoot 'Campaigns\Windows11Upgrade\Scripts\SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1'))
     Test-Step 'Hybrid Join endpoint: a skipped virtual machine neither applies nor writes the run guard' {
@@ -525,7 +545,7 @@ $script:HostLines.Clear()
     } -ArgumentList $w11Region, $w11Data
     try {
         $held = $false
-        for ($i = 0; $i -lt 30; $i++) { Start-Sleep -Seconds 1; if (Test-Path (Join-Path $targetRoot 'State\TargetOperation.json')) { $held = $true; break } }
+        for ($i = 0; $i -lt 30; $i++) { Start-Sleep -Seconds 1; if (Test-Path (Join-Path $targetRoot 'State\TargetOperation.json.txt')) { $held = $true; break } }
         Test-Step 'cross-campaign target guard: lease written by the holder' { $held }
         $blocked = Enter-SemtTargetOperationGuard -Campaign HybridJoin -CampaignDataRoot $hjData -RunId R-HJ -CorrelationId C-HJ
         Test-Step 'cross-campaign target guard blocks the other Campaign with an explicit status' { -not $blocked.Acquired -and $blocked.Status -eq 'TARGET_OPERATION_ACTIVE' -and $blocked.Detail -match 'Windows11Upgrade' }
@@ -541,18 +561,18 @@ $script:HostLines.Clear()
     Test-Step 'pending marker does not block its own Campaign' { $sameCampaign.Acquired }
     Exit-SemtTargetOperationGuard -CampaignDataRoot $w11Data
     Test-Step 'pending marker is cleared only by its own Campaign' { -not (Clear-SemtTargetPendingOperation -Campaign HybridJoin -CampaignDataRoot $hjData) -and (Clear-SemtTargetPendingOperation -Campaign Windows11Upgrade -CampaignDataRoot $w11Data) }
-    Write-SemtTargetJson -Path (Join-Path $targetRoot 'State\TargetPendingOperation.json') -Data ([pscustomobject]@{ Campaign = 'Windows11Upgrade'; Reason = 'old'; ExpiresUtc = (Get-Date).ToUniversalTime().AddHours(-1).ToString('o'); LastBootUtc = ''; ClearedByReboot = $true })
+    Write-SemtTargetJson -Path (Join-Path $targetRoot 'State\TargetPendingOperation.json.txt') -Data ([pscustomobject]@{ Campaign = 'Windows11Upgrade'; Reason = 'old'; ExpiresUtc = (Get-Date).ToUniversalTime().AddHours(-1).ToString('o'); LastBootUtc = ''; ClearedByReboot = $true })
     $expired = Enter-SemtTargetOperationGuard -Campaign HybridJoin -CampaignDataRoot $hjData -RunId R-HJ -CorrelationId C-HJ3
     Test-Step 'expired pending marker no longer blocks' { $expired.Acquired }
     Exit-SemtTargetOperationGuard -CampaignDataRoot $hjData
-    Set-Content -LiteralPath (Join-Path $targetRoot 'State\TargetPendingOperation.json') -Value '{ not json' -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $targetRoot 'State\TargetPendingOperation.json.txt') -Value '{ not json' -Encoding ASCII
     $unreadable = Enter-SemtTargetOperationGuard -Campaign HybridJoin -CampaignDataRoot $hjData -RunId R-HJ -CorrelationId C-HJ4
     Test-Step 'unreadable pending marker gives an explicit indeterminate status' { -not $unreadable.Acquired -and $unreadable.Status -eq 'TARGET_STATE_UNREADABLE' }
     Exit-SemtTargetOperationGuard -CampaignDataRoot $hjData
-    Remove-Item -LiteralPath (Join-Path $targetRoot 'State\TargetPendingOperation.json') -Force
+    Remove-Item -LiteralPath (Join-Path $targetRoot 'State\TargetPendingOperation.json.txt') -Force
     Test-Step 'attempt results keep the newest 50 files' {
         for ($i = 0; $i -lt 55; $i++) { [void](Write-SemtAttemptResult -CampaignDataRoot $hjData -Data @{ CorrelationId = ('c-{0:000}' -f $i); State = 'Completed' }) }
-        @(Get-ChildItem -LiteralPath (Join-Path $hjData 'State\Results') -Filter '*.json').Count -eq 50
+        @(Get-ChildItem -LiteralPath (Join-Path $hjData 'State\Results') -Filter '*.json.txt').Count -eq 50
     }
     #endregion
 
@@ -603,8 +623,8 @@ exit 0
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCIXE7D8LX5TpgF
-# md1MbXzkaZ2zu+A6m1q8SKijICH6KKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBVJjODCOfUCWQx
+# ebOCfMrUvSjlIvReDIXAzxwLdWVqlaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -634,14 +654,14 @@ exit 0
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDXVmQt6uzJd3ME6Z7lyU5o
-# z5opPCzuVonJSSebNeXBFjANBgkqhkiG9w0BAQEFAASCAYBZOVGOPzZ6lO9kkyTr
-# 8+5ZMiSwY7UpzkpNWCX4dn1OZkBOiEyb/Za4H+zYu2dRzRyhcaVYIHVXIpmay91m
-# Xkcd2XayzhXo2eq6osRqVkfYUPSSJUSQNXXvcOGBoYQdvUz4x0NfJKU9o/rogcri
-# PX2K33Pic72XrGY2Cg7BwF2ryESr9DxJJOcdMYtyhQEyMlI8igz6BTfLbSCTgcFw
-# iwqjR54r9dcYTsN9D9stCBQ5h/lyzfPVazR7VspCDImk7aIeTQa7S7Hzdhyrq9aQ
-# j4XL5/+fmfzf8qM4AOVOaaUX+VFW3s11L4TYFCiTbURBCS8KTF8yM7LHyo4pUKGL
-# n+XuwFSRZmXfk/8tvwH1JGF34YHgYO6zYTTj3GNtI2pduqDphQWIKpTKQ6RxkR5A
-# m/47oYqLoBhzbzxwnH1zv+XPdMm0p4MG82gcZrjMwUXQuY16G7FRkKtPq8nnhmR2
-# iUR8e9KXiTH4yCiHKaDPT6vVd/4v6sdk2zQKFEEk4BRmI7Y=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAUvJAsQRqKQyxAoy+wPfcI
+# RrenvqLu47FXKyO8aAbz6DANBgkqhkiG9w0BAQEFAASCAYBzJFgsqz/MfQ2fnE2b
+# XBBg37doE+X0NCJNfJi8jY0c1DqbmY41oXjw9x2hZhZ3hH362K0SMogkSVOgMwb9
+# gZH7HKrAyxjXC1TAL8GEfYHMaUwE5akMKt3ihP0PDouCgocwjYvm1kYeOsKgLqWo
+# jSGV2YlqwyPD2VU7cOteRe7nZC1Xfq+7g3S/CccLTltNGS9of+aImWlxXqfR6Z7P
+# xzMtUiQjnnlXUzdqanW9kAzpJHun2lcPWVD4r/bAvPAXngyCYQX8nYrWhF13fY5D
+# sMWBVYX4mxUz2d4/tI3bOiOsZ2gZEjrrJ0mirJzmQbPnHJHqiHD7u43TUXiium0u
+# WmLfed/VrC4ySFJnJjxAouQo+ia95FBa6hqYPcLpPbaeS5BOWW2mrGbi6eo7jwOz
+# gjhsIf13PAu3ajnGvavLBeftoH29pntIv0J9/g3TlaVqNCExbVWdDC4PtmOqgljY
+# ELRrdY1ArW9gx5EADRf5QzR9jdZiEFB0sZU5TFodBX1QxRA=
 # SIG # End signature block

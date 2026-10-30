@@ -8,10 +8,10 @@ The table at the end is generated from the catalog; the catalog wins if they dif
 Highest first:
 
 1. Explicit CLI (`-Option @{ Name = Value }`, `-DryRun`, `-AuditOnly`, `-IgnoreRunGuard`)
-2. GUI choices captured for the Run (`Runs\<Campaign>\_GuiSelections\*.json`, Campaign checked)
-3. Wave (`Waves\<Campaign>\<Wave>\Wave.local.json`)
+2. GUI choices captured for the Run (`Runs\<Campaign>\_GuiSelections\*.json.txt`, Campaign checked)
+3. Wave (`Waves\<Campaign>\<Wave>\Wave.local.json.txt`)
 4. `SEMT_*` environment variables (`SEMT_*` common, `SEMT_HYBRIDJOIN_*`, `SEMT_WINDOWS11_*`)
-5. Global configuration (`Config\SmartEndpointMigrationToolkit.local.json`)
+5. Global configuration (`Config\SmartEndpointMigrationToolkit.local.json.txt`)
 6. Campaign default (catalog `CampaignDefaults`, else `Default`)
 
 Then rules: `DryRunSingleCycle` (dry run with unlimited cycles runs one cycle), `RunModeOnce`
@@ -22,8 +22,8 @@ empty, `null`, `__INHERIT__`, `__USE_GLOBAL__`, `USE_GLOBAL`, `__USE_DEFAULT__`.
 validated against type, range and choices; an invalid or unknown option stops the Run with the
 layer that supplied it. An option of the other Campaign is ignored.
 
-Every Run records `EffectiveOptions.json` (value and source of each option) and the report shows
-the same table. The GUI keeps its last choices per Campaign in `Config\GuiState.<Campaign>.local.json`.
+Every Run records `EffectiveOptions.json.txt` (value and source of each option) and the report shows
+the same table. The GUI keeps its last choices per Campaign in `Config\GuiState.<Campaign>.local.json.txt`.
 
 ## Default decisions (D11)
 

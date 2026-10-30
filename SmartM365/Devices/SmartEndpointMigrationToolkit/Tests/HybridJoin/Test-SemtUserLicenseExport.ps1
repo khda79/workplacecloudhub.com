@@ -34,7 +34,7 @@ Export-ModuleMember -Function Get-MgContext,Invoke-MgGraphRequest
     $rows = @(Import-Csv -LiteralPath $output)
     if ($rows.Count -ne 2 -or $rows[0].InventoryComplete -ne 'True') { throw 'Paged export incomplete.' }
     Write-Host 'PASS: all user pages exported with provenance'
-    $targeted = Join-Path $testRoot 'Targeted.json'
+    $targeted = Join-Path $testRoot 'Targeted.json.txt'
     & (Join-Path $root 'Scripts\SmartM365-EndpointMigration-Get-UserLicense.ps1') -UserSid 'S-1-5-21-42' -TenantId '22222222-2222-2222-2222-222222222222' -OutputPath $targeted -NoConnect
     $targetData = Get-Content -LiteralPath $targeted -Raw | ConvertFrom-Json
     if ($targetData.User.id -ne 'u1' -or @($targetData.LicenseDetails).Count -ne 1) { throw 'Targeted lookup returned incorrect identity or licenses.' }
@@ -77,8 +77,8 @@ Export-ModuleMember -Function Get-MgContext,Invoke-MgGraphRequest
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+BCuyueHNDi9Y
-# iiI2pN9KgXVMxn2um2qr0cUK7UGdwKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7KaXHqxKvP00o
+# 1x0aHZiio784L/jKCsTrzAjt/vLBjqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -108,14 +108,14 @@ Export-ModuleMember -Function Get-MgContext,Invoke-MgGraphRequest
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAESOuy2Vq9uFJzpPe0IXX0
-# C1M8X4KvrmOSf2MKkTFUQTANBgkqhkiG9w0BAQEFAASCAYArhJnyJdhOLPvoRgOo
-# TnXBXYW5rPTw6S2kBQRZDVud18aziPuRlex3/FogRHtpDS479aMQi/NZ/UbADsh3
-# zOAbsLwztpKpmNDrDv1kK9i/CddZtv4pkTvr5+ByzJ+zxjqnASwXA0yYLfkuDvga
-# KkYh6OldBwN9isafrx12iNziQBoKURXtra6LQ1eSegioyYhXPr5k8AmCO1g34FMy
-# XW6p+3TNEaobbfZtQUSciwQhWuPD9wSzny9aTqRkEWilgwCNdsUAQAVOW1cOWSnd
-# jeqCaXtTau+XvSlDzoxFQHT5XfsUJOURsN1VAtZPznsU+MUAuk0vghXCKEYMgdK+
-# XoemtiY4mKTTq2jDWUjVg9jG1j5QrjPysqa5e2uZ1y3H0fHXt2qjstyeeIpB+IN4
-# LGKN8y6RkMecUmTSv/4z1Nbb2bhmdAJT7ma/dd7MORozrdovRJxVAcms9icrp5Ep
-# 0EaeaUW0eDeqZsULJ5aIws79Yn5uXZhi4hOIn1g0bzrR/fg=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD24aLEokQMTbSAmd4CPM2m
+# ugTbJLkcdyUf6Jp430yTTTANBgkqhkiG9w0BAQEFAASCAYAq+DYzKhGjrwk/kXnv
+# oehN0+O/KGfiHyd/rrRZlnMC6liKV6eIF1kYF0jj1BKLsuhC0Zg0bI45H+26Mn/I
+# vqiVG+697UyEu/HXUjMl9CshcqZ0YBhWBHBpJUdOK+uXXml5Krpq/lBTQnFPhzIw
+# 9YG6j3YFdPP19Cxf9KxmljauuTmAgo1gAim+i81gGeAYYFlIuFS0gQEJgpWe5N+X
+# 3dE+yqFvxCjI0p6OzFPRoJpCE6IBxp2lBdwAdmvq07wYEOn/23aN1q+3R10f/bd6
+# 137TDJMK45UPBt78b3bgP1oTSsVxcP85cvwOy/EZ/JrL4riPO2Ftd3YI1djNmhX7
+# euUUk96VNKyc4YeGh/5TCYzufnHEdWxhBGb/VbSs91laIBnspFu8P7fnPY6TtFGn
+# ob2Jz+hAH1sxbAs7Hlv9A7iQn7RcsYXuUYwSMeZypN0juipnBkgIcelM5OnfK8uM
+# RE8Wxlb5dafbzpau0tun0GlR8lIsNZuYkLcY4J1c8fC5X/s=
 # SIG # End signature block

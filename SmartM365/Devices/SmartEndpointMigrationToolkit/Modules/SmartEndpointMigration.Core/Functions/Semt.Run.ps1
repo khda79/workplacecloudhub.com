@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Layout:
-      <Package>\Waves\<Campaign>\<Wave>\Computers.txt + Wave.local.json + wrappers
+      <Package>\Waves\<Campaign>\<Wave>\Computers.txt + Wave.local.json.txt + wrappers
       <Package>\Runs\<Campaign>\<Wave>\<RunId>\{Logs,PsExecLogs,Reports,CentralLogs,State,Inventory}
     A Single PC Run uses an ephemeral Wave created under Runs\<Campaign>\_SinglePC\<RunId>\Wave
     and goes through the same engine.
@@ -146,7 +146,7 @@ function Write-SemtWaveWrappers {
 
 function New-SemtWave {
     <#
-    Creates Waves\<Campaign>\<Name> with Computers.txt, Wave.local.json (from the campaign
+    Creates Waves\<Campaign>\<Name> with Computers.txt, Wave.local.json.txt (from the campaign
     template) and the Loop/Once wrappers. It never launches the Wave.
     #>
     [CmdletBinding()]
@@ -219,8 +219,8 @@ function New-SemtRunContext {
         ContractRoot = Join-Path -Path (Join-Path -Path $RunRoot -ChildPath 'State') -ChildPath 'Contracts'
         InventoryRoot = Join-Path -Path $RunRoot -ChildPath 'Inventory'
         LauncherLogPath = Join-Path -Path (Join-Path -Path $RunRoot -ChildPath 'Logs') -ChildPath ("SEMT-{0}-Launcher_{1}.log" -f $Campaign,$RunId)
-        EffectiveOptionsPath = Join-Path -Path $RunRoot -ChildPath 'EffectiveOptions.json'
-        RunManifestPath = Join-Path -Path $RunRoot -ChildPath 'RunManifest.json'
+        EffectiveOptionsPath = Join-Path -Path $RunRoot -ChildPath 'EffectiveOptions.json.txt'
+        RunManifestPath = Join-Path -Path $RunRoot -ChildPath 'RunManifest.json.txt'
     }
     foreach ($folder in @($context.LogRoot,$context.PsExecLogRoot,$context.ReportRoot,$context.CentralLogRoot,$context.StateRoot,$context.ContractRoot,$context.InventoryRoot)) { New-SemtDirectory -Path $folder }
     return $context
@@ -258,7 +258,7 @@ function Update-SemtRunHistory {
         [int]$Cycles = 0
     )
 
-    $historyPath = Join-Path -Path (Split-Path -Path $RunContext.RunRoot -Parent) -ChildPath 'RunHistory.json'
+    $historyPath = Join-Path -Path (Split-Path -Path $RunContext.RunRoot -Parent) -ChildPath 'RunHistory.json.txt'
     $lockPath = '{0}.lock' -f $historyPath
     Invoke-SemtWithFileLock -LockPath $lockPath -TimeoutSeconds 60 -ArgumentList @($historyPath,$RunContext,$Status,$ReportPath,$Detail,$Cycles) -ScriptBlock {
         param($LockedPath, $LockedContext, $LockedStatus, $LockedReport, $LockedDetail, $LockedCycles)
@@ -295,7 +295,7 @@ function Get-SemtRuns {
     $root = Join-Path -Path (Get-SemtStorageRoot -PackageRoot $PackageRoot -Kind Runs) -ChildPath $Campaign
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { return @() }
     $rows = New-Object System.Collections.Generic.List[object]
-    foreach ($historyFile in @(Get-ChildItem -LiteralPath $root -Filter 'RunHistory.json' -File -Recurse -Depth 1 -ErrorAction SilentlyContinue)) {
+    foreach ($historyFile in @(Get-ChildItem -LiteralPath $root -Filter 'RunHistory.json.txt' -File -Recurse -Depth 1 -ErrorAction SilentlyContinue)) {
         $history = $null
         try { $history = Read-SemtJsonFile -Path $historyFile.FullName } catch { $history = $null }
         if (-not $history) { continue }
@@ -322,7 +322,7 @@ function Invoke-SemtRunArchive {
     $threshold = (Get-Date).AddDays(-1 * $OlderThanDays)
     $results = New-Object System.Collections.Generic.List[object]
     foreach ($folder in @(Get-ChildItem -LiteralPath $waveRunsRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'Archives' -and $_.FullName -ne $RunContext.RunRoot -and $_.LastWriteTime -lt $threshold })) {
-        if (@(Get-ChildItem -LiteralPath (Join-Path -Path $folder.FullName -ChildPath 'State') -Filter 'ActiveRun_*.json' -File -ErrorAction SilentlyContinue).Count -gt 0) { continue }
+        if (@(Get-ChildItem -LiteralPath (Join-Path -Path $folder.FullName -ChildPath 'State') -Filter 'ActiveRun_*.json.txt' -File -ErrorAction SilentlyContinue).Count -gt 0) { continue }
         New-SemtDirectory -Path $archiveRoot
         $zipPath = Join-Path -Path $archiveRoot -ChildPath ('{0}.zip' -f $folder.Name)
         try {
@@ -520,7 +520,7 @@ function New-SemtWorkerContract {
         CampaignData = $CampaignData
     }
     $safe = Get-SemtSafeName -Value ($Computer.Split('.')[0]) -MaxLength 40
-    $path = Join-Path -Path $RunContext.ContractRoot -ChildPath ('C{0}_{1}_{2}.json' -f $CycleNumber,$safe,$contract.ContractId.Substring(0, 8))
+    $path = Join-Path -Path $RunContext.ContractRoot -ChildPath ('C{0}_{1}_{2}.json.txt' -f $CycleNumber,$safe,$contract.ContractId.Substring(0, 8))
     Write-SemtJsonFileAtomic -Path $path -InputObject $contract -Depth 8
     return [pscustomobject]@{ Path = $path; CorrelationId = $correlationId; ContractId = $contract.ContractId }
 }
@@ -618,7 +618,7 @@ function Get-SemtRunGuardHistoryPath {
     param([Parameter(Mandatory = $true)][string]$Campaign)
 
     [void](Assert-SemtCampaign -Campaign $Campaign)
-    return (Join-Path -Path (Join-Path -Path (Get-SemtLauncherStateRoot) -ChildPath $Campaign) -ChildPath 'RunGuardHistory.json')
+    return (Join-Path -Path (Join-Path -Path (Get-SemtLauncherStateRoot) -ChildPath $Campaign) -ChildPath 'RunGuardHistory.json.txt')
 }
 
 function Invoke-SemtRunGuardHistoryTransaction {
@@ -674,8 +674,8 @@ function Get-SemtRunGuardFqdn {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCALISgspWj9EiFB
-# awc4UFi0fpMRzlQCd/A9mrENho7/xKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCix+kW/JfkoGFQ
+# ODcMLKw+dpupuxYsm1An9cLMe4bL9KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -705,14 +705,14 @@ function Get-SemtRunGuardFqdn {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCpvvtCNVmhn7ym1aQnzo3F
-# rVtkczv366mzNhha443HVTANBgkqhkiG9w0BAQEFAASCAYCWb6q3+YpTtf0jPg04
-# e7xzkcLPh0SBfYExBFRGnR+uvcQY39a6fkmGiiVqapF/IVnHqXf83i53k7ACwbWE
-# vzPrwLlEn5khRont3WxHhEWOtcFc03E8uWYsfZqMN0c2Qz5dvem3Qmu06vsUyDsm
-# COVgouU41L/RNLlJuv+1/1Pf3JUqvDHB3K0Mr1QpfEQCFImWwFwgotuFDAIzGMUL
-# b4kn1wvcsJCOon6VGTh4+hEFzKI7kHhrO+dNe1Mp7kv6QM8ivsWjy+YtDdsJD+dS
-# 07vfA+4W7grd63Ig+nHvT+C8LURMlYzJZ532VC5BqvstiPDpOl+evwcWt05ABuQv
-# hq9g7LohKcEqdoEH/7PpfXydUOWZW1Gt/Z5IBGfHAScHYLZSDaCiRKnNtEi5MDwG
-# dqHOQENZUquWJ013cNtCw1/lS3RYKT+yPgb3ylUdCo+ZP+cG7zEMyoxhU8+WAYBZ
-# 54wBvE2jBma3DH/a0YuRdzOQAW+RDNCV1t9oLxVRjU16sa4=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDLF19gECEJ5IOM46HqN2KV
+# TRiwoI09EKEVScU5NE9hIDANBgkqhkiG9w0BAQEFAASCAYBHdgGEIbRtHpESt4+0
+# YxTRoIWCPJNg3TsDa6B8LvftqUYzyL6eb9jdxhxH8ziWt9Bq5R10dRYG/kKfHG+2
+# 6tlVFkGP5QUmFATKNBjYZGQT2YIInt6Wrj7FPHHeLQaY4W/RAMtqyakax0C7iMxU
+# XUBgPvsCsTy+R4n7ztpcQXQwlI9d2Mr5JxbbtpLM8CNwAOaKFSqinElr+v71hct8
+# P7z23uJmkESlx9s1KsckaAjksDwHheuM0/fll7vzMRFo4pVHneICq/mPnbmXd1Co
+# 3l8oY0mRedRdpyEyGQGb4XQfKsvl1o9cnPx3SfbESVCi3upwtLSG5h9/YODzoJWB
+# 1zLiU90Lxxp1kn94ulCoTtweUp0dZmUOblxSsPzkoDdjiokUAZCWQ9Fi6Ik3fwjt
+# uF+o/p1KlMP8ExxUHSfZI7gfib/eIsyguuMyhimu8O/p71NWKY3Jloca/ZH9XcCQ
+# uBNAV0zIpjU7mzfCYGOkcDPwsirXsFNlYceNWbM7dXXAKLA=
 # SIG # End signature block

@@ -4,8 +4,8 @@ This folder is a template for the setup source copy gate root of the Windows11Up
 
 For production Wave/PsExec runs, do not use this repository folder as the active gate root.
 Create a dedicated UNC share that target computer accounts can write to, then set the options
-(environment variable names shown; the same keys exist in `Wave.local.json` and
-`Config\SmartEndpointMigrationToolkit.local.json`):
+(environment variable names shown; the same keys exist in `Wave.local.json.txt` and
+`Config\SmartEndpointMigrationToolkit.local.json.txt`):
 
 ```text
 SEMT_WINDOWS11_SETUP_SUBNET_CONCURRENCY_LIMIT=1
@@ -34,7 +34,7 @@ Required permissions on the production share:
 Lease behavior:
 
 - One slot directory is created per allowed copy in `SetupSubnetCopy/<subnet-key>/slot-NNN`.
-- Each slot contains `lease.json` with computer, run, source, subnet, creation time, and heartbeat time.
+- Each slot contains `lease.json.txt` with computer, run, source, subnet, creation time, and heartbeat time.
 - The heartbeat is refreshed during `robocopy`.
 - If a device crashes or disappears, another device can remove the stale slot after
   `SEMT_WINDOWS11_SETUP_SUBNET_CONCURRENCY_LEASE_MINUTES`.

@@ -11,7 +11,7 @@ Runs locally on the machine (typically under LocalSystem through PsExec). Writes
 by default C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin.
 - One Smart Endpoint Migration Toolkit operation at a time per computer (shared target guard).
 - Previous toolkits are inspected read-only; a real active legacy operation stops the run.
-- Each attempt writes State\Results\<CorrelationId>.json for the technician worker.
+- Each attempt writes State\Results\<CorrelationId>.json.txt for the technician worker.
 
 - If not domain joined => Exit 2.
 - If DC not reachable => Exit 4.
@@ -205,16 +205,16 @@ $Timestamp    = Get-Date
 $ComputerName = $env:COMPUTERNAME
 $RunGuardHours = 12
 $CleanupRetentionDays = 7
-$RunGuardPath = Join-Path $DataRoot "LastRun.json"
+$RunGuardPath = Join-Path $DataRoot "LastRun.json.txt"
 $script:RetryAfterRebootTaskName = "SmartM365-SEMT-HybridJoin-RetryAfterReboot"
 # The retry task runs as SYSTEM: its runner, its state (script path and arguments) and the endpoint
 # copy it starts live under Program Files, never under ProgramData.
 $script:RetryAfterRebootProgramDir = Join-Path $env:ProgramFiles "WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\RetryAfterReboot"
-$script:RetryAfterRebootStatePath = Join-Path $script:RetryAfterRebootProgramDir "RetryAfterReboot.json"
+$script:RetryAfterRebootStatePath = Join-Path $script:RetryAfterRebootProgramDir "RetryAfterReboot.json.txt"
 $script:RetryAfterRebootRunnerPath = Join-Path $script:RetryAfterRebootProgramDir "RetryAfterRebootRunner.ps1"
 $script:RetryAfterRebootScriptPath = Join-Path $script:RetryAfterRebootProgramDir "SmartM365-Invoke-EndpointMigration-HybridJoin.ps1"
-$script:RebootSafetyStatePath = Join-Path $StateDir "RebootSafety.json"
-$script:EndpointInstanceStatePath = Join-Path $StateDir "EndpointInstance.json"
+$script:RebootSafetyStatePath = Join-Path $StateDir "RebootSafety.json.txt"
+$script:EndpointInstanceStatePath = Join-Path $StateDir "EndpointInstance.json.txt"
 $script:EndpointInstanceMutexName = "Global\SmartM365_SEMT_HybridJoin_Endpoint"
 $script:EndpointInstanceMutex = $null
 $script:EndpointInstanceMutexAcquired = $false
@@ -810,8 +810,8 @@ function Enter-SemtTargetOperationGuard {
     )
 
     $productRoot = Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot
-    $leasePath = Join-Path -Path $productRoot -ChildPath 'State\TargetOperation.json'
-    $pendingPath = Join-Path -Path $productRoot -ChildPath 'State\TargetPendingOperation.json'
+    $leasePath = Join-Path -Path $productRoot -ChildPath 'State\TargetOperation.json.txt'
+    $pendingPath = Join-Path -Path $productRoot -ChildPath 'State\TargetPendingOperation.json.txt'
     try {
         $script:SemtTargetMutex = New-Object System.Threading.Mutex($false, $script:SemtTargetMutexName)
         try { $script:SemtTargetMutexAcquired = $script:SemtTargetMutex.WaitOne(0) }
@@ -862,7 +862,7 @@ function Exit-SemtTargetOperationGuard {
     param([Parameter(Mandatory = $true)][string]$CampaignDataRoot)
 
     if ($script:SemtTargetMutexAcquired) {
-        $leasePath = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetOperation.json'
+        $leasePath = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetOperation.json.txt'
         try {
             $lease = Read-SemtTargetJson -Path $leasePath
             if ($lease -and [int]$lease.ProcessId -eq $PID) { Remove-Item -LiteralPath $leasePath -Force -ErrorAction SilentlyContinue }
@@ -884,7 +884,7 @@ function Set-SemtTargetPendingOperation {
         [bool]$ClearedByReboot = $true
     )
 
-    $path = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetPendingOperation.json'
+    $path = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetPendingOperation.json.txt'
     $boot = Get-SemtTargetLastBootUtc
     Write-SemtTargetJson -Path $path -Data ([pscustomobject]@{ SchemaVersion = 1; Campaign = $Campaign; Reason = $Reason; SinceUtc = (Get-Date).ToUniversalTime().ToString('o'); ExpiresUtc = (Get-Date).ToUniversalTime().AddHours($Hours).ToString('o'); LastBootUtc = $(if ($boot) { $boot.ToString('o') } else { '' }); ClearedByReboot = $ClearedByReboot })
 }
@@ -895,7 +895,7 @@ function Clear-SemtTargetPendingOperation {
         [Parameter(Mandatory = $true)][string]$CampaignDataRoot
     )
 
-    $path = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetPendingOperation.json'
+    $path = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetPendingOperation.json.txt'
     try {
         $pending = Read-SemtTargetJson -Path $path
         if ($pending -and [string]$pending.Campaign -eq $Campaign) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop; return $true }
@@ -1035,7 +1035,7 @@ function Get-SemtLegacyEndpointActivity {
 
 function Write-SemtAttemptResult {
     <#
-    Writes <DataRoot>\State\Results\<CorrelationId>.json. The technician worker only trusts a
+    Writes <DataRoot>\State\Results\<CorrelationId>.json.txt. The technician worker only trusts a
     result whose CorrelationId matches its own attempt. Keeps the newest 50 result files.
     #>
     param(
@@ -1044,10 +1044,10 @@ function Write-SemtAttemptResult {
     )
 
     $resultsRoot = Join-Path -Path $CampaignDataRoot -ChildPath 'State\Results'
-    $path = Join-Path -Path $resultsRoot -ChildPath ('{0}.json' -f [string]$Data['CorrelationId'])
+    $path = Join-Path -Path $resultsRoot -ChildPath ('{0}.json.txt' -f [string]$Data['CorrelationId'])
     Write-SemtTargetJson -Path $path -Data ([pscustomobject]$Data)
     try {
-        @(Get-ChildItem -LiteralPath $resultsRoot -Filter '*.json' -File -ErrorAction Stop | Sort-Object LastWriteTimeUtc -Descending | Select-Object -Skip 50) | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+        @(Get-ChildItem -LiteralPath $resultsRoot -Filter '*.json.txt' -File -ErrorAction Stop | Sort-Object LastWriteTimeUtc -Descending | Select-Object -Skip 50) | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
     }
     catch { }
     return $path
@@ -1298,7 +1298,7 @@ function Get-ComputerSystemSummary {
 }
 
 # A virtual machine skipped by -SkipVirtualMachines is detected before the run guard: the skip does
-# nothing on the computer, so it neither applies nor writes the 12-hour guard (LastRun.json). Writing
+# nothing on the computer, so it neither applies nor writes the 12-hour guard (LastRun.json.txt). Writing
 # it left Status=RUNNING and blocked the next Runs with RUN_GUARD_ACTIVE.
 $script:SkipAsVirtualMachine = $false
 if ($SkipVirtualMachines) {
@@ -5733,8 +5733,8 @@ exit $ExitCode
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCWmGG5u8K7Lerv
-# tmNkLbINoQ0QS6SpuUq2AQ70rJ7f4KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqe9v6nUl+VT4A
+# ruI8C8s/tTjVqsqvI0JGpUCrL5rHA6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5764,14 +5764,14 @@ exit $ExitCode
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCE7/6A2z5pEy0P3tYEzD++
-# BTlxWwdTe4RzWUwUjwsVqzANBgkqhkiG9w0BAQEFAASCAYCml/TmVAKGjnr3agNV
-# VGeJ56AknA7v97HrtuTMPq0uftFYn1ZAr8uqchZ/rsLLV7dDCYiOJe+MJr2c8vM1
-# Hr09e5mC65pM0K39oZL1lbZWTGMMdFxsxRdaHAIRRk5zIA/taCs2QMzsDQjxWLJR
-# bhYC7JHMVY7QeCt4MF6F3nxjbyOV8IiAzkP7zu8MCX9Fjr0gF9LktZdLo6xXCTf8
-# 7drVhDtwVejLKnjlzWToVRVPow3Ew/AJZEHd9NSKhuhz0U+/pu+ehJFbm1af8RAS
-# ALxF9v1URJ9Ca+Xz3Anxxk0m3Z/P9/9VQ/LXAsP5XjUeM9nKWnTF2qWwqd7XEaFV
-# o1gYm78yWHmgcunYAg6tVFMztQHqoffxaFI6ovkYQ6FgcFQXRMuVVmapE8BT5LiV
-# HIfEATyDAnH09XJboYKKzXwH6LPH/AtoXZi7AtqZSA3oc4NRb8uR/Pz92+GoO3zK
-# VPDMv++luGY4UCy0YT6/NzJvfg5jdDa3KhZJV1Q6+wcOa8c=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBEyyDoAimeLcyI1shhtxHO
+# blSfeoWaPPFtq6fMSTZvbjANBgkqhkiG9w0BAQEFAASCAYBPqnWNiDL2nnaCg73A
+# ctSPiQBBqOyRpjZ9i9+GJefWP6MzsiFojWKAZAAFvGPXS3EV5ii5hUz1HFVnb2yC
+# cMPjTvsSRP4jAlxNwbr1mOEFr9TrOp/mADI7Foaws/E4iP8rVfhGZ/N4G+39gpZW
+# cnyHdg5F94TfL/2V+bvrvpRGuoXa7bwvXgdhx0OvZtY53rv7xYhXFIrfXOWSgRD7
+# qqiqIDc+Ziw66NA4nfdzYt0be+GKWfS72QDMyphR2gxBF1tb/5rvC4MA5xaXbDZB
+# z9m1T6iRiUY3Lir4TAWRUKd9vfvWXsvdjd/NoFNo18CaOrmLkPWw10s1YTLF5vZ9
+# Az5wwqh5tc/uIuc+2enoWyCMKzPnsaMWV47+aj92ZwGmxW0LWPwAjONyVCZJ3HGV
+# BESoCPZJKLeXIZWBTwol+xcXFU5AlA6UoAWZimh9/BwgJIYbCrEyxBbFi81TW46g
+# tdNpYvjc+EFwI2SP8GBAYqDEp3V7Zh8Oi0YV14P5OLdbPU8=
 # SIG # End signature block

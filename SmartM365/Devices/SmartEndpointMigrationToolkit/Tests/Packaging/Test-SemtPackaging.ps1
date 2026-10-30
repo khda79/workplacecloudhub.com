@@ -62,10 +62,10 @@ try {
     Get-ChildItem -LiteralPath (Join-Path $copyRoot 'Release') -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('Output','Work') } | Remove-Item -Recurse -Force
     $planted = @(
         'Waves\HybridJoin\WAVE-PRIVATE\Computers.txt',
-        'Waves\HybridJoin\WAVE-PRIVATE\Wave.local.json',
+        'Waves\HybridJoin\WAVE-PRIVATE\Wave.local.json.txt',
         'Runs\HybridJoin\WAVE-PRIVATE\R1\Logs\SEMT-launcher.log',
-        'Config\SmartEndpointMigrationToolkit.local.json',
-        'Config\GuiState.HybridJoin.local.json',
+        'Config\SmartEndpointMigrationToolkit.local.json.txt',
+        'Config\GuiState.HybridJoin.local.json.txt',
         'Inventory\DevicesIntune.csv',
         'Campaigns\Windows11Upgrade\SetupSource\Win11-fr-FR\setup.exe',
         'Campaigns\Windows11Upgrade\IntuneWin32\Output\package.intunewin',
@@ -143,13 +143,13 @@ try {
     $validateW11 = Invoke-Child -Arguments @('-NoProfile','-ExecutionPolicy','Bypass','-File',$engine,'-Campaign','Windows11Upgrade','-ComputerName','SEMT-QUALIF-PC','-RunMode','Once','-DryRun','-ValidateOnly')
     Test-Step 'extracted package: Windows 11 engine -ValidateOnly (dry run) succeeds' { $script:ChildExitCode -eq 0 -and ($validateW11 -join "`n") -match 'ValidateOnly: options, rules and component integrity are valid' }
     Test-Step 'extracted package: effective options of the Single PC Run record values and sources (rules applied)' {
-        $optionsFile = @(Get-ChildItem -LiteralPath (Join-Path $pkg 'Runs\HybridJoin\_SinglePC') -Recurse -Filter 'EffectiveOptions.json' | Sort-Object LastWriteTime | Select-Object -First 1)[0]
+        $optionsFile = @(Get-ChildItem -LiteralPath (Join-Path $pkg 'Runs\HybridJoin\_SinglePC') -Recurse -Filter 'EffectiveOptions.json.txt' | Sort-Object LastWriteTime | Select-Object -First 1)[0]
         $effective = Get-Content -LiteralPath $optionsFile.FullName -Raw | ConvertFrom-Json
         $rows = @{}; foreach ($row in @($effective.Options)) { $rows[[string]$row.Option] = $row }
         $effective.Campaign -eq 'HybridJoin' -and [string]$rows['ThrottleLimit'].Value -eq '1' -and [string]$rows['ThrottleLimit'].Source -eq 'Rule:SinglePcOneWorker' -and [string]$rows['MaxCycles'].Source -eq 'Rule:RunModeOnce' -and [string]$rows['HybridJoin.AllowRebootAfterDsregLeave'].Value -eq 'False'
     }
     Test-Step 'extracted package: Windows 11 dry run records DryRun from the CLI layer' {
-        $optionsFile = @(Get-ChildItem -LiteralPath (Join-Path $pkg 'Runs\Windows11Upgrade\_SinglePC') -Recurse -Filter 'EffectiveOptions.json' | Select-Object -First 1)[0]
+        $optionsFile = @(Get-ChildItem -LiteralPath (Join-Path $pkg 'Runs\Windows11Upgrade\_SinglePC') -Recurse -Filter 'EffectiveOptions.json.txt' | Select-Object -First 1)[0]
         $rows = @{}; foreach ($row in @((Get-Content -LiteralPath $optionsFile.FullName -Raw | ConvertFrom-Json).Options)) { $rows[[string]$row.Option] = $row }
         [string]$rows['DryRun'].Value -eq 'True' -and [string]$rows['DryRun'].Source -eq 'Cli'
     }
@@ -177,8 +177,8 @@ exit 0
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtQ2Gt2l+VzUvO
-# 1z8h/ahU/RTBJgHHYgMSzn/XdA0fbKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPWS4PXXAkCtx8
+# blG+0zqyKvg4JOEEVrC2lclI/r3x0KCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -208,14 +208,14 @@ exit 0
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAKKiQoFchjf6sL+bDQOfcy
-# GoaJNdEdOLDiz0e5JuNX0zANBgkqhkiG9w0BAQEFAASCAYAw62KAFZkGE7OQ1Jkm
-# OTLTSFOdNbIaPG42FtilyeP0K6sPPJV19iZotzLhhbJRnIjFFF6PuyuugGN6h4Lm
-# dMYkyjvCjaJbkDi2DqlHLoRHUOKcKHosUguK46ZqYGZ3K4UqVWp0S+EvlHmi6TDE
-# 0XgqsRsDpYTmecj0MBtt+JsY+xUpy5Ws5dPLazFQnkMumgN+OpI3YYSqrRuV1scl
-# +z0bpTs1kqJWLmkPK8QuabntaWpe5m5xdko/Z3dZWmj7b0kjGQXVyZp0UqbfBHXt
-# 6nL8lPz55Mp7ZuvPJq2lWqOPXfSpn/HV9YxBhshzPKf2R/44iOfNBvhmsnF9z6Cc
-# 8LrzdU0sdiJY8TuOwVkKPdKcZGbibDskqywq8QsP6b7R2jyuydaXuXSavpioQ/Ig
-# xbjJ2bIxIvylKtmbvXQHgfOp29ePEXIi3m2EhTlRY6LL1LTsmU6o1/ZX33WbeppP
-# cwEb1+2olaBJIrzFYLXhgAnYVmLvYP/5PcVfZQV8nprcDUg=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDsJ9+DiZCb3H4WwwsqaLQG
+# ufne5JWJaudnIb5n2+Ei3zANBgkqhkiG9w0BAQEFAASCAYCKCztuKKnaorL1gnLM
+# ctobhFKp9StXjqFYnIB/JiMzOUicOa2wa/GwZITqewpBBK14b3sVN2thVxE/1YEf
+# 1bFJUejpZXmi9t0AHhuXJ/HN8U5UXya8F20iC7dGzWDJ/8Z5hMncM3gKeppguru7
+# CoZ1wvkDew8yEL465fekz6eTNwq2KD9rD6e929pAo0l4O5f8JuG7XAME5ZxkflDz
+# xfnDSBiKtWcG2SCZl90MuRE8AAwxLFBDo7dh2uSv2lnXhb6c07qKNuZmeZkCGRTy
+# LdQR3pp6JkmGW561dpUcbTA5a+HFm4eDVVpXgfymXKxBw8inZgkqr5mq4pV+Wvct
+# SBHrWxuqWu/EEPcr1iIR8rtPPCzFboAQjcdQm2KXoceS/GiCZ/zQpF5uY4FWyVA9
+# NH1fonnshMgXq0H3hMY2JJ80SBg65dLlw5AHHNmbuFO8H3OIJHF6/vWB3f0221Xd
+# J/2Yv3DfPyNCTVnixYoiIT5LoDeyKG1GMqsFucd4rtAKLzI=
 # SIG # End signature block

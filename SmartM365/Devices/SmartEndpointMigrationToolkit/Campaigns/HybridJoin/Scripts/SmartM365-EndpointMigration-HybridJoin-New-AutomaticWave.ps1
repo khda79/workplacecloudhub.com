@@ -33,7 +33,7 @@ AD_DOMAIN_NOT_MATCHED, or AD_DOMAIN_UNKNOWN when they have no AD record or no do
 exist in the AD inventory. The shared AD inventory always covers the whole forest.
 
 .PARAMETER Create
-Creates the Wave (Computers.txt, Wave.local.json, wrappers). Without it, only evidence is written.
+Creates the Wave (Computers.txt, Wave.local.json.txt, wrappers). Without it, only evidence is written.
 
 .PARAMETER PreviewEvidencePath
 Evidence folder of a Preview (run without -Create). With -Create, the Wave is created from that
@@ -510,7 +510,7 @@ function Get-AutomaticWavePreviewReuse {
         [Parameter(Mandatory = $true)][string]$InventoryFingerprint
     )
 
-    $summaryPath = Join-Path $Path 'AutomaticWaveSummary.json'
+    $summaryPath = Join-Path $Path 'AutomaticWaveSummary.json.txt'
     if (-not (Test-Path -LiteralPath $summaryPath -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $Path 'AutomaticWaveSelection.csv') -PathType Leaf)) {
         return [pscustomobject]@{ Summary = $null; Reason = 'the preview evidence is incomplete' }
     }
@@ -597,7 +597,7 @@ function New-AutomaticWaveFromPreview {
     $values['PreviewEvidencePath'] = $PreviewPath
     $summary = [pscustomobject]$values
     if (-not $NoEvidence) {
-        Write-SemtJsonFileAtomic -Path (Join-Path $evidencePath 'AutomaticWaveSummary.json') -InputObject $summary -Depth 5
+        Write-SemtJsonFileAtomic -Path (Join-Path $evidencePath 'AutomaticWaveSummary.json.txt') -InputObject $summary -Depth 5
     }
     Publish-AutomaticWaveProgress -Stage 'Automatic Wave created.' -Detail ([string]$wave.Path)
 
@@ -894,7 +894,7 @@ $summary = [pscustomobject]@{
 }
 
 if (-not $NoEvidence) {
-    Write-SemtJsonFileAtomic -Path (Join-Path $evidencePath 'AutomaticWaveSummary.json') -InputObject $summary -Depth 5
+    Write-SemtJsonFileAtomic -Path (Join-Path $evidencePath 'AutomaticWaveSummary.json.txt') -InputObject $summary -Depth 5
 }
 Publish-AutomaticWaveProgress -Stage $(if ($Create) { 'Automatic Wave created.' } else { 'Automatic Wave preview ready.' }) -Detail $(if ($Create) { $wavePath } else { "Selected devices: $($selected.Count)" })
 
@@ -908,8 +908,8 @@ Publish-AutomaticWaveProgress -Stage $(if ($Create) { 'Automatic Wave created.' 
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWFXrQnPA8/LRG
-# pq2YedGEcsPkx7rBwQNE/iNBI5NhQKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBGkJSGDIHTI2Kj
+# O/vqWMoma/KKw+DQGMNx9fdWFl2sr6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -939,14 +939,14 @@ Publish-AutomaticWaveProgress -Stage $(if ($Create) { 'Automatic Wave created.' 
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB6Qn2t815BSOU9PgtkKDHL
-# gREhpl3xCSmPvy9/mx5bYzANBgkqhkiG9w0BAQEFAASCAYCTmvIGAfgVrrFV4HxE
-# ZwwK1f3JkwfRLXcRYc2sN7wVFPjUtRgmm/jt0B9/lJujWuf1PIq5uGCEspkqt+7I
-# bKOrNXx3e65/rFHZlEUJR0P8PnTIm2+rp4E689lBBMNYd5+I6BFZRo8/fg+kXvi7
-# Eq4dvHf1v2RDTrjRcClhw7n1qVvDxffXHFNZhYDN6IWKkhKTTJEU43RK71ZLzTA0
-# eP4gwyXxh93EjQz0bdlnSZi9vXIYwrQZLmdws1nptqZY04AQ9XCCMR7114L+r0yO
-# 1vfmL5vlxau2wuQp19Cv1VdLu3SUzn3Idmivm/bNrAe3xvVtqzVb423OyqFHyAd3
-# /rwolEmrsMcRYDjQb4ZlrmS594O0xn2s4j6+470rrf2UvbejftRLFvZWLSP+kU1p
-# DILCTRgMVetaEvsbQqyE1FxeVAIk+DBzBxff3hU2Wv/qh9fopc66D7vaj1iGvcqC
-# Ppsu8Pb/TXKJD2gKM9D44gIM0vhTtUD0GAGVCeys6RNo+xk=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBH7cYOcqiUrhq+lmQtWe7a
+# Td0o1feNWjrbK7yDuDjkQDANBgkqhkiG9w0BAQEFAASCAYBV1FJrypZArBUExdUa
+# w3CLdbX3OWcfF8eFCZ+RVipy4HUOrJnBuw++TRtOAI47AiQz33Y++u3TUAN3mleo
+# 9IxGDR3nR7RA95LVbw+Th+A19MuZEQ07TRJsHBNxUTwK1+jA2elY/Xqj3YgV8CCu
+# m6YRexvzPm8SifsECmb2XesUQ6tzbjQyBSmfhzdw4E9Rn5imCwmeXa/Dh6jQS+SR
+# AXGXs23ESuZFn8ir0PJRRZr4oinjCjbgPurTQFUgb0gLl7PYrzacuSVxuj18jFTD
+# 3Yk0GPahwNIsOi/VA5d0RqrD2bESYD3XMAVSLOifgeSHwW7j+cP1PqaTLZQonwRU
+# 1e0VU2Cb/hdh1XNZRBdZtUOg4hu/tXcFTrYV/CkLDGVd9yJhd2p3575ZY6aHQRi7
+# HMSReoxgZ6Lpy3V+ly5VAsw6ef5DBb4DMne7aZYWPcqU32lAwi30Y9+IxbsNao/0
+# iIfqMroPI7Zz7iLldJul2whqYjN6GHKFmY9n/FMUQ6oLK1U=
 # SIG # End signature block

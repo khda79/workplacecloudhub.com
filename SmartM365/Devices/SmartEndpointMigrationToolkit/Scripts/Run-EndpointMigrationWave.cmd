@@ -2,8 +2,8 @@
 rem Smart Endpoint Migration Toolkit - shared Wave launcher.
 rem Usage: Run-EndpointMigrationWave.cmd "<Wave folder>" Loop|Once Default|IgnoreRunGuard
 rem The Campaign is the parent folder name of the Wave (Waves\<Campaign>\<Wave>).
-rem Options are resolved by the engine: SEMT_* environment variables, Wave.local.json,
-rem Config\SmartEndpointMigrationToolkit.local.json and the campaign defaults.
+rem Options are resolved by the engine: SEMT_* environment variables, Wave.local.json.txt,
+rem Config\SmartEndpointMigrationToolkit.local.json.txt and the campaign defaults.
 setlocal DisableDelayedExpansion
 
 set "SEMT_WAVE_ARG=%~1"

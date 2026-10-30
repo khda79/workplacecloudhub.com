@@ -197,7 +197,7 @@ try {
     $evidencePreview = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-EVIDENCE'
     $expectedEvidenceRoot = Join-Path $packageRoot 'Runs\HybridJoin\_AutomaticWave'
     Assert-True (([string]$evidencePreview.Summary.EvidencePath).StartsWith($expectedEvidenceRoot, [System.StringComparison]::OrdinalIgnoreCase)) 'preview evidence is written under Runs\HybridJoin\_AutomaticWave'
-    Assert-True (Test-Path -LiteralPath (Join-Path $evidencePreview.Summary.EvidencePath 'AutomaticWaveSummary.json') -PathType Leaf) 'preview writes AutomaticWaveSummary.json'
+    Assert-True (Test-Path -LiteralPath (Join-Path $evidencePreview.Summary.EvidencePath 'AutomaticWaveSummary.json.txt') -PathType Leaf) 'preview writes AutomaticWaveSummary.json.txt'
     Assert-Equal @(Get-ChildItem -LiteralPath $waveRoot -Directory).Count 0 'preview with evidence still creates no Wave'
 
     # Create through New-SemtWave.
@@ -214,17 +214,17 @@ try {
         Assert-True (Test-Path -LiteralPath (Join-Path $created.Summary.WavePath $wrapper) -PathType Leaf) "Wave wrapper exists: $wrapper"
     }
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $created.Summary.WavePath 'AdDomain.txt'))) 'no legacy AdDomain.txt is created'
-    $waveConfig = Get-Content -LiteralPath (Join-Path $created.Summary.WavePath 'Wave.local.json') -Raw | ConvertFrom-Json
-    Assert-Equal $waveConfig.Source 'Automatic' 'Wave.local.json records Source=Automatic'
-    Assert-Equal $waveConfig.Campaign 'HybridJoin' 'Wave.local.json records the HybridJoin Campaign'
-    Assert-Equal $waveConfig.EvidencePath $created.Summary.EvidencePath 'Wave.local.json records the evidence path'
+    $waveConfig = Get-Content -LiteralPath (Join-Path $created.Summary.WavePath 'Wave.local.json.txt') -Raw | ConvertFrom-Json
+    Assert-Equal $waveConfig.Source 'Automatic' 'Wave.local.json.txt records Source=Automatic'
+    Assert-Equal $waveConfig.Campaign 'HybridJoin' 'Wave.local.json.txt records the HybridJoin Campaign'
+    Assert-Equal $waveConfig.EvidencePath $created.Summary.EvidencePath 'Wave.local.json.txt records the evidence path'
     Assert-True ([string]$waveConfig.Description -match 'ComputerNamePrefix=' -and [string]$waveConfig.Description -match 'Selected=5') 'Wave description summarizes the filters'
     Assert-True ($createStages -contains 'Automatic Wave created.') 'creation completion is reported'
     Assert-True (([string]$created.Summary.EvidencePath).StartsWith($expectedEvidenceRoot, [System.StringComparison]::OrdinalIgnoreCase)) 'create evidence is written under Runs\HybridJoin\_AutomaticWave'
-    foreach ($name in @('DevicesAD.csv', 'DevicesIntune.csv', 'DevicesEntra.csv', 'AutomaticWaveSelection.csv', 'AutomaticWaveExclusions.csv', 'AutomaticWaveFilterExclusions.csv', 'AutomaticWaveSummary.json')) {
+    foreach ($name in @('DevicesAD.csv', 'DevicesIntune.csv', 'DevicesEntra.csv', 'AutomaticWaveSelection.csv', 'AutomaticWaveExclusions.csv', 'AutomaticWaveFilterExclusions.csv', 'AutomaticWaveSummary.json.txt')) {
         Assert-True (Test-Path -LiteralPath (Join-Path $created.Summary.EvidencePath $name) -PathType Leaf) "evidence file exists: $name"
     }
-    $summaryJson = Get-Content -LiteralPath (Join-Path $created.Summary.EvidencePath 'AutomaticWaveSummary.json') -Raw | ConvertFrom-Json
+    $summaryJson = Get-Content -LiteralPath (Join-Path $created.Summary.EvidencePath 'AutomaticWaveSummary.json.txt') -Raw | ConvertFrom-Json
     Assert-Equal $summaryJson.WavePath $created.Summary.WavePath 'evidence summary records the created Wave path'
     Assert-Equal @(Get-SemtWaves -PackageRoot $packageRoot -Campaign HybridJoin | Where-Object { $_.Launchable }).Count 1 'created Wave is listed as launchable by the engine'
 
@@ -247,7 +247,7 @@ try {
     Assert-Equal $reused.Summary.PreviewEvidencePath $reusePreview.Summary.EvidencePath 'the Create summary records the reused preview'
     Assert-Equal @(Get-Content -LiteralPath $reused.Summary.ComputersPath).Count ([int]$reusePreview.Summary.SelectedDevices) 'the Wave contains the previewed selection'
     Assert-True (Test-Path -LiteralPath (Join-Path $reused.Summary.EvidencePath 'AutomaticWaveSelection.csv') -PathType Leaf) 'the preview reports are copied to the Create evidence'
-    Assert-True ([string](Get-Content -LiteralPath (Join-Path $reused.Summary.WavePath 'Wave.local.json') -Raw | ConvertFrom-Json).Description -match ('Selected={0}$' -f $reusePreview.Summary.SelectedDevices)) 'the reused Create keeps the Wave description format'
+    Assert-True ([string](Get-Content -LiteralPath (Join-Path $reused.Summary.WavePath 'Wave.local.json.txt') -Raw | ConvertFrom-Json).Description -match ('Selected={0}$' -f $reusePreview.Summary.SelectedDevices)) 'the reused Create keeps the Wave description format'
     $reuseStages.Clear()
     try { [void](& $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-REUSE-FILTER' -AdLastLogonMaxAgeDays 400 -Create -PreviewEvidencePath $reusePreview.Summary.EvidencePath -ProgressCallback $reuseCallback) } catch { }
     Assert-True (@($reuseStages | Where-Object { $_ -like 'Computing the selection again*filters changed*' }).Count -eq 1 -and @($reuseStages | Where-Object { $_ -like 'Loading inventory records*' }).Count -eq 1) 'Create with other filters computes the selection again'
@@ -314,8 +314,8 @@ exit 0
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZM48mfecnp1on
-# bOa8FJV1+u3+n/VOcwjqOQMOr4orNKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsAVW61V6FzfdL
+# 6iaT2Lv9KzqQqGP5RZ+lRRIZXTTux6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -345,14 +345,14 @@ exit 0
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDspeidMXhR48W0IyEDt7Tw
-# ruBkRfBMrqaR4EiUJyMZwzANBgkqhkiG9w0BAQEFAASCAYBnnkl43ic+S0FQNBhs
-# x0+cilcCInD0/0Xz7Pv22qbwHTLZkdIg3Y2KhfbS7Dahg0L19Mq+U//DBQN2qkKA
-# qqfNjhLSxHbXnZ+zo9MFWDRSDfbbbO814kmCs+Y6j4XYrU771tDw1m20CwPVFP2X
-# Dt3+27GbPqWxeMVYSTkE64VKRD39qhPBHkf4rOOk39O434MucyEAZuqCchlL6MEd
-# mY9OaF1qpcy5YkINZJaxxBYkXxL0OgtWJqBm3uTL2ksc+AfRhHBWfda+0VPwM4ZA
-# 4700lDLh+HPFuVLEhCmBUDUCXOgzf1jn7+HH2cCkHgPQr6CI9UpSQxkqrAHd/WnL
-# Ga8tJQUw+YEmuGlD0FKjxiFwwNOyCtCROPLs/puIuwL3LY626slAEETGphNJ6MKp
-# 3Qx8RlyJIuwTI9HtIyGWiWCaZeFd2U568Sru+NIBsi+8+FMbOjy5gVIKBi+OCkvS
-# 3KtdwMDl29BM0MxKjYzN+2XlboryrdrXgyS5fQm0gCD31TI=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCA9y7QgkPVf0b7hTtGSPqHj
+# a1rRj0sTwuwqlHnwSAPHiTANBgkqhkiG9w0BAQEFAASCAYClQ/CdSA2dNB/PyTf+
+# c1+gKOPHzBaF574kN5plQWIrf9lzyCmyUq2C7nuI2eVHgwHsoSnaTvyWT0oNk6KO
+# 62MHeT0IcOHE2qmZHW0jOvBG8EZ9xEO1DCgn0mExe6RV9DyYQY9ZNEg08IW4rtnc
+# 21HHfkdvTUfjhpWJRyKLNVGvSR5JBy96nL58AzCTJClIZBtbGosR4Zjg53xrlxiJ
+# 4FdVK136nosYusUZa+H+Xbv/ODAOrz7xVjMsPZyLWVdr37umHmJD0z/4i12IDPfK
+# JtEke57hUT90rrOFgVoJRO6wEsSaNHu29JLPMmeI16cyov4ATYDV5GixrwKYsuCy
+# mLj88dFw1UVnpTwz+uoawIGJHjX5wGK0jG/m7wtULKZ82jkup30B+/YiP1qRHsQc
+# LQKkaNuU+69wGWMuS2sRN2qeoaknS/PSdFKy6ekRsnnsokL2u/VOC+URXefmfmoQ
+# 0h0NTHJnG2hDbO1fjGmVp6Mdb8cHw72Cl6XLUsLDuf9I/jg=
 # SIG # End signature block

@@ -17,7 +17,7 @@ jamais de production, et avec accord explicite avant chaque lancement.
 - [ ] `Release\SmartM365-EndpointMigration-Build-Release.ps1` (aperçu) : validation OK, aucune
       écriture. Sans `-AllowUnsigned`, refus attendu tant que les sources ne sont pas signées.
 - [ ] Build de qualification : `-Build -AllowUnsigned`. Attendu : ZIP, `.sha256`, notes
-      marquées `UNSIGNED QUALIFICATION BUILD`, aucun fichier privé (Waves, Runs, `*.local.json`,
+      marquées `UNSIGNED QUALIFICATION BUILD`, aucun fichier privé (Waves, Runs, `*.local.json.txt`,
       inventaires, médias, DemoAssets, mémoires).
 - [ ] Extraire le ZIP dans un dossier neuf (chemin avec espace) et travailler **depuis ce dossier**.
 - [ ] Après signature des sources (pre-push), reconstruire sans `-AllowUnsigned` : manifeste
@@ -60,9 +60,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtProgramFolde
 
 ## 4. Hybrid Join (laboratoire)
 
-- [ ] Single PC, **Dry run**, Once : `DRYRUN_*` cohérents, rapport HTML, `EffectiveOptions.json`.
+- [ ] Single PC, **Dry run**, Once : `DRYRUN_*` cohérents, rapport HTML, `EffectiveOptions.json.txt`.
 - [ ] Single PC, **Audit only** : diagnostic distant sans modification ; CorrelationId identique
-      dans la ligne de rapport et `State\Results\<CorrelationId>.json` sur le poste.
+      dans la ligne de rapport et `State\Results\<CorrelationId>.json.txt` sur le poste.
 - [ ] Single PC, réparation avec *Allow dsregcmd /leave* **décoché** : le journal endpoint montre
       que `/leave` n'est pas autorisé.
 - [ ] Wave de 2 postes, Loop : cycles, run guard, archivage `Computers.AlreadyEnrolled.txt`.
@@ -74,7 +74,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtProgramFolde
 - [ ] Réparation avec **DirectSetup activé et *Allow controlled reboots* désactivé** : aucun
       redémarrage demandé (l'endpoint ne reçoit pas `-AllowReboot`).
 - [ ] Réparation normale sur un poste : copie par le poste, validation, setup lancé, marqueur
-      `TargetPendingOperation.json` présent jusqu'au redémarrage.
+      `TargetPendingOperation.json.txt` présent jusqu'au redémarrage.
 
 ## 6. Coexistence avec les anciens outils
 

@@ -13,8 +13,8 @@
 
     Options are resolved from Config\SmartEndpointMigrationToolkit.options.json.txt with this
     precedence: explicit CLI (-Option, -DryRun, -AuditOnly, -IgnoreRunGuard) > GUI choices
-    captured for the Run (-GuiSelectionPath) > SEMT_* environment variables > Wave.local.json >
-    Config\SmartEndpointMigrationToolkit.local.json > campaign default. The effective options
+    captured for the Run (-GuiSelectionPath) > SEMT_* environment variables > Wave.local.json.txt >
+    Config\SmartEndpointMigrationToolkit.local.json.txt > campaign default. The effective options
     and their source are written to the Run folder and shown in the reports.
 
     Dry run, remote audit and repair are distinct:
@@ -137,7 +137,7 @@ $waveLayer = $null
 if (-not $script:RunContext.SinglePc) {
     $waveConfig = Read-SemtWaveConfig -PackageRoot $script:PackageRoot -Campaign $Campaign -WavePath $script:RunContext.WavePath -CreateWhenMissing
     $waveCampaign = [string](Get-SemtPropertyValue -InputObject $waveConfig.Data -Name 'Campaign' -Default $Campaign)
-    if ($waveCampaign -ne $Campaign) { throw ("SEMT_WAVE_CAMPAIGN_MISMATCH: Wave.local.json declares Campaign '{0}', not '{1}'." -f $waveCampaign,$Campaign) }
+    if ($waveCampaign -ne $Campaign) { throw ("SEMT_WAVE_CAMPAIGN_MISMATCH: Wave.local.json.txt declares Campaign '{0}', not '{1}'." -f $waveCampaign,$Campaign) }
     $waveLayer = $waveConfig.Data
 }
 $cliLayer = @{}
@@ -716,8 +716,8 @@ finally {
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHI5nqPFlHKLav
-# ySThCtkI1IWfUNOwFzITE+3Sm5u51qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBLzognU+3Yhgoq
+# OwaStep4zhlFMi4hGzvIWLaOPYVY86CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -747,14 +747,14 @@ finally {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDVeqhWYFA5y2OIrE3pU83Y
-# TGJWERenbeWLjVZHTZYdBTANBgkqhkiG9w0BAQEFAASCAYAjdN3hnHm96pdZNqxL
-# /UFniHBDiUS3cYZBV7K8rw4aypHjTk9rcyVm7jJG1EncBHJalttZ8DaboBZdoAg1
-# d5wLm1ioFISI9RzZy/YPsTQX59VL/qo3pnXCQa4bWkbBH+Q5xFjRymF6N5Na6rSh
-# Tr9bkYXWsneBJMMMvTXrSx4lBqrrABbC0vUKNsmdRuPrmCtPazIFjoPmeFBOTh1M
-# BsMfIl4GdIM6tiaAw/OEZOJLVrK1v+rnWuNkWKmrRbPR6HgaSbshNGmsfZrpA2xT
-# hgKewsdbnHoa1JkaGJR7zP7TKwaqYx/ahg2S7/cQHshALPj07pGFexkylcgeDnnY
-# QFS/LJ835z79t/vWp7UVJnTZlZ66BGsI7WxilvQWFDGGiQgoi6p58CWVMhCd80Tj
-# oq5jaVTwAvUS/UG+nMIiSTEE1ub9zBrKHLV5WNjIS2beaZYrwX/YK2RaLAbDm7pu
-# Z5+4/S0c9VdToJrpaM+OqW40dL58y/BxjLrp6oDV+KPfFEE=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAa2q5E9Qca1BWuwHv8QYUh
+# 9Dym3tMajSbKjh4B3CE8SDANBgkqhkiG9w0BAQEFAASCAYAlLDm7seXJUEU8Frd4
+# 2X+1edMaPmRpjrcLzLw2S/t732Eu/eIZ/6IbtkJUG5q3VvCEHvSGF7IDZOQ4by/h
+# 3WHq/VlrJQSGSmmnKsew+/CBII7sUJT9t4krCRxHdGZBYmCLeyjwi2QfPGaoElft
+# N1YmRcsA14fWOLtkhzq4stmfGRgmikO8/fIl8VRF0wFvjbJFNMg70qmM41aKZ3Dl
+# FuLvNBXhlt3uMqNlD1vtCD+v9xr3sISr9uXBgO5BGesox0GXQyXK7zKdkI7+xRDH
+# W5vYoKMv3xfKxSLm1X9n8PVrFN6pj8GETsrhCmWf6OCAQP9RAoTh6h9oIwDswL0m
+# PzAuJB8oWgKabDxPBwc5K2QuOZOWMblPds4VxfArTB0im2ikxU5mDyNLoXjg9ZCO
+# kfP8ZhLWq7IgSuXNfF9QY5E+2xLggG9AjEsRoawbnQDzp56N2WGIkUk0RnYGZMa2
+# /Qntz99sV7Dk8c10yoYr6BeHVZm+L1Qio5vorzQSStXuoc0=
 # SIG # End signature block

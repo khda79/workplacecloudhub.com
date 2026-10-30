@@ -49,7 +49,7 @@ try {
     New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
     foreach ($item in @('Assets','Campaigns','Config','Modules','Scripts')) { Copy-Item -LiteralPath (Join-Path $sourceRoot $item) -Destination $packageRoot -Recurse -Force }
     foreach ($item in @('Runs','Waves\HybridJoin','Waves\Windows11Upgrade')) { New-Item -ItemType Directory -Path (Join-Path $packageRoot $item) -Force | Out-Null }
-    Get-ChildItem -LiteralPath (Join-Path $packageRoot 'Config') -Filter '*.local.json' -File | Remove-Item -Force
+    Get-ChildItem -LiteralPath (Join-Path $packageRoot 'Config') -Filter '*.local.json.txt' -File | Remove-Item -Force
     $env:SEMT_RUNTIME_ROOT_OVERRIDE = Join-Path $tempRoot 'Runtime'
     $env:SEMT_GUI_UPDATE_CHECK = '0'
     $guiPath = Join-Path $packageRoot 'Scripts\SmartM365-EndpointMigration-GUI.ps1'
@@ -77,7 +77,7 @@ try {
     $script:PackageRoot = $packageRoot
     Import-Module (Join-Path $packageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
     # Wave options tab (replaces the "Wave options" button): Options first, then Activity; editors read and
-    # write Wave.local.json with inheritance. A fictional Wave in a temporary folder; nothing is launched.
+    # write Wave.local.json.txt with inheritance. A fictional Wave in a temporary folder; nothing is launched.
     Test-Step 'Waves view: Options tab first (selected), then Activity; no Wave options button' {
         $xaml -notmatch 'OpenWaveConfigButton' -and $xaml -match '(?s)x:Name="WaveSideTabs".*?x:Name="WaveOptionsTab" Header="Options" IsSelected="True".*?x:Name="ActivityTab" Header="Activity".*?x:Name="ActivityText"' -and $xaml -match 'x:Name="WaveOptionsHost"' -and $xaml -match 'x:Name="SaveWaveOptionsButton"'
     }
@@ -97,7 +97,7 @@ try {
     $optionsWave = Join-Path ([IO.Path]::GetTempPath()) ('SEMT-WaveOptions-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory -Path $optionsWave -Force | Out-Null
     try {
-        $waveFile = Join-Path $optionsWave 'Wave.local.json'
+        $waveFile = Join-Path $optionsWave 'Wave.local.json.txt'
         Copy-Item -LiteralPath (Join-Path $packageRoot 'Campaigns\HybridJoin\Templates\Wave\Wave.local.json.template') -Destination $waveFile
         $template = Get-Content -LiteralPath $waveFile -Raw | ConvertFrom-Json
         $template.Description = 'Fictional Wave'
@@ -157,9 +157,9 @@ try {
         $domain = $filters.Clone(); $domain.AdDomain = 'be.example'
         $a -ne (Get-AutomaticFilterSignature -Campaign HybridJoin -Filters $changed) -and $a -ne (Get-AutomaticFilterSignature -Campaign HybridJoin -Filters $domain)
     }
-    $run = Get-GuiRunCommand -Campaign Windows11Upgrade -WavePath 'C:\Waves\W 1' -RunMode Once -IgnoreRunGuard $true -SelectionPath 'C:\Sel\s.json'
+    $run = Get-GuiRunCommand -Campaign Windows11Upgrade -WavePath 'C:\Waves\W 1' -RunMode Once -IgnoreRunGuard $true -SelectionPath 'C:\Sel\s.json.txt'
     Test-Step 'Run command uses Windows PowerShell 5.1, the engine, the GUI selection and the run mode' { $run -match 'WindowsPowerShell\\v1\.0\\powershell\.exe' -and $run -match 'SmartM365-Invoke-EndpointMigrationWithPsExec\.ps1' -and $run -match '-GuiSelectionPath' -and $run -match '-RunMode Once' -and $run -match '-IgnoreRunGuard' -and $run -match '"C:\\Waves\\W 1"' }
-    Test-Step 'Single PC command passes -ComputerName and no Wave' { $fictionalComputer = 'PC-1'; $c = Get-GuiRunCommand -Campaign HybridJoin -ComputerName $fictionalComputer -RunMode Once -IgnoreRunGuard $false -SelectionPath 'C:\s.json'; $c -match '-ComputerName PC-1' -and $c -notmatch '-WavePath' -and $c -notmatch '-IgnoreRunGuard' -and $c -match '-GuiSelectionPath' }
+    Test-Step 'Single PC command passes -ComputerName and no Wave' { $fictionalComputer = 'PC-1'; $c = Get-GuiRunCommand -Campaign HybridJoin -ComputerName $fictionalComputer -RunMode Once -IgnoreRunGuard $false -SelectionPath 'C:\s.json.txt'; $c -match '-ComputerName PC-1' -and $c -notmatch '-WavePath' -and $c -notmatch '-IgnoreRunGuard' -and $c -match '-GuiSelectionPath' }
     $refreshHandler = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Start-InventoryRefresh' }, $true)
     Test-Step 'inventory refresh runs in a hidden process, never in a visible console' { $null -ne $refreshHandler -and $refreshHandler.Extent.Text -match '-WindowStyle Hidden' -and $guiText -notmatch '-NoExit' }
     $refreshAssignment = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$inventoryRefreshXaml' }, $true)
@@ -234,7 +234,7 @@ try {
         $logPath = Join-Path $evidenceRoot 'GuiAutomaticWave.log'
         $command = Get-AutomaticWaveCommandText -Campaign HybridJoin -Filters @{ WaveName = 'WAVE-AUTO-HJ-GUI'; Prefixes = @(); Contains = @(); ExcludeStaleAd = $false; LastLogonDays = 45; Source = 'Both'; ExcludeIntunePresent = $false; AdDomain = '' } -EvidenceRoot $evidenceRoot
         $process = Start-Process -FilePath $powershell51 -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-AutomaticWaveProcessText -CommandText $command -LogPath $logPath)))) -WindowStyle Hidden -PassThru -Wait
-        [pscustomobject]@{ ExitCode = $process.ExitCode; Log = $(if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath -Raw } else { '' }); Summary = @(Get-ChildItem -LiteralPath $evidenceRoot -Filter 'AutomaticWaveSummary.json' -File -Recurse) }
+        [pscustomobject]@{ ExitCode = $process.ExitCode; Log = $(if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath -Raw } else { '' }); Summary = @(Get-ChildItem -LiteralPath $evidenceRoot -Filter 'AutomaticWaveSummary.json.txt' -File -Recurse) }
     }
     $missing = & $runPreview 'Missing'
     Test-Step 'Preview without inventory fails with exit code 1 and the error in the log' { $missing.ExitCode -eq 1 -and $missing.Log -match '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ERROR Required automatic Wave inventory not found' -and $missing.Summary.Count -eq 0 }
@@ -251,7 +251,7 @@ try {
     $values = @{ ThrottleLimit = 4; 'Windows11Upgrade.SetupSourcePath' = ''; DryRun = $true }
     $selection = New-GuiSelectionFile -Catalog $catalog -Campaign Windows11Upgrade -Values $values
     $captured = Read-SemtJsonFile -Path $selection
-    Test-Step 'GUI selection is stored per Campaign under Runs\<Campaign>\_GuiSelections' { $selection -like (Join-Path $packageRoot 'Runs\Windows11Upgrade\_GuiSelections\*.json') -and $captured.Campaign -eq 'Windows11Upgrade' }
+    Test-Step 'GUI selection is stored per Campaign under Runs\<Campaign>\_GuiSelections' { $selection -like (Join-Path $packageRoot 'Runs\Windows11Upgrade\_GuiSelections\*.json.txt') -and $captured.Campaign -eq 'Windows11Upgrade' }
     Test-Step 'GUI selection omits empty text options so Wave/global values still apply' { [int]$captured.Options.ThrottleLimit -eq 4 -and -not $captured.Options.PSObject.Properties['Windows11Upgrade.SetupSourcePath'] }
     Test-Step 'engine accepts the GUI selection only for its own Campaign' {
         $ok = $false
@@ -303,7 +303,7 @@ $state.Window.Close()
     Test-Step 'every demo action completes without error' { $demoText -match 'FAILED=0' }
     Test-Step 'demo report is generated in the demo temp folder only' { $demoText -match 'OUTPUT=.*SmartM365-Demo.*Run-Report-DEMO\.html' }
     Test-Step 'demo states that nothing was launched' { $demoText -match 'NOLAUNCH=True' }
-    Test-Step 'demo wrote no Wave, Run or configuration into the package' { @(Get-ChildItem -LiteralPath (Join-Path $packageRoot 'Waves') -Directory -Recurse | Where-Object { $_.Parent.Name -in @('HybridJoin','Windows11Upgrade') }).Count -eq 0 -and @(Get-ChildItem -LiteralPath (Join-Path $packageRoot 'Config') -Filter '*.local.json' -File).Count -eq 0 }
+    Test-Step 'demo wrote no Wave, Run or configuration into the package' { @(Get-ChildItem -LiteralPath (Join-Path $packageRoot 'Waves') -Directory -Recurse | Where-Object { $_.Parent.Name -in @('HybridJoin','Windows11Upgrade') }).Count -eq 0 -and @(Get-ChildItem -LiteralPath (Join-Path $packageRoot 'Config') -Filter '*.local.json.txt' -File).Count -eq 0 }
     #endregion
 }
 catch {
@@ -322,8 +322,8 @@ exit 0
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/N77aWjFPeDcr
-# 2DOftE1/jdC7uFZzwWqAQu0/cWH8iKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9zFLipNRMAN4/
+# obsrfzShGIGIk9JKhMtCjDtS2EEoGaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -353,14 +353,14 @@ exit 0
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCZvoGWizPoO45YyXQYWfOg
-# GRd0TNotb0K9ZBqu0HhS7jANBgkqhkiG9w0BAQEFAASCAYAJXcBMZut/9F4d6HqF
-# lUjyX8XPtEAWcLGGclvA7kBVmz6umGYUkCp/K3ovWamSJddCLjjiMoXmRSthFyzN
-# vxUyLnK6PxGIWUx+v0mmZHRla3gIaQpZip5rn7b/B7fLgCKEX/dkt6usHsccSL0O
-# /cg427c7bd5aNxeeLDAWTirCV5bym4K93Y7eYyXtEKAVZEOThZvoimtmphdm/TIj
-# KRe3EWo+j+TwpwW59ky+frKaARlJb+BFMNV8vvG3+dTvZ7O4LFziUo4fqI/dNo07
-# lPTE6De0to0K8LFrA6aoS0jMkss4fqCD0VOyzwjgvflLlvklqqXTIaRi1KNuaVvg
-# TI/dcWTcxJ/Pq+5Ke/+McrG8dP0NnTVEdlfi7iKza1K5CJXf+Zf/Hq70Eksn4X/U
-# PIrp1jo041D7OT/F0+W3bYSbgWmn+6YIdzbnXi672EN+gM6NObXXYib+S4wLN6fD
-# zcW7e7rwvdbo0mzZ2h2gAt1bzBkJC6fWPOacvX/zZ8H/kHA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCC1vMKqRWpmnfa/21CYmS4B
+# RWW6Qe58NPXlRq8gLUrpZTANBgkqhkiG9w0BAQEFAASCAYAOSeke5H4d5jeG+c0m
+# QlXhSjiNJIu4kA5qocV6vEhW6FJRNzppRDXAUR23oFFXixGg08y3ClKdkTXQ7YFc
+# ryBsqPz50nhtZNm8cHGx2UzKUtr7PrUnyl0TzW7fo8hrwFpggzTPpLNJTorDO91D
+# qObv0763OIwGQLMoeccS9MIwgdRofydqFFv6dIvdY9MWV0s0KTCQY68hWT5aeMAz
+# geagQtJkVNk8RQz/cbgkXIUpiW+GAYG/fNbeBEVJMYyMkv/NSZtghgfXFr6dkdi8
+# aPkXJ3I1YI/khQzGsbGqX3IIndPkZK6Q7QrhwvsleAcg3wR87jNrf/NjX3/Pi/Zi
+# 4Wc+ifGd5IyHvoZzlaj3Q8qTOwpYMTdK+tGDvj3wgWDIzs+xJudIzwlWVbggJS1w
+# /8IB0Feke8ktmXX88uRBn7Sp718GsQexNijXBKzCJMVuEwN4BtFRRbUNY7912TZY
+# Go2J0LPzWH7sJN9wP77ejfBXTFMsnEIAkNsIto/ZSFnzcUo=
 # SIG # End signature block

@@ -14,7 +14,7 @@
     - Windows 11 media left by the previous toolkit is reused before any large copy: idle,
       unmanaged media is moved on the same volume (validated, rolled back on failure); media
       still owned by a legacy Intune Win32 package is reused in place and never moved or cleaned.
-    - Each attempt writes State\Results\<CorrelationId>.json for the technician worker.
+    - Each attempt writes State\Results\<CorrelationId>.json.txt for the technician worker.
 
     By default the script is diagnostic-only. Corrective actions require explicit switches.
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
@@ -115,7 +115,7 @@ $script:InputDir = Join-Path $DataRoot 'Input'
 $script:StateDir = Join-Path $DataRoot 'State'
 $script:LogPath = Join-Path $script:LogDir ("{0}_{1}_{2}.log" -f $script:ScriptName,$script:ComputerName,$script:RunId)
 $script:CsvPath = Join-Path $script:OutputDir ("SEMT_Windows11Upgrade_{0}_{1}.csv" -f $script:ComputerName,$script:RunId)
-$script:LastRunPath = Join-Path $DataRoot 'LastRun.json'
+$script:LastRunPath = Join-Path $DataRoot 'LastRun.json.txt'
 $script:RetryAfterRebootTaskName = 'SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot'
 if ([string]::IsNullOrWhiteSpace($CorrelationId)) { $CorrelationId = [guid]::NewGuid().ToString('N') }
 elseif ($RetryAfterRebootTaskRun) { $CorrelationId = '{0}-R{1}' -f $CorrelationId,(Get-Date -Format 'yyyyMMddHHmmss') }
@@ -127,7 +127,7 @@ $script:SetupMediaReuseDecision = ''
 # The retry task runs as SYSTEM: its runner, its state (script path and arguments) and the endpoint
 # copy it starts live under Program Files, never under ProgramData.
 $script:RetryAfterRebootProgramDir = Join-Path $env:ProgramFiles 'WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade\RetryAfterReboot'
-$script:RetryAfterRebootStatePath = Join-Path $script:RetryAfterRebootProgramDir 'RetryAfterReboot.json'
+$script:RetryAfterRebootStatePath = Join-Path $script:RetryAfterRebootProgramDir 'RetryAfterReboot.json.txt'
 $script:RetryAfterRebootRunnerPath = Join-Path $script:RetryAfterRebootProgramDir 'RetryAfterRebootRunner.ps1'
 $script:RetryAfterRebootScriptPath = Join-Path $script:RetryAfterRebootProgramDir 'SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1'
 $script:SetupMediaManifestFileName = 'SmartM365-SetupMediaManifest.sha256.csv'
@@ -572,8 +572,8 @@ function Enter-SemtTargetOperationGuard {
     )
 
     $productRoot = Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot
-    $leasePath = Join-Path -Path $productRoot -ChildPath 'State\TargetOperation.json'
-    $pendingPath = Join-Path -Path $productRoot -ChildPath 'State\TargetPendingOperation.json'
+    $leasePath = Join-Path -Path $productRoot -ChildPath 'State\TargetOperation.json.txt'
+    $pendingPath = Join-Path -Path $productRoot -ChildPath 'State\TargetPendingOperation.json.txt'
     try {
         $script:SemtTargetMutex = New-Object System.Threading.Mutex($false, $script:SemtTargetMutexName)
         try { $script:SemtTargetMutexAcquired = $script:SemtTargetMutex.WaitOne(0) }
@@ -624,7 +624,7 @@ function Exit-SemtTargetOperationGuard {
     param([Parameter(Mandatory = $true)][string]$CampaignDataRoot)
 
     if ($script:SemtTargetMutexAcquired) {
-        $leasePath = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetOperation.json'
+        $leasePath = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetOperation.json.txt'
         try {
             $lease = Read-SemtTargetJson -Path $leasePath
             if ($lease -and [int]$lease.ProcessId -eq $PID) { Remove-Item -LiteralPath $leasePath -Force -ErrorAction SilentlyContinue }
@@ -646,7 +646,7 @@ function Set-SemtTargetPendingOperation {
         [bool]$ClearedByReboot = $true
     )
 
-    $path = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetPendingOperation.json'
+    $path = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetPendingOperation.json.txt'
     $boot = Get-SemtTargetLastBootUtc
     Write-SemtTargetJson -Path $path -Data ([pscustomobject]@{ SchemaVersion = 1; Campaign = $Campaign; Reason = $Reason; SinceUtc = (Get-Date).ToUniversalTime().ToString('o'); ExpiresUtc = (Get-Date).ToUniversalTime().AddHours($Hours).ToString('o'); LastBootUtc = $(if ($boot) { $boot.ToString('o') } else { '' }); ClearedByReboot = $ClearedByReboot })
 }
@@ -657,7 +657,7 @@ function Clear-SemtTargetPendingOperation {
         [Parameter(Mandatory = $true)][string]$CampaignDataRoot
     )
 
-    $path = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetPendingOperation.json'
+    $path = Join-Path -Path (Get-SemtTargetProductRoot -CampaignDataRoot $CampaignDataRoot) -ChildPath 'State\TargetPendingOperation.json.txt'
     try {
         $pending = Read-SemtTargetJson -Path $path
         if ($pending -and [string]$pending.Campaign -eq $Campaign) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop; return $true }
@@ -797,7 +797,7 @@ function Get-SemtLegacyEndpointActivity {
 
 function Write-SemtAttemptResult {
     <#
-    Writes <DataRoot>\State\Results\<CorrelationId>.json. The technician worker only trusts a
+    Writes <DataRoot>\State\Results\<CorrelationId>.json.txt. The technician worker only trusts a
     result whose CorrelationId matches its own attempt. Keeps the newest 50 result files.
     #>
     param(
@@ -806,10 +806,10 @@ function Write-SemtAttemptResult {
     )
 
     $resultsRoot = Join-Path -Path $CampaignDataRoot -ChildPath 'State\Results'
-    $path = Join-Path -Path $resultsRoot -ChildPath ('{0}.json' -f [string]$Data['CorrelationId'])
+    $path = Join-Path -Path $resultsRoot -ChildPath ('{0}.json.txt' -f [string]$Data['CorrelationId'])
     Write-SemtTargetJson -Path $path -Data ([pscustomobject]$Data)
     try {
-        @(Get-ChildItem -LiteralPath $resultsRoot -Filter '*.json' -File -ErrorAction Stop | Sort-Object LastWriteTimeUtc -Descending | Select-Object -Skip 50) | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+        @(Get-ChildItem -LiteralPath $resultsRoot -Filter '*.json.txt' -File -ErrorAction Stop | Sort-Object LastWriteTimeUtc -Descending | Select-Object -Skip 50) | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
     }
     catch { }
     return $path
@@ -2663,7 +2663,7 @@ function Get-SemtSetupMediaUsage {
     foreach ($lockRoot in @($LockRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
         if (-not (Test-Path -LiteralPath $lockRoot -PathType Container)) { continue }
         foreach ($lockDir in @(Get-ChildItem -LiteralPath $lockRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like ('*{0}*' -f $leaf) })) {
-            $payloadPath = Join-Path $lockDir.FullName 'lock.json'
+            $payloadPath = Join-Path $lockDir.FullName 'lock.json.txt'
             if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) {
                 if ($lockDir.LastWriteTimeUtc -gt (Get-Date).ToUniversalTime().AddMinutes(-5)) { $signals.Add(('Recent lock without payload: {0}' -f $lockDir.FullName)) }
                 continue
@@ -3043,7 +3043,7 @@ function Invoke-SemtSetupMediaAdoption {
     }
     function Complete-Adoption([string]$Outcome, [string]$Path, [string]$Detail) {
         $state.Outcome = $Outcome; $state.Path = $Path; $state.Detail = $Detail; $state.Steps = @($steps.ToArray())
-        try { ([pscustomobject]$state) | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidence 'adoption.json') -Encoding UTF8 } catch { }
+        try { ([pscustomobject]$state) | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidence 'adoption.json.txt') -Encoding UTF8 } catch { }
         $level = if ($Outcome -in @('Moved','NotMoved','RolledBack')) { 'INFO' } else { 'ERROR' }
         Write-SmartLog ("Media adoption outcome {0}: {1} Evidence={2}" -f $Outcome,$Detail,$evidence) $level
         return [pscustomobject]$state
@@ -3074,7 +3074,7 @@ function Invoke-SemtSetupMediaAdoption {
     # 2. Restore information.
     try {
         $before = @(Get-SemtMediaTreeSnapshot -Path $source)
-        $before | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'snapshot-before.json') -Encoding UTF8
+        $before | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'snapshot-before.json.txt') -Encoding UTF8
     }
     catch { Add-AdoptionStep 'Snapshot' 'Failed' $_.Exception.Message; return (Complete-Adoption 'NotMoved' $source ('Not moved: snapshot failed: {0}' -f $_.Exception.Message)) }
     $saved = $null
@@ -3131,7 +3131,7 @@ function Invoke-SemtSetupMediaAdoption {
     $comparison = $null
     try {
         $afterRollback = @(Get-SemtMediaTreeSnapshot -Path $source)
-        $afterRollback | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'snapshot-after-rollback.json') -Encoding UTF8
+        $afterRollback | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'snapshot-after-rollback.json.txt') -Encoding UTF8
         $comparison = Compare-SemtMediaTreeSnapshot -Expected $before -Actual $afterRollback
     }
     catch { $comparison = [pscustomobject]@{ Same = $false; Differences = @(('verification failed: {0}' -f $_.Exception.Message)) } }
@@ -3276,7 +3276,7 @@ function Test-SetupCacheManifest {
         [Parameter(Mandatory = $true)]$Fingerprint
     )
 
-    $manifestPath = Join-Path $CachePath 'SmartM365-SetupMedia.json'
+    $manifestPath = Join-Path $CachePath 'SmartM365-SetupMedia.json.txt'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $false }
 
     try {
@@ -3310,7 +3310,7 @@ function Save-SetupCacheManifest {
         [string]$SourcePath
     )
 
-    $manifestPath = Join-Path $CachePath 'SmartM365-SetupMedia.json'
+    $manifestPath = Join-Path $CachePath 'SmartM365-SetupMedia.json.txt'
     $Fingerprint | Add-Member -NotePropertyName SourcePath -NotePropertyValue ([string]$SourcePath) -Force
     $Fingerprint | Add-Member -NotePropertyName WrittenUtc -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('o')) -Force
     $Fingerprint | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8 -Force
@@ -3333,7 +3333,7 @@ function Remove-StaleSetupSourceCopyLeases {
     param([Parameter(Mandatory = $true)][string]$GatePath)
 
     $nowUtc = (Get-Date).ToUniversalTime()
-    foreach ($lease in @(Get-ChildItem -LiteralPath $GatePath -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+    foreach ($lease in @(Get-ChildItem -LiteralPath $GatePath -Filter '*.json.txt' -File -ErrorAction SilentlyContinue)) {
         $remove = $false
         try {
             $data = Get-Content -LiteralPath $lease.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -3361,12 +3361,12 @@ function Acquire-SetupSourceCopyLease {
     New-SmartDirectory -Path $gatePath
 
     $leaseId = [guid]::NewGuid().ToString('N')
-    $leasePath = Join-Path $gatePath ("{0}_{1}.json" -f $env:COMPUTERNAME,$leaseId)
+    $leasePath = Join-Path $gatePath ("{0}_{1}.json.txt" -f $env:COMPUTERNAME,$leaseId)
     $waitSeconds = [math]::Max(60, $SetupSourceConcurrencyLeaseMinutes * 60)
     $started = Get-Date
     do {
         Remove-StaleSetupSourceCopyLeases -GatePath $gatePath
-        $activeCount = @(Get-ChildItem -LiteralPath $gatePath -Filter '*.json' -File -ErrorAction SilentlyContinue).Count
+        $activeCount = @(Get-ChildItem -LiteralPath $gatePath -Filter '*.json.txt' -File -ErrorAction SilentlyContinue).Count
         if ($activeCount -lt $SetupSourceConcurrencyLimit) {
             [pscustomobject]@{
                 ComputerName = $env:COMPUTERNAME
@@ -3557,7 +3557,7 @@ function Remove-StaleSetupSubnetCopyLeases {
     $nowUtc = (Get-Date).ToUniversalTime()
     foreach ($slot in @(Get-ChildItem -LiteralPath $GatePath -Directory -Filter 'slot-*' -ErrorAction SilentlyContinue)) {
         $remove = $false
-        $leaseFile = Join-Path $slot.FullName 'lease.json'
+        $leaseFile = Join-Path $slot.FullName 'lease.json.txt'
         try {
             $data = Get-Content -LiteralPath $leaseFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
             $seenText = if ($data.PSObject.Properties['LastSeenUtc']) { [string]$data.LastSeenUtc } else { [string]$data.CreatedUtc }
@@ -3654,7 +3654,7 @@ function Acquire-SetupSubnetCopyLease {
             $slotPath = Join-Path $gatePath ("slot-{0:000}" -f $slot)
             try {
                 New-Item -ItemType Directory -Path $slotPath -ErrorAction Stop | Out-Null
-                $leaseFilePath = Join-Path $slotPath 'lease.json'
+                $leaseFilePath = Join-Path $slotPath 'lease.json.txt'
                 Write-SetupSubnetCopyLease -LeaseFilePath $leaseFilePath -GateInfo $gateInfo -SourcePath $SourcePath
                 Write-SmartLog ("Acquired setup subnet copy lease: Subnet={0}; LocalIPv4={1}; Source={2}; Limit={3}; Lease={4}" -f $gateInfo.Display,$gateInfo.LocalIPv4,$SourcePath,$SetupSubnetConcurrencyLimit,$slotPath)
                 return [pscustomobject]@{ LeasePath = $slotPath; LeaseFilePath = $leaseFilePath; GateInfo = $gateInfo }
@@ -3749,7 +3749,7 @@ function New-SetupCacheLockPayload {
 function Read-SetupCacheLockPayload {
     param([Parameter(Mandatory = $true)][string]$LockPath)
 
-    $payloadPath = Join-Path $LockPath 'lock.json'
+    $payloadPath = Join-Path $LockPath 'lock.json.txt'
     if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) { return $null }
     try { return (Get-Content -LiteralPath $payloadPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop) } catch { return $null }
 }
@@ -3760,7 +3760,7 @@ function Save-SetupCacheLockPayload {
         [Parameter(Mandatory = $true)][object]$Payload
     )
 
-    $payloadPath = Join-Path $LockPath 'lock.json'
+    $payloadPath = Join-Path $LockPath 'lock.json.txt'
     $Payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $payloadPath -Encoding UTF8
 }
 
@@ -6560,8 +6560,8 @@ exit $exitCode
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHQx6qk09sATd1
-# VnHnEr7E8LHQD0t/eiu6je8BGMaPf6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBc7KrBuT216+YB
+# v4xWGnNf56kx33NR9sr/aNa/SjFSvqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6591,14 +6591,14 @@ exit $exitCode
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD64WNEiMP4Yu5eete8gtdI
-# R0zR4H34QpOqYjzvcFDnAjANBgkqhkiG9w0BAQEFAASCAYBltpIC54doMqBC22lQ
-# rFVato8be8nlLRDHNTcl96n8oYVOAFIva//CnbdmZEyIvI8bDW9Faq3IF+gjPAGo
-# n5vsIQQQuw6E8yCFLIZ9ulC9U8eAZYDWZtmyb/8e5Pw2W7wOlxF/nX7lec7GJJWD
-# HWOhXH9qEk1FXl1B8HIKKfTReJuu6ecS6QAeirtZJVuJqyYtT9jXJqd5WZeDJ1Oh
-# K11hPsQrbHqaXUSmNva8uxCmBfCeA48gJFr93v/XdI6ON4vaC/Hay7FJhfqamSAa
-# MJN5J3F2RyYwtK0OLnangFCmaVeHxslAb62UUBci/b6aDqx5zZrE5xJnmgtc8cEc
-# 6HuzUXhbSmTHawn9649zVWZ1wUBiXxxSIT0w1ujihoswnm65MxKz4H2lY6wODf5H
-# nwGTtRzv+7MjI+ylnYyweYPHW388X+YAHWvJXvGzmt762CWW+YWp7kBdbk7uKszM
-# EDFiiFemZgcpQwIQEiKWq/4YFHjX3lAj8u3UQAHREsnqmqA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCCKN2Rn2iIHUKmQCtjkN5N
+# UahzTiNkY9OrkG2ZXYDk0TANBgkqhkiG9w0BAQEFAASCAYBZluMq0kZVBSQ7hv+g
+# +LPjlXYYqHJ8Y99KCdTtu2+LxQug/kb3a4Lmr+xcH5hxhaeG+AuJ5Yl6fDdtA9fb
+# GgQaWPRMt1ljhfI2iSoFUnVZTSf6ocn6kqdN8A0VdRL92rAqThrorGxERGa16/Jv
+# DprC2iUr6BL+I5gHG3s0NZl12lZj4Qswxj2fQNNLPNJGoj8VOEwxHyzj3YUr/oEY
+# RXVHS0jtQ1RMmcyuKgtoxdSv9wqwm5luikeh+Bzr0Y3G4wmnWBNRkRo0opsmgSXi
+# WRyyZxUot5DwHNyu79cy7ZvgzSlOdPuT4drHxnv15Eh6PcFRd1X1Zkgbvd9Y9+jf
+# ATPMtIj3Fo31Iy7N3BlZOV/z7LEEgnfZJPZiCp9WoL4CDbNELy8Gi7ROenP2G3KX
+# ckriNX98YR3YYf0mhg1cfFIxQ9fg8v+gmF/6RrfwOAhDXqYkjFXhb+elmDAdj5aq
+# OJsJMXpPWpbkSG04uhOhP6l0/NcHydsCEkHyiASrnQU1ArY=
 # SIG # End signature block

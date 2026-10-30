@@ -78,7 +78,7 @@ free-disk check runs before any copy.
 1. Checks before any change: full source and destination paths, destination absent, same volume,
    no reparse point in the source tree or the destination parents, not owned by a legacy package,
    not in use, media valid.
-2. Restore information: relative path, size and DACL of every item (`snapshot-before.json`) and an
+2. Restore information: relative path, size and DACL of every item (`snapshot-before.json.txt`) and an
    `icacls /save` file (`acl-before.icacls`).
 3. Same-volume move, then permission reset to the inheritance of the new cache, checked on every
    item (not only from the `icacls` exit code), then validation in place.

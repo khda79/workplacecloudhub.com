@@ -19,7 +19,7 @@ products stay installed and usable; nothing is migrated from them (see
 | Term | Meaning |
 | --- | --- |
 | Campaign | The kind of migration: `HybridJoin` or `Windows11Upgrade`. Options, Waves, Runs, history and GUI choices are kept per Campaign. |
-| Wave | A named list of computers of one Campaign: `Waves\<Campaign>\<Wave>\Computers.txt`, its `Wave.local.json` options and its Loop/Once launchers. |
+| Wave | A named list of computers of one Campaign: `Waves\<Campaign>\<Wave>\Computers.txt`, its `Wave.local.json.txt` options and its Loop/Once launchers. |
 | Run | One execution of a Wave (or of a Single PC): `Runs\<Campaign>\<Wave>\<RunId>\` with logs, reports, effective options and evidence. |
 | Cycle | One pass over the computers still pending in a Run. A Loop Run repeats cycles until every computer is complete, the cycle limit is reached or the Run is stopped. |
 
@@ -27,11 +27,14 @@ A **Single PC** Run uses a one-computer Wave created inside its Run folder
 (`Runs\<Campaign>\_SinglePC\<RunId>\Wave`) and goes through the same engine and protections.
 
 The technician may set `Storage.WavesPath` and `Storage.RunsPath` in
-`Config\SmartEndpointMigrationToolkit.local.json` to independent absolute local or UNC paths.
+`Config\SmartEndpointMigrationToolkit.local.json.txt` to independent absolute local or UNC paths.
 Both default to empty: Waves and Runs then remain under the toolkit directory. These paths are
 the Waves and Runs directories themselves, each retaining the Campaign subdirectories. Change
 them only when no Runs are active. Existing content is not moved automatically; copy it if needed
 and regenerate existing Wave launchers using the GUI or `Scripts\SmartM365-EndpointMigration-Update-WaveCmdWrappers.ps1`.
+SEMT now reads and writes its own JSON data as `.json.txt`. It does not read or migrate earlier
+`.json` configuration, Wave options, Run history or endpoint state. Configure the new files before
+starting a Run; existing settings and guard history are not inherited from the old filenames.
 Details: [Docs/CAMPAIGN-WAVE-RUN.md](Docs/CAMPAIGN-WAVE-RUN.md).
 
 ## Requirements
@@ -87,7 +90,7 @@ Start-SmartEndpointMigrationToolkit-Demo.cmd
 ```
 
 GUI tabs: **Waves** (select, Launch Wave, launchers; on the right, the Wave **Options** tab, which edits
-Wave.local.json with inheritance, then **Activity**), **Single PC**, **New Wave**,
+Wave.local.json.txt with inheritance, then **Activity**), **Single PC**, **New Wave**,
 **Automatic Wave** (Preview, then Create: Create never launches), **Runs** (reports, controlled
 stop, forced local stop) and **Options** (generated from the option catalog, saved per Campaign).
 **Launch All Waves** launches the launchable Waves of the selected Campaign only, one every
@@ -143,9 +146,9 @@ alone does not confirm that its Intune service plan is enabled.
 
 All options come from [Config/SmartEndpointMigrationToolkit.options.json.txt](Config/SmartEndpointMigrationToolkit.options.json.txt).
 Precedence, highest first: explicit CLI, GUI choices captured for the Run, Wave
-(`Wave.local.json`), `SEMT_*` environment variables, global configuration
-(`Config\SmartEndpointMigrationToolkit.local.json`), campaign default. The effective value and
-its source are written to `EffectiveOptions.json` and shown in the report. Reference and default
+(`Wave.local.json.txt`), `SEMT_*` environment variables, global configuration
+(`Config\SmartEndpointMigrationToolkit.local.json.txt`), campaign default. The effective value and
+its source are written to `EffectiveOptions.json.txt` and shown in the report. Reference and default
 decisions: [Docs/OPTIONS.md](Docs/OPTIONS.md).
 
 Local configuration files are created from their `*.json.template` and completed automatically

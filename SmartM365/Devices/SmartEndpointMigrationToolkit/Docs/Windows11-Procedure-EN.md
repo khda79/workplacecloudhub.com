@@ -33,8 +33,8 @@ In the GUI, select **Windows 11 upgrade**, then **Options**:
 | Setup | Source path or map, execution mode (`LocalCache` default, `Share`, `Auto`), media id, language (`MatchSystem`), Dynamic Update, legacy media reuse, duplication |
 | Parallelism / Safety | workers per Wave, shared cap, PsExec timeout, run guard hours, minimum free disk (32 GB) |
 
-Global defaults can also be set once in `Config\SmartEndpointMigrationToolkit.local.json` and per
-Wave in `Wave.local.json` (for example a site-local source per Wave).
+Global defaults can also be set once in `Config\SmartEndpointMigrationToolkit.local.json.txt` and per
+Wave in `Wave.local.json.txt` (for example a site-local source per Wave).
 
 Reboots: `Allow controlled reboots` (default on) reboots for a pending reboot or setup completion
 only when no user is connected, **except** when uptime exceeds

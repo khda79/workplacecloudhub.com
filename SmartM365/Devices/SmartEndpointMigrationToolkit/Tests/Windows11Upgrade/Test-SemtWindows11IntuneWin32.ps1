@@ -289,23 +289,23 @@ try {
 
     $outcomeRoot = Join-Path $testRoot 'outcome'
     $resultsRoot = Join-Path $outcomeRoot 'State\Results'
-    $lastRunPath = Join-Path $outcomeRoot 'LastRun.json'
+    $lastRunPath = Join-Path $outcomeRoot 'LastRun.json.txt'
     New-Item -ItemType Directory -Path $resultsRoot -Force | Out-Null
     $cid = [guid]::NewGuid().ToString('N')
-    [pscustomobject]@{ CorrelationId = $cid; State = 'Completed'; Status = 'SETUP_UPGRADE_STARTED'; ExitCode = '0'; NextAction = 'WAIT' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $resultsRoot "$cid.json") -Encoding ASCII
+    [pscustomobject]@{ CorrelationId = $cid; State = 'Completed'; Status = 'SETUP_UPGRADE_STARTED'; ExitCode = '0'; NextAction = 'WAIT' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $resultsRoot "$cid.json.txt") -Encoding ASCII
     [pscustomobject]@{ CorrelationId = 'other'; Status = 'OLD'; ExitCode = 1; NextAction = 'OLD' } | ConvertTo-Json | Set-Content -LiteralPath $lastRunPath -Encoding ASCII
     $outcome = Get-EndpointAttemptOutcome -ResultsRoot $resultsRoot -LastRunPath $lastRunPath -CorrelationId $cid
-    Test-Step 'runner trusts a Completed Results\<CorrelationId>.json first' { $outcome.Source -eq 'AttemptResult' -and $outcome.Completed -and $outcome.Status -eq 'SETUP_UPGRADE_STARTED' }
+    Test-Step 'runner trusts a Completed Results\<CorrelationId>.json.txt first' { $outcome.Source -eq 'AttemptResult' -and $outcome.Completed -and $outcome.Status -eq 'SETUP_UPGRADE_STARTED' }
     $cidRunning = [guid]::NewGuid().ToString('N')
-    [pscustomobject]@{ CorrelationId = $cidRunning; State = 'Running'; Status = 'RUNNING' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $resultsRoot "$cidRunning.json") -Encoding ASCII
+    [pscustomobject]@{ CorrelationId = $cidRunning; State = 'Running'; Status = 'RUNNING' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $resultsRoot "$cidRunning.json.txt") -Encoding ASCII
     $outcome = Get-EndpointAttemptOutcome -ResultsRoot $resultsRoot -LastRunPath $lastRunPath -CorrelationId $cidRunning
     Test-Step 'runner does not treat a Running attempt as completed' { -not $outcome.Completed -and $outcome.Status -like 'ATTEMPT_NOT_COMPLETED*' }
     $cidMissing = [guid]::NewGuid().ToString('N')
     $outcome = Get-EndpointAttemptOutcome -ResultsRoot $resultsRoot -LastRunPath $lastRunPath -CorrelationId $cidMissing
-    Test-Step 'runner falls back to LastRun.json and flags a foreign attempt as not completed' { $outcome.Source -eq 'LastRun' -and -not $outcome.Completed -and $outcome.Status -eq 'OLD' }
+    Test-Step 'runner falls back to LastRun.json.txt and flags a foreign attempt as not completed' { $outcome.Source -eq 'LastRun' -and -not $outcome.Completed -and $outcome.Status -eq 'OLD' }
     [pscustomobject]@{ CorrelationId = $cidMissing; Status = 'COMPLIANT'; ExitCode = 0; NextAction = 'NONE' } | ConvertTo-Json | Set-Content -LiteralPath $lastRunPath -Encoding ASCII
     $outcome = Get-EndpointAttemptOutcome -ResultsRoot $resultsRoot -LastRunPath $lastRunPath -CorrelationId $cidMissing
-    Test-Step 'runner accepts LastRun.json of the same CorrelationId as completed' { $outcome.Source -eq 'LastRun' -and $outcome.Completed -and $outcome.Status -eq 'COMPLIANT' }
+    Test-Step 'runner accepts LastRun.json.txt of the same CorrelationId as completed' { $outcome.Source -eq 'LastRun' -and $outcome.Completed -and $outcome.Status -eq 'COMPLIANT' }
 
     # ---------- Detection template ----------
     Test-Step 'detection template keeps both placeholders' { $detectText.Contains("'__PACKAGE_ID__'") -and $detectText.Contains("'__PACKAGE_VERSION__'") }
@@ -370,12 +370,12 @@ try {
     Test-Step 'builder did not call IntuneWinAppUtil' { $null -ne $buildResult -and [string]::IsNullOrEmpty([string]$buildResult.IntuneWin) -and -not (Test-Path -LiteralPath $prepRoot) -and @(Get-ChildItem -LiteralPath $testRoot -Filter '*.intunewin' -Recurse -File).Count -eq 0 }
     $stagedSource = Join-Path $fakeIntune "Build\$expectedPackageId\Source"
     $stagedNames = @(Get-ChildItem -LiteralPath $stagedSource -File -ErrorAction SilentlyContinue | ForEach-Object Name | Sort-Object)
-    $expectedStaged = @('PackageManifest.json','SmartM365-EndpointMigration-Install.ps1','SmartM365-EndpointMigration-Run-IntuneUpgrade.ps1','SmartM365-EndpointMigration-SetupMediaIntegrity.ps1','SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1')
+    $expectedStaged = @('PackageManifest.json.txt','SmartM365-EndpointMigration-Install.ps1','SmartM365-EndpointMigration-Run-IntuneUpgrade.ps1','SmartM365-EndpointMigration-SetupMediaIntegrity.ps1','SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1')
     Test-Step 'builder stages exactly the new package file names' { ($stagedNames -join ',') -eq ($expectedStaged -join ',') }
     Test-Step 'builder embeds the NEW endpoint script unchanged' { (Get-FileHash -LiteralPath (Join-Path $stagedSource 'SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1')).Hash -eq (Get-FileHash -LiteralPath $endpoint).Hash }
     Test-Step 'builder stages media under SetupMedia\<MediaId>-<Language> and validates it' { (Test-SmartM365SetupMediaIntegrity -MediaRoot (Join-Path $stagedSource 'SetupMedia\Win11-fr-FR')).Files -eq 4 }
     $stagedManifest = $null
-    try { $stagedManifest = Get-Content -LiteralPath (Join-Path $stagedSource 'PackageManifest.json') -Raw | ConvertFrom-Json } catch { }
+    try { $stagedManifest = Get-Content -LiteralPath (Join-Path $stagedSource 'PackageManifest.json.txt') -Raw | ConvertFrom-Json } catch { }
     Test-Step 'package manifest records identity, cache folder and endpoint version' { $null -ne $stagedManifest -and $stagedManifest.PackageId -eq $expectedPackageId -and $stagedManifest.SetupCacheFolder -eq 'Win11-fr-FR' -and $stagedManifest.PackageMode -eq 'WithMedia' -and $stagedManifest.EndpointVersion -eq '1.0.0' -and $stagedManifest.PackageVersion -eq '1.0.0' }
     $outputDir = Join-Path $fakeIntune "Output\$expectedPackageId"
     $generatedDetect = Join-Path $outputDir 'SmartM365-EndpointMigration-Detect.ps1'
@@ -469,8 +469,8 @@ exit 0
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC+Lzu5+rkYwA18
-# evwruEusHEtIi0QNnQ5LEWtMTTas3qCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCSIIu+jORybMAJ
+# iYyIcLGg49+djyaL4zmkR4KQop+yB6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -500,14 +500,14 @@ exit 0
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAhlRWQ0lTjp8b67GsHKnUS
-# wr+7TcHC4yzKOQhJUmvStTANBgkqhkiG9w0BAQEFAASCAYCU/03DgiDdCDRWI8bL
-# 5+1XaPRyEMj4SSZ0HbRs6NPb7pEjEd9Uyzm1EMuVzQscGjlN/2UbNUxPH6IMKVl5
-# agqijYPX7oU+hRRmLESPZHfXMFql27EP+r2anR6Ay/ubeLNBaS+9c3JjVF+CPZrN
-# qk++q/BEOB5WIG3m5U16Djx1hiSSaiNvMRf+ujDP90sMtBziC3Yv4yfzu+bjXlmK
-# aWuL4R+Fnr4/jF9qmJK/82bgnzB1tiJwWo3ZEC8p3ha2Kdw8HQmgsPL2jV2hGDqo
-# bJ76x4/EWq4nAu8V9JnbYCpswM7MUC6MDOiqONJfJf5D3p8GybcLeTO8CDadQ150
-# WN2A8DtSRGdX3wmVURdGf+hwGbfeRpVz7imASNxQnZ9K4fueh/UIP5kNt+Kezs5v
-# E2dqeQM7JYyk5TDbgZhrbKFTuF1Q2GNLRftxb7lGRFfZWVI+EeZQRkdwEBLo0cTL
-# hwwSNgooNrd2rYGzsmLFCaGyJqBc77c6npfT0TF0CXdg5gI=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAw5p3qSJiAxQNtLk9SYoG6
+# 5si3erwT5+YkLJEMoSuGnTANBgkqhkiG9w0BAQEFAASCAYBlpZyZBryUswvSbOxN
+# DS2NP1EkuotfN/qqXlTcNDossY3IA7hANCsknTkL1vgg0ukBDgqzMCBLDD37Hs0w
+# 210gzUaFpbxefJezgrDTPvcHXNfyt0ijP6cflaOh+H63Q8TG4HUby/22D3RQcipD
+# 8HruQxk2xDYYQTQbqCdY5Kko9NxybkbWLcA62hMEQvbuinJ4OJOd6Drm61PacNQ2
+# 5Dz+lyGdpF047r2JJOcggvkg0DRRnDl7Qlb5+qj/dmvjrkQLb0pI9XV7xCUZj1xn
+# E44D9A3RjrWUh4Bopu6jTDXMgIPcq/DiInrEgNzygNgnbi9JgMV3+nsVhfqbwlEN
+# IGnYx01rwNMSJDwBX175XLHaAb7YfK7UYKg22ledSHi79s4DQiQkkKEkFlL+Uglq
+# dGIUPQ0YajLeqyJktHCx9JFpz1Yunh0xZ1xk0Sz17IQKyhEYVnOGU8fHuw1f5TEE
+# sLfuYlRsHZEBZCCb3sC2A/T4vAun0ZV1LkHHmZtzd6ZvmQ0=
 # SIG # End signature block
