@@ -1699,6 +1699,33 @@ function Get-Windows11IndicatorSummary {
     }
 }
 
+function Invoke-SemtGpUpdateWithTimeout {
+    param([int]$TimeoutSeconds = 180, [Parameter(Mandatory=$true)][string]$OutputFile)
+    $stdout = Join-Path $env:TEMP ('SEMT_W11_{0}_stdout.tmp' -f [guid]::NewGuid().ToString('N'))
+    $stderr = Join-Path $env:TEMP ('SEMT_W11_{0}_stderr.tmp' -f [guid]::NewGuid().ToString('N'))
+    $timedOut = $false
+    $exitCode = ''
+    $stopDetail = ''
+    try {
+        $process = Start-Process -FilePath 'gpupdate.exe' -ArgumentList @('/target:computer','/force') -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            $timedOut = $true
+            try { $process.Kill() } catch { $stopDetail = $_.Exception.Message }
+            try { if (-not $process.WaitForExit(5000)) { $stopDetail = 'Process did not exit after termination was requested.' } } catch { if (-not $stopDetail) { $stopDetail = $_.Exception.Message } }
+        } else {
+            try { $process.Refresh() } catch { }
+            $exitCode = $process.ExitCode
+        }
+        $parts = @()
+        if (Test-Path -LiteralPath $stdout) { $parts += Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $stderr) { $parts += Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue }
+        (($parts | Out-String).Trim()) | Out-File -LiteralPath $OutputFile -Encoding UTF8 -Force
+        return [pscustomobject]@{ TimedOut=$timedOut; ExitCode=$exitCode; StopDetail=$stopDetail; OutputFile=$OutputFile }
+    } finally {
+        Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Repair-WindowsUpdatePolicyBlockers {
     Write-SmartLog 'Repairing legacy Windows Update policy blockers.'
     $wuPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
@@ -1721,7 +1748,10 @@ function Repair-WindowsUpdatePolicyBlockers {
         }
     }
 
-    gpupdate.exe /target:computer /force | Out-Null
+    $outputFile = Join-Path $script:OutputDir ('gpupdate_policy_{0}.txt' -f $script:RunId)
+    $result = Invoke-SemtGpUpdateWithTimeout -TimeoutSeconds 180 -OutputFile $outputFile
+    Write-SmartLog ('gpupdate finished. TimedOut={0}; ExitCode={1}; OutputFile={2}; StopDetail={3}' -f $result.TimedOut,$result.ExitCode,$result.OutputFile,$result.StopDetail)
+    return $result
 }
 
 function Reset-WindowsUpdateComponents {
@@ -6168,9 +6198,17 @@ try {
         $nextAction = if ($AllowPolicyRepair) { 'POLICY_REPAIR_ATTEMPTED' } else { 'ALLOW_POLICY_REPAIR' }
         $detail = $policy.Issues
         if ($AllowPolicyRepair -and -not $AuditOnly) {
-            Repair-WindowsUpdatePolicyBlockers
-            $actionResult = 'PolicyRepairCompleted'
-            $exitCode = 0
+            $gpUpdateResult = Repair-WindowsUpdatePolicyBlockers
+            if ($gpUpdateResult.TimedOut) {
+                $status = 'GPUPDATE_TIMEOUT'
+                $nextAction = 'INVESTIGATE_GROUP_POLICY_TIMEOUT'
+                $detail = ('gpupdate exceeded 180 seconds after policy changes; termination requested; stop detail: {0}; output: {1}' -f $gpUpdateResult.StopDetail,$gpUpdateResult.OutputFile)
+                $actionResult = 'PolicyRepairGpUpdateTimeout'
+                $exitCode = 1
+            } else {
+                $actionResult = 'PolicyRepairCompleted'
+                $exitCode = 0
+            }
         }
         else {
             $exitCode = 3
@@ -6503,8 +6541,8 @@ exit $exitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQRUQS0XZ+Lpmg
-# FpjwJePOkvA1RiiccpHYdL0F1lkFoqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDRoGqPSH2K7v4t
+# SXfS+bn4lA4sxEsm9ZpVwaAJXpDdEqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6637,31 +6675,31 @@ exit $exitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIODEjbvSVhAdCiVl4rfXaWrbtugwrIYBzPIX3z4lipXdMA0GCSqG
-# SIb3DQEBAQUABIIBgBZ6LJupIKx9OxJENk3q3BKyN07a8g75mHsY6giIwnmvedO5
-# rEp1mNX43wUlai+3cOb4qlsBGEKJkWMtoQiY1ZC9NRxZd4Y41wgUe5lsp3948/gS
-# m4Usy7zoZHxAld5mjP8Iczg/1dgS7AdIbRZ51tTBMMkx8V8FuRSbnWWF7RVYNekB
-# +m7Q616QbEqqt3Ce1WfchS9KmhQKV/QwFXPStthTBXnVQ4A59rVLKOfvrbopCEnr
-# 8EZIIKzn8FufAEMwsrUwWLC4dutksp54X8IHBG7cxJdQ1n+mjoWxrlp2Kw8S8omX
-# zED272zHrDpSM0QfoPTiV5b6YHqm7i+iDLFNeSC2PWqhvg3HMfYPdncGDHP59gOA
-# XUukbxM+gntKYO+cI+qZ0QIFS7i6joU0PGJaxBnn4txAmWQPQ5KyjH7ycm33C6AJ
-# IfhUJY7QT+10R4J6q486kJyhsVOpcBpRINntkG6YlSLRA4iG25T6r+Ke03BmObVH
-# D8GAOPR4Q4KrWJxERqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKaG+MDhbqwfys6yMHGcvIDw6EjC4V4Fxfgon9SLQ7d2MA0GCSqG
+# SIb3DQEBAQUABIIBgGogFVxE73W4Vnxj0JwFiwG0DutZ/xptgQXwqfsGeshrjx5d
+# FciaWX9+8KUlG2SUwEWZEStNu+1OxbC2ZJSMZGx5A40r+ut/+Wg3nh1gmKdXnQki
+# MGdM4R8sAXolOyBlES/VeD6YxFOiYq1ccUsT5PzNoD9xm9JqrZWU50mFFO1up45L
+# GZvyfRFcSLs8FgjyVvVeo8udOjT+DA0thlfLHtB5rGDMP/aEYl9L8JKTzDeKxaoS
+# SZYBM8YSy2bNq4+ka94GxEcM5xTaRlX/eeCBg42MylSiT6X+WzyOOQiO4UKTw44j
+# ZjufeBak74JYuX9wQcnCnIjQqxrokU7ZKzPw3lOQMaXd6P6GAKMY6gJnBy0boIy/
+# +6mxK/qj48nKOk4dHuGsfE30ZjDPMw4p4QMX69ne93CpSn/G9mA9nOdzOR9OSByh
+# ZDjnor6qK//iPLLsbBYQW+PJILsgGL9huveuHNOzwJr3U/Oi4p1Ljcf0VdnJyv8o
+# W8+6Hk1nFPAlAXz3L6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAxMTU1
-# NTVaMC8GCSqGSIb3DQEJBDEiBCDlxrDd/nWaNExnorSvspXt03CK/tnWOVFqWAgi
-# eEF0MzANBgkqhkiG9w0BAQEFAASCAgAcNEpf0+5Etp0pGCSbP+GFJ9DrbbVLIRfe
-# 4en1QSRc95rTj/jKegDqH8/mfCflNAODsYaFsrQgqlsSh3wdXveyA9gKJet+9cxN
-# zqL91B2IkR5l7/7rElYVUbhz1i1l9kAwpq7Oo0ZDY2LmqSrSs5XE3tQ+4HcQtJXc
-# /6bWvp1SXWGDnUGD6Jxe9J/8UAR6euYjam9Fe94RC9XsuLFb/wWGCPvTHzlBmhRL
-# zDjYI/IX3+dN1/7nP4e7a1vI2zmtosSLBhGDBHhtScRk4VnI2Z74sn5Kep1+0p1A
-# sVTVcOwKnwgeEQhw8Tx2PLwtIfFJQ5NeTVqbuGA/CVyi6pR1d/pGXZv+h4AUijoP
-# o/P2MIvTITTevuUb8oQYBWYrZu08ulQgvzfVT0TKhv4tLNJ/TjbDQUvz8zvm26yv
-# h7helS6NAtDKtqoaYnbTTEpMIUxFmMEBMoptrwEjm1SSU340p2pbP0KV7VjUbyvh
-# Padxf2YH7fd58z/quBqjHxXR3WYb8VdevrKp5SWIdDSzo4gFXnjzmWt84qDyE3ON
-# HokKQzvVyn0b5j/Kir2awFXM4wZFAYCBoFbREdPBCwT/rxunBb0qLaakIDWdevMm
-# XWZo2ohssaZf5/O0naSvvQmtpgWdNw92pekdG8xrOiuocp/oDd8fdGPw/+dL66cp
-# f8vIfBGTHg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAxMjUz
+# NTNaMC8GCSqGSIb3DQEJBDEiBCBrjcwsJmfcXPdB0tvrSJxq9JeqyqZPeS2QWNyv
+# oKKipjANBgkqhkiG9w0BAQEFAASCAgA6liIaRUX0emUqc3KmBqrnAPNTvOpmPCRs
+# c0pC5lMwXKJKo6zZyJ2goJQ/rPOH+oXVGSPOyzrm8HaTGAfYL8rEXDIn2G7ojXsz
+# QjFoQ3dwT3vcEPe0RSBjz4NSEskaUDsUaKWeQ3VqnT7HsTI2c4Yjkl2BLBNmyZPp
+# vwLLI8hJe8Ek/h7tyAIOijBzKBFkv3AGYDiyrC1GXT1rZBWlwZnF6jSBVYifmi70
+# 4/8Wh9ooAYlcgoop0izCHYfN8LUU+jT2UzT9k5yvxxQK2fdK0vqC66R4AUAgaZA3
+# NwY59k9k6BM18MHdkLAq/DQbl0/YvK2672+6v/GrdqQqQFKQ1CbzJ2iM2CMBPmFk
+# JDaS/F4fw27jl1jYuRoLGeJXxDw2OBcrAc+1nzO9pk88i+jecqj322YFwwEjwz8W
+# IO1IL87q2wBXIifH/G9Fqp2oh+9KsW7zHSmAmYdwSMmRt3egbdR9IjF9JjR841Ns
+# PJ2ZF38cbQnz5FAef8e9yM/RK3hbdTAgw+oV6hLwjDckcepmTq8eA5OPUb05XIL2
+# hmFBCeEqETEQTHvyeQHtszqveximohljrK+HCT3cL4JtjYEgahrT+Dn9DjTN/NK3
+# u3UJNzzNz4JVfmyky/EN7Lkhcha/MUDxGOEm/TrTxD70HOoN0smV9KH3irNieTNJ
+# bUA+HFp3sg==
 # SIG # End signature block

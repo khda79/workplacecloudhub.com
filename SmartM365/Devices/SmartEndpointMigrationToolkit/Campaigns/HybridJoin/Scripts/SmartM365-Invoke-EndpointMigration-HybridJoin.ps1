@@ -1359,6 +1359,7 @@ $RetryMaxRetries   = 2
 $UserTaskWaitSeconds = 30
 $UserPrtRetryWaitSeconds = 30
 $GpUpdateWaitSeconds = 30
+$GpUpdateTimeoutSeconds = 180
 $UserTaskFolderPath = "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin"
 $UserStatusTaskName = "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserDsregStatus"
 $UserRefreshPrtTaskName = "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserRefreshPrt"
@@ -1369,7 +1370,7 @@ Write-RunLog ("Retry policy: SleepMinutes={0}; MaxRetries={1}; Mode=LocalWait" -
 Write-RunLog ("Intune retry policy: SleepMinutes={0}; MaxRetries={1}; Mode=LocalWait" -f $IntuneRetrySleepMinutes, $IntuneRetryMaxRetries)
 Write-RunLog ("User task policy: Folder={0}; StatusTask={1}; RefreshPrtTask={2}; IntuneAutoEnrollTask={3}; NextLogonTask={4}; WaitSeconds={5}; RefreshWaitSeconds={6}" -f $UserTaskFolderPath, $UserStatusTaskName, $UserRefreshPrtTaskName, $UserIntuneAutoEnrollTaskName, $UserNextLogonAutoEnrollTaskName, $UserTaskWaitSeconds, $UserPrtRetryWaitSeconds)
 Write-RunLog "DNS policy: FlushDNS=True"
-Write-RunLog ("GPUpdate policy: Force=True; WaitSeconds={0}" -f $GpUpdateWaitSeconds)
+Write-RunLog ("GPUpdate policy: Force=True; TimeoutSeconds={0}; PostWaitSeconds={1}" -f $GpUpdateTimeoutSeconds,$GpUpdateWaitSeconds)
 Write-RunLog ("Non-Intune MDM removal policy: AllowRemoveNonIntuneMdmEnrollment={0}" -f [bool]$AllowRemoveNonIntuneMdmEnrollment)
 
 # Transcript (best effort)
@@ -3094,12 +3095,14 @@ function Invoke-ProcessWithTimeout {
     $timedOut = $false
     $exitCode = ""
     $outputText = ""
+    $stopDetail = ""
 
     try {
         $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $tempStdOut -RedirectStandardError $tempStdErr
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             $timedOut = $true
-            try { $process.Kill() } catch { }
+            try { $process.Kill() } catch { $stopDetail = $_.Exception.Message }
+            try { if (-not $process.WaitForExit(5000)) { $stopDetail = 'Process did not exit after termination was requested.' } } catch { if (-not $stopDetail) { $stopDetail = $_.Exception.Message } }
         }
         else {
             try { $process.Refresh() } catch { }
@@ -3122,6 +3125,7 @@ function Invoke-ProcessWithTimeout {
         TimedOut = $timedOut
         Output = $outputText
         OutputFile = $OutputFile
+        StopDetail = $stopDetail
     }
 }
 
@@ -3318,6 +3322,8 @@ function Get-NextActionForStatus {
         "SKIPPED_VIRTUAL_MACHINE" { return "NO_ACTION_VIRTUAL_MACHINE" }
         "COMPUTER_SYSTEM_QUERY_FAILED" { return "FIX_WMI_CIM_OR_RETRY" }
         "DOMAIN_CONTROLLER_UNREACHABLE" { return "FIX_DOMAIN_CONNECTIVITY_OR_VPN" }
+        "GPUPDATE_TIMEOUT" { return "INVESTIGATE_GROUP_POLICY_TIMEOUT" }
+        "FINAL_GPUPDATE_TIMEOUT" { return "INVESTIGATE_GROUP_POLICY_TIMEOUT" }
         default {
             if ($Status -like "REBOOT_TRIGGERED*") { return "WAIT_REBOOT_AND_RECHECK" }
             if ($Status -like "*CONNECTIVITY*") { return "CHECK_CONNECTIVITY" }
@@ -3985,6 +3991,8 @@ $uptimeHours = ""
 $uptimeDays = ""
 $bootInfoDetail = ""
 $gpUpdateAttempted = $false
+$gpUpdateTimedOut = $false
+$gpUpdateStopDetail = ''
 $gpUpdateExitCode = ""
 $gpUpdateOutputFile = ""
 $gpUpdateMdmPolicyWarning = $false
@@ -3993,6 +4001,8 @@ $gpUpdateMdmPolicyDetail = ""
 $gpResultHtmlFile = ""
 $gpResultTextFile = ""
 $finalGpUpdateAttempted = $false
+$finalGpUpdateTimedOut = $false
+$finalGpUpdateStopDetail = ''
 $finalGpUpdateReason = ""
 $finalGpUpdateExitCode = ""
 $finalGpUpdateOutputFile = ""
@@ -4190,13 +4200,15 @@ try {
     Write-RunLog "Running gpupdate /target:computer /force."
 
     try {
-        $gpupdateOutput = gpupdate.exe /target:computer /force 2>&1
-        $gpUpdateExitCode = $LASTEXITCODE
-        $gpupdateOutput | Out-File -FilePath $gpUpdateOutputFile -Encoding UTF8 -Force
-        Write-RunLog ("gpupdate completed. ExitCode={0}; OutputFile={1}" -f $gpUpdateExitCode,$gpUpdateOutputFile)
+        $gpResultProcess = Invoke-ProcessWithTimeout -FilePath 'gpupdate.exe' -Arguments @('/target:computer','/force') -TimeoutSeconds $GpUpdateTimeoutSeconds -OutputFile $gpUpdateOutputFile
+        $gpUpdateExitCode = $gpResultProcess.ExitCode
+        $gpupdateOutput = $gpResultProcess.Output
+        $gpUpdateTimedOut = $gpResultProcess.TimedOut
+        $gpUpdateStopDetail = $gpResultProcess.StopDetail
+        Write-RunLog ("gpupdate finished. TimedOut={0}; ExitCode={1}; OutputFile={2}" -f $gpUpdateTimedOut,$gpUpdateExitCode,$gpUpdateOutputFile)
 
         $gpupdateText = (($gpupdateOutput | Out-String).Trim())
-        if ($gpupdateText -match "MDM Policy") {
+        if (-not $gpUpdateTimedOut -and $gpupdateText -match "MDM Policy") {
             $gpUpdateMdmPolicyWarning = $true
             $gpUpdateMdmPolicyState = "Warning"
             $gpUpdateMdmPolicyDetail = "gpupdate reported MDM Policy processing issue."
@@ -4272,6 +4284,12 @@ try {
     catch {
         $gpUpdateExitCode = ""
         Write-RunLog ("gpupdate failed to start: {0}" -f $_.Exception.Message)
+    }
+
+    if ($gpUpdateTimedOut) {
+        $status = 'GPUPDATE_TIMEOUT'
+        $ExitCode = 1
+        throw ("Initial gpupdate exceeded {0} seconds; repair stopped. Termination requested; stop detail: {1}. OutputFile={2}" -f $GpUpdateTimeoutSeconds,$gpUpdateStopDetail,$gpUpdateOutputFile)
     }
 
     if ($GpUpdateWaitSeconds -gt 0) {
@@ -5212,14 +5230,21 @@ try {
             Write-Host "Refreshing computer Group Policy after repair action..." -ForegroundColor Cyan
             Write-RunLog ("Running final gpupdate /target:computer /force. Reason={0}" -f $finalGpUpdateReason)
             try {
-                $finalGpupdateOutput = gpupdate.exe /target:computer /force 2>&1
-                $finalGpUpdateExitCode = $LASTEXITCODE
-                $finalGpupdateOutput | Out-File -FilePath $finalGpUpdateOutputFile -Encoding UTF8 -Force
-                Write-RunLog ("Final gpupdate completed. ExitCode={0}; OutputFile={1}" -f $finalGpUpdateExitCode,$finalGpUpdateOutputFile)
+                $finalGpResult = Invoke-ProcessWithTimeout -FilePath 'gpupdate.exe' -Arguments @('/target:computer','/force') -TimeoutSeconds $GpUpdateTimeoutSeconds -OutputFile $finalGpUpdateOutputFile
+                $finalGpUpdateExitCode = $finalGpResult.ExitCode
+                $finalGpUpdateTimedOut = $finalGpResult.TimedOut
+                $finalGpUpdateStopDetail = $finalGpResult.StopDetail
+                Write-RunLog ("Final gpupdate finished. TimedOut={0}; ExitCode={1}; OutputFile={2}" -f $finalGpUpdateTimedOut,$finalGpUpdateExitCode,$finalGpUpdateOutputFile)
             }
             catch {
                 $finalGpUpdateExitCode = ""
                 Write-RunLog ("Final gpupdate failed to start: {0}" -f $_.Exception.Message)
+            }
+            if ($finalGpUpdateTimedOut) {
+                $previousStatus = $status
+                $status = 'FINAL_GPUPDATE_TIMEOUT'
+                $ExitCode = 1
+                throw ("Final gpupdate exceeded {0} seconds after repair; previous status={1}. Termination requested; stop detail: {2}. OutputFile={3}" -f $GpUpdateTimeoutSeconds,$previousStatus,$finalGpUpdateStopDetail,$finalGpUpdateOutputFile)
             }
         }
     }
@@ -5424,7 +5449,7 @@ try {
     Write-RunLog ("Script end. Status={0}; ExitCode={1}" -f $status,$ExitCode)
 }
 catch {
-    $controlledRetryStop = $status -in @("RETRY_AFTER_REBOOT_EXHAUSTED","RETRY_AFTER_REBOOT_STATE_MISSING")
+    $controlledRetryStop = $status -in @("RETRY_AFTER_REBOOT_EXHAUSTED","RETRY_AFTER_REBOOT_STATE_MISSING","GPUPDATE_TIMEOUT","FINAL_GPUPDATE_TIMEOUT")
     $errorMessage = $_.Exception.Message
     if (-not $controlledRetryStop) {
         $status = "ERROR"
@@ -5676,8 +5701,8 @@ exit $ExitCode
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDY9iyZnSlQqLf9
-# WwVI052swp+sP3ti33p043/AYHSnbKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtXg3s4KlnuRqU
+# B6qEtoskOyCbeHx2BiOfa02UAMt+p6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5810,31 +5835,31 @@ exit $ExitCode
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBRCFM3P4jzRngFW2gWdxN262vkxojQzF/xLfKEVRCvOMA0GCSqG
-# SIb3DQEBAQUABIIBgJGRzDBh4EUlnyjkPZ+i7+FwJsvRyQR6Uf4vMrdFjKJpRoaz
-# zgjfOJIPHgxyI5LrBp+g13X31Ph6zYaegvoJFJtXhusiRRju8YcllJCB9kfgO0nW
-# XEk9dwGJm0FV71FVF2IEKkg4ybwnNr13RdS9I/v/VCHlp6OnyKHufraD+O6sORh2
-# 9JaxhZMqJQOe1VwGXXx7B2Mtkmr5sT5gKed1pGwCaEA/f3tO3U9alb8nYZ8nBG8B
-# P3kBTG6b+v5IsMNEqxSCUENnj5GICnXWOZfVTz9JF7HMNFR9T3IzfbzWxm6vPBTf
-# UkGSTeU/kPJCcLhL7Mc89soziU/4iZDkE0xVVD9wjkkzAfF+VEf6FicElpmL6mKW
-# elXn/YpIvT9o+ECJLRzW4QSo4u6LgrxeD1EMvx9CZSEY9mMacEq9xMXGXmdSVdmE
-# iZhMmdixmq6NDigwOpnUFl7Obb6HTDyweJ0v7OkyS+OSBOoHKIXpK0lffydZj/yV
-# TAWS1LbBISC6W7YQt6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFlGbD7X4kOsgPB4Taa69o5f729fRqiyr3dnESJl1sFOMA0GCSqG
+# SIb3DQEBAQUABIIBgD5zgaOblKsLA+aQOu5V3T4n8CkIEhf9nE1zgW5MgxQee9/E
+# XORUNNxQYO6XtrUs1+SmYLWP3QAV1KUt/ni/OicuNVvv4dCcgMi19IcA2enwEz67
+# MkthC/1+OnxrQwx9bA/4S4z03Rc7rPKZPtRGLJP3+K/P9RC5F4B54LsKBLSCKpZx
+# H4/jcOCWlg79oazdLZbJovvPI7Juhh2dvMNtQOSpcMYIthMl1R0aoNLUJleQx37c
+# vUXHMe24+yOMyEEh2ofcTQvq03Ulz4mIQC2gY+E41Eb6jYngPpik8R8p8QjWbYGI
+# vN5Kt1A2AacM4rpMtCTiY4u/fLGrsW5/60cbeFze9n0aMtExhQnP387v1g0DsjK7
+# TrANpMnXAUlGPJyAraXanpp3qTztoi98ADfwqbE9Pcg47nRmEIPE03ypUaZWi/fd
+# oCh5OEvlo8OZKuCoVgXhLOCtLjlk+lFX5xs478SKZF5A+I1G2dejiL1BZ/rvgCO5
+# j4flOkAn2krUlgCXQaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAxMTU1
-# NTRaMC8GCSqGSIb3DQEJBDEiBCBVDzigimLXF1XLWFVVMu9FMnso++aqKqa8Wt6W
-# p0fO9TANBgkqhkiG9w0BAQEFAASCAgAauBba8dgYJTOOzB2e8HE4vVrE1ACzLE/W
-# bBjapNTMLTDbE/lh8IPQ7vtdICEenvThZjKK/2/BegKCIl8G0YehkBd3Ou7L7MSI
-# 3iEy/jVQge7RKIM32yQm94zPL7KuP/wZzJju9Zyu2z6zcGykK8fbgtLKPWF30hc1
-# SjxBuOGtBTwvasPrAr/B1k7RurY1r7aen9Y5Rz+v2oXcpGUCvaqUhW0pGKsYAVyV
-# B8iHHn+GygUjWi9V2SLm+nVGR9eP8scESxWFDdz80AZDSOIVWSuZ67WtYRQ28HrK
-# LAbrtt9CzEAYvZr2h2E2IFdQo9cps/3n6o2lpxdI8FHSa3eMtQTEITWcxecQU7m2
-# czK/bzie83DmwaHb/GC36Iqrzt5lnRwLH4suXnJmi7Niosp8V1INZGGas5lx27bw
-# AViEDy9ZDQOgGxa3/+SugpXmxpZsPnk+2NQd1o435LXwlD53XT4JWFwVI8KI1pdQ
-# s+JxhjD0M4HO6ykih4fFgqH42CmxZ63c+8xoRfbqXLI3XG6LU/XBZCadVythCcNa
-# pk/s/kLlGBrgZjfiS0ATCPwgFwv423Ty0I3EzacPDvx2Qq+p1dgoLADt5zBQMmB8
-# iQ+HgPbQnvsV9cbxlH5W1sF3QJfxkzQoxYG714vHXCFToVnkrJdMLsWXfrlwl+3K
-# CwAvTpJlyg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAxMjUz
+# NTNaMC8GCSqGSIb3DQEJBDEiBCBuwCKwETVSbbwn3aUkGWgI7QMK9fnJS0gOSJ6j
+# vNZ/hTANBgkqhkiG9w0BAQEFAASCAgBi3O0AkOcdVSnxpvq1sMy/uU0g+g9d4oNu
+# uSUtmUvgg0b4Ozz1TCqHACYZ52FUx8mWwtv+Di9j014oxXMuJH15qIvIbUn+5uIJ
+# dAlKsH4370X1IaUk/iqcovYNNbOxaazXPFlpFI/HWoefRqS3LOwIwUyQfeqF3Zts
+# 28VE2caAV3v/xvmw26hS2iQ05lrDLYqX8eb7CBWiucifUiy/eGY+Ngy8l7XAuq4w
+# VyaA8Xnlq0K0QvkYeNXC1ik275BEOqrSpY2hTOKhVDC1qY8YuVbJfapcfrjsUKuS
+# Td5MH+CImISjuBwlA43jrPmN6TpZKNidxALYSsx3EwVOk9vNCvZ0shlSoolNuQhn
+# UJdATRKqUQOw9gg4OzDxujF+3KUk6J1TyT/FwON2evg+axya7sNj5kimrVJfc9Hf
+# 3oQQIdslbtVMPGO1YYio2GNkWMqe4FH1Rv1cOYuJTgQsIzyk6/gY4bEaGPVM3KMK
+# 4xSTSqPGdBtHTdnFGXzpBFgtESAKnec4UMeUDKWHBjFAS4y8SwSK1I/VYiRvo7rV
+# I3Lt1IAVHDZfKprh/Jm6jqAXIJEQv3mDDYLIKM+5ele6EMzYu9wZWkjILxQ6q5MP
+# HxJJKYyk7u+yoX21GAib7B7dj04w6fFjuJ9wnfmFIWMXrCA3D6m+7Ude5aIv8bsk
+# KGye5zfZpA==
 # SIG # End signature block
