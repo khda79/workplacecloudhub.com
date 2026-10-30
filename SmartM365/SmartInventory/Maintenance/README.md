@@ -2,7 +2,7 @@
 
 ## Orchestrator server acceptance
 
-`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.9, PowerShell 7.2+) qualifies a server before it
+`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.10, PowerShell 7.2+) qualifies a server before it
 is switched from Inactive to Active in the orchestrator GUI. The orchestrator capability probe only
 signs in or loads a module; this script makes a real, limited read for each capability, checks the
 rows, then drops them.
@@ -21,7 +21,7 @@ What it guarantees:
 | Capability | Real test | Data checks |
 |---|---|---|
 | RunAccount | Running identity; `-ExpectedAccount` fails another account, otherwise compared with the account of the orchestrator scheduled task | |
-| Modules | PowerShell 7 and 5.1; Python 3.10+ from `PreparedPythonCommand` of the WorkplaceEvidence-Prepare configuration (WARN when missing: no orchestrator capability covers it); the modules the jobs import: Microsoft.Graph Authentication, Users, Groups, Identity.DirectoryManagement, Reports, DeviceManagement, Beta.Groups, Beta.DeviceManagement, ExchangeOnlineManagement, ImportExcel (required), MicrosoftTeams >= 4.7.1, ActiveDirectory, Adaxes (optional); every Microsoft.Graph module at the Authentication version; Exchange and SharePoint snap-ins | missing required module = FAIL |
+| Modules | PowerShell 7 and 5.1; Python 3.10+ from `PreparedPythonCommand` of the WorkplaceEvidence-Prepare configuration (WARN when missing; it is the orchestrator capability `Python` for the job eligibility list); the modules the jobs import: Microsoft.Graph Authentication, Users, Groups, Identity.DirectoryManagement, Reports, DeviceManagement, Beta.Groups, Beta.DeviceManagement, ExchangeOnlineManagement, ImportExcel (required), MicrosoftTeams >= 4.7.1, ActiveDirectory, Adaxes (optional); every Microsoft.Graph module at the Authentication version; Exchange and SharePoint snap-ins | missing required module = FAIL |
 | CodeSigning | Authenticode status of the script, Core, distributed module and orchestrator; execution policy | |
 | Network | HTTPS to login, Graph, Exchange Online and the SharePoint host; Teams endpoints (teams.microsoft.com, api.interfaces.records.teams.microsoft.com); proxy used; latency | any HTTP answer = reachable; unreachable Teams endpoint = WARN |
 | Clock | Offset against the Date header of the Entra sign-in endpoint | WARN 60 s, FAIL 300 s |

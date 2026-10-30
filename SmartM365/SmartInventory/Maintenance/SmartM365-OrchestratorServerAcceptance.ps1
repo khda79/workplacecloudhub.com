@@ -38,7 +38,7 @@ the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.9
+1.0.10
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -1004,6 +1004,8 @@ function Test-AcceptanceModules {
         Add-AcceptanceMeasurement -Section 'Modules' -Item ([string]$module.Name) -Value $value -Status $moduleStatus
     }
     $python = Test-AcceptancePython
+    # Orchestrator capability Python (orchestrator 1.5.80): ready when Python 3.10+ answers.
+    $script:PythonReady = ($python.Status -eq 'PASS')
     $statuses.Add($python.Status); $parts.Add($python.Detail)
     Add-AcceptanceMeasurement -Section 'Modules' -Item 'Python 3.10+ (WorkplaceEvidence-Prepare)' -Value $python.Detail -Status $python.Status
     $windows = Invoke-AcceptanceChildProcess -EnginePath $script:WindowsPowerShellPath -ScriptText $script:WindowsPowerShellInventoryScript -Environment $script:ChildEnvironment -TimeoutSeconds 120
@@ -1419,6 +1421,7 @@ $global:EnableSharePointUpload = $false
 & (Get-Module -Name SmartM365.Core) { $script:SmartM365TeamsNotificationInProgress = $true }
 
 $results = [System.Collections.Generic.List[object]]::new()
+$script:PythonReady = $false
 $extractionRows = [System.Collections.Generic.List[object]]::new()
 $script:Measurements = [System.Collections.Generic.List[object]]::new()
 $startedAt = Get-Date
@@ -1486,6 +1489,7 @@ try {
     $notEligibleRows = @()
     if ($Capability -contains 'All') {
         $ready = @($results | Where-Object { $_.Capability -in $script:OrchestratorCapabilities -and $_.Status -in @('PASS', 'WARN') } | ForEach-Object Capability)
+        if ($script:PythonReady) { $ready += 'Python' }
         $roles = if ($null -ne $script:GraphChild -and [bool]$script:GraphChild.Ready) { @($script:GraphChild.Roles | ForEach-Object { [string]$_ }) } else { @() }
         $eligibility = @(Get-SmartM365AcceptanceJobEligibility -Jobs $script:CatalogJobs -ReadyCapabilities $ready -GraphRoles $roles)
         $eligible = @($eligibility | Where-Object Eligible)
