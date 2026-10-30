@@ -3,7 +3,7 @@
 .SYNOPSIS
 Validate offline the SmartInventory launch engine and its catalog against the legacy .cmd launchers.
 .VERSION
-1.5.1
+1.5.2
 .NOTES
 Runs under Windows PowerShell 5.1 and PowerShell 7. Nothing is executed outside a fictional fixture.
 Checks:
@@ -199,8 +199,8 @@ try {
     $allDomains = @(Get-SmartM365InventoryMenuDomains -Items $menu -IncludeAdvanced)
     $advanced = @($menu | Where-Object Advanced | ForEach-Object Name)
     Assert-True ($menu.Count -eq @($catalog.Entries).Count -and @($menu | Where-Object { $_.Domain -eq 'Other' }).Count -eq 0) 'Every catalog entry must belong to a menu domain.'
-    Assert-True ($advanced.Count -eq 9 -and $advanced -contains 'WorkplaceEvidence-ConvertMetadata' -and $advanced -contains 'Orchestrator-ScheduledTask-Installer' -and $advanced -notcontains 'M365-Usage-Inventory-D180') 'Nine advanced entries: migration, repair, diagnostics and setup tools.'
-    Assert-True ((($domains | Measure-Object -Property Count -Sum).Sum) -eq ($menu.Count - 9) -and (($allDomains | Measure-Object -Property Count -Sum).Sum) -eq $menu.Count) 'Advanced entries are listed only on request.'
+    Assert-True ($advanced.Count -eq 10 -and $advanced -contains 'WorkplaceEvidence-ConvertMetadata' -and $advanced -contains 'Orchestrator-ScheduledTask-Installer' -and $advanced -contains 'Orchestrator-ServerAcceptance' -and $advanced -notcontains 'M365-Usage-Inventory-D180') 'Ten advanced entries: migration, repair, diagnostics, acceptance and setup tools.'
+    Assert-True ((($domains | Measure-Object -Property Count -Sum).Sum) -eq ($menu.Count - 10) -and (($allDomains | Measure-Object -Property Count -Sum).Sum) -eq $menu.Count) 'Advanced entries are listed only on request.'
     Assert-True (@($domains.Domain) -join '|' -eq 'Active Directory|Exchange Online|Exchange 2016 (on-premises)|Intune|Microsoft 365|SharePoint (on-premises)|Workplace Evidence|SmartFinOps|Orchestrator|Maintenance') ('Unexpected menu domains: ' + (@($domains.Domain) -join '|'))
     $adItems = @($domains[0].Items)
     Assert-True ($adItems[0].Kind -eq 'Job' -and $adItems[-1].Kind -eq 'Manual') 'Jobs come before manual entries in a domain.'

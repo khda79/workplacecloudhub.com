@@ -2283,6 +2283,15 @@
       ]
     },
     {
+      "Name": "Orchestrator-ServerAcceptance",
+      "Manual": true,
+      "Group": "Orchestrator",
+      "Advanced": true,
+      "Description": "Acceptance test of this server before activation: limited real reads per capability, nothing kept, nothing written to the tenant.",
+      "ScriptPath": "Maintenance\\SmartM365-OrchestratorServerAcceptance.ps1",
+      "Arguments": ""
+    },
+    {
       "Name": "Orchestrator-ScheduledTask-Installer",
       "Manual": true,
       "Group": "Orchestrator",

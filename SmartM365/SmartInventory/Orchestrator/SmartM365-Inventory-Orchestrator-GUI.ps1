@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.31
+1.6.32
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.31'
+$script:AppVersion = '1.6.32'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -985,6 +985,11 @@ $xaml = @'
                                                     <ComboBoxItem Content="Adaxes"/>
                                                 </ComboBox>
                                                 <Button x:Name="ApplyServerButton" Content="Apply server settings to draft" Background="#E5F1FB" Margin="0,6,0,0"/>
+                                                <!-- Acceptance test before activation (GUI 1.6.32): it reads from the computer it runs on. -->
+                                                <TextBlock Text="Acceptance test (limited real reads, nothing kept)" Margin="0,12,0,0"/>
+                                                <TextBlock x:Name="ServerTestHintText" Foreground="#5F6B7A" TextWrapping="Wrap" Text="Select a server"/>
+                                                <Button x:Name="TestServerButton" Content="Test this server" IsEnabled="False" Margin="0,6,0,0" ToolTip="Runs the Orchestrator-ServerAcceptance manual launch in a new console on this computer."/>
+                                                <Button x:Name="TestServerAsServiceAccountButton" Content="Test as service account" IsEnabled="False" Margin="0,6,0,0" ToolTip="Same test started with runas under the account of the orchestrator scheduled task of this computer."/>
                                             </StackPanel>
                                         </GroupBox>
                                         <GroupBox Grid.Row="1" Header="Configuration versions" Margin="0,10,0,0">
@@ -1448,7 +1453,7 @@ $script:SmartInventoryRoot = Split-Path -Path $PSScriptRoot -Parent
 
 if ($ValidateOnly) {
     $validationWindow = ConvertFrom-OrchestratorGuiXaml -Text $xaml
-    foreach ($controlName in @('MainTabs', 'PlanningGrid', 'JobArgumentsBox', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'RequestPrepareButton', 'ApplyJobButton', 'ApplyServerButton', 'ServerActiveCheck', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
+    foreach ($controlName in @('MainTabs', 'PlanningGrid', 'JobArgumentsBox', 'HistoryGrid', 'ServersGrid', 'VersionsGrid', 'PublishButton', 'RebalanceButton', 'RequestPrepareButton', 'ApplyJobButton', 'ApplyServerButton', 'ServerActiveCheck', 'TestServerButton', 'TestServerAsServiceAccountButton', 'ServerTestHintText', 'RollbackButton', 'DaysPanel', 'MondayCheck', 'TuesdayCheck', 'WednesdayCheck', 'ThursdayCheck', 'FridayCheck', 'SaturdayCheck', 'SundayCheck',
         'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
@@ -2665,6 +2670,19 @@ function Invoke-GuiOrchestratorAction {
     $script:Controls.StatusText.Text = "$($command.Title): started in a new console."
 }
 
+$script:ServerAcceptanceLaunchName = 'Orchestrator-ServerAcceptance'
+
+function Update-ServerTestButtons {
+    # The acceptance test reads from the computer it runs on: it can only test the computer of this GUI.
+    param([AllowEmptyString()][string]$Server)
+    $local = -not [string]::IsNullOrWhiteSpace($Server) -and [string]::Equals($Server, $env:COMPUTERNAME, [StringComparison]::OrdinalIgnoreCase)
+    $script:Controls.TestServerButton.IsEnabled = $local
+    $script:Controls.TestServerAsServiceAccountButton.IsEnabled = $local
+    $script:Controls.ServerTestHintText.Text = if ([string]::IsNullOrWhiteSpace($Server)) { 'Select a server' }
+    elseif ($local) { 'Runs on this computer; also in Manual launches (Orchestrator-ServerAcceptance).' }
+    else { "Open this GUI on $Server to test it: the test runs on the computer that starts it." }
+}
+
 function Get-GuiOrchestratorServiceAccount {
     # Account of this computer's orchestrator scheduled task (installer name: 'SmartM365 Inventory Orchestrator - <Tenant>').
     # Never hard-coded: the repository is public.
@@ -2691,9 +2709,10 @@ function Get-GuiRunAsArgumentList {
 
 function Invoke-GuiLaunch {
     # Runs a catalog job or a manual entry now on this computer, like SmartInventory.cmd <Name>.
-    # -AsServiceAccount (jobs): same command started with runas under the orchestrator task account.
-    param([Parameter(Mandatory = $true)][ValidateSet('Job', 'Manual')][string]$Kind, [switch]$AsServiceAccount)
-    $row = if ($Kind -eq 'Job') { $script:Controls.LaunchJobsGrid.SelectedItem } else { $script:Controls.ManualLaunchesGrid.SelectedItem }
+    # -AsServiceAccount: same command started with runas under the orchestrator task account.
+    # -Name runs that catalog entry instead of the grid selection (server acceptance test buttons).
+    param([Parameter(Mandatory = $true)][ValidateSet('Job', 'Manual')][string]$Kind, [switch]$AsServiceAccount, [string]$Name = '')
+    $row = if ($Name) { [pscustomobject]@{ Name = $Name } } elseif ($Kind -eq 'Job') { $script:Controls.LaunchJobsGrid.SelectedItem } else { $script:Controls.ManualLaunchesGrid.SelectedItem }
     if ($null -eq $row) { throw 'Select an entry first.' }
     $preview = Get-GuiLaunchPlanText -Name ([string]$row.Name)
     if ($null -eq $preview.Plan) { throw $preview.Text }
@@ -3563,7 +3582,7 @@ foreach ($name in @(
     'AssignmentCombo', 'PinnedServerCombo', 'TimeoutBox', 'RetriesBox', 'RetryDelayBox', 'DurationBox', 'ApplyJobButton',
     'HistoryFromPicker', 'HistoryToPicker', 'HistoryServerCombo', 'HistoryJobCombo', 'HistoryStatusCombo', 'HistoryRefreshButton',
     'ExportCsvButton', 'ExportHtmlButton', 'HistoryGrid', 'ServersGrid', 'NewServerBox', 'AddServerButton', 'RemoveServerButton',
-    'SelectedServerText', 'ServerActiveCheck', 'ServerWeightBox', 'ServerPolicyCombo', 'ApplyServerButton', 'VersionsGrid', 'RollbackButton',
+    'SelectedServerText', 'ServerActiveCheck', 'ServerWeightBox', 'ServerPolicyCombo', 'ApplyServerButton', 'TestServerButton', 'TestServerAsServiceAccountButton', 'ServerTestHintText', 'VersionsGrid', 'RollbackButton',
     'ConfigurationTabs', 'ConfigurationSettingsTab', 'ConfigurationServersTab', 'FooterText', 'VersionText',
     'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
     'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
@@ -3651,8 +3670,17 @@ $script:Controls.ServersGrid.Add_SelectionChanged({
     $script:Controls.ServerActiveCheck.IsChecked = ([string]$row.State -eq 'Active')
     $script:Controls.ServerWeightBox.Text = ([double]$row.Weight).ToString([System.Globalization.CultureInfo]::InvariantCulture)
     Select-ComboText -Combo $script:Controls.ServerPolicyCombo -Text ([string]$row.Policy)
+    Update-ServerTestButtons -Server ([string]$row.Server)
 })
 $script:Controls.ApplyJobButton.Add_Click({ try { Apply-SelectedJobToDraft } catch { Write-GuiException -Context 'Invalid job draft' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Invalid job', 'OK', 'Error') | Out-Null } })
+$script:Controls.TestServerButton.Add_Click({
+    try { Invoke-GuiLaunch -Kind Manual -Name $script:ServerAcceptanceLaunchName }
+    catch { Write-GuiException -Context 'Server test failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Server test failed', 'OK', 'Error') | Out-Null }
+})
+$script:Controls.TestServerAsServiceAccountButton.Add_Click({
+    try { Invoke-GuiLaunch -Kind Manual -Name $script:ServerAcceptanceLaunchName -AsServiceAccount }
+    catch { Write-GuiException -Context 'Server test with service account failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Server test with service account failed', 'OK', 'Error') | Out-Null }
+})
 $script:Controls.ApplyServerButton.Add_Click({ try { Apply-SelectedServerToDraft } catch { Write-GuiException -Context 'Invalid server draft' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Invalid server', 'OK', 'Error') | Out-Null } })
 $script:Controls.RefreshButton.Add_Click({
     if ((Test-GuiDraftChanged) -and $script:OrchestratorDialog.Show("The draft has unpublished changes.`n`nRefresh reloads the published configuration and discards them. Continue?", 'Discard draft changes', 'YesNo', 'Warning') -ne 'Yes') { return }
@@ -3878,6 +3906,12 @@ if ($SmokeTest) {
     if (@($script:LaunchJobRows).Count -eq 0 -or @($script:ManualLaunchRows).Count -eq 0) { throw 'Operations launch lists are empty.' }
     $script:Controls.ManualLaunchesGrid.SelectedItem = $script:ManualLaunchRows[0]
     if (-not $script:Controls.RunManualLaunchButton.IsEnabled -or [string]::IsNullOrWhiteSpace($script:Controls.ManualLaunchCommandBox.Text)) { throw 'Manual launch preview is not displayed.' }
+    if (@($script:ManualLaunchRows | Where-Object { [string]$_.Name -eq $script:ServerAcceptanceLaunchName }).Count -ne 1) { throw 'Server acceptance test is not in Manual launches.' }
+    if ($null -eq (Get-GuiLaunchPlanText -Name $script:ServerAcceptanceLaunchName).Plan) { throw 'Server acceptance test command is not resolved.' }
+    Update-ServerTestButtons -Server $env:COMPUTERNAME
+    if (-not $script:Controls.TestServerButton.IsEnabled) { throw 'Server test button is not enabled for this computer.' }
+    Update-ServerTestButtons -Server 'SMOKE-OTHER-SERVER'
+    if ($script:Controls.TestServerButton.IsEnabled) { throw 'Server test button is enabled for another computer.' }
     foreach ($action in @('Start', 'Stop', 'Restart', 'FullCollect', 'SendSummary')) { if (-not (Test-Path -LiteralPath (Get-GuiOrchestratorActionCommand -Action $action).ScriptPath)) { throw "Orchestrator action script missing: $action" } }
     $planningNames = @($script:PlanningRows | ForEach-Object { [string]$_.Name })
     $sortedPlanningNames = @($planningNames | Sort-Object)
