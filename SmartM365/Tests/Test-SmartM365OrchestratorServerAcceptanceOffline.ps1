@@ -4,7 +4,7 @@
     module assessment, child output parsing, Graph roles and job eligibility. Nothing is read
     from a directory, a tenant or a share.
 .VERSION
-    1.0.3
+    1.0.4
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -103,6 +103,10 @@ $hung = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -S
 Assert-True (-not [bool]$hung.Ready -and [bool]$hung.TimedOut -and $hung.Detail -match 'during: waiting on a hung call') "Time-out names the hung step ($($hung.Detail))."
 $quick = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText "Invoke-AcceptanceDataset 'X' '' { [pscustomobject]@{ A = 1 } } | Out-Null; Write-AcceptanceResult @{ Ready = `$true; Detail = 'ok'; Datasets = @(Invoke-AcceptanceDataset 'TeamsUsers' '' { [pscustomobject]@{ Identity = 'i'; UserPrincipalName = 'u@example.test' } }) }" -TimeoutSeconds 60
 Assert-True ([bool]$quick.Ready -and @($quick.Datasets[0].Rows).Count -eq 1) 'Step lines do not leak into the rows of a data set.'
+
+# Inner exception messages reach the detail (Teams only said 'see inner exception' in 1.0.3).
+$inner = Invoke-AcceptanceChildProcess -EnginePath (Get-Process -Id $PID).Path -ScriptText "try { throw [System.Net.Http.HttpRequestException]::new('The SSL connection could not be established, see inner exception.', [System.Security.Authentication.AuthenticationException]::new('The remote certificate is invalid')) } catch { Write-AcceptanceResult @{ Ready = `$false; Detail = (Get-AcceptanceErrorText `$_) } }" -TimeoutSeconds 60
+Assert-True ($inner.Detail -match 'see inner exception\. -> The remote certificate is invalid') "Inner exception is reported ($($inner.Detail))."
 
 # Modules.
 $installed = @(

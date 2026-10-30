@@ -37,7 +37,7 @@ the last step announced by the child is reported. The jobs of the
 catalog that this server could run are listed at the end (same rule as the election).
 
 .VERSION
-1.0.3
+1.0.4
 
 .EXAMPLE
 ./SmartM365-OrchestratorServerAcceptance.ps1 -Tenant prod
@@ -554,7 +554,9 @@ function Invoke-AcceptanceWebProbe {
     }
     catch {
         $watch.Stop()
-        return [pscustomobject]@{ Uri = $Uri; Reachable = $false; StatusCode = 0; Milliseconds = [math]::Round($watch.Elapsed.TotalMilliseconds); Proxy = $proxyText; Date = ''; Error = $_.Exception.Message; ReceivedAtUtc = [datetime]::UtcNow }
+        $messages = @(); $exception = $_.Exception
+        while ($null -ne $exception) { if ($messages -notcontains $exception.Message) { $messages += $exception.Message }; $exception = $exception.InnerException }
+        return [pscustomobject]@{ Uri = $Uri; Reachable = $false; StatusCode = 0; Milliseconds = [math]::Round($watch.Elapsed.TotalMilliseconds); Proxy = $proxyText; Date = ''; Error = ($messages -join ' -> '); ReceivedAtUtc = [datetime]::UtcNow }
     }
 }
 
@@ -576,6 +578,12 @@ function ConvertTo-AcceptanceText($Value) {
 function Write-AcceptanceResult($Result) {
     'SMARTM365_ACCEPTANCE_JSON:' + (ConvertTo-Json -InputObject $Result -Compress -Depth 8)
 }
+function Get-AcceptanceErrorText($ErrorRecord) {
+    # The outer message often only says "see inner exception": keep every distinct message of the chain.
+    $messages = @(); $exception = $ErrorRecord.Exception
+    while ($null -ne $exception) { if ($messages -notcontains $exception.Message) { $messages += $exception.Message }; $exception = $exception.InnerException }
+    return ($messages -join ' -> ')
+}
 function Write-AcceptanceStage([string]$Text) {
     # Straight to stdout, outside the pipeline: the parent reads the last step after a time-out.
     [Console]::Out.WriteLine('SMARTM365_ACCEPTANCE_STAGE:' + $Text + ' (' + (Get-Date -Format 'HH:mm:ss') + ')')
@@ -585,7 +593,7 @@ function Invoke-AcceptanceDataset([string]$Name, [string]$Scope, [scriptblock]$R
     Write-AcceptanceStage ('reading {0} {1}' -f $Name, $Scope)
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     try { $rows = @(& $Read); $errorText = '' }
-    catch { $rows = @(); $errorText = $_.Exception.Message }
+    catch { $rows = @(); $errorText = Get-AcceptanceErrorText $_ }
     @{ Name = $Name; Scope = $Scope; Error = $errorText; DurationSeconds = [math]::Round($watch.Elapsed.TotalSeconds, 1); Rows = @($rows) }
 }
 function Invoke-AcceptanceRetry([scriptblock]$Action) {
@@ -617,7 +625,7 @@ try {
         })
     Write-AcceptanceResult @{ Ready = $true; Detail = ('forest {0}: {1} domain(s): {2}' -f $forest.Name, $domains.Count, ($domains -join ', ')); Datasets = $datasets }
 }
-catch { Write-AcceptanceResult @{ Ready = $false; Detail = $_.Exception.Message } }
+catch { Write-AcceptanceResult @{ Ready = $false; Detail = (Get-AcceptanceErrorText $_) } }
 '@
 
 $script:AdWindowsPowerShellScript = @'
@@ -662,7 +670,7 @@ try {
     )
     Write-AcceptanceResult @{ Ready = $true; Detail = ('Graph app-only sign-in with {0} application role(s)' -f $roles.Count); Roles = $roles; Datasets = $datasets }
 }
-catch { Write-AcceptanceResult @{ Ready = $false; Detail = $_.Exception.Message } }
+catch { Write-AcceptanceResult @{ Ready = $false; Detail = (Get-AcceptanceErrorText $_) } }
 finally { try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { } }
 '@
 
@@ -682,7 +690,7 @@ try {
     )
     Write-AcceptanceResult @{ Ready = $true; Detail = ('Exchange Online app-only connection to {0}' -f $env:SMART_ORGANIZATION); Datasets = $datasets }
 }
-catch { Write-AcceptanceResult @{ Ready = $false; Detail = $_.Exception.Message } }
+catch { Write-AcceptanceResult @{ Ready = $false; Detail = (Get-AcceptanceErrorText $_) } }
 finally { try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch { } }
 '@
 
@@ -702,7 +710,7 @@ try {
     )
     Write-AcceptanceResult @{ Ready = $true; Detail = ('Windows PowerShell {0}, {1} Exchange server(s) visible' -f $PSVersionTable.PSVersion, $servers.Count); Datasets = $datasets }
 }
-catch { Write-AcceptanceResult @{ Ready = $false; Detail = $_.Exception.Message } }
+catch { Write-AcceptanceResult @{ Ready = $false; Detail = (Get-AcceptanceErrorText $_) } }
 '@
 
 $script:SharePointOnPremChildScript = @'
@@ -721,7 +729,7 @@ try {
     )
     Write-AcceptanceResult @{ Ready = $true; Detail = ('farm build {0}, {1} web application(s)' -f $farm.BuildVersion, $webApplications.Count); Datasets = $datasets }
 }
-catch { Write-AcceptanceResult @{ Ready = $false; Detail = $_.Exception.Message } }
+catch { Write-AcceptanceResult @{ Ready = $false; Detail = (Get-AcceptanceErrorText $_) } }
 '@
 
 $script:TeamsChildScript = @'
@@ -741,7 +749,7 @@ try {
     )
     Write-AcceptanceResult @{ Ready = $true; Detail = 'Teams app-only connection, tenant identifier verified'; Datasets = $datasets }
 }
-catch { Write-AcceptanceResult @{ Ready = $false; Detail = $_.Exception.Message } }
+catch { Write-AcceptanceResult @{ Ready = $false; Detail = (Get-AcceptanceErrorText $_) } }
 finally {
     try { if (Get-Command -Name Disconnect-MicrosoftTeams -ErrorAction SilentlyContinue) { Disconnect-MicrosoftTeams -ErrorAction Stop | Out-Null } } catch { }
 }
@@ -782,7 +790,7 @@ try {
         })
     Write-AcceptanceResult @{ Ready = $true; Detail = ('Adaxes module {0}; service(s) {1}' -f (Get-Module -Name Adaxes).Version, ($services -join ', ')); Datasets = $datasets; Info = @{ DomainSource = $domainSource } }
 }
-catch { Write-AcceptanceResult @{ Ready = $false; Detail = $_.Exception.Message } }
+catch { Write-AcceptanceResult @{ Ready = $false; Detail = (Get-AcceptanceErrorText $_) } }
 '@
 
 $script:WindowsPowerShellInventoryScript = @'
@@ -809,7 +817,14 @@ function Test-AcceptanceRunAccount {
         }
         return [pscustomobject]@{ Status = 'PASS'; Detail = "$detail (expected account)" }
     }
-    return [pscustomobject]@{ Status = 'PASS'; Detail = "$detail; run it again under the orchestrator service account with -ExpectedAccount" }
+    # Without -ExpectedAccount, the account of the orchestrator scheduled task of this computer is the reference.
+    $taskAccounts = @(Get-ScheduledTask -TaskName 'SmartM365 Inventory Orchestrator*' -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.Principal.UserId } | Where-Object { $_ } | Sort-Object -Unique)
+    if ($taskAccounts.Count -eq 0) { return [pscustomobject]@{ Status = 'PASS'; Detail = "$detail; no orchestrator scheduled task on this computer to compare with" } }
+    $userName = $identity.Name.Split('\')[-1]
+    if (@($taskAccounts | Where-Object { [string]::Equals($_, $identity.Name, [StringComparison]::OrdinalIgnoreCase) -or [string]::Equals($_.Split('\')[-1], $userName, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
+        return [pscustomobject]@{ Status = 'PASS'; Detail = "$detail (account of the orchestrator scheduled task)" }
+    }
+    return [pscustomobject]@{ Status = 'PASS'; Detail = ('{0}; the orchestrator scheduled task runs as {1}: run the test again as that account' -f $detail, ($taskAccounts -join ', ')) }
 }
 
 function Test-AcceptanceModules {
@@ -857,11 +872,17 @@ function Test-AcceptanceNetwork {
     foreach ($uri in @('https://login.microsoftonline.com/', 'https://graph.microsoft.com/v1.0/', 'https://outlook.office365.com/')) { $endpoints.Add($uri) }
     $sharePointHost = [string](Get-AcceptanceConfigValue -Name 'SharePointSiteHostname')
     if ($sharePointHost -and $sharePointHost -notmatch '(?i)^contoso\.') { $endpoints.Add("https://$sharePointHost/") }
+    # Teams PowerShell endpoints: only the Teams job needs them, an unreachable one is a warning.
+    $optional = @('https://teams.microsoft.com/', 'https://api.interfaces.records.teams.microsoft.com/')
+    foreach ($uri in $optional) { $endpoints.Add($uri) }
     $statuses = [System.Collections.Generic.List[string]]::new()
     $parts = [System.Collections.Generic.List[string]]::new()
     foreach ($uri in $endpoints) {
         $probe = Invoke-AcceptanceWebProbe -Uri $uri
-        if (-not $probe.Reachable) { $statuses.Add('FAIL'); $parts.Add(('{0}: unreachable through {1}: {2}' -f ([uri]$uri).Host, $probe.Proxy, $probe.Error)); continue }
+        if (-not $probe.Reachable) {
+            $statuses.Add($(if ($uri -in $optional) { 'WARN' } else { 'FAIL' }))
+            $parts.Add(('{0}{1}: unreachable through {2}: {3}' -f ([uri]$uri).Host, $(if ($uri -in $optional) { ' (Teams)' } else { '' }), $probe.Proxy, $probe.Error)); continue
+        }
         if ($probe.Milliseconds -ge 2000) { $statuses.Add('WARN') }
         $parts.Add(('{0}: HTTP {1} in {2} ms ({3})' -f ([uri]$uri).Host, $probe.StatusCode, $probe.Milliseconds, $probe.Proxy))
     }

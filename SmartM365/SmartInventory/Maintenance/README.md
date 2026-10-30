@@ -2,7 +2,7 @@
 
 ## Orchestrator server acceptance
 
-`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.3, PowerShell 7.2+) qualifies a server before it
+`SmartM365-OrchestratorServerAcceptance.ps1` (1.0.4, PowerShell 7.2+) qualifies a server before it
 is switched from Inactive to Active in the orchestrator GUI. The orchestrator capability probe only
 signs in or loads a module; this script makes a real, limited read for each capability, checks the
 rows, then drops them.
@@ -20,10 +20,10 @@ What it guarantees:
 
 | Capability | Real test | Data checks |
 |---|---|---|
-| RunAccount | Running identity; `-ExpectedAccount` fails another account | |
+| RunAccount | Running identity; `-ExpectedAccount` fails another account, otherwise compared with the account of the orchestrator scheduled task | |
 | Modules | PowerShell 7 and 5.1; the modules the jobs import: Microsoft.Graph Authentication, Users, Groups, Identity.DirectoryManagement, Reports, DeviceManagement, Beta.Groups, Beta.DeviceManagement, ExchangeOnlineManagement, ImportExcel (required), MicrosoftTeams >= 4.7.1, ActiveDirectory, Adaxes (optional); every Microsoft.Graph module at the Authentication version; Exchange and SharePoint snap-ins | missing required module = FAIL |
 | CodeSigning | Authenticode status of the script, Core, distributed module and orchestrator; execution policy | |
-| Network | HTTPS to login, Graph, Exchange Online and the SharePoint host; proxy used; latency | any HTTP answer = reachable |
+| Network | HTTPS to login, Graph, Exchange Online and the SharePoint host; Teams endpoints (teams.microsoft.com, api.interfaces.records.teams.microsoft.com); proxy used; latency | any HTTP answer = reachable; unreachable Teams endpoint = WARN |
 | Clock | Offset against the Date header of the Entra sign-in endpoint | WARN 60 s, FAIL 300 s |
 | Certificate | Same readiness test as the orchestrator: store, expiry, real signature with the private key by the running account | WARN under 30 days |
 | SharedRuntime | DATA-ALL, DATA-LAST, LOG-ALL read/write; witness create/write/read/metadata/delete under WorkspaceRootPath; read of the code share; free space | median SMB call WARN 15 ms, FAIL 50 ms; DATA free FAIL < 10 %, WARN < 15 %; local disk FAIL < 2 GiB, WARN < 10 GiB |
