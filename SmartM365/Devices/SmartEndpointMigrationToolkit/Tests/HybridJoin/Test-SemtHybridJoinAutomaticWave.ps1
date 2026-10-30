@@ -127,11 +127,11 @@ try {
     $progressStages = New-Object System.Collections.Generic.List[string]
     $progressCallback = { param($stage, $detail) [void]$progressStages.Add([string]$stage) }.GetNewClosure()
     $preview = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-TEST' -NoEvidence -ProgressCallback $progressCallback
-    Assert-Equal $preview.Summary.SelectedDevices 4 'default preview selects four safe AD clients'
-    Assert-Equal $preview.Summary.NeedsHybridJoin 2 'missing ServerAd evidence is classified as needing Hybrid Join'
+    Assert-Equal $preview.Summary.SelectedDevices 5 'name-only Intune match remains a candidate'
+    Assert-Equal $preview.Summary.NeedsHybridJoin 3 'missing ServerAd evidence is classified as needing Hybrid Join'
     Assert-Equal $preview.Summary.HybridJoinPending 1 'pending ServerAd evidence is classified'
     Assert-Equal $preview.Summary.NeedsIntuneEnrollment 1 'registered ServerAd without Intune is classified'
-    Assert-Equal $preview.Summary.IntunePresentExcluded 1 'Intune presence is always excluded'
+    Assert-Equal $preview.Summary.IntunePresentExcluded 0 'Intune name matches are not excluded'
     Assert-Equal $preview.Summary.ADDisabledExcluded 1 'disabled AD object is excluded'
     Assert-Equal $preview.Summary.WindowsServerExcluded 1 'Windows Server is excluded'
     Assert-Equal $preview.Summary.ADNameCollisions 1 'AD short-name collision is excluded'
@@ -160,14 +160,14 @@ try {
 
     # Name and stale filters.
     $filtered = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-FILTERED' -ComputerNamePrefix 'FR-' -ComputerNameContains '-PC' -NoEvidence
-    Assert-Equal $filtered.Summary.SelectedDevices 3 'prefix and contains filters are combined with AND'
+    Assert-Equal $filtered.Summary.SelectedDevices 4 'prefix and contains filters are combined with AND'
     Assert-Equal $filtered.Summary.FilterExcludedDevices 5 'nonmatching AD keys are recorded once as filter exclusions'
     $stale = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-STALE' -ExcludeStaleAd -AdLastLogonMaxAgeDays 45 -NoEvidence
     Assert-Equal $stale.Summary.ADLastLogonFilterExcluded 1 'stale AD device is excluded by the optional 45-day filter'
 
     # AD domain filter: the inventory covers the forest, the Wave keeps one domain.
     $frOnly = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-FR' -AdDomainFilter 'FR.test.' -NoEvidence
-    Assert-Equal $frOnly.Summary.SelectedDevices 3 'AD domain filter keeps the safe clients of that domain only'
+    Assert-Equal $frOnly.Summary.SelectedDevices 4 'AD domain filter keeps the safe clients of that domain only'
     Assert-Equal $frOnly.Summary.ADDomainFilter 'fr.test' 'AD domain filter is normalized (case, trailing dot) and reported'
     Assert-Equal @($frOnly.FilterExcludedDevices | Where-Object { $_.FilterReason -eq 'AD_DOMAIN_NOT_MATCHED' -and $_.FilterType -eq 'ADDomain' } | ForEach-Object { $_.ComputerKey }) -join ',' 'BE-OLD-A-01' 'computer of another domain is a visible filter exclusion'
     Assert-Equal $frOnly.Summary.ADDomainFilterExcluded 1 'summary counts AD domain filter exclusions'
@@ -175,7 +175,7 @@ try {
     $beOnly = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-BE' -AdDomainFilter 'be.test' -NoEvidence
     Assert-Equal (@($beOnly.SelectedDevices | ForEach-Object { $_.ComputerKey }) -join ',') 'BE-OLD-A-01' 'AD domain filter selects the other domain on request'
     $noDomainFilter = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-ALL' -AdDomainFilter '' -NoEvidence
-    Assert-Equal $noDomainFilter.Summary.SelectedDevices 4 'empty AD domain filter keeps every domain'
+    Assert-Equal $noDomainFilter.Summary.SelectedDevices 5 'empty AD domain filter keeps every domain'
     foreach ($case in @(@('xx.test','SEMT_AD_DOMAIN_NOT_IN_INVENTORY'),@('fr test','Invalid AD domain'))) {
         $failure = ''
         try { [void](& $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-BAD' -AdDomainFilter $case[0] -NoEvidence) } catch { $failure = $_.Exception.Message }
@@ -185,7 +185,7 @@ try {
     # Entra is optional (the shared Entra cache of the test package does not exist).
     $withoutEntra = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -WaveName 'WAVE-AUTO-HJ-NO-ENTRA' -NoEvidence
     Assert-Equal $withoutEntra.Summary.EntraInventoryAvailable $false 'Entra is optional'
-    Assert-Equal $withoutEntra.Summary.EntraUnavailableSelected 5 'safe selected devices are marked when Entra is unavailable'
+    Assert-Equal $withoutEntra.Summary.EntraUnavailableSelected 6 'safe selected devices are marked when Entra is unavailable'
 
     # Generated and sanitized names.
     $generated = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -ComputerNamePrefix @('fr-', 'be-') -NoEvidence
@@ -209,7 +209,7 @@ try {
     Assert-Equal $created.Summary.WaveName 'WAVE-pilot-fr-ihj' 'invalid folder characters are sanitized and the WAVE- prefix is added'
     Assert-Equal $created.Summary.WavePath (Join-Path $waveRoot 'WAVE-pilot-fr-ihj') 'Wave is created under Waves\HybridJoin'
     Assert-True (Test-Path -LiteralPath $created.Summary.ComputersPath -PathType Leaf) 'Computers.txt is created'
-    Assert-Equal @(Get-Content -LiteralPath $created.Summary.ComputersPath).Count 4 'created Computers.txt contains selected devices only'
+    Assert-Equal @(Get-Content -LiteralPath $created.Summary.ComputersPath).Count 5 'created Computers.txt contains selected devices only'
     foreach ($wrapper in @('Start-Wave-Loop.cmd', 'Start-Wave-Once.cmd', 'Start-Wave-Loop-IgnoreRunGuard.cmd', 'Start-Wave-Once-IgnoreRunGuard.cmd')) {
         Assert-True (Test-Path -LiteralPath (Join-Path $created.Summary.WavePath $wrapper) -PathType Leaf) "Wave wrapper exists: $wrapper"
     }
@@ -218,7 +218,7 @@ try {
     Assert-Equal $waveConfig.Source 'Automatic' 'Wave.local.json records Source=Automatic'
     Assert-Equal $waveConfig.Campaign 'HybridJoin' 'Wave.local.json records the HybridJoin Campaign'
     Assert-Equal $waveConfig.EvidencePath $created.Summary.EvidencePath 'Wave.local.json records the evidence path'
-    Assert-True ([string]$waveConfig.Description -match 'ComputerNamePrefix=' -and [string]$waveConfig.Description -match 'Selected=4') 'Wave description summarizes the filters'
+    Assert-True ([string]$waveConfig.Description -match 'ComputerNamePrefix=' -and [string]$waveConfig.Description -match 'Selected=5') 'Wave description summarizes the filters'
     Assert-True ($createStages -contains 'Automatic Wave created.') 'creation completion is reported'
     Assert-True (([string]$created.Summary.EvidencePath).StartsWith($expectedEvidenceRoot, [System.StringComparison]::OrdinalIgnoreCase)) 'create evidence is written under Runs\HybridJoin\_AutomaticWave'
     foreach ($name in @('DevicesAD.csv', 'DevicesIntune.csv', 'DevicesEntra.csv', 'AutomaticWaveSelection.csv', 'AutomaticWaveExclusions.csv', 'AutomaticWaveFilterExclusions.csv', 'AutomaticWaveSummary.json')) {
@@ -294,7 +294,7 @@ try {
     Copy-Item -LiteralPath $intunePath -Destination (Get-SemtSharedInventoryPath -PackageRoot $packageRoot -Kind Intune) -Force
     Copy-Item -LiteralPath $entraPath -Destination (Get-SemtSharedInventoryPath -PackageRoot $packageRoot -Kind Entra) -Force
     $defaults = & $engine -NoEvidence
-    Assert-Equal $defaults.Summary.SelectedDevices 4 'default inventory inputs are the shared caches'
+    Assert-Equal $defaults.Summary.SelectedDevices 5 'default inventory inputs are the shared caches'
     Assert-Equal $defaults.Summary.EntraInventoryAvailable $true 'shared Entra cache is used by default when present'
 }
 catch {
@@ -312,10 +312,10 @@ if ($script:Failed -gt 0) { exit 1 }
 exit 0
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA91BfavgmJu7u3
-# Oy2TawTEQXRnFt+ws3ZSgCWJ2jvYtaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZM48mfecnp1on
+# bOa8FJV1+u3+n/VOcwjqOQMOr4orNKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -340,139 +340,19 @@ exit 0
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINgDcw6b2wEQHrtMBj8tcZKIehAKcZt35UpOYxQabJJpMA0GCSqG
-# SIb3DQEBAQUABIIBgBFE8DbhXe7RBkLplLxa0tVc341fJRWZyvz2/K5pfQhyNo7v
-# pfm9YzCi8WJVj4s2LzWRZcpFb3JqCAJeBm3lrCXzcB8IoEeh1iHqvNKn+XbCohwI
-# hXIbzkPklgGDF04KOQGxkMzVjfNyar4SFkPQVBE12iyLUqPCGtolbG17lEmjh4oe
-# wPT3JJ7WrohNmCViO1O/PyUH3pXbkC3kle7xdvNC1IP9hkq3ODAx2PrP2UvmWTX+
-# x4A+Yzr2MFw3nkopbIjk2i3cVhpREqXOFQJcv5AAvGjCknBuoMGLxPAMeSww5krk
-# C7Bgz8BxR5FsTg2hGnXiXyKTngBwSRZpMRKH1yAjC5Ovrjb1/iBMA3R/d86oAhYz
-# 4KrfS2bPuLmKmsBGFebmrn0L8VRrhakBY7UCnRaheIkHe4uEwk8TclWRYgTIiHnh
-# lYFSh3VPQJu410MLdG9rwctZ33tqFxYgqJUgBa/5gmCYMmJlrFcGggqIJMlpnv1g
-# ZlpzYjKqz6ZnJ0R6GqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjgyMTU4
-# NDRaMC8GCSqGSIb3DQEJBDEiBCB6LbUGFeSV2LAGu46bJfGcAy4NPrSyCcKayldC
-# aIeDxzANBgkqhkiG9w0BAQEFAASCAgAARLgioUiDRuknfHjvZuQ981g4Op33domr
-# bdo4x6D2DXyn4kpfsFu2OnJ5NqIGZqcSyZrm6l5JZpDEZ29p8mC8C/VQZnXTOirz
-# I6kFlAHHgidXD8cntSCgJmzxOYQSdGINqm+GsvBcqoqMwXMH9CMPCSXxiR+K8ukZ
-# zVLJASYLQjwvSXIt/8rBCXJobtVbtV9/gavrxqmDn7a+NYXMGTOCdqMPUeXeHVcj
-# yllrJsyGgpNOispCHbMhYisUFaPTxib/YbbEYnsvPttsCSnxNWFuuEAx4WupXpTZ
-# +AYmnelCy+svwDH7sNvH5qHBaLKpPdUG+iu7m/hNHMY6J4nlALDJ6watieXarbVt
-# kIV3dZonmVi0+DAe3hINS5APCsEtSlOlC7WXeCViskcQj8kPuh+xUOoiH4+AYdZa
-# BFhcSH9oxHC6DfijIEGT6iExxetDDoUM0Vs+knkFKVsoDUbub1QJ2gOjtImLPymM
-# 5UmvR/SaKgWh9vYs40ZfsfahoHZoyzZHt2JM2vOX+jCDToMyquy4wefvlSnXMwz5
-# ekJEQzFe6J2Ahg6x/zmf2ddeWWPStRl+ZOQTIOXCUGyVHR8yCUoqM0Nt0MJVCXcf
-# 9Akl4yS5W3j4gA4G1xDWWMtiZJVDoTAQA0tz+p6MfQxk3oSVpYO0UGTcH7qKdk4l
-# b8+yBgcYQA==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDspeidMXhR48W0IyEDt7Tw
+# ruBkRfBMrqaR4EiUJyMZwzANBgkqhkiG9w0BAQEFAASCAYBnnkl43ic+S0FQNBhs
+# x0+cilcCInD0/0Xz7Pv22qbwHTLZkdIg3Y2KhfbS7Dahg0L19Mq+U//DBQN2qkKA
+# qqfNjhLSxHbXnZ+zo9MFWDRSDfbbbO814kmCs+Y6j4XYrU771tDw1m20CwPVFP2X
+# Dt3+27GbPqWxeMVYSTkE64VKRD39qhPBHkf4rOOk39O434MucyEAZuqCchlL6MEd
+# mY9OaF1qpcy5YkINZJaxxBYkXxL0OgtWJqBm3uTL2ksc+AfRhHBWfda+0VPwM4ZA
+# 4700lDLh+HPFuVLEhCmBUDUCXOgzf1jn7+HH2cCkHgPQr6CI9UpSQxkqrAHd/WnL
+# Ga8tJQUw+YEmuGlD0FKjxiFwwNOyCtCROPLs/puIuwL3LY626slAEETGphNJ6MKp
+# 3Qx8RlyJIuwTI9HtIyGWiWCaZeFd2U568Sru+NIBsi+8+FMbOjy5gVIKBi+OCkvS
+# 3KtdwMDl29BM0MxKjYzN+2XlboryrdrXgyS5fQm0gCD31TI=
 # SIG # End signature block

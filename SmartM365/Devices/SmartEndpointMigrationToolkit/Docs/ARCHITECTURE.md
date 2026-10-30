@@ -94,10 +94,32 @@ The shared region in both endpoint scripts provides:
 
 ## Inventories
 
-Shared caches `Inventory\Devices{AD,Intune,Entra}.csv` are reused only when fresh (AD 12 h,
-Intune and Entra 2 h) and, for Intune, when their provenance (tenant, delegated sign-in,
+Shared caches `Inventory\Devices{AD,Intune,Entra}.csv` are reused only when fresh (AD, Intune and Entra: 24 h) and, for Intune, when their provenance (tenant, delegated sign-in,
 `AllManagedDevices`) is verified. A Run that needs fresher data exports a scoped inventory into
 its own `Run\Inventory` folder; a scoped export never overwrites a shared cache.
+
+User licensing evidence is collected separately into `Inventory\UsersLicenses.csv` using a
+delegated `User.Read.All` session and paginated Graph user reads. It contains user identities
+and assigned plans and is sensitive operational data. A complete cache is eligible for 24 h;
+correlation requires an exact on-premises user SID and matching local tenant ID. An absent or
+ambiguous SID, stale cache or unknown plan remains unknown. The MDM user scope is not inferred
+from licensing and must be checked in Entra. Before a non-audit HybridJoin run, a bounded
+read-only DCOM preflight compares the console SID, user-credential MDM policy, and a unique
+registry tenant candidate with a fresh inventory. An unlicensed match stops the worker for
+review before copying or running the endpoint. Registry tenant information can be stale: this
+is a conservative review signal, not proof of the device tenant or the enrollment identity.
+When the preflight fails or is ambiguous its state is Unknown and the run continues; this is
+not evidence that licensing or scope is correct. A successful local enrollment is cloud confirmed
+only when the local Entra device ID and tenant match exactly one Intune object. Name-only
+inventory presence never archives a HybridJoin target. Scoped Intune exports retain duplicates.
+
+For a targeted lookup after an audit, run `Scripts\SmartM365-EndpointMigration-Get-UserLicense.ps1`
+with the confirmed session SID, device tenant ID, and a new output path in the Run directory. This
+requires a delegated `User.Read.All` Graph session and permission to read license details. Errors,
+empty or multiple SID matches and unavailable MDM scope remain unknown. The targeted output is
+not a shared inventory. `HybridJoin.CollectMdmDiagnostics` explicitly requests a sensitive
+DeviceEnrollment archive with a 300-second process timeout; the archive is copied only when central
+evidence collection is enabled, within the configured size limit.
 
 ## Identities
 

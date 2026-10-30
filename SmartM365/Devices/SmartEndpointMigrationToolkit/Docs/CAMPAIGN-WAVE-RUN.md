@@ -52,8 +52,8 @@ PowerShell 5.1 with the engine. `Update-WaveCmdWrappers.cmd` regenerates them fo
    other domains are filter exclusions `AD_DOMAIN_NOT_MATCHED`; devices without an AD record
    (Intune only) are `AD_DOMAIN_UNKNOWN`.
    **Refresh old inventories only** exports only the inventories that are missing, older than
-   their limit (AD 12 hours, Intune and Entra 2 hours) or of unverified provenance: AD alone needs
-   no Microsoft Graph sign-in; Intune and Entra together still share one sign-in. Before
+   their limit (AD, Intune, Entra and user licenses: 24 hours) or of unverified provenance: AD alone needs
+   no Microsoft Graph sign-in; Intune and Entra share one sign-in. The user license export uses a separate delegated sign-in with `User.Read.All`. Before
    **Preview** and in the **Create** confirmation, the GUI warns when an inventory read by the
    selection is old (Windows 11: the inventories of the chosen Source) and lets the operator
    continue or cancel.
@@ -101,7 +101,7 @@ Each cycle:
 
 1. reloads `Computers.txt` and removes duplicates;
 2. refreshes inventories when the Run needs them and the shared cache is not usable;
-3. runs the Campaign pre-cycle hook (Hybrid Join: devices already in Intune are skipped;
+3. runs the Campaign pre-cycle hook (Hybrid Join never skips a device on a name-only Intune match;
    Windows 11: devices already on Windows 11 in AD/Intune are skipped);
 4. resolves DNS for every computer (a DNS failure blocks the cycle when
    `DnsPreflightBlocksCycle` is on);

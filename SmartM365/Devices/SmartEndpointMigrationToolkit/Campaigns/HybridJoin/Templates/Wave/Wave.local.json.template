@@ -40,6 +40,7 @@
                     "IntuneInventoryPageSize":  "__INHERIT__",
                     "AdInventoryFreshnessHours":  "__INHERIT__",
                     "CloudInventoryFreshnessHours":  "__INHERIT__",
+                    "HybridJoin.CollectMdmDiagnostics":  "__INHERIT__",
                     "HybridJoin.AllowDsregLeave":  "__INHERIT__",
                     "HybridJoin.AllowRemoveStaleIntuneEnrollment":  "__INHERIT__",
                     "HybridJoin.AllowRemoveNonIntuneMdmEnrollment":  "__INHERIT__",

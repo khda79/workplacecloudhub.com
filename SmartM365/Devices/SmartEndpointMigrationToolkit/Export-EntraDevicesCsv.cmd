@@ -1,7 +1,7 @@
 @echo off
 rem Smart Endpoint Migration Toolkit - Entra inventory export (delegated Microsoft Graph sign-in).
 rem Writes the shared cache Inventory\DevicesEntra.csv with the full Entra device inventory.
-rem A shared inventory less than 2 hours old is reused; pass -ForceRefresh to regenerate.
+rem A shared inventory less than 24 hours old is reused; pass -ForceRefresh to regenerate.
 rem Set SEMT_NO_PAUSE=1 to skip the final pause (unattended use).
 setlocal DisableDelayedExpansion
 

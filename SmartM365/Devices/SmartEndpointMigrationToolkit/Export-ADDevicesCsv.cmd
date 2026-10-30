@@ -1,6 +1,6 @@
 @echo off
 rem Smart Endpoint Migration Toolkit - AD inventory export.
-rem Writes the shared cache Inventory\DevicesAD.csv (reused while less than 12 hours old; pass -ForceRefresh to regenerate).
+rem Writes the shared cache Inventory\DevicesAD.csv (reused while less than 24 hours old; pass -ForceRefresh to regenerate).
 rem The shared cache always covers every domain of the current AD forest; a domain is chosen per
 rem Wave (Automatic Wave AD domain filter). -Domain is accepted only with -OutputPath.
 rem Set SEMT_NO_PAUSE=1 to skip the final pause (unattended use).

@@ -85,15 +85,16 @@ Generated from catalog SHA256 `A587713B499D1D85BB1B3A3352BB1BDCD41D8CD26CD83A0AD
 | `ComponentIntegrityMode` | Choice | Auto | Auto, Enforce, Warn | `SEMT_COMPONENT_INTEGRITY_MODE` | Safety | no |
 | `IntuneTenantId` | String | (empty) |  | `SEMT_INTUNE_TENANT_ID` | Inventory | yes |
 | `IntuneInventoryPageSize` | Integer | 999 objects | 1..999 | `SEMT_INTUNE_INVENTORY_PAGE_SIZE` | Inventory | no |
-| `AdInventoryFreshnessHours` | Integer | 12 hours | 1..168 | `SEMT_AD_INVENTORY_FRESHNESS_HOURS` | Inventory | no |
-| `CloudInventoryFreshnessHours` | Integer | 2 hours | 1..48 | `SEMT_CLOUD_INVENTORY_FRESHNESS_HOURS` | Inventory | no |
+| `AdInventoryFreshnessHours` | Integer | 24 hours | 1..168 | `SEMT_AD_INVENTORY_FRESHNESS_HOURS` | Inventory | no |
+| `CloudInventoryFreshnessHours` | Integer | 24 hours | 1..48 | `SEMT_CLOUD_INVENTORY_FRESHNESS_HOURS` | Inventory | no |
 
 ### HybridJoin options
 
 | Option | Type | Default | Range / choices | Env var | Category | GUI |
 | --- | --- | --- | --- | --- | --- | --- |
+| `HybridJoin.CollectMdmDiagnostics` | Boolean | False |  | `SEMT_HYBRIDJOIN_COLLECT_MDM_DIAGNOSTICS` | Evidence | yes |
 | `HybridJoin.AllowDsregLeave` | Boolean | True |  | `SEMT_HYBRIDJOIN_ALLOW_DSREG_LEAVE` | Actions | yes |
-| `HybridJoin.AllowRemoveStaleIntuneEnrollment` | Boolean | True |  | `SEMT_HYBRIDJOIN_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT` | Actions | yes |
+| `HybridJoin.AllowRemoveStaleIntuneEnrollment` | Boolean | False |  | `SEMT_HYBRIDJOIN_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT` | Actions | no |
 | `HybridJoin.AllowRemoveNonIntuneMdmEnrollment` | Boolean | False |  | `SEMT_HYBRIDJOIN_ALLOW_REMOVE_NON_INTUNE_MDM_ENROLLMENT` | Actions | yes |
 | `HybridJoin.AllowRebootWhenNoInteractiveUser` | Boolean | True |  | `SEMT_HYBRIDJOIN_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER` | Actions | yes |
 | `HybridJoin.AllowRebootAfterDsregLeave` | Boolean | False |  | `SEMT_HYBRIDJOIN_ALLOW_REBOOT_AFTER_DSREG_LEAVE` | Actions | yes |

@@ -35,7 +35,8 @@ Details: [Docs/CAMPAIGN-WAVE-RUN.md](Docs/CAMPAIGN-WAVE-RUN.md).
   launchers and every endpoint script; the engine, the worker and the tools also accept
   PowerShell 7.2 and later.
 - Inventories (optional, recommended): the ActiveDirectory module for AD exports, and Microsoft
-  Graph PowerShell with delegated sign-in for Intune and Entra exports.
+  Graph PowerShell with delegated sign-in for Intune, Entra and user license exports. The user
+  export requests `User.Read.All` and stores personal data in the local, Git-excluded Inventory folder.
 - Targets: Windows 10/11 with the administrative share reachable by the technician account.
   Endpoint scripts are single self-contained files and do not need the technician module.
 

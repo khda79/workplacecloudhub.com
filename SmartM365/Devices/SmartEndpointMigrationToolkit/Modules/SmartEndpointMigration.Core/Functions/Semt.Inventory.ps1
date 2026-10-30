@@ -32,6 +32,66 @@ function Get-SemtInventoryFieldNames {
     return @($script:SemtInventoryFields[$Kind])
 }
 
+function Get-SemtUserLicensePreflightDecision {
+    [CmdletBinding()]
+    param([AllowNull()]$Evidence,[object[]]$Users)
+    $unknown = [pscustomobject]@{ State='Unknown'; Detail='Preflight identity, policy or inventory is incomplete'; Block=$false }
+    if ($null -eq $Evidence -or $Evidence.Tenants.Count -ne 1 -or -not $Evidence.Sid -or $Evidence.AutoEnroll -ne 1 -or $Evidence.CredentialType -ne 1) { return $unknown }
+    $tenant = [string]$Evidence.Tenants[0]
+    $matches = @($Users | Where-Object { $_.InventoryTenantId -ieq $tenant -and $_.InventoryScope -eq 'AllUsers' -and $_.InventoryComplete -eq 'True' -and $_.OnPremisesSecurityIdentifier -ieq $Evidence.Sid })
+    if ($matches.Count -ne 1) { return $unknown }
+    if ([string]::IsNullOrWhiteSpace([string]$matches[0].AssignedSkuIds)) {
+        return [pscustomobject]@{ State='NoAssignedLicense'; Detail='Current console SID has no user SKU in the fresh same-tenant inventory; review licensing and MDM scope. Tenant is inferred from registry and must be confirmed.'; Block=$true }
+    }
+    return [pscustomobject]@{ State='HasAssignedLicense'; Detail='A user SKU exists; Intune plan and MDM scope are not confirmed by this preflight.'; Block=$false }
+}
+
+function Invoke-SemtUserLicensePreflight {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string]$ComputerName,[Parameter(Mandatory=$true)][string]$InventoryPath,[int]$TimeoutSeconds=25)
+    $unknown = [pscustomobject]@{ State='Unknown'; Detail='User inventory is missing, stale, or preflight could not complete'; Block=$false }
+    if (-not (Test-Path -LiteralPath $InventoryPath -PathType Leaf)) { return $unknown }
+    $age = ([datetime]::UtcNow - (Get-Item -LiteralPath $InventoryPath).LastWriteTimeUtc).TotalHours
+    if ($age -lt 0 -or $age -ge 24) { return $unknown }
+    try { $users = @(Import-Csv -LiteralPath $InventoryPath) } catch { return $unknown }
+    if ($users.Count -eq 0) { return $unknown }
+    $job=Start-Job -ArgumentList $ComputerName -ScriptBlock {
+        param($target)
+        $s=$null
+        try {
+            $s=New-CimSession -ComputerName $target -SessionOption (New-CimSessionOption -Protocol Dcom) -ErrorAction Stop
+            $cs=Get-CimInstance -CimSession $s -ClassName Win32_ComputerSystem -OperationTimeoutSec 15 -ErrorAction Stop
+            $user=[string]$cs.UserName
+            if (-not $user -or $user -notmatch '^([^\\]+)\\(.+)$') { return }
+            $domain=$Matches[1]; $name=$Matches[2]
+            $sids=@()
+            foreach ($process in @(Get-CimInstance -CimSession $s -ClassName Win32_Process -Filter "Name='explorer.exe'" -OperationTimeoutSec 15 -ErrorAction Stop)) {
+                $owner=Invoke-CimMethod -InputObject $process -MethodName GetOwner -OperationTimeoutSec 15 -ErrorAction Stop
+                if ($owner.ReturnValue -ne 0 -or $owner.Domain -ine $domain -or $owner.User -ine $name) { continue }
+                $sid=Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid -OperationTimeoutSec 15 -ErrorAction Stop
+                if ($sid.ReturnValue -eq 0 -and $sid.Sid) { $sids += [string]$sid.Sid }
+            }
+            $sids=@($sids | Select-Object -Unique)
+            if ($sids.Count -ne 1) { return }
+            $reg=Get-CimClass -CimSession $s -Namespace root/default -ClassName StdRegProv -OperationTimeoutSec 15 -ErrorAction Stop
+            $hive=[uint32]2147483650
+            $tenantKeys=Invoke-CimMethod -CimSession $s -CimClass $reg -MethodName EnumKey -Arguments @{hDefKey=$hive;sSubKeyName='SYSTEM\CurrentControlSet\Control\CloudDomainJoin\TenantInfo'} -OperationTimeoutSec 15 -ErrorAction Stop
+            $policy='SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\MDM'
+            $auto=Invoke-CimMethod -CimSession $s -CimClass $reg -MethodName GetDWORDValue -Arguments @{hDefKey=$hive;sSubKeyName=$policy;sValueName='AutoEnrollMDM'} -OperationTimeoutSec 15 -ErrorAction Stop
+            $kind=Invoke-CimMethod -CimSession $s -CimClass $reg -MethodName GetDWORDValue -Arguments @{hDefKey=$hive;sSubKeyName=$policy;sValueName='UseAADCredentialType'} -OperationTimeoutSec 15 -ErrorAction Stop
+            if ($tenantKeys.ReturnValue -ne 0 -or $auto.ReturnValue -ne 0 -or $kind.ReturnValue -ne 0) { return }
+            [pscustomobject]@{ Sid=$sids[0]; Tenants=@($tenantKeys.sNames); AutoEnroll=$auto.uValue; CredentialType=$kind.uValue }
+        } finally { if ($s) { Remove-CimSession $s -ErrorAction SilentlyContinue } }
+    }
+    try {
+        if (-not (Wait-Job $job -Timeout $TimeoutSeconds)) { Stop-Job $job; return $unknown }
+        if ($job.State -ne 'Completed') { return $unknown }
+        $data=@(Receive-Job $job -ErrorAction SilentlyContinue)
+        if ($data.Count -ne 1) { return $unknown }
+        return (Get-SemtUserLicensePreflightDecision -Evidence $data[0] -Users $users)
+    } catch { return $unknown } finally { Remove-Job $job -Force -ErrorAction SilentlyContinue }
+}
+
 function Find-SemtGraphAuthenticationModule {
     <#
     Newest Microsoft.Graph.Authentication visible to this process. When PSModulePath misses the folder
@@ -131,8 +191,9 @@ function Test-SemtSharedInventoryUsable {
         return [pscustomobject]@{ Usable = $false; Reason = 'Missing'; AgeHours = $null; Provenance = '' }
     }
     $item = Get-Item -LiteralPath $Path
-    $ageHours = [math]::Round(((Get-Date) - $item.LastWriteTime).TotalHours, 2)
-    if ($ageHours -gt $MaxAgeHours) {
+    $elapsedHours = ((Get-Date) - $item.LastWriteTime).TotalHours
+    $ageHours = [math]::Round($elapsedHours, 2)
+    if ($elapsedHours -gt $MaxAgeHours) {
         return [pscustomobject]@{ Usable = $false; Reason = ('Stale:{0}h>{1}h' -f $ageHours,$MaxAgeHours); AgeHours = $ageHours; Provenance = '' }
     }
     if ($Kind -ne 'Intune') {
@@ -258,10 +319,10 @@ function Add-SemtInventoryFieldsToResult {
 }
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDLiSDVWaz3+g4c
-# cYESs/DMcJ1hMZ7mCZPfHGEoo/7xE6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZPsDjPgzHpQpz
+# bkpIILjTIxS14o7//VpMIk9WVGpC26CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -286,139 +347,19 @@ function Add-SemtInventoryFieldsToResult {
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPiwC1eOWGd+fGfooqBaCy/NdQnzWjx2id9T/LyWSdrjMA0GCSqG
-# SIb3DQEBAQUABIIBgGrjrA0+H7DUQ3vlzKJFBGIUsyJ2Ev3nKm49UiZLNUG3HqgJ
-# ObvFds9fxKThOlHOt1qpnBh2yhIplfCL6yBPKz7WPpwQ59nEqo+EHxblisg4/mwA
-# ujCpB+2TtHuk/1GVYsyhXThnl7ASSI2QbUmhgeCy0xBLjudGRVfqp+Ga4sxBOz+f
-# Ak5O8oxmkwaDdTjG4y9kZNWWNsZ+MJppbiSDwqIc6x9yJNDKEOdIwB6mkBTqTfwX
-# 6IFEdr6TQVSlrC44CUEfrIRpdbPxsmV1biotAe9EOt/HXKLUb8oFVIWIs8Z7uU1u
-# 2kPqBK1RtkYQ1Xy3KjzhKRYtkBXD/zWNL8PUzsHD+9OxQjAMIHzifzeVDHP0UpOe
-# b/ZCZ+wHKYJHMPVaqdxy2c8siCSOkP+Rc55H/wG+fwvpW4nBdEFMxYyyTJQI4/V8
-# 1ZrrNN4g9k9MZfpncvcStq5yyo7i4AlQiwlC1QAiSwlPXB5pXDrw2LAYt8I95WPO
-# 4oPfQidjt1MVhEqIwqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjgxNTU4
-# NDRaMC8GCSqGSIb3DQEJBDEiBCAAKV7YlcSqnUg4RZOwP/gChMoSCx9khiHw+MAR
-# xTcVDDANBgkqhkiG9w0BAQEFAASCAgA7fi0P3bzY+1iE7ZSL9G2+sFvQuE6UDiHa
-# 3VKUQR+h5Crrm0Xp89SZ1nDPjtQVFSQ6bv0Gjw3JRE43yZKCETEtD3yKF73WbeZ2
-# 85Axnp+rPaakCGWSktOBvIrn3qCzVPQaUaZQCqvZ14xBDmHG4I0WiaEGhNcOOS5r
-# mjI89v8VZKFHi0lHG97AxERcOZYw+UdjO+DtiNO7PaVmPY9f6paX7Zsn7RgAsv0/
-# M9Bbx3aVyDKkdZNYsV1RW3nUsxVAwT2yN7mOLPx+uO1AGNEViaDz/ObUa0Eizd7f
-# tTyRBvQypY89z3iKfABSpAhbssseUy9t0aUVAhJydZDfbwvgSGlOKSKGXWzapPDZ
-# 47Ylyrgggg0WST8yK4h1DqA/Alc6nSn9CrjDbKnoASpadtGw791sz4IPdfTFSYw7
-# m17oDxWXeHv0Idc3J6T6pCZOFEO0oJc4lmqu1IeXZlkwY/DZjo2zEJatXeOv3j3O
-# vKpGMNW+4sxLbqjYs5dT3Td2FgeIRo2/FcoC2sLybdzcQVSnipxxoPTifZYBP/Em
-# I0L8yE13/u1hmSR/XjggtzBaTq7vmBX0KYqEkXlSYFhYJfjWBabRjNXr7X/j7tuQ
-# ssL/k81ZaVReNRqod60O6ygGbEPf3FSMm79uXTZBFeYd60BxcRocQhVH+RiMIKOS
-# xkYjkJNY5Q==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB+okYSnJNiPFyxp6OHR7nO
+# Z78J44wWH+XDW/qarMz9MzANBgkqhkiG9w0BAQEFAASCAYCiutGfEC68yPzorpg3
+# mhrmyCqaDdWp908QaD2hV4LgW+A/ytwYZhPwNEduvlLUjLAHM1Uy6mrstYIb3rAy
+# rAPjT+XQIOjy8LBqdQlqSi7KkXtha9rBo5H4xiGabDpF1wsgwBG1s7oPZ8A+6EDz
+# jX1DGfyP+ClDkdlJH2sC4/iAJCPRYfwNuNZWqZK1gAaOZtkGbznZRGBfE2LHrmmT
+# 3f0TF8dBaN83pcvb5tIWNC6ss/Zafzple0Ios9fl1FziYFmc0I/P2Fda8H556brp
+# 0Ev2K7t17AwIPEi0OmU7kJi2DApk2OtD6eOePyqvk6EYF0ra+xzB7if5eDrFhrzs
+# FVVlJ89lLcsCEnClhjQnqjgXYmsALZhwQYVdFXz4rxSkE4AjN29c7A98fPfIM6Et
+# JpeU6rAksukjL1eBDse2jQZLmg/DrNFFFcHCydvSnk8PgZJ9PUC2h9hCFQunTIlB
+# gH0oJ5YU3nS2MTqkzqzFr7uyah47wqiIy2Jcs2y8IxqUYOw=
 # SIG # End signature block

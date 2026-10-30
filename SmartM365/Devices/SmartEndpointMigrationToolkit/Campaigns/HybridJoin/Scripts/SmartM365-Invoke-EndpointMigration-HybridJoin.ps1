@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 SYSTEM-safe Entra Hybrid Join and Intune enrollment repair helper (dsregcmd /status, optional /leave, trigger Automatic-Device-Join, optional MDM auto-enrollment, bounded local retry).
 
@@ -44,7 +44,7 @@ Allows a reboot after a successful dsregcmd /leave when rejoin did not complete 
 Allows removal of confirmed non-Intune MDM enrollment registry keys and EnterpriseMgmt scheduled tasks before trying Intune auto-enrollment. WMI-to-CSP bridge registrations are never removable through this option.
 
 .PARAMETER AllowRemoveStaleIntuneEnrollment
-Allows removal of stale local Intune enrollment traces when Windows reports an Intune discovery URL but no confirmed Intune ProviderID.
+Retained for backward compatibility. Ambiguous local Intune traces are not removed automatically; manual review is required.
 
 .PARAMETER SkipVirtualMachines
 Skips detected virtual machines before DNS, domain, gpupdate, or repair actions.
@@ -105,6 +105,7 @@ param(
     [switch]$AllowRemoveStaleIntuneEnrollment,
     [switch]$SkipVirtualMachines,
     [switch]$AuditOnly,
+    [switch]$CollectMdmDiagnostics,
     [switch]$EntraHybridPending,
     [int]$StaleCleanupDelaySeconds = 60,
     [int]$RebootDelaySeconds = 180,
@@ -157,6 +158,7 @@ try {
             if ($AllowRemoveStaleIntuneEnrollment) { $argList += "-AllowRemoveStaleIntuneEnrollment" }
             if ($SkipVirtualMachines) { $argList += "-SkipVirtualMachines" }
             if ($AuditOnly) { $argList += "-AuditOnly" }
+            if ($CollectMdmDiagnostics) { $argList += "-CollectMdmDiagnostics" }
             if ($EntraHybridPending) { $argList += "-EntraHybridPending" }
             $argList += "-StaleCleanupDelaySeconds"
             $argList += $StaleCleanupDelaySeconds
@@ -356,10 +358,12 @@ function Write-SemtHybridJoinAttemptResult {
         LegacyActivityDetail = $script:SemtLegacyActivityDetail
         RetryAfterRebootTaskRun = [bool]$RetryAfterRebootTaskRun
     }
-    foreach ($name in @("interactiveUserName","interactiveUserDomain","interactiveUserAccountName","interactiveUserAccountType","interactiveSessionName","interactiveSessionState","userIsUserAzureAD","userAzureAdPrt","userSessionIsNotRemote","intuneEnrolled","dsregAzureAdJoined","dsregDeviceAuthStatus","leaveAttempted","rebootAttempted","rebootReason")) {
+    foreach ($name in @("mdmDiagnosticStatus","mdmDiagnosticZip","interactiveUserName","interactiveUserSid","mdmEnrollmentRecentEvidence","interactiveUserDomain","interactiveUserAccountName","interactiveUserAccountType","interactiveSessionName","interactiveSessionState","userIsUserAzureAD","userAzureAdPrt","userSessionIsNotRemote","intuneEnrolled","dsregAzureAdJoined","dsregDeviceAuthStatus","leaveAttempted","rebootAttempted","rebootReason")) {
         $value = Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction SilentlyContinue
         $data[($name.Substring(0,1).ToUpperInvariant() + $name.Substring(1))] = [string]$value
     }
+    $data["Dsreg_DeviceId"] = [string](Get-Variable -Name dsregDeviceId -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+    $data["Dsreg_TenantId"] = [string](Get-Variable -Name dsregTenantId -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
     $data["RetryAfterRebootAction"] = [string]$script:RetryAfterRebootAction
     $data["RetryAfterRebootDetail"] = [string]$script:RetryAfterRebootDetail
     $data["RetryAfterRebootAttempt"] = [string]$script:RetryAfterRebootAttempt
@@ -2998,6 +3002,7 @@ function Resolve-InteractiveUserAccount {
         User=$UserName
         AccountName=$UserName
         AccountType="Unknown"
+        Sid=""
         Detail="No process owner found for the interactive session."
     }
 
@@ -3038,7 +3043,13 @@ function Resolve-InteractiveUserAccount {
                     $accountType = "Unknown"
                 }
 
+                $ownerSid = ""
+                try {
+                    $sidResult = Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid -ErrorAction Stop
+                    if ($sidResult.ReturnValue -eq 0) { $ownerSid = [string]$sidResult.Sid }
+                } catch { }
                 return [PSCustomObject]@{
+                    Sid=$ownerSid
                     Resolved=$true
                     Domain=$domain
                     User=$user
@@ -3057,6 +3068,7 @@ function Resolve-InteractiveUserAccount {
             User=$UserName
             AccountName=$UserName
             AccountType="Unknown"
+            Sid=""
             Detail=$_.Exception.Message
         }
     }
@@ -3358,8 +3370,8 @@ function Export-RecentEventLog {
     )
 
     try {
-        $events = Get-WinEvent -FilterHashtable @{ LogName=$LogName; StartTime=$Since } -ErrorAction Stop |
-            Select-Object TimeCreated,Id,LevelDisplayName,ProviderName,Message
+        $events = Get-WinEvent -FilterHashtable @{ LogName=$LogName; StartTime=$Since } -MaxEvents 200 -ErrorAction Stop |
+            Select-Object TimeCreated,Id,RecordId,ActivityId,LevelDisplayName,ProviderName,Message
 
         if ($events) {
             $events | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8 -Force
@@ -3394,6 +3406,7 @@ function Export-EnrollmentDiagnostics {
     if (-not [string]::IsNullOrWhiteSpace($autoEnrollCopy)) { $files += $autoEnrollCopy }
 
     $logs = @(
+        @{ Name="Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Enrollment"; Suffix="DeviceManagement_Enrollment" },
         @{ Name="Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Admin"; Suffix="DeviceManagement_Admin" },
         @{ Name="Microsoft-Windows-User Device Registration/Admin"; Suffix="UserDeviceRegistration_Admin" },
         @{ Name="Microsoft-Windows-AAD/Operational"; Suffix="AAD_Operational" }
@@ -3939,6 +3952,9 @@ $intuneAutoEnrollDetail = ""
 $intuneAutoEnrollOutputFile = ""
 $intuneEnrollmentDiagnosticsFiles = ""
 $intuneEnrollmentDiagnosticsInitialFiles = ""
+$mdmEnrollmentRecentEvidence = ""
+$mdmDiagnosticStatus = "NotRequested"
+$mdmDiagnosticZip = ""
 
 $userStatusAttempted = $false
 $userStatusTaskExitCode = ""
@@ -3976,6 +3992,7 @@ $interactiveSessionState = ""
 $interactiveSessionDetail = ""
 $interactiveSessionIsRemote = $false
 $interactiveUserDomain = ""
+$interactiveUserSid = ""
 $interactiveUserAccountName = ""
 $interactiveUserAccountType = ""
 $interactiveUserIdentityResolved = $false
@@ -4037,6 +4054,27 @@ try {
 
     Write-Host "Running in LOCAL mode on computer: $ComputerName" -ForegroundColor Cyan
     Write-RunLog "Running LOCAL mode."
+
+    if ($CollectMdmDiagnostics) {
+        # An explicit option: capture does not alter MDM enrollment. The archive is
+        # sensitive; only write under SEMT's protected data root.
+        $mdmDiagnosticZip = Join-Path $OutputDir ("MDMDiag_{0}_{1}.zip" -f $ComputerName,$CorrelationId)
+        $mdmDiagnosticOutput = Join-Path $OutputDir ("MDMDiag_{0}_{1}.txt" -f $ComputerName,$CorrelationId)
+        try {
+            $tool = Join-Path $env:SystemRoot 'System32\mdmdiagnosticstool.exe'
+            $capture = Invoke-ProcessWithTimeout -FilePath $tool -Arguments @('-area','DeviceEnrollment','-zip',(ConvertTo-SemtCommandLineArgument -Value $mdmDiagnosticZip)) -TimeoutSeconds 300 -OutputFile $mdmDiagnosticOutput
+            if ($capture.TimedOut) { $mdmDiagnosticStatus = 'Timeout'; $mdmDiagnosticZip = '' }
+            elseif ($capture.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $mdmDiagnosticZip -PathType Leaf)) { $mdmDiagnosticStatus = 'Failed'; $mdmDiagnosticZip = '' }
+            else {
+                Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+                $archive = [IO.Compression.ZipFile]::OpenRead($mdmDiagnosticZip)
+                try { if ($archive.Entries.Count -eq 0) { throw 'MDM diagnostic ZIP is empty.' } }
+                finally { $archive.Dispose() }
+                $mdmDiagnosticStatus = 'Collected'
+            }
+        } catch { $mdmDiagnosticStatus = 'Error'; $mdmDiagnosticZip = ''; Write-RunLog ("MDM diagnostics error: {0}" -f $_.Exception.Message) }
+        Write-RunLog ("MDM diagnostics: Status={0}; Zip={1}; Output={2}" -f $mdmDiagnosticStatus,$mdmDiagnosticZip,$mdmDiagnosticOutput)
+    }
 
     $bootInfo = Get-LocalOsBootInfo
     $osCaption = $bootInfo.Caption
@@ -4469,6 +4507,7 @@ try {
         $interactiveIdentity = Resolve-InteractiveUserAccount -SessionId $interactiveSessionId -UserName $interactiveUserName
         $interactiveUserIdentityResolved = $interactiveIdentity.Resolved
         $interactiveUserDomain = $interactiveIdentity.Domain
+        $interactiveUserSid = [string]$interactiveIdentity.Sid
         $interactiveUserAccountName = $interactiveIdentity.AccountName
         $interactiveUserAccountType = $interactiveIdentity.AccountType
         $interactiveUserIdentityDetail = $interactiveIdentity.Detail
@@ -4873,52 +4912,13 @@ try {
     if ($status -eq "SUCCESS" -and $intuneEnrolled -eq $false) {
         $staleCleanupCompleted = $false
         if ($staleIntuneEnrollmentDetected) {
-            if ($AllowRemoveStaleIntuneEnrollment) {
-                $staleIntuneRemovalAttempted = $true
-                Write-Host "Hybrid Join is healthy, but a stale local Intune enrollment trace exists. Removing it because -AllowRemoveStaleIntuneEnrollment was specified." -ForegroundColor Yellow
-                Write-RunLog ("Stale Intune enrollment removal requested. EnrollmentIds={0}" -f $staleIntuneEnrollmentIds)
-
-                $removeStaleResult = Remove-NonIntuneMdmEnrollment `
-                    -EnrollmentIds $staleIntuneEnrollmentIds `
-                    -OutputDirPath $OutputDir `
-                    -ComputerNameValue $ComputerName `
-                    -RunIdValue $RunId `
-                    -RemovalLabel "Stale local Intune enrollment trace"
-
-                $staleIntuneRemovalSuccess = $removeStaleResult.Success
-                $staleIntuneRemovalBackupDir = $removeStaleResult.BackupDir
-                $staleIntuneRemovalDetail = $removeStaleResult.Detail
-                Write-RunLog ("Stale Intune enrollment removal result: Success={0}; BackupDir={1}; RemovedItems={2}; Detail={3}" -f $removeStaleResult.Success,$removeStaleResult.BackupDir,$removeStaleResult.RemovedItems,$removeStaleResult.Detail)
-
-                if ($removeStaleResult.Success) {
-                    $status = "SUCCESS"
-                    $staleCleanupCompleted = $true
-                    $staleIntuneCleanupContinuedToAutoEnroll = $true
-                    $staleIntuneEnrollmentDetected = $false
-                    $staleIntuneEnrollmentIds = ""
-                    $unconfirmedIntuneEnrollmentIds = ""
-                    $dsregStatusErrorMessage = ("Stale local Intune enrollment trace was removed. Waiting {0} seconds before attempting Intune auto-enrollment in the same run." -f $StaleCleanupDelaySeconds)
-                    Write-RunLog $dsregStatusErrorMessage
-                    if ($StaleCleanupDelaySeconds -gt 0) {
-                        Start-Sleep -Seconds $StaleCleanupDelaySeconds
-                    }
-                }
-                else {
-                    $status = "STALE_INTUNE_ENROLLMENT_REMOVE_FAILED"
-                    $dsregStatusErrorMessage = ("Stale local Intune enrollment removal did not fully complete. BackupDir={0}; Detail={1}" -f $removeStaleResult.BackupDir,$removeStaleResult.Detail)
-                }
-                $ExitCode = 3
-                if (-not $removeStaleResult.Success) {
-                    Write-RunLog $dsregStatusErrorMessage
-                }
-            }
-            else {
-                $status = "STALE_INTUNE_ENROLLMENT_LOCAL"
-                $dsregStatusErrorMessage = ("A stale local Intune enrollment trace is suspected. UnconfirmedIntuneIds={0}; gpupdate State={1}. Use -AllowRemoveStaleIntuneEnrollment only after validation." -f $staleIntuneEnrollmentIds,$gpUpdateMdmPolicyState)
-                $ExitCode = 3
-                Write-Host "Hybrid Join is healthy, but a stale local Intune enrollment trace may block auto-enrollment." -ForegroundColor Yellow
-                Write-RunLog $dsregStatusErrorMessage
-            }
+            # Discovery URL plus 0x8018000A does not prove a stale registration. Never
+            # delete these traces based solely on this ambiguous evidence, even when the
+            # historical cleanup switch is enabled.
+            $status = "INTUNE_ENROLLMENT_STATE_REVIEW_REQUIRED"
+            $dsregStatusErrorMessage = "Unconfirmed Intune registration and already-enrolled policy signal require manual review; no cleanup was performed."
+            $ExitCode = 3
+            Write-RunLog $dsregStatusErrorMessage
         }
         if ($status -eq "SUCCESS" -and $intuneEnrolled -eq $false -and -not $staleCleanupCompleted -and $nonIntuneMdmEnrollmentDetected) {
             if ($AllowRemoveNonIntuneMdmEnrollment) {
@@ -5249,6 +5249,17 @@ try {
         }
     }
 
+    # Enrollment events describe observations in a time window, not necessarily the
+    # current attempt. Preserve timestamp and record id and do not infer a causal user.
+    foreach ($file in @(($intuneEnrollmentDiagnosticsInitialFiles + ';' + $intuneEnrollmentDiagnosticsFiles) -split ';' | Where-Object { $_ -like '*DeviceManagement_Enrollment.csv' })) {
+        try {
+            $observations = @(Import-Csv -LiteralPath $file | Where-Object { $_.Id -in @('52','76') -and $_.Message -match '(?i)UserLicense|0x80180018|0x8018000A' } | Select-Object -First 1)
+            foreach ($event in $observations) {
+                $code = if ($event.Message -match '(?i)UserLicense|0x80180018') { 'UserLicense/0x80180018' } else { '0x8018000A' }
+                $mdmEnrollmentRecentEvidence = 'Enrollment event {0}, record {1}, time {2}: {3}; correlation with this attempt not established.' -f $event.Id,$event.RecordId,$event.TimeCreated,$code
+            }
+        } catch { Write-RunLog ('Unable to summarize enrollment events: {0}' -f $_.Exception.Message) }
+    }
     $nextAction = Get-NextActionForStatus -Status $status -IntuneEnrolled ([bool]$intuneEnrolled)
 
     # Final log entry
@@ -5348,6 +5359,7 @@ try {
         IntuneAutoEnrollDetail  = $intuneAutoEnrollDetail
         IntuneAutoEnrollOutputFile = $intuneAutoEnrollOutputFile
         IntuneEnrollmentDiagnosticsInitialFiles = $intuneEnrollmentDiagnosticsInitialFiles
+        MdmEnrollmentRecentEvidence = $mdmEnrollmentRecentEvidence
         IntuneEnrollmentDiagnosticsFiles = $intuneEnrollmentDiagnosticsFiles
         UserStatusAttempted     = $userStatusAttempted
         UserStatusTaskExitCode  = $userStatusTaskExitCode
@@ -5394,6 +5406,7 @@ try {
         FinalGpUpdateOutputFile = $finalGpUpdateOutputFile
         InteractiveUserDetected = $interactiveUserDetected
         InteractiveUserName     = $interactiveUserName
+        InteractiveUserSid      = $interactiveUserSid
         InteractiveUserDomain   = $interactiveUserDomain
         InteractiveUserAccountName = $interactiveUserAccountName
         InteractiveUserAccountType = $interactiveUserAccountType
@@ -5565,7 +5578,8 @@ catch {
             IntuneAutoEnrollDetail  = $intuneAutoEnrollDetail
             IntuneAutoEnrollOutputFile = $intuneAutoEnrollOutputFile
             IntuneEnrollmentDiagnosticsInitialFiles = $intuneEnrollmentDiagnosticsInitialFiles
-            IntuneEnrollmentDiagnosticsFiles = $intuneEnrollmentDiagnosticsFiles
+            MdmEnrollmentRecentEvidence = $mdmEnrollmentRecentEvidence
+        IntuneEnrollmentDiagnosticsFiles = $intuneEnrollmentDiagnosticsFiles
             UserStatusAttempted     = $userStatusAttempted
             UserStatusTaskExitCode  = $userStatusTaskExitCode
             UserStatusFile          = $userStatusFile
@@ -5611,7 +5625,8 @@ catch {
             FinalGpUpdateOutputFile = $finalGpUpdateOutputFile
             InteractiveUserDetected = $interactiveUserDetected
             InteractiveUserName     = $interactiveUserName
-            InteractiveUserDomain   = $interactiveUserDomain
+            InteractiveUserSid      = $interactiveUserSid
+        InteractiveUserDomain   = $interactiveUserDomain
             InteractiveUserAccountName = $interactiveUserAccountName
             InteractiveUserAccountType = $interactiveUserAccountType
             InteractiveUserIdentityResolved = $interactiveUserIdentityResolved
@@ -5699,10 +5714,10 @@ finally {
 exit $ExitCode
 
 # SIG # Begin signature block
-# MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtXg3s4KlnuRqU
-# B6qEtoskOyCbeHx2BiOfa02UAMt+p6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDknjyGyuVf5T8e
+# baIRzZPAQ0B2RGYsTLIpjF+yEaHWKaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5727,139 +5742,19 @@ exit $ExitCode
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBY0w
-# ggR1oAMCAQICEA6bGI750C3n79tQ4ghAGFowDQYJKoZIhvcNAQEMBQAwZTELMAkG
-# A1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRp
-# Z2ljZXJ0LmNvbTEkMCIGA1UEAxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENB
-# MB4XDTIyMDgwMTAwMDAwMFoXDTMxMTEwOTIzNTk1OVowYjELMAkGA1UEBhMCVVMx
-# FTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNv
-# bTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MIICIjANBgkqhkiG
-# 9w0BAQEFAAOCAg8AMIICCgKCAgEAv+aQc2jeu+RdSjwwIjBpM+zCpyUuySE98orY
-# WcLhKac9WKt2ms2uexuEDcQwH/MbpDgW61bGl20dq7J58soR0uRf1gU8Ug9SH8ae
-# FaV+vp+pVxZZVXKvaJNwwrK6dZlqczKU0RBEEC7fgvMHhOZ0O21x4i0MG+4g1ckg
-# HWMpLc7sXk7Ik/ghYZs06wXGXuxbGrzryc/NrDRAX7F6Zu53yEioZldXn1RYjgwr
-# t0+nMNlW7sp7XeOtyU9e5TXnMcvak17cjo+A2raRmECQecN4x7axxLVqGDgDEI3Y
-# 1DekLgV9iPWCPhCRcKtVgkEy19sEcypukQF8IUzUvK4bA3VdeGbZOjFEmjNAvwjX
-# WkmkwuapoGfdpCe8oU85tRFYF/ckXEaPZPfBaYh2mHY9WV1CdoeJl2l6SPDgohIb
-# Zpp0yt5LHucOY67m1O+SkjqePdwA5EUlibaaRBkrfsCUtNJhbesz2cXfSwQAzH0c
-# lcOP9yGyshG3u3/y1YxwLEFgqrFjGESVGnZifvaAsPvoZKYz0YkH4b235kOkGLim
-# dwHhD5QMIR2yVCkliWzlDlJRR3S+Jqy2QXXeeqxfjT/JvNNBERJb5RBQ6zHFynIW
-# IgnffEx1P2PsIV/EIFFrb7GrhotPwtZFX50g/KEexcCPorF+CiaZ9eRpL5gdLfXZ
-# qbId5RsCAwEAAaOCATowggE2MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFOzX
-# 44LScV1kTN8uZz/nupiuHA9PMB8GA1UdIwQYMBaAFEXroq/0ksuCMS1Ri6enIZ3z
-# bcgPMA4GA1UdDwEB/wQEAwIBhjB5BggrBgEFBQcBAQRtMGswJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBDBggrBgEFBQcwAoY3aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNydDBF
-# BgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNl
-# cnRBc3N1cmVkSURSb290Q0EuY3JsMBEGA1UdIAQKMAgwBgYEVR0gADANBgkqhkiG
-# 9w0BAQwFAAOCAQEAcKC/Q1xV5zhfoKN0Gz22Ftf3v1cHvZqsoYcs7IVeqRq7IviH
-# GmlUIu2kiHdtvRoU9BNKei8ttzjv9P+Aufih9/Jy3iS8UgPITtAq3votVs/59Pes
-# MHqai7Je1M/RQ0SbQyHrlnKhSLSZy51PpwYDE3cnRNTnf+hZqPC/Lwum6fI0POz3
-# A8eHqNJMQBk1RmppVLC4oVaO7KTVPeix3P0c2PR3WlxUjG/voVA9/HYJaISfb8rb
-# II01YBwCA8sgsKxYoA5AY8WYIsGyWfVVa88nq2x2zm8jLfR+cWojayL/ErhULSd+
-# 2DrZ8LaHlv1b0VysGMNNn3O3AamfV6peKOK5lDCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggbtMIIE1aADAgECAhAIT9wzT35FTtvDD4/5
-# khg1MA0GCSqGSIb3DQEBCwUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwHhcNMjYwODA1MDAwMDAwWhcN
-# MzcxMTA0MjM1OTU5WjBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
-# IEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFNIQTI1NiBSU0E0MDk2IFRpbWVzdGFt
-# cCBSZXNwb25kZXIgMjAyNiAxMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
-# AgEAtnum8sn+zUr41JtMZbP9OMYw+HwJDpG5xkIu/lqcfNYmMX81YmsUiHLbh9yk
-# peWBGKTLhYBrAN9Tdg/QEzG32XcObmgIblnr0CoQ3WSAeDZ6nH6X6VkFyYkJw3QB
-# JREwvm4UhLzSxmwPA7cFKRTEOMsmEEj6qJk/dqLEAL+oQYuOwE2UuiX1Vnul8YRe
-# IyWd4kgLn9gq6LNXM0UplkR6jL/QHxmb6fMoGBJYbnaUI7XD6cKDpekK2SVMld4i
-# DbzeHDtOaaxldH5IxuNusQ69nd8/ZXEiB5Hbxj3RlK13cX1W4DlFXKdv/CEhM8Cj
-# 1vvlmvhNroyPdRGbbpBlgyf8Wdu5N6ByhFwURn0U6ozlPoxN22v+fviUhP+6DR54
-# 7OZnpBMWDfei1f5sVGwiiW/KQTWOK97g+4RJpPzPNV4VYMAwO2jM2Aty2QYPVmOQ
-# TJm0msuXnJrSbl2gf9JylpkJlWXqk1Q4LJsxz+TELoQCZIljbgvTJgoPU2R12ydv
-# 8i1UqL/adelA0y7U9Pmmtbze9Xx3rtajC5SzQd1jgfwAwsa90v9YcSPdmeoyoBBA
-# /27cCL237l5DTYYPDLQ4ON3OLTGWnvRb6jDrf/T75gMRfUzSLCBQfBusm9+mSWRl
-# C/Df6S/e9Q8i13CuhzOT2Jx+V/nlbXM4QoBwlUAhelwwJT0CAwEAAaOCAZUwggGR
-# MAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFBTJY4owLtRK+26U8+bjQH717M3iMB8G
-# A1UdIwQYMBaAFO9vU0rp5AZ8esrikFb2L9RJ7MtOMA4GA1UdDwEB/wQEAwIHgDAW
-# BgNVHSUBAf8EDDAKBggrBgEFBQcDCDCBlQYIKwYBBQUHAQEEgYgwgYUwJAYIKwYB
-# BQUHMAGGGGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBdBggrBgEFBQcwAoZRaHR0
-# cDovL2NhY2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0
-# YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3J0MF8GA1UdHwRYMFYwVKBSoFCG
-# Tmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVT
-# dGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNybDAgBgNVHSAEGTAXMAgGBmeB
-# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAI3FOmEenVIK35ms
-# CYB+fShAsWvSYvLBItoNdAgQ2jIqrGsVsluXMJU/+mRebBc52s6lbKAvOVPXaizm
-# KkMLLflEEKDZQx4CkS2t8aHPjkXha3hYZ010htFa3dhNgmalH5vuWvh3tTCf4frT
-# S7gPtGc4Z/xaPhQ2AB1mR8eEe/WbH0RWHvVIl6VwQ3+g5FKNfN2N/DWJkf13w2H+
-# 2GfqEfbd35Ww8CvoYBjLNIDTadcPWdgsjsiOaK/7EsKJgLjUNIVgvcaFOLLQ/Glr
-# A+0ZHJoFUbOr5SJN8zykPspXIXlpDJY/gqFUZRROeab9GVgmhbdOJcD/63RhxPah
-# FUGbckRONqMe6DYAv6/mOG0pWd3cPStsdcS7buj5DyniwRY8yooMH6ptx5vpP/pZ
-# zBPBeZD2U4IsthyxB5Jaa8qrOkB5z160TXiM5ADMspZ0TfD9MJoq0tFpFPssKRFh
-# WeEDYPvcUuN7U7lvcdHl4ezQ3NT/7Ffs1sR1yh/LRbdZ3B3Vc6q2WmD8mDC0p9kz
-# l2o73iVtS946IkEj7FkRsZGww1teYxERROC745xrtjvcw9ZyyUjHZWGRIpJeMNsP
-# quCDf0fkyHtB+J4AiNZqCQk23rxh+KbpyMTNVKItJ5l92Svl20U9NbqMBOVYl1h5
-# 4NEYLJq1/xHWFKPNK903zJZA9P2DMYIFvjCCBboCAQEwYjBOMR4wHAYDVQQDDBV3
-# b3JrcGxhY2VjbG91ZGh1Yi5jb20xLDAqBgkqhkiG9w0BCQEWHWNvbnRhY3RAd29y
-# a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
-# AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
-# CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFlGbD7X4kOsgPB4Taa69o5f729fRqiyr3dnESJl1sFOMA0GCSqG
-# SIb3DQEBAQUABIIBgD5zgaOblKsLA+aQOu5V3T4n8CkIEhf9nE1zgW5MgxQee9/E
-# XORUNNxQYO6XtrUs1+SmYLWP3QAV1KUt/ni/OicuNVvv4dCcgMi19IcA2enwEz67
-# MkthC/1+OnxrQwx9bA/4S4z03Rc7rPKZPtRGLJP3+K/P9RC5F4B54LsKBLSCKpZx
-# H4/jcOCWlg79oazdLZbJovvPI7Juhh2dvMNtQOSpcMYIthMl1R0aoNLUJleQx37c
-# vUXHMe24+yOMyEEh2ofcTQvq03Ulz4mIQC2gY+E41Eb6jYngPpik8R8p8QjWbYGI
-# vN5Kt1A2AacM4rpMtCTiY4u/fLGrsW5/60cbeFze9n0aMtExhQnP387v1g0DsjK7
-# TrANpMnXAUlGPJyAraXanpp3qTztoi98ADfwqbE9Pcg47nRmEIPE03ypUaZWi/fd
-# oCh5OEvlo8OZKuCoVgXhLOCtLjlk+lFX5xs478SKZF5A+I1G2dejiL1BZ/rvgCO5
-# j4flOkAn2krUlgCXQaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAxMjUz
-# NTNaMC8GCSqGSIb3DQEJBDEiBCBuwCKwETVSbbwn3aUkGWgI7QMK9fnJS0gOSJ6j
-# vNZ/hTANBgkqhkiG9w0BAQEFAASCAgBi3O0AkOcdVSnxpvq1sMy/uU0g+g9d4oNu
-# uSUtmUvgg0b4Ozz1TCqHACYZ52FUx8mWwtv+Di9j014oxXMuJH15qIvIbUn+5uIJ
-# dAlKsH4370X1IaUk/iqcovYNNbOxaazXPFlpFI/HWoefRqS3LOwIwUyQfeqF3Zts
-# 28VE2caAV3v/xvmw26hS2iQ05lrDLYqX8eb7CBWiucifUiy/eGY+Ngy8l7XAuq4w
-# VyaA8Xnlq0K0QvkYeNXC1ik275BEOqrSpY2hTOKhVDC1qY8YuVbJfapcfrjsUKuS
-# Td5MH+CImISjuBwlA43jrPmN6TpZKNidxALYSsx3EwVOk9vNCvZ0shlSoolNuQhn
-# UJdATRKqUQOw9gg4OzDxujF+3KUk6J1TyT/FwON2evg+axya7sNj5kimrVJfc9Hf
-# 3oQQIdslbtVMPGO1YYio2GNkWMqe4FH1Rv1cOYuJTgQsIzyk6/gY4bEaGPVM3KMK
-# 4xSTSqPGdBtHTdnFGXzpBFgtESAKnec4UMeUDKWHBjFAS4y8SwSK1I/VYiRvo7rV
-# I3Lt1IAVHDZfKprh/Jm6jqAXIJEQv3mDDYLIKM+5ele6EMzYu9wZWkjILxQ6q5MP
-# HxJJKYyk7u+yoX21GAib7B7dj04w6fFjuJ9wnfmFIWMXrCA3D6m+7Ude5aIv8bsk
-# KGye5zfZpA==
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
+# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
+# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
+# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDbLh2HdUU+/ivQsJhkJ1L3
+# CQLkLiProKKObVe7PXOyoTANBgkqhkiG9w0BAQEFAASCAYCEXsNsddDNLKZRcjuG
+# zskV8l89Kh3DactzBLmkOKtNYW79GVWbq5P0fzvxj59M59GKz4lynxPyqbNsFJV1
+# 8HkihsgxCQGtolA1yshYCcjG9ZAu9jBs4XfzovfV77gYGA0UKuH/UCgsMOZyowm9
+# cPKdiZ9y3Wqd0ITzrACsuWaPOUcDt6/hDfgHN/E8H97IqZtYozp7n6rgBhbm549f
+# fs+lART4ZE30ngiIg/wmcmUh741Ld2Nzr/sRwEkXU9QOIkD5MBtd9K+XrgJvw2jZ
+# Rfzv4DggHYuBuUL3qyOtSzoDkEqOjoU2lR0vaqecpl8uLN17djrz7GXtf3sh43Sg
+# pafByZ/6gqsiSZr73j2sv6v8hqr2vsbIP964a9rcosXKOLaMpNbWjyfXQLTzXU7j
+# IcbEGzWByDuh0MbJblmqrSrDEwwJsTOhyWHlMmvay6kuLodutBrz7X1J9Jq/lyd0
+# 7KkJLtK+3QVjJjyVVCVeE76VlaGjBQY2J6rlxLFSm/F8440=
 # SIG # End signature block
