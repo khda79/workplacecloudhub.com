@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Exercise real ownership tracking, schedule selection and launch admission in memory.
 The concurrency gate captures admitted occurrences and prevents every child launch.
@@ -39,7 +39,8 @@ function Reset-Case {
     $script:StatePersistenceHealthy=$true;$script:FailSave=$false
     $script:Settings=[pscustomobject]@{MaxConcurrency=1;SharedDataFolderPath='unused'}
     $script:RunningJobs=@{};$script:ForcedPending=@();$script:PipelinePending=@{}
-    $script:MaintenanceDue=$null;$script:Saves=0;$script:Cleared=0
+    $script:MaintenanceDue=$null;$script:MaintenanceCoverage=$null;$script:CoverageError=$false;$script:Saves=0;$script:Cleared=0
+    $script:State.MaintenanceCatchUpRevision=8
     $script:Admitted=[Collections.Generic.List[object]]::new();$script:Rows=[Collections.Generic.List[object]]::new()
 }
 function Get-JobState {param($JobName) $script:State}
@@ -51,6 +52,8 @@ function Clear-DependencyWaitLog {param($JobName) $script:Cleared++}
 function Test-JobSelected {param($JobName) $true}
 function Get-JobEffectiveAllowedServers {param($Job) ,@($env:COMPUTERNAME)}
 function Get-MaintenanceCatchUpOccurrence {param($Job,$State,$Control) $script:MaintenanceDue}
+function Find-OrchestratorPeerMaintenanceCoverage {param($JobName,$Revision,$Occurrence) if($script:CoverageError){throw 'Synthetic peer read failure'}; $script:MaintenanceCoverage}
+function Complete-MaintenanceCatchUpOccurrence {param($State,$Occurrence) $State.MaintenanceCatchUpLastOccurrence=$Occurrence.ToString('o')}
 function Get-OrchestratorOccurrenceCoveredByLaterClaim {param($Job,$ExpectedOccurrence,$Now) $null}
 function Test-SmartM365OrchestratorPipelineCancellation {param($SharedDataFolderPath,$BatchId) $false}
 function Test-OrchestratorLocalConcurrencyBlocked {
@@ -147,6 +150,19 @@ try {
         Invoke-LaunchPhase $script:Acquired
         Assert-Case ($script:Admitted.Count -eq 1 -and $script:Rows.Count -eq 0) 'Maintenance catch-up was skipped.'
     }
+    Case 'Peer already handled maintenance occurrence' {
+        $script:MaintenanceDue=$script:Due
+        $script:MaintenanceCoverage=[pscustomobject]@{Server='peer';Revision=12}
+        Update-OrchestratorElectedOwnership $script:Acquired
+        Invoke-LaunchPhase $script:Acquired
+        Assert-Case ($script:Admitted.Count -eq 0 -and $script:Saves -eq 1 -and $script:State.MaintenanceCatchUpLastOccurrence -eq $script:Due.ToString('o')) 'Peer coverage did not persist the cursor.'
+    }
+    Case 'Unreadable peer state pauses catch-up' {
+        $script:MaintenanceDue=$script:Due;$script:CoverageError=$true
+        Update-OrchestratorElectedOwnership $script:Acquired
+        Invoke-LaunchPhase $script:Acquired
+        Assert-Case ($script:Admitted.Count -eq 0 -and $script:Saves -eq 0) 'Unreadable peer state admitted or consumed catch-up.'
+    }
     Case 'Running job is not relaunched after reassignment' {
         $script:RunningJobs[$script:Job.Name]=@{ProcessId=123}
         Update-OrchestratorElectedOwnership $script:Acquired
@@ -195,8 +211,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDjWudh5OKPicve
-# r5J9uFMzJUeMoGZDXhoLzs/xSheP2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBYmjokz78qBAbT
+# //XkkcQXxmiAHyHfdbDPNJSXjglCzaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -329,31 +345,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIMT/hNW5UIi7GO/SZRhtoAg/0uu/wHtlN5G5yw2LbqCnMA0GCSqG
-# SIb3DQEBAQUABIIBgHwpMgFKyUJLV7SDNG39MC3KH87rGPr8jGrJC7BPvXqKGk8C
-# KwlHL640XIovrnslYMPAIi3e5/7hTuR2M9MSSGRL8RDAj+l8t5OB2eruoWoMZv+1
-# nXMEmww1eCRCwml6VG8jJFjSnrNk1c2dDa/s5FI9KF+fiMsI8S7ivneABIPwmjxS
-# loz7yoajsN8I6Oy6nW9kbwVNF3rt/EJUhfsO6VuazIWFUMlYp7zqiFzFD4uyMpBB
-# DikuSXHuLOHDHINZyx6olRI/keK6Nigdvx9CogFYsTyG2evo+0BUax5y4CoZP7fu
-# 2+gZV6JkfdGFMFAn1Yom1gbKfymafmyVPh6Bb7IjbaZBrSn3mUteczefXZVby8Lz
-# uSSiVWhVAV8UoQubIHc+Gnkbu1MNmVUjGMY2C01iY9WNGaZe/PdVg4TMz7kCDxo3
-# Nl7CYZaeUvzEdVF259t4pIkD5JxlWq9VG0Hte7G5b8IIADIExkR1ESWQ8ncqVYO9
-# xa1/nZiXd1h+KNjkUaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDQVDZM8iniqm4RLxo4Mw8oeNSmaMSpjvrYdinP7tDAqMA0GCSqG
+# SIb3DQEBAQUABIIBgAPqZjYJfpYyWeMOS2S0gD0n4cHqs9QYB2KlSko5A56AGn/C
+# oc7isLnFqRN1hbzA3wiYlUkVE8Py2OE++o8FxsSTmjM7pTWrL0qap2Xk0IOOmFtQ
+# O8k54VP67XkY9voKaxOl2NmdlUHCgYmMnDh+/IghVpYh5AUk0lJ4O1n/dCfTajeZ
+# tEIyAkFA3hc0B3s+2DuOeQ8STCTMXrh+OFNMQAzQEah+ZVflyIJ8pntTRHB2J5Td
+# XFVpcTPBzyzeCNd7SVyHzjvqxmSCK2baFrKVcptxl0l1hTNwpbluQtMkQjK5owMJ
+# SRXQ5mLIqXvyeJnpcefglnvh/d+IZbsumVBQe4kl9zq42XchCUrGUPkGM2Y4Fie4
+# EoBEXAtfPcxfEWhY2Poxb1Qdq5WZ+VpAghdz7VI9Novl7FGHbqwx02pLozIwwQ0i
+# 7ng6fmBLIj5CnaYIwyGU43bs5S3ll6jZPHk/lHipar2pl2pe4lqc3iJ39ofK5YpC
+# QUPb5w3rkvoxVYHZaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjkyMjAw
-# MjFaMC8GCSqGSIb3DQEJBDEiBCBYUW0Sn+evOx4t2ab8VVzOq9UlC7zOg3N0fzW1
-# i1fOoTANBgkqhkiG9w0BAQEFAASCAgBLx1dGE8RjsVIXCu5s2tUJA/hIkBeIftAO
-# zXIDvtuvzQjuPKz+akNTNm9Ieaz6XRz55UjdqIzWmkdy1z+9CQ42SzB+fbGHnQv2
-# Q2G3Rhs5pdAWE1Hpv9p86zmDeObT+5EM624Wd+nZF4dFolHFTKPQBZnvaJtYgknl
-# KXPQs4Xp2rGsObsu37iWPAr7Ps5G0II0Ca47FiIE3U4a5r4UwUSh+JA1eTXxyNEJ
-# uHz1Xf2mb3st41z+dNGCPzbfUUrbtx1kGq5yqTAUbU8zVdXjPW+wBOm2ZRIvVN5h
-# +9HXrcPvWkY8nWQ0x2HveL4d/PDga0EsAQcKJgXY0Ong9XzTyD80O0bo/quUsrE2
-# u+xCXfUF3fRv/ymRnNAbeu/9M7gLISyMTCG9u+J8swEBPSNrVuTXv0c3UBZyYDI/
-# zKXlj7t0nJ8xqVjbUbXYK42bwghUjXRomk1Xfj4MafN8AKdggW7LxoklvUDoB+OS
-# MSfo/qKIDmRff9s8uy5+XOi4cO64NggLV+b0H4ov69LCaDS42Ry3Y3Vw5a5FloBc
-# tn8J9ozB6VgdBeCOqemGg7t+ZbgSmo0Nz9qkdUIHpSqv1GA5BrtHdXNhTGAJiM/T
-# 7eQ0TKjVXG3KpfdAp5Sx8o9oeoRmH2wh1/DqLvcZoQDVVopmp/WK/iowdR+pX9w1
-# vVpNaRIEow==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNTQ3
+# MTZaMC8GCSqGSIb3DQEJBDEiBCB2Ls3YBJY37C7PHjYfMzjVc9IZptFQcHEtzUJ4
+# RxMCpjANBgkqhkiG9w0BAQEFAASCAgCXJU2CUvE/bqc89s4iiBNUetsSy0qbiijm
+# FAUy6C9/+dEqj7+XYji2Qtksxjis4ppaslSV7IKlpV8a0yQbLtBv0EEgFcKsLWEt
+# 1POpIdq1Y+kMR56vkQpE2Fc7OwNdeH6tSiv7WtcK8vscmtv71JZWvhmEfz4qiF8c
+# K7w0HKIAqtdjzbXU45UCl8u3MAXf1iq6+oRRSJqp84KCgU0zV/DTdDQVv8KpWaSR
+# q5+QlKbDZWYjS0bGXHGrniuLv6MFLrzD27MNw782Fd1bMsuk02aoPmryCiuRWrwb
+# b7PkmpMUo2F/EjFEGBM0Od6nU9K0x1Z2+L/qfYK7cupeGLNMBOQSNZRa5c8U4IFT
+# blmW2tvUQc+3UsuApuM0fhrYpowcbwIbC5kTqeC0tCOfQ0LSKpWQ6OHJKH7AH8n+
+# 7pWzwVfH3zP6WHKH6mO34BVqJlVJodLaSJdD/rzMzV39IPil5sqrqO0Au6lW4hZd
+# eXgwHRgxjRoWhToSvJf9Evc0ojU2nF/1WmpJ+0KrP9LP7Uqrf1B9geZftr1dF6+K
+# hUgcO/7jfPb6qrIeHOizY3ZJd7ZCeOH4paTpRBNjKoJDSIgc/vgHnzAyxLkeXd1w
+# tzPC3dYusabEB6iwdFLiF9nIgDuH1618K4CPt2jTjkhT7rwQeoYwT7afT7epob6U
+# Jahw76FmjA==
 # SIG # End signature block

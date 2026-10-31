@@ -653,8 +653,14 @@ not reset this boundary: normally due jobs waiting for dependencies or capacity
 remain eligible. Losing ownership and acquiring it again starts a new interval.
 A temporarily unreadable plan preserves the boundary and still blocks launch.
 
-`RunOnce`, pending retries, manual Force/Pipeline requests and explicitly requested
-maintenance catch-up retain their existing behavior. No running collector is
+`RunOnce`, pending retries and manual Force/Pipeline requests retain their existing
+behavior. Since 1.5.85, an elected maintenance catch-up checks the persisted
+per-job cursors of the other servers before launch. A peer cursor covering that
+occurrence advances the new owner's cursor without relaunching it, even after
+occurrence claims have expired. An unreadable peer state pauses the catch-up;
+an occurrence not covered by any peer remains eligible. Keep the peer state
+files: if all evidence is deleted, old completed catch-ups cannot be recognized.
+No running collector is
 stopped. Offline regression: `Tests/Test-SmartM365OrchestratorSkipRebalanceOffline.ps1`.
 
 ### Supervision, timeout, retries

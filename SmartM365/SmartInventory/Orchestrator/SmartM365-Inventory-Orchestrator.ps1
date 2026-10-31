@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Resident scheduler that runs SmartInventory scripts unattended at their configured times.
 
@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.84
+1.5.85
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.84"
+$ScriptVersion = "1.5.85"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1652,6 +1652,35 @@ function Complete-MaintenanceCatchUpOccurrence {
     param([Parameter(Mandatory)][hashtable]$State, [Parameter(Mandatory)][datetime]$Occurrence)
     $State.MaintenanceCatchUpLastOccurrence = ConvertTo-StateTime -Value $Occurrence
     Save-OrchestratorState
+}
+
+function Find-OrchestratorPeerMaintenanceCoverage {
+    param([Parameter(Mandatory=$true)][string]$JobName,
+          [Parameter(Mandatory=$true)][long]$Revision,
+          [Parameter(Mandatory=$true)][datetime]$Occurrence)
+    # Each cursor is persisted after a launch or a terminal admission decision.
+    # Unlike short-lived occurrence claims, server state survives claim retention.
+    # A later revision is reached only after preceding windows were traversed.
+    $root = [string]$script:Settings.SharedDataFolderPath
+    foreach ($directory in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction Stop)) {
+        if ($directory.Name -ieq $env:COMPUTERNAME) { continue }
+        $base = Join-Path $directory.FullName 'Orchestrator-State.json'
+        $path = Get-SmartM365JsonReadPath $base -Optional
+        if (-not $path) { continue }
+        try {
+            $document = ConvertTo-SmartM365OrchestratorHashtable (Read-OrchestratorSharedJsonDocument -Path $path)
+            if ($document -isnot [hashtable] -or $document.Jobs -isnot [hashtable]) { throw 'Invalid peer state.' }
+            if (-not $document.Jobs.ContainsKey($JobName)) { continue }
+            $jobState = $document.Jobs[$JobName]
+            if ($jobState -isnot [hashtable] -or -not $jobState.ContainsKey('MaintenanceCatchUpRevision')) { continue }
+            $peerRevision = [long]$jobState.MaintenanceCatchUpRevision
+            if ($peerRevision -gt $Revision) { return [pscustomobject]@{Server=$directory.Name;Revision=$peerRevision} }
+            if ($peerRevision -ne $Revision -or -not $jobState.ContainsKey('MaintenanceCatchUpLastOccurrence')) { continue }
+            $last = ConvertFrom-StateTime -Text ([string]$jobState.MaintenanceCatchUpLastOccurrence)
+            if ($null -ne $last -and $last -ge $Occurrence) { return [pscustomobject]@{Server=$directory.Name;Revision=$peerRevision} }
+        } catch { throw "Cannot safely read peer maintenance progress at '$path': $($_.Exception.Message)" }
+    }
+    return $null
 }
 
 function Get-OrchestratorSharedDependencyStatus {
@@ -7151,6 +7180,24 @@ function Invoke-LaunchPhase {
         }
         if ($null -eq $occurrence) { continue }
 
+        # Maintenance cursors were historically per server. Recover already
+        # handled occurrences from peer state even after old claims expire.
+        if ($reason -eq 'maintenance-catch-up' -and $job.AssignmentMode -eq 'Elected') {
+            try {
+                $coverage = Find-OrchestratorPeerMaintenanceCoverage -JobName $name -Revision ([long]$state.MaintenanceCatchUpRevision) -Occurrence $occurrence
+            } catch {
+                Write-OrchestratorRuntimeUpdateWarning -Key ("maintenance-peer-state:{0}" -f $name) -Message ("Job {0}: maintenance catch-up is paused because peer state cannot be checked: {1}" -f $name, $_.Exception.Message) -Now $Now
+                continue
+            }
+            if ($null -ne $coverage) {
+                Complete-MaintenanceCatchUpOccurrence -State $state -Occurrence $occurrence
+                Save-OrchestratorState
+                if (-not $script:StatePersistenceHealthy) { break }
+                Write-OrchestratorLog -Message ("Job {0}: maintenance occurrence {1} already handled by {2} (revision {3}); local cursor advanced." -f $name, $occurrence.ToString('yyyy-MM-dd HH:mm'), $coverage.Server, $coverage.Revision)
+                continue
+            }
+        }
+
         # Skip only scheduled occurrences missed before this ownership interval.
         # RunOnce, retries, forced/Pipeline requests and explicit maintenance
         # catch-up retain their admission rules. Queueing under the same owner
@@ -9170,8 +9217,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAyanbvYG/4WgEw
-# Cg3IIOG5O4yTwRMIge3vsSDQvPwKeaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvcATZUhcjhOCk
+# 91nfIBuUVgrVsXpJtHfCic+hRA9Qu6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -9304,31 +9351,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOLBWZQlGr9HvqBK7lbJR1NQ3P3XE1Gpi11AVJo1HRT0MA0GCSqG
-# SIb3DQEBAQUABIIBgKc51Kbt6ajbuC1tzO0rTIdS5lqVp/CZUzGy+feDivxZrYcf
-# 0mzKvz8N2odusQpsIcJEOzpQ20D2z17tW++AIc2+jpL2pwAqaRsHfJeNZVg3c5/w
-# odpqPkkm0huASEZ/80niO3XB47ZbqYT6xjkVAvhu5C5UV0Lupw5VuRAcHF9jCRz5
-# 9ocawW6s32gu+JuhHl8bet2YYluvewgYuiwDtzucYrexktAmUnqxXH50KgJKWCwK
-# 10Zt1A9GLz1e8jNwwKpHyLP9xnzO19TeRYbrCppyRCkzrIu5IxkQ7vQX4OiG/T8g
-# Fdv8tEIiRCoITZ3uqOfYjAvWSDefOYOUBX7qGBApnvuMZGYTl9Pz6RynkAb98blx
-# 44v3gc8+4xpvflvj4s2kLfu7SWVaFNRvdG7DueJLDC8BpbhkEFMWbB4XEOoNskMp
-# clKmVga8vm3WuATffCtOyQ2BKopgPNJszW0JypCM15T0btWzW4S9N2V45PCfxro6
-# d5adGLPLZblNTIexeaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIBF+RtrH+COJbnDGW9P9ZmS9wfm1SvBGcLI2/k1EBLIMA0GCSqG
+# SIb3DQEBAQUABIIBgA04pbeeYsljIBxJJuLu4T6x+wHusxQO54P7bdWpBAfLuKK7
+# rvX/TEeuR7GTn37rAbYcGAKaXRIk6Cvgsj7OQI7Qcf9PAAxAK+FTKDGpx0dinPYB
+# 4+eHiiYVt6otLmGotpjJPAbfAoJS6ga6z4LQQXsQq/rTdq1p0YqcKwA1RxHbtEWC
+# ncYb2r0iP6iIB5wkH2ziILUoogo1YMGvZfg48x9RXDmL5qJvsAiqeb99psbLzk+R
+# L35wl9J9Ta44O30897JZaf81N0BYXjJUhcjzVFFPMrELKep6bHFnDxgykoV51iF5
+# 27ifCrQvfsamLsxK12am6fQta5TamQ6gvb4eiTphw6vyXiC3P3ALVt73lypdZkhF
+# FkoVhtrxoI37RcTrBbNKmbZqNMbUJQ9yIQhurriol1oAwsZMhF6kRG0oWawCXJc1
+# mUfvDgxGY9SgRhIBXjoMoWfmSvtoCIbpexDQSwdbzGb/SIZo18wUaUV0rIHWsApA
+# vRl6NcL8hrRvk/5U+aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA4
-# MDVaMC8GCSqGSIb3DQEJBDEiBCDouB+7g3JLn636uggvjlugChJ24Zhxc9rEqh7P
-# uDjnPDANBgkqhkiG9w0BAQEFAASCAgAI+0wvvmAUjwx4ANzn61Og7PiJILrz7+IT
-# z13UgPs5QP4H9TYK8saRobcEJ8YP8k+DfUlLFY+lL8FxNjrsRbi5GCvJ8Tl4q4y5
-# AHTaBxaomJLl8jDx8szfrSzjy+9fidkm1zsPN1XNWNFLiBmakX6btD5p8cAvWf4X
-# Dlr8iuoB7waAEBK3JHWQ7Lwl9Xarh6zcmA+/g7tFkdKITR/eDkZcvYCtJ4/6RTxc
-# jFOcSdaN2noWKwsyt6fSYtas8ulXeWrjzcoCgXs+g0lPPdvhPmb4FQv7l7O9E3jd
-# Y7QaV7PEm+d69LwuJjKdrApiYobd+HVed92lLk+Svviqj5NJoOHQU6dkXVhet8dR
-# Tq7SE2YXjtTr9ppzVYle9cw2bBW7NLYT0AkS/RuKLFcEVoJG9RUo7RqodfxpIR1g
-# 0bdQmBHuKaXZozl/h77xdWiWeqcEQt7RHEVbpXvjRPUyZujP91dW/AzYlrQGWLPK
-# j/5VhgABROEbPTUzgX/y7yjr6Vh6SKwI4okHqpaKZm/UTqWJqRLPQ1Pz2sT+KLMU
-# hiGgZ7x5cJ0Mr2+2gzdDaVM19olR+NW6i302D8F36Do8Uiy4pIr/9V6jJGWh9G8/
-# pflB6d0ilvJ138M+UXBfJ9yLc3nkwpO9CES6LCz/eDLOIDRC9WV8hqo+Kga6H6zX
-# WgeeHeAXyg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNTQ3
+# MTVaMC8GCSqGSIb3DQEJBDEiBCAE+6pxqOzALwNYq7hxTjIZhfngT8xnKgMC8ZH5
+# JXec0DANBgkqhkiG9w0BAQEFAASCAgCBVEy7zXzWhu5SzDLWPYiVt+1hzMxdo+cC
+# l7I8Cq8Voq7QXZ51f9+02kxbqHtN95r0HtyufPQjN66FQNi2zMaXU/XUsUiy0ehK
+# bHaYT5mjLc31QjOdXa+ohZe8aYaY7J+wlgeryQ5JcfdWzFyDYDptXwXyBECKTKLP
+# w4SPvE5acNDCI4ZQHbmWtraXLl/IZ390FJs2PJVSbEwbn8fAUv7dd51jhVw8C4G2
+# 6U2q/krtBPxOOUUch0eYse9FV8sN4wvWT9V0MXKqowYtiBw0lK+baiKL4cN3Bmlf
+# 9/b1rGyZXDZ1c/St4ZWUzG1XFmRjdkX0Ub3ST9p3QLNTJpcdy19XGU/Z2Ho4n5J4
+# SC1suYRZ+PAI6H/Mv+19Jdfi0kw2m4nanm/ue8FP+cSv7kmZ1lqpX97DpO3mEgOz
+# WGlaeWlPHXeJ3A9AL4YbWUW2BVYwdiOMpCNqiW+rMdC9KkRIH9kF/C0p1DYuA6Zt
+# mfSMnYHl5EtHuLEoinu/5z30Q+DsjiwW8xWSLtVhimX6ttdAwMue2hgn/LJ1Y1r6
+# 8KLkAwLbyFR74/KXZME0hvqpn7v549fcFGakpKlQ0lo/lfWD9aviJ3MACxc8RSzs
+# qNJB2/1PqPLMpgkkv1PX6aeQMcizvyFwpJJGYCXWgViu99xtUmOGoz2XgBsrkUbu
+# IyzbcTZXHA==
 # SIG # End signature block
