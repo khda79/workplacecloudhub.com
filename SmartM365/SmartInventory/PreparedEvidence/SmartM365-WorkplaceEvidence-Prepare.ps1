@@ -2,7 +2,7 @@
 .SYNOPSIS
     Prepare a validated, versioned SmartWorkplaceIntelligence batch after raw collectors.
 .VERSION
-    0.4.13
+    0.4.14
 .NOTES
     PowerShell 7. SharePoint mapping reads use the tenant configuration unless Offline.
     Deployment must include the sibling SmartWorkplaceIntelligence/scripts, config and reference folders.
@@ -99,13 +99,13 @@ function Invoke-PostTransferRetention($VerifiedTransfer) {
         $retention = Invoke-PreparedStep {
             & (Join-Path $product 'scripts/Invoke-PreparedSharePointRetention.ps1') -Tenant $Tenant -Mode Configured `
                 -ConfigurationPath (Get-SmartM365JsonReadPath (ConvertTo-SmartM365InventoryConfigLocation -Path (Join-Path $PSScriptRoot "$scriptName.local.json"))) `
-                -ExpectedPublishedBatchId $VerifiedTransfer.BatchId -ExpectedPointerSHA256 $VerifiedTransfer.PointerSHA256 -NoCompletionBanner
+                -ExpectedPublishedBatchId $VerifiedTransfer.BatchId -ExpectedPointerSHA256 $VerifiedTransfer.PointerSHA256 -NoCompletionBanner -Simple
         }
         $level=if($retention.Status -in @('Blocked','PartialOrBlocked')){'WARNING'}else{'INFO'}
         $reasons=if($retention.PSObject.Properties['Plan'] -and @($retention.Plan.BlockedReasons).Count){
             ' Reasons: '+(@($retention.Plan.BlockedReasons) -join '; ')
         }else{''}
-        WriteLog -Message "Post-transfer retention: $($retention.Status); plan=$($retention.PlanPath); journal=$($retention.JournalPath).$reasons" -Level $level
+        WriteLog -Message "Post-transfer retention: $($retention.Status); protected=$(@($retention.Protected) -join ', '); actions=$(@($retention.Actions) -join '; ').$reasons" -Level $level
     } catch {
         WriteLog -Message "Batch publication remains verified; retention incomplete: $($_.Exception.Message)" -Level WARNING
     }
@@ -427,8 +427,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCTxHgT3PwJWc2
-# UZWvY5m1nfS5JYoeNk7HUYXszpPoeqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCB0vz2Pi/bVYo0
+# dFr2tRHLNX4CwXipeF/YucU30jZ6iqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -561,31 +561,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIF6xTElmXSI+Cv0t/1VFuCqiLJK18QGwgjN+4lVz0E90MA0GCSqG
-# SIb3DQEBAQUABIIBgBqwuneeZUrf+gL73i/PiirmXDn3M4lH7GIobQd0hcN2MJ1w
-# ETrHjTfX/B4uiomjSyHp0GkB8j8ApnSGOaGptq/GeOCcpVdDMxOtEJL6WIDvlHQu
-# +ivLP7TcGiwLJ7jGObjxBZjXIv2ej79o9ZNDo4xDD02lHcW0a/83iUFIDlQw7pIh
-# iUBOKWUpd1+lWKvdOCb1QpW4MRXu+Z/8miSVOwO643TON2SsvrKLkHVdEY5fwmOS
-# IOCgM1anQXTBiDXp9A4GXG72pG7BzL6hS7+Z7rKGiUrGpRUUjcI3tkPXSWovQTqs
-# fwa2E4+jayny2hBbEph2efTCFldx8JBPdT5IzAklwalEzsZTq4A2bsa6v8YmYiEp
-# jPILE00lNoBE1/odrzS+mgHVF5CXCqX3Y4YNBRxp+9COGrMtMv33ZbwDR7njFvOn
-# b+dMNexWO+JIEyJTl6E0cSrL4/0X4p5lan4q45yuH0rk1OMyIUElmVsPXcOqAiSz
-# V0nMmtMDErkEQFVeMKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIO00uyGAiAtQbilCyO8swqSxTUWBUQIypGOZQnzJbqyMMA0GCSqG
+# SIb3DQEBAQUABIIBgEzpJf0eF4WCzCAyyBVcGHKOZ6HyARS/Ik5dGBgVByBtHHH1
+# jmOEMUupvAawVVqtxUA1kdr5deFuWjxy/cQ5k5D1kNWHPp413pqtLgbTzEwLCxJT
+# lCbKLOjQJQsybXTHmh/HjIMjfi3lFJdcY1rXpsB3SYgw/R8YnWIj3+Rr+Gz2opLK
+# /Vroxg27MhdOxwTVK3mVHKzUG4EXZT95HdGhcNfsoc2GuuY8f70ROhG0uZSQR/XK
+# lZEKXccjsC8J219RjB+oWipN13EUrys3mluV0PTErrzF/XBKXhdbQlmVu4qj5PMn
+# PHiLCvroIO8mNdghBpr/v8NFtQycDVKkdj9kWQANZ1W8ZdyXKzFbMWsAhIo1RDuY
+# VLWwBPjRp6qpjzuBcK4Uk0xWR0fut3AozFw6/deTdUP3PTA3LDrxTwuM0ROPglWZ
+# 7hFiyVaWGr/6IHul+KL5JvNfNbOFIpKB43XiPlsM2hO5AFUOvT3kVmeiFA0e4ps1
+# bRnB5d6f8Yj6eitlI6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExMjEx
-# MTRaMC8GCSqGSIb3DQEJBDEiBCB4oQjxzMfnlJXK1IQhHc+iGUYzmw5rVwPEbRkq
-# ZTBu8jANBgkqhkiG9w0BAQEFAASCAgBnjcGQ3Kp01yifeW5uWl5dwDpXf3NqM3S+
-# vBmP7i8nZlmENFYkaEOLEfhmjb85ElUnPBeJjvPZUshnyKTNV8rfiodso25T7aKZ
-# TmMbnxMdQ4xmK13rdjX30NmRqwxuHS1sDYylTO4Tre1xwnBfYm/SS8gpQJBYnlZc
-# fsGUqdxVYKu22krlYwoQT1VZG1a83byuR+bO6HZOjwiMivKwpE7G6yw0kYgN+Oho
-# Ta8zzUkhwoSt5eITJ8qxyiZYZ6bpZUE9H7GNxw+s923ggFtmwpdqhanp3W5PguAY
-# s0kY8Np2GMmno/p7s6+alRM8HESevALke/8fkgyMXzd6ltuAd0H+EMnhzH8hD2x0
-# MS1SHoUp4f5L08SEuxZM7giGK4B3vF6m4IVuaxJXRHU/SMhxTCgS03JuqcQouOny
-# hHz6ubybZMijuhwh7H+VgvG30Y9TdUSaVIVdMiINPcgYXrE8d87eo+OgKsCR/Txo
-# XLSbFPcIyfTrVfM/OZfvEDZP0yJVDgB26K5vFgXLFidb+Y3VP9bY5a47sPbWYueK
-# U2aH2KtZQPNVOS8Pn6jC4oI2tMLSPhxasRZZTGYzBr/trzGz/kD7LDCDi2FogGsy
-# x5aQwwk/wdh5Ol6dh7pjhDpWRaLe1uaPX7AlF4hlNzakOtOtc6EB2LqjCZk6IxQg
-# 2ARPxoLmzA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNTI2
+# NDJaMC8GCSqGSIb3DQEJBDEiBCCH2rQMZu37tnnSMo51wAxJTIyl9hNcb7263UCi
+# nIrp4jANBgkqhkiG9w0BAQEFAASCAgBa2zjHrCEvW9F9/4xdKtwZOql36rFekayl
+# QgZl2IJy1b8kz6Bv684yph3KVpXj5BDxfrO2kxwLsvIzBnV78+7ZBEN+uTACRkt0
+# CFkg703rQue5yHuVWIxCAmXvmsl2/Sl8KNjD9H2J/1gJ3VcXP46CO75RFqajI0Fn
+# hjnicnANzhwCRwKiUnUxsGfrs7yoKuyUC83oGCQsZneVqU3aUbUgiRBNpb0Xkkn3
+# Ap+zkvdj0X1Kq/tOk9HjM2wKCZOGVju2YvyXTOqhXSv849E63oTWlbS61iiAXiGe
+# QYd8KlU6EwD37bFEaVbC2hRHpi3aQRvjuAEh39TdG02inPIOvxJ0cE8Ws1lcpygK
+# UxTcK4NglpQpq81j0fnx45UFS2ELU8ml3bEzM1z81Nqackzwm5N35htsbjZLKndP
+# SjIpNEYmty/HmTKEypN85k6v6uqrvAx38yH4qNKOB0I2nvSadtb47KtxLOLMQ3/u
+# fdBOup6v9NscJsbTfHiyCYIpaZdzAjwLts/KtsstEeFrRZbgaxd/+nLOlaHPZnPN
+# 8/1I9QKy2o0iZZZQkPSTPvhYM0gCl8W0P41HmhKftyd6gmZzAi0pqv9Sgja412w2
+# iLz70lBONTwKaQUOW1mwMrBfSbBYyMp7A/3GSs5Q3Jh+4HAPftDLQtwsgdrbT2P8
+# FCGDc02x4A==
 # SIG # End signature block

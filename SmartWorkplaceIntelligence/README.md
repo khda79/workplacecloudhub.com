@@ -101,11 +101,26 @@ Run the offline regression suite with
 `python -B -m unittest discover -s SmartWorkplaceIntelligence/scripts -p test_thematic_reports.py`.
 Fixtures contain no tenant data and do not open Desktop or connect to Service.
 
-## Qualified batch retention
+## Batch retention after Prepare
 
-Publication alone no longer retires local batch payloads. After a successful
-SharePoint transfer and verified root pointer, the wrapper invokes coupled
-server/SharePoint retention. `PreparedRetention.Mode` defaults to `Preview`:
+After a verified SharePoint publication, Prepare uses the simple retention path.
+It keeps the current and previous batches and at least the two newest folders on
+both SharePoint and the server. Extra folders can remain when needed to protect
+the pointer or when a removal fails. It lists batch folders without downloading
+and hashing every old payload. The shared publication lock prevents concurrent
+Prepare publication; both current pointers are checked against the transfer
+receipt. SharePoint folders are recycled before server folders are removed.
+Each action is logged; a failure is a warning and does not undo publication.
+Reports pinned to old batch IDs may stop working after their batch is removed.
+
+The standalone retention command retains the qualified workflow described
+below unless explicitly called with `-Simple`. The Prepare wrapper calls
+`-Simple -Mode Configured`, which applies the two-batch cleanup after a verified
+transfer, regardless of the legacy `PreparedRetention.Mode` setting.
+
+## Legacy qualified batch retention
+
+The standalone qualified workflow uses `PreparedRetention.Mode` and defaults to `Preview`:
 fast metadata inventories and journals are produced without downloading payloads,
 archiving or removing batches. Candidates are not SHA256-qualified actions:
 metadata previews cannot be applied. `-Mode Preview -Verification Full` creates
