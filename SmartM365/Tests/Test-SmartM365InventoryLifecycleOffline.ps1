@@ -1,8 +1,8 @@
-<#
+﻿<#
 .SYNOPSIS
     Offline lifecycle regression: no collector, tenant initialization, preparation or provider request.
 .VERSION
-    1.0.5
+1.0.7
 #>
 [CmdletBinding()]
 param([switch]$ReceiptOnly)
@@ -32,7 +32,7 @@ function Read-LifecycleCleanupText($Finally){
     return $text.Substring(1,$text.Length-2)
 }
 $fixture=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-LifecycleOffline-'+[guid]::NewGuid().ToString('N'))
-$globals=@('SmartM365InventoryRun','EnableSharePointUpload','EnableTeamsNotifications','SmartM365ExecutionSummaryWritten','SmartM365ExecutionStatus','SmartM365ExecutionStartTime','SmartM365WarningCount','SmartM365ErrorCount','SmartM365ScriptName','SmartM365ProfileKey','SmartM365TenantKey','SmartM365OrganizationKey','SmartM365EnvironmentKey','SmartM365TenantId','BasePath','LogTextFile','logTranscriptFile','csvGeneratedPaths','SmartM365SharePointUploadedFiles','SmartM365MailHtmlFiles')
+$globals=@('SmartM365InventoryRun','SmartM365CollectorUploadPolicies','SmartM365CollectorUploadRoots','EnableSharePointUpload','EnableTeamsNotifications','SmartM365ExecutionSummaryWritten','SmartM365ExecutionStatus','SmartM365ExecutionStartTime','SmartM365WarningCount','SmartM365ErrorCount','SmartM365ScriptName','SmartM365ProfileKey','SmartM365TenantKey','SmartM365OrganizationKey','SmartM365EnvironmentKey','SmartM365TenantId','BasePath','LogTextFile','logTranscriptFile','csvGeneratedPaths','SmartM365SharePointUploadedFiles','SmartM365MailHtmlFiles')
 $saved=@{};foreach($name in $globals){$v=Get-Variable $name -Scope Global -ErrorAction SilentlyContinue;$saved[$name]=@{Exists=($null-ne$v);Value=$(if($v){$v.Value}else{$null})}}
 $previousExit=[Environment]::ExitCode
 $script:Events=New-Object 'Collections.Generic.List[string]'
@@ -63,6 +63,29 @@ function Reset-LifecycleFixture {
     $script:Events.Clear();[Environment]::ExitCode=0
 }
 try {
+    $outerPolicy=@{marker='outer-policy'};$outerRoots=@{marker='outer-roots'}
+    $global:SmartM365CollectorUploadPolicies=$outerPolicy;$global:SmartM365CollectorUploadRoots=$outerRoots
+    $policyState=Start-SmartM365InventoryRun -ScriptPath 'synthetic-policy.ps1'
+    Assert-Lifecycle ($null -eq (Get-Variable SmartM365CollectorUploadPolicies -Scope Global -ValueOnly -ErrorAction SilentlyContinue)) 'Nested run inherited an upload policy.'
+    Assert-Lifecycle ($null -eq (Get-Variable SmartM365CollectorUploadRoots -Scope Global -ValueOnly -ErrorAction SilentlyContinue)) 'Nested run inherited upload roots.'
+    $global:SmartM365CollectorUploadPolicies=@{marker='inner-policy'};$global:SmartM365CollectorUploadRoots=@{marker='inner-roots'}
+    $policyState.ReachedTerminal=$true
+    Complete-SmartM365InventoryRun -State $policyState
+    Assert-Lifecycle ([object]::ReferenceEquals($global:SmartM365CollectorUploadPolicies,$outerPolicy)) 'Outer upload policy was not restored.'
+    Assert-Lifecycle ([object]::ReferenceEquals($global:SmartM365CollectorUploadRoots,$outerRoots)) 'Outer upload roots were not restored.'
+    # An inner collector must not replace the outer run's effective upload guard.
+    foreach($outerEnabled in @($false,$true)) {
+        $global:EnableSharePointUpload=$outerEnabled
+        $outerRun=Start-SmartM365InventoryRun -ScriptPath 'synthetic-outer.ps1'
+        $innerRun=Start-SmartM365InventoryRun -ScriptPath 'synthetic-inner.ps1'
+        $global:EnableSharePointUpload=-not $outerEnabled
+        $innerRun.ManagedCollectorLegacyUpload=@{Value=(-not $outerEnabled)}
+        $innerRun.ReachedTerminal=$true
+        Complete-SmartM365InventoryRun -State $innerRun
+        Assert-Lifecycle ($global:EnableSharePointUpload -eq $outerEnabled) 'Nested collector did not restore the outer upload guard.'
+        $outerRun.ReachedTerminal=$true
+        Complete-SmartM365InventoryRun -State $outerRun
+    }
     New-Item -ItemType Directory -Path $fixture|Out-Null
     [IO.File]::WriteAllText((Join-Path $fixture 'trace.log'),'synthetic trace')
     $core=Join-Path $testRoot 'Modules/SmartM365.Core/SmartM365.Core.psm1'
@@ -378,8 +401,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCmY0icdu9co7g
-# v1PYEs0k7BECDRiIyQttgR0nwRHnX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDoMB00aM4IKN9Z
+# VI/3lKFSn0aWiy98tK6Y+sqNTIST3qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -512,31 +535,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGEJr3hK0pVIypnm0dIEox8sKbqsIRW2KIUMq2MZJWERMA0GCSqG
-# SIb3DQEBAQUABIIBgGROGVsTovaL1AYKBTcbMzb3LgKA4DYp2MUFrpxkF7kuo6Oc
-# IMre4yfG7HL0P9CWOZIFLzzy5N4GsrrZNz73nJUC8YlmxzODT3nGNvOHROaGdbL1
-# 65Lqz4qPEFgnWoAY2OT8AFo1KZXidj1RWwqlYYqSWAfud4YR3v4fKhbHJadcC4I8
-# IAJaC36LWPiMZNU6o9xrQXbCfvvIJEUvq23yKqFTbH6wkPQdq1tEepwXzTHQqgIl
-# X2sbHwgXzsXbszAS/yAEbzqkZ4Dq7p+HyD/tAKuWUZxcofwgJc7JBtG+MnQV5LfY
-# 05B3fbeVh4x5vzrIV3Nl4HMdT364TLa9h151SjLZIdum/k55Ca6DNQEtZ9/DHJw2
-# cSWDoM6m5DedtdbNToqfqxZctgjTmT0rYHcbtZazYqPf/WxS6fNLuzMFwUme+3O5
-# 43gipTpq86k7A+uA8bYYeFmVZlphlQNBIApvG6qjIEzsAhvzxVOAS9EmY+AVWNdQ
-# gPZ97lpJDvKy6rKzX6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICOikzUvJROvELOhZUqf7vICqYuqLoury41wOxrlb4YfMA0GCSqG
+# SIb3DQEBAQUABIIBgKCGe3Sya4OlOC8IUZD5T8aSlXcBZCdTS1cEzXUpkQ62ZfH0
+# S0FNVKhPnt9yXgKiq6TZq1Jyr8EXuYenFz3LrySwU0jqbT7YzgQfE9jXJOd1wAgR
+# HtyQnugDaX1VTwHTfSfdlFvbLXzHi5aqdA/GB0e2VYHDiqdyzSd+0ZzBrpNVKtdx
+# zRFd15WLEqg2JNYWw5dXjjHBG3zAkT3BRRdkacoUSznwgO9/osmzjZGjHoeXFCRm
+# fqAvSERTjr6yapgenYZODIOLF4FsrZrYixawIL5YGuZJEIOSncx8T0zi5aVTdZUH
+# wVfGjnmsqCC+5YgtxFZed8FFKFp5yEcYpPbVC835mRAfi0mtB5a9dUo7Va6oVooj
+# BbVv7fo4Ntc01dyanENyxfskmNZdjBADWne1m8bn0K1aFJUWec3cs0VVMB8qyZYm
+# 98/oDczZ0hYBXyxPmoA3/tD7utxeQK44sukwccyahUzVXupKaIHx/uqaQlB7A6rz
+# 4uz4PJ9orO8BdXSY/6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjkwMDIx
-# MjNaMC8GCSqGSIb3DQEJBDEiBCCt2ksJW+IlnQdiN2jcjtK8U6pU7Ai2dmG/6I1x
-# G97GEzANBgkqhkiG9w0BAQEFAASCAgCZY+BrgCpxF+KGk+TtmAjriF19bTL5ycA7
-# UhwkHGmnQwD0dO0zZCIGINE7B5CHRSOgjWAHK0nx5q58OEsnnWiudYR8PMpDrQdq
-# 8ywvurI/7U5Eg/3qEWWQb/+c4kSBM2HlsLUE9XVvzmvBCPteMGtdoVXZK4SYdv0f
-# vhhsQ/kiPxt4o0s2gNhbLWXMbZvgKHvxpDwlWvShs85n7iJAQifm0ip6XJSWv7DI
-# 7p+onEhoStase+ognmvKMbRHHaEb32qZltM6sYhxpHqMQqAu6Gi4lJkSPhdpxuNT
-# uNO0LQzXtpzpNos2I5odXVFImxJzBdA7DhmGkP8vsK8+ugajggzYfhUc6fkpLbsu
-# +4R0SOF2HFgAsXwTfUjdKis5GSodOlRKs+nEZ8HLWjx9LOhWMEHsgbwSr0c4KWxA
-# SqaRRgjw2K36DJPPbCZmlhTmqP2H06ZTbt9BnpBKxYWOIsFIeKCVPmyRkqgr+Wg4
-# g3DL5thnhxCk/GCU1YJSQC0xsnOQdAHzny+SMzxjXAuKJYk1bwXTfZQDvNzaFTUx
-# ZKR3DjAVAmuNVeDVW/BpZtmi+mbuy6khW1y9Per/6vXoJ/vPfpRG7f843a4NkhqV
-# o09Q19lRiDjJSsDJluxanx+g1wGwblEksLEr7vnBTLr5AB/SyxEG6Kb/mMpVz9E3
-# hajuQ7+VmA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDM3
+# MjRaMC8GCSqGSIb3DQEJBDEiBCD7ml7JiCM9n1wywb9fM1elbAPC8m8cHqSqZNML
+# NNXsOTANBgkqhkiG9w0BAQEFAASCAgBpluizPjOBAiPnM2NQUhXw1r6lkmvyfrKx
+# /S5DXTgQYL/MLysfoA8qxfvWVltN9UGbOsUnapJx8xNO/xgDueXO0xi7B7XKSL0P
+# nNR5FCrlJbXfSt3d0pEv3hULi39mEGKihHi6Yz1k+pxyrzmViXsljq+SB4q3hFFI
+# VPvlNKui8gdWvBGnQU3dXRTQir/WXw1sndHjb0nBD3R7a2U8TD1nMgUhMEiKxEAc
+# aRes6qXRTA/oFtoL8VUP7YTS9xI1nCRIa88mzUMnyxvrgYaJxW6QVCbT2aO68JTJ
+# wE+JeDu8vOq6exnTfS67zGIOz16Zd63wXq1ALRjgPgzRoSQj+xqRZ22ToSp+sXGT
+# cucAd3kSiy5m9EV82QQLV924uZ6XiBOtSfW3LXICaBMNpfDo0dRbr4idf3ZhbpIA
+# HqOwc3USfUsvFjJNoOK3quH5mZhExv6dDw2PKMGmzwgs2GLqIQQjcRm0NdUjDIXp
+# STLxaGS49W3DpRrZw3Xmy3SgHGoM2vJzXfNY29Z39oCq6ebBhSmGRFtPlh+ougDN
+# INzqsNDii5lhd7BGWVz9tGRSCa92M42bPMwjDQ6rNWsFzHZR44oK7ZgMV3GZpoWh
+# 3cBLsURPI8tA1NqqAPS6watuIU0syBwqHEF/5dzXvCM0A1KFfKt1M5GpcxCuOMnV
+# OqKqstEOJg==
 # SIG # End signature block

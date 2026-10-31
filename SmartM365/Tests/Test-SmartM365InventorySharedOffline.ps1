@@ -2,7 +2,7 @@
 .SYNOPSIS
 Synthetic regression tests for shared inventory identity and atomic persistence.
 .VERSION
-1.1.14
+1.1.15
 #>
 [CmdletBinding()]
 param(
@@ -141,6 +141,7 @@ try {
                     $script:BannerCount++
                 }
                 function Complete-SmartM365CmdbSourceReceipt { param($Status,$ErrorCount) $script:Receipt }
+                function Test-SmartM365SourceReceiptMirrorBlocked { param($Path) $false }
                 function Invoke-SmartM365SharePointCsvUpload {
                     param($LocalFilePath)
                     if ($script:ActiveTranscript -and $LocalFilePath -eq $global:logTranscriptFile) {
@@ -190,6 +191,7 @@ try {
         & $weeklyModule {
             function script:Get-SmartM365IsoWeekName { '2026-W39' }
             function script:Get-SmartM365WeeklyHistoryFileName { param($Path) [IO.Path]::GetFileName($Path) }
+            function script:Get-SmartM365WeeklyHistoryMaxRetentionWeeks { 0 }
             function script:Copy-SmartM365FileAtomically { param($SourcePath,$DestinationPath) Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force }
             function script:Write-SmartM365TextAtomically { param($Path,$Content,$Encoding) Set-Content -LiteralPath $Path -Value $Content -Encoding utf8 }
             function script:Invoke-SmartM365SharePointCsvUpload { param($LocalFilePath) $script:Uploads++; $script:UploadedPaths += $LocalFilePath }
@@ -197,6 +199,29 @@ try {
             $script:Uploads=0
             $script:UploadedPaths=@()
             $script:Warnings=0
+        }
+        Test-OfflineCase 'Weekly history follows DATA-ALL upload policy' {
+            $root=Join-Path $testRoot 'weekly-policy-disabled'
+            $source=Join-Path $testRoot 'weekly-policy-source.csv'
+            Set-Content -LiteralPath $source -Value 'Id,Value`n1,synthetic' -Encoding utf8
+            $policyPath=Join-Path $SourceRoot 'Modules/SmartM365.Core/SmartM365-SharePointUploadPolicy.ps1'
+            $observed=& $weeklyModule {
+                param($s,$r,$helper)
+                . $helper
+                $oldUpload=Get-Variable EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
+                $oldPolicy=Get-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue
+                try {
+                    $global:EnableSharePointUpload=$true
+                    $global:SmartM365CollectorUploadPolicies=@{DataAll=[pscustomobject]@{Enabled=$false};DataLast=[pscustomobject]@{Enabled=$true};LogAll=[pscustomobject]@{Enabled=$true}}
+                    $before=$script:Uploads
+                    Save-SmartM365WeeklyInventoryHistory -SourceFiles @($s) -HistoryRootPath $r -UploadChangedFilesOnly -RetentionWeeks 0
+                    [pscustomobject]@{Uploads=$script:Uploads-$before;Snapshot=(Test-Path -LiteralPath (Join-Path $r '2026-W39/weekly-policy-source.csv'));Pending=(Test-Path -LiteralPath (Join-Path $r '2026-W39/upload.pending'))}
+                } finally {
+                    if($oldUpload){Set-Variable EnableSharePointUpload -Scope Global -Value $oldUpload.Value}else{Remove-Variable EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue}
+                    if($oldPolicy){Set-Variable SmartM365CollectorUploadPolicies -Scope Global -Value $oldPolicy.Value}else{Remove-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue}
+                }
+            } $source $root $policyPath
+            Assert-Offline ($observed.Uploads -eq 0 -and $observed.Snapshot -and -not $observed.Pending) 'Disabled DATA-ALL must preserve local history without upload or a false pending marker.'
         }
         Test-OfflineCase 'Weekly snapshot keeps first CSV and manifest capture time on rerun' {
             $root=Join-Path $testRoot 'weekly-fresh'
@@ -616,9 +641,8 @@ try {
                 }
             }
         }
-        # 24: WorkplaceEvidence-Prepare run mail (23), ProxyAddresses merged into the mailbox report (22),
-        # SharePoint on-prem Content and Infrastructure daily summaries (24).
-        Assert-Offline ($mailFiles.Count -eq 24) "Expected 24 SmartInventory mail-capable scripts, found $($mailFiles.Count)."
+        # This count guards the scope of the mail audit; update it when a mail-capable producer is added or removed.
+        Assert-Offline ($mailFiles.Count -eq 25) "Expected 25 SmartInventory mail-capable scripts, found $($mailFiles.Count)."
         Assert-Offline ($directBypasses.Count -eq 0) ("Direct mail transports bypass shared normalization: {0}" -f ($directBypasses -join '; '))
         foreach ($mailFile in $mailFiles) {
             $mailSource = [IO.File]::ReadAllText($mailFile)
@@ -680,8 +704,8 @@ if ($failed) { exit 1 }
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDO6VpFZVEm8Z8B
-# fX5wrwXaw6Ez8rKqg9WOmW4C7cNK/aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhZqV7bsj7Jlc4
+# oTpVa2k15auFCwX3b3lx5H6FOyZsxKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -814,31 +838,31 @@ if ($failed) { exit 1 }
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIBe4zYTXNWJIMd4ogKLz4ahhHJv2uIaUrNHvBW1LEUu7MA0GCSqG
-# SIb3DQEBAQUABIIBgKmosps7f1tUey3ump5J5fGlmjJf5ckPWZ5ee6QVeYDyiPJl
-# HCzCuFiRlL0ceOmBpdPM3NMWw9nW2AzOFOWV0Yz+e+ms77Qs7FxfywVifSQuw+2w
-# 4r7ezACmWllECkgFzFXK8gMow9cApf1GFyjo3pUKXQl/fxy+9JmqVdf57lib4xNA
-# 4AcJClLGQaaoYB5niFJ0ZFmLzZf6k7RoQZL/kOihzCRQW5BjUknh0wG5anpc9c/+
-# p67lJP/eF9dDCPI+WBLQrAsqduvhZT9opCJ+Fs8INZeTY7cWg8c0RfdmTDDttm2N
-# EdjcQ2IMB0NFywm5sOU8MK2WIFyYZ59QiMJdWpiV7NjbElDWkGpsscIhv0A6aM9C
-# c6rkq+hmwyGcBxaCH2p9DjLNoKySbVqfg9LPkN6BG4u59I8GKRRcReYwN4bexYax
-# eePnoD2T1qppJVtXDcgGcGzgReqVH5lJn374HP7l1awDwkbpnvSskeRQLlfpO5fN
-# lJOJkmoR3pjkG1PStqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDriCbgoRqYLKfPDqUWpwbI6FvKt0M1TuB7+aEhq/JpZMA0GCSqG
+# SIb3DQEBAQUABIIBgD/+DjP9hfHpIdnmctkLWYYyP2l9m4iUjGUZtEV7B15lYsyO
+# v9q4xniwtF7eTCwekpXusP1GTi5KZSGvDH0hmBxNHQoqidhemABgUFFfzBFt1UxC
+# JushwR8tEZabY1ukPwRGESl1WrQVc/hrsN7DJVJ/JYON39HBxx9AKfD6JFTUuErY
+# DxxXRDydM2rF4polCPNtO2JcAE9LDb0BgfKO1CqB4rITNlEFZJmpayadNHExAXzM
+# 8FC0fHUp3cik8wTBCKEbFyZPJTZGJAFS1EiGtKB9OQeSMEOjcKq/QVNslPt83aM/
+# Faj5kxiFZUPF1t0teZsRYoRKy9S9DNbrmvh97mi4OeXUEHjgC4d5A8lcGSxcECBb
+# sdT8OAT8WWl21FCP9qaxF9MdjDjdSSHMoaqRlKrMCmEo4ijXqdMBHQMZNI7ZK+Q+
+# 7Ff1ebzsnX0EUYHaXZdzQRhfMUZTROv0dIxGLlPy7JzbIDfa5t6Ui/t+ZM4oIIou
+# EynXZ+Sq0cfhJL02QKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxNTI2
-# MDVaMC8GCSqGSIb3DQEJBDEiBCDET8oYzSvGrM6/iiTrvkoJnyuQnu4Ed72v+Fh2
-# 3fZSxjANBgkqhkiG9w0BAQEFAASCAgCYuStlfiba6JaY7yu3KpPfUohl3btRxh1M
-# OkPnKU/jO0x9T34/KsAXZ7JIJo57chOL6q1w/5z25FxSe8R+GRZO9herhoZMpdbe
-# K3+dxvFrxwHKYz12i0AyOEamjxsF/DfA/cIRO4QrRHmSW2LmhpQtr8iYF5D6b/O9
-# 8dHpWRImAIp+3zd22EUeS2n/0JSTavCS2J5f5l26/DD7eA/a56/XzD9WiBSbdAJI
-# 79O/iMT+t8TEtx3Ns0FQoirzX+BjjRmbq9OD3lR3l4mg5M6qpQRP8grbAJRXOvky
-# TCo/ln9VRpAoj1cqScoIBNa8S4sMQrcWKv7Tw/Zn245kwcmvG+rCMCg0TLOkJV6u
-# 1q5tbWSR/U8h1tSQM7NVqq/k0ieG1oEbJ0NvAS65KyEnMu8I9WZT1cBAp2n93ajv
-# llGSEFHQtMbUoFWpvafI7LHsB0WF+ZoIJ0xGEs0EdFbvjODx9ClIoyNbWr/I7dR/
-# 6gPJ++PBU/KvpzyoWjaz3P6gEfpkqDAxAhCJNX95PrnMMaObnrhsj0z/J7xgvJrp
-# V36G4sBUkTrhF0Y+dgug/38Ai/OI5vjij1u/fPoOEJuhHBpYnMOugxnZ0g++eHFW
-# PkcVw/24EQENl/i76rTvjjStzK9G1e/B+hX7SSojHQ4T4sY6c2ljef2pBmOhsU6K
-# l4cuSUMihw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExMjEx
+# MTdaMC8GCSqGSIb3DQEJBDEiBCAnTjuvpNqSH7m5T/iDBsWHOe7YstngH81V9hvm
+# t0USoTANBgkqhkiG9w0BAQEFAASCAgBEjD+l8L+XK3/f6FziF0gD4gNG1C0o1vFk
+# r8SgkXUSxznJHdGQhyZg0BgrdEXWxREEbC7s1UPqxtf1/MfJLKtFIVr2R+PFcYrG
+# aIexFhyimmcqnOS7rrrgrTvYgrEkwqUGZLG81G1JpfaH+6c4TYf6aHnUsXpaF7Ta
+# nc/7f/6Ifi/NH2HAaGK65uW/lRI62gQaceD0MZsOdGxUodcog+/DsbEl4MX5z2C0
+# nnA3ospZVXt8QEFoKtwnT5i1V/y+bROr329tB2UdTdQDjTydbZcGcx+plmM2LfZz
+# lfo6uGITlsfNZ0DgsiYTWWHPeWTKtxYSSojW6ESv0AJE9n5PsskW5XRCfcV4sSRo
+# 5a5xDN2znQGB8hkZFFZjLoyq0/hc8RZ0eTJOeBdCuwAEnFCSrYYCNbDPVTHfnmdb
+# 4iCpSmUIFTnI7ZETt2wjvg1jTxU8bMu7UYykXbZfBcxTnBLUcaztkcvNePJqTC5T
+# c/2Y9koT2kKH+e9WOVXLR6tZZHdSvIwRuM0aGQqeZRPCUchRaekwBwXoGPyJYNew
+# bP55s1xo4qNMrHedePUhk6skK6mllvMNqqzqlycNh4jg5dZbKFuwgzDJj0ai+8PP
+# vDBv8aYUfNznFFFBi5CibVRJADhbzzY0iC2v3l3+pMqm+n1DcDOLos9XWH/HOmrV
+# eTuVFumIiw==
 # SIG # End signature block

@@ -18,7 +18,7 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.21
+1.24
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -246,7 +246,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.109' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.119' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -404,15 +404,25 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.21"
+$ScriptVersion = "1.24"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
 if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath) -or $LatestCsvFolderPath -match '\{\{') {
     throw 'LatestCsvFolderPath must resolve to the configured tenant DATA-LAST folder.'
 }
+$previousCollectorPolicyVariable = Get-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue
+$previousCollectorPolicies = if ($previousCollectorPolicyVariable) { @{ Value=$previousCollectorPolicyVariable.Value } } else { $null }
+$previousCollectorRootsVariable = Get-Variable SmartM365CollectorUploadRoots -Scope Global -ErrorAction SilentlyContinue
+$previousCollectorRoots = if ($previousCollectorRootsVariable) { @{ Value=$previousCollectorRootsVariable.Value } } else { $null }
+$legacySharePointUpload = [bool]$global:EnableSharePointUpload
+. (Join-Path (Split-Path $modulePath -Parent) 'SmartM365-SharePointUploadPolicy.ps1')
+$global:SmartM365CollectorUploadPolicies = Resolve-SmartM365CollectorUploadPolicies -LocalConfig $ScriptLocalConfig -GlobalConfig $global:SmartM365GlobalConfig -LegacyEnabled $legacySharePointUpload -ExternalActionsAllowed $true
+$global:EnableSharePointUpload = @($global:SmartM365CollectorUploadPolicies.Values | Where-Object Enabled).Count -gt 0
 try {
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPathInit $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+    $global:SmartM365CollectorUploadRoots = [pscustomobject]@{ DataAllRoot=$InitializeOutputPath; DataLastRoot=$LatestCsvFolderPath; LogAllRoot=$global:LogPath }
+    Assert-SmartM365CollectorUploadRoots -DataAllRoot $global:SmartM365CollectorUploadRoots.DataAllRoot -DataLastRoot $global:SmartM365CollectorUploadRoots.DataLastRoot -LogAllRoot $global:SmartM365CollectorUploadRoots.LogAllRoot -Policies $global:SmartM365CollectorUploadPolicies
     Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
     # DATA-LAST changes only when this run completes; MaxItems runs hold no receipt.
     Enable-SmartM365StagedSourcePublication
@@ -422,6 +432,9 @@ try {
     $OutputPath = $InitializeOutputPath
     WriteLog -Message "Starting $TaskName..."
 } catch {
+    if ($previousCollectorPolicies) { Set-Variable SmartM365CollectorUploadPolicies -Scope Global -Value $previousCollectorPolicies.Value } else { Remove-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue }
+    if ($previousCollectorRoots) { Set-Variable SmartM365CollectorUploadRoots -Scope Global -Value $previousCollectorRoots.Value } else { Remove-Variable SmartM365CollectorUploadRoots -Scope Global -ErrorAction SilentlyContinue }
+    $global:EnableSharePointUpload = $legacySharePointUpload
     Write-Host "Initialization failed: $_" -ForegroundColor Red
     exit 1
 }
@@ -768,6 +781,9 @@ finally {
         $script:ExitCode = 1
         Write-Host ("Failed to write execution summary: {0}" -f $_) -ForegroundColor Red
     }
+    if ($previousCollectorPolicies) { Set-Variable SmartM365CollectorUploadPolicies -Scope Global -Value $previousCollectorPolicies.Value } else { Remove-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue }
+    if ($previousCollectorRoots) { Set-Variable SmartM365CollectorUploadRoots -Scope Global -Value $previousCollectorRoots.Value } else { Remove-Variable SmartM365CollectorUploadRoots -Scope Global -ErrorAction SilentlyContinue }
+    $global:EnableSharePointUpload = $legacySharePointUpload
     if ($null -ne $completionError -or $completionStatus -eq 'Failed' -or $global:SmartM365ExecutionStatus -eq 'Failed' -or [int]$global:SmartM365ErrorCount -gt 0) { $script:ExitCode = 1 }
     if ($script:ExitCode -ne 0) { exit $script:ExitCode }
 }
@@ -776,8 +792,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAw+4byBj7I5csD
-# szF927moYdtDS7JR8PDLvzCGjI/Kl6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBK/Yq1J5OTQigB
+# kLMG2QsT5/5+N5aZadyToDLhy9JAmaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -910,31 +926,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDg2B/yCRaDTxPDIoUCHbJIDMowd3UUwpQLQcf9Y5ZqmMA0GCSqG
-# SIb3DQEBAQUABIIBgH3vD3il3y0W0ItWSSz/vWcdGMKc6SmY9kygbCchmnPlDZvI
-# lJ4U77AY9Be9Ue6B6oEzD78mQhIhMwv28ui86Cg84WKW3H6w4gmYpVL+K24A83lu
-# QV1u1BCx+oIZJHEC8+OA6kRAnUMNXLMgIjxGYFNNGWCk2NahuA7SAJKn/s/45pJ8
-# 6LI2mD4FCYP6xarigs56ohiM3WcLdxlXwLKMfJsN1Ywo47xjg0PelVsutd2psh+a
-# ccw1l9Jksaum5MkneEM1Ca0mSKuqRmzc46PxdwXZG+DpoISVpEVMzZkfHzj+V0kE
-# 0zOuCCOsEyMstWQgJVR7z4rVvqwMRjxjWkDF0q6w4nhQ4u22xw7V/Th9Fqi3H9rD
-# 1BVL52gTSjGQgKBqxfITj5eooDiOddX5Sg6IeiXMk0fg9jue+WnQuLvQEl/edQpf
-# QMR9KTM7agcfXfKuqTkvgQx2JJMrBOJwuYn5kQmsT8la/l3yAS7bNm4H28scOd7r
-# M5fZmFQykJ0nC/vnQ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBs6pF1+KlONXyHGpO0rdQ8H8xFwpjCPWsnSKJwTKKH2MA0GCSqG
+# SIb3DQEBAQUABIIBgKlZt3JCqtHE6Zu/X5yf8MZ26OJwAuxxycqszRgTSFXRCqCa
+# ULxU0XgZvbkU8BLdW3TYy8HfKyctRMZHetOpymLiOv58WDPmQuIEZ82ZAGYvsTJV
+# 4I38tQW9WviI3fEu3j1CBQvMgWlE8G5lJ6IoZvEnkja7L1gX4GMHg37cle5ehwCW
+# T3rLPHj+XSL61v+NZJxuaRE6/oK4ADtQaWP69I2dw1bpjPqSAtgrBu17y6lvXYev
+# 2JP24aW0uMjCai0oatHJV4Hp5QPz4DxWqvkddQ3E769QoAxp1uqaTKTBwAohverx
+# j1oDSRCK0TACEJSYf5iNvUWun65w/4CHYJ2SnkRE4lEA3ag2rEphMZMCR6iv45Gv
+# mEGbX7w0iBKn0PIJt+SMbK/WTCDEHn2yq4F8xalb6PlmIaKj1IPQpmGrk0m61TaC
+# 75kfMsAkTKEmMI6bUp9ykZDY+4fE3Q4JpLObvqc7OqQVtApG0wKn5NfmI0GmlUII
+# 7oDPQcy4D58fg1JNH6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
-# NTJaMC8GCSqGSIb3DQEJBDEiBCDErS3k7QTk25jOT67nCrD9Sf0UNkSBby1sLCM4
-# Nm49STANBgkqhkiG9w0BAQEFAASCAgCe/6HmjQQsmKmEoK3+7BVkBk89j8pLjlYn
-# duuEfkHaT1JjmIc48GgeOGtLSzB0St8lrhS3VtyPpTZOYpytIDaZBkWrejYWZKOK
-# eBx/4BiKvPdiBkH4SV6p18sYOhFd0aFp04ozte+uqztDaBWXXR8qEfXPLxXVLnN3
-# Hut/FP5F+fBagwTj4KmjRRlCVAixcl8EmGPmK/U+tdIjFEYveUBiGrNJlkjIli+7
-# ZVU9OaJ+QBXCU37vDBOG0AWrSInIBBk4LrPFushD16JM4Rz5o48iwjWsd/z09fSk
-# 8i26RboXgFFvatGpG2gJtRVPkyyNw/RwakLy1W0xBaGdacMBUdCy6fXrNwvXwNem
-# E8W9/0BpSzF+JxfGaNblD4mBdkScQn/DKjm2dE1V2RTK1mJq2W00Wl9DC5o8mWbH
-# VGvFMvdKnUuGH9kqVTvRAbKhiy54zkNRN6cFoX7ll0FIHrl9r5SSnWpmFAetKZZd
-# qS0/6MkGszSHaPF9PpZ4aH9bM2VmCnO83ToqQyLYWAMBBzIzkR5cKWUKPAQuksio
-# ljsv/pd24peHpNCDg9+AkPUq3xd1VhZASWSwSILD/tSRTYQ+hVFB9BgIaus894Bn
-# XpO2eYof6EZLZ9XGRl6g6oq5eeMSmnU8TCY40CwocsckUlOa3qt+QK9AHKCOpWoV
-# VCufGZ10WQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
+# MjJaMC8GCSqGSIb3DQEJBDEiBCA8KsiEqbgHGY0fyRtnQmMoNVSdKlubsOxi5rlB
+# vTiglTANBgkqhkiG9w0BAQEFAASCAgB/nIhhibxYwCB9JPL19TKBC+t9/BaNBika
+# QjgpO+ROrRrWL9kvruo1Py/00AzfhdIcEXrddytGsG9C7PdBP0WzGskd8dMlcJZu
+# ASWYUr7aAHbNJmMMITcWN3pNOIEL8pLR+8LHbXvPd6A3pSOgEGoPSf493hao87kc
+# A6KNcmF2l5Lx1lPry8lCC6yvNtLGNtXs3BQhurEi83vw/WI2MkH6x+JCW8wCXynD
+# ai0/9ApU4kxzflCFIrc0uw0Ms41fFu8+Mpl20YdghZSWopJnQXz55dmrQrGoPTSd
+# A/Ju4gi1bt/VY17dwCyRqTBl5PXidD8YGJpy0xSy/raS+DhOTG71bM+lQ8k7VJKB
+# N1UOPxnqbYKSTsJC0n/c1uYCANIL5fK5Jf1qC3QgV6zkXim1roS+XTgYEJocgkc5
+# QHfXyTZSRkvss9OE8DnLrXrCH5GtsjAZ/tsZ/3bWKewYdYwHkwzXMNGdrhMYynSk
+# tLk2kNHhe/AKX3swj/uJq9+LNZNSN4W+NRsQ8I5PQGBFbeD15exCkp4LAylsF+H8
+# Fbu8kcjO9376ED6pAPq4Co+3yDRmYlld4KuTSdql8joaavk0STvrvnbXXedRXj8U
+# 7UfPmcsLzQmy0uE6jpjKiLOynPSQC5q+ZSlrMLboDVYBJIXhAdaTXG+gxw2cZ6+f
+# ukDHYcgmFQ==
 # SIG # End signature block

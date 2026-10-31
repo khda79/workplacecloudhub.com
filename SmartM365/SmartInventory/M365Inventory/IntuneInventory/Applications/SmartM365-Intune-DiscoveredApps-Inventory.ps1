@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Intune-DiscoveredApps-Inventory
     Retrieves discovered applications for all Intune platforms via Microsoft Graph API.
@@ -44,7 +44,7 @@
     Version : 1.38
 
 .VERSION
-1.38
+1.40
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
@@ -332,7 +332,7 @@ $Thumb = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumb' -De
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.104' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.119' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath': $_" -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -341,7 +341,7 @@ try {
 # ==========================================================
 # Script metadata
 # ==========================================================
-$ScriptVersion = "1.38"
+$ScriptVersion = "1.40"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion"
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DiscoveredAppsCsvLogFolderPath' -DefaultValue $OutputPath
 if (-not $PSBoundParameters.ContainsKey('DelayMs')) {
@@ -418,6 +418,8 @@ try {
     $InitializeOutputPath = InitializeScriptEnvironment `
         -OutputPathInit $OutputPath `
         -LogFileName    ($MyInvocation.MyCommand.Name -replace '\.ps1$', '')
+    . (Join-Path (Split-Path $modulePath -Parent) 'SmartM365-SharePointUploadPolicy.ps1')
+    Initialize-SmartM365CollectorUploadContext -LocalConfig $ScriptLocalConfig -GlobalConfig $global:SmartM365GlobalConfig -DataAllRoot $InitializeOutputPath -DataLastRoot (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -LogAllRoot $global:LogPath -ExternalActionsAllowed (-not $DryRun)
         Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:$DryRun
         # The weekly collection runs for about a day: DATA-LAST changes only when it completes.
         Enable-SmartM365StagedSourcePublication
@@ -873,7 +875,7 @@ function Save-DiscoveredAppsHistoricalSummaries {
             }
         }
 
-        if ($global:EnableSharePointUpload) {
+        if (Test-SmartM365CollectorUploadEnabled -Category DataAll -Policies $global:SmartM365CollectorUploadPolicies -RunEnabled ([bool]$global:EnableSharePointUpload)) {
             foreach ($path in @($destination, $manifestPath)) {
                 $receipt = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path -EnsureParentFolders
                 if (-not $receipt) { throw "Discovered Apps summary archive SharePoint publication failed; detail retention was not applied: $path" }
@@ -1927,7 +1929,7 @@ function Remove-LegacyDiscoveredAppsDeviceDetailExport {
     }
 
     $legacyLatestPath = Join-Path -Path $LatestOutputPath -ChildPath $legacyFileName
-    if ($global:EnableSharePointUpload) {
+    if (Test-SmartM365CollectorUploadEnabled -Category DataLast -Policies $global:SmartM365CollectorUploadPolicies -RunEnabled ([bool]$global:EnableSharePointUpload)) {
         $removedFromSharePoint = Remove-SmartM365SharePointFile -LocalFilePath $legacyLatestPath
         if (-not $removedFromSharePoint) {
             WriteLog -Message 'Legacy DiscoveredApps DeviceDetail SharePoint file could not be confirmed as removed.' 'WARNING'
@@ -2594,8 +2596,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUGv4w6qB+VXpF
-# LfGcSETKD4ctVjhfpeQXYu11vX0xUKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC/GWP+pHAu+fUd
+# PEc5pN6MicEaXBf7yXBNXEUvY26af6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -2728,31 +2730,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKIDUe6wqNXYdSYNrMpK5Ea8gbbTmxxLfG/K7wv+crKdMA0GCSqG
-# SIb3DQEBAQUABIIBgFeU6jyHkGDQhF2iN4zd7/ixbfI9x8BXUW6WKS/iROVJIwEx
-# UULmkPq2NITucje5eLrV9PxHS8gWve1n+gsesHncwgH3hPSWp//KZRbX4ROuj96v
-# YcjW1sQ3oSTSFrGZff0u4Ra3KqT+vG68ktY1IPUtvgAlQH20D5hmoInKHwRAxpo/
-# thkNbVzcEaS5r/EVftRpXYS1rCiQ5SDTTC5SxmmEVYQ10fDCpSzX8fzx0y/5dh1k
-# LTD2HOZSMqjP/cYI0NGIVt7y9J18NRfpGOaeWYecnpcWkUX79t220UYSoPcPW/lp
-# 9KKYrsab8pGA6pIUqiw1ArCwU59AlAGXtvb7dXkqMiAgtLrLQRHKUNxcEBoZxSeF
-# QvLqUC9vhudtksRDtsbSEnLpu7kUheqD04iXlpdW0B7ao+0MJXtzd534pCkV8c/b
-# d++czUXTegoMJy67/X7+s2ManWUx9u51PNBUCkNZtWtIY+9L/iIs1U5mVajWokKD
-# uiN1H2amojYER8p/SKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILXus1dJXN2YhrP8yCmZkZjE6Q/+ROsxW8r5FFsVfUJlMA0GCSqG
+# SIb3DQEBAQUABIIBgK1dZCGb8lAYCMfgr2ddkbp9P2gz9RRyFkiJN2XAV/fxxqgJ
+# fXavmmP9KyiHgRHvSjrAne2NvUznuHOUJW+X5PuBJO/8y0PBDkmS3o02e1CMUZBa
+# oX71wCXXpM7r1jiZP91CwJdGat+uwfsqoDDlVeXL7DoyTBsHuh/FnIyFq35rAb0J
+# vW7I1JFqRbwNfcJk++/Wuhd2Z4ITPLDUtsbzWUhtJl5DxTKzVjHKv2R+zZ/z2c+w
+# FDXai3UF8eY4GrfyYkBJTsLK53ewpJ6mVs/EuWBSeyWlN0JtyaLUukOY0cIdYfY0
+# stvP40vKbpbV+d3m9zl8NntAr3TR/2ZT/jkZELxIttEpwGemiAdY4jR37Yu9ZzE1
+# EZGnz3mwDyodi+rIaPvfLi5L7p+yHSBQELquf/h8dlKw4udlLmJ6FTG8T2N6ZfnC
+# oSxCnv1hz0VR6bNerUypJP4UYLExTpXCFCqkVOQx3pkVAJ8cllRgnXGXJLMUEYHa
+# 9h8zFUTbiRZM+yjjsqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjkyMDU4
-# MDdaMC8GCSqGSIb3DQEJBDEiBCCN14KFI84brO5ULqB5dcy/SXVR9EiOk6OCyox6
-# Rcx1LDANBgkqhkiG9w0BAQEFAASCAgCbzW36LB7a/SLWPaQV9oZqjiwsPzseZ4b2
-# siW5ke78WDLQ5LJxLn+cplNN1oe8i0MvTlvHiucNyBO94dI0/OOPJ1j4RGE08gCx
-# OjdUwVIDJGhrYcFQiekr010jm7T88+JYPrrwOxvAlsGTgptg4o2JNERek+HLqS6P
-# IVmdCciYl9iARpP0GkVoL9mkxfrhnK7ZZruVjsQi0Pxi69DG65TBRMPwY1ibzQz7
-# KL2rS5mLLdHqGxIEZkAfJqqSSr8GILhgH9/Gs50maaq7jEfJR2rk7gX+YSQ7XIbu
-# SwkzC0zz8FtRTrwZvmQrpxyls3pDU5dnJ+sYJBI2jCMSUre24Cc+gOxDWbGb7JYG
-# FjuTrO1oTnjqX8JufkWq/MKR955kjnRaeINkyg1VA2uCB6TIvXa0IGhsvxikYygh
-# MR0pw/0TFGSE+NPGwANuQDp/2aJfcOVkSt1xrbRnbN84txCKP38TMc8UfidgxRiG
-# OoWgJksAbPOfEgcb6oceXCCpOgZwTPYssKOil49iyfKT4UM0sBv+tOnaVhzmmIpJ
-# wRCwBzcqhEGJu40y4myhbsFnCRHFMriVZ3T4WbU+0PXGsuLB3w10+HQ1vGrE0Beu
-# Fy1lAT5AvRBScGC0EErguxXK6cbSV0h4BZD9gDYh3upCchvZ0aZ+LFiOUM3mcYqH
-# R14qI+b+8Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
+# MjFaMC8GCSqGSIb3DQEJBDEiBCCATjb6JbGHZ8Q7Z6ZNSHHZan1tz+t+4JcQy01P
+# LQB/ADANBgkqhkiG9w0BAQEFAASCAgBeiwD8ffRbBtirKV1GqHRGCeJQCAiuz6jE
+# F3cOUy0x3RdoQSdsQH0nYAGio3XNd30tFRADkB+mZ+JoBPBY8w+hO7ahwfUgSbUq
+# qAtkcP6w5uKEOnMgdNhtnZqnyF8R6NoU2yfSTiEWrFndnmImXcA6LRPJKKtJWCDS
+# lvulBsY1oAfPzTju7FS8iWFxmXqO6yxSZ69BI3akweZEZeGub8d3srG2J2aHMF0C
+# kWiUT/pUOTgXC3outSVGxiomwAQnK894biWazAfcSgQDR+1CZXY0y485Al5TcKOA
+# keshlX1/BhHOesttdIhE7nj+fpb55tfo+kYo6LCn/kuhEqBS1Rd6GwcMYhlsPuE2
+# I2aCnmCa38qhfq7QymLITIdsuk+AmZ9RmNPtT17VrCpH5fmY6cHZv9AhXC4EBVNZ
+# gcfMdN/DnWAOrKKCuabdH14jWCY6nEDfojqxfIZjGf/BHzTxLyDXLa+sxWSDAFsB
+# SNTMUwcWp+MoFBI7VyQD9/gM6O2QdJayr9ZUNGyPRT6LZuDx/9D2OD85ZUyl5uSW
+# 3EvgTvrrzFA4EU+8Eo5l++xZTB04oifVZui9bjuGcbAk0ZxH4nmVYltyPMhhPXYx
+# fmY06GPC3eerBj7p4EouP8mvj4koyrSInaMthtjWfslMXWgymX7RNRfYdw82vDI2
+# Uxqyul6BNA==
 # SIG # End signature block

@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
     SharePoint Online tenant inventory with CSV exports and HTML alert summary.
@@ -58,7 +58,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
- 0.44
+0.46
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell enables tenant capacity collection and optional sharing scans.
@@ -128,7 +128,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.44"
+$ScriptVersion = "0.46"
 $TenantCapacityEnabled = -not [bool]$SkipPnPTenantCapacity -and ([bool]$UsePnPTenantCapacity -or [bool](Get-Module -ListAvailable PnP.PowerShell | Select-Object -First 1))
 $CurrentOperation = 'Initialize'
 
@@ -159,7 +159,7 @@ function Import-SmartM365CoreModule {
     $searchRoot = $PSScriptRoot
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.95' -Force -ErrorAction Stop; return }
+        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.119' -Force -ErrorAction Stop; return }
         $parent = Split-Path -Path $searchRoot -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
         $searchRoot = $parent
@@ -1315,6 +1315,8 @@ if ([string]::IsNullOrWhiteSpace($latestFolder)) { throw 'LatestCsvFolderPath co
 
 $CurrentOperation = 'InitializeScriptEnvironment'
 $initializedOutput = InitializeScriptEnvironment -OutputPath $scriptOutputPath -LogFileName ([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath))
+. (Join-Path (Get-Module SmartM365.Core).ModuleBase 'SmartM365-SharePointUploadPolicy.ps1')
+Initialize-SmartM365CollectorUploadContext -LocalConfig $ScriptLocalConfig -GlobalConfig $global:SmartM365GlobalConfig -DataAllRoot $initializedOutput -DataLastRoot $latestFolder -LogAllRoot $global:LogPath -ExternalActionsAllowed (-not $DryRun)
 if (-not $MailOnly) {
     Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:$DryRun
     # DATA-LAST changes only when this run completes; DryRun and MailOnly hold no receipt.
@@ -1697,11 +1699,12 @@ finally {
 if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 
 
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAK8uEDz6R8VoTe
-# /FMiSxl4E6GCQE5aDwpvyeogD1ZzDqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuAHwv4PhrQhTe
+# 1z7t2f61tv3ON02h9gQIh1naKopjwKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1834,31 +1837,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM5uD1Wc59cdmeNKPlSsCMCbwSDp1+3WtLvLCGflLv0sMA0GCSqG
-# SIb3DQEBAQUABIIBgAjY9o7OiLW+0xCTZ8kSS1lQ1eUW2WTYYls4KdZU9c8+fTY2
-# ZAgXhh6fSvEPNoeDyOp/8vEEpw8w84GOWH55eqzwawoETeLClSCHSaz5lheNhbre
-# s2UBCs0nTCLOJ78ITCMb15qUSMhyO+20gdUvRGPJJmOYasjmXSH5JLcX2Mt4r/b5
-# BN9o9kUcBhprMTWltDBfRc4lKRrgd9eKdYyZONv+on0PntzyErWFhFV7xdqqpvou
-# 7YGy1o1IBKIYW1YvsLt/P8r3DL3yBLsxQ7cTLruoS0yj9/I5M8HMZQLqP7XTvdrk
-# K77dcO4YloTLn4kriBc/qvLun7fv+g13r+HMCbwDtbtlBaDy2F/00O5xJkWM4u64
-# T61O5YI5UZ/KbWCGjfg/RHmNqGgIFP3I08ke65P8113hjUMWqcc9YG8Q1dO4AXYi
-# hEaYM+LVC+jqDdHfyR723rctGeVTXVag4J8tab7nLfel51+3em3dUFYmTb7AYzGQ
-# VUfRk3WPMEy/ZaVlaKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIEQKeltgDfXzByanfUa5pueJ5bdVPOcqmcr8kOygtYk8MA0GCSqG
+# SIb3DQEBAQUABIIBgGRUm/p8XT/vYHHLHZ88+6zs326j4bEtSUdk9ESwX8WTev2j
+# 4M4ahzzPbRZJVYNk0+JYsU+ZfBrqGB67aqI5Wyert3Bn65UMZ6Gdc/decQeis47L
+# ZPYmLxqTbSt0nPuIRvB9DeuygVBGxtcbaL1gmXF1RjWQ8pcQO2nut6vw1M6G2E6F
+# 7VAR/lq0UeNjhGKKSu7FJcyvijetNMv8XT6Ql8UjqfVI03ab7CdL9IH7cnAygXvq
+# yh1OW0EK2rGGo0eDcK+UvYVhMqvQ3VXG+fw5MhxXV7VOpYA3i9ADBlxufFZfTfko
+# d4Iqfjf4L+qAl2Imbq056v1BkR/REevudgZ4eQae8AmDo0KXpG2+Qatp2KxdRzyO
+# 28baLoHari8X9EE+NiOi1DJ1kmk5pIHNOWCWflEJVah8+HrlwIJkDusGiySTVrRz
+# 45l9inLl2im1NqVshlgCaPWZKUMVmYGjaR9HSnlX623OtjDk/LzuAnyghiBQ8+hY
+# h9D9iC1+ieDLW/9TfaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjkyMDU4
-# MDhaMC8GCSqGSIb3DQEJBDEiBCCcWpi6kiW1KynuaNXI6EPo3Uauoe1PtEEKoMJx
-# 8wG0CDANBgkqhkiG9w0BAQEFAASCAgBSd7ojPClRUYY9V9k5hoA7WQK6uD4LJ5Uy
-# F+pk3o++RiBPhbs89+r8+Ulef+cN1t0F+odKmoKof7XC2CIjGetXI6U1Z4npZWO9
-# DNqgbSU+ibvBZAeL68+oMdInnzNvUyCzyq2It0ToOHDrWqW2XXE0YO336NtaVCkm
-# Bw8l3piNo8S9hdwEudsJPR8230ZEq95/iOOPhH1o6B093DzNxRpYUHpg+XhCvFQE
-# 8yfE3GJFZ4wYfmnxf0Zd2hYonneBZ27acAu4Lp2hKNljv4+P83QfshV9hf14ryrE
-# i7bjI3gtfg7+B7EoADieEFeb8MadkrE+ZFFGIrxHJJULPZlY662+TKU0k6QJdnuK
-# z9+nHSQVAN0FMJVxLkyjOGuJydmPIKVDI2iiLMOpEHSuv9jWL4dmbs0VWL39vpEV
-# qMTunbcAE5S6vTFRS2HpGa+mO+5WkirPWNh3L3ewYSQ0jWM+NVmR67efEsItPy41
-# 9rggCQ2CnmAOGgoJlbGiC3dVtZbjdgRQI8fwiJSSJIwnsQ2FShq9ZQ2IB+ow5DBF
-# QGi/HpJb3KGVFctUPJROTAumGlFgrkpjm1Cq6wBZjv23lihSp9+9WsiYDXdfXRLK
-# 4LodfryXN0F0x06AVJrgzEjEaWpjZgFwwsqLc2ubMpiUJxNSz0OjNmJrIGuDjt2K
-# 1krQf4yQ0Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
+# NTZaMC8GCSqGSIb3DQEJBDEiBCCBitBa1veOPCPH/8UoCLNcfjHJXpqcLCQ/JTGZ
+# RqDzJzANBgkqhkiG9w0BAQEFAASCAgCjp+m2euNLEuB9ZifSxFjdzQgCSjQKP28+
+# gQWhp6qd3M4ujB88bjOFkL38F83087dFZxk9INL1OWDWzDyu2CSrYH5O2nllvS43
+# dSpCUiTKXQaVWnIcyNeOzxVVQAejYYsaXm4shkI72AwLuXgqYdYyjHs5v4vm8ViY
+# dvnJHlKsXcentcDfGrpbrJasYhPunf4737DRTD/tNXkoZa0JaGNWwJNIt1GSYAAo
+# Npvg0BkULX6NlXGqA55na5Z6HwVrIImiV6sYFW1lIfs9dmtu3AVcOTAqGB3r4edh
+# D9X1Q/pqsYWoN0pQ4SOor4YmyyZMXrXYiA1s79tBf+LHCUIGm1p/pm5/DaWQXSfb
+# QMeCwHKIBF58R9GpPRj2FGIHcLVI4UX74LHJ9jxaF/3M4p0ivMmsXB9vLM+/L5Vo
+# NQvjSsHyKKs2KIm5LciC7JI0zChQWyT2qVuK7tB75cHjreIMoRqMHwE+jsuVXGAd
+# 5SwZlkJozAT9mD9ZxpYHv3mX6LoH90XxGtsLU2m47ndI5SFhGfWUk/tLDuscJhlO
+# N761dNFHFgclFeWiNPPibyGpH+yQQ2GvZiiq7x1B5AAq5eG9gG2dAOiZcgvBXdNS
+# 0IA6fMUwG3AqJV/FZPNeH6O/K1EEoFVd9BMLYVhGxbWyPGQRiWQH8qMa9EEz04ls
+# d4NME/0lSw==
 # SIG # End signature block

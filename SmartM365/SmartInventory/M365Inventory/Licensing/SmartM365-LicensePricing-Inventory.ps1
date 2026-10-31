@@ -7,7 +7,7 @@ SKU+Currency replaces every public period of that SKU+Currency. A PricingSourceC
 file keeps the former whole-replacement behaviour with a migration warning. Windows 10 ESU prices come only
 from a private EUR source (EsuPricingCsvPath) and are published as Windows_ESU_Prices.csv.
 .VERSION
-1.1.2
+1.1.5
 .REQUIREMENTS
 No Microsoft Graph permission. PricingSourceCsvPath must reference the public baseline or a private CSV.
 #>
@@ -25,7 +25,7 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.1.2';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.1.5';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-LicensePriceRows{
     param([object[]]$InputRows,[string]$RunId,[string]$CollectedAtUtc)
@@ -106,14 +106,14 @@ function Resolve-LicensePricingRows{
     $messages.Add([pscustomobject]@{Level='INFO';Text=("Public baseline {0} row(s) merged with private override {1} row(s) for {2} SKU/currency key(s); {3} public row(s) replaced." -f $sourceRows.Count,$overrideRows.Count,$merged.OverrideKeys,$merged.ReplacedPublicRows)})
     return [pscustomobject]@{Mode='PublicBaselineWithOverride';Rows=$merged.Rows;Messages=$messages.ToArray()}
 }
-if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force;$sample=[pscustomobject]@{SkuPartNumber='SPE_E5';Currency='EUR';UnitPriceMonthly='42.50';EffectiveFrom='2026-01-01';EffectiveTo='2026-12-31';PriceSource='Contract'};$test=ConvertTo-LicensePriceRows @($sample) r n;if($test.Count-ne 1-or $test[0].UnitPriceMonthly-ne 42.5){throw 'License pricing self-test failed.'};'PASS: License pricing offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
+if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -Force;$sample=[pscustomobject]@{SkuPartNumber='SPE_E5';Currency='EUR';UnitPriceMonthly='42.50';EffectiveFrom='2026-01-01';EffectiveTo='2026-12-31';PriceSource='Contract'};$test=ConvertTo-LicensePriceRows @($sample) r n;if($test.Count-ne 1-or $test[0].UnitPriceMonthly-ne 42.5){throw 'License pricing self-test failed.'};'PASS: License pricing offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1';. $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     # Create the runtime JSON from its template when absent and add missing template keys without overwriting values.
     Read-SmartM365JsonConfig -Path (Join-Path $PSScriptRoot 'SmartM365-LicensePricing-Inventory.local.json') -Required | Out-Null
     Import-Module (Join-Path $PSScriptRoot '..\..\..\Modules\SmartM365.Core\SmartM365.Core.psd1') -MinimumVersion '1.0.92' -Global -ErrorAction Stop
-    Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'M365\Licensing\Pricing' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest)
     Enable-SmartM365DailyCaptureRetention -OutputRoot $script:Runtime.OutputPath
@@ -158,8 +158,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCfncqt3ExR6TZ5
-# BpwWZD6BPxnQmdw6lmLFRDjkWuyWVKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBO6UjZ+fPgBiiZ
+# GAEuvKOlQZQIcfQbHXUoAHkdTuBjoqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -292,31 +292,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOV5ioqPbDJ9AC+SNlT5BXr3XDbC89hpv98ADBQcOPyOMA0GCSqG
-# SIb3DQEBAQUABIIBgD/c4DQZLozbvJNRSqGxow+LgQxCTJqcI+YWmn5UjDjPIk4v
-# wRJ1pNZ+2jCQS2DtQRzJcc7fOl6vuaCoHPDMCfULDQRvEnM+RtX1nGI02rMqYLOR
-# D+nOinip69QNrWe4giMsxK/piWxVYz2pvEjk3eutsYNtKYt+wtnflIsj054xnIfV
-# xNPulznY/q0oG+qIgOj3RsOfDkC7JQ8/DOcXIcbuAJKKCPMk1BZjSRsoUCc4vKTO
-# E/Kl7Aquz0GTwBg13HjrSJ9quZiPfgf9syV4LfRCOdzWVWcWv4xGPKEY2io+f0uF
-# +CCRADym2OkzL84BB3iSCEZCy5KfhsQJs5G/6FCGXLTNZlnZdsQrW8dYND3zmK+l
-# gchP43PejiNqM0ceWda0it7ybS6zANFKnoOgzjvRNx07H5Tcn+zEnJy67uDPXRqc
-# YvSns1HfvJvfZ4aZONXRFAy12kO7V9Cb2PiQoPR+qszyeHOL0iikXnW55GQC8kla
-# +y/VSaDws4MtCpQ4pqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEID1HXs5UiDKmjqesMtPpXGkJTFGryFZek68Bf7myA3VJMA0GCSqG
+# SIb3DQEBAQUABIIBgHgsVEKo0v3LUQaKC0aiq4P7KDzGhWAoRQFpbb1i09HSR7kE
+# Z1cpvsXOPXu7lROTa0VLKG6pn0dnHs6paLWuYIyBZpKhza+tPQFAojtm3k/X+U0v
+# tHnnKXaUpZ0y8W2QOxp7bLtkgIsSz4gBHx2beleG6zsS6neJioOQ3DBp09nqP0wR
+# sD+JtuCSJcEyk0RYsjSie4q9g7XaVM0dCNwV2IYrt6T7SA6noS8BlV/8tRgKM43X
+# nAXGyMCagtLTskPBilqypp6Q7NFzPLfNmFHOAuA9nVSmI+sh8+VDfviBsVV8ot+c
+# rznNxxj9YujhKAIM0jdTH3PsPiJndq7TYzT3PYS5pbqa/tsBbSiWmxHZg+hddCL7
+# gcsJ8L3nX/FFaPqV2a/HxpD5cqD44UJvmelVSdl20x6WUTVKVVKkzjO9XfjkZfj/
+# 8f5//tRySS9cCOcckRdh8aOstezK8PAUYulkS9YhOl1JNYkdeDtKSs47cqFqo/97
+# +p/CkiZvlkzzJYADnKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkyMjMz
-# NDdaMC8GCSqGSIb3DQEJBDEiBCC8JTCQyLLEjVL3n1xKtDKooOrOhWCIY8kzrX4p
-# 1mLGcDANBgkqhkiG9w0BAQEFAASCAgCw2kos7NgBcnGA2xEQOEpzqX/9IFaSzJZm
-# y9/5Coz922hAVgBycFifidF6WDjUJnmKcwQspnokFeuezvo1TcUze7FPaN0AImME
-# C85tWvvdoExIsKXrHAYeNHUUeCSS0auFtE35C/3Uber80XHdpfV40jk4cd+1KE2a
-# OSsJ8yNHtEMi2cCWiTT0jcSR8Im5lvGABfGKWUq/PcasAwaduKqVAVu7uFSSvggL
-# ItHoQ2VdzEGn1xaxG2VSgxXf9YZyUuk3k6Hc0sB57BlHNt0cJgHylemlIqaKuAdM
-# h8h0AAMR0FrkyY3oK5/gvvh+khYmNktWQlkmqiRMtSh/I5JJfFLQKkwDy0/Shs32
-# CmrGqWAWhgP/uXhGN12JzvuzmS+qFlhqubjgPYOJgLAtGNIU/hGOPri+u6EDiuYy
-# iT79tfKTDYH4e7RBHWlaqdepSCVhbG45U+X53o4Gj1wIzfP6Pd3NoSrLPgrb2VCJ
-# 9LRIRkTdtHisctEmxZ+thPQPORAvGuw6EPGZ+qb0Rl5GMeRZydGW8/D/wu0Ttqpn
-# bq6t7FewvkjxabUVZ7YmsQfA3OsPWgMPoI/WdBdx0rTmBSOWuNfuTH93u+qXyYM8
-# m6eYGdquj+ZVUoTrcT61qNZrN/B/agvzSu2/emvLnkbYJ6ySyVpnH0/K0u6rV9E5
-# c4aQww7i0A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
+# MjRaMC8GCSqGSIb3DQEJBDEiBCAByjE7Li79uOOuzgXitFWKlYuhufADPibq4QGP
+# i1/zVzANBgkqhkiG9w0BAQEFAASCAgA330zSOtyt70B1nFPlr51AWFVnJd0BNVjA
+# IwPy55R92V3Pj60FwNGG2pwJ8O23ajXMgYhbkB/g0H3ZaakocogFC2v2fTNSXROw
+# pHsuRdIuhCxH0VWUZoBLIVf6TOjvfcrUp/6cWVFCz/ZRAf/BuT/c0RvgkimC8gsO
+# IhqxwA10wex/cz2KG1TBimPloQdfcgWDMeoO3CX/S20saHclqkKXuLZDMYQkx2L6
+# TgAybN5Ot0aQaP/gQbbi6v7hvhYO+NJjMS6N9VYWJdtfeKChB7aFDJgLwQDX1WhX
+# MZAQbqz+drCHH0l9ly8wqUDoTLYCpJVlvS2qzADDOHugwsqz9oxu07ku6Ri39UFb
+# P25dbr+iDUJ4uC/MOxK5ISX9MRA/fPFK6sK7esv1rQIYFSIrDxBen+2KB5ug6ip6
+# YdtEmsy9ztMPKlBc5XDaVrxoFJ43CN747ofqnTd3CYx6TEC1Qn7ZPy1CpUlrk5dn
+# RfkmVXNUnSf5piS1AduDswQAyRzo4Cg/Lis2YIsx2/EyPAy+AtpDj93MYWyI+jl7
+# qlpRyHxiUi8wB14fqM7N794wTjuP/6PhRBNMpw0O8TiEF4cUnUX3g8mBkayeto3r
+# D2ZSPJRdJLewZbTnhzANa43NIZvHDPBzVKKafsaGiSqODshjagAcHR8Xo1KlqvRM
+# Hbnp7OzrCg==
 # SIG # End signature block

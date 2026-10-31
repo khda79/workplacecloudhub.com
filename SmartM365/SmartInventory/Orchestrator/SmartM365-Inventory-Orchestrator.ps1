@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Resident scheduler that runs SmartInventory scripts unattended at their configured times.
 
@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.82
+1.5.84
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.82"
+$ScriptVersion = "1.5.84"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -398,6 +398,17 @@ function Test-OrchestratorSharePointUploadConfigured {
     return $true
 }
 
+function Test-OrchestratorUploadCategoryEnabled {
+    param([Parameter(Mandatory)][string]$Category)
+    $property = $script:Settings.PSObject.Properties['SharePointUploadPolicies']
+    if ($null -eq $property -or $null -eq $property.Value) {
+        $legacy = $script:Settings.PSObject.Properties['SharePointUploadEnabled']
+        if ($null -eq $legacy) { return $true }
+        return [bool]$legacy.Value
+    }
+    return [bool]$property.Value[$Category].Enabled
+}
+
 function Invoke-OrchestratorSharePointUpload {
     param(
         [Parameter(Mandatory = $true)][string]$LocalFilePath,
@@ -405,6 +416,13 @@ function Invoke-OrchestratorSharePointUpload {
         [switch]$Force
     )
 
+    if ($Reason -eq 'operational folder mirror') { $category = 'DataAll' }
+    elseif ($Reason -match 'log|mail HTML') { $category = 'LogAll' }
+    else {
+        $category = Get-SmartM365SharePointUploadCategory -Path $LocalFilePath -DataAllRoot $script:Settings.SharedDataFolderPath -LogAllRoot $script:Settings.OrchestratorLogFolderPath
+        if (-not $category) { $category = 'DataAll' }
+    }
+    if (-not (Test-OrchestratorUploadCategoryEnabled -Category $category)) { return $false }
     if (-not (Test-OrchestratorSharePointUploadConfigured)) { return $false }
     if ([string]::IsNullOrWhiteSpace($LocalFilePath) -or -not (Test-Path -LiteralPath $LocalFilePath)) { return $false }
 
@@ -666,6 +684,7 @@ function Invoke-OrchestratorSharePointDelete {
 function Invoke-OrchestratorSharePointMirror {
     param([switch]$Force)
 
+    if (-not (Test-OrchestratorUploadCategoryEnabled -Category 'DataAll')) { return }
     if (-not (Test-OrchestratorSharePointUploadConfigured)) { return }
     $staleMinutes = [math]::Max(30, [int]$script:Settings.OrchestratorSharePointUploadIntervalMinutes * 2)
     $mirrorLock = Enter-OrchestratorSharePointMirrorLock -Path $script:Settings.SharePointMirrorLockPath -StaleMinutes $staleMinutes
@@ -8398,7 +8417,8 @@ $script:CentralClusterHash = ''
 try {
     $tenantContextPath = Find-SmartM365TenantContextPath
     $coreModulePath = Find-SmartM365CoreModulePath
-    Import-Module -Name $coreModulePath -MinimumVersion '1.0.87' -Force -ErrorAction Stop
+    Import-Module -Name $coreModulePath -MinimumVersion '1.0.119' -Force -ErrorAction Stop
+    . (Join-Path (Split-Path $coreModulePath -Parent) 'SmartM365-SharePointUploadPolicy.ps1')
     $distributedModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Distributed.psm1'
     Import-Module -Name $distributedModulePath -Force -ErrorAction Stop
     $managementModulePath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Management.psm1'
@@ -8413,6 +8433,8 @@ try {
     $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     $localConfig = Get-SmartM365ScriptLocalConfig
     $script:OrchestratorLocalConfig = $localConfig
+    $orchestratorLegacyUpload = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'EnableSharePointUpload' -DefaultValue ([bool]$global:EnableSharePointUpload)
+    $orchestratorUploadPolicies = Resolve-SmartM365CollectorUploadPolicies -LocalConfig $localConfig -GlobalConfig $script:SmartM365EffectiveConfig -LegacyEnabled $orchestratorLegacyUpload -ExternalActionsAllowed $true
 
     $script:SmartInventoryRoot = Split-Path -Path $PSScriptRoot -Parent
 
@@ -8620,7 +8642,9 @@ try {
         OrchestratorRunsCsvLockTimeoutSeconds = [math]::Max(1, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorRunsCsvLockTimeoutSeconds' -DefaultValue 300))
         OrchestratorHeartbeatLogIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorHeartbeatLogIntervalMinutes' -DefaultValue 30))
         OrchestratorSharePointUploadIntervalMinutes = [math]::Max(0, (Get-SmartM365ScriptConfigInt -Config $localConfig -Name 'OrchestratorSharePointUploadIntervalMinutes' -DefaultValue 60))
-        SharePointUploadEnabled = Get-SmartM365ScriptConfigBool -Config $localConfig -Name 'EnableSharePointUpload' -DefaultValue ([bool]$global:EnableSharePointUpload)
+        SharePointUploadEnabled = [bool](@($orchestratorUploadPolicies.Values | Where-Object Enabled).Count -gt 0)
+        SharePointUploadLegacy = $orchestratorLegacyUpload
+        SharePointUploadPolicies = $orchestratorUploadPolicies
         SharePointSiteHostname = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SharePointSiteHostname' -DefaultValue $global:SharePointSiteHostname)
         SharePointSitePath = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SharePointSitePath' -DefaultValue $global:SharePointSitePath)
         SharePointLibraryDisplayName = [string](Get-SmartM365ScriptConfigValue -Config $localConfig -Name 'SharePointLibraryDisplayName' -DefaultValue $global:SharePointLibraryDisplayName)
@@ -9146,8 +9170,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAAubw/MXzKRxHS
-# XiKJ3mfxmzYbu1p0/avFWr4JFXGJXqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAyanbvYG/4WgEw
+# Cg3IIOG5O4yTwRMIge3vsSDQvPwKeaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -9280,31 +9304,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJ4a3arJvYbCeBeBBix0pUBvMRynn9dKBIUC7UQtCGlLMA0GCSqG
-# SIb3DQEBAQUABIIBgAPeUggOAEj04saPlmP37YG2iBSnu8q/gRzuVOy6EDfiTYLp
-# pth/35oR01helbjmYOKqMv44Y3mmHM8hXLxR9GfLP0ewPuxMSS9AtGsx9Qo9CrUh
-# fGEiAL/hSo8MpoNtX3EVulaHXaIAO+srNOMDPn5RGrZ3dBrgzjyAWYPAb+sRX1CH
-# f8UPTRn8Q7i6IJj8U3q23CoCAx8o25xvGjvjvvwzp3/m0OWe3ODm4OwpVGSJ/Mu0
-# t4P7mVrksnilT23OqOvSMnzmLhlK6KbTDvdXmmLFiP0bVbqSaczMak8eatXMU0WH
-# 69oGXUNoDRtMx96TF/iFebtyS5uWGImNCOVZ6lFxSpbjP2DmSKRaBrilQcDeiDOb
-# 3OulfVsRgHgInC6OD1dGnzS1XIl/aoxBTJPaWvEq8E2NZ4FZzBxmzoY63xvtTCVu
-# tCEiMsHoClzNCblgI1S0F0HbX19Y4b58kNrvTzftR1QLhseo3GtLnwHPcTa6xkKe
-# fRG23t1FjES5gOJUJqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOLBWZQlGr9HvqBK7lbJR1NQ3P3XE1Gpi11AVJo1HRT0MA0GCSqG
+# SIb3DQEBAQUABIIBgKc51Kbt6ajbuC1tzO0rTIdS5lqVp/CZUzGy+feDivxZrYcf
+# 0mzKvz8N2odusQpsIcJEOzpQ20D2z17tW++AIc2+jpL2pwAqaRsHfJeNZVg3c5/w
+# odpqPkkm0huASEZ/80niO3XB47ZbqYT6xjkVAvhu5C5UV0Lupw5VuRAcHF9jCRz5
+# 9ocawW6s32gu+JuhHl8bet2YYluvewgYuiwDtzucYrexktAmUnqxXH50KgJKWCwK
+# 10Zt1A9GLz1e8jNwwKpHyLP9xnzO19TeRYbrCppyRCkzrIu5IxkQ7vQX4OiG/T8g
+# Fdv8tEIiRCoITZ3uqOfYjAvWSDefOYOUBX7qGBApnvuMZGYTl9Pz6RynkAb98blx
+# 44v3gc8+4xpvflvj4s2kLfu7SWVaFNRvdG7DueJLDC8BpbhkEFMWbB4XEOoNskMp
+# clKmVga8vm3WuATffCtOyQ2BKopgPNJszW0JypCM15T0btWzW4S9N2V45PCfxro6
+# d5adGLPLZblNTIexeaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAxMTE0
-# MzlaMC8GCSqGSIb3DQEJBDEiBCAjmo5W49rjl5E/mESROXBniR3npMHkoGKOlfft
-# V5EDXTANBgkqhkiG9w0BAQEFAASCAgAL+OnBGJHRFG6ZzUhxg1/hxWbVJGLwZXvG
-# pMwDvNi8pgkPOLsmNhB0HuratuTFKW3QM0xQnFhrs4oaQoIzunPrC9h/rL02ZWUw
-# ZEbAa59lZDK8YVA3ebBRdOt8GfFMqsc3WqSQRoe0vCL8E4S2kgbcnYIHQBHRyRpg
-# BkZ3Q+PJcdd00s3G/WEcpEk4r4mY54dkRS5+rZfwOK/FxuDvAF4w7EWvHgI/A2QU
-# y/rAlPMTyN+ZRoLdu9Gu4FhvCIUq2O8QAg/11kWAikgc3R3RtT16Qrh98cVCHSEw
-# 5GIgEqnHZRBDem29kqdiDY2uffr1TsfP5t5AX/P94qbFpwiFe1FpriyI5r2Y+fGO
-# mvDNAWYP5T9PphXgkXMRHS2YW6i62m2PgPe9V0FklAkmQure46zcMLNtr4EpwIHX
-# 6DXsLPDbpNRT7hx4KjP+tG4oi3RClmvenyFu7nZHueaoU4dPt0yMYdzeMJZxk4A/
-# inFauKSTbWFB1GuMUd0Abk7wRsbmcTBM5fJlaT4kxM8HBH53rWUkxmN3w4b4nsFp
-# sATarZGaRdkrCF6hpWV9dh+3Vmkwrk1kBhFeeDfpLvGQsgeDMLeKUWcQV6vYvvpD
-# mGBrAmQYCK5Yv6dWO8nln1nvTzt0N2CG/tcabEiamzGiiA4Ks4FByGShzSM4EytP
-# SV45xWXF+w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA4
+# MDVaMC8GCSqGSIb3DQEJBDEiBCDouB+7g3JLn636uggvjlugChJ24Zhxc9rEqh7P
+# uDjnPDANBgkqhkiG9w0BAQEFAASCAgAI+0wvvmAUjwx4ANzn61Og7PiJILrz7+IT
+# z13UgPs5QP4H9TYK8saRobcEJ8YP8k+DfUlLFY+lL8FxNjrsRbi5GCvJ8Tl4q4y5
+# AHTaBxaomJLl8jDx8szfrSzjy+9fidkm1zsPN1XNWNFLiBmakX6btD5p8cAvWf4X
+# Dlr8iuoB7waAEBK3JHWQ7Lwl9Xarh6zcmA+/g7tFkdKITR/eDkZcvYCtJ4/6RTxc
+# jFOcSdaN2noWKwsyt6fSYtas8ulXeWrjzcoCgXs+g0lPPdvhPmb4FQv7l7O9E3jd
+# Y7QaV7PEm+d69LwuJjKdrApiYobd+HVed92lLk+Svviqj5NJoOHQU6dkXVhet8dR
+# Tq7SE2YXjtTr9ppzVYle9cw2bBW7NLYT0AkS/RuKLFcEVoJG9RUo7RqodfxpIR1g
+# 0bdQmBHuKaXZozl/h77xdWiWeqcEQt7RHEVbpXvjRPUyZujP91dW/AzYlrQGWLPK
+# j/5VhgABROEbPTUzgX/y7yjr6Vh6SKwI4okHqpaKZm/UTqWJqRLPQ1Pz2sT+KLMU
+# hiGgZ7x5cJ0Mr2+2gzdDaVM19olR+NW6i302D8F36Do8Uiy4pIr/9V6jJGWh9G8/
+# pflB6d0ilvJ138M+UXBfJ9yLc3nkwpO9CES6LCz/eDLOIDRC9WV8hqo+Kga6H6zX
+# WgeeHeAXyg==
 # SIG # End signature block

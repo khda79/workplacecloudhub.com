@@ -1,7 +1,17 @@
+<#
+.SYNOPSIS
+    Offline SharePoint on-premises infrastructure inventory tests.
+.VERSION
+    1.0.0
+#>
 [CmdletBinding()]
 param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$global:EnableTeamsNotifications=$false
+$global:SmartM365GlobalConfig=[pscustomobject]@{ProfileKey='test';EnableTeamsNotifications=$false}
+function global:Invoke-OfflineSuppressedTeamsNotification { [CmdletBinding()]param([Parameter(ValueFromRemainingArguments=$true)]$Remaining) }
+Set-Alias -Name Send-SmartM365TeamsNotification -Value Invoke-OfflineSuppressedTeamsNotification -Scope Global -Option AllScope
 $folder = Split-Path $PSScriptRoot -Parent
 $scriptPath = Join-Path $folder 'SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.ps1'
 $templatePath = Join-Path $folder 'SmartM365-SharePoint-OnPrem-Infrastructure-Inventory.local.json.template'
@@ -148,6 +158,12 @@ try {
     if ((Publish-QualifiedCsvUploads -Paths @('run.csv','latest.csv')) -ne 0 -or $script:uploadCalls.Count -ne 0) { throw 'Disabled infrastructure upload was attempted.' }
     $global:EnableSharePointUpload = $true
     if ((Publish-QualifiedCsvUploads -Paths @('run.csv','latest.csv','run.csv','failed.csv')) -ne 1 -or $script:uploadCalls.Count -ne 3) { throw 'Infrastructure upload qualification failed.' }
+    . (Join-Path $folder '..\..\..\Modules\SmartM365.Core\SmartM365-SharePointUploadPolicy.ps1')
+    $outputBase=Join-Path $tempRoot 'policy-all';$latestRoot=Join-Path $tempRoot 'policy-last';$global:LogPath=Join-Path $tempRoot 'policy-log'
+    $global:SmartM365CollectorUploadPolicies=@{DataAll=[pscustomobject]@{Enabled=$false};DataLast=[pscustomobject]@{Enabled=$true};LogAll=[pscustomobject]@{Enabled=$true}}
+    $script:uploadCalls.Clear();$runPath=Join-Path $outputBase 'run.csv';$lastPath=Join-Path $latestRoot 'latest.csv'
+    if ((Publish-QualifiedCsvUploads -Paths @($runPath,$lastPath)) -ne 0 -or $script:uploadCalls.Count -ne 1 -or $script:uploadCalls[0] -ne $lastPath) { throw 'Infrastructure upload category selection failed.' }
+    Remove-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue
 
     $extended = Get-ContentDatabaseExtendedFields -Database ([pscustomobject]@{NeedsUpgradeIncludeChildren=$true;DiskSizeRequired=999999})
     if ($extended.DatabaseSizeBytes -ne '' -or $extended.DatabaseSizeStatus -ne 'Unavailable' -or $extended.NeedsUpgradeIncludeChildren -ne 'True' -or $extended.NeedsUpgradeStatus -ne 'Collected') { throw 'Read-only content database extended fields are incorrect.' }
@@ -257,8 +273,8 @@ Write-Output 'PASS: infrastructure parser, PS5 CSV, receipts, disabled operation
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAwdlflqk3Udq/W
-# MEGSIB2BlR3zkuxU0heF86DLcJrGPKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA8H6HNlPEMQyJ3
+# 3lyZ9zK1cxPfpFPA1zG103+phja20aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -391,31 +407,31 @@ Write-Output 'PASS: infrastructure parser, PS5 CSV, receipts, disabled operation
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPb5jCfq0cbAny5aZHEU908+nMMlYUwaLEHLF8g5qNxeMA0GCSqG
-# SIb3DQEBAQUABIIBgDd9dqq5Hc+WkvyLaTDWT0oRNGkaiyd01OQAYzoQx/9fLr14
-# UUd5Pa5Lgeyl8T3InSb3ou4yY4LRYVhp+jolN6bNfAl15uoRlE3BdtenKuyz0Qjz
-# P7qAmkFumaU3EC2VG0QYSbvrHmufLt20eba5gzjNQ22k4MR8Gzw8ChErR62n9g7s
-# HisQIh/gm2lzozqL8jbPomoN8LVXUuYgQ450311Lit1IeXH0NWHYERJKl63vqA7M
-# qTls5kl+XWEYcAskMVU7VMLCTI9fucKbjDFAfRF6NUX8SCj1RyxjqO6Z/b3cWJLP
-# yIGR5solR4aLnfxmlZqB/IYtR7Mm37BjNoBgkbJLbYlN0J8BwwemHZ1s4gh6MdwK
-# 1tAJNyOE/D/AyyfihTQd/8Vgx02YyLSGma3vCuXtXQCb+DG8Y9dP0gSg2wT9m9ro
-# wmDd+p0s1bcBNz9JiSb2RRtQardD8aGcCeR69/uxbwdYsS2fBOmtPzZczKyVZyDn
-# exfPU1H604wnDETQM6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEICh/JzQLTQUuyrex+4o8ZyL+O6ga8xsNYE1SioEEFfTDMA0GCSqG
+# SIb3DQEBAQUABIIBgJvgBniOEar+4xyT5jAm5mhIfqpTpvNzx0j2wliyFqanIhyW
+# g2IG+txJO8NNMzLupPHJzM5bNAUL+0IH/rBat/ZpzaRVgjEsg2nFfAVaG+YRM8ne
+# oZKDXcf73gELHgUtzU46gEzePL2uNw6ir+IGDxkf6OFWuKyTOv6wJCq498LTNi/2
+# Pb/KDjtfqjhGFsipOZn1VLz5ypFdkLj8p+iKJKxxVlBdpmdz+IExXfCuB5tbn7oZ
+# SLeetSYupq/CWyO3vx23mOnUO5VYQ0eF4yp2ONUyB9mHWaA6OTND35gUy70D2vcy
+# hT87nDSR/Sbdto8ue/z6iXpYZseG+ZE26IoZpeL39xMQW1X1l4mE2FEkDqf7BfC6
+# 2TkrNu+/DM4fW2c72C9NN+iipGUX9uCCb60qsQ5ZFhDtcxJyLqnCLF0dmlLeRkIb
+# J3Z9Zdh7SewwEl4lJcA1EVXWGhS+6yoxy1G+Sbj19b6sj3WJPftymO84HFTOZwZp
+# QcI8jbZoeUtA9hqSmaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIwOTUx
-# NTlaMC8GCSqGSIb3DQEJBDEiBCBm/UCwyeILnjHY8vfJvzgX+V2gpxIWwn7ztKlX
-# TwpruTANBgkqhkiG9w0BAQEFAASCAgBBsWv/gFqL9w4VkF3dKs30OsC8FR9buwl9
-# GS4nP8XRW1j13hazm2yF8Q5R8l1VSD35gxji9OLiH+PbIuh/6I2gNmZMKVUOtfP0
-# Lyt70hnubhux59sdcgsp8kZ2Tr3W0fudDTUrEdrIal7d2J2k4BSRkHiILhw2yctn
-# zrUB2kpqjVOg0g6x2bscxp5q4R3+4HAp6ZxkJNTWVDBFy4yFBdU0q+77nCGkc0kf
-# u3DmBGyWWKJtD1mC6BIKG1ZaNbtq4Oz4XVxwGLEZES67VIUboj6qb3dFqDFCRwLK
-# Pzh43CcCXl4rvT055DfYXYhL2eI4nrbjR8Hnadqw1zZRwE989mGSZQkAyKLZUKBg
-# wgVJRa+sAICOHJP91M9YI8UhGVffEeEtPBjptsFClmbGWNdoBaE+Upd8ZOzHwEYE
-# TzmFYfcm1JvFf/F6rT979uKWaUzwY7aI3JwzsbMGRP8uZbHybAob020FwyK6zWw/
-# sVDU1mdut61LMmomiKa44AR3FwJSZIuGOmh5gal0tKPiJ4833zaxASO48AXnmtUy
-# s/Ve1Qr1yqdXh76R30R4Xqs4vhdpkItSJDIi9qA2Yx1oKscgS6+3COAQ5hbdOzVA
-# hfFYvCGhdvIi+4GxSv8UMBEw9MlHa0ja+8+uNiKC6oZR8OohxR7X8I3JZTJc2H20
-# HEPZ2jThoA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExMjEx
+# MTVaMC8GCSqGSIb3DQEJBDEiBCCQbmJuizPirf/L4EFRNf4jXYShxxoAZUenjE4q
+# CM/MHTANBgkqhkiG9w0BAQEFAASCAgCtOgIzWMXq+B3bG6q+5T+LvgpHQoCR+mHh
+# IjitDXQBCqJbezLEysMcYIY3MAn3mL47fJINrTfbxOaUWBnHXVPoK6gnodbH9wu+
+# 53KDKMJnSKDxv0inKhqfKW+OU5T7drpa1Ggb2ofxxShT5WX5Stfo5XHdlYmoCAZj
+# kidumGwBUQOP3Gahfi4FlbEnt15Uw1oPbeTO7ojKdaxms3thnF8QGuKMxeB//AOV
+# xO3KacgvILJKWGGCbyUX9IZjrM6lr32oh/pSRGhQoQjMM8taTFwayD+/Qe8c4asn
+# oLyJF1AOMRa9ZKf9bN8Ec4tiQcM8mTx/lLTmvonmQvJiwHeck0RSr2RCHDL6cY78
+# A7iSw9GHrd6d5OJZ+QuaRuWp8yiQv/4XrL5Bed0SprSu2fS+lsNzNNZQSH2aouP0
+# LCgIGncZxWCgGQZ+008G+rPWBAf6SpbyiDE+MgUpHFzPX3HttIiBjtijBTetWrxt
+# xijGaTj+/Wu6I78vPI1ge3OepRtN/pn1q8U2L0VQ4DBGSZEpBzcn3Cb1BKDJcYn1
+# qHp0/Chk7rSqhs8jtrvwi60fm3KiIYoejba8YzDlzRhu7ltt5aNqmW0vRGDi7gXx
+# NJVzTN2XXubgjBqmcaIaf3GVjKnYFvuCPnT/QazZ/kXm9xi4ytZGVpWT8nF3z+ge
+# 9E8ezwZGuw==
 # SIG # End signature block

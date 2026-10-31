@@ -1,13 +1,21 @@
-# Shared local lifecycle for SmartInventory entry points. Compatible with PowerShell 5.1.
+﻿# Shared local lifecycle for SmartInventory entry points. Compatible with PowerShell 5.1.
 <#
 .VERSION
-1.0.2
+1.0.4
 #>
 function Start-SmartM365InventoryRun {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ScriptPath,[switch]$RequireReturn)
     $previousVariable = Get-Variable SmartM365InventoryRun -Scope Global -ErrorAction SilentlyContinue
     $previous = if ($previousVariable) { @{Value=$previousVariable.Value} } else { $null }
+    $previousUploadVariable = Get-Variable EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
+    $previousUpload = if ($previousUploadVariable) { @{Value=$previousUploadVariable.Value} } else { $null }
+    $policyVariable = Get-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue
+    $previousPolicy = if ($policyVariable) { @{Value=$policyVariable.Value} } else { $null }
+    Remove-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue
+    $rootsVariable = Get-Variable SmartM365CollectorUploadRoots -Scope Global -ErrorAction SilentlyContinue
+    $previousRoots = if ($rootsVariable) { @{Value=$rootsVariable.Value} } else { $null }
+    Remove-Variable SmartM365CollectorUploadRoots -Scope Global -ErrorAction SilentlyContinue
     $state = [pscustomobject]@{
         ScriptPath=$ScriptPath; ScriptName=[IO.Path]::GetFileNameWithoutExtension($ScriptPath)
         StartedAt=Get-Date; ReachedTerminal=$false; InCleanup=$false; ErrorRecord=$null
@@ -15,7 +23,7 @@ function Start-SmartM365InventoryRun {
         PendingCompletion=$null; PendingBanner=$null
         RequireReturn=[bool]$RequireReturn; ReturnedNormally=$false; ExplicitExit=$false
         GraphOwned=$false; ExchangeOwned=$false; TeamsOwned=$false
-        Previous=$previous; PublicationMask=@{}; CleanupWarnings=New-Object 'Collections.Generic.List[string]'
+        Previous=$previous; PreviousEnableSharePointUpload=$previousUpload; PreviousCollectorUploadPolicy=$previousPolicy; PreviousCollectorUploadRoots=$previousRoots; ManagedCollectorLegacyUpload=$null; PublicationMask=@{}; CleanupWarnings=New-Object 'Collections.Generic.List[string]'
     }
     $global:SmartM365InventoryRun = $state
     return $state
@@ -166,14 +174,23 @@ function Complete-SmartM365InventoryRun {
         }
         if ($State.Previous) { Set-Variable SmartM365InventoryRun -Value $State.Previous.Value -Scope Global }
         else { Remove-Variable SmartM365InventoryRun -Scope Global -ErrorAction SilentlyContinue }
+        if ($State.PreviousCollectorUploadPolicy) { Set-Variable SmartM365CollectorUploadPolicies -Scope Global -Value $State.PreviousCollectorUploadPolicy.Value }
+        else { Remove-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue }
+        if ($State.PreviousCollectorUploadRoots) { Set-Variable SmartM365CollectorUploadRoots -Scope Global -Value $State.PreviousCollectorUploadRoots.Value }
+        else { Remove-Variable SmartM365CollectorUploadRoots -Scope Global -ErrorAction SilentlyContinue }
+        if ($State.Previous -and $null -ne $State.Previous.Value) {
+            if ($State.PreviousEnableSharePointUpload) { Set-Variable EnableSharePointUpload -Scope Global -Value $State.PreviousEnableSharePointUpload.Value }
+            else { Remove-Variable EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue }
+        }
+        elseif ($State.ManagedCollectorLegacyUpload) { $global:EnableSharePointUpload = [bool]$State.ManagedCollectorLegacyUpload.Value }
     }
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAJG5PGSOVyYlAs
-# 7mTNhmYi80SVEet3yOxq3iMdKm1GcKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBMidk47PzinVBm
+# ZBPRuLyEwVGpXML7VEZfCSo7wynimKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -306,31 +323,31 @@ function Complete-SmartM365InventoryRun {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIISlDCoPv8MrPE4pR+W7iByJN4sK/zc/yKUH3o04gm/yMA0GCSqG
-# SIb3DQEBAQUABIIBgK/M9TZTbHO8xX9IvSHEw/qM+L+mwWowFsinKd+oPIe+1QEx
-# VtJGsnRP/G04WECJWYmoTKLU9l9HyJsv2mw8hDLaetW5WpgrdIDIcalJWPgH1gy9
-# U10TIEO6OyzWX7xGWxwae3ueL7Bi+k4cJNIWD/ATlv1vHfdf/KUVWrc8k+fP1PnH
-# 3AFOnSfJWvgUd/Bz/JaUD+AubrYilGwH4zzEUHn2bHkxZLqBa/D43xAeIBkxXyQ5
-# oNedVKtdvMd1k1+86SgkL16FcgPrgLYLI/dqDIHlSoUtr9K6iIT+YuWdyDiWqHeO
-# q44Y5yVpnAxHt/q+4Qx+WhAMBDEkP8vTJY2JxcoUUlJefxg8ETsnewYq7PyZJRnb
-# EASIt4vVZfRNJn+UK5k5EsAYHB3yHMle9J/N6WuIM0LV9qaFI1WCh0WgiWiabzMv
-# blUO2JraT5OLb2zYxcaFmFUATrQ5Nt87VEy9gY0tOILC9/NLJl4maLgr0kFQdXSa
-# MQ3zas9MTDdbBjry86GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJLM1i2w3YlX3w1wxDN411tuLLkpGts/ELhPVbUI3sC1MA0GCSqG
+# SIb3DQEBAQUABIIBgCCoE4TYyx9JF0SZUntpRYjEJ2pyEB/nW/PjH3ZbVxf75OkT
+# xT9xqv1hq55NanWMUuMpKLo8zMFRAZAufcHOFtfLJY0s1FUDA9ix49sX2fOvNDcJ
+# FRFS+QCm2kSbVvzYrotrakbji97OwPvU96HJOi8QZSQjaJ4EvxE8zHJyEV5CNbgp
+# HzWyGYaIQv/yg0to0xfGSATAA4tpnPiMMq9YTK+nx/XNpcBXK7yuXuq4Q4BHe+HZ
+# kO6Tv5l/XiK7nj7jR5uHBqHM+QDmBIQeaS58VX12vH2511zfCel76SqV3S1QGkgN
+# CIXR5wt7LMmWD0vISJZ37VLLCaOIS6u1Ud05bNnmC2gplhrWJH2JlhXRufovSHJg
+# tZUpVOnxaKHQNzHTCJUk+gYUFsisunJ62/k20nBbiUdjMVJzlTvkLXZckTJLvalA
+# FWGFj3s2KmxT2NGlBRA8KhlN2qx1opPANW6gXxhN5IrsYSOMKUK7WWINrCnAPxDB
+# gNRspQbXl69YBlQUjaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjEyMDMy
-# NDRaMC8GCSqGSIb3DQEJBDEiBCBHGhpfoUW26PDIJ9flTzBCHuM8W+wWPow+KOLn
-# 3kmUpTANBgkqhkiG9w0BAQEFAASCAgCYdU3z0SwjAnd146LcfTe4JP52/YX6fFki
-# +3GycZCP3XgXAMOdsOoFXld94YouWN4KZ3ZWGOlzOzEoSXissLMVLObg/rtbCORm
-# WzwjxZac/ZRrm3nY+lNfAGfdTBdJC3ArQDoE35QWgAGkp+YNY2sNrQ79T0tJW9l6
-# 2VSMImbsDpel3eFjmBQo6u+IrtKkFaM70XybxFffKh47/uD3k964y7ljs+tLi2Rp
-# f/wei3/azpSfAZc9pQvnGhL21XUTOC1TFQcanzt1ZIuPtuu0RtviZi4WQYcZeIFW
-# HQDfdL1MMFVMtzE/k5bSjjquqNpuxs9OHIrGiGdzPZ+h/r10GBJMV1FjCGs4HTym
-# HKr5oSiIkPOIRydzw0pkMpjxTGm8nzvh0DUFwhyGrA3NLLGVIE7BLZFh5GQTKi7/
-# vxrh8YXBvEXeLpMcV1o32fk5LF0TGHR4Z3E22ClqHb4kgBn9mAehVSgWNRK7kN3z
-# RVdCsaIoEN/xvm9CSR57Tav+8niadubkqETsw48C+JhudZs845zkiT0ljPgPl2C5
-# iSHA57jEpDMx0aV6DDPh5J3i/LlsulArhecQVe7FxciKZlXhTZZ6LHJDDJktJE4M
-# EFzl/ho3GbzmEVJI7DgJXArPZbL23EjSKM0Hle3Zm7EmDXfmpu+r0FmkmqgCakUz
-# njrAubBTIQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDM3
+# MjNaMC8GCSqGSIb3DQEJBDEiBCDfPcqE3ExmNRBfcXkfCE+YJ3hcXmCopls+j9mS
+# nthOEzANBgkqhkiG9w0BAQEFAASCAgBcXF+ESGCHmVa1cKUUEYugzmHmQTGk9jxU
+# Nupl9i50xMQP/BFh+uSmtSqM5M1ulGg5tLnqgfVs2QWkfaHglI/fHrGilMbirzHE
+# UDH75haP55aeQujCuhpp9NXlK2NIBPV7ArBOCPoUMjdee4wrqMqOvXC63cqcdPsW
+# p5HabKFokyj2OjSQr5Oa3VFsh5vBYMAVzCtw9mIhRRaKMXHXY5RSVdBALdlqGvU1
+# D/u4uo1hA4Pf8kBip8wk9UhyiBPPvofUj7xKaPvAuTiPCb4+AByM0+rlW1n2uHNI
+# p3oxOYc1EyxygIRk8M34PK5yyhwkNJtuPxh73qAfqOGXGBmGxTDmHqVTgvq9qZ2C
+# NzfbnWloCHzMjujyZf/O/9bxx2ce/l33sLu6Us3rv8lQ6OYXYN/LQYz4nQ1IKAfq
+# uhTQRCYpI6R9g8ZCoFje27IHnBnys5eJsxW0zRbjr30srdCpn3YsQ1l4rMEfrzAa
+# tFQmKtLNm//FTfMUEblalxKpH3moMJbUZaRnyWpMgwFhCbxaJgcYVcTYhnJkqSMN
+# XTL6IRA2cK1ltC1W/xlZ+m3C2DwRj5Dg5i9vg9Ob3/Z1tjhci5TchRO+zulla0a3
+# mTWc1b9bswfQyVjVznzHeNuUEYiDuh7JXVMU1vhFkr2m2y+pApAQqJFRpW8nlBtp
+# Z7Wwf5DZgw==
 # SIG # End signature block

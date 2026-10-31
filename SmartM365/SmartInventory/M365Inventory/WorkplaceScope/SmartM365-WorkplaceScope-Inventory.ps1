@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collect native Entra direct membership and Intune policy/assignment evidence.
 .VERSION
-1.0.13
+1.0.16
 .NOTES
 Candidate collector. Not automatically scheduled until production qualification.
 Graph beta membership avoids the documented v1.0 service-principal omission.
@@ -43,7 +43,7 @@ try {
     . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
     $effective = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
     Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.92' -ErrorAction Stop
-    Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.18' -ErrorAction Stop
+    Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -ErrorAction Stop
     Import-Module (Join-Path $PSScriptRoot '../../Common/SmartM365.WorkplaceSource.psd1') -MinimumVersion '1.0.0' -ErrorAction Stop
     $script:Runtime = Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effective `
         -DefaultOutputRelativePath 'M365/WorkplaceScope' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath `
@@ -301,8 +301,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAWSAixjpKs8nBl
-# uoyZmMV0PrahTivY8jF4La6znowQN6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmCr/KRj4hxY+Y
+# isH9OcGW3fdW8i8byr+TE6yX+3aPxKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -435,31 +435,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEILu2LW1m7jMNfYFWGrE8FzZhgsb9PVGokWJSRiPYNy92MA0GCSqG
-# SIb3DQEBAQUABIIBgExjDMPOsN7wXJVdJSkq8x4jpKOHU/tg40izEqUDGu4YwEBI
-# fSnFe/Y11yhycHeOYWjM8RAtyb41tGzMzHGuF24EhWVBVAx1VsPBwzpa1SgL5D2X
-# 96yQD+z6yT50W7JdNsTuS56X+G2IQ4o3RBGTcYWjBsT3Kuocrxm/4ppyfyG8RRW+
-# UcxTnquso1IOzXCD8pV11kLUz5mZeAcjOgfasPXlgx13MavCHWVbxReWe7DFN76L
-# QGX29UDQFbxIp0UTAMgKjLXY0RZ1lMyr2MXQem6Cgk7frXAF8nfrFYdpETWixJy6
-# lKLM6Jnl3E6j0Pj5CbiaupUAbZuJ/gzMu1WEJjIgZRp+MmK7asb61kX6gK4o80To
-# bUXX3wlY1vgJIHE9tGMBtGBjg90FuPTH7mq4pfkjvrGjc3aggh7+BSqRbdRMH1KQ
-# DtoDcPckzY+l76UJ9Wyn8OQJrZd742OKhY5aNyb7tT50vsuyGh2O/nVjAmr7FKF9
-# luD1sl0sHleAfxj9AqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBG2SHDAQ1bcdhlRp384C9+U/Ow/K7jER7YOSW8xorsEMA0GCSqG
+# SIb3DQEBAQUABIIBgIZluf3cLrhm5xwbP2JKF0ukFK31Jl3WWUhX2sdhhCjuXcFx
+# FF8PbrcaS3JVhi6rDRGxTI9uds8XEE7aetY0RDzKdg2/Gqb5KxktPlrf+ERfOb7K
+# rHAFnztd0ETJCqaYk20XkQEFXBrm0OfGTJ9oeNOV7IDRscfPrIxsWICeJQTB4xwg
+# K/GYZDC7scwF++7gHV9ynWALBSIP/TkOEbH47VfrRxF076fkOG02OVoRSR6JZYD9
+# N0LBCAZUpyEC8eQr17wk+DdoRIDr70zO/3sqgYqZW7fGvHpqmDJR55sxg8TO4m3/
+# t2/gKqO8vKj+jkzKJQ1LVETlLwRaXo+jfuWJmnBEebo5MLlw49m7u32hZKOHahDh
+# 22PY5HXGgNcwGD7GZWVc46adysAztIktEU7xr1sas+CFRd2gK3UVYg8bOZJMDhF5
+# +hDhTjDsw7caX9dAevWl5Qi/v2kfnQwmxUeTE7rh+e6BY8U4COOq8ukmtJPPdNV3
+# RuDYrUkizxxpDkTZgKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjkyMzU5
-# MDVaMC8GCSqGSIb3DQEJBDEiBCCc5cjuBbj/IcVEUgJYFQY9oDtlZLxSnO2E2Csi
-# NqelWDANBgkqhkiG9w0BAQEFAASCAgCeTuzLwKmSR83LrsweZ5yxKIgnIwakVaAX
-# X5M/qPqhv0pQh0dUiUjIA1Hr/+3KXviFyeWiOWo9Bq5Cgq6u06zVlr4Ukxl3waxL
-# uVIyWW65Uq9cMRaOlnZwPwuI98IoH0/n3M8JEF9d+JmLqOqL6oQEgal4fFQZoWqY
-# SljtAgs98SsDhFY1WyymGf6LsIiJJJWWVE3H3jSTZjO9Aovd9PLaUjoMK6UUbYVa
-# fdJX2ygTApUuxQQMchEjWm0mCoKpHB1VXRJ/jWgc6mlZAxYtGN6q+BpJNpIuMXBm
-# 9EZR24QkRHAFtsWmCri3TFxRoGirObUVgeu9EfW//GWpsYES61n41vxaCam+DJrD
-# gXwgMPz/nplILI8RgPWZOyeIYh9TvxYL4zpHasSkrnD2horUSCmNG64WvyVDHfUI
-# IJI64qAhqC7bWDB8qHImSYoudJfAtCv48iBEWdck5s+VXCf+BYHshfnKip9BaIld
-# XqGgxEkEmA5Qng75z2FpsA+Wme783LqrgebKFU2KZeqouOeD3K9lo6NwcdaqDlwr
-# BN3yYd2Y6nhwBMlLWDbm1ZfJ61vrkI0BYJpsjXUjShtphG3lNZLL2+OXhkqetykQ
-# JcqY33gc3VuKPFiQJ9FmmRkZ3OtTark59XdhUbDJptfeS52Ko7y0kpg1q2hZX2kP
-# mMKiq837Rg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA4
+# MDRaMC8GCSqGSIb3DQEJBDEiBCAjS0PtE+RXXE8j0Brf80mZW9Bf4jaOUByaKr9u
+# tIZtozANBgkqhkiG9w0BAQEFAASCAgCvwIe8GLm8xzIihX/XZRAsDfRFYkPRHkcv
+# /wXDED0cWMSJwfSYztTBfQw5HDzQCwFZ5NXn/VDkpyFDw2OCaU8/AAlgsHmfalKf
+# 0ob0UxpoFAkQG1xO2mnmqSj+F3bdr4IK5ID2LB4YKXIva8Q89+KvDRpaegyNA733
+# /68MFvuw7m9mYaF4rk9vzSGO36o2poJKv+/p8txduybapJdEKEtOJ5yJx4TBJdMx
+# FwpXOJohlKUh5clnG45VvEYXfQlzvwimSYcTNOTzsqx4K3NnRktemUBQT6ETdugX
+# HQ+5VqDC06RbUhYtzENrSOjRAvva1/9WhbQRcLAzQf1LR7Wnp9D6YOHFqLu3LIbM
+# r8lUfIveGgcvY2dMTpuZVQXc1jUobLNFZ9wKGpV6sGdB9Tbrq0veHklwFP3ypIfP
+# 8qtkVRpX1xtgTi4dj8Ah/vE0yNxV7Ql8v/rQKLM4qMau3bR0ngAZFO2Njh+gFXlr
+# C/s9vcMzxaF6D3bzRxhl/IaQQnqF0jzNaSF1quX7srhLXxk3Uc9tZTulIj56Lpjf
+# UuxMqZe35CiY7bPGWY1Tq+xi21sjUfxOQZM5N367E1KAlWWlyTRS/5GVKyxYFXw2
+# 5VFBLj5vQAFhgEc+2igQzpqVjbpJwjV9bYvqKThfXJW4IKkzzUmCbbh8uinLKiDa
+# hMvjd26Iow==
 # SIG # End signature block

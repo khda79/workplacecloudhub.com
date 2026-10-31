@@ -1,7 +1,17 @@
+<#
+.SYNOPSIS
+    Offline SharePoint on-premises content inventory tests.
+.VERSION
+    1.0.0
+#>
 [CmdletBinding()]
 param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$global:EnableTeamsNotifications=$false
+$global:SmartM365GlobalConfig=[pscustomobject]@{ProfileKey='test';EnableTeamsNotifications=$false}
+function global:Invoke-OfflineSuppressedTeamsNotification { [CmdletBinding()]param([Parameter(ValueFromRemainingArguments=$true)]$Remaining) }
+Set-Alias -Name Send-SmartM365TeamsNotification -Value Invoke-OfflineSuppressedTeamsNotification -Scope Global -Option AllScope
 $folder = Split-Path $PSScriptRoot -Parent
 $scriptPath = Join-Path $folder 'SmartM365-SharePoint-OnPrem-Content-Inventory.ps1'
 $templatePath = Join-Path $folder 'SmartM365-SharePoint-OnPrem-Content-Inventory.local.json.template'
@@ -352,6 +362,12 @@ try {
     if ((Publish-QualifiedCsvUploads -Paths @('run.csv','latest.csv')) -ne 0 -or $script:uploadCalls.Count -ne 0) { throw 'Disabled content upload was attempted.' }
     $global:EnableSharePointUpload = $true
     if ((Publish-QualifiedCsvUploads -Paths @('run.csv','latest.csv','run.csv','failed.csv')) -ne 1 -or $script:uploadCalls.Count -ne 3) { throw 'Content upload qualification failed.' }
+    . (Join-Path $folder '..\..\..\Modules\SmartM365.Core\SmartM365-SharePointUploadPolicy.ps1')
+    $outputBase=Join-Path $tempRoot 'policy-all';$latestRoot=Join-Path $tempRoot 'policy-last';$global:LogPath=Join-Path $tempRoot 'policy-log'
+    $global:SmartM365CollectorUploadPolicies=@{DataAll=[pscustomobject]@{Enabled=$false};DataLast=[pscustomobject]@{Enabled=$true};LogAll=[pscustomobject]@{Enabled=$true}}
+    $script:uploadCalls.Clear();$runPath=Join-Path $outputBase 'run.csv';$lastPath=Join-Path $latestRoot 'latest.csv'
+    if ((Publish-QualifiedCsvUploads -Paths @($runPath,$lastPath)) -ne 0 -or $script:uploadCalls.Count -ne 1 -or $script:uploadCalls[0] -ne $lastPath) { throw 'Content upload category selection failed.' }
+    Remove-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue
 } finally {
     if ([IO.Path]::GetFullPath($tempRoot).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -362,8 +378,8 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUjlM+pJAuYsm3
-# tCCF8vgmfXeGn4aB/h3lL+7bbxYZj6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD8JwnPJKIx0ur5
+# /fTPdhhnLfWdqwUgD59DB43EJde5B6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -496,31 +512,31 @@ Write-Output 'PASS: content parser, nested configuration, persistent paths, lock
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIFovz222pLw/A+l++Aga4/7aSuYZ+kZJh8li+qg5RIMMA0GCSqG
-# SIb3DQEBAQUABIIBgIGFG9UVr7Dxs3C7DY03X5rysnwK2XdgCu4dw1c5iPJYQr23
-# EIBEaj7eGq6Up035mI/UTCkw3fgTF+h4GMZQdQ8XANPGzgI8YJ8N7Vayp7IVL2hZ
-# Omz0OFDt8Q8n1I+wpROjwlKLcOqY6nIaqD4ECLJgDTvzUVvPuGigXpK27l7TdVVI
-# qu/uDzGLA5ra8AV8PTp57Pplrpis2oW3T/62778c3S/htMnQ7VIyymgoWlcYVam1
-# TzuLhlcX+WIIbM0FNMcJnuYz3YWMuaEaM3YJ7R7zoaO7hlPmCKjFNrBs9RBRAjVB
-# k+HkM7djo1KIt1BSmM9bscTaHNSYMlmhe9XmXKjlNtQNAwNKfF4OPl4Sy8UbZ3IS
-# HGl3fTRFyvDwVgqyFoyf5gCemRpPXh1ZjLB3sdd/VcfDKFayzZKK/04aPmtTT4mR
-# JMA44f3ot5Zdt90M+WjS/Wqp4dsl8UR2er1Gut+QQ0XnVWjW83oVxHg8+CNf+S1L
-# 89QxA+DoGWnOth9k0KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKvn26Y5ifPP3h+iS3CeFhGCJ2d1AX7J4qnMQjtny88QMA0GCSqG
+# SIb3DQEBAQUABIIBgEJ6JCgw0WdwMFgD30mecgqhInxbj1yyt+V4DyZZK784MxhC
+# wN8PheqwUhQXTbB/5C1YQ6DNbhThuMx2sYJSXVCL+HH0UsoeC6EbD8QYpmpDuyCU
+# iXVGAHP1tOZlMlIALgRfTQUESiqUowdX7ppdYZNQyx4vo+RBtbVkjx/qK5Lt7KEO
+# XrCp+tgGzsC2Pv8VLG/UIdg+6kZ3eRA/vUFLXyGAigL9bLroy+RJg+T/HFuWKUtY
+# W0hGaw9O5EbnYZcLiQPh3jErh8vo0GpA66jfRkb46GVAUY1oQP7WST4AjBTq15oa
+# Uo8UcfL8EwkosVcLZRRjespf2uN5hGJiVXnRUjGQ8PK+17s667dBHk/hZlsSycoi
+# gw5lZRwOsIvT23ZgFIVEawYJc3HHsh0e8qcRSliXOz2j/JDSeSGNEscStXGPDer2
+# R12CcPF0mSkdiFnjd6ajKUjZBOcvKS2mLctI2EhtnsCgp1Jlzm+4+8ArMVa9YxwX
+# HnFkRmIY2EiqHtbj8aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTIwOTUx
-# NThaMC8GCSqGSIb3DQEJBDEiBCA6vVeSce2TTCfAIYd+HN25p4hG0haDlw/l8xyi
-# 1GUqYjANBgkqhkiG9w0BAQEFAASCAgAuqt6r17/7SqnNDh6BzkebALuijHvseHey
-# 3NBpjtp6vobDdtdpNgDoNFP9+eVv2XQJeYHoMCSGvgflGdyoV3QW78ATCzJ2vblK
-# xQ903UtXB5OrQOe+hpMLQyeBXDYvz8whl+bhCLI54MG9/TRhBq411+Rkbrud166D
-# 8i+QYeej30ewJgX/wUyrn9ap3pVK2FILGviXs8OnYpkWAwnF+vloJ5v87AAk88JL
-# VTtOO0adVYNsf97rJ7W+gF0a2wJ3Ud+tlOThFedNrNLsOPBPGkP0UVlwasn7lCMQ
-# UkwDGiZ5qZ4JRTrhuoT0P23+ucObo+Q6Q9eQ5Wcj1tKIKC4M4sQ12aHtcLvzftGx
-# 3q2VAbZc9cB6HfbU7B/hUs2QZvZAbK3Ddnn6VSYaxbvVleF+J6IcHxYIBC01V16c
-# AB/Pd5hBonF+JTDSjRWNLrPjh8XD246X5hS7IfbWKUyY4HkfyXkR87xktdMdooxE
-# O6GRKXCXf779FqRYONyvN7sAP2GsuyMFey8Xncde6nS7eAZ1rtucRJP5Jk3XXadc
-# tabXp1X2RtKgwTDyDSMk/89tcM92WDBPMJuKfUZU7e3lJqJxFCrOz/jKAvvaMpvS
-# EEQpB9jEB0CxEFgNksInqYIOQmqsjmgUptckh34oQYhzNRCqUSf/Rnym90z9z/TX
-# CIX8bEnUDQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExMjEx
+# MTVaMC8GCSqGSIb3DQEJBDEiBCBug+YzV+QlWIagITKQWZTecxFrLN9e5+HdpzZU
+# wpYFMTANBgkqhkiG9w0BAQEFAASCAgCX2GW7T7oNbdRHNx5OLBpePiCjoM+qCzF2
+# T9EfUexetekjLo52JqsCOCYkffTzkKAwSNi8R8WGt05nAVKZ6/fbwVIjL4MoiGrX
+# mz/Cewns88ABv5RPof7lbxTRh7yuMBIAZFURJzs394Z0kY9MVecD1rLVWOUQKXu4
+# d/3uzmKrrE2VNapmOi6hnO/IA7fYuyiVfHJu/v7KsZddlZe6I9FNcnZrGkkeZX96
+# qc+zQaUq0HdgceeDzUpPXvektTN+gH9dAl0i4f/PMg+EW8KQ6jHmWd676WNUI6xp
+# Xv0xxh6tqkMCfjYvGXUVwQTvb4VPfiZ2gcTR+RsMEu68FaBywI49QGVQavyyB2M7
+# QZ4+kjNSEvxOJ3pV61YGatjw5iknHQnATB5q2lbuShWip7kNyyPWP3P3Nr7mbT+J
+# QVbxGX8OU3DmzNXV7aq04zLM5erJa5OXrDOBTN/shNtssaNffiYyRFhWwj+XXLAJ
+# 02bLlPenIQ1HeWS5FvKqBpQPcEjGNTQ72MxEwTFnhQVBCQJ9tBvoIKMrhBP39z5e
+# BdZFyurmkNFb1QPVOjRlg5VRf3ylatF+bJxGRiCfdA84kojeZfsBo9gkdlnmHWVJ
+# rDFz6rs5FMvgrHhzFJr/3eqI7n7Dh6Mk1c5AaCIZEOBs1Rn4GcQEAKuCx1IzkDYs
+# U+YXIhnRSg==
 # SIG # End signature block

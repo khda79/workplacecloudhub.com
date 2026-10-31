@@ -1,4 +1,4 @@
-Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.1.0' -Global -ErrorAction Stop
+﻿Import-Module (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.1.0' -Global -ErrorAction Stop
 <#
 .SYNOPSIS
 Loads SmartM365 global and tenant configuration context.
@@ -7,7 +7,7 @@ Loads SmartM365 global and tenant configuration context.
 Merges global and tenant local JSON configuration, resolves workspace paths, and exposes the effective tenant context used by SmartM365 scripts.
 
 .VERSION
-1.0.14
+1.0.15
 #>
 function Write-SmartM365StartupBanner {
     [CmdletBinding()]
@@ -495,6 +495,7 @@ function Get-SmartM365EffectiveGlobalConfig {
     foreach ($key in $tenantConfig.Keys) {
         $tenantValue = $tenantConfig[$key]
         if ($key -in @('From', 'Cc') -and $null -eq $tenantValue) { continue }
+        if ($key -match '^EnableSharePointUpload(DataAll|DataLast|DataPowerBI|LogAll)$' -and $null -eq $tenantValue) { continue }
         if ($tenantValue -is [string]) {
             $tenantText = $tenantValue.Trim()
             if ([string]::IsNullOrWhiteSpace($tenantText) -or $tenantText -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { continue }
@@ -597,8 +598,8 @@ function Initialize-SmartM365TenantContext {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmQLdm4hDwqubh
-# C1tMP3A0BaN4CZGNLyihDg7XW0AJmaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDsXcjHb1Xki7PA
+# EOYuI85NM5mGawNCXhbf/KLXqo8rzaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -731,31 +732,31 @@ function Initialize-SmartM365TenantContext {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAqMjj92c+B/GUHpLzsn/V3dnicBggnACKk87ZdNUlxZMA0GCSqG
-# SIb3DQEBAQUABIIBgGEg7K+uuM3RLSir4CD+o5xGtT6g9vWmjZ34JH6icH95fVq3
-# +HFtmGjsYFou7Eetdnox7yF01k+yIWEwn6n8NWcyI2YqzL4UXzPS6lWpJnk+PQXk
-# kbqNN3Q43a1Hb0ENduc1ZPuN6n9medgkntm5u9RMJ5P+O6WJxz09OKsml3aDVRBQ
-# JD2zP1j+iz7WOYUApya4PCEGNy/cMGY4pYvXrx/kkwwKJYNo5O5n5Dw0OLAOmJZj
-# DaImukhUnCjMcI+9qI+Rt9iTfRy6zbtscGPzr3uo3dSXVrxcwWvk1DCe9TBiCWmQ
-# inoJEXJOtzlRfRMpgRJ44chtrngr6DuHeyvDZM26PnuOfXn89qORSteYzqCKwpRu
-# tjYmMJXx+IcHPmZk4ZSXVkvLK41XWGMHwMtmz1C+PcbiTAUF5tUHSjnCPl8RyuHO
-# lZr7fwb4Fl/cgPTdCZC3R/V4aoZnVVI8WCN/keZ0Cm9Ym+7yADvi2BUwGUqEBOz6
-# ahGlbdSFqcU+0PgCDqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFO7J58Oq44pQTXrq7rgW6t7uXVX13xD0ZGjUtIOtj6/MA0GCSqG
+# SIb3DQEBAQUABIIBgFkUHNA3VMXgsIwTXzfxUbkcNpiWV/NNSSfiuCrP0actyCo+
+# CLL59Mc1Vfj3ZHTykMRQHRYs1eGydPF+gV8cp9YJSC8q3v5Nk5H56dBlKgnzRPHB
+# hpQdZxUn9l6ZWGkKBn7QcZJ3l55XgpsvxDn2hoEAhAwODIQ+Lke8sNG6Ghau+995
+# yvgMXh3Z559h32QHRQAg5GpEmOgX1V7KS2PkRhTcIVJY+IfQLUwQVTCBwWpr1vR3
+# I2HHU/KSqBMnM6Z8tSdJ8FrlhDKLIho1G8JnhxvBwQq00sF7JbLBzbU9RayxYiQg
+# YyJobaslQRYw/xksshMMOch99c4tl9Gs3Gy+r2/nO/upVw0KOanu1MiLfszZbQxy
+# sBNm0q7M8RAsORoGxWQzpYAaHXTd3E1Dz6QyBVd0r2YN+uqBTws0CqQb50CysiG1
+# YOq8aJabHsfrz19BY96VMpAuXDL8oZEGPaF6NVSbN9isOJW9yGJ60wK0dQ89DUaD
+# KWss0W5Wtu/WYCeeRaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcyMDUy
-# NTFaMC8GCSqGSIb3DQEJBDEiBCC7e6StQHZ31vbzkMVjB1eOI6X0H0zpUNodwDpY
-# wHvPITANBgkqhkiG9w0BAQEFAASCAgB0ArtaYyKJG+/R/7b3aLoB2TL1HhnewGjd
-# CXJn4xiGOkzoxf4oqW+C7ZMlLHvNZ2lAzbGMBBIKuOAMIBAjl7dmVQDK7KcuCu2f
-# f6Sx0iqCvYuVqKXeI2HczxfbiIZcwUR8LA61UYCLmZAglgAkdg2g5WssRIkKJA47
-# BOxmuWuUiwIgY0TF3UmUeh9TfMLPXAHo5+cyAH8uLq1KH7+qtwMKm1hll2fZN4HC
-# FChl3ALta65QOxG/dpK1mxjvHk8++LswYssdAshbRE794+XtHz7C3thrtBEghpmE
-# y4EYYcpEozVzwRHjFJesjVkhOIosfz5HuOnWlsoT9w2jtuVidymP0AaEkq4rbHhI
-# Xr8ck+lcMO/4uqvLe2o0p9UGL9/99H2d8c2mwK9tvCuyJ7CF1Lq5kCHKwfI6q35R
-# RTGINgKBylvWWp0KooIho8Drsq1xytfax/BUHgA73p1hzulfPUucEsXBHx12hDT7
-# QB9PUn/VcYxGFdRCIIdjZkDG941hEbf+u2IaDON8U9CvYLTX9Mg3PnMubdJv+4GX
-# 2M0yPq31ztMowXWCr+yDGwMKBi293ebhFjGoZV7650nn0631ur2sQvxQwWFa1vy3
-# M92Dn4B3xWedgkAlM4CRPEXdtDUniXMrW01NQKjNEaKv1nKfyXzXyt67hc92fMa0
-# kt9+pU2ZLg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExMzU1
+# MjlaMC8GCSqGSIb3DQEJBDEiBCAD3wr8qINKJMk6lfNtURuWtWIaAxUv1Bx8t30+
+# jaCBQDANBgkqhkiG9w0BAQEFAASCAgBkTsHQ/89yiLM6nzRHwKzEcM2WAQGV1XdE
+# b/wHMNPzrIJ9X9o/P/sM95WplNgWYppYdoEu9+UjbEt8hNzNVfVaeYeMAqg/THk6
+# CMFN+c3Ms+L5z1EcSnAn7X0Pt/gF4wot80YkHBUTnJfsWEclDweZjRmMr103ZT/c
+# 7rzakaiN1W29oPr160vgt2rGwTQXpYuDTm9s3polmqK5WMsqMj8+NXrhHOpGPDzR
+# D4ZTcawV+ztWi3enqPKE4FdrAOLfvb9CWxQPnDLDTwZw4No3gB00vh6EtGK7bjop
+# XGoGoGuiejYa5mqDHKtnSqmh7WaYGzjYE268nLY150IxRCdWRLSN3I7l1hhQ9/mW
+# UzfQCrq2Z7eK4yQJZCUTIeSoOnWm0MPHByyMfLl+UBwEFORv+c+pPZmIWrpma1rQ
+# J9bEqi974tmVmCUONiy4n48aJazGALDyGF5kEnoeFLJJO9AZdxWRY1s2Ud+Kvr/h
+# Rp6/hDxZFyh3/Ht+DS32vKjVNDgpfn1LPcBXgFBwWHIVolcCEJh/7Dcy8cTZzwce
+# Bdq8spP/4Jf9q1F6Pc3U8yC40Q+Dpg/NEhtthHN6tnKrx9qo1TeUkVA4lSX7a1V9
+# EwP/P3/p78kfTBu5iRSDuz/ILNOk+eVl1KA3u6J/rim+DmTsr7Kw/CPqMjpHbT1e
+# aipdRTW04Q==
 # SIG # End signature block

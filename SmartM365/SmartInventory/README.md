@@ -68,6 +68,29 @@ device-status date. A policy modification date is not substituted for it.
 
 ## Daily capture retention
 
+### Independent SharePoint uploads
+
+Set these optional JSON Boolean properties in the global, tenant or script configuration.
+All four appear in each collector template; DATA-POWERBI applies to prepared evidence,
+and the other categories apply only when the component produces those artifacts.
+`__USE_GLOBAL__` or an absent property inherits the next configuration level.
+When no category override is set, the component's existing `EnableSharePointUpload`
+behavior remains the fallback.
+
+| Property | SharePoint content |
+| --- | --- |
+| `EnableSharePointUploadDataAll` | DATA-ALL exports, operational mirror, daily captures and `WeeklyHistory` |
+| `EnableSharePointUploadDataLast` | DATA-LAST current exports and source receipts |
+| `EnableSharePointUploadDataPowerBI` | Automatically transferred SmartWorkplaceIntelligence prepared batches |
+| `EnableSharePointUploadLogAll` | LOG-ALL logs and transcripts |
+
+Collector safety switches such as validation and dry-run still suppress their
+external actions. A deliberate `-TransferOnly` request remains an explicit batch
+transfer even when automatic DATA-POWERBI upload is disabled. Prepared evidence
+logs retain their previous default when no LOG-ALL override is configured. Remote
+retention follows the DATA-ALL policy; disabling DATA-ALL does not delete its
+SharePoint copies. Independent choices require distinct local category roots.
+
 Core 1.0.92 adds receipt-qualified daily capture retention for eight producers:
 M365 UserActivity, Copilot Usage, M365 WorkplaceScope, Intune Configurations,
 Intune Managed Apps, Licences, License Pricing, and Windows Autopatch Alerts.
@@ -91,7 +114,7 @@ records are kept after their payload is retired. No archive is created.
 Per-file count/age cleanup is bypassed only inside the opted-in output root.
 For Usage and Copilot this root is the parent of the run folders, rather than
 the current run folder. Whole-set retention runs only after receipt completion;
-it verifies retained captures and every candidate before deletion. If SharePoint
+it verifies retained captures and every candidate before deletion. If DATA-ALL SharePoint
 upload is enabled, captures and their metadata must be uploaded and read back
 with matching SHA256 first. Remote deletion uses the inspected item ID and
 `If-Match` ETag; a remote refusal stops local deletion.

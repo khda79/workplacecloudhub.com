@@ -3,7 +3,7 @@
 .SYNOPSIS
 Tests real evidence runtime imports and receipt visibility without tenant actions.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param([ValidateSet('', 'Preloaded', 'Cold', 'ActiveState')][string]$Scenario = '')
@@ -92,6 +92,18 @@ try {
     if ($global:OfflineEnvironmentCalls -ne 1 -or $global:EnableSharePointUpload -or $global:EnableTeamsNotifications) {
         throw 'ValidateOnly environment boundary or external-action suppression regressed.'
     }
+    $effective | Add-Member NoteProperty EnableSharePointUploadDataAll $false
+    $effective | Add-Member NoteProperty EnableSharePointUploadDataLast $true
+    $effective | Add-Member NoteProperty EnableSharePointUploadLogAll $false
+    $null = Initialize-SmartM365EvidenceRuntime -ScriptPath $scriptPath -EffectiveConfig $effective -DefaultOutputRelativePath 'M365/WorkplaceScope' -EnableConfiguredExternalActions
+    if (-not $global:EnableSharePointUpload -or $global:SmartM365CollectorUploadPolicies.DataAll.Enabled -or
+        -not $global:SmartM365CollectorUploadPolicies.DataLast.Enabled -or $global:SmartM365CollectorUploadPolicies.LogAll.Enabled) {
+        throw 'Independent collector upload settings did not reach the real runtime.'
+    }
+    $null = Initialize-SmartM365EvidenceRuntime -ScriptPath $scriptPath -EffectiveConfig $effective -DefaultOutputRelativePath 'M365/WorkplaceScope'
+    if ($global:EnableSharePointUpload -or @($global:SmartM365CollectorUploadPolicies.Values | Where-Object Enabled).Count) {
+        throw 'Explicit external-action guard did not suppress all categories.'
+    }
     if ($runtime.OutputPath -cne (Join-Path $effective.DataAllRootPath 'M365/WorkplaceScope') -or
         $runtime.LatestCsvFolderPath -cne $effective.LatestCsvFolderPath) {
         throw 'Runtime output path inheritance regressed.'
@@ -117,8 +129,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBUes1xJh59eKlA
-# tg9H8PMK+RfCzd31afnuFH0qYJhCXqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7ErlFscyvHz+C
+# sq9UAbMYN+XEmAXPmLQY5KDKnVT/c6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -251,31 +263,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIk/IN4o+UvyWZL9BKsZd05vbU1kJ7m7BOKYNJraT4oPMA0GCSqG
-# SIb3DQEBAQUABIIBgJu+wfmOvJJOYEJPgK01qRbA+1f1HBju6XUwKR7OMFddzIh6
-# ycKwsJ+NDbRCkfenO8ACSDLP4qRG9wVyQIGXrmmFRTMHSmvGddpjNa2Arue7G+vM
-# mTffjGDlON0/PSZrn82QSpwD3FwP+pgxVuH0JUC2VuEpMT2YCE0vaUQCDWcEbDjq
-# gpyHxy5IBaAwaQlW4lE1dwpeoXIyGbEDcQdyzUwZk06jBCUnP8NT3gfB1m1XQGNo
-# 6y2Ii6SUGajPHa891pJwuwlM689ap6ead/fk6vk31VU/vRRQlao2sqk78/beUVFR
-# wdD8ucZWXaKqlfakx2GOJaDht3CdWEx2EvEcnQsYaLYDhkhYOi+spEREhgOtXoJ9
-# CC8j5IeEewCabKlH7l1/pHwmhQfjCrOuh90SW+kvxFj6peWAtCk8wrzrZgBRa+Xi
-# q0G6VdTXYPelJJztaFfFHX4HdPRfv2Re/D7uDjrMNDbkmvi18TWr2BlTtKYzBRXQ
-# 4wd4B4sHDmNwF4zmL6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA//rgykwUQyzJLMvSZGQYHuwRcLSOakk1JoeVeCvjqrMA0GCSqG
+# SIb3DQEBAQUABIIBgGvD41WiDU46rr2PkbjGXX9f9t4+z8FDn+isLuzQmH5w0jGb
+# jMUx3wXR4bumlb5yyb48iTYUdNoBn/DP14+OB1I6dzUtsphz3JKJrddfGWtpLXwp
+# 2BetSN9QpqAlW54mc0B9TmuWq65rXmDVtNZ84agRfOTDggl2Lh8U3kV+oxrSotKV
+# VqlSbaYioG/3L8yWbms/l7rj2MQbhvo0oAbCnTdPgAhoAwBpvdmFzX9KlMH4Eh8h
+# yOc84vXHR5JaB21vv91Rai1k41oT41NAvuiUJI6mzix2yVUbcI8xoNUuqOd+J7Fg
+# /eGH5kUcAag1v+4ulcPKNe4zQR6fnM7j+erGU8edJcVy/XgkUe2E9K1vyyiRFItp
+# V/o2QAd4YDz+nTjBw+4HibVcX3BhaQ6EPAEx5FxSONj65zcn8tGFLe0A0ON/jY2G
+# HMZxGInJm/vuj+uEw30ng1rmCZs1yL3D3YTDLP0zcip5ehCQFCBvgV1dTWRvx4L8
+# /YQyP9P3in9XXOvFg6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxMTMz
-# MTZaMC8GCSqGSIb3DQEJBDEiBCBEOeEmuCxxCUygu/qIJNcKQnTAtvypCnJySsEI
-# AwdgmTANBgkqhkiG9w0BAQEFAASCAgAosxFwm/jqGvOu+i/65K/UejO/M+xt6QLM
-# w1N+nLMKoD7SGDw4xf451YXLBZLc+6L4kZ24/FHncrk8fPSSYJfZD+b7O3zh84u3
-# EhdGh5kHGGyxsfX+kszYeohASVOjHrsz7pLKuFzC+80C6sS5sNmCquMZIkW1PsGW
-# C9Z9YfJYiQapbyb93+c0jLo6BoINhTIhIZ9Jv/erABiUqlzl/4mPkkm86th6BgAn
-# igGu5MTeNEFdRyT+N5I0UqKpQsLnZb1YZwab4Zc3ZDSaYrE4Uepk7nqlINieWPrP
-# vc/7wfH3NKlmh+6/0n4QpkWBCQ9YIiEdareXx9vFcSFxuJKPZ+CZq+fJSxSmj3Q1
-# ykD6A7w9VBbL9xDh4Uj2i7iN1nJEZbFdUpsvvUCERtThy5wQXwk3w/eT947hPaL/
-# 9PKHXXKvUtvN4r7BEUOS4e8ifRgCoWoiBbV0E0WQLDTTidgtW4j8IZ67Dpk6amlj
-# tZzvSJWgGdqSxPtrR0fdUDklvscPMTseVuei9ugxhHtkmtO1+PQVxXTK86Bm/NOM
-# ZQXJ9+f5re/Sr3zEDrfT6tnm5abyAzHlssE1ZEwjtoWbeUQAZl/bkSIiorl624Mt
-# v7BY47Vw1MP1EJL/08nMP3d4AWUGRckd29u+wfr5DcRgxFNY93fLYng5zRKAks8d
-# QN6Uz8gYRg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExMjEx
+# MTZaMC8GCSqGSIb3DQEJBDEiBCCtq6kzJKfGKgCEd0yckwnBSCK8OEvT2IT+Kt/b
+# DvpA9TANBgkqhkiG9w0BAQEFAASCAgBHM2GgCE3TjRQYq1rmzC5UT+QuCpYOEYti
+# V34LZnTM5dZ6/zvdtuxTBh+pG3cfct557uePekbzgqU/oXcqXo25eCfm/163VKow
+# WFpl8VaIDHriaaPjWaChyjaIJhhOZLXWjMsOXh9agkFNRym1j38Fsu/V4v+xXnrX
+# jyQjzaTmuLHYAhGAfig1DXhd9AHoQ1eEuT7k8rqplYZuPsQ7y7ROXclsNnsKWFvN
+# ro1XeJ7u2QyB5zQFu1yJY2vGT/Nh/oPn2IC7LAUITP5yNXDGMq98bTZkubE8MCSs
+# BqjFdqIPJg+DWf9E4FcmDrd75x8nCOIBo82haKe4pcLFgr9PNGCEJ2es+GWsiO+R
+# izEC0F/CcnOb9hdqDpEKjFzEVeUqZ6da9HEfoU9N3klIt1+2aLH9l3lw18v+Gbn8
+# vb8XH/8WfWI4zfaDT8TsTDhUNmS7g8w4dgOYExsSkUHXmZaUDX1YtG5XqldDLhQP
+# 6YNfj64zQUoZrz4TfGy4byV13Xm3SA4KZjUdBmZzEMeHNH+PsqBNeIXX+2g75rua
+# 3g4iLOtUkJkuGhQPGz4RSLkCHxOHx42Khxm6VW8aAXUDx1Jqosn83iqNea66mBP6
+# RGPU4IkSxq+Ri2mNxpe+eCryVXG9msQobnUzErUREozENEzWI06Ae+SeWxzp0Lvc
+# hrSpiAU3dA==
 # SIG # End signature block

@@ -1,0 +1,6 @@
+{
+  "EnableSharePointUploadDataAll": "__USE_GLOBAL__",
+  "EnableSharePointUploadDataLast": "__USE_GLOBAL__",
+  "EnableSharePointUploadDataPowerBI": "__USE_GLOBAL__",
+  "EnableSharePointUploadLogAll": "__USE_GLOBAL__"
+}

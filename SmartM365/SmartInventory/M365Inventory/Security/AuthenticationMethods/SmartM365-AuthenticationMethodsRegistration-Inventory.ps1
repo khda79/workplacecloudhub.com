@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Entra authentication-method registration evidence for MFA, SSPR, and passwordless readiness.
 .VERSION
-1.0.3
+1.0.6
 .REQUIREMENTS
 Microsoft Graph application or delegated permission AuditLog.Read.All.
 #>
@@ -21,17 +21,17 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.0.3';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.0.6';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-AuthenticationRegistrationRows{
     param([object[]]$InputRows,[string]$RunId,[string]$CollectedAtUtc)
     return @($InputRows|ForEach-Object{[pscustomobject][ordered]@{RunId=$RunId;CollectedAtUtc=$CollectedAtUtc;CollectionStatus='Observed';IsPartialInventory=$false;SourceScriptVersion=$ScriptVersion;UserId=[string](Get-SmartM365EvidenceProperty $_ @('id'));UserPrincipalName=[string](Get-SmartM365EvidenceProperty $_ @('userPrincipalName'));UserDisplayName=[string](Get-SmartM365EvidenceProperty $_ @('userDisplayName'));UserType=[string](Get-SmartM365EvidenceProperty $_ @('userType'));IsAdmin=Get-SmartM365EvidenceProperty $_ @('isAdmin');IsMfaCapable=Get-SmartM365EvidenceProperty $_ @('isMfaCapable');IsMfaRegistered=Get-SmartM365EvidenceProperty $_ @('isMfaRegistered');IsPasswordlessCapable=Get-SmartM365EvidenceProperty $_ @('isPasswordlessCapable');IsSsprCapable=Get-SmartM365EvidenceProperty $_ @('isSsprCapable');IsSsprEnabled=Get-SmartM365EvidenceProperty $_ @('isSsprEnabled');IsSsprRegistered=Get-SmartM365EvidenceProperty $_ @('isSsprRegistered');MethodsRegistered=ConvertTo-SmartM365EvidenceText (Get-SmartM365EvidenceProperty $_ @('methodsRegistered') @());LastUpdatedDateTime=[string](Get-SmartM365EvidenceProperty $_ @('lastUpdatedDateTime'))}})
 }
-if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force;$row=[pscustomobject]@{id='1';isMfaCapable=$true;methodsRegistered=@('microsoftAuthenticatorPush','passKeyDeviceBound')};$test=ConvertTo-AuthenticationRegistrationRows @($row) r n;if($test.Count-ne 1 -or $test[0].MethodsRegistered-notmatch';'){throw 'Authentication methods self-test failed.'};'PASS: Authentication methods offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
+if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -Force;$row=[pscustomobject]@{id='1';isMfaCapable=$true;methodsRegistered=@('microsoftAuthenticatorPush','passKeyDeviceBound')};$test=ConvertTo-AuthenticationRegistrationRows @($row) r n;if($test.Count-ne 1 -or $test[0].MethodsRegistered-notmatch';'){throw 'Authentication methods self-test failed.'};'PASS: Authentication methods offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1';. $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'M365\Security\AuthenticationMethods' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest)
     Connect-SmartM365EvidenceGraph $script:Runtime @('AuditLog.Read.All') -InteractiveAuth:$InteractiveAuth
@@ -63,8 +63,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDwh+WSOUTp+r+Z
-# 0lltdtv8g9DKQaKnLwQSTtK22Qpa4aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBq4haiiONhKskL
+# 8Ux/k9vc7UiTlaUgvuOywK2lG6SCjaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -197,31 +197,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJvTtqjIg71a3qSbPiPumFGEV9A9rvgokjMO/0XOHA3OMA0GCSqG
-# SIb3DQEBAQUABIIBgEaKsRD/Fie23aiOQKSt1ljrEPTW5UlclwVwwtpLAwtsNlmH
-# 6vDnRtckIRL3Q34MsInfUKU4zdQQUaYyBOkebjFr2MIrAm17H1u8dTFUJEVSFUaW
-# smy/kXEqiNxPKGrijfD+Vw5uavbvwB3508Z/4F2+LFVPfhxjQ4OAA04BTUShXKxB
-# 6R3e+S4c/MN//9Q44iOIOz47qoE0k2I4GvvOfa0+jStGVd1enKbcjoEF4IB0l/jU
-# 5qEChmGpmLLrk8WR9VE6tgWCbd50IZrUl/YFpGovFtnVPgCL+7JVw/YbhxDGFcGi
-# S2O4V2TOZm20PMrC7vzQmxSXVYH3JXFWQmEcnDdPAparUbEVxYh2KanDaqoh3ZAK
-# Cc9I6PeVY5Tx/RC7S0l2o7njyq51ORGs9LIFDjqKqPCWgTemzMd1xK/O9iAjEwy+
-# LhcCo4eNImjXR0dZ234ICKAxNtFGAnTQnSL7uLweVq4ud5iV359VrB7ohCX/YPJB
-# 60DRZKcwEqnQOo88wKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIBXTZn7STdASUESwWeHLSLwdS3hMIKO9KV7ZiNZR0JvMA0GCSqG
+# SIb3DQEBAQUABIIBgGnhgL5ca5aTG+EyGal9+5w/sXa51jjujEXjPt7/OZjrYMqg
+# igvmjFJZw3DWfbQ21S8PCvaJD8pduLxBV/yyc0dUAlUSmKV+FSoHHHf/n8KbadHy
+# 7/Z6ayFesfO06rFR9Rjjd+pRZvbtaioqTUu0zcefB8CWlpEFbyopozdjDmSWn+aD
+# RqNuLrqHCDxOPsMPTCIr/KUYhoO/6ZmwIFFBbwIHYxciURpNdyOUS16VxQaIz2W2
+# ceURmj23kEa+Ufw9tWA/zgGo0RTHYr86FdtUbjfxP37cN7sKMiG/finyFuArDM7G
+# REWGrG9Xh7L/54J8E6aENl8D14f6+I7ZecFed0a61vLp3rZTM09eX2dKkBHM1a8k
+# H193fJsdiTmFch3p+3MFjFSdM5xMheBbIOTVWWV+i42z0OqfrVGO4AsIriqbuwcB
+# yD/JPHZ8zy1IBA2cdz9NLiKxOTwhPPtXXTP0kPpWFS8q7VaGUQeKBtD3yECo66FD
+# tJyv+y1/XS2hRqGtQKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTQxNTMw
-# MzFaMC8GCSqGSIb3DQEJBDEiBCAWxXmEfBuHBMLp5QLoJJwY5IiaQhLVKISZ620a
-# mqIQEzANBgkqhkiG9w0BAQEFAASCAgBY08xy0AYwFr0WiLk+4I2Nx3MyBsEdaEKT
-# 3rUZXylIhX5sK1oM8CMH4I2EBinQ6cchCTKzg/5KHfdl9Qut3Ys4zzScxwLnbYBA
-# G811eZW3hEmE2b5/yp72i7PqwIZYmaRzr0Ph9WpZdKHS0emt4BLD4w6sOnMffXFd
-# lgqtnMyWUZP/Zi9HzeJ00KVZfHrYUk46WujkDxdICdtX/yIwcgVxXaMQ+TXKHf6g
-# uWX0Ixm0W4/arc4oNAIphh3Teu6w9kxesAV75SNsVCvQWnaqfZo/J/UVv+SxIt4k
-# NhtaOdeHgW8pcJ/Zg70o0UT2PLOc3CfDraRStdBP5nxZEYZxWyS762Sb3xoeObmN
-# QhxELpOZ0TvXdp6YwK5QbxmofoDrRTTO3TsE6yJoKscVdTSChKzkq9BUM0hqRvjk
-# ia1p3/DPpaql5YK3UtLfZ/eG4Zb3GHTHtGldqNOBUWsusdS34TXRFHEDWal+9A3o
-# 4eByjJqXRc+TleXE4M/vMs4dtEMlHf26J1RoWfg0JcOVzaxCOEwHuw38cDD5haea
-# KG1Ph/6zVEyUI09DlseN8VFywynMOuxc77MNArdM+ZF9+vOJV3Y5X12V/HYoW/4P
-# D1YF9GFhb68nebca2VlE0ll/McMVoZK0ipdz2B5zElUoqQTBJAm6vDQILpme08Fx
-# k9gHKQ47vQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
+# MjVaMC8GCSqGSIb3DQEJBDEiBCDytENwIrUjxTBR2KtRZL/0Q3hzaxTEFlnkTeLz
+# fhBKwjANBgkqhkiG9w0BAQEFAASCAgAPaJAAOpBtu64D799J/DFe/PJaBtVANUGg
+# SmWzQfy/mwAcWpkJzt/NOpX2UGVOBU+T+8PrAfjsQ7HJ1iy6VzPFdIxNBs+TYBpj
+# /h4gW56CiI6Vs+5u5AoZzRG31yDcfGjrA7Ou9icDNNYvWVWFkNV0i9kWd8HzibaA
+# siuBuJoZZu3cZlSgqXGTGC5Xgs0lneu8lJc1L2E1iMGDEcJ379sq/fsYwSYPWrYl
+# LQ0u3qdoUhWcbsZ984JSjxqUs81FCUn6VuEozsVPnPimhNbXGHMGiFOsl1pngfFg
+# yXwGsARHX9t4QH1JEJYld0gVboSPMLy2+7gRx9leWEjiFdXeKRvcmcrZFOAh3OcW
+# M9SCHWpbLgJ+08cNGBW4kvsXAZyikmW40vdpbSDY/00HFZ36EVfs9k+RD8/Kg362
+# WEPcVGCJjnfwz5BtWo3FQfIkqVZSqyWcqICYpLRP9tcw2UlpDy/GyLbS+tib8n16
+# GgQLiikFAy37YjGL6It1vMB8JOgj7ZBi9oMZ6L5ASOQ2JCjF5SueiG7rDnGoAf5t
+# cheFSyvjQTHDWR/oHA6i+i8OmZQ75Aa3TMwkCHgQLiKxOY/Qrsx9lWgceEoRgDPN
+# jyJqQtZpgQk6P1UU8NTe5+dZCEy/8+UU6RB1t1sUNHxA4QnHU+t3mdgUYDM24cNd
+# HWcnYKsQnw==
 # SIG # End signature block

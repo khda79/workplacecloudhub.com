@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercise Windows Update polling and ZIP retries with the real prefixed Core module offline.
 .VERSION
-1.0.0
+1.0.1
 .NOTES
 Only extracted collector functions run. HTTP, waits and random samples are stand-ins;
 no tenant, SDK connection, collector, synchronized data or real network access.
@@ -37,7 +37,8 @@ $temporary = Join-Path ([IO.Path]::GetTempPath()) ('SmartInventory-WinUpdateRetr
 New-Item -ItemType Directory -Path $temporary | Out-Null
 try {
     Check ($null -eq (Get-Command Get-SmartM365RetryDelay -ErrorAction SilentlyContinue)) 'An unprefixed Core import hides collector prefix errors.'
-    Check ((Get-Content $sourcePath -Raw) -match "-MinimumVersion '1.0.103' -Prefix Core") 'Collector does not require the shared retry helper version.'
+    $minimumMatch=[regex]::Match((Get-Content $sourcePath -Raw), "-MinimumVersion '([0-9.]+)' -Prefix Core")
+    Check ($minimumMatch.Success -and [version]$minimumMatch.Groups[1].Value -ge [version]'1.0.103') 'Collector does not require the shared retry helper version.'
     # Guard the actual touched request path; these functions must remain REST-only.
     foreach ($text in @($definitions) + @(& $core { ${function:Invoke-SmartM365ExportFileDownload}.ToString(); ${function:Get-SmartM365RetryDelay}.ToString() })) {
         Check ($text -notmatch 'Set-MgRequestContext|Invoke-MgGraphRequest|EvidenceCollector') 'The tested request path now depends on the Graph SDK request context.'
@@ -128,8 +129,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBiH/8gBlnQnRlI
-# WyS1kYhJI/W1ahHqnhYt9TOiDOrMXKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClPUdxUDwWfwZm
+# WLzDZLCJ5xXpZgWJO4AWnb2KOebh26CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -262,31 +263,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHQNxxOQ4ZUeWfwFXgcy+0wgcLuHTo0BkxFnXh3cegrFMA0GCSqG
-# SIb3DQEBAQUABIIBgBAB8zisbLOrEJ3sdajo/WQfYgR/hrtbKFg0706QjLF6wKTe
-# Lg++be0L0m9IJANPdQ4rLd/4tRlA9TlRlFuorXabKxxHWHp9pBx7oUdc3Lf9Qxi8
-# bCzwi/lsY/ahS1lFG5amF8QPNJo3Eu33cfb8o3rmVhtBGv9h8uCUi0VspC51MsxO
-# nQlhT9BaPYE+0oRRYpk3TJhV+vQ8L+pdAlIUtgNpgfjHJFTKq5ag1GbVWaBoo7on
-# em8+FKcXM32Qv05Nf+4c/mbFgY6qCpn3AKQsA7M0LfhhSH+OvN2phRaIsh7FjvYt
-# I1wLCbRUXXxFpUuxgOiSuTFDUTjuuI0VjNo+mp3h2PQcetnaCJ6hSvAdYu9bB2+N
-# h0OewUtAa6K6SOWKwcIxLRg7c99UZ+3fLqNYkU670tSoDB7K7WU0ft2PL/5JJ1O2
-# FNuSzsDzAACUyAcmLOZ/3rig/axLnGqjFmleMGAs6andbU9GppHsfkrbhZZE1Hpw
-# rYPAZozoxh1v1jV7/qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBQToTQQRUvOOJWWX92F3UFwv51L7NIBypK2+BrP3gp3MA0GCSqG
+# SIb3DQEBAQUABIIBgCQf9KuNe9uLc1GtAQg5kDgRcaTGrjAUYNY93PxXM6I7hGTN
+# qVo/4AcvjCGF0pGBjy/gE2+Ct5H3XCPPXPF4DRAkyeWEVPd9OGxrRpt/4SfFHVDW
+# Hlbm1uMZCU5ibHqOSsO+dwyeeSHG1xhLHzqLDOCX9OKt7HNnhba/v4Nx8TZnFE66
+# yPf4to+JcvWn7D4o9FZdiWEOsAGrz7ATsfzfeRzgiFsEQdaStqPge9U1MIRaGH57
+# 91VyBnPGA6ggMbtwjQ+l96oKwZ/Qo2OPYnCztnm5dLJFxqM/E/2ejouOcZ4ldrxG
+# KHIGcPn17UK0vIYozO1NUSs7eoVeSQ2KOt1C528fmiTxmm2yzzJQw1AdzErsBHSZ
+# i8H9LQHpnY1KLuBsV2Gpg8+KcBnCkF//YUQhNg09K+9EFrlQl0sX4/nEOK1oBcIG
+# A1fX8UWk/ks1g/7GerNj5hI5kpzM9kJDc/PU0noH9M9uO73OdUVa/lHhgynoA9OA
+# MrvtXppcg2QgQ+MqXKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxMDU0
-# MjhaMC8GCSqGSIb3DQEJBDEiBCD0xiQDWtmpT1F/b5JJF3siAfPWA3PcQbg52cwQ
-# SeOgwzANBgkqhkiG9w0BAQEFAASCAgB+GQn7SyH15TxYHAutzZuXvdQWBDDXvZ7D
-# kkUoc+C8YCo05jb/4p/FPF1/ZTFMUuTOejKWzsu5MrL65z8USRu68TAP6X974Gnd
-# aVlYl5ySlyxX2cX4GHE3C+JigVEKn2grXI++VVzFy1tT3NByFJJFx7sbqnDZmS1l
-# Idi98VLCxatHPuffa8gtgb8GzUhjnX/qDzZaxcGF3t8Ubsic6uYIc32jxOItAfJY
-# erUBw6QP8G9ye82wpVKhoopmNvJeI0mM7oFHWjpWfwWnrPFd7HrFsSg1SWb0NeRx
-# OldPMofOVsvvvoBw6JimK2lkyGbXufzifc2t53FSzyqMcqKoLbZx/LXqulTk2rp/
-# yH9tVJ/FTeihWulGUG3lsaXy7jkCmOqWtAUZ9Z4pewWohFb5IQ9jvZipch5M1HEv
-# JBm6/r8mri3SXgSnLK/BIsStvzSkmL4A1zTHx65Jcc3XxihwMP1od+Q44e6Zl5Xo
-# ZqNQCnDeyX41WE+vNd64fAbzapjOsrCHn95193IkyFtKDRf29P+12dXcnbXoRFtG
-# ieGtlJiizVFRvd5/nT4eb2W0BRUeSzWaE/WuWlALehpuvPVEWIO98dCNETSpRU0Y
-# zEXY0K3/RYhpXTH5ICwg6acpx03bJlk5q4JJHXHa6HMFyPqK+fLcrUNezhZi5bTT
-# nA7bpfSk+w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExMjEx
+# MThaMC8GCSqGSIb3DQEJBDEiBCAjwB5DlH67Zx1hz/3S7oGilrIU1BZ8OMzF8hbK
+# NXDrXTANBgkqhkiG9w0BAQEFAASCAgAgoSclEfewWFPVG9Q89s1zNJ+EZXzgWS/U
+# CDJZyxiAG/sgMZtHxbfECfF9mJeUKGaC+YdJJBAIaxXLlakPi2OAgH/Tc3QGklNb
+# xssvZSXDKaI43Nrz4fjg6/ynRVNGVxPyKzVF+19+ypRDqP6/Rt7m5yYqvlYKyE2+
+# l9nniCULbszy5CyYHuyN5FfTcBwmx4/1EOwSZ1EBGgEMy/UMDjg0DLl2GQqIVV+Q
+# 9yJ7XnuLMDeU//WOlj+YfR7K670x1crP1P1sp6VGXckQwgSHSJTIIP+aiOO8X3ou
+# JREOkmpkqXQCMML6PSca/rek1U/Ui8r3mnPkEjw9dKAFfu/yNfXzFLr4FB79/giZ
+# dA7WbG691u6bynmGdZGoPNK9r/rOxVeVm9Gxp2JKxtzHdxMZLXklcoiBL41qWh4T
+# LUJx7QoIpri+gAIiEh6BjCg5UbO3hiPVgABLIR5OO5hcs3qMRh5JVbWa0EtSv46E
+# 8taBBOBDyr/Gv3k12PycrYWX51ue7WvMMBFkVRikdSsoFDCSDKqBOFExzMxl2tEQ
+# THoUST2aX4EKUzQyvk1SVKfhXrBAHMFNAu4dvDHcRih8t1DWLhsQhg9dhgTXtnqi
+# Aq4F1/x0WopUY0GFNtF3snuAKYuRcHcjeRRp7/oM7Pz8Sa+T82BHWdqh3Ve+eVZT
+# QKtlGu5QPQ==
 # SIG # End signature block

@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
 Collects configurable Adaxes attributes of Active Directory users, keyed by ObjectGUID.
@@ -8,7 +8,7 @@ attributes (adm-*) are available. The attributes and their CSV column names come
 Attributes list of the script configuration. AD_Adaxes_Users.csv is joined to the AD inventory
 on ObjectGUID. Exception to the folder rule: reads go through Adaxes, not the ActiveDirectory module.
 .VERSION
-1.0.1
+1.0.4
 .REQUIREMENTS
 Adaxes PowerShell module (Adaxes installer component) on the collection server, and read access
 in Adaxes to the configured attributes for the running account.
@@ -29,7 +29,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$ScriptVersion='1.0.1'
+$ScriptVersion='1.0.4'
 $script:CompletionStatus='Success'; $script:CompletionError=$null; $script:Runtime=$null; $script:ReadWarnings=$false
 $script:FixedColumns=@('RunId','CollectedAtUtc','CollectionStatus','IsPartialInventory','SourceScriptVersion','Domain','ObjectGUID')
 
@@ -145,7 +145,7 @@ function Get-AdaxesDomainList {
 }
 
 if($SelfTest){
-    Import-Module (Join-Path $PSScriptRoot '..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -Force
     $map=Get-AdaxesAttributeMap @([pscustomobject]@{Column='AccountType';Attribute='adm-CustomAttributeText1'},[pscustomobject]@{Column='Generic';Attribute='adm-CustomAttributeBoolean1'},[pscustomobject]@{Column='LastSeen';Attribute='adm-CustomAttributeDate1'},[pscustomobject]@{Column='Tags';Attribute='adm-CustomAttributeTextMultiValue1'})
     $user=[pscustomobject]@{ObjectGUID=[guid]'2b26b47b-22a2-4fd1-81b4-6b1312936ffb';'adm-CustomAttributeText1'='Named';'adm-CustomAttributeBoolean1'=$false;'adm-CustomAttributeDate1'=[datetime]::new(2026,10,27,16,58,14,[DateTimeKind]::Utc);'adm-CustomAttributeTextMultiValue1'=@('A','B')}
     $row=ConvertTo-AdaxesUserRow $user 'contoso.local' $map 'run' 'now' $false
@@ -182,7 +182,7 @@ try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1'
     . $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $PSScriptRoot '..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.11' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'ActiveDirectory\Adaxes' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest)
     $config=$script:Runtime.Config
@@ -248,8 +248,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0JLNFJE3FYplA
-# 0YAMUffKzqJSrw0gCH+F7S72AedkQaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4UuiA2lQDMyT3
+# bVT2XJ79fGCuixdUfDYqOFEvEXtFKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -382,31 +382,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM7lyjXwWWRMAIVCR11iUNRBuahX+sxmBB07MWk4Qyf5MA0GCSqG
-# SIb3DQEBAQUABIIBgHnQFOLyI5PeXv0B84nxvRifQ3U6X2rH4F3i/ndmo7nKC9Wz
-# DYLcWBZPe7qSswQIfMEK85loJHTPfDPX0201ULH6IMtVv1NFcFH+HgnKkytUv4ev
-# Ca43mVlmMNNOhZHxYiyCqj489xS73D7Npsl+6diU6AdWYfdMbUSxVndWHGtcyMqb
-# IU6wZgir2Sv0VtAEHXXq7g6esuFhjbsHLQL9QV6QJr655xNnksvsWJV/WFc5QeD/
-# JkYeC6d4exK8Sj0ARd7DX0ECpaicZHvdZQN5gI04ZZcz9+37T2JnmRlIRKYdywNM
-# /MJ5Ev7MW1Woeu5UtNJTGZbnoDqxWAzqeriTGbEIUpu8XPuitj/XN+RZgZ9sDeJx
-# ewPB7pASRC+p8oCLT0aPQhQrmDfedGWTHD5al/tDHE0gxpRu6zIrVR2FmEGsER+2
-# jGhSjHIeuSAIzYKuxqlMkjQ9HqbndfEGI+NGFydizdYqn0qVXybEPt1tYmb/E1M6
-# uFULUo7hKYUcOcxpNKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJYJdDnjaz6jn2uLHgZTHmChsERSdPFw2BwPVOyfDgOZMA0GCSqG
+# SIb3DQEBAQUABIIBgAxmLEnN3q52qHQq2IhTmjJvW3V8h/f5t+INmCwb4sno+B4C
+# Qi1x0bRlgyWK8fDCyUAujQMsqAbDhuQnxampKvy67B/eTN5HjvIoWRe4pFxGpujk
+# v42HbgMSfhqrMbq1RNv0+yO6UKnFAgFB8yGjLnwE1KjMSh/1MRYp5MlHmuG2sr01
+# gSaK8vUl9KPbauwjuff2eGOauvMtJN1itIrRqxGZjCMUJ5qyUOPBlqxJn+FX2BbE
+# 4+NOpCHjiH7IXaYoBaOckRZ5S4ZYp421QjxkphEKLpKz0DCcex4nuu0IWfkHB2m5
+# WVeSt07ebC1a/bXpATENwOkt0w8/YmF+maEghIofb4LX7EUfwkJ6xFwyMWPSh3PU
+# zeYtjOlP/waFaU84GgeG1n0dyuJt6nSI+tbDsWBFCjPOf+mpLMP+OZLcafSIUE9F
+# wKdQk8s02NO83bIQyNz+XODQzEFbR2pzC/kFV/Q3PHQeTudiuWKJi678vHwdxj41
+# O9sgsb/z1yg01QUXl6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjkwMDUw
-# MDFaMC8GCSqGSIb3DQEJBDEiBCCD+CUg2hv6Sr3DUNeq1aVjlNaoDyIz/EUiuvUp
-# o8XeZTANBgkqhkiG9w0BAQEFAASCAgBq7dwqTVgIROUXizSGwN2SQepo/s61mxoL
-# vYZ187EbYaq7aijdYAZP/t/FZtgsDr9zAU3OJZGs59GGPjVbOhDFRhIF+HMouE0p
-# GVw8F+hQ3Wq1j9K5SyQcBd8/jm2VC4YL87CvTxv6/1kvyhmBozeK0rv+nF5TjOeC
-# 6isGIz86jjgOwSMX8Q7perlrj9xVzmOroHRkqpFDlLklSSu00C0tbiImPvUn/Tq5
-# M2D5kjwkMS1hujKZHAOwAgzsHLhIYlhidMcvhW0ubO05aXwpIAlWXaIrMpjEQ2aX
-# aPTObx60gORfXWBOu+wPw/pURvY8VSRYHvL4noQnlSUNMxGWczFJortXGhy/q7Ra
-# /21/rk2iTI02ebj/vwjbJU0c8cjMMFWYXYKRUYPV+6tCXXh9/hOR2SDzsHQ8ixEl
-# Uf+as0JWcwuroEqD707PeF6VvDpWqPLWZqVtJRW5AxRtJ+A217chQtKY0DoTjWXG
-# xxbsBI2X3w3Dur0Xd73KkHo66Xo0qV2GRy+hJQIkwBUDqtj647ziTkeaxUuTzV8h
-# oWjmf+p1GNsxUSHXa4h36Xmy7MroZDQbROBfw1HiFhc1cTjyCf1Wyy5jLQqh92jf
-# gm4JgqOvn1v916EWQjZJKytnN/aChmFG6VrRBLJDHUcIpdF3uDyzioGr8qF3KAkw
-# GuuxldwZ4A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
+# MTZaMC8GCSqGSIb3DQEJBDEiBCDRcPXW71y6UPUWS5CJm52dLDmH0OZnmp1LJKc/
+# jtM1bzANBgkqhkiG9w0BAQEFAASCAgBFr/GaxbL3jxMmiMuR1kvpYT8+oQ4Lz7RX
+# VsrwrY/R0qdXfVw9QZofLHDLDbUchgY1JiNTgX19uPwPjco41r4MLf98zrEKvtwc
+# lMZn+7WIWTGARss60JzxKFs7VwqFqD5/Oej0Qa+CzATl2w4Q1/xrmUh1vhbpi2sx
+# gAtneZ/PTCGg8wvw6+HKCbI8hz5BboiCC0Pq04oOD/rPFXzhtRRjYanSTs6BK9qU
+# ZuTk2B3zp0/L06smudO0QIuJm9+2SBQs9Qrn7+Kf6r+e8roiTWVuwuEBuSDXegg/
+# GOhu5OYuC3pBLAv83YlORbf9bfcm9eS1r5hQqG+f3O591s14MPkkHT7fx+5x+sza
+# Asr026JhoVmN0znQhlfpZDzKw03QmbeW2/167Q652Wabi/X/1nhGFfTjYCwUF35L
+# zXb7kwBVZ3+QNF7WtGcQv21uzYU9RmMTvwzxk2eypFsII9WD74w3Z2es9mQ/RnHT
+# 4/DZYR5tNDlMNRXdt7WuRs40fjeJgQe6QVzmjwA5+7GrlpofrGnG18PWanKbudMg
+# KtR41aEF7jDy/QXZ/Ym8fvpOl0Aq+pd+a8COG/vOgVrqIhrdtqj5F+yfRDQkciki
+# KMYv3AsbVmXYeyz3BTrE7PQiJuY/n2zYuRDPWEIMiLU/sZJrWwZ3Ys++aE05AHnb
+# /WeqLFtBgw==
 # SIG # End signature block

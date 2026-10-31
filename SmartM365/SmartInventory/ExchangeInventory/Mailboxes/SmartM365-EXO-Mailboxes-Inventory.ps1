@@ -30,7 +30,7 @@
         expensive at scale ~9800 mailboxes). Without -IncludeLastUserActionTime, the column is intentionally empty
         even when -IncludeStats is active.
 .VERSION
-1.30
+1.32
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; ExchangeOnlineManagement; Microsoft.Graph.Authentication when Graph enrichment is used. SmartM365 mail/SharePoint upload uses Graph REST direct from SmartM365.Core.
@@ -303,7 +303,7 @@ $StatsSnapshotCsvPath  = Join-Path $LatestCsvFolderPath "Exchange_EXO_Mailboxes_
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.104' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.119' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     $smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; $smartM365RunGuard.ExitCode=(1); exit $smartM365RunGuard.ExitCode
@@ -413,7 +413,7 @@ function Publish-MailboxInventoryDiagnosticCsv {
     }
 }
 #region Init
-$ScriptVersion = "1.30"
+$ScriptVersion = "1.32"
 $script:StatsCompletenessDiagnosticPath = $null
 $script:StatsCompletenessIssueRows = @()
 $StatsCompletenessFailMinRows = [int](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'StatsCompletenessFailMinRows' -DefaultValue 50)
@@ -441,6 +441,8 @@ try {
     $logMode = if ($PermissionsOnly) { 'PermissionsOnly' } elseif ($IncludeStats -and (-not $ExcludeStats)) { 'LiveStats' } else { 'Snapshot' }
     $logFileName = '{0}-{1}' -f (($MyInvocation.MyCommand.Name) -replace '\.ps1$',''), $logMode
     $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $logFileName
+    . (Join-Path (Split-Path $modulePath -Parent) 'SmartM365-SharePointUploadPolicy.ps1')
+    Initialize-SmartM365CollectorUploadContext -LocalConfig $ScriptLocalConfig -GlobalConfig $global:SmartM365GlobalConfig -DataAllRoot $InitializeOutputPath -DataLastRoot (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -LogAllRoot $global:LogPath -ExternalActionsAllowed $true
     Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -ReadOnly:$PermissionsOnly
     # The weekly live-stats run lasts most of a day: DATA-LAST changes only when a run completes.
     # Diagnostic selections keep their direct suffixed copies; permissions-only runs hold no receipt.
@@ -2956,8 +2958,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCf8Omh1TKv2Djf
-# prVN+q1mW7gwDgOZ7s/ih3/5VSjT/qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBCOi3ixzhSzFlG
+# Q4bvjRrv+DHhQc5JlTkYBQOYL2ZAsqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3090,31 +3092,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHa1xT1v/2efUc/HAC8e5b38BbrQdF9r17UXv8UoW2hmMA0GCSqG
-# SIb3DQEBAQUABIIBgGnV1T0N5Zd3tAw4s1OWtVcbvOPc/0Ru78bdPUFgtVh4aeUc
-# aN3loVZ2oQbDJ+036KkELnsI+M19TJx3ziS9lhSzNdKAzC2H2HP4TdBslBProKVQ
-# E72CdE6fT7V9bc6U9GxwJFX7nqzGICW0CRojgaGgcqshCz0Hqca2Je/TyS3kc9dj
-# xGbjN35hSJivqH2SpYrbETv7FFQZzXFErR1TEWwdrcoH29ppE3VcnEJWx57Cg6uS
-# BGNjzr49xdpSAEDMR9hhP/s30IP1KrQ8aGjW4uFhnrreCRLm7PVmbAY6wMAHSs6q
-# fj6stBcTvMV1AXQvdQ2NoTrvAgJ7GTnQC9ZjYt6DvStbfLmzZnUF6xtE7ZvcAMxL
-# bm18d9nkT9aRVIJO6Q7rCaBe/XkPoHXdL4AK70w35soobf8IQACJWPZN7Eyg/qqs
-# N8JUWLWzwGIBVXCNt9ib5r9VrUX1zm09cr40pRAwpuLQn3XeuDv2siQst74NucuJ
-# CU7EH75gpVEY5ySCyaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIG1xs5jg9ofGN6HBHWRUwsbw7K6F/1PxckB7oJzDAFF5MA0GCSqG
+# SIb3DQEBAQUABIIBgLBiNkyb3cs+T3b20gBbnEytu9igPxwXA3lTbZCfG2SZ4p3o
+# zqC4MaeSIVSm/ZNXEXUGOBJmvoqpMVYM+4YoFgMkUg0Srw3D3D9A7xbG146B0d0u
+# /7+3JIka8sZIQ5TRvgncNdKzIYbVN9HWTWgU8qyVV8lswSycyxHRW6pyilpmayfR
+# hY8mYuGO3CNRhoqIpCC8V+p0hWTO/HMDrT3Ha/BKpyGCgjanJ+kyErehaPcP4QvY
+# UMKuobWNqOflw9rXN5BJt9xPfkHXOPS86NmLOaPcqC2+zn+9C6HjhJKqGz6R5vLg
+# eHz0uXTUe7KHXd44O8a29mi4Xyl/dpu535u3MBeOh43Lq27X+3Rm8yw+B5cOXKVU
+# k1Efbn45A3od9UrgBe/M+4OmdZhMyuR96ozQxLT/1jOnpVFfVSsznd+u8F1KLbGD
+# sZQ7WGDr0Vw09Zg+baLWPvP8pmThDEMoPL9w8sF2IfpgmKPlDGy+IAZtbHHgkUPZ
+# 9yWJRM4rMOVYnczZMqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAwNzU3
-# MjlaMC8GCSqGSIb3DQEJBDEiBCACunWu0uVldfQX0bm7kQjeA0VFLe05dTKyJLR0
-# RLQNCDANBgkqhkiG9w0BAQEFAASCAgAmad5xPUXsGS1HYaBHeeyaIGMVTGS9lpT5
-# +LS3lU9367JKpE1ck2JH4WdDfyCefzuk6z8O6lYALxSsj92yUAYNVETRtdivf+Oy
-# 4InwQCragGy1XCOuWUN8g/8AqTS+00Cyuh3wg8fk5WhOwhfFBMq8EEFcAANXMe3j
-# TrC07LCfosFkYGF8E4zeLIGAeMeXwnLDu9QE0Sr0TWUNhxX/IuH9hcnxjXL2tI46
-# b5hFXK9361SJFzQ+kGDqu+3RGauBHL0mTzulLUJZ+zxgEIEwvuHOl7DJiXMTDlep
-# JDq0yPnpKl2HOXKjZ8hEWJLea2xSOaWjgWXFtAF4TVxUeRMXAu14nIRCczA63Lvx
-# vMewjdepJ0g/uSinJegT44WZ7rmJjPmpWGLwB2i4K/rctioIFV/5cj7BPJ7z1hxo
-# XCcUi5bhYUuk6qgIZqeuoxytxAUiTsQZqTgzLdLAYghRCxJkfgpCid4N+B+2EX6R
-# Nk6Da6v5pqJfO/Pdsu5FBZ81pNI0iUFfkMEgS4hN5VgEmu+PqeAVJoJGC8GxEaiP
-# qPsgt+cWKhCgpYwIBIrUCbsfh/nw8A94KzMcNi1WUmsJ13awZxE0oCwcdRHkCtb3
-# kkBceYHtVsGc4IPUiDJzPznm23T+H8oJpIFDusWB1HNvZMvBEyIRyn8HbJHLwelB
-# 6XRewC/P5Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
+# MTlaMC8GCSqGSIb3DQEJBDEiBCAhF7jBvkuqHBul4uqAS6HmWpblHAobtXTNEEiZ
+# RhPkwzANBgkqhkiG9w0BAQEFAASCAgCVtuXBsk2dwX+nwAX8GkBoLSOvNM/DALZU
+# 7WMyVsQA+Aun6ec7OoNuuHsS07aiOwdctSNJmoBKucoEtIHhbI9k+xDXkgZE0pxQ
+# vBH50CmMz6bDSVN3A7dVths2lG5InCoh1JEM7iLVuxcm/V/0MVoQupSLO2d0PAYj
+# fo9x6KMDq+XHxNVjc+/xqbgSdAx75w/n8y2Tpd5LZVsOa0uYvNgrypQ8RokrJ61f
+# pp5oviArSRWeK7bltWUcczBb8p5HyD/d/yyQCooV7jt0NPLvs40UF3A7IyD/k+Yk
+# xq95XHjEhriGN/Aj5ZX5LEd8e1cy/utu5GtwziGD0HUfJXkOX58YysLKA9FKOws5
+# I7Kz3yprNIbK5vEe4ZiepCXVBzWK+1q9cxg1/dMEZ1coQd1FnoAKMFpV1hps2aBZ
+# 8ehqu3NL6w1kEgckrdOTDvpwLnFeesl0GHgEs2iMfu0As2MjtU4XzC46MIjsXreY
+# iUP68Ovi5zqt+42hHwiKoVl1l4bOTAlyDbu8BUf9SZOTgwt7/BvDICiEoFMumiy5
+# zqqCRLycSbJ8g8vHlyJHTJdEHePh/wfU503SRflDpylezKhwAigz6PO3UCWwB8O5
+# wTA5uHgac0tpSOn0VsvzhyiAt7oTlGRe/YNrJoGi7kVMuM0Y5GAW0cHXgTud/Hwx
+# KvapcgnPsg==
 # SIG # End signature block

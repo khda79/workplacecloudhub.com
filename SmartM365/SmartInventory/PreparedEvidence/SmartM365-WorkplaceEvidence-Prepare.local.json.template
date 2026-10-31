@@ -1,4 +1,6 @@
 {
+  "EnableSharePointUploadDataAll": "__USE_GLOBAL__",
+  "EnableSharePointUploadDataLast": "__USE_GLOBAL__",
   "LatestCsvFolderPath": "__USE_GLOBAL__",
   "DataAllRootPath": "__USE_GLOBAL__",
   "LogAllRootPath": "__USE_GLOBAL__",
@@ -65,6 +67,8 @@
     }
   },
   "EnableSharePointUpload": true,
+  "EnableSharePointUploadDataPowerBI": "__USE_GLOBAL__",
+  "EnableSharePointUploadLogAll": "__USE_GLOBAL__",
   "PreparedSharePointFolderPath": "",
   "PreparedMappingSharePointFolderPath": "",
   "SharePointTargetFolderPath": "__USE_GLOBAL__",

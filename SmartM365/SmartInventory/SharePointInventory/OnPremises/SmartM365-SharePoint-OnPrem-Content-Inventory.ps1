@@ -1,8 +1,8 @@
-<#
+﻿<#
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.14
+    1.0.16
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -611,6 +611,11 @@ function Publish-QualifiedCsvUploads {
     if (-not $global:EnableSharePointUpload) { return 0 }
     $failures = 0
     foreach ($path in @($Paths | Sort-Object -Unique)) {
+        $policy=Get-Variable SmartM365CollectorUploadPolicies -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+        if ($null -ne $policy) {
+            $category=Get-SmartM365SharePointUploadCategory -Path $path -DataAllRoot $outputBase -DataLastRoot $latestRoot -LogAllRoot $global:LogPath
+            if ($category -and -not (Test-SmartM365CollectorUploadEnabled -Category $category -Policies $policy -RunEnabled $global:EnableSharePointUpload)) { continue }
+        }
         try {
             if (-not (Invoke-SmartM365SharePointCsvUpload -LocalFilePath $path)) { throw 'No upload receipt was returned.' }
         } catch {
@@ -630,7 +635,13 @@ function Flush-RunRows {
 }
 
 $coreManifest = Join-Path $root 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psd1'
-Import-Module -Name $coreManifest -MinimumVersion '1.0.55' -ErrorAction Stop
+Import-Module -Name $coreManifest -MinimumVersion '1.0.68' -ErrorAction Stop
+. (Join-Path $root 'Modules\SmartM365.Core\SmartM365-SharePointUploadPolicy.ps1')
+$oldPolicyVariable=Get-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue
+$oldPolicy=if($oldPolicyVariable){@{Value=$oldPolicyVariable.Value}}else{$null}
+$oldRootsVariable=Get-Variable SmartM365CollectorUploadRoots -Scope Global -ErrorAction SilentlyContinue
+$oldRoots=if($oldRootsVariable){@{Value=$oldRootsVariable.Value}}else{$null}
+$legacyUpload=[bool]$global:EnableSharePointUpload
 $outputBase = if ($PSBoundParameters.ContainsKey('OutputRoot')) { Resolve-InventoryConfigTokens -Value $OutputRoot -Name 'OutputRoot' } else { Get-InventoryConfigValue -Name 'OutputRoot' }
 $outputBase = Assert-InventoryPath -Path $outputBase -Name 'OutputRoot'
 $latestRoot = Assert-InventoryPath -Path (Get-InventoryConfigValue -Name 'LatestCsvFolderPath') -Name 'LatestCsvFolderPath'
@@ -647,6 +658,10 @@ $script:Completed = $false
 $script:FailureHandled = $false
 try {
     $null = InitializeScriptEnvironment -OutputPath $runFolder -LogFileName $script:ScriptName -CallerScriptPath $PSCommandPath
+    $global:SmartM365CollectorUploadPolicies=Resolve-SmartM365CollectorUploadPolicies -LocalConfig $localConfig -GlobalConfig $script:EffectiveConfig -LegacyEnabled ([bool]$merged['EnableSharePointUpload']) -ExternalActionsAllowed (-not $ValidateOnly -and $MaxItems -eq 0)
+    $global:SmartM365CollectorUploadRoots=[pscustomobject]@{DataAllRoot=$outputBase;DataLastRoot=$latestRoot;LogAllRoot=$global:LogPath}
+    Assert-SmartM365CollectorUploadRoots -DataAllRoot $outputBase -DataLastRoot $latestRoot -LogAllRoot $global:LogPath -Policies $global:SmartM365CollectorUploadPolicies
+    $global:EnableSharePointUpload=@($global:SmartM365CollectorUploadPolicies.Values | Where-Object Enabled).Count -gt 0
     WriteLog -Message ("SharePoint content inventory starting. SharePoint upload enabled for this run: {0}." -f $global:EnableSharePointUpload)
     if (-not $ValidateOnly -and $MaxItems -eq 0) {
         try { Ensure-GraphAuthenticationModule }
@@ -1000,13 +1015,19 @@ try {
         try { Complete-SmartM365ExecutionContext -Status Failed -FailureStage 'Interrupted' }
         catch { [Console]::Error.WriteLine('Content inventory interrupted; execution cleanup failed: ' + $_.Exception.Message) }
     }
+    $priorPolicy=Get-Variable oldPolicy -ErrorAction SilentlyContinue
+    if($priorPolicy){if($priorPolicy.Value){Set-Variable SmartM365CollectorUploadPolicies -Scope Global -Value $priorPolicy.Value.Value}else{Remove-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue}}
+    $priorRoots=Get-Variable oldRoots -ErrorAction SilentlyContinue
+    if($priorRoots){if($priorRoots.Value){Set-Variable SmartM365CollectorUploadRoots -Scope Global -Value $priorRoots.Value.Value}else{Remove-Variable SmartM365CollectorUploadRoots -Scope Global -ErrorAction SilentlyContinue}}
+    $priorUpload=Get-Variable legacyUpload -ErrorAction SilentlyContinue
+    if (($script:Completed -or $script:FailureHandled) -and $priorUpload) { $global:EnableSharePointUpload=[bool]$priorUpload.Value }
 }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC4nvwKEq/TWxtT
-# VCrxnHfAngrh/ierSGl/i4C+OklULaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCC7BqMoyGL6NKR
+# 9WOmIllbG0wO84zeK1L2+9jMlRtpKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1139,31 +1160,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJsyCZMXWOt/Jk3o0pBTJZoD2ni79gvF6uO90xdVXg+wMA0GCSqG
-# SIb3DQEBAQUABIIBgIrgItiAvSsMfQK7WmvNLN1tIUj1y4OspMLSz36lPAbRR+/z
-# 7ATWhq5Ql2KlPWpDM64jehS3U/LHudPO5E1MJ9bbm5lPwqdC7Y4T8yOhPovB0ajX
-# 3yKQJslMhbm728CWZ/RSH7eWIQXh6kNMChiVw28Y2K7FoMoWt0103L54oC4r8T2E
-# dh3VAzxoBjO7q8xU47juGkgAcR6zwcbqhBirWp8zJEvPOYssmSqwK+9Vprc9j5Co
-# /34TvsyRqkvdRrEQ0+eAdzUX06jzN2+6PqV64q++plpseng58c8/+hNIUAn+UGOH
-# 5CKpAPFSC3C+ZLP8aYDWoSZASkchnDftuw1iW3vRT/IxGDxRNrE9JaMLjg967mil
-# yGeiFYK2vmawgIiqW6pcon7ya1bVFONgsvfGFYiXZ3D/hRdek+wxCOe+dIl4aYcw
-# i4589/oPNtJdbfkosNenuVX9nyIa+faZ/DasbYemOVocmei21gPButQOkQWEaeAx
-# dxdmqWrDPO3I8lmSKqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINAyEZ+2uj0VbzyEz/mR/h9C7Ee4oeJBoBiLBgH7lLKxMA0GCSqG
+# SIb3DQEBAQUABIIBgJi6Et+eUrgkl4qWnXDZYna2jk5nHa94xHAoagFeYelRJLTw
+# MznrByRcdL5e1cdxF1HqDqd5fbDSduKddHkBZD0G5Q8zmld1CyFKfqUkBO/PulF3
+# MT0SymbNIebRPhO93enyFjQ0VM7P6QmcfZtezdwBEpQWTdnzbRZIdwpj339XHPCM
+# ETyaiJGd/d/xtqd6CPQbe0aTxkBs3TlqPtsnRmhlm3pKEzhONeGRN4XDAFHSkV2Z
+# M9h/QsF37sSs/H99m6IHNjWuPCIjY4FzZoDR/hkPGBsEDZn3rAvkzVIrBALLatCp
+# dPIcs2GhzI1QaOha/Aryfd6OimIxPHbCEtPzCPasW+F+8yL+uHkq/VrpVkd3IH3z
+# 0VgEOQ0Ps2gHzSCb7Ab8eij30X7R8NghD0seM1NlLsOmeKV/obDn0lBuaGN6CXbz
+# 34WOYRuWVxKEbODWAOUt4YNMfqXmhbnrEjBzCjsZPU6UVUK/GUddjT6Fif8byJqB
+# /RxsZolRnD8yXsHCH6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMTkxNTI1
-# NTRaMC8GCSqGSIb3DQEJBDEiBCCDTno/Q9QON1oVfyA4NGmGp1AfARw3nyTbvuyn
-# Bv7msTANBgkqhkiG9w0BAQEFAASCAgAFw6uF4p8Ah+8gO0N5ik8V+L/9vvpt7sfk
-# T/IRFBVAY8cSF6o7PSkb0dcKu+UcF8873Opqjw0ZkjiWw8+aA2L4BRfRTaTR+ivm
-# a3366jEh/yjqbsj7uS48HYwfNrpQTw2JKEDfyn4KDD2M8WVjQI5FfSQIctoai/YZ
-# 1WA1rlt9xRlRyAHm266o9gNxMeh9CFvc31Q2FukF/OVt4SVf4pnP38gcx9nLprm6
-# j1JG/l3Qm0zNpZe/CV+JlXhgabHVb6bAXEZOSMnwV8c/5L0tUJTh4M0BWQJ7U7Bs
-# MrXjTuAklnfXqYlWWF0zhbdOrlb8IaHI8wu7Vmx583VN+rn1avo+9whNrEFChR7c
-# LeJPFUdNtEXjkDMyjaz4wM9adWp9tFxSG6eEWpVeEL59AafgAvwdTSG9J6y2lMkU
-# uKFEiI0JmDh2fOEv+4LDkfr12DUOv3L58s60EUzxh06HXNOqloXkA+hAdU6EuISY
-# HIQxEbxtb4nIq3TEBHDFwZwJKM5C9Jc5vBS8S0d+ENspLqPqC0Z6XcvxZSjDil40
-# RuNcFkTfqiugZJTpuc9xAs4aZOyL8P5XGRfe/pwb6gg4bfUbNP7wCZqFHhnGVXIR
-# WGzgpdYz2faWut+S9OlEZDmAJyM9boqCC6EFtmcvejW2nq6Ty3BWk6z3DTHZ/HxS
-# ILlcW78Xow==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA4
+# MDVaMC8GCSqGSIb3DQEJBDEiBCC2m0skLHFf1hwaZ8c8ZymNkM5DvabCzp0wNBHA
+# M/AGuDANBgkqhkiG9w0BAQEFAASCAgCxAf+G9gDg7U8QHsX9AGlPy9QzjxoBKe9D
+# IGzJagHxSbpDa5Z/BlvhkD6MenNDzYLmqEwSHAW6dOBJ9i8mNgo6LJGDtG5imCQo
+# LOGtH3eVwXfGV99HpS6vrdaQYJwh6I5SHZpvt2EWFSqm2Bhu1ipMpdZ2oEhoX0U3
+# SdBVVwaTBid7wDSLv3zKvJRFzABNbA4km79p3H8kMPFzKOkhyQCkXJfioKGfhVPK
+# YwXFR8OGRPyAmbkuzju8r5df+cORTC0RDNjgGKmnjm5dcEJOeYAMRzYFMf1Yjq+J
+# AN10Sz+ibtTLg5lvnVWwKPjUZcrNKxA4QoCCE9j2/i/qilltOboa1bznL5KTjPXL
+# +1OKLxZtpyvwH+MgqT3ZR7lthxazUCef3jwz9Ak3WyFtBCteXo0a2+5gbSt4z7cR
+# tgG7145SHhxMVSuQybskwqvjnAh4dfElBHqnbPziB19/HV+s86eWT2RsQ6bq7yLZ
+# r3AGv5sNCBkslQqMaIaKNTOvpUDdiso2z32wzvV8XjbhnNPv/jqVFSULcxcxBuVO
+# CyqLXSM2B+6PzjWJ8C2mibu7+4Lo6qPXwQyMoxKeMIoZcPno3VM6DJ9gobLCj0oV
+# IpyA6oxT3PNeWeRE8J2pSBT9dgStwT4eGySKbmkag8Y3IsjzoyS514LUOmmQMqGr
+# 3t2BwEVbQw==
 # SIG # End signature block

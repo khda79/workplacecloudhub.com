@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs offline tests for the orchestrator SharePoint operational-folder mirror.
 .VERSION
-1.0.4
+1.0.5
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
@@ -37,6 +37,7 @@ $functionNames = @(
     'Enter-OrchestratorSharePointMirrorLock',
     'Exit-OrchestratorSharePointMirrorLock',
     'Invoke-OrchestratorEnsureSharePointFolder',
+    'Test-OrchestratorUploadCategoryEnabled',
     'Invoke-OrchestratorSharePointMirror',
     'Invoke-OrchestratorPeriodicSharePointUpload',
     'Test-OrchestratorPlannedRecycle'
@@ -156,6 +157,16 @@ try {
         }
     } $sharedRoot
 
+    & $mirrorModule {
+        $script:Settings | Add-Member -NotePropertyName SharePointUploadPolicies -NotePropertyValue @{ DataAll=[pscustomobject]@{Enabled=$false}; LogAll=[pscustomobject]@{Enabled=$true} }
+        Invoke-OrchestratorSharePointMirror
+        if ($script:Uploads.Count -ne 0 -or $script:Deletes.Count -ne 0) { throw 'Disabled DATA-ALL must skip both mirror uploads and remote deletions.' }
+        if (Test-OrchestratorUploadCategoryEnabled -Category DataAll) { throw 'DATA-ALL should be disabled.' }
+        if (-not (Test-OrchestratorUploadCategoryEnabled -Category LogAll)) { throw 'LOG-ALL should remain enabled.' }
+        $script:Settings.SharePointUploadPolicies.DataAll.Enabled = $true
+        $script:Settings.SharePointUploadPolicies.LogAll.Enabled = $false
+        if (-not (Test-OrchestratorUploadCategoryEnabled -Category DataAll) -or (Test-OrchestratorUploadCategoryEnabled -Category LogAll)) { throw 'Orchestrator policies are not independent.' }
+    }
     & $mirrorModule { Invoke-OrchestratorSharePointMirror }
     $firstUploadCount = & $mirrorModule { $script:Uploads.Count }
     Assert-True -Condition ($firstUploadCount -eq 7) -Message "Initial mirror uploaded $firstUploadCount files instead of 7."
@@ -328,8 +339,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBH5nzViKkTfQpg
-# NPdwEqXW51vyS7+/3LtKvpS2Y8ZvX6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCdcAfn/k84Pk4z
+# wPQ3sNVoSYv/0/09sCWkFTs1saHZHKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -462,31 +473,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIHtO8xz0H/wlExbvsiVYU7EY8mWQ+54/SDzRHbBIEJDsMA0GCSqG
-# SIb3DQEBAQUABIIBgKdQE2j2nApNGuSkW/vyEf27go3PI48yIf9PjyMHSqs7LTTx
-# xysLYDYg7I/Yow+fr6/YK5+WL6DDNdBV7nFpm8tqD3EXiZns4Axtl1sGI+nGkNgE
-# 4DCcU6qYJV7Q1yuhRiWZUJ3stKASHcbhEy3cywU4UqN+AaL7qf9qeFBE+4N+DP5M
-# L+b6FGCMsQK8jMEhxgMxSXFnzZg4Zq8TVVy9chQSedWNmBGjfmxrtl/6eqGrMCVT
-# QRtvr/iq0NdrEbXSQ+UpE0IFO76YSrkXjBxyGNYH3htFvOqxOOGjqeTjpLJKvK/I
-# gHKi9Zq4T/rzJiInBZZI7w/jxGh9EJVkLL+4OHtnMtjOWbZoXv+tq3kezlg7793z
-# UmUZXmW/zirobpRpva+eirECJV0gkOJJeSMiC0zOv5//nNd1KKx9GCnnTXsLijZA
-# haf1jArkoh+/ubNpacQafeYsMapu/4h4TWfmewpBL53wPLqTzjrLNi3/mZIIgt+n
-# t/qIKIcnnZlndsSLq6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBrCKijipmR5D+p/mJ4/BzOgzZb9E9abOmhqXse3PWmcMA0GCSqG
+# SIb3DQEBAQUABIIBgAUd+85O7tK62x5Eb8ou8h+pKrP4zuuU0YIXV4BX2+3Wv6xf
+# MtmLYItmsWf4SfrLK0WcrnAi61Y/mcY0FVasrXjBW3z3duJJWbv2yBsSD8ACbAYL
+# 3x4w4vAJQ40MDXi56PeU4EWqdyGAL/ASfmp9Gb2qRn/SeygWoOA/sDTCV5yzbIHf
+# wPnssk1KNNE+nAdvGG1czcVqU5AxogHFTPUgfXg3+Ff3Zobm+l45BZrYNid6ERKG
+# 19AHk2ORHaKnpvtWT2xJ7J2Z97N2UW78QG+5cBqgJbID59KdGYeLWq2D2VKs7Tu6
+# BrOPP/4Q+jIHHTF6KGaJwuWDNxGmf07/2TgTO0kABibZcadHkKF7+zCM+Sraxfla
+# 3GogBZkivK4tvdEU4ISAVfy7c8SLiw5TNRbJEDuzTH4JZ43UT0V+1HJM4iw6pWp2
+# i2S3H6lY9iyAJ/cdRFHrMQi2Th4o8n5McoN51/sRrcj8mQ92QElCdYqxHNQy1b7C
+# xkJLXPbG8uYMkZOhfKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjkxODIz
-# MzlaMC8GCSqGSIb3DQEJBDEiBCAFPhtyD1okqC5IGpKKfLrlOBG1bQGrdPn9MJ/q
-# m5aYYzANBgkqhkiG9w0BAQEFAASCAgBTC9M51kW0pLw6e+Tw+l62qZAwylTwIUEA
-# 1Yo7OPWiEUVZUrFlWmDI5vbiAYD5HncjSSpifdfj+C83k03PSnFm4AkxTlVO0wuB
-# z6zocFBeVZUEvZmnNqFf5MxMZmBAbCGCQdKDC7XIVDnfSG6pwENDRvIUG49Q3kjg
-# bMJoC0XVyD/ZT86HWt/vSBf1cgftiBtVzBLPkfu9Lju093X5rkh0jp073CSL9wek
-# 3qvai7PjmgQa9gAmlfbR/3GC+frffVF84J+NdZ8cphfucspgJNg0roBltyyRBOML
-# xU4nQXKglVfnJkb8EAJs7ZoI1TceXuGilpOGeicqh8Ok0/fm6V/UwG5dz0g33g5G
-# fZWtMOQWBawC5tJAia+Uwgxustlu3RFWttk//+4hfCSPvq7RV0EOOkUT+SZRQk2u
-# w3ixe30bLztUfTz7kjGqp54PJIWkk0lEgp+MFEme0A2BHPs46KwHz/v0zJ5jehn7
-# PtomvvF4lYENNWKmkPdRIq645im0ky9XH1JHOKyhGv9xnQql1qfeLrhgJpEfBNjR
-# 9bc26yLGCL1KvWCUlrvx8rRP3XRsckMmV61QFLh29W/3fOn14GbVtarxValdXdir
-# 6ZNZSOEvCcsWf9tOEdqXPAr/aBf7D1XKZK0F001fJ6IvnQA0Q8Ky+MdJkJx1mw4G
-# 9k+iF41uZA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExMjEx
+# MTdaMC8GCSqGSIb3DQEJBDEiBCAet27h384Tt9P1gGSUBcXa8IyrDAwJP+cXdcpa
+# 7p28EjANBgkqhkiG9w0BAQEFAASCAgB116oFZ2dicSMO7Judtj1pk0clBhKszjcO
+# y+Akopnc0ODEdMXgbEMJ2LV0q8Zbkr+n98p59Jjl66+Lq600e64LP7jKWD2Ryng3
+# eYcvXrXxglqnxWUhNAUcl1iB3k/qfNaYBTpdh7W959rNCOVHZBqJy0hb0EGpmUAO
+# +hifJ7VJIWmKBwzGa7SRYALy6EDvmOy0Au4Jp22JCzBpuu0zqxclXeYK0tW910F3
+# IK7499wQHxgJ/vUcpQEFLUlGT3CkykU3DBtP60rmMSjQ2IHp98NiV2QT4J2ve2XC
+# faPGc3O9TswtjeMoz3lmzOu9SKJ1F30VEFV5i5XI/x+60Z6nndqPCzE5BzgiqzsR
+# W+cp97ooV/SYDBp7ghEOTH3M0O1lF6hXW0vYKjmeFANgMEhI2s00hY1D493ZtsTY
+# dfXpB1MPGT+RZqkb5p5H2Wcliu6ompHCMZc+IT2EzDQFvBSvoDKjcL1LsoIdLxNp
+# yv5In7qxa+D6XHp4yoG2ccxOMHqD/k9dLrtJU95HwEX55yf3dhOWv35PjJ3X94mY
+# I8uFF46bWu+26+hbqSJrWyDccOfn1HOgTb3aKR7G7cOQNn6L68lzDUeOyhkc7OeL
+# yPhPQ5C3ENjdRt1RXg8fZItJd03X0vrImySdkIW31hPM8vIusyUBfn60fsCBXmol
+# 1TqPaCp3Dg==
 # SIG # End signature block

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline JSON transport tests for the Active Directory weekly history.
 .VERSION
-1.0.2
+1.0.3
 #>
 [CmdletBinding()]
 param()
@@ -14,11 +14,13 @@ $policy=& $transport { (Get-Command Get-SmartM365JsonTransportPolicy).ScriptBloc
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../SmartInventory/ActiveDirectoryInventory/SmartM365-ActiveDirectory-Inventory.ps1'),[ref]$tokens,[ref]$errors)
 if($errors.Count){throw ($errors|Out-String)}
-foreach($name in @('Save-WeeklyInventoryHistory','Publish-WeeklyInventoryHistoryToSharePoint')) {
+. (Join-Path $PSScriptRoot '../Modules/SmartM365.Core/SmartM365-SharePointUploadPolicy.ps1')
+foreach($name in @('Save-WeeklyInventoryHistory','Publish-WeeklyInventoryHistoryToSharePoint','Test-SmartM365AdHistoryUploadEnabled')) {
     $definition=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
     . ([scriptblock]::Create($definition.Extent.Text))
 }
 function WriteLog { param($Message,$Level) }
+function Get-SmartM365WeeklyHistoryMaxRetentionWeeks { 0 }
 function Copy-SmartM365FileAtomically { param($SourcePath,$DestinationPath) Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath }
 function Invoke-SmartM365SharePointCsvUpload { param($LocalFilePath) $script:uploads += $LocalFilePath; if(!$script:failUpload){[pscustomobject]@{Path=$LocalFilePath}} }
 $root=Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-JsonAD-' + [guid]::NewGuid().ToString('N'))
@@ -42,6 +44,12 @@ try {
     Check (!(Test-Path $legacy)) 'AD conversion left legacy file.'
     Save-WeeklyInventoryHistory -SourceFiles $source -RequiredSourceFiles $source -HistoryRootPath $history -RetentionWeeks 0
     Check ((Get-FileHash "$legacy.txt").Hash -eq $hash) 'AD retry recalculated history.'
+    $global:EnableSharePointUpload=$true
+    $global:SmartM365CollectorUploadPolicies=@{DataAll=[pscustomobject]@{Enabled=$false};DataLast=[pscustomobject]@{Enabled=$true};LogAll=[pscustomobject]@{Enabled=$true}}
+    $before=$script:uploads.Count
+    Save-WeeklyInventoryHistory -SourceFiles $source -RequiredSourceFiles $source -HistoryRootPath $history -RetentionWeeks 0
+    Check ($script:uploads.Count -eq $before) 'Disabled DATA-ALL uploaded AD weekly history.'
+    Remove-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue
     $global:EnableSharePointUpload=$true;$script:failUpload=$true
     Reject { Save-WeeklyInventoryHistory -SourceFiles $source -RequiredSourceFiles $source -HistoryRootPath $history -RetentionWeeks 1 } 'AD migration upload failure was ignored.'
     Check ((Get-FileHash "$legacy.txt").Hash -eq $hash) 'Failed upload changed historical content.'
@@ -77,8 +85,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDuyG1QLzAQoVuC
-# 598yPklCsoGO+3oAY0ycQrj7mTvt6aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDQO/BKT+o+yg6Y
+# 2zrdLenkwPX/9W2+VgcjFTGsWjwQwqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -211,31 +219,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINC/efgtAWwSB24qR0LMpF5wDxV7H1YP6nOxucQcGfUZMA0GCSqG
-# SIb3DQEBAQUABIIBgEGUK/Ed1Uym7+wZgcO+9yDQD+Evr3HLuYkaK5bSb2x/nseL
-# MXSdwhVPJCWPYZPllGudsXEOHXijCPgHAbK0aC/jAQCdyShzTNhsHxtyhSF8E6/T
-# 5KFH1KUC/cZ+KhmWk83oEoYmCT6K0cwS+UC5KodVcOwohC36j5AppN6NrGbxDEm0
-# ilLBw1vB0GokwpZMxW8zANKdDpV/zDlBn9suUt7E5L5yCZGe85tzjARdai5Lc5Po
-# CyMOJqxCGsooqjE7lkufo5NqtLw8OU/Mh64asV8X+kBB7s1+v9Kz7mDHFbSJsgB8
-# WeWePiwzkbQPs5Jt/tfpXe1Xa1gufPrsP0CBvrHDa89PEcn7VK7XCfx52K3Lmwx4
-# zD9F+JI/wfCUwH7GcChbjOXg6IP7Vvk89TSWkiCzH1HGGJw1MPmELzVr4KZxQ8B7
-# pWVHcwJxnPXLGl73DceOSfUd8nFOVTMIePehSDGCVWbnWxsc4jilo+O/h62jny1t
-# OvGdTGfZOvC1eh5xxqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIAHBnLiB6qUcedYYwrG/cpW3n5UFxEJ26jmMSkuVFCEOMA0GCSqG
+# SIb3DQEBAQUABIIBgAmDrPULObvcvVO2tolkCvmKI8YQtgp3v4k+r6Hibgq/tAGS
+# 2j0tuHp3HkmOwnc35MW5yWgAWb0F1fCl/WCgJ/NxTTxob+DHoNJGa5Oqq93BYquS
+# gQUhE2TI2DlcmuRMBhll+veCyk0iyVwzrC2X4rpXwFFG9EWrLNi9nI4anLhCHXg2
+# 9XGVxCOE3Z5T7qSA6xBC+T6+bwNvzZT+21eRy+9C/Let4YHQ86DCwYkzwdOxYcN4
+# IlamGcvwQTTr+TNAPF/HqK7X60EKGK8F+LDYv1yO5aN5V/26L/HB7Jq1AUX6T+X1
+# E9HEUbR8pDj4E28NBDBbCv0FDH1/k7DVnCiTaXyELKWi57venRVREp6yDciQl7yD
+# PoI3HX09ID4q1nUdcw5y7tpJtflSDEpvkjhKzvoUgpauO77ilqXopXK6BHdOBs7u
+# PUSL3OB7cqOkMXCBbtaS6nsw11ZjoiEKmTsQdg+ZRtu0gGxAXUXA+uaTwqBHtWHL
+# zLyh3htlxTw3BZEIl6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjUxNDE3
-# NDhaMC8GCSqGSIb3DQEJBDEiBCB3Q0Wbip8i9J8EjFg8GfNYNMEakXxz1dm9KZ1c
-# pPvlPTANBgkqhkiG9w0BAQEFAASCAgAGj8fXOkd4hYBJbTrO8WA8Gav9Af21b2A7
-# 8mNy3U7nvfQ8UvM+/dd/jyLW6G7/7EA/Ws5WD3enUe+MTt45T94FN/CzF3NJicMS
-# zwt75MOXacjm+NqMFBDJz98y0ZiaHosVBUk1rw4yZBnsRJob43wWNpxZZMQmotQi
-# x5d1szLFoPFxx2HZ24JHRgVdmeoRCvIH0OZI/j0FCkfKx0AJISrvddo0qeFdTz1o
-# T0Cd5yL887kkeUWGrpF2WzExOngocnlJ+d5fbCPZICDIK4eVlZY9jN91yPlbo0hT
-# VYzhUVrUfvkvKbnNnWpFfHoY9Y+VDeYz1TvrBXQvxTxIpyCzEsTSiJvKJTQLRBdv
-# Rnkup4kUe9WVECX7BJy0il3Z7kasy2b4skRQ/Saa4KmdWYJVlls1Z07LEA4JAUmR
-# EBHLvNHs2xDGOJPHeMRFBwF3UAESWiUfLgnbFVImegq2Tq+g9TNaT9OKF4vTYwnI
-# Qu9jN0XPvLQ2/yjvWNdW89aj9gc1CU+hfxO+AQELKOL5eN1L13l7bQSp3KIAsRUd
-# Uzl1eBmhN1EFfTFK5xpuMj9ksf/5GIYL+FmLpSP9N9BqoabkFF7/FYUhN/OcLAoe
-# kapoTv17sG3tk3h+drFFkEBvl0TwKRtcJI0hKtm+oFyGv3qy+9HCJP4A0QPsfkCk
-# +RXGimlouw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExMjEx
+# MTZaMC8GCSqGSIb3DQEJBDEiBCDZ40o5iaFSzgLfnDvzqRr/6dnPi3MYOZRpJ5Uz
+# TKOVGzANBgkqhkiG9w0BAQEFAASCAgB3tyAteyMWjlxn/72Oo9Ss/+i+hKOKgbsy
+# M1fJ1Yvm5PjP8TBG5s68ei/8v0a2zbdGzaeDfVbjyD2/nalggPjI3AtlvWOW9WXW
+# tbEP2khzYaMP+uWLRcYPvj5XOt/dkVJOUo/iNopo65qf2MfEgU3sw6Wp9bM2mOkK
+# FZLLfoGVa7pHfpVB3+nX4GcVzEwkhr72J0dYEjEowS+n4p96BAwM6PQzvUPm7tNR
+# tVwwmky96UA65t+ubOTxRma5pMfEoqbwjjvyCE8DAStCTuQlK+noIHjdbds5jkTq
+# lsoZHQbYYASFzPtArSw7sT+5F693dozEC6g+E0LeIND7CgkogJUq4Tye4cvExKyy
+# 5sGbcBCldXPvK/9WY/zHnGaVPSzRVeJj/Tj+565EH5smphsiPjKWIPz5i/+1kEVx
+# vF5a4bwcnuI7yPieGP75z1WKrB+mYYFfJQ9Zkq+74kuZNWnuDtGhr5ZDenQiySUI
+# 2GjlUSDoVgbf519bHKoc97OkEHFY4nRW69hlPeKv7GldyIDweZZnr44WGZcgyxuS
+# 6pwPci7PurxY8P/TE5ADfHw5dk3oHoEdEgfsovfMPHDFbjlAB5J3XaxFB+F0MYJr
+# m26WqzO6SFkNRtIAc3g2muAm4gMILaZJUI08yn17Pa8g9oeMiENL9NcPW0/YXDxE
+# yq2vsS7bOQ==
 # SIG # End signature block

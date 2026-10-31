@@ -4,6 +4,7 @@ Import-Module (Join-Path $PSScriptRoot '../../SmartM365.JsonTransport.psd1') -Mi
 . (Join-Path $PSScriptRoot '../../SmartM365-MailMaintenance.ps1')
 . (Join-Path $PSScriptRoot '../../SmartM365-ImportExcelHealth.ps1')
 . (Join-Path $PSScriptRoot '../../SmartM365-InventoryLifecycle.ps1')
+. (Join-Path $PSScriptRoot '../../SmartM365-SharePointUploadPolicy.ps1')
 
 function Get-ModuleLocalConfig {
     [CmdletBinding()]
@@ -308,7 +309,9 @@ function Save-SmartM365WeeklyInventoryHistory {
     # Changed-only publication is not self-healing on its own: a marker is kept in the week folder
     # until every upload succeeded, and a later run that finds it republishes the whole week.
     $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
+    $collectorPolicies = Get-Variable -Name SmartM365CollectorUploadPolicies -Scope Global -ValueOnly -ErrorAction SilentlyContinue
     $publicationEnabled = [bool]($uploadSetting -and $uploadSetting.Value)
+    if ($null -ne $collectorPolicies) { $publicationEnabled = Test-SmartM365CollectorUploadEnabled -Category DataAll -Policies $collectorPolicies -RunEnabled $publicationEnabled }
     $pendingPublicationPath = Join-Path -Path $weekFolder -ChildPath 'upload.pending'
     $republishWeek = $UploadChangedFilesOnly -and $publicationEnabled -and (Test-Path -LiteralPath $pendingPublicationPath -PathType Leaf)
     if ($republishWeek) {
@@ -333,12 +336,12 @@ function Save-SmartM365WeeklyInventoryHistory {
     }
     $unchangedManifestCount = 0
     foreach ($historyUploadCandidate in $historyUploadCandidates) {
-        $uploadReceipt = Invoke-SmartM365SharePointCsvUpload -LocalFilePath $historyUploadCandidate.FullName
+        $uploadReceipt = if ($publicationEnabled) { Invoke-SmartM365SharePointCsvUpload -LocalFilePath $historyUploadCandidate.FullName } else { $null }
         if ($uploadReceipt -and $uploadReceipt.PSObject.Properties['SkippedUnchanged'] -and $uploadReceipt.SkippedUnchanged) {
             $unchangedManifestCount++
         }
         $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
-        if ($uploadSetting -and $uploadSetting.Value -and -not $uploadReceipt) {
+        if ($publicationEnabled -and -not $uploadReceipt) {
             throw 'Weekly history publication failed; snapshots are preserved and retention is deferred.'
         }
     }
@@ -3539,6 +3542,7 @@ function ExportAndCopyCsv {
         RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -NamePattern ('^' + [regex]::Escape($BaseFileName) + '(?:_MAXITEMS-\d+)?_\d{8}_\d{6}\.csv$') -MaxFiles $global:RetentionMaxCSV
     }
 
+    Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath1 | Out-Null
     Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
 
     $historySourcePath = $csvFilePath3
@@ -3665,6 +3669,7 @@ function ExportAndCopyCsvFromConvert {
             RemoveOldFiles -FolderPath $OutputPath -FilePattern "$BaseFileName`_*.csv" -NamePattern ('^' + [regex]::Escape($BaseFileName) + '(?:_MAXITEMS-\d+)?_\d{8}_\d{6}\.csv$') -MaxFiles $global:RetentionMaxCSV
         }
 
+        Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath1 | Out-Null
         Invoke-SmartM365SharePointCsvUpload -LocalFilePath $csvFilePath3
 
         $historySourcePath = $csvFilePath3
@@ -4371,6 +4376,23 @@ function Invoke-SmartM365SharePointCsvUpload {
     )
 
     if (Test-SmartM365InterruptedRun) { return }; if (-not $Enabled) { return }
+    $collectorPolicies = Get-Variable -Name SmartM365CollectorUploadPolicies -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -ne $collectorPolicies) {
+        $uploadConfig = Get-SmartM365EffectiveModuleGlobalConfig
+        $category = Get-SmartM365SharePointUploadCategory -Path $LocalFilePath -DataAllRoot $uploadConfig.DataAllRootPath -DataLastRoot $uploadConfig.LatestCsvFolderPath -LogAllRoot $uploadConfig.LogAllRootPath
+        $collectorRoots = Get-Variable -Name SmartM365CollectorUploadRoots -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+        if ($collectorRoots) {
+            $specificCategory = Get-SmartM365SharePointUploadCategory -Path $LocalFilePath -DataAllRoot $collectorRoots.DataAllRoot -DataLastRoot $collectorRoots.DataLastRoot -LogAllRoot $collectorRoots.LogAllRoot
+            if ($specificCategory) { $category = $specificCategory }
+        }
+        # Final artifacts have an explicit role even when their local paths are custom.
+        $knownLogPaths = @((Get-Variable LogTextFile -Scope Global -ValueOnly -ErrorAction SilentlyContinue), (Get-Variable logTranscriptFile -Scope Global -ValueOnly -ErrorAction SilentlyContinue))
+        $knownLogPaths += @(Get-Variable SmartM365MailHtmlFiles -Scope Global -ValueOnly -ErrorAction SilentlyContinue)
+        $knownReceipts = @(Get-Variable SmartM365SourceReceiptUploadPaths -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+        $artifactCategory = Get-SmartM365KnownUploadArtifactCategory -Path $LocalFilePath -LogPaths $knownLogPaths -ReceiptPaths $knownReceipts
+        if ($artifactCategory) { $category = $artifactCategory }
+        if ($category -and -not (Test-SmartM365CollectorUploadEnabled -Category $category -Policies $collectorPolicies -RunEnabled $Enabled)) { return }
+    }
     if (-not (Test-Path -LiteralPath $LocalFilePath)) {
         WriteLog -Message "SharePoint upload skipped: local file not found: $LocalFilePath" -Level "WARNING"
         return
@@ -5418,8 +5440,8 @@ function Export-SmartM365Csv {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYC86zT9dl9s/G
-# UEVB5/FSmUq51fJOtTscQ+JT/jGPlKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCwsfI1rcIyMAEo
+# I3moF4qh22cPYMDZb+UnAX7MCa1W2aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5552,31 +5574,31 @@ function Export-SmartM365Csv {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICM298vL0TLjAV5/nPAsjK+cWS3hiGuQaEyHR1sjPuAJMA0GCSqG
-# SIb3DQEBAQUABIIBgET+/NpbFsL4SeQXq6knKUrXxoD9AIsi98+Mov8YtlnWCauc
-# DhCWbVK4iLtKMPCGxziLPBTLsmLmfoF2r1MYTF5cIl/jFcdLjvfPP4Rp6XbsXYd/
-# aKQL/Fm6pCoNLAZ5jwQ9Gc9zYGXJJyXHoRA/1fm9TD+IHRi1vitG6XRHC0rs1u6B
-# FjTO/WCIXjPF55g+91DTvt3zkKXjvpsdlkZQ78EIo4nSQI3YyVirolm/QFp7Lvsi
-# Gi4MDUqVu6qvpg0/bpWomO/36V3sjc/tSvbW2byv8MN9duYj8jP5U1coKQp3cm9i
-# 98w/A+soZ1DLM2gy2mczVycP+Fb65Asw4aN9mlP4hh8XMKTHIcsrRnHal94fzE8Y
-# pfGaRwLLEhb3DK7lMrbupoGJ7wYXl6kuSwrl+ZVo60Qk8JMM+M7yd0xB5YD5yxYG
-# 1GaTEQbfgSFoBcoX6bheUMaAk2soa8bqJEjhO0u2U4cbzJsyh+uKS54qVT2IsYa/
-# 3PU571Z6J4fVhgPp76GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBBSG9fV1xaI9xDdOQ02U9/mYKfy/wggwDtEGItD+lwhMA0GCSqG
+# SIb3DQEBAQUABIIBgGegfM+Y+Rz/SHtP4vxDSejTWmxbIjb9EtVH3+4sP3RLemsk
+# o5Y5R/qDdxTsYfVL+1vuTwyUb2x0ejYkj6aBTZJ+LpRDN8nnmtMxnaDEbN/wsRBo
+# dOwxk3IxHsgELNSDW0YcEO487Z14KSoKSVVXPU8db7mB7jKr6KtiKSzOdGDongvC
+# BKMCSj8OC9pb1J6NsLuBGXuGHOnJZd494FOjhPjAiF398QH7JdyelQoRH9lFfVdt
+# hXVa7w6RcRT8f/BfUT/8nMDkFmkRYh8n7ePpc2SiVcUxhf+4VVvMMsJaZgFte433
+# 7SwL8BJiW2Yu8Ve3PaWH/83w1BVEJjhp+lOVu3LguHRDFDZNzR/BSYSOvnYu+Whz
+# lEmKGHbmZyyzR7dS1jfZ5JXVmnhAWRuXEWr6yPUFfnf51HPoztbmWwGQyWFL7/82
+# fGveYSFZ8oT0ZiBaqQ8sL4sS7y0HLPPNREyTqZZdc4AA2DNssehhZPZxjhf/ZZNz
+# pAeHl6+7Vd+scv/IGaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjkyMDU4
-# MDRaMC8GCSqGSIb3DQEJBDEiBCCnI8QoHST38m01Mn80MpC60gSumEXxH8tvT/V0
-# 0+bTDTANBgkqhkiG9w0BAQEFAASCAgBFzI7KXGEwQOPHYB7Szny73bWaL5ywkSEP
-# rARb6WT/2zUsGVIz9RAzyb3DqYxMAINOauDOfU5X3UE4VEZj1GnWYHsYJI07EIDi
-# Ftm9RBp+Jk7BrPq+ppi6FHKNefoi/NhOMkaHqJhJMH0U9FmdDagEbAma+dzQdXOd
-# YIecZ/nqn+nOSHYZ2Cbq0IXv0hsYj4N94diEHstJ/JiRYY5D5ZIhPdeN7fWHl8EE
-# QIZaeGKrSbOxMj10bqGwsYn872OHMJPQYxPC3KRkHEXGaznum9Wvz7P8hT63rjSn
-# 4TdaP1+wP2xRrQK5kIGn++ByWtgImtWVdMhWOuRu3SWuJsJfLkxx5rSH6pGZFmX9
-# ZAaCPGv7/GYsAVjQDB4j788FTqajhdXpTeEL1qDSMFwMYvPutlQiGlUDyaqHmFy5
-# A9gNEGHS/mHf8WZJuSOLiWqBWfMr5Xlx7zFv+Wb1IqIg4Kzn9JHnVy1Bt+Okjv76
-# a+HywA+ZFE2fzuiDtrnwebUAImzhteDFoGgkzy23nfAS+Kh01oCCGYWGShl3rUeU
-# 3ab6KBjFIvlADcYRlwSrABs60ym7s6ZloO0YddibFiDBy0umzLi2N3PtvEp7HeTj
-# U14lY0CsyRoqzObyZOMVSRzJ6zmfaBHv12im6xbxnaNE2//6lInLiVbLTeSo7IR8
-# 51c/zvFebA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
+# MTVaMC8GCSqGSIb3DQEJBDEiBCDeKYDnO22RXsT43l3ZCoeVYevwFnlbPkn9Hd+o
+# mXEL8DANBgkqhkiG9w0BAQEFAASCAgAknxZzc5xOU1v6hI76ypEd0mlLVysewpjq
+# ZPDH8+lC/OH6gi1Rsi2i4REiPV18Wm+/q0WK13dgtn9imzCnGyIX/JHznA4A9ohD
+# OP+f/FOgHPPvXPAwCe24H6Tvt1zsNZVMzwFFlXBYLuFEb7ObFEYBUltn1gwvn88T
+# FT+z7BBjZBqPx4FHa8UyK0uyRS777nVXgNskh67/+ZH/PbBGYClFSfGQQmLKzSmO
+# v80E2DaKTlOxmAx4KS4on4gsfwO5IkuGkZuDA8A/rbLMFSE5jOAgfhTGgVuzoLT8
+# W/FOkC274TKip140xWEc+ymk+dS6BguAG6NdzknaA1E7KsbSYsVk8p0yjx44dnif
+# ENRtKkmQ+qbXdNe4WJMYIekVtzYFDbMvwQYVnezqT07ImjAu7RswEHg+y0vxRw4/
+# 0iF0yJjynV0/RWrWSaNRfSoGD5v+mrRrMinvOnX9WIKHzEKw0zWD5T9xaLbFtO4G
+# wgPhv2jezSrGlXO8DRatyUx09AT8OMIBxsjeseJeKACf33qpDfu92zTPbVvoMDxe
+# nZTpWtJ9vETB3iiUJcpLDLTcAjKvWRRPvIWSma1VNeZtT/FgXE9gFDGbyeKoRfqc
+# b31K7p7P/4k1gG84zXiITxi4t+EIRCy+puzZotBBJ8bC1e0VW+T7SUZq4Ip/DTLU
+# OQqbr50EHQ==
 # SIG # End signature block

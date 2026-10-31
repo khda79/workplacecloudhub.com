@@ -3,7 +3,7 @@
 .SYNOPSIS
 Synthetic daily capture, preservation and conditional SharePoint deletion tests.
 .VERSION
-1.0.4
+1.0.5
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Synthetic Core globals are saved and restored in finally.')]
@@ -217,6 +217,17 @@ try {
             Check (-not(Test-Path (Join-Path $linkedRoot 'DailyCaptureRecords'))) 'linked output receives no retention writes'
         } finally {Remove-Item -LiteralPath $linkedRoot -Force}
 
+        # A disabled DATA-ALL upload keeps capture retention local even when another category is enabled.
+        $global:EnableSharePointUpload=$true
+        $global:SmartM365CollectorUploadPolicies=@{DataAll=[pscustomobject]@{Enabled=$false};DataLast=[pscustomobject]@{Enabled=$true};LogAll=[pscustomobject]@{Enabled=$true}}
+        try {
+            $beforeUploads=$script:UploadLog.Count
+            $f=New-Fixture 'remote-disabled-by-policy'
+            $run=New-Run $f ([datetimeoffset]'2026-10-19T08:00:00Z') 'first';Finish $run
+            Check ($script:UploadLog.Count -eq $beforeUploads) 'disabled DATA-ALL never uploads capture payloads or metadata'
+            Check ((Payloads $f).Count -eq 2) 'disabled DATA-ALL still preserves the local capture'
+        } finally { Remove-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue }
+
         # Actual remote adapter verification runs against local fake remote bytes; no network is reachable.
         $global:EnableSharePointUpload=$true
         $f=New-Fixture 'remote'
@@ -372,8 +383,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCz0VOXnnd1Xqvm
-# enjgP2YFn9MaBlR1Dc2mzFx8lY2IzqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDDZ6eUhgqAwokf
+# XcxtMQSq8oeD5VK1YQC9HgBW/GJ8+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -506,31 +517,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEVGO1MLSmxUWuOOwNcK8/HFDpIvNLtee9uafYVFZWetMA0GCSqG
-# SIb3DQEBAQUABIIBgCnm9wbVQGTRXad6DxI/BIrrXqGxXN0UJuV4GmadgtaONUDa
-# /saufNj6Mrr2nWz7PzeYTYhZPgIIU1kQ+svbfqhRZRkI4ej2RJZEE3JW46BvzD2L
-# eJUOcWaI5a7xLu12/l7bLIUkJwSnTW9ulynpDoWIM+QFbgQ+tefUxnO+U7ih098t
-# kKDCWlorlC02aGYKNq4bI/B7ux1zROsZgHqzF/gpYT3fAcx/+qYxm7xovvfbX985
-# gc1cPVkvvFyz+918ILekxnUpv8192m9t30lQ9Fol0JBPf8NEdEeS1EpAN3jHQFts
-# JOooZ/z58Mvcang/XATfLhHPfyWO+RJAgJeRqL5SVMgDPw2A9ibu2fekzGFLQR0q
-# /XvmDpQefDjOITEZi/h163Tinf0INnAurRhj2ae+EjP+GbGH5LNn4+wCWxyPUMCP
-# OrYZAHsPQl/enhblZQgDgwf9xJlS5SD2816LCHKgDdOVN7LUW08zcAhlvDis3ySg
-# QZzkHUKpxKbQhzJvOaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIIJNtENnR04T/gtnlpVLACU7e3LaN5/kCDZtFhM7cflNMA0GCSqG
+# SIb3DQEBAQUABIIBgKNlrJgQA348dqXFh2FYURpsN+TzC5qCm3Z58agNGBFmxZCs
+# XGc7zxAfB6EJ/+oF3ctGgD4vAeqX3DQGkC6TM4FypFgyceu/0w4d6qec5KrBhGL8
+# h5tIw7/AZoQAGoMos3MBRdI+AMeSWBjFToDqO/taSrKV7rjY5gskrSGacvBYF2rB
+# KEvCS4S1J+LHk8R9KaAf4qNZsvUfoCEOo+ihTTPtTfAIApVimhcmxNIm2lRvuP95
+# +XUc/CqMKH7mq6Rh0LNhvmfToFcNTLK8ENIZ/Xl9zgvtrbOAfuAZX6YSOz9Xb79P
+# 26MPACUdMPCCBAOX4YD3G4uoxQZIlgBrdArF5Ze1LwMox2O3uVJc4RlXNDlITgjF
+# lL7rPg+TsTbFoz9byyuWX5dKUsh6jV8Bgw1dAGSTZnbPFAtwTyzlq4EoWZPehSz9
+# VroA8KCX1HJi8lSgr2vW0UXZS48zYpDfvNNyaN+UdUYql/SxxLkN1BMJFb4nL1uS
+# w8BXqkcCXVQ7b68YDKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAwODMw
-# MjlaMC8GCSqGSIb3DQEJBDEiBCA0/WqK6PcmH+DheHAVk8OIgXAUaDlYiz/NV3sO
-# kXpyWDANBgkqhkiG9w0BAQEFAASCAgBC/JQGekSNj72SpnLHXE4oQEy1UuMqKAvA
-# fVxHoHngS2oAwVevd3fnlMidQQIhnwbXG6weZizDvOggXyUjKlVVZjl0wiefb/8l
-# SSaZLKtCb1aU8s6YdAoxYhlHQPEiusnVu9H34hNMIRVNSJgGt9gYBqVLu8wZzWcR
-# Orv8etj9sFJBoW8swExLte33LqsYbjejBk71468W2B1JXx8J9ISIQDQX25G40gYB
-# Fvw5Mx1MD9osa6dzJrW5t+ziw1qbIs5VKKJoA7E2t+V0lt2pv0dz75HHHG2mFyZ7
-# gyNfYQJYsDTscwMt4nttmviw6cAduvmB3cptBNeEPJM0ru1Mr0penrIKNPqyIUPF
-# 2ZUazW3wCWYcx0SikOb/kx2elcwL0LDT8pmAvFniPkfVls+Hg7uK2zSe4eLtYvlA
-# Na7q5mC5jW5FcFR+/Fo0sceZlqSWoP2wLBqqwIXqn1YT+O6RCGjPq932E8B/min2
-# tCchJWnGXRF7mu7TeM5Ndtb829WEERMkzKWOvn1KuiOsoAunc4bOVenDgvmdJ90e
-# vGSUp49z1dN2RxOdL8YA81zGqHexyA8bHwLyoJEtCfeoaCHFlEy8DfPmT3dL/T7g
-# /+9iGL4PbGntz1+r7dhq6jLHgRAcODekgWAUADwyuqW0Z+23B14t+82Ja6OEsIxk
-# i4e3cT1irQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExMjEx
+# MTZaMC8GCSqGSIb3DQEJBDEiBCAKiYUeES8oB7iT718lXmvhGTx9WGp4NZQ3cBwn
+# acL1rDANBgkqhkiG9w0BAQEFAASCAgAdUxFTUhU6HMKiqur2tUmKJtgntOEuxsOl
+# DjPOkc7YByRcKm1L7ouljCvq2CQCnS1w1+CWMv1Shi5+8sXe4MwiqkeeljmpzocN
+# AM4kM6R7augE9H7Yy4ltHE7SAhDsLmQgJDOtpnetzkL/d0ZYoVOM6KUeGiAUuVzK
+# 8EUlTowl72DyV/Pgz8qhhhDyRjeye4VzBFa07BK5Hc0w7OT8o2TKqj4cdM5dROlr
+# EcZZNRxbI1+yWZ9WwnV0cNsEtCKurg3k/xU4tcTi7pM8j83iXAMcTW3YdTt4hMJP
+# gXA3Rt6ejjCYAhn4se9VBFzlu1FF2Uoq4QrRthckiBGY4u4NTy2UZgYm/3cye5JB
+# kJgscRHM9MG5VZs49qSzQs88lKUWdNkDPp3H6MApMHVMoI0DER8kPLgNs3utm/F9
+# HnsDO0kQLQLKUuH/yBUncHPYWf9GqlrdcFU49NoSMbJo1Mt/PKaAyZglLW3HpbVt
+# eFdVr1q/NohAU3MzAjvv4TAsZ3jE/vBJDBfYbUVhHyLTT+dLDCR7XGu7gwqfEz5E
+# lRpOO/F7IwIxp/U+akrkNCtLx5bZSBHXp9s0uWUaxj0iCS4cq9ZQh2DC2fh2gPHI
+# C2ajyJOlAhW0HgtB9maX16l51u2heqTwSt+G1ibKcGDqWhMNbcDF5HE9moIDCa1W
+# 04sU/8pYLw==
 # SIG # End signature block

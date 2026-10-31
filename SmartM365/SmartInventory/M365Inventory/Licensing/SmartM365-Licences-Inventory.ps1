@@ -30,7 +30,7 @@
   readable headers, AD domain and country columns, colored reasons and dates, print setup and a tenant or domain file name.
   The script parses under Windows PowerShell 5.1 again (1.65), so SmartInventory.cmd can resolve and start it.
 .VERSION
- 1.65
+1.67
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -276,7 +276,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.104' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.119' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -577,7 +577,8 @@ function Remove-LegacyDetailedServicePlansExport {
 
   $legacyLatestPath = Join-Path -Path $LatestOutputPath -ChildPath $legacyFileName
 
-  if ($global:EnableSharePointUpload) {
+  $collectorPolicy=Get-Variable SmartM365CollectorUploadPolicies -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+  if ($global:EnableSharePointUpload -and (-not $collectorPolicy -or (Test-SmartM365CollectorUploadEnabled -Category DataLast -Policies $collectorPolicy -RunEnabled $true))) {
     $removedFromSharePoint = Remove-SmartM365SharePointFile -LocalFilePath $legacyLatestPath
     if (-not $removedFromSharePoint) {
       WriteLog -Message "Legacy detailed ServicePlans SharePoint file could not be confirmed as removed." "WARN"
@@ -3509,6 +3510,8 @@ function Invoke-LicensesReportUpload {
   param([Parameter(Mandatory)]$Result,[AllowEmptyCollection()][string[]]$ReportPaths=@(),[AllowEmptyCollection()][string[]]$SkuPaths=@())
   $uploadSetting = Get-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
   if (-not ($uploadSetting -and [bool]$uploadSetting.Value)) { $Result.UploadSatisfied = $true; return $Result }
+  $collectorPolicy=Get-Variable SmartM365CollectorUploadPolicies -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+  if ($collectorPolicy -and -not (Test-SmartM365CollectorUploadEnabled -Category DataLast -Policies $collectorPolicy -RunEnabled $true)) { $Result.UploadSatisfied = $true; return $Result }
   $result = $Result
   try {
     foreach ($path in $ReportPaths) {
@@ -4811,7 +4814,8 @@ function Remove-LegacyWeeklyServicePlanStateDuplicates {
     }
     $previousManifestDocument = if (Test-Path -LiteralPath $manifestPath) { Read-SmartM365JsonDocument $manifestPath } else { $null }
 
-    if ($global:EnableSharePointUpload) {
+    $collectorPolicy=Get-Variable SmartM365CollectorUploadPolicies -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($global:EnableSharePointUpload -and (-not $collectorPolicy -or (Test-SmartM365CollectorUploadEnabled -Category DataAll -Policies $collectorPolicy -RunEnabled $true))) {
       $removedFromSharePoint = Remove-SmartM365SharePointFile -LocalFilePath $legacyPath
       if (-not $removedFromSharePoint) {
         WriteLog -Message ("Legacy WeeklyHistory duplicate could not be confirmed as removed from SharePoint: {0}" -f $legacyPath) 'WARNING'
@@ -4834,7 +4838,7 @@ function Remove-LegacyWeeklyServicePlanStateDuplicates {
     $manifestContent = $manifestObject | ConvertTo-Json -Depth 7
     $expectedHash = if ($previousManifestDocument) { $previousManifestDocument.SHA256 } else { 'ABSENT' }
     $null = Write-SmartM365JsonBytesAtomically -Path $manifestPath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($manifestContent)) -ExpectedSHA256 $expectedHash -Validate { param($document) if (-not $document.PSObject.Properties['Files']) { throw 'Licensing manifest Files missing.' } }
-    if ($global:EnableSharePointUpload) {
+    if ($global:EnableSharePointUpload -and (-not $collectorPolicy -or (Test-SmartM365CollectorUploadEnabled -Category DataAll -Policies $collectorPolicy -RunEnabled $true))) {
       Invoke-SmartM365SharePointCsvUpload -LocalFilePath $manifestPath | Out-Null
     }
   }
@@ -4917,7 +4921,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.65"
+$ScriptVersion = "1.67"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -4970,6 +4974,8 @@ try {
   # Initialize script environment
   # ------------------------
   $InitializeOutputPath = InitializeScriptEnvironment -OutputPath $OutputPath -LogFileName $(($MyInvocation.MyCommand.Name) -replace '\.ps1$','')
+  . (Join-Path (Split-Path $modulePath -Parent) 'SmartM365-SharePointUploadPolicy.ps1')
+  Initialize-SmartM365CollectorUploadContext -LocalConfig $ScriptLocalConfig -GlobalConfig $global:SmartM365GlobalConfig -DataAllRoot $InitializeOutputPath -DataLastRoot (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '') -LogAllRoot $global:LogPath -ExternalActionsAllowed $true
   $inventoryEnvironmentInitialized = $true
   Start-SmartM365CmdbSourceReceipt -ScriptPath $PSCommandPath -SourceRootPath (Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue '')
   # DATA-LAST changes only when this run completes; a failed or running run leaves the previous set intact.
@@ -5695,8 +5701,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5lNBTSst7cBQT
-# Eo3YPoA7N5K02b7GMCjFhLswZzvEZqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjxBb04Y/I9UIW
+# yQWxbj0bqBBzRahY4Qe7FTVPosWWAKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5829,31 +5835,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID9Q7OaKQaWa0ZYw8d/oW8/zry+IrN/pFs7C2c78B3yeMA0GCSqG
-# SIb3DQEBAQUABIIBgAmUfTDeAb4Jpl55+t7qIC+7ItuhCW4KBqFliZH3XhlZecGj
-# QlZqZ5D3GzgzjZP9FNsYIdUkJCa/jOgHx3hINHM/h52Sj6YTrUCVgltzDWep3410
-# Yf/K6mqtOeXBvPUCRANG8Rg6/i7X7GUlj9EsGuNgLVA/Ee30wF7dLfeIfpjnn2Eg
-# OP0LDTZToN51Xb5bhC8PlZWC4QEk/3w1MYrl+7h28CdLaMUWjqAqswWHAueycLau
-# zZYID4oMsa6qCMZuH/xM1uW4VO5xLQMzh+kii76J+TGlMQzN1Ghu7q9Y+rI5t4ZW
-# eNa+81Ut5G3bgm3/IYYo/GkB7LzvgyngGOAz162ix/v35oPCQMfO6EH8xhVNbT/W
-# HxRRdP5rrQiqcd9bP0mpdMoAJWyYIn2LFsiJykv3uKOKkqrZ1WCKrXSaxvHEM23B
-# mwfun9EIwh3d5WHCJ7mMi/7yLkyTn2NvXSmRVIZdN2BWa6N41WPj+MSW0N2RrDug
-# DFEUNgC7vIvQjD2IpKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBVuc52N3gcfr8boOBhqC9Qo5ZtSNd12mJ5Fg1F7CQIeMA0GCSqG
+# SIb3DQEBAQUABIIBgIEGMpRkaHP6nD97xVT4TCeso3RYWYw9v+F2W5ML/4F9cnQm
+# +u6s4KcR2O0pbYXptUyeSOcrZy3sOJfBia7L4F0amkj58sW4ovSXSa8G1tjV9xph
+# ffkO2h3bGR6Vmds96EEMRJ/daQBKrF+kxWqcIRqcDZdcz9bGBYYQ9mTgiUzaHpIN
+# dl+DOXdOtaMOaWhc5rLmJW7sfR6/RZ7TsuHZMTPe1SLs8DWZwie1ffTdFTl/jCFL
+# OFfUs3sfjM4RlHhZuQEFGn1qytmvuPOrEJiik/rtyK6OtAv/w/HfMdCH8BZd00XR
+# rP056PDJHbLGoWvfWniDVC2IDj3SHaUyNi2Q2N/sp3K9+c6HD2SWCrI3smd0iBiJ
+# DUilw/jVfaAIB+1CpuFeYHaLNNT2YvpeoDOtzmK/rbuc3V7/2HpGYa4bucXV5Ruw
+# 5TitorV82yx6jF4sUXjy6+DSpGINbcQ69B5DrGLF3Hwpw2vblokNTnRx8mbWQmjY
+# 3bdYCiUNRqhqqH7+fKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjkyMTIz
-# MjNaMC8GCSqGSIb3DQEJBDEiBCB2O3SWqzQAlaZddAOscTfS5LexJSjXi+nJXPyN
-# 4UPSqzANBgkqhkiG9w0BAQEFAASCAgAywixYW+S/jqUTmD9FInkTsN58ZqASISkE
-# KO42OedLrvuTsbAYZBOFuI58KlOb9m/DEWj45BKsg9aiiOJ/ZmCLWWeTBg8FLlch
-# ZI8hlrjIQI2VzXEadPNtm3uXtVesmFKOYbqZ1+/tEpNz/ofCNRKnXgLgK1ZbVx/C
-# TWgv4piLMW4/z67s2hN6vhPHy9iofborp3qPtlY40r0qPCCNBBEk3Ojuz+uYtTBR
-# qG1OxnyfXqsj9lA6gkx+VJRLlTn0YliPr6YtsRbxFdTvIVls0bGcnALJ7v8KbxxL
-# qUt6rNaACNn5XcLGG3MfbkISiGz/wX0WVaoSkxVP9vaSiPV8Wq25ErOZx18lLjSh
-# FzFTSZBlSZJiaygq5Z56PJBBg7w/UPzLYMDFJfx+uUgqe5l2ytY413QMzlJosi/6
-# N1HfTaKlwLg+8szgDVFvxpzFZT5D5ud0vtkBupYtJnkR33jYpy0sqrZIXyPDB9FK
-# zs7bsJstCWhl9mpSUwmQOxNRJnDaqNmOGx3vqLByfx0BfFKYOnpcVv8tGsScugJL
-# AmbrdIZKSn+xGEZOLTTJAkKozCEWdM6kko6EETaNdW/vXTgB9FXJBeGCSK8aMSZH
-# EfRLMXve0/9rSa7BFpNpotz9NLi+d2GRLAtxcq4BP0wWEtEigwoLohs9otJqj1EJ
-# 7mcQKZLO9w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
+# MjRaMC8GCSqGSIb3DQEJBDEiBCCL+kuSLDRgp5JQxPKW6disAGAuubU7leU+6ifi
+# Oh0gCTANBgkqhkiG9w0BAQEFAASCAgBjNvKOyJntJrgaHtPOjA9mRurW9/Ilfy9H
+# KxftTApb0ipwihir/khVqoAfhLD89gMqTgbain6tyB8Sjwteg+K04qR6XVXIkAjI
+# rVos5MZbDuTPt6FHgOxCdQ0aeRBlLIUnJmoEASiWPAb7NsxImB/1YFj+iK/LygWS
+# aARbVvLxZYyriOKz2e68bqPJmjxLXyYJ+kWvRSMy34f4QPXWXaqj3uDtSvNcY1Ut
+# GEqyAo6CvBRbscmI/B9Vi/CCRjvdR09pkNXCjgIVhgLrwzVhNNQWkrIDDadWTnwh
+# LY1XyhUc6PJsOrRaCcT7W2qbaX809aoRhlZUzUt3e1b8uV/IGVZyu1sdorcrCVZV
+# MmI12EG1/N3e/7Do2lYfsxx7Tw7ChOogsB4LP0gE2jDA6wHVGi16MoDJqzvvCDfi
+# KlHa5O6DodbgEdmdltY8vegkHVJIJcDlp6ryeEi5WBUO1bAPOJhR+AToDA1S2oyT
+# veZh0CwI/oazu1tUnl/uRBm2JaP4Zjkg7tOZ4iQlHr54futGyg4l9h2OQrGjOD3S
+# 4giZ5baRACFNZ4ojKhRAhk4WFifrkmDIxA0htO4rfF+O4IyS8l4QPef6WwjQl8xc
+# t8297iR21PJwoakOBm5E3uTLko+N5NB7pd1teOzp2oslVcwsN1oQVxEOUgRdxmbt
+# Y+75HDaBOg==
 # SIG # End signature block
