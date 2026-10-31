@@ -30,7 +30,7 @@ Before acting, both endpoint scripts inspect the previous toolkits **read-only**
 write, delete, lock, wait on a legacy mutex, stop a process or change a task or registry key.
 The mere presence of a previous toolkit does not block.
 
-| Status | Blocking | Meaning | Next action |
+| Status | Blocking with Block | Meaning | Next action |
 | --- | --- | --- | --- |
 | `LEGACY_ABSENT` | no | No trace of the previous toolkits | |
 | `LEGACY_INSTALLED_IDLE` | no | Folders, tasks or packages exist; nothing is running | |
@@ -41,8 +41,8 @@ The mere presence of a previous toolkit does not block.
 | `LEGACY_RETRY_AFTER_REBOOT_PENDING` | yes | A legacy retry task will resume a legacy run at startup | `WAIT_OR_REMOVE_LEGACY_RETRY_TASK` |
 | `LEGACY_STATE_UNREADABLE` | yes | Legacy state could not be read: the state is indeterminate | `VERIFY_LEGACY_TOOLKIT_STATE` |
 
-The option `LegacyActivityPolicy` (`Block` by default, or `Warn`) controls the reaction to a
-blocking status; `Warn` is meant for an operator who verified the legacy state by hand. The status and its detail are in every result row (`LegacyActivityStatus`,
+The option `LegacyActivityPolicy` (`Warn` by default, or `Block`) controls the reaction to a
+blocking status; `Warn` records the status and continues, while `Block` stops the endpoint. The status and its detail are in every result row (`LegacyActivityStatus`,
 `LegacyActivityDetail`).
 
 Hybrid Join also stops with `TARGET_WINDOWS_SETUP_ACTIVE` (`WAIT_WINDOWS_SETUP_COMPLETION`)

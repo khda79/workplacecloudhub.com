@@ -86,7 +86,7 @@ param(
 
     [string]$DataRoot = 'C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade',
     [string]$CorrelationId,
-    [ValidateSet('Block','Warn')][string]$LegacyActivityPolicy = 'Block',
+    [ValidateSet('Block','Warn')][string]$LegacyActivityPolicy = 'Warn',
     [switch]$ReuseLegacySetupMedia,
     [switch]$AllowSetupMediaDuplication,
     [string]$SetupMediaPath
@@ -6560,8 +6560,8 @@ exit $exitCode
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBc7KrBuT216+YB
-# v4xWGnNf56kx33NR9sr/aNa/SjFSvqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCTImv68oyqj58M
+# jh1yv4r4KoacBoS3+3vXeCrnUUo7waCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -6591,14 +6591,14 @@ exit $exitCode
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCCKN2Rn2iIHUKmQCtjkN5N
-# UahzTiNkY9OrkG2ZXYDk0TANBgkqhkiG9w0BAQEFAASCAYBZluMq0kZVBSQ7hv+g
-# +LPjlXYYqHJ8Y99KCdTtu2+LxQug/kb3a4Lmr+xcH5hxhaeG+AuJ5Yl6fDdtA9fb
-# GgQaWPRMt1ljhfI2iSoFUnVZTSf6ocn6kqdN8A0VdRL92rAqThrorGxERGa16/Jv
-# DprC2iUr6BL+I5gHG3s0NZl12lZj4Qswxj2fQNNLPNJGoj8VOEwxHyzj3YUr/oEY
-# RXVHS0jtQ1RMmcyuKgtoxdSv9wqwm5luikeh+Bzr0Y3G4wmnWBNRkRo0opsmgSXi
-# WRyyZxUot5DwHNyu79cy7ZvgzSlOdPuT4drHxnv15Eh6PcFRd1X1Zkgbvd9Y9+jf
-# ATPMtIj3Fo31Iy7N3BlZOV/z7LEEgnfZJPZiCp9WoL4CDbNELy8Gi7ROenP2G3KX
-# ckriNX98YR3YYf0mhg1cfFIxQ9fg8v+gmF/6RrfwOAhDXqYkjFXhb+elmDAdj5aq
-# OJsJMXpPWpbkSG04uhOhP6l0/NcHydsCEkHyiASrnQU1ArY=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDsKbAU/LrYDJoIomxem2er
+# aaddHRuZzbZ6US4rZDZkCTANBgkqhkiG9w0BAQEFAASCAYCIGh15RpSXCIKCYSuE
+# bOvBLx1SolP9jQ158m2xwiBdE78M8PoSyBMFi2LVWVN4jEHgSvKyzImJ+UAgsFBH
+# E1Dh0bJnQL+aIdMaeZe0m8WEEURiK9UQDNtKe894D88Nq7BqLKU7jkybrtCQCgSD
+# C7n8yQSJPllGe370dGjP6yWtxkC+Tqk0dkXGv0x7QK/+q5mXzsQ/pSvy7CcU/g0F
+# JQjcQeD6vbDn9A7/ir0xLKhpZ1YM2Xbi5YN+dxUPm4TUttSAZ1aE1BkTHJ+XczjG
+# 1hrbpPOfYFF2mRk3XoEolawSaCtypglP9D53TeTrH7hCG9Q7bsjYRt6CcKKguF4m
+# 4mQl1mGoZeItKrzdg8+v0sEvbKF6YtbHh9L1tsm8H2M1Bee0qS5w+QAqk96Er4M3
+# VxYQK3PqALQSJA+pZpKXcdnssfUk7ad2OLgakuyGm8MmXlgUUAKawW6LoPX5lWYj
+# IobPInqzWrzs0GWPX97mm0+EnfJG2DiVJ6VM8vVD7A0RqEM=
 # SIG # End signature block

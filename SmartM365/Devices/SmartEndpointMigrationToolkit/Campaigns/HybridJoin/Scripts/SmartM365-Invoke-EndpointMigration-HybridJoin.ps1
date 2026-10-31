@@ -80,7 +80,7 @@ Campaign runtime folder. Defaults to C:\ProgramData\WCH\SmartM365\SmartEndpointM
 Attempt identifier supplied by the technician worker. A local run generates one.
 
 .PARAMETER LegacyActivityPolicy
-Block (default) stops when a previous toolkit is really operating on this computer. Warn only logs it.
+Warn (default) records previous toolkit activity and continues. Block stops when previous toolkit activity is detected.
 
 .VERSION
 1.0.0
@@ -116,7 +116,7 @@ param(
     [switch]$RetryAfterRebootTaskRun,
     [string]$DataRoot = 'C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin',
     [string]$CorrelationId,
-    [ValidateSet('Block','Warn')][string]$LegacyActivityPolicy = 'Block'
+    [ValidateSet('Block','Warn')][string]$LegacyActivityPolicy = 'Warn'
 )
 
 # Endpoint scripts run in Windows PowerShell 5.1 (the worker and the Intune runner start them with
@@ -5733,8 +5733,8 @@ exit $ExitCode
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCqe9v6nUl+VT4A
-# ruI8C8s/tTjVqsqvI0JGpUCrL5rHA6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCusiPoQwfBZMpY
+# pw0hHoFHb1OEtzdXO5oNTkEvOR6dpqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5764,14 +5764,14 @@ exit $ExitCode
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBEyyDoAimeLcyI1shhtxHO
-# blSfeoWaPPFtq6fMSTZvbjANBgkqhkiG9w0BAQEFAASCAYBPqnWNiDL2nnaCg73A
-# ctSPiQBBqOyRpjZ9i9+GJefWP6MzsiFojWKAZAAFvGPXS3EV5ii5hUz1HFVnb2yC
-# cMPjTvsSRP4jAlxNwbr1mOEFr9TrOp/mADI7Foaws/E4iP8rVfhGZ/N4G+39gpZW
-# cnyHdg5F94TfL/2V+bvrvpRGuoXa7bwvXgdhx0OvZtY53rv7xYhXFIrfXOWSgRD7
-# qqiqIDc+Ziw66NA4nfdzYt0be+GKWfS72QDMyphR2gxBF1tb/5rvC4MA5xaXbDZB
-# z9m1T6iRiUY3Lir4TAWRUKd9vfvWXsvdjd/NoFNo18CaOrmLkPWw10s1YTLF5vZ9
-# Az5wwqh5tc/uIuc+2enoWyCMKzPnsaMWV47+aj92ZwGmxW0LWPwAjONyVCZJ3HGV
-# BESoCPZJKLeXIZWBTwol+xcXFU5AlA6UoAWZimh9/BwgJIYbCrEyxBbFi81TW46g
-# tdNpYvjc+EFwI2SP8GBAYqDEp3V7Zh8Oi0YV14P5OLdbPU8=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAJxU2rYZC3dx4cubfwyPpp
+# aHL6YF3QgmiPgAyHwkejljANBgkqhkiG9w0BAQEFAASCAYAUXnP/HMGojlpI2/I4
+# D0o40AkeNkCCDuKuK+U+0ywYA2+OlCFzePQEGuTlpnJL5vm2fPm4CMMr6GF+4WrT
+# z6hkBiOpmTFUlwtLv9R6PPw9XUQULqU32D+b75WpHb+68n3Jrnru/aBvVMrgkuPO
+# qfbYt/7gI1mKHaeeWx8MNX2FSG8sqTsIxfJX83XeMMK/fyvZGAxZ3vj9WOFEq41r
+# zq7P8tMeguzcdxGxXsiCBcZclwGmQhWGPy5v0gnf+eu+8oQWmaXAnv6MjVXt8ohb
+# jxTMpRNX+6mRKK19nGrPPo79O3K84wczFJ4eVxUJ9MUqaMwvzYPuGuwT83x7DVQw
+# FAza23RSEXuaw0qO/pT8guWWCqRaifQ3w2PBcjTBw2/XXjcxvLAxf23uYPq4t+Ou
+# x53FNTn0kX2mZoqdQqr/0qxu7a8KsbZIqBc5N0j/f3XGGe2SOOau4eQOw6Xfre2N
+# Qhgf95qv6Cw9wtRYo8+rZR76Nz3jAd2E1aUOpIhGGNw2SiI=
 # SIG # End signature block

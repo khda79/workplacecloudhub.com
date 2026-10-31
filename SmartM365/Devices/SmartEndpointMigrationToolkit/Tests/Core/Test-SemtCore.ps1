@@ -92,6 +92,14 @@ try {
     }
     Test-Step 'no Batch/LOT wording in option labels or descriptions' { @($catalog.Options | Where-Object { ('{0} {1}' -f $_.Label,$_.Description) -match '\b(LOT|LOTs|Batch|batch)\b' }).Count -eq 0 }
     Test-Step 'D11: Hybrid Join AllowRebootAfterDsregLeave defaults to false' { (Get-SemtOptionDefault -Definition $catalog.ByName['HybridJoin.AllowRebootAfterDsregLeave'] -Campaign HybridJoin) -eq $false }
+    foreach ($campaign in @('HybridJoin','Windows11Upgrade')) {
+        Test-Step "legacy activity defaults to Warn for $campaign" { (Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign $campaign)['LegacyActivityPolicy'].Value -eq 'Warn' }
+        Test-Step "legacy activity Block override remains available for $campaign" { (Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign $campaign -GlobalLayer @{ LegacyActivityPolicy = 'Block' })['LegacyActivityPolicy'].Value -eq 'Block' }
+    }
+    foreach ($endpoint in @('Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1','Campaigns\Windows11Upgrade\Scripts\SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1')) {
+        $content = Get-Content -LiteralPath (Join-Path $script:PackageRoot $endpoint) -Raw
+        Test-Step "standalone endpoint defaults legacy activity to Warn: $endpoint" { $content -match "\[string\]\`$LegacyActivityPolicy\s*=\s*'Warn'" }
+    }
     #endregion
 
     #region Option precedence
@@ -623,8 +631,8 @@ exit 0
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBVJjODCOfUCWQx
-# ebOCfMrUvSjlIvReDIXAzxwLdWVqlaCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrCaJi+bKEg1e6
+# hr+kQqCw6VV43umluImHm30qxIvQWKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -654,14 +662,14 @@ exit 0
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAUvJAsQRqKQyxAoy+wPfcI
-# RrenvqLu47FXKyO8aAbz6DANBgkqhkiG9w0BAQEFAASCAYBzJFgsqz/MfQ2fnE2b
-# XBBg37doE+X0NCJNfJi8jY0c1DqbmY41oXjw9x2hZhZ3hH362K0SMogkSVOgMwb9
-# gZH7HKrAyxjXC1TAL8GEfYHMaUwE5akMKt3ihP0PDouCgocwjYvm1kYeOsKgLqWo
-# jSGV2YlqwyPD2VU7cOteRe7nZC1Xfq+7g3S/CccLTltNGS9of+aImWlxXqfR6Z7P
-# xzMtUiQjnnlXUzdqanW9kAzpJHun2lcPWVD4r/bAvPAXngyCYQX8nYrWhF13fY5D
-# sMWBVYX4mxUz2d4/tI3bOiOsZ2gZEjrrJ0mirJzmQbPnHJHqiHD7u43TUXiium0u
-# WmLfed/VrC4ySFJnJjxAouQo+ia95FBa6hqYPcLpPbaeS5BOWW2mrGbi6eo7jwOz
-# gjhsIf13PAu3ajnGvavLBeftoH29pntIv0J9/g3TlaVqNCExbVWdDC4PtmOqgljY
-# ELRrdY1ArW9gx5EADRf5QzR9jdZiEFB0sZU5TFodBX1QxRA=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBHLNBJyT9N7+EX7mnQp0r4
+# JV2ORQfweCJvKVUpuUgZBTANBgkqhkiG9w0BAQEFAASCAYAxrmwvVVwBtn0hWlLG
+# zCNhDDm9W/N2ZS9BKHRwpRx/SV81MHgNBzvG9OAdsZroCrvBUSykXFiEwTru8bDr
+# WFBaxHtmKJB0Zi9aLELQ/TmX6z+b2hO6zZsl1mw9r5Rhkf7/aaFQDRsQks3AKYLW
+# u+aUmoA2ALVaQOfGAnj9lv8qYqA/7Gyujr0bexrCpX2e+S7/2ROMWj5gJpc02W5i
+# yFiZFYrmg9REWZ2XV/gC1N6nCyGW+CVqBudRfLKQFV3mI+q2V7DLnz9U/woS1nto
+# HgVuAly9gHM8VHNykDqe84uBfjfdIv3QT5cx6Z+8z8PXSIcNg9BcckqxFFvh3XVJ
+# fR0lPfbmf2gW60JNILv8ty1xRwMAe9vXtLuMzde9c8jD+k6EAy8V7Igx8G+A9q4N
+# LpLBaN0QWyWdHjY3XmrWbfrImYVT3V0ROGgCUmSxyS8SSzd+7VZp9/G1DVs93jrg
+# WnHjWwbedWKxn+/kWV2lGzMp8Ow+lzz3Qtp+HIRwNJkLDeM=
 # SIG # End signature block

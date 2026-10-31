@@ -79,7 +79,7 @@ Generated from catalog SHA256 `466140DF637E8CADE5F99FF8730BB5BCFD83A89045DA3EE7E
 | `SkipVirtualMachines` | Boolean | True |  | `SEMT_SKIP_VIRTUAL_MACHINES` | Safety | yes |
 | `RetryAfterRebootDelaySeconds` | Integer | 300 seconds | 0..3600 | `SEMT_RETRY_AFTER_REBOOT_DELAY_SECONDS` | Safety | no |
 | `RetryAfterRebootMaxAttempts` | Integer | 3 attempts | 1..30 | `SEMT_RETRY_AFTER_REBOOT_MAX_ATTEMPTS` | Safety | no |
-| `LegacyActivityPolicy` | Choice | Block | Block, Warn | `SEMT_LEGACY_ACTIVITY_POLICY` | Safety | no |
+| `LegacyActivityPolicy` | Choice | Warn | Block, Warn | `SEMT_LEGACY_ACTIVITY_POLICY` | Safety | no |
 | `CentralLogCollection` | Boolean | True |  | `SEMT_CENTRAL_LOG_COLLECTION` | Evidence | yes |
 | `CentralLogCollectionMode` | Choice | Standard | Standard, Full | `SEMT_CENTRAL_LOG_COLLECTION_MODE` | Evidence | yes |
 | `KeepCentralLogHistory` | Boolean | False |  | `SEMT_KEEP_CENTRAL_LOG_HISTORY` | Evidence | yes |
