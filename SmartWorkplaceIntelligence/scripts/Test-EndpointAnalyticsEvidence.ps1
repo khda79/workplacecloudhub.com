@@ -89,6 +89,13 @@ try {
     }
     $qualified=& $module { param($Rows) Get-QualifiedWeeklyPerformance -Rows $Rows } @($first,$second,$appOnly)
     Assert-Test ($qualified.ExcludedDevices -eq 1 -and $qualified.ExcludedRows -eq 2 -and $qualified.Rows.Count -eq 1 -and $qualified.Rows[0].ReportName -eq 'EADevicePerformanceV2') 'Weekly score exclusion changed the collector policy or independent report.'
+    $identical=& $module {param($Rows) Get-QualifiedWeeklyPerformance -Rows $Rows} @($first,(New-TestRow),$appOnly)
+    Assert-Test ($identical.DeduplicatedDevices -eq 1 -and $identical.DeduplicatedRows -eq 1 -and $identical.ExcludedRows -eq 0 -and $identical.Rows.Count -eq 2) 'Identical weekly score rows were not collapsed exactly once.'
+    $mixed=& $module {param($Rows) Get-QualifiedWeeklyPerformance -Rows $Rows} @($first,(New-TestRow),$second,$appOnly)
+    Assert-Test ($mixed.ExcludedDevices -eq 1 -and $mixed.ExcludedRows -eq 3 -and $mixed.DeduplicatedRows -eq 0 -and $mixed.Rows.Count -eq 1) 'Conflicting group containing identical rows was partially recovered.'
+    $differentMetadata=New-TestRow; $differentMetadata.ReportRefreshDate='2026-01-03T00:00:00Z'
+    $different=& $module {param($Rows) Get-QualifiedWeeklyPerformance -Rows $Rows} @($first,$differentMetadata,$appOnly)
+    Assert-Test ($different.ExcludedRows -eq 2 -and $different.DeduplicatedRows -eq 0) 'Different non-score values were treated as identical.'
     foreach ($rows in @(
         [pscustomobject]@{Rows=@($first,$second,$otherTenant)},
         [pscustomobject]@{Rows=@($first,$second,(New-TestRow -Device ''))},
@@ -140,6 +147,12 @@ try {
     $result=(& $trendPath -DataRoot $testRoot -WindowsOutputPath $windowsOutput -EndpointOutputPath $endpointOutput) | ConvertFrom-Json
     $trend=@(Import-Csv -LiteralPath $endpointOutput)
     Assert-Test ($result.EndpointSnapshots -eq 2 -and $trend.Count -eq 2 -and $trend[0].'Endpoint Analytics Covered Devices' -eq '1' -and $trend[0].'Endpoint Analytics Score' -eq '71.0') 'Healthy weekly generator changed its coverage or scores.'
+    @($first,(New-TestRow),$appOnly) | Export-Csv -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv') -NoTypeInformation -Encoding utf8NoBOM
+    $duplicateSourceHash=(Get-FileHash -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv')).Hash
+    $result=(& $trendPath -DataRoot $testRoot -WindowsOutputPath $windowsOutput -EndpointOutputPath $endpointOutput) | ConvertFrom-Json
+    $trend=@(Import-Csv -LiteralPath $endpointOutput)
+    Assert-Test ($trend[1].'Endpoint Analytics Covered Devices' -eq '1' -and $trend[1].'Endpoint Analytics Score' -eq '71.0' -and $trend[1].'Excluded Endpoint Analytics Score Rows' -eq '0' -and $trend[1].'Evidence Status' -eq 'Observed') 'Identical duplicate did not yield one observed score.'
+    Assert-Test ((Get-FileHash -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv')).Hash -eq $duplicateSourceHash) 'Generator rewrote identical historical source rows.'
     @($first,$second,$appOnly) | Export-Csv -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv') -NoTypeInformation -Encoding utf8NoBOM
     $sourceHash=(Get-FileHash -LiteralPath (Join-Path $endpointWeek 'Intune_EndpointAnalytics_DevicePerformance.csv')).Hash
     $result=(& $trendPath -DataRoot $testRoot -WindowsOutputPath $windowsOutput -EndpointOutputPath $endpointOutput -WarningAction SilentlyContinue) | ConvertFrom-Json
@@ -209,8 +222,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB7lr0OyEcOd84p
-# aMZGBibfnaTjlR0R39puZ4V4uqY/PaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCudqY1xysaCrtu
+# 2RGUgCiEr0CqmsOp8ScUtWw36/GX6aCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -343,31 +356,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEICrv+0HDnQ4WQux1joRrxlA2S89KkG9dLryUCzg8QCYCMA0GCSqG
-# SIb3DQEBAQUABIIBgGnkbSmOBVQ+TCy5vYYmhhtd58rfOVReMPIeOyomYLoUJt5O
-# OUlY/VA3N1RbXBc44ifCN6JbBA6vBaisBv3y8/EafBl5KmnLCGFKIpkM3Bx9Ld2D
-# rkYO2lG4V+yjGYykAM0So3HLZri4AmETzFFc0Ri1LoFY3/VtSEqH/17sISO9iSpC
-# 0pMR7/n9WxyMfiNP+s/soWwAEJflqAemotj5slR4FKo8jby2w963yf1PJCi2R1k9
-# 9NmiMuqr+4F/wg+GyICXhuSqDJLhA8vV7wUroaUA+aFdG36iEQ5se5/AtkXwq0dB
-# 9/WjQRNGyHIk/VFTyg/OctPCBZ0+ldERkpNsXF80PXdOYf9iwX+2wiVQhvYzzuHD
-# xt+JgYInL6k60n8q8rm9ysaoLnAJWphB3fGK4Fg+AodXYFKgGEr5ybJFiIhCuzpg
-# B/jFrrn8OtO2+94TUMVOdr6q5otjQ9R6xRwPE+t9VlmoO0lAFgn26Oqgt6P5eFYb
-# YkYd8I8ZdFmPjn2xxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGrWB4EYFHzjWNHsHQQtDlRONXbU8/Yu4FaOCR5fjzLZMA0GCSqG
+# SIb3DQEBAQUABIIBgIAq/hiE4ic7ijnJNM8VWRoDRunMRiMWO2UCC9+WcsA1KoAK
+# u3LWgRbeNWPdCdxlxwGj5S/69RnqP9xMCgAq9apQpIW2IxxmWnPHd6QN4L2R2CK9
+# rj3ryvGtM/R29QIeF0F6/dzcxpFd5Yp+6ss7tIP45a4VjxZKnnh82Q3b8p2bdPDu
+# IiaR75rk3CIRwcF41zK6ApUcovRYWfVHYWuAej8EyirKSZ5WYKr5IpMlYGSNL0wB
+# wVkXqmd3oShA318R9jN7MtLQEyBLVK0rn1EZlOpkbw7p0uXVPvJARL1I5Nb8KVsI
+# uLoNiCP+gCejrhG1TaOoo/aLvXabHjzvRxjJUH73iHTneQYh1Aae+fqY7H58R3An
+# yl7QqhWfTkalNxSNJwEJQYM4X08Kg+zMZFXv81EbP6rwjsQfrEiV5Ro2YsR2Et5d
+# ow/5Ur+mVsVIe2IyZh4+0rSeGukYw8ctQ1cm/DkiZF5ismcX+zZlAT1SVhjOxARn
+# SiA3WCdvuoHq1O+P/KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMTMw
-# MDRaMC8GCSqGSIb3DQEJBDEiBCCxvyij7e68MEx1qZnY2j714qlPerAlcG5RLJ2P
-# oTP+UDANBgkqhkiG9w0BAQEFAASCAgAMP0+DEwglEDZkppvbCzJxTnwQJoYiZcTv
-# gzZ4MkNmTbAwecn4rUlPqz7JV9fKhm5LRspL7gChFP2EZG0Y07UYllOpOxcaXxWb
-# qEo3EoHPGbbqkexsHKUjk2rhfCbHkhzc6IxeKnPejQMQcZXsa32Z5IcXwra5mJlM
-# hWzcG3+CzrQ4G6Jigic8VS0aaKuxap/NCZKk9MkxuA2yWybdD+bJ2znYfjGuOtCD
-# Omljk6bPsruWjsX/J1mjZx4CuVBsO6ePDmo4hmpvW/tnFxa48J/6doU3FAnS6w+T
-# c9In2scMBwlo+voaPhbIPuqafX9xkVQFD1m8c+/hW4uW+QddM4p/ncXuB7RQ2XTm
-# EqXgQ8u1LaRf4ABBbf0nlqrvovwD5EbRQfsx/AYMeym1vA6Y1IXaTLhnDHzaPGqV
-# 9cRCge+QK1PTwifvgirCJw2g+iWnoU8Po1pCsgaE5Ctbt3q4MIqIPSw7f8lMEZt7
-# HNWI6bGtTf1jj/G4SO2zgGY1v2KZDAPL3itOe1TWeIY4XgaMnwieJaJj1/uw5lQD
-# LYEEnLS/S/FAHs2FQnP1LcKRLJCppDI3FBO7zYp9g0kakQyrMy/ga/2ScqaB3xGG
-# jOFPJVMCqy6o0AY5rVgdcMyoILU0JvcJBkJcnbFRMfbKNhx1PQHoEkLAxtefzChb
-# 0lbpjJvzXg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzEyMTUz
+# NTZaMC8GCSqGSIb3DQEJBDEiBCDRmYy1yGmmZinNClpNXZh2AXWcYVg3uIiAowy5
+# KpL5bDANBgkqhkiG9w0BAQEFAASCAgAon+rQfzx9yAyMstJO8jE5aRQ3SEsYIrWQ
+# tkyQcRY3DPswXu63nVix14vU66WK5L8CCoegh1r7MQ6HChl7Iq/LkWVhr5pAY2Ww
+# cLbOFAKBxqc2orKvUKg/ewNZUaXMDjl880nA0yofbUHqAXei3vg4LFed1fUf2Bvf
+# ihUE9RU+rZ7JOCz+JAIFlukmDRTnPLh2LW37KECdeMrr4r8J2MfOgpJ+LFw5LhBf
+# t8/jy/T7RxGyHHvUHjZr9Tfxf/tAzGK29Wgy17siUEZAOBREh/8qAdEQiG9oDcFU
+# gXg5tS3LNAbQ+BPH1Wn43pR1h44MPuJTecRBcHU9OqeLSeI3Hv/nOqhuv3X0qtMu
+# cjzeW1zLafUO0T3iSn6FssYJm+UC3y7qTDXy26qy2gYbZVSuI+Hiaq7AffjS4O6c
+# MZIYjFap3/Ap6M7izmBvCQ97YoCzMgyEybRUyhtTJPwsInDPV2bfgiJiwAIjL6IT
+# u3KgD0TTGYsd46kfbVpw4Gy7sa12VF7nrmYHr23zbJ6heWx/H5YKK890IQFpK78r
+# LI1NlTpdrB9cz88roY5MTT3W3pvOsSCCDZN45GuXDe+Paj3JYyV61nlDo4i6/ezi
+# qW6LnGUsDTnSMrQhBynIA/ius5LnYfPb/PGUQG0/RRLrLDmHdKRXUJbaNHohYwx+
+# mFCUSlwweQ==
 # SIG # End signature block

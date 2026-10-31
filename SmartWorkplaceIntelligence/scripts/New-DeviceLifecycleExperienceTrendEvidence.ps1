@@ -80,6 +80,8 @@ function Get-QualifiedWeeklyPerformance {
 
     $tenants = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $scoreCounts = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
+    $firstScores = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+    $conflictingKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $invalid = 0
     foreach ($row in $Rows) {
         if ($null -eq $row) { $invalid++; continue }
@@ -91,7 +93,19 @@ function Get-QualifiedWeeklyPerformance {
         [void]$tenants.Add($values[0])
         if ($values[1] -ine 'EADeviceScoresV2') { continue }
         $key = '{0}:{1}{2}:{3}{4}:{5}' -f $values[0].Length,$values[0],$values[1].Length,$values[1],$values[2].Length,$values[2]
-        if ($scoreCounts.ContainsKey($key)) { $scoreCounts[$key]++ } else { $scoreCounts[$key] = 1 }
+        if ($scoreCounts.ContainsKey($key)) {
+            $scoreCounts[$key]++
+            # Only exactly equal CSV field values qualify; no ranking, merge or normalization.
+            $firstProperties = @($firstScores[$key].PSObject.Properties)
+            $properties = @($row.PSObject.Properties)
+            if ($firstProperties.Count -ne $properties.Count) { [void]$conflictingKeys.Add($key); continue }
+            for ($i=0; $i -lt $properties.Count; $i++) {
+                if ($firstProperties[$i].Name -cne $properties[$i].Name -or
+                    -not [object]::Equals($firstProperties[$i].Value,$properties[$i].Value)) {
+                    [void]$conflictingKeys.Add($key); break
+                }
+            }
+        } else { $scoreCounts[$key] = 1; $firstScores[$key] = $row }
     }
     if ($invalid -gt 0 -or $tenants.Count -gt 1) {
         throw ("Endpoint Analytics device evidence rejected: invalid identity rows={0}; tenant populations={1}." -f $invalid,$tenants.Count)
@@ -99,10 +113,13 @@ function Get-QualifiedWeeklyPerformance {
 
     $excludedKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $scoreCounts.GetEnumerator()) {
-        if ($entry.Value -gt 1) { [void]$excludedKeys.Add($entry.Key) }
+        if ($entry.Value -gt 1 -and $conflictingKeys.Contains($entry.Key)) { [void]$excludedKeys.Add($entry.Key) }
     }
     $kept = [Collections.Generic.List[object]]::new()
     $excludedRows = 0
+    $deduplicatedRows = 0
+    $deduplicatedDevices = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $seenScores = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($row in $Rows) {
         $report = ([string]$row.ReportName).Trim()
         if ($report -ieq 'EADeviceScoresV2') {
@@ -110,11 +127,12 @@ function Get-QualifiedWeeklyPerformance {
             $device = ([string]$row.DeviceId).Trim()
             $key = '{0}:{1}{2}:{3}{4}:{5}' -f $tenant.Length,$tenant,$report.Length,$report,$device.Length,$device
             if ($excludedKeys.Contains($key)) { $excludedRows++; continue }
+            if (-not $seenScores.Add($key)) { $deduplicatedRows++; [void]$deduplicatedDevices.Add($key); continue }
         }
         $kept.Add($row)
     }
     Assert-EndpointAnalyticsDeviceGrain -Rows $kept.ToArray()
-    [pscustomobject]@{ Rows = $kept.ToArray(); ExcludedDevices = $excludedKeys.Count; ExcludedRows = $excludedRows }
+    [pscustomobject]@{ Rows = $kept.ToArray(); ExcludedDevices = $excludedKeys.Count; ExcludedRows = $excludedRows; DeduplicatedDevices = $deduplicatedDevices.Count; DeduplicatedRows = $deduplicatedRows }
 }
 
 function Get-AverageOrNull {
@@ -164,7 +182,10 @@ $endpointTrend = foreach ($weekFolder in (Get-ChildItem -LiteralPath $endpointHi
     $performance = @(Get-LatestRowsByDevice -Rows $qualifiedPerformance.Rows -PreferredProperty 'EndpointAnalyticsScore')
     $startup = @(Get-LatestRowsByDevice -Rows @(Import-Csv -LiteralPath $startupPath) -PreferredProperty 'StartupScore')
     if ($qualifiedPerformance.ExcludedRows -gt 0) {
-        Write-Warning ("Endpoint Analytics weekly score rows excluded: week={0}; report=EADeviceScoresV2; devices={1}; rows={2}; policy=ExcludeAllDuplicateKeys" -f $weekFolder.Name,$qualifiedPerformance.ExcludedDevices,$qualifiedPerformance.ExcludedRows)
+        Write-Warning ("Endpoint Analytics weekly score rows excluded: week={0}; report=EADeviceScoresV2; devices={1}; rows={2}; policy=ExcludeConflictingDuplicateKeys" -f $weekFolder.Name,$qualifiedPerformance.ExcludedDevices,$qualifiedPerformance.ExcludedRows)
+    }
+    if ($qualifiedPerformance.DeduplicatedRows -gt 0) {
+        Write-Host ("Endpoint Analytics identical weekly score rows deduplicated: week={0}; report=EADeviceScoresV2; devices={1}; removedRows={2}" -f $weekFolder.Name,$qualifiedPerformance.DeduplicatedDevices,$qualifiedPerformance.DeduplicatedRows)
     }
     $endpointScores = @($performance | ForEach-Object { Convert-ToDoubleOrNull $_.EndpointAnalyticsScore } | Where-Object { $null -ne $_ })
     $startupScores = @($startup | ForEach-Object { Convert-ToDoubleOrNull $_.StartupScore } | Where-Object { $null -ne $_ })
@@ -217,8 +238,8 @@ $endpointTrend | Export-Csv -LiteralPath $EndpointOutputPath -NoTypeInformation 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCiR90vK/gmmkvi
-# 2lQ/VIhl9h7MDRNMtZzuWzU9pepZR6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpERaFrVAJA/g6
+# ekeptpcEGUSubZ7SQbN8cLaLyAHO26CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -351,31 +372,31 @@ $endpointTrend | Export-Csv -LiteralPath $EndpointOutputPath -NoTypeInformation 
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIE/aV5uJ0Mub4SPgq+n2p4X2qNV2bntxf8bEJ3xXvC5WMA0GCSqG
-# SIb3DQEBAQUABIIBgIvZfyQMxKvzYcIbxlYtIAXxSrjRfRAEy0XJOu0UmnzAm1MN
-# uVZx/OpaUynilY/MnZ1/Fqr8pFEu7PIAlmljTUK+sW1UlkVyZkZfzIhO9CjrVoFi
-# iXzbBWSwdgqZ6SYiFXikg9tYH7w04LhIf0vhjnUCveEliyXkw+vT0q0mitduqPfb
-# 9A54j/KhlsWNH7mUvrrRLiJVz1jyp3SWvEQ0RtmPSDTQfjoTP9c1kzhalKIglF2B
-# U8rtRV0mnsj4Iu+AJKVmTsjIA5idyb7xUPkkDfrFpeJhZZTAu4cJcMtngA3Tnf7V
-# qio4f+tSme2RO26ZutopOU3InPOObuZepK5zZGtgBi+fBZt8NsC+QJzdzR+0tgUJ
-# uoXyWdDAirwWXK2sxXPA9PT5cU39xASBb0LUA26gpxh3G4hMXncBMzy+iO+AET6s
-# gwYwyYlEC2Lgmijmy3EkIsR3P+Krttu90Dygf7NA24t80jFnqNjNXagMMqNVlTQl
-# XyMPl/dRC/kwOQbS4KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFpeqsgdP2yXNQLgM7qO+WJMFUweKH3GxVLa7tgvkJKAMA0GCSqG
+# SIb3DQEBAQUABIIBgC59spbFwRX3esPx8THRaCneur5E146mEfZoqt3LdQSJeIwV
+# 2upNJtOS2MwwtV1xqByoab0+ykWbvBIZ8Ts9rxSjjFllSZMJjdHG/zKWCY2nuyIE
+# f2QI7Hezi5IAsrj7oqumNhVbHxeX8cf0XYrzpYNdsfUSnFSU1vjO8dTvo2q/lopi
+# P9eEOWtm/Asj3nuZ0Hu/3ImPRssZGDGDR4SqEn0gIOmNRFPPYrhQBmMXnhPqGG2D
+# heP8K9jp4hBFkrvvqPtGl/rmPB2gXTApc0uo7VJa7g6RzKKF6bl+PXk69/M0YZb2
+# 347eJImJMHGaGzWVTC2FojuZFpqEXFTfySe/OCfmIJ/fpmwFTIKepqw8HCPwzwmY
+# yEyle8LsXQtnTFry562FCzh2lCixTvuVqSZk0QVPQLfQbDbLm2yGfIVUaD6BKRAn
+# 7B0fuFjXTZK/Pby7xyfCsdR1GIfHksQSI2fQVZZWSGoVXVSaei/ou7u3g6CIrU4c
+# Ay52eIi6H//1jMROrqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDgxMTI4
-# MDdaMC8GCSqGSIb3DQEJBDEiBCD20IlbfajyCoUXGcMc+gsGvtBXiGFjAOI/eZJS
-# ZwVxtzANBgkqhkiG9w0BAQEFAASCAgCJpfk6KLnV6dFV7jaK6FSqnhwEsj8zcnET
-# Ud/3VN/DYSdEIvZTyGU+WoAUPY1qgRK/m8VpdXbgTYTfNbZdqKzD0rPbg7Jf42qR
-# VymNvKHsbuAw5U0MfjH0rNjW261wufUBnReTgh5WuLboaKt1A9ef2fQ5w5A5X73G
-# XxxuZfh1LFqGh1e5SC/jItaHZWzuH+3Mgj8kQ8GJ/r7LJ0/cUR3n5qyTOyOQAbfi
-# blavz/otA2jDbbE1d43MVCQPEnqUDfetprZrGciwJWB3htcrZ7BdkacsVACPEzr2
-# lDXU1LPhkZP+/h+Mx9Oh5pY1Az+vM3fOYLJq9NZgXnH0ZDzQ5TUcb6E2I3BDNL21
-# hZC0ONMRrPijKLmRd27yDx1InoqYJ88C4Tlls7SjKM6MsvpI6roY0XhDF8ZDyv/q
-# 33QhNI3kqKUbrO0deBGOv980o0WdUhMto4K44LpYrY0w3i1Uyk8TSVdPeo3xHWka
-# YGLztPrpKUkw+zpYsU+JcRq9QhqPVorJt/JAZImV+gfmRhkciBSG99QpJ3OogwEg
-# FetUsQBFILJTFTTfNvKbAI++zr97a2mpnS/THDyD7rE0PLNRrkR9bKpWWP8PLPX7
-# nGUMmmMvB6oFpgyoS2kPCkLU/gpRvc02113D4wLefe282rsjDfr9l0D6jjdVCG3r
-# qEaIr8O/Gg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzEyMTUz
+# NTZaMC8GCSqGSIb3DQEJBDEiBCDX4KzvkyONUJxmVA5X29glQNPA5dygYFmySqYE
+# bLXqJjANBgkqhkiG9w0BAQEFAASCAgAdoNsFTWUanTSzKj7EVXXcs1WPyCjinJ4S
+# ziySwrpGOkCDqojRsbxPogupikxykCDmKgsMNpz+E6ouq80Xl1dpLV+cJq5g06B/
+# VQTBgsG2MXEotbVrKgj/oaUQKYWaC4PooN6s0mmBM9GCKc2bfIOElfxBQuvJr1VL
+# 0CGpte5NIbL0tlJXE6vaKJ2EbBqziX3M0NIoo8qgi+5cc/3ctSl73uuSNcT+89kz
+# 5K4efjztbY/35d+9IZpS4naoZVlxDLigFKpKXDQyjrY+SIYAl3JBD4nTz7wSQD8Z
+# jHuiyAKKjXIpynUTU3Cf8pT/HiqYmQcG+I/Rmjksv7jOOJlCXZbeVnHCoEYBbXA3
+# tawH2QD9Xfi0UuivqhHYEnLtK57FZoqW2wNy12DdAp/zod96iRf3yJY98PS++giO
+# eZSormhVQDuW1AgkE9rrZTY4AxHj9/egMGP01ujRU7fFRCsORG4mEotZ4fCN5zUR
+# A8+uNlAF5Qesf0uPiH1rBX1TOOjtg9Fv5tOr/Bl4ErAk9Q+o3WrS1w5XgoXvaG2R
+# qGVUKyFZ4wwVKRl5JvBU2PmyY3k2rgzR2u7N6jBGKfKIcjnp2ipVOWlZ0xkJ9ySE
+# /dsRtAD6z7oBjdFLyRyamSZgnMMsnlqkdMqJJLhjGZE4gItrA2qSa7oQ4hdyc8O2
+# krznMO98QA==
 # SIG # End signature block
