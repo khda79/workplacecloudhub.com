@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Windows Update (Feature Update) device status from Intune with Win11 Readiness enrichment
 and full remediation columns. Single CSV output for Power BI consumption.
@@ -39,9 +39,9 @@ PARAMETERS
   -RiskTopN                  : Number of action-required devices shown in email (default: 10)
 
 VERSION
-  1.54
+  1.58
 .VERSION
-1.57
+1.58
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
     Minimum application permissions: DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All
@@ -106,7 +106,24 @@ if ([string]::IsNullOrWhiteSpace($CsvTenantKey)) { throw 'The effective tenant c
 # ==========================================================
 # Version
 # ==========================================================
-$ScriptVersion = "1.57"
+$ScriptVersion = "1.58"
+
+function Get-WinUpdateSourceReceiptUploadPaths {
+    param([AllowNull()][AllowEmptyString()][string]$ReceiptPath)
+    if ([string]::IsNullOrWhiteSpace($ReceiptPath)) { return }
+    if ($ReceiptPath -match '\.run\.json\.txt$') { return $ReceiptPath }
+    if ($ReceiptPath -notmatch '\.current\.json\.txt$') { throw 'Unexpected source receipt path.' }
+    $runPath = $ReceiptPath -replace '\.current\.json\.txt$', '.run.json.txt'
+    if (-not (Test-Path -LiteralPath $runPath -PathType Leaf)) { throw 'Source run state is missing; the current receipt will not be mirrored alone.' }
+    $current = [IO.File]::ReadAllText($ReceiptPath) | ConvertFrom-Json
+    $run = [IO.File]::ReadAllText($runPath) | ConvertFrom-Json
+    if (-not $current.RunId -or $current.RunId -cne $run.RunId -or
+        $current.Owner -cne 'SmartInventory-SourceReceipt' -or $run.Owner -cne 'SmartInventory-SourceRun' -or
+        $run.Status -cne 'Completed' -or $run.UnqualifiedPublication -isnot [bool] -or $run.UnqualifiedPublication) {
+        throw 'Source current receipt and completed run state do not match; neither will be mirrored.'
+    }
+    return @($ReceiptPath, $runPath)
+}
 
 # ==========================================================
 # App-only authentication parameters
@@ -2931,7 +2948,10 @@ finally {
 
     if ($EnableSharePointUpload -and (Get-Command Invoke-CoreSmartM365SharePointCsvUpload -ErrorAction SilentlyContinue)) {
         $runArtifacts = @($LogPath)
-        if($sourceReceipt){$runArtifacts += $sourceReceipt}
+        if($sourceReceipt){
+            try { $runArtifacts += @(Get-WinUpdateSourceReceiptUploadPaths -ReceiptPath $sourceReceipt) }
+            catch { Write-Log "Source receipt upload skipped: $($_.Exception.Message)" "WARN" "SP" }
+        }
         if ($global:SmartM365MailHtmlFiles) {
             $runArtifacts += @($global:SmartM365MailHtmlFiles)
         }
@@ -2970,8 +2990,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHk4qeYOHVGjBL
-# XJf87l9PfQH0M8I8ANe9l+7W/klLaqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBPmj8w/RbhwNST
+# Y1HICINKFqB+A/aisqWckTsHbeypYaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -3104,31 +3124,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKLZ+gBI1HDWB9RgyXN0ZcwPbv6jzaQGVsQw7tS+PvDFMA0GCSqG
-# SIb3DQEBAQUABIIBgIx+T3i6RH4jTynDzFJg5bkvMbucKRrOw4F/vIfsZrlg+GJ3
-# h8xRCmXaVL1sd0ZXd99z8bT60N3fjjCSeN8bmvAiqc8ukYyMUOyURGe0EbWePI2+
-# D+diOH41xzlhiUHTgwe+c6nD24ulTdJYQmpS1NxO9rDWMPHwjaAsPhhfcr5U/G/K
-# l3ad+kuxkYq8W5K4PIF8ihG83E/3rSr7CT3q5HdcctInza5RpdTyuail8rI0Ugo4
-# QBsj4yX2jdg4K7IELXwaCukYVJth5ARXg9hcpXrbrBSnTCAMz/E6feGf9PtAjdhL
-# I1eF9OpvyLtbkW/P53IPyKdidW1KbKLJpVMfSwVZDgLZI9Ki36KiAtMyiWOIroOO
-# zGupC8Bm2AlEe6To/8UkdAPMFsY+9BDjsJXE+dhu/TyvVcYTu7g4ciOGfR4CM9GO
-# 46IQEbnj/9HvO/M+tGECXrrvmshx4wso1EuQD/vfSKEab+x/zety298Eae3mmHBu
-# h4P3lGikEIvwxVC2GKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIFpCtbbJFMSimcwZ6vxGovJWg8jWykeGT55tnaO/HVwVMA0GCSqG
+# SIb3DQEBAQUABIIBgDE3TEz9PmqTKOD0pVfIG23pGnsDYWCpXOud0/Lz4gYqIpnw
+# cVrOtJ7ZN/C62mIyyfWqYlsOENyTqpOypn0AVerfWiiGN+jKqv+qzej6vi5u3PJ/
+# kk2oJev0y7llG+4vXqMmozjPQ/M5kGSD6YgEiHsPMerKM++JhB5Gse0d0nTljmPW
+# wopvDR54Mg36GUda/t8HZUV5WA68+FAxAUcU6lDzsgm5yfqgg/0DFTPgP99xj/PH
+# rrts3qvehgIaqvYR2uP3LrTZBZrmDOWAd0h5jYO0Uyy712DnAv5NbwzN0eAdRzYG
+# Cgf5Z5gt6uTgYLxTADsfKxlSvpPQT52KooDFzp2BFmRxTdKd/KibNZsBsBImdDej
+# zN2sMxONgSmnBEERb6Y6uozQpO/GcLt4wl5Splwsr4p5bOu3rT3XGJMQpSg+LYgn
+# WgmeIfvmiwUmV7PpQwkmMXrqERjSDkZFf4h0c6SPrCjozHNwE3wR0Cd8+uHdzkD8
+# h3TGw6qRdpg9MPm+fqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
-# MjRaMC8GCSqGSIb3DQEJBDEiBCBQcJguU3RrDHfWKlax75m3ka+Q2O/MdRSdG/rR
-# EEgArzANBgkqhkiG9w0BAQEFAASCAgBF5K5ZIitMjNbvtSUln2YVw4yQy0PG50IJ
-# IrwXjJKATj1hryEV1ZiUqDr5ml43PpT7HFw42cOWvoWjq/OFKzAD3ZVLqE+Q8XL7
-# ft9biT42Sz2xvhs61YtGSoN7kF9vAhrAg6QDu/9zSme8TABElHmsaZRh0b31JqV4
-# h561PjHcFKQB4NyiM58+U1CVEI3NEwp5HTlqLaH8FXznVqFajDagQtwW8N9kCbPS
-# 5Y6RUdhu8uUo3h61jzwaA4wR8I5t3ekoMhKAMd2h+lN8+osfBdhVTZSHK+M94U1N
-# yzEww3IowOzN+SuSfneKJuUb3VXOKoKupkwBW//LbII+pYMvJYUvlcAA8pdDkZ0o
-# 7fsyTKlHX7sIi9QAS4EXTwdNIQe8xJr3r3UUL2yIV63MYpEt0VuHYBX/cZOE3hUq
-# /RFRikUQrRx13sAXOeg9BiLr8+6fbdtXPzWo7tIlKw6sWQj+94gyr6MDelU/1TiK
-# 0e1u1a7Lmt3qSaz+IiXwb7ACnbeGLef1UkztQ6ucn8kTwVQITnIb0L1tt9tB7K01
-# vvA86AACXQxOaEsQ+egWkJX7tsiOechyGeZWPxb1McXpW/biweROV+y/xPn9Tc1v
-# 2VFf6bGcsfTAde32ivRyEv2OWP2j5eHu+O6fnp9AV/b4r0Xx2BR43hMowHy4ScOK
-# Hf3kIau/pg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNTUz
+# MzdaMC8GCSqGSIb3DQEJBDEiBCDIRctHypAUaSORQkC8pglgHvkhe6dY09DxECj0
+# 0+Cg3jANBgkqhkiG9w0BAQEFAASCAgAWzdNkI9quFPB5193MYnWlOy+YK4K7yzpw
+# h871bKkzlGpk5llu7USzyZtQ3+/lSLftYOWTbDeHnGf6wqYT9xiu9YS++86/oKBO
+# yFwPXxNAJ8SsuKzYjkmGxUccqN/UoAz7AEiShL//FFks4Fuq/ers6Opskv1Sk09v
+# U2CV9ls8yggUgMuhnMRU5ownOxvAGFxVjI6O9P1oRll1QigQ4kgAXuIvpCxiMLZl
+# yES6AmydcsZDQTUcZ6BR3n2IpvuI744xKDZH3WaV8oDrUCjfBPrgBSrsseBQOS/E
+# y8gujFZ+IWonU3Bukd9/5x6wxI5Ucm2E93R8GtfKa2MNvDDJj9IT6RGOQzywz1PY
+# LtOeLzd5Hal4CzitiWqzuYnnQarXdFiv8TQIHrvxnaNntM82VoQvKCwVuUy4uwo2
+# lTCyQj/nlEAqc/ILHAj9pLfRU8HC/buozzTN/FCpSSbkY9gQrcvV95KbzhVQc36Q
+# 7/g73kR9Qv7Ag9oUoFgd7T86hNx1ep96ERwtqnl8v/MU8fy2PKMgThVbXCHeQ0sD
+# EFYbvBB95aHB7ZMdREJHxqiCw80hEHu0aqJu7wRFfTFFrZc4bHIGPwqQVHkhtXon
+# W88DethJhYm5SelGyeDjmdtyu+L1xZIPMZahs9iV+nmQZ3LBJM9KtQHS5QFWDajJ
+# o1OXZia9uw==
 # SIG # End signature block
