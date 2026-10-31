@@ -1,6 +1,6 @@
 ﻿<#
 .VERSION
-1.1.0
+1.1.1
 #>
 Set-StrictMode -Version 2.0
 
@@ -1109,6 +1109,11 @@ function Send-SmartM365CommunicationMail {
 
     $effectiveMailMode = Get-SmartM365CommunicationMailMode -MailSendMode $MailSendMode -SmtpServer $SmtpServer
     if ($effectiveMailMode -eq 'Disabled') { return [pscustomobject]@{ Sent = $false; Mode = 'Disabled' } }
+    if (-not (Get-Command Resolve-SmartM365UnifiedMailRoute -ErrorAction SilentlyContinue)) {
+        Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.Core.psd1') -ErrorAction Stop
+    }
+    $route=Resolve-SmartM365UnifiedMailRoute -To $To -Cc $Cc -Bcc $Bcc -MailPurpose Report
+    $To=$route.To; $Cc=$route.Cc; $Bcc=$route.Bcc
 
     if ($effectiveMailMode -eq 'Graph') {
         if (-not (Connect-SmartM365CommunicationTeamsUserGraph -TenantId $TenantId -Scopes @('User.Read', 'Mail.Send'))) {
@@ -1156,6 +1161,7 @@ function Send-SmartM365CommunicationMail {
                 if ($RetryDelaySeconds -gt 0) { Start-Sleep -Seconds $RetryDelaySeconds }
             }
         }
+        if($route.AdministratorsOnly){return [pscustomobject]@{ Sent = $false; Mode = 'AdministratorsOnly' }}
         return [pscustomobject]@{ Sent = $true; Mode = 'Graph' }
     }
 
@@ -1215,6 +1221,7 @@ function Send-SmartM365CommunicationMail {
         finally {
             if ($smtp) { $smtp.Dispose() }
         }
+        if($route.AdministratorsOnly){return [pscustomobject]@{ Sent = $false; Mode = 'AdministratorsOnly' }}
         return [pscustomobject]@{ Sent = $true; Mode = 'SMTP' }
     }
     finally {
@@ -1447,8 +1454,8 @@ Export-ModuleMember -Function `
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA3WvZ/V1HhokFH
-# o7v093FRKQf/b2gflYLuH3YQGjyMFKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCASwb3S+T+5a3uG
+# Y/rAkRdBoXesh/m98un7RNl1pKq7dKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1581,31 +1588,31 @@ Export-ModuleMember -Function `
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKd0GBtFVyJMAetEOvQ/kv5OZD0ljAMhJJfj+P0NI5vxMA0GCSqG
-# SIb3DQEBAQUABIIBgBVZpPwHQfC/BrFiEFru4ZehWFFBfloaQ4Tc+Tm0xs8EksaK
-# Y7/VSeLHb3TBt5tlW10w5l9zAYw0dQAK4c52Rdps3RtoDsDFGWutg2mlJVW+kxf2
-# PBU2alqqj58uDKpDeSqQhUfso8cmvXsQjv5TFYGwqczAcd13+SGG4WFmkzLSUCSg
-# U+gmMCWw4tPOCbT0liTtYqjIWC0O4NS0mQ6q4xOjv4ToA90sdknR+gBpqCtHweBJ
-# jAiUK0wXS0GiLFGAItFOoNs2DQigKKcByY/xYoO9vwTxn7WYA9dw+xB+Dma6b1mi
-# 7vFE9CClh+3HeVMX6UtW4KCijWdphrzRBpBviEqzC7dmoD8x08YDzsNy706jzy3T
-# IGuVh5q8lj3d7Fmnwusrrd36zH+9roBBOYMrVi0iL3bducLPJXJRU2dP1I7FAdsz
-# LIZxKl/OzgNgUHGTQKAw7I7hdKCDQMVViPd1W+AtTeNW11cMoLCnL78k40a/8QFr
-# Ili/S+8w1GD/FSFA5aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIDMJVnh2xfrrciDlag7raByroM9h31zysdZG/Y5xK/CaMA0GCSqG
+# SIb3DQEBAQUABIIBgDBemjYQR7g0FyPueT3xDzV3MQhiWud6D+Q+yua/Hl3/W8t4
+# /dCaulbjcNwksyVRroij5izG7YJvm8XGGw2G/uu1EEIOyppOj8dyYlK58XGvBYxu
+# Dtt9ovInnlkcG9rZSHr62KntjazId12lsDwD3akrA6RLlze150SeROHpu56MfZxW
+# XAmJpw6EtjMed0TEBaplEXwmd6J6HNjcAUUlIkX8KeSfb4898NrmgniuTZ7to3kS
+# 75SDDX9Xjd4Op7fLT6XIcayOwwz1SsJQeN7vQAeaf6tPU/+96i0THwBj9HuwJk+F
+# sfXYJamLkzr7uYlVzr4FCSXWvYvjS7HtarxUOc8EY+3QXduJFhnFckjHQfO7pmZS
+# 4PzBeeKG+Vbn0TZDpZpdFJyuXsU0osu5OnpP0+B4sL+yRp67q48i5c7DbAgyEtBj
+# b7tyv5rmTHb808n3F1EiL2CGO7RFqs92Sl++NvCdjB0iWNoeopT8E2T4i6+Enft5
+# RfMQuWR3w0eskfXkrqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzE0
-# MzFaMC8GCSqGSIb3DQEJBDEiBCDrGlTWXVYeDaPGta9Phvxk2z6lpl3i255SVw7c
-# 9iQyZzANBgkqhkiG9w0BAQEFAASCAgBE3ghEkX/JwiN9b0ZCYoerbOr/Fp90uDi1
-# 1VLTAM5hHq0S1UWpZ0QsqvyxOGX3tezPXs+utsRMKYw5vYISqcb6E4rxl+rxjqKd
-# OGxKol0sKZ7hd45dwovj5oqe+l4A51tq7siTqkHblNJGlVYDGwRnj79PnPNyT9T+
-# G7cVwxU03/WdM+oWogzCClRt+DrE8wOcFQhYt8qPCNwA0OPfnE9T7fsB4hfHI6B9
-# bD88gg1DmzuurPOCcwRdwKyz1nDEKn9NG2jQlUxc/3akMw9ZnQc+J2KzOyvjbTZq
-# P/JUdhqNEEyXrIr5+FC1vAHI1+HeIzUj9VMoq6Vs1YwfQ0U2HmJyUWjpRx1Q9zD1
-# vf0YcDwFdDcB/bO4Ht2ffMx/AuK0w0fILx+9yx3zYuIwz/XDy6jdKu1Gt7lhQ88s
-# PC8Z5QuSc3UtZQAfILPX0fKdj7cPv8M01fyxRB8ff2tjht9KR6RqFUpLNGcRTN+H
-# Esj3jTAHj+i/a5neAcg/8AD5bNKA2Ac4L9a81t587ki55meVDMhuoABU0H9unIYA
-# Jv/pc3A/OvEyACE+WObu7r5z5F50WVG5l70CpKM84372zfNPy2XJyJHbDrcCR/6P
-# IDWFFK6UKfDW13jtQPT8ZsEIAtXBq6gAOq57/8CHT442iJJ1rNLjLujZvX2SKsn5
-# yIyC/LXYTQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNjE4
+# MjJaMC8GCSqGSIb3DQEJBDEiBCBH24m60cqx5dY774RltyjANxXlrVNqIO5QtEFF
+# JQU43TANBgkqhkiG9w0BAQEFAASCAgBk2agLXZZW5ZqGbSVEs92hZmx/daNrc+ZL
+# A4p6koh7jXJlKkCIJj66hzyemYzqetYMaSGVZSTY1d5AvNAsjhxPuaWnVRSqgZWE
+# ki9yBxovAQmMg9AiRa3h6c5ue8jC86UHcYXXzoG9D3gELycCd+X95TcdORLT6x+i
+# CwSB020Ou8pCZreaF0wJjaF36qyzJNRuQ47hj2pqrxu6Qud6HAZZikv6G87CnyjD
+# DLh367IVDbsGpztRTqjY49qYDvvDTSM1sdji+mcpq+8S0vcic7F6q0+SQr6Yejn8
+# pgoLiNE4xgEqwwSEEGsvyNd2uPlBFyLTv3rKEgYaUKDCFJgZ1RyZBzW59vP3Fo0R
+# IcphIV6YJa3Eqvz9Ro0L8VDklaNpyQSa5NwzAuFPIh3FL2SA/9n1al/VYbNyzhyU
+# Ol/QNV3d2xNf0ID6W8rEQ0+15eP3ZQ5ZNfbFW83hATFVLD4/daOTUZeyQhjvREmG
+# kSJebDaxsYn3AhCV/PVtzH6BUVkECD8/mRNxP63axDXCOl9i+6F6jOEiTf1lMbv8
+# a7Vrdp2s7eFQqzsGVBwyWlFgucWvAavxX92l37/Fs6ocvan9Jn1hWG4V73V4K3Cv
+# qopab6seeHypD7Gw3OHKCxXjxSwphg+7Y9afdTwvYxGb/A32Mmc8NfysBLrjnNa5
+# Zj9oOUm/Zw==
 # SIG # End signature block

@@ -663,6 +663,27 @@ files: if all evidence is deleted, old completed catch-ups cannot be recognized.
 No running collector is
 stopped. Offline regression: `Tests/Test-SmartM365OrchestratorSkipRebalanceOffline.ps1`.
 
+### Administrator mail routing
+
+Set `Smart365Administrators` in each tenant profile to one or more plain email
+addresses separated by semicolons before deploying this version. An empty or
+invalid value blocks mail rather than falling back to other recipients. This
+also applies to targeted user communications: administrators receive a copy of
+each message, including its individual content.
+When only administrators receive an individual campaign message, the campaign
+does not record the original user as emailed, so it can be sent later; optional
+Teams delivery remains independent and follows its existing configuration.
+
+The `Operations > Live` button changes the tenant's shared mail-routing state
+without changing the scheduling maintenance state. Normal mode preserves the
+existing recipient policy and adds administrators without duplicates. In
+administrators-only mode, To contains only those addresses and Cc/Bcc are
+removed. The state is revisioned and records the latest user, host and time; an
+unreadable or missing initialized control blocks mail. The decision is read on
+each send by processes that have loaded the new Core. Processes already running
+with an older Core must finish or be restarted before relying on the restriction.
+This button does not change Teams notifications or initiate any email.
+
 ### Supervision, timeout, retries
 
 - Each tick checks running children: exit code and duration are captured on exit; `TimeoutMinutes` triggers a full process-tree kill (`taskkill /T /F`). `TimeoutMinutes` may exceed 1440 for jobs longer than 24 hours. The committed production manifest uses 1380 minutes for a daily schedule with one execution time and 8640 minutes for a weekly schedule with exactly one day and one execution time. To migrate an existing shared configuration safely, first run `Set-SmartM365-OrchestratorTimeoutPolicy.ps1 -SharedDataFolderPath <OrchestratorRoot>` for preview, then repeat with `-Execute` to create the audited version. Startup and manifest reload log a `Timeout policy audit` line with counts and mismatches from the active central manifest. Since v1.5.62, `AD-Inventory` (360 since 30/10/2026, 240 before), `M365-WorkplaceScope-Inventory` (480), `EXO-Mailboxes-Inventory` (2160) and `Exchange2016-FreeBusy-Check` (120) are intentional exceptions (`Get-SmartM365OrchestratorTimeoutPolicyExceptions` in the management module): the policy script keeps them unchanged and the audit lists them separately instead of counting them as mismatches.

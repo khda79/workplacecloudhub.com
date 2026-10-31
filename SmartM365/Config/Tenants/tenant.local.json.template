@@ -30,6 +30,7 @@
   "Thumb": "0000000000000000000000000000000000000000",
   "Thumbprint": "0000000000000000000000000000000000000000",
   "ErrorMailTo": "admin@example.com",
+  "Smart365Administrators": "",
   "To": "",
   "SmtpServer": "",
   "SendMailMode": "Graph",

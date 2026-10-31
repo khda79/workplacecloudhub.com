@@ -59,7 +59,7 @@ Runs the configured archive campaign in dry-run mode using the recipients path a
 Sends the archive notification to a pilot CSV even when rows are below the configured mailbox-size threshold.
 
 .VERSION
-1.5
+1.6
 #>
 [CmdletBinding()]
 param(
@@ -426,7 +426,7 @@ try {
                 $teamsStatus = 'Disabled'
                 $teamsError = ''
                 try {
-                    if ((Get-SmartM365CommunicationTeamsUserMode -TeamsUserMessageMode $teamsUserMessageMode) -ne 'Disabled' -and ($WhatIf -or $result.Sent)) {
+                    if ((Get-SmartM365CommunicationTeamsUserMode -TeamsUserMessageMode $teamsUserMessageMode) -ne 'Disabled' -and ($WhatIf -or $result.Sent -or $result.Mode -eq 'AdministratorsOnly')) {
                         $teamsMessageTemplate = Get-SmartM365CommunicationSubject -SubjectByLanguage $teamsUserMessageByLanguage -LanguageTag $language -DefaultSubject ''
                         $teamsMessageText = Expand-SmartM365CommunicationTemplate -TemplateContent $teamsMessageTemplate -Tokens $tokens
                         $teamsResult = Send-SmartM365CommunicationTeamsUserMessage -TeamsUserMessageMode $teamsUserMessageMode -To $email -MessageText $teamsMessageText -TenantId $global:TenantId -SenderUserId $teamsUserSenderUserId -RetryCount $teamsUserRetryCount -RetryDelaySeconds $teamsUserRetryDelaySeconds -WhatIf:$WhatIf
@@ -489,8 +489,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDhs280Sh8H65MF
-# rHDDsG6jmtze3C8380Ek4ZzSVC1vL6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAvbLocnLyrb6vH
+# 1lMZWjhMgsqNaMq/4wwMZRvH8n/Ul6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -623,31 +623,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAMdpEc22Sfnz3jcE3IAoplQBR2/MENJ5BKbLug03bdhMA0GCSqG
-# SIb3DQEBAQUABIIBgBXK3R1Fj782navDLn4H28vttqWhrqUpniWwDIRuq5Fleihm
-# 3NuiWz+0r+2VwhomlVDaN9+AY2gzcN1++OfXLJIrbthTGta2OPA/j4M6PNT5fJwc
-# iHe2xeINrtQtO189fGaJJ+lS+dplriJN4lyN/z+8ZNErFYSOhBs36XzoOz1Zwq/G
-# R87xoGaiq5iu83nR/0onnyupkdJAS054oiCdIxjBVdKK8kJf1G6WUoGbXSoAOqhp
-# ZiwqxO1TuJu9wymncj7cDReuMtVg9U/KkPi368Y5oWJjhm2hl6TQYVClOpsvdhpE
-# 4jPIGPzaqQsh23XyEEAtQMoteZNY+H8AJwt/Qesh9xYJSsg5vcCpnmXBNS5tn6DT
-# GD/WeheLnQ8Uj/n2oszp4QItf8ry7GqutDHw1qnL6YYCKKMQfQn8ILO0EYEjqPab
-# K97Cyw2QvtyBEsOAwbLXnTx3nyfUjy+BXkFfBENC9uuNKX2w81Z3P4cXvyIh+RLI
-# ceJOyFSMVA4bI0qnxaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIB68BUrE6ChprRm1GHA+aqZfoQrjhm+gUWmbUFd0U9NkMA0GCSqG
+# SIb3DQEBAQUABIIBgJ4SkClLEqYvzzmbkeMc3AbMlCH48w/x94Q4FyEYOF2SqOO4
+# Vwntg660Tz3GrfNHvnzVFIBWsgoljPPfsGx8qA56ZlLZ/hcHAmUN4bOJfbXB+ZtV
+# cnFIwJltwPIioG88kgQtsueNP4rjHZEIygokspphcREBt3CyZo9fMhYZBhcUANz0
+# hyTpTr1yWaF1RfNhK9zVnX5uNmq/0+0woaKQFUmAs9uz+Yp23eTAHsnCVou+jXDM
+# maC4pELlN7WaOVdpDkGhESA4kJ1hAK9qnc+gd6XgQO2zJ/Slz81973lDgVIEmfte
+# JWQw12RmpT3UdIj/sf1ykWcLojWb10Z0XQLJASUyBe5EAis2ZJT4hx6DSLOcJVQL
+# M304FQsGFQkq0++9hWeB1Ql6f2wy9Fl1iinLZfHt9r7SepfLLqityzNWASTftxiS
+# jUJFn9/W2Ct1yR6BQIGyJdqqBWylFkx0ZkW0N5in5cLBCBpC+WCKJs4DQSXUrAn0
+# C0mEK7bLeB3ESmDWiqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzE0
-# MzNaMC8GCSqGSIb3DQEJBDEiBCC9envgZJB11vTRZRH+QRpOWLeJkz0YBMWguf+O
-# Uh5MfDANBgkqhkiG9w0BAQEFAASCAgBH35helePWfS5kMdq+e0XEFeARRmaLUvmZ
-# O6lgmXPtKO4PyE+MSaWIkcjnZNRLRBjz7G5zUAuojyRu+ENhwZDswJYTkn9J5QIy
-# O/heETj97/r4MQVsDIo7tjkCKCDZbig8ScHYfl3eX7KoblLsTx0nMx9TKJCmOXAc
-# OikAwVselKa4CcJb0kGlEY5/ps8gxu5ki3yXNLE31hriT9x9QEcznZo5ofSdxAx/
-# uCwkja/mijJE5XSmIQZFPiwIW+J7Rc0H7FUKSF96cDRcEMsTJOTjzsFClhig2/XB
-# ftrBCxRuv4uRL1JwqtM/j4OTfYBXXg5T5CypFK0lvGi49rAp28K5Ggrd2xvembXi
-# 3BoodO1g0CLzEPJX8S/JPrgXrOAwAZ2UOj1loMHVvm5+sZ6NN1zAoYcJUIkhZOq4
-# lH/Wbw4yCjIy2VSyycrhTXhtN+Cw1oW3l0r7p+nTwfpRjOdO7PONTLPRm0bO2YC8
-# 5umd5xl+43UojpSjL07EXeaGjuC4FEiKp/PlkRaGT57ozz3w4RMpEbhUgobq4POF
-# IyXIh3KTpamazQFeB93uA+0NhwpTgdmxQyJNIa7LwWcweJtAdHOlVLYRufgeNjno
-# Cl8tPpjFCzXswBYbWmetaBUikoO9HG+tiM5nu3CPj+VpN3IQL2dE1F0KH40T2xxE
-# RCCnH3u3Pw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNjE4
+# MjNaMC8GCSqGSIb3DQEJBDEiBCCn5AvIphhM9rMp1ZVBaTY7knqHVQ38LYe/IEWa
+# 5YE7XTANBgkqhkiG9w0BAQEFAASCAgAIKFdoUcfU4Bc99QOYCW6UY4cIQi6fMR0S
+# qDEE8T97eaHoX9xZVXBxk0n6oVYDv65Du2jpfI5IUvRrWf6qVVUBSXICyqjai1eF
+# x+VHxk0JL1E7mwfBk7eXRVUkQno5bHYOSk4fBYLLypLeQXf0Dxz4WNwKc6Ca0eYB
+# sfirQsq4XaJPPyIE6ELjvmTmi6CJqBEyNszbNDEvm03yNzaFvkPc4vjOtSl1J20C
+# sQunGOBpusamtbQdC7Jj21H7+qGLE8+BW1X4hz22mSJafql9jcQMWRWssqmjBWjK
+# sgUPkKl5+t40VTIJ/YzZ/Kn/kdhPeH4zW9zEozIPm2I97ejLUUUSn3SL6BxbMLSd
+# 0FmfWTYLD/UwvK2GLSGnrLOX6SwEIiYOQTkAW0QvJoxORcoLjZcrM9O4BbkODz0r
+# HDegFWqLiIXPb4niqmeIkbqanSwGI/VCN5LMcxPKILGM+aEC4RuuPNjikBQGaNDv
+# vEF7vGPc/AcfyIYpRYDCBXFhkwf7bVfbeInl1IMa+tcU+kIgJsnXPQOc7PS7Cv9H
+# LSD0q2zSiF4gSa4mnX19FHCpxZ4mFyEoi/jpbnh2JTIqXPcZS8pERiyOG+idw4tM
+# l8MOzmhRlK+GONsG7L3V12VMBpGlPx2EksFwkey8NxMrCAyeyM07Zhm9UBQCE6F2
+# jTlxGzczbg==
 # SIG # End signature block

@@ -4,7 +4,7 @@
 Synthetic maintenance mail admission and transition tests. Production entrypoints,
 authentication and mail transports are never executed. Run in PS7 and PS5.1.
 .VERSION
-1.0.2
+1.0.3
 #>
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars','',Justification='Tests emulate the existing Core global runtime context and restore it afterwards.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter','',Justification='Transport and branding mock signatures match production helpers without performing external actions.')]
@@ -42,11 +42,17 @@ try {
         $source=Join-Path $core $edition
         $names=@('Send-SmartM365GraphMail','SendEmailHtmlReport','ConvertToRecipientArray','ConvertTo-SmartM365GraphRecipient','ConvertTo-SmartM365GraphFileAttachment','Get-ModuleLocalConfigValue')
         if($edition -eq 'SmartM365.Core.psm1'){$names+='Send-SmartM365Mail'}
-        $definitions=@(Get-Definitions $source $names)+@(Get-Content (Join-Path $core 'SmartM365-MailMaintenance.ps1'))
+        $definitions=@(Get-Definitions $source $names)+@(Get-Definitions (Join-Path $core 'SmartM365-MailAdminRouting.ps1') @('Resolve-SmartM365AdminMailRoute','Get-SmartM365AdminMailControl','Set-SmartM365AdminMailControl'))+@(Get-Definitions (Join-Path $core 'SmartM365-MailMaintenance.ps1') @('Get-SmartM365MaintenanceMailRoot','Get-SmartM365MaintenanceMailState','Add-SmartM365AdminRecipients','Resolve-SmartM365MaintenanceMailRecipientRoute','Set-SmartM365SmtpMaintenanceRecipient','Resolve-SmartM365UnifiedMailRoute'))
         $runtime=New-Module -ScriptBlock ([scriptblock]::Create($definitions -join "`n"));$runtimes+=$runtime
         & $runtime {
             param($Shared)
-            $script:Cfg=[pscustomobject]@{TenantKey='synthetic';ProfileKey='synthetic';DataAllRootPath=(Split-Path $Shared -Parent);To='global-report@example.invalid';ErrorMailTo='global-error@example.invalid'}
+            # Preserve the pre-existing maintenance contract independently of the
+            # administrator-routing suite, which exercises the real new policy.
+            $script:UseAdminPolicy=$false;$script:AdminOnly=$false;$script:OriginalAdminAdd=${function:Add-SmartM365AdminRecipients};$script:OriginalUnified=${function:Resolve-SmartM365UnifiedMailRoute}
+            function script:Get-SmartM365AdminMailControl { param($SharedDataFolderPath) [pscustomobject]@{AdministratorsOnly=$script:AdminOnly} }
+            function script:Add-SmartM365AdminRecipients { param($Route,$Config,$Control) if($script:UseAdminPolicy){& $script:OriginalAdminAdd -Route $Route -Config $Config -Control $Control}else{$Route} }
+            function script:Resolve-SmartM365UnifiedMailRoute {param($To,$Cc,$Bcc,$MailPurpose) if($script:UseAdminPolicy){& $script:OriginalUnified -To $To -Cc $Cc -Bcc $Bcc -MailPurpose $MailPurpose}else{$r=Resolve-SmartM365MaintenanceMailRecipientRoute -To $To -Cc $Cc -MailPurpose $MailPurpose;[pscustomobject]@{To=$r.To;Cc=$r.Cc;Bcc=$(if($r.Restricted){''}else{$Bcc})}}}
+            $script:Cfg=[pscustomobject]@{TenantKey='synthetic';ProfileKey='synthetic';DataAllRootPath=(Split-Path $Shared -Parent);To='global-report@example.invalid';ErrorMailTo='global-error@example.invalid';Smart365Administrators='admin@example.invalid'}
             $script:Caller=[pscustomobject]@{To='local-report@example.invalid';ErrorMailTo='local-error@example.invalid'}
             $script:Graph=@();$script:Smtp=@();$script:FailGraph=$false;$script:BeforeAuth=$null
             $global:AppId='synthetic';$global:TenantId='synthetic';$global:Thumbprint='synthetic';$global:Thumb='synthetic'
@@ -77,6 +83,13 @@ try {
         Assert-Case ($normal.Graph.message.toRecipients[0].emailAddress.address -eq 'local-report@example.invalid') 'Inactive Graph changed To.'
         Assert-Case ($normal.Graph.message.ccRecipients[0].emailAddress.address -eq 'local-cc@example.invalid') 'Inactive Graph changed Cc.'
         Assert-Case ($normal.Smtp.To[0] -eq 'local-report@example.invalid' -and $normal.Smtp.Cc[0] -eq 'local-cc@example.invalid') 'Inactive SMTP changed recipients.'
+        & $runtime {$script:UseAdminPolicy=$true;$script:AdminOnly=$false;Send-TestGraph;Send-TestReport}
+        $adminNormal=& $runtime {[pscustomobject]@{Graph=$script:Graph[-1];Smtp=$script:Smtp[-1]}}
+        Assert-Case ((@($adminNormal.Graph.message.toRecipients | Where-Object {$_.emailAddress.address -eq 'admin@example.invalid'}).Count -eq 1) -and @($adminNormal.Smtp.To | Where-Object {$_ -eq 'admin@example.invalid'}).Count -eq 1) 'Normal Graph/SMTP missed administrator.'
+        & $runtime {$script:AdminOnly=$true;Send-TestGraph;Send-TestReport}
+        $adminOnly=& $runtime {[pscustomobject]@{Graph=$script:Graph[-1];Smtp=$script:Smtp[-1]}}
+        Assert-Case (@($adminOnly.Graph.message.toRecipients).Count -eq 1 -and $adminOnly.Graph.message.toRecipients[0].emailAddress.address -eq 'admin@example.invalid' -and @($adminOnly.Smtp.To).Count -eq 1 -and $adminOnly.Smtp.To[0] -eq 'admin@example.invalid' -and @($adminOnly.Smtp.Cc | Where-Object {$_}).Count -eq 0) 'Exclusive Graph/SMTP leaked recipients.'
+        & $runtime {$script:UseAdminPolicy=$false;$script:AdminOnly=$false}
         # Error routing applies outside maintenance as well, even with explicit report recipients.
         foreach($mode in @('SMTP','Graph','Both')) {
             & $runtime {param($Mode) $script:FailGraph=($Mode -eq 'Both');Send-TestReport $Mode Error;$script:FailGraph=$false} $mode
@@ -262,8 +275,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZa52ZYUkTZddk
-# Qnl9+rzV1Axuiq0O1rglKxTfxhF986CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA9KUzFboY3ckfC
+# TkvR8ImZSEIvbfVuhdr7Dd0r6djgg6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -396,31 +409,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIGu8gUaBEn4aqpo6t1TG9RmLULjraGWwTxOGGQMydfR8MA0GCSqG
-# SIb3DQEBAQUABIIBgKGe5xuGvCnQ53ehc9o3PCNFgsZXWWxYZS7M5mJYL3J8BAMO
-# tfFRCYJrcAIF0kdMSeXvAhObnfyATG3yXkWox1PGJ0v3jLSWj/78U8LA38F5aUj+
-# FiHG/h6BkQzUS0WbZ5cUTFz11JuesQFZv9eRubOzsrJ1AumMUPayT2fAG4hEOtmC
-# Fx49Z2e7skrJdirtDEh5TTQ90o95YCnMCu3mxxBKBDYKoWOFB8zQpgirvKiQiqjY
-# fhbazewbMzi3V5kbm17lSCCY6wJnqv06tHpDmmPFeIlsBTq8jCXKm9w0oiG1/jSD
-# KQbnYzxNxb2nZ6kozAewsFsz1uWmrw2aN3FJzhj2luBoIpRsVUo1MUuWWd2FFzQk
-# e0XLcJMBGcgb7uwCuab0jhEkOnGBWPl9E5A2jFK1Uk0BJJBsaHTqB+d2W6OzyEl8
-# rp3QXSSaYiEr8pElirlXX3oe8sYkCON8EhurhRn7bFW5JboNSS1kA+4KCKUGbtCr
-# 6oA4evGt24ormBfgCaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINMjxPxRH0NUhJR8sBrUuBt9dB0fGxGXMw0KvULonm7XMA0GCSqG
+# SIb3DQEBAQUABIIBgFzeTvmEFdIJ+smRZ+Uci1V3UjIPbOnHJpcU+Lz//K5TizG6
+# FspSnToeyO1z8wcnfEEKpM/KiwTpnGQiDQhQvjaqBHDIh9OyHET47pZnq88oH5Lp
+# VDbbTZYCfJMBKP1eFGbYUk7HF2g8/uUe4XYrEQMo5pXmpcCQGIqNNED+jArZKIPG
+# AiaxaJ7nKbp+g3noUBTVwfsTPsz54NyNo4C+9tkz3TvjLXZtLA9YN2bsHkKi6ZVe
+# o+9IzY6H2uS/XEoNWCWTMpnUX6sFfgVXBBbhh5PauYfgQKYxJvnDRu3D5b7I9a/W
+# k+VR6nCmUFZo5NLsNWmSJ02zXNRO9Se4sgFnvarpyK3mWGCXxA1TbFO+r4AszYMp
+# hUEMhS/rK6hOx57xkWLoviowf8U14iiF5KWiuJAHGQqaIammnmZlHdr2DZ9JWuGR
+# Dwrc/hBMsctK4r0ZaJkNhd/7FMd6pAdgRT4q76tsxAuIbpWJ1jPoLGpLUWInFWUR
+# gvK+4vJPpFt7CrGq36GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
-# MDdaMC8GCSqGSIb3DQEJBDEiBCDxhuRhJe1dN4vQFaE/RJ+KVodr4oFszhCVqau6
-# m2LP3zANBgkqhkiG9w0BAQEFAASCAgAg3igRuroDLA5uQE5Gy+TFpMbNtcFNTnCx
-# +B5dXUBzcduvh0Odqa6TPhwlYz0E1HKCNPrYXeRAVzwkeZZm9Bn6X4IDKgQ6Y/o0
-# GxZ7X63ktYf7PRc1xxFXiULe0F8woq/pD3vK8h0RNUROykakR02RHdYcEedUzF/i
-# wILKsYKducUgux/Ws26BRpug1yv8xmRlp7AQA4RZ4aHUgehFMAp7rvUIzQ/e4kjt
-# 0nEubUYnbLFw/H8ex8bB6CHPOBT9IrvHevqfSS8n6rFacPUzEr8fcAsPcp24Qtbp
-# NRl3xLCPN7Copg5AI4gu9TgmBoLbX6L83bVoU56EFQYFIBx2SvMp7bywCXOMnme6
-# Y3HSopdFtCo/1w8YmVoZRH4CYKyhFnzrx90JP/KMfeQYQuQiHOL0ZOufPqZBw2Xi
-# toZq7UHxsHHx6qAf2aZVRiyVq4rCNbxVd3jwh4z9MnZ8iXiebie8ozAs7YfT+Eo1
-# gwVlbaft0xM723n0W/uHFaBdj55QWeCA7poCvmycbOA80oBNipYttxRbcIgkG5Vh
-# N1X+vcSL/U3jI7C++9UJTrORPabNFYWEv9Qy3AdCdbrEyYGDJFFbbtprMSDowLF7
-# JyX2ykuCm1J+KnqhssYE8+kaIvtDQl2VSKfC7O5FkKXsv53t9emOKdQ1s0jeu3F7
-# 4q9qC7DlwQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNjE4
+# NDhaMC8GCSqGSIb3DQEJBDEiBCAIC57XfjCM3LR8Y8wzhO9sA7Y0auAtHoioyQH6
+# 8gav/TANBgkqhkiG9w0BAQEFAASCAgCTCwYUHwkvU9Nyn7T4sTgrZjuivHyHzLNU
+# B2vKnk6/kO0UGpBwKD8F67WWpaV5dCiCNv3sLDAjb8tJXUOP1PtuPJwcPEf7d32B
+# IOjl5fOIx7RR1RK4AN4UWZu0ik8Mu2I50+rs6xwqptFXx+GLcVceiOPBskMwzTxU
+# dTfplSdn3dLxf0rx6ug49st4QnlhuEVtnESNDZhyGECU5K6c0QezFIoPY9/zskSe
+# Fe7iA3mBci1ykZ/nzB9YG/0nBKkQoSRe3dXVtrlItZYfRMc948o5wxlNMkD6mE3K
+# rqaAQnz0g9LUFbbpXgDrQGfntsacyxjWQbSIgrhnbPEa1On6CI6P9CrEKLUXBczU
+# d7yVNToryWly7+zCMK1IFFCwJWsTEMtL3LACMOxacaLBXXRe4tOWk4G0hG2/kZKl
+# a7ghbbsr8YUY5ygdm66sYQSzw08+GA2dmDC5Z0NExMsZUPHWUGngwLdEJNig/02l
+# YV4PnYg0xhySSx6y6s613/kBEXtYd4yMwiW6yLuacBcTIzaQWyUvtGyXtyENVkIb
+# Mq7hSdhlXjfaBfyhR3XhCqJ1nvwBtWrOFFG3i97QRhdkXq7nkCmApOhifNBJCQRI
+# wiJxI73cviitzBHphZ1ZqkrgZR6OnPal1GTMXh+q/D4ENKvyp3BoEQzY2oVm0kBj
+# kKteK9n42w==
 # SIG # End signature block

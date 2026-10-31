@@ -2,7 +2,7 @@
 .SYNOPSIS
 Shared mail admission policy, dot-sourced by both Core editions. No I/O on load.
 .VERSION
-1.0.1
+1.0.2
 #>
 function Get-SmartM365MaintenanceMailRoot {
     param([Parameter(Mandatory)]$Config)
@@ -72,10 +72,22 @@ function Get-SmartM365MaintenanceMailState {
     return $state
 }
 
+function Add-SmartM365AdminRecipients {
+    param($Route,$Config,$Control)
+    $property=$Config.PSObject.Properties['Smart365Administrators']
+    $administrators=if($property){[string](Resolve-SmartM365ConfigValue $property.Value)}else{''}
+    $result=Resolve-SmartM365AdminMailRoute -To $Route.To -Cc $Route.Cc -Smart365Administrators $administrators -AdministratorsOnly $Control.AdministratorsOnly
+    return [pscustomobject]@{To=$result.To;Cc=$result.Cc;MailPurpose=$Route.MailPurpose;Restricted=($Route.Restricted -or $Control.AdministratorsOnly);AdministratorsOnly=[bool]$Control.AdministratorsOnly}
+}
+
 function Resolve-SmartM365MaintenanceMailRecipientRoute {
     param([string]$To,[string]$Cc,
         [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose='Auto')
     $config = Get-SmartM365EffectiveModuleGlobalConfig
+    $adminControl = Get-SmartM365AdminMailControl -SharedDataFolderPath (Get-SmartM365MaintenanceMailRoot $config)
+    if ($adminControl.AdministratorsOnly) {
+        return Add-SmartM365AdminRecipients -Route ([pscustomobject]@{To=$To;Cc=$Cc;MailPurpose=$MailPurpose;Restricted=$true}) -Config $config -Control $adminControl
+    }
     $state = Get-SmartM365MaintenanceMailState -SharedDataFolderPath (Get-SmartM365MaintenanceMailRoot $config)
     if ($MailPurpose -eq 'Auto') {
         $MailPurpose = 'Report'
@@ -98,9 +110,9 @@ function Resolve-SmartM365MaintenanceMailRecipientRoute {
             if ([string]::IsNullOrWhiteSpace($recipient) -or $recipient.Trim() -in @('__USE_GLOBAL__','USE_GLOBAL') -or $recipient -match '\{\{') {
                 throw 'ErrorMailTo is not configured; error mail was not sent.'
             }
-            return [pscustomobject]@{To=$recipient;Cc='';MailPurpose='Error';Restricted=$true}
+            return Add-SmartM365AdminRecipients -Route ([pscustomobject]@{To=$recipient;Cc='';MailPurpose='Error';Restricted=$true}) -Config $config -Control $adminControl
         }
-        return [pscustomobject]@{To=$To;Cc=$Cc;MailPurpose=$MailPurpose;Restricted=$false}
+        return Add-SmartM365AdminRecipients -Route ([pscustomobject]@{To=$To;Cc=$Cc;MailPurpose=$MailPurpose;Restricted=$false}) -Config $config -Control $adminControl
     }
     $key = if ($MailPurpose -eq 'Error') {'ErrorMailTo'} else {'To'}
     $property = $config.PSObject.Properties[$key]
@@ -108,7 +120,7 @@ function Resolve-SmartM365MaintenanceMailRecipientRoute {
     if ([string]::IsNullOrWhiteSpace($recipient) -or $recipient -in @('__USE_GLOBAL__','USE_GLOBAL') -or $recipient -match '\{\{') {
         throw "Global $key is not configured; restricted mail was not sent."
     }
-    return [pscustomobject]@{To=$recipient;Cc='';MailPurpose=$MailPurpose;Restricted=$true}
+    return Add-SmartM365AdminRecipients -Route ([pscustomobject]@{To=$recipient;Cc='';MailPurpose=$MailPurpose;Restricted=$true}) -Config $config -Control $adminControl
 }
 
 function Set-SmartM365SmtpMaintenanceRecipient {
@@ -116,18 +128,36 @@ function Set-SmartM365SmtpMaintenanceRecipient {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable]$MailParameters,
         [ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose='Auto')
-    $route = Resolve-SmartM365MaintenanceMailRecipientRoute -To ($MailParameters['To'] -join ';') -Cc ($MailParameters['Cc'] -join ';') -MailPurpose $MailPurpose
+    $route = Resolve-SmartM365UnifiedMailRoute -To ($MailParameters['To'] -join ';') -Cc ($MailParameters['Cc'] -join ';') -Bcc ($MailParameters['Bcc'] -join ';') -MailPurpose $MailPurpose
     $MailParameters.To = @(ConvertToRecipientArray $route.To)
-    if ($route.Restricted) { $MailParameters.Remove('Cc'); $MailParameters.Remove('Bcc') }
-    elseif ($route.Cc) { $MailParameters.Cc = @(ConvertToRecipientArray $route.Cc) }
+    if ($route.Cc) { $MailParameters.Cc = @(ConvertToRecipientArray $route.Cc) } else { $MailParameters.Remove('Cc') }
+    if ($route.Bcc) { $MailParameters.Bcc = @(ConvertToRecipientArray $route.Bcc) } else { $MailParameters.Remove('Bcc') }
+}
+
+function Resolve-SmartM365UnifiedMailRoute {
+    [CmdletBinding()]
+    param([string]$To,[string]$Cc,[string]$Bcc,[ValidateSet('Auto','Report','Error','Maintenance')][string]$MailPurpose='Report')
+    $base=Resolve-SmartM365MaintenanceMailRecipientRoute -To $To -Cc $Cc -MailPurpose $MailPurpose
+    $config=Get-SmartM365EffectiveModuleGlobalConfig
+    $admin=[string](Resolve-SmartM365ConfigValue $config.Smart365Administrators)
+    $hidden=if($base.Restricted){''}else{$Bcc}
+    $visibleTo=$base.To
+    if(-not $base.Restricted -and $hidden){
+        $hiddenSet=@($hidden -split '[;,]' | ForEach-Object {$_.Trim().ToLowerInvariant()} | Where-Object {$_})
+        $originalTo=@($To -split '[;,]' | ForEach-Object {$_.Trim().ToLowerInvariant()} | Where-Object {$_})
+        $visibleTo=@($base.To -split '[;,]' | Where-Object {$_.Trim().ToLowerInvariant() -notin $hiddenSet -or $_.Trim().ToLowerInvariant() -in $originalTo}) -join ';'
+    }
+    $final=Resolve-SmartM365AdminMailRoute -To $visibleTo -Cc $base.Cc -Bcc $hidden -Smart365Administrators $admin -AdministratorsOnly $false
+    $onlyProperty=$base.PSObject.Properties['AdministratorsOnly']
+    return [pscustomobject]@{To=$final.To;Cc=$final.Cc;Bcc=$final.Bcc;AdministratorsOnly=($null -ne $onlyProperty -and [bool]$onlyProperty.Value)}
 }
 
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCCTCYnNVqTNpQ6
-# KV4nNpELvYrXtKkatDhlibhSnDgrfaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBahipvw8QhsjcZ
+# gQNnKCVp2biBsl+2L+5KFnv+jX5iu6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -260,31 +290,31 @@ function Set-SmartM365SmtpMaintenanceRecipient {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDXoeeXaGORxULJKGFHYFBLDwENDy9lBAbRDAQ6+eP6xMA0GCSqG
-# SIb3DQEBAQUABIIBgHWzjcxi0wzDBnf8xGuPzEbp7nq62xhMmEFlzh8K9q7hLpo7
-# wUPrHr4sFstX7do4nXIEoHDNwaW/SrkEuZxxHdjjQatn0A2kx2rF/XrYB/klipbH
-# RfFgLpwhDVeyYrasjEjZXWCRobVBw6VD+NnBNJBeuS77yPPqKRBJgILG++GtfaVj
-# W1WX46bkxdsO0ih/9ZjscqB5UTMWpDAdoGBtv+wFUrLzSxxk6pn61g+A3oTFvA9Z
-# w94pKGmVZqUTedVofZsObEgaZAnQYKKgGXE4lNgXlKAOHMVpbZa07DfIH/4AROc8
-# 6EW4j1xo/5hJvaSjoOTLmDPlQcKrmRYOZWV7Eb8TIUF0q3EPV5GimoiaeHcx741l
-# 1CF0swamIytMZOLBeSwfrcp4n6ro9L8dAfVeHXVMq/lcEMrMp62dalmrcifQa1ow
-# r6w7eQC3+8BOvbfhlHo7s/Xr+o0VVqk2Nof3u3KEqlejIZbVhRDPy66qh0ZdceXL
-# RsYKnp1g+2+LzFAKd6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIOTFPp322BDjvIW+NxTqciSoVKEhBawn3Znh515HqsHYMA0GCSqG
+# SIb3DQEBAQUABIIBgAA/9pXGqSRyLxpgXVPmGrsO8OVv+aMuhjwgRVlYBdi5cZMc
+# j8WorkPcqYvEBmpeHkJW4Fhrid1ubE4wGU0g6E+CaXaWEHd/DpUXor1cT+3WDgIF
+# 14NxexBAd02C2hd+iNjFzpTXxIk85HZ6k2VXtAQoyBLKHGDiFUoU9D/sEhmxp669
+# bNUJNy3KPSYvLFisyTSfOJFTxt3RHzb8/zKX4doAilN9fpdaHYADfr6IrYoc7uug
+# qIFmy1kqC6NmRCT1Lu8+kweI9A9IqkOG7rgwjxWA/rePABu235SULA0SwWTjeUOy
+# RqiaVO7vJmScVeSYISBAcH3YFUOWe3txQO4JOxdPJZkhogMQQUybULXer2K/H1Lj
+# fSWb/CVYJxFyLquqNQwXYAWOgTJs1NjE/0O2cJnVuPU5m+AjhXEKjFBpHWUResbG
+# w5B7cAKjmfubtNRsTDSphqmzRrkISwaYQ0W4FBbx8RLE7bjsI5VW4sO7QNbVcjzH
+# CEwTjGGavTKmlrPInaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMwMjE5
-# MDZaMC8GCSqGSIb3DQEJBDEiBCDtuWJuu+qahlSsGoX2LngppD869qM1eBSLtej9
-# 5mhczDANBgkqhkiG9w0BAQEFAASCAgBLkiunhMehl6T9kjZ4okqlinVBFRVHzLPv
-# drP9Gesrce/MSyCtSmbsnUvKNPf4cjmnrcPS09+iQmKD5BKuwRE/c2cjO1sOGiC+
-# a66pB1miJ3YMXDPRsj/zJ/2S2NqT9BOOV4iIQJVQx+w+wQdpK5BdgWOTsjvq+Ifr
-# mghzyuuKRgXVMpLHEncLixnF5XW6vh52BFJu8qkhra8ei+2ik5CrAVWTuinSPbZq
-# 07lOQHWNhdd6wpcZn28ros6K8MNfpPpy54FXnUcKX6yH4O/sjPczNshqp23x7NQv
-# 7o055T2q8tdlQs/y5WIpjRnKsNj19dViyp99j9YrsccGI8OOehzHIWjYC7XHuPHj
-# 0QtcecX7BmGBDQ4UIO5lPI07gQT/Y430dgsqhMIJVynslLREiL+972f/G5oDR0Eq
-# DoLQWkTHfUDlyQhUnE00KQCYcD1gn/B8ozhqO/ts+ShJfhaCo4Wbcb4UCbwEyo2B
-# ae7CbnckDVehAyDUzlNdqJZnP+qNNvU/fy1gqsJ/9+WRIqJzCNXAZ5XFkrhPUVRR
-# 72mStR30Sdv55mRi0fgM6Cql9fVIG3V95fZZr14EV+njxXOVMD5RVNkBxB6jYarr
-# +GE+BGB/MY6JgRZ1Jc5H+6yEXRTxe2eqB0IaLu8qKDGRW5Cy8BY3ENYuBu9ZhCyK
-# qYyoqTN+WA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNjE4
+# MjRaMC8GCSqGSIb3DQEJBDEiBCAA+KhDatZU+u3xytmWjoA0zfyMsRpcl+jFt0T/
+# xpXaTTANBgkqhkiG9w0BAQEFAASCAgAVLFAYeS6PcSqEPgm3fFVgaDMzYTtWpCsG
+# f6bmEcP/0WtTB5Gw9N6ABDwv73iRac5nRsWW/BcmOSPT4a46U6UXOLdwtKUeNOzt
+# d7w6REw67NE8Wrfhuansh3Q6ZKTwnL52UGhWLax9QCf6qPOBbFhZ6Si82R+2kmNT
+# xVcKOARZ/XgK87vswrQZM2KHrFj2Nk8gVkWxRkUwUOrmmunIaTfNFcsmnC23s/VO
+# zjEAAO+YVwd3gnrIL/6vsGrZuw3L38jsc8KcVS/O8fib+7F6rTx5XtlqDLkhSxOP
+# kfmUBH3kQ9NQdDYYFU06sSgjPcua1CjFBimaKLduP3B/B5jh4c59U+GQll4OMhsK
+# PbNvMtXIoOKi5+sxT5hKHMwfxDG64NpvOSYZyi0F+zRRRQ7QhEBYc6+l1ika9+Fv
+# Cvyi+vNo0bgySuUnoxZY9noZnEQB/sWc0S77G3J6g8+NxRny134yQlCkwF2TQv7f
+# RvxJoJYBP6v3BjSsHtPwqFfObvuCWQ9b6M7S/z8rC6Z/kn8GxKv6vbDGMfilcTK4
+# OqFkttoVPo7dL7CdrcwcmU0NoqD6g/AWdXEaqj1zsQaZVYUOtxgLJFiWw1Nk6j53
+# tqKXSSS0XkOU6AA8hZw00YMu9xs5iD/WwD1KMKTPmRAyzcJzgS41K8gJhSuCi/O9
+# QfWDSX21ig==
 # SIG # End signature block

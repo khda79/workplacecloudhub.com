@@ -34,7 +34,7 @@ Loads the complete WPF data model without showing the splash or main window.
 Intended only for isolated tests with SharedDataFolderPath pointing to a temporary folder.
 
 .VERSION
-1.6.34
+1.6.35
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +68,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:AppVersion = '1.6.34'
+$script:AppVersion = '1.6.35'
 $script:PrepareJobName = 'WorkplaceEvidence-Prepare'
 $script:StartupClock = [Diagnostics.Stopwatch]::StartNew()
 $script:Snapshot = $null
@@ -435,7 +435,7 @@ $xaml = @'
                             <!-- Maintenance text left, reason and buttons right on the same rows (GUI 1.6.29). -->
                             <Grid Margin="0,0,0,8">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <TextBlock x:Name="MaintenanceDetailText" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                <StackPanel><TextBlock x:Name="MaintenanceDetailText" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0"/><StackPanel Orientation="Horizontal"><TextBlock x:Name="AdminMailStatusText" Text="Mail routing: checking" VerticalAlignment="Center" Margin="0,0,10,0"/><Button x:Name="AdminMailToggleButton" Content="Toggle administrators only" IsEnabled="False"/></StackPanel></StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Text="Reason" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                     <TextBox x:Name="MaintenanceReasonBox" Width="300" MaxLength="1000" ToolTip="Required to enable maintenance. Does not publish the configuration draft."/>
@@ -1450,6 +1450,7 @@ Import-Module -Name $managementModulePath -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.JobStop.psm1') -Force -ErrorAction Stop
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365.Orchestrator.Insights.psm1') -Force -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Maintenance.psm1') -ErrorAction Stop
+. (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365-MailAdminRouting.ps1')
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.Pipeline.psm1') -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.GuiWorker.psm1') -ErrorAction Stop
 Import-Module -Name (Join-Path $PSScriptRoot 'SmartM365.Orchestrator.ConfigView.psm1') -Force -ErrorAction Stop
@@ -1462,7 +1463,7 @@ if ($ValidateOnly) {
         'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
         'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
         'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
-        'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
+        'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton', 'AdminMailStatusText', 'AdminMailToggleButton',
         'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
         'DashboardBannerBorder', 'DashboardBannerText', 'DashboardTilesList', 'DashboardActionsGroup', 'DashboardActionsGrid', 'DashboardGrid', 'DashboardTimelineCanvas', 'DashboardMetricsCanvas', 'ServersMetricsCanvas', 'DashboardLoadingOverlay', 'DashboardLoadingText',
         'ConfigFilterBox', 'ConfigShowSensitiveButton', 'ConfigRefreshButton', 'ConfigOpenFolderButton', 'ConfigSummaryText', 'ConfigFileTabs', 'ConfigGlobalTab', 'ConfigTenantTab', 'ConfigMailTab', 'ConfigGlobalStatusText', 'ConfigTenantStatusText', 'ConfigMailStatusText', 'ConfigGlobalGrid', 'ConfigTenantGrid', 'ConfigMailGrid',
@@ -1914,6 +1915,19 @@ function Set-GuiMaintenanceBannerStyle {
 
 function Refresh-MaintenanceView {
     param($Operations = $null)
+    try {
+        $script:AdminMailControl=Get-SmartM365AdminMailControl -SharedDataFolderPath $script:SharedDataFolderPath
+        $script:Controls.AdminMailStatusText.Text=if($script:AdminMailControl.AdministratorsOnly){'Mail routing: ADMINISTRATORS ONLY'}else{'Mail routing: normal + administrators'}
+        $script:Controls.AdminMailToggleButton.Content=if($script:AdminMailControl.AdministratorsOnly){'Disable administrators only'}else{'Enable administrators only'}
+        $addressProperty=$script:EffectiveConfig.PSObject.Properties['Smart365Administrators']
+        $addresses=if($addressProperty){[string](Resolve-ConfigTokens -Value $addressProperty.Value)}else{''}
+        $validAddresses=$true
+        try {$null=Resolve-SmartM365AdminMailRoute -To 'validation@example.invalid' -Smart365Administrators $addresses -AdministratorsOnly $true}catch{$validAddresses=$false}
+        if(-not $validAddresses){$script:Controls.AdminMailStatusText.Text+=' | configure Smart365Administrators: mail blocked'}
+        $script:Controls.AdminMailToggleButton.IsEnabled=($validAddresses -or $script:AdminMailControl.AdministratorsOnly)
+    } catch {
+        $script:AdminMailControl=$null;$script:Controls.AdminMailStatusText.Text='Mail routing: CONTROL UNAVAILABLE';$script:Controls.AdminMailToggleButton.IsEnabled=$false
+    }
     try {
         if ($null -ne $Operations) {
             if ($Operations.MaintenanceError) { throw $Operations.MaintenanceError }
@@ -3592,7 +3606,7 @@ foreach ($name in @(
     'AutoRefreshCheck', 'OperationsServersGrid', 'OperationsRunningGrid', 'JobStopReasonBox', 'StopRunningJobButton', 'OperationsPendingGrid', 'OperationsIncidentsGrid', 'OperationsMailsGrid',
     'DependsOnBox', 'DependencyModeCombo', 'DependencyMaxAgeBox', 'DependentsText', 'ReadinessGrid', 'IncludeDependenciesCheck', 'RequestRunButton',
     'Failures24hButton', 'RequestsGrid', 'RequestJobsGrid', 'CancellationReasonBox', 'CancellationProgressText', 'CancelRequestButton', 'CancelAllRequestsButton', 'MaintenanceBannerText', 'MaintenanceDetailText',
-    'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton',
+    'MaintenanceReasonBox', 'EnableMaintenanceButton', 'DisableMaintenanceButton', 'AdminMailStatusText', 'AdminMailToggleButton',
     'EventsServerCombo', 'EventsLevelCombo', 'EventsCategoryCombo', 'EventsPeriodCombo', 'EventsTextBox', 'EventsGroupCheck', 'EventsRefreshButton', 'EventsSummaryText', 'EventsGrid', 'EventsDetailBox',
     'ConfigFilterBox', 'ConfigShowSensitiveButton', 'ConfigRefreshButton', 'ConfigOpenFolderButton', 'ConfigSummaryText', 'ConfigFileTabs', 'ConfigGlobalTab', 'ConfigTenantTab', 'ConfigMailTab', 'ConfigGlobalStatusText', 'ConfigTenantStatusText', 'ConfigMailStatusText', 'ConfigGlobalGrid', 'ConfigTenantGrid', 'ConfigMailGrid',
     'OrchestratorStartButton', 'OrchestratorStopButton', 'OrchestratorRestartButton', 'FullCollectButton', 'SendSummaryButton', 'OperationsTabs', 'OperationsRequestsTab', 'OnPremModeText', 'JobExecutionModeCombo', 'ApplyJobExecutionModeButton', 'ApplyModeToAllOnPremButton', 'LaunchJobsGrid', 'RunJobNowButton', 'RunJobAsServiceAccountButton', 'RequestJobButton', 'LaunchIncludeDependenciesCheck', 'LaunchJobCommandBox', 'ManualLaunchesGrid', 'RunManualLaunchButton', 'ManualLaunchCommandBox'
@@ -3762,6 +3776,23 @@ $script:Controls.EnableMaintenanceButton.Add_Click({
 $script:Controls.DisableMaintenanceButton.Add_Click({
     try { Set-GuiMaintenance -Enabled $false }
     catch { Write-GuiException -Context 'Disable maintenance failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message, 'Maintenance', 'OK', 'Error') | Out-Null; Refresh-MaintenanceView }
+})
+$script:Controls.AdminMailToggleButton.Add_Click({
+    try {
+        if($null -eq $script:AdminMailControl){throw 'Refresh mail routing before changing it.'}
+        $enabled=-not $script:AdminMailControl.AdministratorsOnly
+        if($enabled){
+            $property=$script:EffectiveConfig.PSObject.Properties['Smart365Administrators']
+            $addresses=if($property){[string](Resolve-ConfigTokens -Value $property.Value)}else{''}
+            $null=Resolve-SmartM365AdminMailRoute -To 'validation@example.invalid' -Smart365Administrators $addresses -AdministratorsOnly $true
+        }
+        $action=if($enabled){'Route all emails only to Smart365Administrators'}else{'Restore normal recipients plus Smart365Administrators'}
+        $message="$action for this tenant?`n`nOnly processes that have loaded the new SmartM365 Core honor this control. Update every server and wait for older processes to finish before relying on it."
+        if($script:OrchestratorDialog.Show($message,'Mail routing','YesNo','Warning') -ne 'Yes'){return}
+        $script:AdminMailControl=Set-SmartM365AdminMailControl -SharedDataFolderPath $script:SharedDataFolderPath -AdministratorsOnly $enabled -ExpectedRevision $script:AdminMailControl.Revision
+        Write-GuiActivity -Message ("Administrator mail routing changed: revision={0}; administratorsOnly={1}." -f $script:AdminMailControl.Revision,$enabled)
+        Refresh-MaintenanceView
+    } catch {Write-GuiException -Context 'Mail routing change failed' -ErrorRecord $_; $script:OrchestratorDialog.Show($_.Exception.Message,'Mail routing','OK','Error') | Out-Null; Refresh-MaintenanceView}
 })
 $script:Controls.OperationsRunningGrid.Add_SelectionChanged({
     $row = $script:Controls.OperationsRunningGrid.SelectedItem
@@ -4162,8 +4193,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBxfCalLQsIFn/P
-# EitmI/xlTDfJ6lXopDTMuhD7zCk+86CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAzW2hGg5lZSTZ1
+# an19A4R3KqOuggjY4ejT2JW4fzbfoqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4296,31 +4327,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIML/D9Orj+3wVZZPSLahMCsaGMNgsr5dDE5OyL4T0ShvMA0GCSqG
-# SIb3DQEBAQUABIIBgBVM+NihIPOhtynlGMku2dMij/jYibHqSB0NGKNxs3iyEhwE
-# Ci3MLWRnDVyu+sD68417Zx28RTBKUdb4VNinjSPlqwLsVkus05FCBqtLxHaRdJY6
-# ktu4XfW9B+SUWMlkTGtKpSRdOf0gFNpFL64QJTfQo8clY8zlnmyUFTkzvkZYqOZq
-# qqBy67lw9MG82buTuYLSYpqH56Fvboqpe6awkFbAOL52phWIo/UnrJMcvt/dsJp7
-# KRL96p0SciqUS1kn207yh6CiU/bhOcL0dtenLhnAmO61cG7tJ8XIZGgwJ2KnpMgP
-# gr9qOkMHiCwxGYfDUt04UhDPShXYGP7ge30IXYiOhUbB2xgYSGM20NQQaxGHpy1v
-# tlzWZJiHbcoVdj3CJ3id5n9hWg6kt9IDQ98IKi20tXBay2yek8SiyrE8V1cXY2Q9
-# 4z6CHtMI5uKupzuNId7UMR+9sJnF0+W86nnVpQ8Qr+CrrRkB7hQrNknNGhgVctPb
-# h/LB8Jpzui+QP39uTqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM4sUvzwv/YgLEae7iqrdc0a8GjdrbBzpNumedXQh7lHMA0GCSqG
+# SIb3DQEBAQUABIIBgKOdIsGiaxoA0AdgtwZfk3PHVzd5ZAqDwCeMynV5dWzQ6FAZ
+# g+tjACPc/uqDPXEMYSP2EhHqlAJvRR7Rc8Fg2SokHX6m8GJjZqL/PNixnOMqDNU+
+# GryI/9I3+oMvhPUgFOkVTFZDPWh3E8LldUbamK0UHXIf/UzueLNnhUIWAb7vbHtQ
+# CFoTlw0kkmz1hYE/PwznY2iJZA1Ns6YT+pEJRxTuyz9j9tze4qcFsyxIwjRpJm1n
+# 1Lsrg5a6FB7oynGmmwoCThApZ7Mx49oRzzuQiOwcPwO2NM2QKIzn8UTkuKjnYb3k
+# tz5lr4l768qTI1oVR9BcAG2CDlBmWfedfu/tpu+B0nOvavgp6i0kHGtpn4GGrPSW
+# oensa4+JH4Z0avUte5Cs8nSiToIO19KD9eoFfk5a9Thcl9hfVLIjWz6s26c1frJ9
+# SJ0oB4to0NlY2+U//cSsh7x/8TJQVnJjn5oEYuJAVnHeHz7MO9ZAcHeDS5aUeTUp
+# EEjiCjKFi/0WwVLGMqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzAxMDQ3
-# MzhaMC8GCSqGSIb3DQEJBDEiBCD2VT/C48zW7+hwplPrn/WTYmDTuM/nFbmbYYRe
-# sgzpQzANBgkqhkiG9w0BAQEFAASCAgBEzuph/39tXfmIxe3QVQCtZGH9zrQexFz3
-# GEzx5slLCUdQVCmU7BvciixP0PJPPw9inTJ+sL4CFs0DwYXwqOph5d26tYbudAkx
-# ZooyqjL7gP1KNlZFoTwUVSKNs1G3gavQQOnCHcbYZijFdJOPogdYa4VXAYbhLPSh
-# LcJUl7Neypsftx5D8Qtv/HHjxcNthRVekLYr7WGOAiYpHV92j5NwMd6Oy4vT7rA2
-# e3yq5zXnAPa/y1g10fhstWnwPr5S23NdEZS3tHniL/xv92GmFbHz8DkUgUW/6h3u
-# gqY4n94VXVgmCDxD+CyEp0ASSQAyWmuFSigT3Y7hQYRNY6HdMpj83+JXjMvS/Lu6
-# S8qhtpI8Sn0jURsAgrZJusHoJEFhewy/vVlM1HJaifQPJslqkY6QjI6/dS8PIWqZ
-# ddefOiKooTV1YwoJRqewuSwNLSW7cDVra5hpLuJKMlx2QyX2atxDYPtiG6PDdv1e
-# zvnq3NqjOPIp2AeP2Akd9rAz3EXB5ktrP4Ms8968NvkAHqCtnpTYBNmWMsPl9L5U
-# nov5PTu64xVZdIeNgaRS0p2GbIKP8nYspzROigdL4qjt1OjzLw+7PMjqBn6Jmwbg
-# h/KlTW7ge6cOQGaNC4vNw/KO4Ogun0FFwf6JonNk/41n2VMSjyTV56pvR7BIc37g
-# f6VequjJ2w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNjE5
+# NTZaMC8GCSqGSIb3DQEJBDEiBCDpG1t8KNHzWsU6I3MCQb1r9ZUvrrz16U+Zs7XG
+# 2Z68DDANBgkqhkiG9w0BAQEFAASCAgB5RpkxfV8oU/dYx1dMEr8zAymesbBSVCku
+# Pnvdds/bP/9ypblhWexUNfpBxiZ0WM0qXzJGtg/yX71vTvrKzdIT2LdouNpJLeD4
+# /ZN5abteh2BAmlqRKm9haXBeMT4v5rU+Zj26Ni5S9RiR2jL7GRuLJHHnD4MkmkTs
+# 6oa/wnkUyK8HcH2xD3ufF6Ah10psc5sWVoTd4Kfzj14xZdQvYp1TNIaOT6lADi4B
+# b+5cF35/OzCFJOGhOIwu4fHasEkRc99yueF1gLWEsG3mb66T0CYOb9BeUis7m4B7
+# p3FBYxj3+8SLppPjKDDrUeqerNGCQp4U2WRV8E94wklZH9hg1TAkcNGx30x670yJ
+# J1oW6r0vFiqyEK8hoDm7j44vIiMK4A2A1ngLZESke7O3J/QYqB8qwKoEcmmeOMAY
+# dN+AhSTlPHYDSiAY/Zo52LOSEu+1vY+72vqZ/nuHxLbA12Gq73oU9BZCMcXfLCBo
+# TUOjYmhdgLRSpYBK7JtFyTDZXNFr/hv1GkGRZyYSnbE/NkzUWS/q1lDLs0xAAD5j
+# bdmSCf55Bae3E5qIkZkIIOAY+zElnrrPywzNrMt25jQz2t7u202NhCmUpqbWX3JG
+# cnqWbOSi2v3uUR1xAyP6uQ8Z9Oni9mgXbitPVmDoUiShlBgIPFOWDKtPKx5v2GI3
+# kyKGHmCI9A==
 # SIG # End signature block

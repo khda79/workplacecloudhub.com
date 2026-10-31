@@ -3,7 +3,7 @@
 .SYNOPSIS
 Offline campaign checkpoint, targeting and failure-status regressions.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param([string]$TestRoot = (Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-CampaignReview-' + [guid]::NewGuid().ToString('N'))))
@@ -100,7 +100,7 @@ foreach ($name in @('ExchangeMigration', 'ExchangeArchive', 'ExchangeMigrationMa
     $lockCommand = $outer.Body.Extent.Text.IndexOf('Enter-SmartM365CommunicationSentRegistryLock')
     $loadCommand = $outer.Body.Extent.Text.IndexOf('Load-SmartM365CommunicationSentRegistry')
     Assert-Campaign ($lockCommand -ge 0 -and $loadCommand -gt $lockCommand) "$name locks before reading registry"
-    foreach ($scenario in @('Success', 'SendFailure', 'TeamsFailure', 'CheckpointFailure', 'DryRun')) {
+    foreach ($scenario in @('Success', 'SendFailure', 'TeamsFailure', 'CheckpointFailure', 'DryRun', 'AdministratorsOnly')) {
         & {
             Set-StrictMode -Off
             $registry = @{}; $registryCheckpointPending = $false; $preventResend = $true
@@ -131,12 +131,13 @@ foreach ($name in @('ExchangeMigration', 'ExchangeArchive', 'ExchangeMigrationMa
             function Send-SmartM365CommunicationMail {
                 param([switch]$WhatIf)
                 if ($scenario -eq 'SendFailure') { throw 'Synthetic delivery failure' }
+                if ($scenario -eq 'AdministratorsOnly') { return [pscustomobject]@{Sent=$false;Mode='AdministratorsOnly'} }
                 [pscustomobject]@{Sent=(-not $WhatIf);Mode=$(if($WhatIf){'DryRun'}else{'Fixture'})}
             }
             function Get-SmartM365CommunicationTeamsUserMode { 'GraphDelegated' }
             function Send-SmartM365CommunicationTeamsUserMessage {
                 # Check durability before even attempting the optional Teams transport.
-                if (-not $WhatIf) {
+                if (-not $WhatIf -and $scenario -ne 'AdministratorsOnly') {
                     Assert-Campaign ((Load-SmartM365CommunicationSentRegistry -Path $sentRegistryPath).ContainsKey($email)) "$name checkpoints before Teams"
                 }
                 [pscustomobject]@{Sent=($scenario -ne 'TeamsFailure');Mode='Fixture';Error='Synthetic Teams failure'}
@@ -155,6 +156,7 @@ foreach ($name in @('ExchangeMigration', 'ExchangeArchive', 'ExchangeMigrationMa
                 Assert-Campaign ($counters.Sent -eq 1) "$name counts successful delivery once"
             }
             else { Assert-Campaign (-not (Test-Path -LiteralPath $sentRegistryPath)) "$name does not persist an unsent email" }
+            if ($scenario -eq 'AdministratorsOnly') { Assert-Campaign ($counters.Sent -eq 0 -and $counters.TeamsSent -eq 1) "$name keeps Teams but does not register an administrator-only email as user delivery" }
             $tail = [Collections.Generic.List[string]]::new(); $started = $false
             foreach ($statement in $outer.Body.Statements) {
                 if ($statement -is [Management.Automation.Language.AssignmentStatementAst] -and $statement.Left.Extent.Text -eq '$summary') { $started = $true }
@@ -199,8 +201,8 @@ foreach ($fixtureSkus in @(@('SPE_E3'), @('SPE_E3','SPE_F1'), @('spe_f1'))) {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBZqtaDvJQ8bPQk
-# aOI1rAq5og3BSV0gP6yvfU1aRFTBvaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCcZVPuDNtz9sN8
+# zMgHwc5hcDwhjZr61haLqY+UR6T/sKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -333,31 +335,31 @@ foreach ($fixtureSkus in @(@('SPE_E3'), @('SPE_E3','SPE_F1'), @('spe_f1'))) {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIAaaBT7rhKTQR39FVfCwdEDH172Xb4dlmBbTt3aOiPNqMA0GCSqG
-# SIb3DQEBAQUABIIBgCmY9fLbhzwpH5Y4Y8U0mbw/devbxrlHoIqRLz2GkKGtAZj1
-# ZHdtWYwtuNxAD3vAndCQ/QCrxEumREBz1BcNUvBDn73ALANg0wVMIjcwS3GP8JmX
-# TMPcDHO301Adtjo1Z3zo0bfnhCuD6WF/ceDG2oaCrClpUwwb8cATLmlntw4NwLaV
-# en5ZT9S5jN14HnC7A7F177fO0LSpilRmj8feOpJESwbcvwmCyTOBr9jTEnTKO/80
-# +zCN60pZkaExPYCEla3NCe8f0UXA1xkVR67bMHKeIvLHOEtjmB06D2jbX7ehZF7d
-# iHWdslgGR1mXbVVr0k1nAxtKj3Bgovukgfmb5aLxS+rPODZokVGoz+HGhtlgOMV9
-# ZaxyCz04Qsu5N0+0U9oHtCZcqZZPofVxu6IJFJrxfsBY1leSaipVcNa5Wig1P8yj
-# RhaeyLrQYm2145rwsXKG4wnTT3w0Z9m9AFNkhhm9fdYfhBSvsp1W/5WEeSpEEZMv
-# ZMdLa/vLUT3pvB1dQ6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIPmM3fYzIUF8RObR28B51Qx9vZ2Q4lbq5/hJwbATEGH/MA0GCSqG
+# SIb3DQEBAQUABIIBgFn4yoFO+/FIKsy4xzezTIilA+9twBzjML2JEjxFp1SNDUsV
+# NWeRJRqv9hJeZA7G1LQ92afNypM2nSCoLLldPOUXPC33+PKw0maxLNsVee7OrKCY
+# U7FxunhjDBXQnC5QOmBnwHD3VnUUBNyoJa4Zdw2VrxV1IYiT9dCwTnRezcCF9tv3
+# 0eTR8JUnrZcZKg+pL712yjOFerVYL54DjFEfWRySua5WTsePQwNmqn0B9ZCnFmwf
+# rZkKtPkQNISMI9ldpiGAyBK+QmjaR4zvKip+G70DnaibfOwXkacacGr0fzXPDMdY
+# eITB3+LFD9dCZ6neidGCLCg96h9yP9DKhfAoLj5x7PTMUZY9/tliE45z1H0NVqhA
+# VmAAjwYsQDkjOZLH+HJNcQ0QPKe1Ef0UUv4frrvA2hlFo4UKjOjbOfsQWm+vHN5r
+# c7r3fI69Nfh0aF3z/9QRrkVhYr7evkiHUVIljSpb1qN9yk5++VZrRvxRodarODXZ
+# /ctiJPMbKhiu8y1rJaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjMxNzE0
-# MzRaMC8GCSqGSIb3DQEJBDEiBCCfetGXMCxASzWl0pDI4OUG7CcX+cLUCEiH8SEn
-# eeK7QjANBgkqhkiG9w0BAQEFAASCAgCdNWdH8BIoJGEUyXWYv7fQzw9WWuOabp3T
-# pKmynGf01IcpUvlGm8GodFkMAGMlb9DRr+pUrc84RLKgjnS3QhfBQtM5Ay2vts8a
-# RzFy3UndGISd1aR+7O1Ys4Z9Saz+YzNrij3nWr0v8Bh7JEEzusY0e81AJJaEnfet
-# 7HP925182+csIIY6QpbDB5WMn9dwqB0JzOX+GTwpwA+NuEUtI0YHvH+ENbgQb8jx
-# c7ZjsM+6WQqCIHNK47u71L0PYpOFUM2ulGJpbY7BuFB5D99EbjlN7qjACrb1wWYU
-# qGZG85JTIQhB0CoKqb+ThH5Q+hmEJ/hWXqPBQyVovz/KMYGX3xENaq81/nGlqCSD
-# AKcNy1G8Rh96bcv1UlRW9triyqIv+LHIpvZyibWMcyGEehbwWpAg1gm9q9V1RF21
-# uglUCsfrnPQx5TVaD1zIpoXTQBmE/6SLquWZY2dwcKGsj3xvG0CeF7DUzeTe35Xp
-# 8PZvEG/4rCSE0OYEpvoCVTKOLv4D6wbln6SAMSVkBSKWL6MMVLx6btadpHYP0poZ
-# EjwcGjr59B0EaIYnLGIear32zRILBWTtBueeLfqgqtc/9ABV4hSULSuiPa+ZtVa0
-# rnG704xNGQPUwXsXwy536HfsYdRzCEN1Duz2MBJAjctW/4jXSQzH/DsJv8rnTlOC
-# CWtKZk5sUw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNjE4
+# MjVaMC8GCSqGSIb3DQEJBDEiBCAa1DtFXA8XeqUPGO/iNrCsv1YwBN5dgSYmUPE1
+# qCg5hjANBgkqhkiG9w0BAQEFAASCAgCv9uAyzsKS5xYXDQCywd70vXsxuliTHk7l
+# CtLO1EuO5vVA1RKvGr0fvFy0z5GDWcBQ7qPa7b+i5Kt5oBe0T8IsGtugGp+QmWH+
+# 3zXzf6smrQcy8juwS5x/wvnZ7eSzYO0+DQyaUnPKub3CvRqs1cuTEsqZfzD5T/uC
+# lqkDxn6Kf2vsbwEjEivxQiIacU0Lz8JWF+1ZxvpTzXFcy9fOKP0+XekqxHe85mwR
+# 8kQLpiz6J6X4ZR/rC32d5Tc/v2UgotZ4LOzV/B9IPx8IuchHbBcZzeIJVNhZzW+l
+# O6bYZQNBicY6ZX7Ywj/GkOO/odW1zvqLbJ8C8TnyKUttwgcd3qIZqJVZuNMlwb3W
+# SBdlaXEKE0e2/+QURywkudDOsfNa9mJJw4MGe0CXWs3bdQdEu3vDZzD0iUMuXDZi
+# irmCxssGWt5wXO/WLnPSS6tw+rJCo4fWOtUDONiWoa3Z9ZaUITsVrBTbSzfaGY4k
+# HUeMCHdmc08ltZHuus38XKj4bXS+cqymaoxM1mMkYpTQ9aOhy8fkfJgSNmaAwT//
+# gi5+PyXBOXfsgaWtX1ldj64sUOUo4f1DHnJL7feP7iCjGuLUcvoT+WY6QnZoPlHg
+# FIcToVeZOts50MEwXgdTK7HDOy7pv4n0+hxxzLo6LCThCLomJZod4+zw3s54vWy1
+# KHfnNCw+Jg==
 # SIG # End signature block
