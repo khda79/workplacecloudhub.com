@@ -26,6 +26,7 @@ $script:SemtOptionLayers = @('Default','Global','Wave','Environment','Gui','Cli'
 # Options removed from the catalog: still present in existing global, Wave and GUI files (the
 # template self-healing only adds keys), they are ignored instead of stopping the Run.
 $script:SemtRetiredOptions = @('LegacyActivityPolicy')
+$script:SemtRetiredOptionsWarned = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
 function Import-SemtOptionCatalog {
     [CmdletBinding()]
@@ -215,7 +216,17 @@ function Resolve-SemtEffectiveOptions {
             if ($known.ContainsKey($key)) { continue }
             $otherCampaign = $Catalog.ByName.ContainsKey($key)
             if ($otherCampaign) { continue }
-            if ($script:SemtRetiredOptions -contains $key) { continue }
+            if ($script:SemtRetiredOptions -contains $key) {
+                # Said once per option and layer when a real value (not an inherit marker left by an
+                # older template) is set: a value such as Block no longer has any effect.
+                $retiredKey = '{0}|{1}' -f $key,$layerName
+                $retiredValue = $layers[$layerName][$key]
+                if ($null -ne $retiredValue -and -not (Test-SemtInheritValue -Value $retiredValue) -and -not $script:SemtRetiredOptionsWarned.Contains($retiredKey)) {
+                    [void]$script:SemtRetiredOptionsWarned.Add($retiredKey)
+                    Write-Warning ("SEMT_OPTION_RETIRED: '{0}' from {1} is no longer used and is ignored." -f $key,$layerName)
+                }
+                continue
+            }
             throw ("SEMT_OPTION_UNKNOWN: '{0}' from {1} is not a known option. Check the option catalog." -f $key,$layerName)
         }
     }

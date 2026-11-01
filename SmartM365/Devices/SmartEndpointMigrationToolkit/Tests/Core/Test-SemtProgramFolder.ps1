@@ -426,7 +426,7 @@ try {
 
     #region 4. Retry after reboot (endpoint functions)
     function Invoke-RetryCase {
-        param([string]$Campaign, [string]$EndpointPath, [string]$ProgramFolderState = 'Trusted', [ValidateSet('Present','Missing','Different')][string]$TaskState = 'Present')
+        param([string]$Campaign, [string]$EndpointPath, [string]$ProgramFolderState = 'Trusted', [ValidateSet('Present','Missing','Different','EnableFails')][string]$TaskState = 'Present')
         $case = Join-Path $tempRoot ('retry-' + $Campaign + '-' + $ProgramFolderState + '-' + $TaskState)
         $script:StateDir = Join-Path $case 'Data\State'; $StateDir = $script:StateDir
         $script:DataRoot = Join-Path $case 'Data'; $DataRoot = $script:DataRoot
@@ -445,7 +445,7 @@ try {
         $script:ComputerName = 'SEMT-QUALIF-PC'; $ComputerName = 'SEMT-QUALIF-PC'
         $script:SemtCampaign = $Campaign
         $script:TaskState = $TaskState
-        $names = @('Register-RetryAfterRebootTask','Write-RetryAfterRebootRunner','Write-RetryAfterRebootState','Read-RetryAfterRebootState','Unregister-RetryAfterRebootTask','Start-RetryAfterRebootTaskRun','Set-RetryAfterRebootStateProperty','Get-SemtRetryAfterRebootTaskSpec','Test-SemtRetryAfterRebootTaskState')
+        $names = @('Register-RetryAfterRebootTask','Write-RetryAfterRebootRunner','Write-RetryAfterRebootState','Read-RetryAfterRebootState','Unregister-RetryAfterRebootTask','Start-RetryAfterRebootTaskRun','Set-RetryAfterRebootStateProperty','Get-SemtRetryAfterRebootTaskSpec','Test-SemtRetryAfterRebootTaskState','Get-SemtRetryAfterRebootTaskReadiness')
         . ([scriptblock]::Create((Get-FunctionText -Path $EndpointPath -Name $names)))
         function Initialize-SemtTrustedProgramFolder { param([string]$Path, [string]$BasePath) New-Item -ItemType Directory -Path $Path -Force | Out-Null; return $Path }
         function Test-SemtTrustedProgramPath {
@@ -468,7 +468,7 @@ try {
             $command = if ($script:TaskState -eq 'Different') { 'powershell.exe|-File other.ps1' } else { '{0}|{1}' -f $spec.Execute,$spec.Arguments }
             return [pscustomobject]@{ TaskPath = $TaskPath; TaskName = $TaskName; Exists = ($script:TaskState -ne 'Missing'); Enabled = ($script:Schtasks -contains ('Enable ' + $TaskName)); Actions = @($command); TriggerCount = 1; UserSid = 'S-1-5-18'; GroupSid = ''; Detail = 'synthetic' }
         }
-        function Set-SemtScheduledTaskEnabled { param([string]$TaskPath, [string]$TaskName, [bool]$Enabled) $script:Schtasks.Add(('{0} {1}' -f $(if ($Enabled) { 'Enable' } else { 'Disable' }),$TaskName)) }
+        function Set-SemtScheduledTaskEnabled { param([string]$TaskPath, [string]$TaskName, [bool]$Enabled) if ($Enabled -and $script:TaskState -eq 'EnableFails') { throw 'synthetic enable failure' }; $script:Schtasks.Add(('{0} {1}' -f $(if ($Enabled) { 'Enable' } else { 'Disable' }),$TaskName)) }
         $outcome = [pscustomobject]@{ Error = ''; Case = $case; TaskRunError = ''; Unregistered = $false }
         try { Register-RetryAfterRebootTask -Reason 'qualification' } catch { $outcome.Error = $_.Exception.Message }
         if (-not $outcome.Error) {
@@ -501,6 +501,8 @@ try {
         Test-Step ("{0} retry: task missing (Prerequisites not run): refused, nothing written, nothing created" -f $retry.Campaign) { $o.Error -like 'SEMT_PREREQUISITE_TASK_MISSING*' -and @($script:Schtasks).Count -eq 0 -and -not (Test-Path -LiteralPath (Join-Path $o.Case ('ProgramFiles\WCH\SmartM365\SmartEndpointMigrationToolkit\{0}\RetryAfterReboot' -f $retry.Campaign))) }
         $o = Invoke-RetryCase -Campaign $retry.Campaign -EndpointPath $retry.Path -TaskState 'Different'
         Test-Step ("{0} retry: task with another command: refused, never enabled" -f $retry.Campaign) { $o.Error -like 'SEMT_PREREQUISITE_TASK_MISMATCH*' -and @($script:Schtasks).Count -eq 0 }
+        $o = Invoke-RetryCase -Campaign $retry.Campaign -EndpointPath $retry.Path -TaskState 'EnableFails'
+        Test-Step ("{0} retry: task cannot be enabled: refused, runner and state removed again" -f $retry.Campaign) { $o.Error -like 'SEMT_PREREQUISITE_TASK_ENABLE_FAILED*' -and -not (Test-Path -LiteralPath $script:RetryAfterRebootRunnerPath) -and -not (Test-Path -LiteralPath $script:RetryAfterRebootStatePath) }
     }
     Remove-Item -Path Function:\Test-SemtTrustedProgramPath -ErrorAction SilentlyContinue
     #endregion

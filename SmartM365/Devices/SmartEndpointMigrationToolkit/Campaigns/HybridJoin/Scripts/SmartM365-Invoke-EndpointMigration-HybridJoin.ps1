@@ -1000,10 +1000,26 @@ function Get-SemtScheduledTaskState {
 }
 
 function Test-SemtRetryAfterRebootTaskState {
-    # True when the task exists, runs as SYSTEM and starts exactly the fixed runner command.
+    # True when the task exists, runs as SYSTEM, has a trigger (at startup) and starts exactly the
+    # fixed runner command. Without a trigger, an enabled task would never resume the campaign.
     param([Parameter(Mandatory = $true)]$State,[Parameter(Mandatory = $true)]$Spec)
-    if ($State.Exists -ne $true -or $State.UserSid -ne 'S-1-5-18' -or @($State.Actions).Count -ne 1) { return $false }
+    if ($State.Exists -ne $true -or $State.UserSid -ne 'S-1-5-18' -or [int]$State.TriggerCount -lt 1 -or @($State.Actions).Count -ne 1) { return $false }
     return ([string]@($State.Actions)[0] -ieq ('{0}|{1}' -f $Spec.Execute,$Spec.Arguments))
+}
+
+function Get-SemtRetryAfterRebootTaskReadiness {
+    # Read-only. Checked before an action that needs a resume after restart (dsregcmd /leave,
+    # reboot): Ready is true only when the task created by the Prerequisites campaign is usable.
+    param([Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade')][string]$Campaign)
+    $spec = Get-SemtRetryAfterRebootTaskSpec -Campaign $Campaign
+    $state = Get-SemtScheduledTaskState -TaskPath $spec.TaskPath -TaskName $spec.TaskName
+    if ($state.Exists -ne $true) {
+        return [pscustomobject]@{ Ready = $false; Spec = $spec; State = $state; Detail = ('SEMT_PREREQUISITE_TASK_MISSING: {0}{1} ({2}). Run the Prerequisites campaign on this computer.' -f $spec.TaskPath,$spec.TaskName,$state.Detail) }
+    }
+    if (-not (Test-SemtRetryAfterRebootTaskState -State $state -Spec $spec)) {
+        return [pscustomobject]@{ Ready = $false; Spec = $spec; State = $state; Detail = ("SEMT_PREREQUISITE_TASK_MISMATCH: {0}{1} does not run '{2} {3}' as SYSTEM at startup. Run the Prerequisites campaign on this computer." -f $spec.TaskPath,$spec.TaskName,$spec.Execute,$spec.Arguments) }
+    }
+    return [pscustomobject]@{ Ready = $true; Spec = $spec; State = $state; Detail = $state.Detail }
 }
 
 function Set-SemtScheduledTaskEnabled {
@@ -3098,6 +3114,8 @@ function Get-NextActionForStatus {
         "RETRY_AFTER_REBOOT_STATE_MISSING" { return "RELAUNCH_WAVE" }
         "RETRY_AFTER_REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE" { return "CHECK_SCHEDULED_TASK_AND_RELAUNCH" }
         "RETRY_AFTER_REBOOT_SCHEDULE_FAILED_WAITING_FOR_USER_LOGON" { return "CHECK_SCHEDULED_TASK_AND_RELAUNCH" }
+        "PREREQUISITE_TASK_MISSING_LEAVE_SKIPPED" { return "RUN_PREREQUISITES_CAMPAIGN" }
+        "PREREQUISITE_TASK_MISSING_WAITING_FOR_USER_LOGON" { return "RUN_PREREQUISITES_CAMPAIGN" }
         "REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE" { return "CHECK_REBOOT_COMMAND_AND_RELAUNCH" }
         "REBOOT_SCHEDULE_FAILED_WAITING_FOR_USER_LOGON" { return "CHECK_REBOOT_COMMAND_AND_RELAUNCH" }
         "SKIPPED_VIRTUAL_MACHINE" { return "NO_ACTION_VIRTUAL_MACHINE" }
@@ -3490,14 +3508,9 @@ function Register-RetryAfterRebootTask {
     $script:RetryAfterRebootAction = "ScheduleRequested"
     # The task is created disabled by the Prerequisites campaign; it is only verified and enabled
     # here, before anything is written, so a missing task leaves no state behind.
-    $taskSpec = Get-SemtRetryAfterRebootTaskSpec -Campaign $script:SemtCampaign
-    $taskState = Get-SemtScheduledTaskState -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName
-    if ($taskState.Exists -ne $true) {
-        throw ("SEMT_PREREQUISITE_TASK_MISSING: {0}{1} ({2}). Run the Prerequisites campaign on this computer." -f $taskSpec.TaskPath,$taskSpec.TaskName,$taskState.Detail)
-    }
-    if (-not (Test-SemtRetryAfterRebootTaskState -State $taskState -Spec $taskSpec)) {
-        throw ("SEMT_PREREQUISITE_TASK_MISMATCH: {0}{1} does not run '{2} {3}' as SYSTEM. Run the Prerequisites campaign on this computer." -f $taskSpec.TaskPath,$taskSpec.TaskName,$taskSpec.Execute,$taskSpec.Arguments)
-    }
+    $taskReadiness = Get-SemtRetryAfterRebootTaskReadiness -Campaign $script:SemtCampaign
+    if (-not $taskReadiness.Ready) { throw $taskReadiness.Detail }
+    $taskSpec = $taskReadiness.Spec
     if (-not (Test-Path -LiteralPath $StateDir -PathType Container)) {
         New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
     }
@@ -3538,7 +3551,14 @@ function Register-RetryAfterRebootTask {
     $programTrust = Test-SemtTrustedProgramPath -Path $script:RetryAfterRebootProgramDir -Recurse
     if (-not $programTrust.Trusted) { throw ("SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} ({1}) {2}" -f $script:RetryAfterRebootProgramDir,$programTrust.State,$programTrust.Detail) }
 
-    Set-SemtScheduledTaskEnabled -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName -Enabled $true
+    # Last step: when the task cannot be enabled (EDR, Task Scheduler), the runner and the state
+    # written above are removed again so no retry is left half scheduled.
+    try { Set-SemtScheduledTaskEnabled -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName -Enabled $true }
+    catch {
+        $enableError = $_.Exception.Message
+        foreach ($path in @($script:RetryAfterRebootRunnerPath,$script:RetryAfterRebootStatePath)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+        throw ("SEMT_PREREQUISITE_TASK_ENABLE_FAILED: {0}{1} could not be enabled: {2}" -f $taskSpec.TaskPath,$taskSpec.TaskName,$enableError)
+    }
 
     $script:RetryAfterRebootAction = "Scheduled"
     $script:RetryAfterRebootAttempt = [string]$previousAttempts
@@ -4542,7 +4562,21 @@ try {
                 $leaveReason = ("KeySignTest is FAILED on an AzureAdJoined device. AzureAdJoined={0}; KeySignTest={1}; DeviceAuthStatus={2}" -f $dsregAzureAdJoined,$dsregKeySignTest,$dsregDeviceAuthStatus)
             }
 
-            if ($AllowDsregLeave -and ($deviceAuthFailed -or $keySignFailedHybrid)) {
+            # With AllowRebootAfterDsregLeave, the reboot that completes the rejoin needs the
+            # retry-after-reboot task created by the Prerequisites campaign: it is checked before
+            # /leave, so the device is never left unjoined without the planned resume.
+            $leaveRetryTask = $null
+            if ($AllowDsregLeave -and ($deviceAuthFailed -or $keySignFailedHybrid) -and $AllowRebootAfterDsregLeave) {
+                $leaveRetryTask = Get-SemtRetryAfterRebootTaskReadiness -Campaign $script:SemtCampaign
+            }
+
+            if ($leaveRetryTask -and -not $leaveRetryTask.Ready) {
+                $status = "PREREQUISITE_TASK_MISSING_LEAVE_SKIPPED"
+                $dsregStatusErrorMessage = ("dsregcmd /leave was not executed: AllowRebootAfterDsregLeave needs the retry-after-reboot task. {0} Leave reason: {1}" -f $leaveRetryTask.Detail,$leaveReason)
+                $ExitCode = 3
+                Write-RunLog $dsregStatusErrorMessage
+            }
+            elseif ($AllowDsregLeave -and ($deviceAuthFailed -or $keySignFailedHybrid)) {
                 Write-Host "Hybrid Join device key/authentication is unhealthy. Executing dsregcmd /leave..." -ForegroundColor Yellow
                 Write-RunLog ("Executing dsregcmd /leave because {0}" -f $leaveReason)
 
@@ -4877,7 +4911,13 @@ try {
 
                         $userContextKey = ("{0}|{1}|{2}" -f $interactiveUserAccountName,$interactiveSessionId,$interactiveSessionState).ToUpperInvariant()
                         $rebootSafetyDecision = Get-RebootSafetyDecision -ReasonKey "WAITING_FOR_USER_LOGON" -UserContext $userContextKey -MaximumReboots $RetryAfterRebootMaxAttempts -RequireUserContextChange
-                        if (-not $rebootSafetyDecision.Allowed) {
+                        if (-not $nextLogonTask.Success) {
+                            # The reboot only helps through the next-logon task: without it, no reboot.
+                            $status = "PREREQUISITE_TASK_MISSING_WAITING_FOR_USER_LOGON"
+                            $dsregStatusErrorMessage = ("Reboot was not triggered because the next-logon auto-enrollment task could not be enabled. {0}" -f $nextLogonTask.Detail)
+                            Write-RunLog $dsregStatusErrorMessage
+                        }
+                        elseif (-not $rebootSafetyDecision.Allowed) {
                             $status = "WAITING_FOR_INTERACTIVE_USER_LOGON"
                             $dsregStatusErrorMessage = $rebootSafetyDecision.Detail
                             Write-RunLog $dsregStatusErrorMessage
@@ -4955,7 +4995,7 @@ try {
         $userStatusAttempted -and
         [string]::IsNullOrWhiteSpace($userStatusErrorMessage) -and
         $userPrtRefreshStillNeeded -and
-        $status -notin @("WAITING_FOR_AAD_CONNECT_LOCAL_RETRY","WAITING_FOR_AAD_CONNECT_LOCAL_RETRY_EXHAUSTED","LEAVE_EXECUTED_WAITING_FOR_REJOIN","WAITING_POST_LEAVE_LOCAL_RETRY_EXHAUSTED","REBOOT_TRIGGERED_POST_DSREG_LEAVE","RETRY_AFTER_REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE","REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE","ENTRA_HYBRID_PENDING_RETRY_EXHAUSTED","USER_PRT_REFRESH_FAILED")
+        $status -notin @("WAITING_FOR_AAD_CONNECT_LOCAL_RETRY","WAITING_FOR_AAD_CONNECT_LOCAL_RETRY_EXHAUSTED","LEAVE_EXECUTED_WAITING_FOR_REJOIN","WAITING_POST_LEAVE_LOCAL_RETRY_EXHAUSTED","REBOOT_TRIGGERED_POST_DSREG_LEAVE","RETRY_AFTER_REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE","REBOOT_SCHEDULE_FAILED_POST_DSREG_LEAVE","PREREQUISITE_TASK_MISSING_LEAVE_SKIPPED","ENTRA_HYBRID_PENDING_RETRY_EXHAUSTED","USER_PRT_REFRESH_FAILED")
     ) {
         if ($userIsUserAzureAD -eq "NO") {
             $status = "USER_NOT_AZUREAD"
@@ -5465,8 +5505,9 @@ finally {
         Write-RunLog ("Retry-after-reboot final cleanup failed. Error={0}" -f $_.Exception.Message)
     }
 
-    # Exit code 0: Hybrid Join healthy and Intune enrolled, the next-logon task is no longer needed.
-    if (-not $AuditOnly -and $ExitCode -eq 0) { Disable-UserAutoEnrollAtLogonTask -Reason $status }
+    # Exit code 0 (Hybrid Join healthy and Intune enrolled) or a confirmed local Intune enrollment
+    # with another final status: the next-logon task is no longer needed.
+    if (-not $AuditOnly -and ($ExitCode -eq 0 -or $intuneEnrolled -eq $true)) { Disable-UserAutoEnrollAtLogonTask -Reason $status }
 
     try {
         if ($TranscriptStarted) {

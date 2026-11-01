@@ -736,10 +736,26 @@ function Get-SemtScheduledTaskState {
 }
 
 function Test-SemtRetryAfterRebootTaskState {
-    # True when the task exists, runs as SYSTEM and starts exactly the fixed runner command.
+    # True when the task exists, runs as SYSTEM, has a trigger (at startup) and starts exactly the
+    # fixed runner command. Without a trigger, an enabled task would never resume the campaign.
     param([Parameter(Mandatory = $true)]$State,[Parameter(Mandatory = $true)]$Spec)
-    if ($State.Exists -ne $true -or $State.UserSid -ne 'S-1-5-18' -or @($State.Actions).Count -ne 1) { return $false }
+    if ($State.Exists -ne $true -or $State.UserSid -ne 'S-1-5-18' -or [int]$State.TriggerCount -lt 1 -or @($State.Actions).Count -ne 1) { return $false }
     return ([string]@($State.Actions)[0] -ieq ('{0}|{1}' -f $Spec.Execute,$Spec.Arguments))
+}
+
+function Get-SemtRetryAfterRebootTaskReadiness {
+    # Read-only. Checked before an action that needs a resume after restart (dsregcmd /leave,
+    # reboot): Ready is true only when the task created by the Prerequisites campaign is usable.
+    param([Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade')][string]$Campaign)
+    $spec = Get-SemtRetryAfterRebootTaskSpec -Campaign $Campaign
+    $state = Get-SemtScheduledTaskState -TaskPath $spec.TaskPath -TaskName $spec.TaskName
+    if ($state.Exists -ne $true) {
+        return [pscustomobject]@{ Ready = $false; Spec = $spec; State = $state; Detail = ('SEMT_PREREQUISITE_TASK_MISSING: {0}{1} ({2}). Run the Prerequisites campaign on this computer.' -f $spec.TaskPath,$spec.TaskName,$state.Detail) }
+    }
+    if (-not (Test-SemtRetryAfterRebootTaskState -State $state -Spec $spec)) {
+        return [pscustomobject]@{ Ready = $false; Spec = $spec; State = $state; Detail = ("SEMT_PREREQUISITE_TASK_MISMATCH: {0}{1} does not run '{2} {3}' as SYSTEM at startup. Run the Prerequisites campaign on this computer." -f $spec.TaskPath,$spec.TaskName,$spec.Execute,$spec.Arguments) }
+    }
+    return [pscustomobject]@{ Ready = $true; Spec = $spec; State = $state; Detail = $state.Detail }
 }
 
 function Set-SemtScheduledTaskEnabled {

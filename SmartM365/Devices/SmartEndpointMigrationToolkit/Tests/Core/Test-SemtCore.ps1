@@ -137,9 +137,11 @@ try {
     }
     Test-Throws 'out-of-range value is rejected with its source' { Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign HybridJoin -WaveLayer @{ ThrottleLimit = 100000 } } 'Wave|range|between|maximum'
     Test-Throws 'unknown option is rejected' { Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign HybridJoin -WaveLayer @{ NotAnOption = 1 } } 'SEMT_OPTION_UNKNOWN'
-    Test-Step 'retired option left in existing files (LegacyActivityPolicy) is ignored in every layer' {
-        $r = Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign HybridJoin -GlobalLayer @{ Options = @{ LegacyActivityPolicy = '__INHERIT__' } } -WaveLayer @{ legacyactivitypolicy = 'Block' } -GuiLayer @{ LegacyActivityPolicy = 'Ignore' }
-        -not $r.Contains('LegacyActivityPolicy') -and $r['ThrottleLimit'].Source -eq 'Default'
+    Test-Step 'retired option (LegacyActivityPolicy) is ignored in every layer and a real value is reported once per layer (SEMT_OPTION_RETIRED), never an inherit marker' {
+        $r = Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign HybridJoin -GlobalLayer @{ Options = @{ LegacyActivityPolicy = '__INHERIT__' } } -WaveLayer @{ legacyactivitypolicy = 'Block' } -GuiLayer @{ LegacyActivityPolicy = 'Ignore' } -WarningVariable retiredWarnings -WarningAction SilentlyContinue
+        $again = Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign HybridJoin -WaveLayer @{ LegacyActivityPolicy = 'Block' } -WarningVariable repeatedWarnings -WarningAction SilentlyContinue
+        -not $r.Contains('LegacyActivityPolicy') -and $r['ThrottleLimit'].Source -eq 'Default' -and $null -ne $again -and
+            @($retiredWarnings | Where-Object { [string]$_ -match 'SEMT_OPTION_RETIRED' -and [string]$_ -match 'from (Wave|Gui)' }).Count -eq 2 -and @($retiredWarnings).Count -eq 2 -and @($repeatedWarnings).Count -eq 0
     }
     Test-Step 'option of the other Campaign is ignored, not applied' {
         $r = Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign HybridJoin -GlobalLayer @{ 'Windows11Upgrade.AllowReboot' = $true }
@@ -554,6 +556,33 @@ $script:HostLines.Clear()
     Test-Step 'Hybrid Join: missing user-context tasks fall back to the native task; the next-logon task is only enabled or disabled' {
         $hjEndpointText -match 'function Test-UserContextHelperTasks' -and $hjEndpointText -match '\$nextLogonTask = Enable-UserAutoEnrollAtLogonTask' -and $hjEndpointText -match 'Disable-UserAutoEnrollAtLogonTask -Reason \$status' -and $hjEndpointText -match 'when it is missing, the native task is used'
     }
+    Test-Step 'Hybrid Join: with AllowRebootAfterDsregLeave, the retry task is checked before dsregcmd /leave (no leave without the resume)' {
+        $check = $hjEndpointText.IndexOf('$leaveRetryTask = Get-SemtRetryAfterRebootTaskReadiness -Campaign $script:SemtCampaign')
+        $skip = $hjEndpointText.IndexOf('$status = "PREREQUISITE_TASK_MISSING_LEAVE_SKIPPED"')
+        $leave = $hjEndpointText.IndexOf('$leaveOut = & $dsregcmdPath /leave 2>&1')
+        $check -gt 0 -and $skip -gt $check -and $leave -gt $skip -and $hjEndpointText -match 'elseif \(\$AllowDsregLeave -and \(\$deviceAuthFailed -or \$keySignFailedHybrid\)\)' -and $hjEndpointText -match '"PREREQUISITE_TASK_MISSING_LEAVE_SKIPPED" \{ return "RUN_PREREQUISITES_CAMPAIGN" \}'
+    }
+    Test-Step 'Hybrid Join: no reboot waiting for a user logon when the next-logon task could not be enabled' {
+        $enable = $hjEndpointText.IndexOf('$nextLogonTask = Enable-UserAutoEnrollAtLogonTask')
+        $guard = $hjEndpointText.IndexOf('if (-not $nextLogonTask.Success) {')
+        $register = $hjEndpointText.IndexOf('Register-RetryAfterRebootTask -Reason $rebootReason', $enable)
+        $enable -gt 0 -and $guard -gt $enable -and $register -gt $guard -and $hjEndpointText -match '\$status = "PREREQUISITE_TASK_MISSING_WAITING_FOR_USER_LOGON"'
+    }
+    Test-Step 'Hybrid Join: the next-logon task is disabled once Intune enrollment is confirmed, whatever the exit code' {
+        $hjEndpointText -match 'if \(-not \$AuditOnly -and \(\$ExitCode -eq 0 -or \$intuneEnrolled -eq \$true\)\) \{ Disable-UserAutoEnrollAtLogonTask -Reason \$status \}'
+    }
+    Test-Step 'retry-after-reboot: the task is enabled last; a failed enable removes the runner and the state (both endpoints)' {
+        $ok = $true
+        foreach ($text in @($hjEndpointText,$w11EndpointText)) {
+            if ($text -notmatch 'SEMT_PREREQUISITE_TASK_ENABLE_FAILED' -or $text -notmatch 'foreach \(\$path in @\(\$script:RetryAfterRebootRunnerPath,\$script:RetryAfterRebootStatePath\)\) \{ Remove-Item') { $ok = $false }
+        }
+        $ok
+    }
+    Test-Step 'Windows 11: the retry task is checked before the pending reboot; a missing task is reported (RUN_PREREQUISITES_CAMPAIGN), never registered after the reboot' {
+        $check = $w11EndpointText.IndexOf('$retryTaskReadiness = Get-SemtRetryAfterRebootTaskReadiness -Campaign $script:SemtCampaign')
+        $reboot = $w11EndpointText.IndexOf('$rebootResult = Invoke-ControlledRebootWhenNoUser -Reason $RebootReason')
+        $check -gt 0 -and $reboot -gt $check -and $w11EndpointText -match "RetryAfterRebootTaskMissing" -and $w11EndpointText -match "outcome\.NextAction = 'RUN_PREREQUISITES_CAMPAIGN'"
+    }
     Test-Step 'Run engine: report names omit the Wave name; a cycle HTML report failure never fails the Run' {
         $engineText -match "'SEMT_\{0\}_cycle\{1\}_\{2\}\.csv' -f \`$Campaign,\`$cycle" -and $engineText -match "'SEMT_\{0\}_\{1\}_final\.html' -f \`$Campaign,\`$script:RunId" -and $engineText -match 'HTML report update failed' -and $engineText -match 'Final report failed'
     }
@@ -599,15 +628,32 @@ $script:HostLines.Clear()
         $spec = Get-SemtRetryAfterRebootTaskSpec -Campaign Windows11Upgrade -ProgramFilesPath 'C:\Program Files' -WindowsPath 'C:\Windows'
         $spec.TaskPath -eq '\' -and $spec.TaskName -eq 'SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot' -and $spec.Execute -eq 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -and $spec.Arguments -eq '-NoProfile -ExecutionPolicy RemoteSigned -File "C:\Program Files\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade\RetryAfterReboot\RetryAfterRebootRunner.ps1"'
     }
-    Test-Step 'retry-after-reboot task check: SYSTEM by SID, one action, exact command' {
+    Test-Step 'retry-after-reboot task check: SYSTEM by SID, a trigger, one action, exact command' {
         $spec = Get-SemtRetryAfterRebootTaskSpec -Campaign HybridJoin
         $command = '{0}|{1}' -f $spec.Execute,$spec.Arguments
-        $good = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command); UserSid = 'S-1-5-18'; GroupSid = '' }
-        $otherUser = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command); UserSid = 'S-1-5-32-544'; GroupSid = '' }
-        $otherCommand = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @(('powershell.exe|{0}' -f $spec.Arguments)); UserSid = 'S-1-5-18'; GroupSid = '' }
-        $twoActions = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command,$command); UserSid = 'S-1-5-18'; GroupSid = '' }
-        $missing = [pscustomobject]@{ Exists = $false; Enabled = $false; Actions = @(); UserSid = ''; GroupSid = '' }
-        (Test-SemtRetryAfterRebootTaskState -State $good -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $otherUser -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $otherCommand -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $twoActions -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $missing -Spec $spec)
+        $good = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command); TriggerCount = 1; UserSid = 'S-1-5-18'; GroupSid = '' }
+        $otherUser = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command); TriggerCount = 1; UserSid = 'S-1-5-32-544'; GroupSid = '' }
+        $otherCommand = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @(('powershell.exe|{0}' -f $spec.Arguments)); TriggerCount = 1; UserSid = 'S-1-5-18'; GroupSid = '' }
+        $twoActions = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command,$command); TriggerCount = 1; UserSid = 'S-1-5-18'; GroupSid = '' }
+        $noTrigger = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command); TriggerCount = 0; UserSid = 'S-1-5-18'; GroupSid = '' }
+        $missing = [pscustomobject]@{ Exists = $false; Enabled = $false; Actions = @(); TriggerCount = 0; UserSid = ''; GroupSid = '' }
+        (Test-SemtRetryAfterRebootTaskState -State $good -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $otherUser -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $otherCommand -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $twoActions -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $noTrigger -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $missing -Spec $spec)
+    }
+    Test-Step 'retry-after-reboot readiness: missing, unreadable, without trigger or ready (read-only check before /leave or a reboot)' {
+        $spec = Get-SemtRetryAfterRebootTaskSpec -Campaign HybridJoin
+        $script:ReadinessCase = 'Missing'
+        function Get-SemtScheduledTaskState {
+            param([string]$TaskPath, [string]$TaskName)
+            $command = '{0}|{1}' -f $spec.Execute,$spec.Arguments
+            switch ($script:ReadinessCase) {
+                'Missing' { [pscustomobject]@{ Exists = $false; Enabled = $false; Actions = @(); TriggerCount = 0; UserSid = ''; GroupSid = ''; Detail = 'Task not found.' } }
+                'Unreadable' { [pscustomobject]@{ Exists = $null; Enabled = $false; Actions = @(); TriggerCount = 0; UserSid = ''; GroupSid = ''; Detail = 'Task Scheduler read failed: synthetic' } }
+                'NoTrigger' { [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command); TriggerCount = 0; UserSid = 'S-1-5-18'; GroupSid = ''; Detail = 'Enabled=False' } }
+                default { [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command); TriggerCount = 1; UserSid = 'S-1-5-18'; GroupSid = ''; Detail = 'Enabled=False' } }
+            }
+        }
+        $results = foreach ($case in @('Missing','Unreadable','NoTrigger','Ready')) { $script:ReadinessCase = $case; Get-SemtRetryAfterRebootTaskReadiness -Campaign HybridJoin }
+        -not $results[0].Ready -and $results[0].Detail -like 'SEMT_PREREQUISITE_TASK_MISSING*' -and -not $results[1].Ready -and $results[1].Detail -like 'SEMT_PREREQUISITE_TASK_MISSING*' -and -not $results[2].Ready -and $results[2].Detail -like 'SEMT_PREREQUISITE_TASK_MISMATCH*' -and $results[3].Ready -and $results[3].Spec.TaskName -eq $spec.TaskName
     }
     Test-Step 'task principals are compared by SID, whatever the display language' {
         $localizedSystem = (New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')).Translate([System.Security.Principal.NTAccount]).Value

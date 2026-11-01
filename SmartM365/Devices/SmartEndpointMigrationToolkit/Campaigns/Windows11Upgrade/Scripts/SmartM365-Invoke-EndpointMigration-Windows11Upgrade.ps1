@@ -769,10 +769,26 @@ function Get-SemtScheduledTaskState {
 }
 
 function Test-SemtRetryAfterRebootTaskState {
-    # True when the task exists, runs as SYSTEM and starts exactly the fixed runner command.
+    # True when the task exists, runs as SYSTEM, has a trigger (at startup) and starts exactly the
+    # fixed runner command. Without a trigger, an enabled task would never resume the campaign.
     param([Parameter(Mandatory = $true)]$State,[Parameter(Mandatory = $true)]$Spec)
-    if ($State.Exists -ne $true -or $State.UserSid -ne 'S-1-5-18' -or @($State.Actions).Count -ne 1) { return $false }
+    if ($State.Exists -ne $true -or $State.UserSid -ne 'S-1-5-18' -or [int]$State.TriggerCount -lt 1 -or @($State.Actions).Count -ne 1) { return $false }
     return ([string]@($State.Actions)[0] -ieq ('{0}|{1}' -f $Spec.Execute,$Spec.Arguments))
+}
+
+function Get-SemtRetryAfterRebootTaskReadiness {
+    # Read-only. Checked before an action that needs a resume after restart (dsregcmd /leave,
+    # reboot): Ready is true only when the task created by the Prerequisites campaign is usable.
+    param([Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade')][string]$Campaign)
+    $spec = Get-SemtRetryAfterRebootTaskSpec -Campaign $Campaign
+    $state = Get-SemtScheduledTaskState -TaskPath $spec.TaskPath -TaskName $spec.TaskName
+    if ($state.Exists -ne $true) {
+        return [pscustomobject]@{ Ready = $false; Spec = $spec; State = $state; Detail = ('SEMT_PREREQUISITE_TASK_MISSING: {0}{1} ({2}). Run the Prerequisites campaign on this computer.' -f $spec.TaskPath,$spec.TaskName,$state.Detail) }
+    }
+    if (-not (Test-SemtRetryAfterRebootTaskState -State $state -Spec $spec)) {
+        return [pscustomobject]@{ Ready = $false; Spec = $spec; State = $state; Detail = ("SEMT_PREREQUISITE_TASK_MISMATCH: {0}{1} does not run '{2} {3}' as SYSTEM at startup. Run the Prerequisites campaign on this computer." -f $spec.TaskPath,$spec.TaskName,$spec.Execute,$spec.Arguments) }
+    }
+    return [pscustomobject]@{ Ready = $true; Spec = $spec; State = $state; Detail = $state.Detail }
 }
 
 function Set-SemtScheduledTaskEnabled {
@@ -5076,6 +5092,15 @@ function Resolve-PendingRebootOutcome {
         ActionResult = ''
     }
 
+    # The retry-after-reboot task is checked before any reboot. When it is missing, the reboot still
+    # clears the pending state (the upgrade needs it), but no resume runs at startup: the next
+    # technician cycle continues instead, and the result says so.
+    $retryTaskReadiness = $null
+    if ($ScheduleRetryAfterReboot -and -not $AuditOnly) {
+        $retryTaskReadiness = Get-SemtRetryAfterRebootTaskReadiness -Campaign $script:SemtCampaign
+        if (-not $retryTaskReadiness.Ready) { Write-SmartLog ("Retry-after-reboot task not usable; a reboot will not be followed by a resume at startup. {0}" -f $retryTaskReadiness.Detail) 'WARN' }
+    }
+
     if ($AllowReboot -and -not $AuditOnly) {
         $rebootResult = Invoke-ControlledRebootWhenNoUser -Reason $RebootReason
         switch ($rebootResult) {
@@ -5111,7 +5136,15 @@ function Resolve-PendingRebootOutcome {
         }
     }
 
-    if ($ScheduleRetryAfterReboot -and -not $AuditOnly -and $outcome.Status -like 'PENDING_REBOOT*') {
+    if ($ScheduleRetryAfterReboot -and -not $AuditOnly -and $outcome.Status -like 'PENDING_REBOOT*' -and $retryTaskReadiness -and -not $retryTaskReadiness.Ready) {
+        $script:RetryAfterRebootAction = 'ScheduleFailed'
+        $script:RetryAfterRebootTaskNameResult = $script:RetryAfterRebootTaskName
+        $script:RetryAfterRebootDetail = $retryTaskReadiness.Detail
+        $outcome.NextAction = 'RUN_PREREQUISITES_CAMPAIGN'
+        $outcome.Detail = ("{0}; RetryAfterReboot=NotScheduled (no resume at startup, the next cycle continues); Error={1}" -f $outcome.Detail,$retryTaskReadiness.Detail)
+        $outcome.ActionResult = if ([string]::IsNullOrWhiteSpace([string]$outcome.ActionResult)) { 'RetryAfterRebootTaskMissing' } else { "{0};RetryAfterRebootTaskMissing" -f $outcome.ActionResult }
+    }
+    elseif ($ScheduleRetryAfterReboot -and -not $AuditOnly -and $outcome.Status -like 'PENDING_REBOOT*') {
         try {
             Register-RetryAfterRebootTask -Reason $outcome.Status
             $outcome.NextAction = 'REBOOT_DEVICE_THEN_RETRY_AT_STARTUP'
@@ -5272,14 +5305,9 @@ function Register-RetryAfterRebootTask {
     $script:RetryAfterRebootAction = 'ScheduleRequested'
     # The task is created disabled by the Prerequisites campaign; it is only verified and enabled
     # here, before anything is written, so a missing task leaves no state behind.
-    $taskSpec = Get-SemtRetryAfterRebootTaskSpec -Campaign $script:SemtCampaign
-    $taskState = Get-SemtScheduledTaskState -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName
-    if ($taskState.Exists -ne $true) {
-        throw ('SEMT_PREREQUISITE_TASK_MISSING: {0}{1} ({2}). Run the Prerequisites campaign on this computer.' -f $taskSpec.TaskPath,$taskSpec.TaskName,$taskState.Detail)
-    }
-    if (-not (Test-SemtRetryAfterRebootTaskState -State $taskState -Spec $taskSpec)) {
-        throw ("SEMT_PREREQUISITE_TASK_MISMATCH: {0}{1} does not run '{2} {3}' as SYSTEM. Run the Prerequisites campaign on this computer." -f $taskSpec.TaskPath,$taskSpec.TaskName,$taskSpec.Execute,$taskSpec.Arguments)
-    }
+    $taskReadiness = Get-SemtRetryAfterRebootTaskReadiness -Campaign $script:SemtCampaign
+    if (-not $taskReadiness.Ready) { throw $taskReadiness.Detail }
+    $taskSpec = $taskReadiness.Spec
     New-SmartDirectory -Path $script:StateDir
     Protect-Windows11ToolkitPathAcl -Path $DataRoot -Directory -RequireSuccess
     Protect-Windows11ToolkitPathAcl -Path $script:StateDir -Directory -RequireSuccess
@@ -5316,7 +5344,14 @@ function Register-RetryAfterRebootTask {
     $programTrust = Test-SemtTrustedProgramPath -Path $script:RetryAfterRebootProgramDir -Recurse
     if (-not $programTrust.Trusted) { throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} ({1}) {2}' -f $script:RetryAfterRebootProgramDir,$programTrust.State,$programTrust.Detail) }
 
-    Set-SemtScheduledTaskEnabled -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName -Enabled $true
+    # Last step: when the task cannot be enabled (EDR, Task Scheduler), the runner and the state
+    # written above are removed again so no retry is left half scheduled.
+    try { Set-SemtScheduledTaskEnabled -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName -Enabled $true }
+    catch {
+        $enableError = $_.Exception.Message
+        foreach ($path in @($script:RetryAfterRebootRunnerPath,$script:RetryAfterRebootStatePath)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+        throw ('SEMT_PREREQUISITE_TASK_ENABLE_FAILED: {0}{1} could not be enabled: {2}' -f $taskSpec.TaskPath,$taskSpec.TaskName,$enableError)
+    }
 
     $script:RetryAfterRebootAction = 'Scheduled'
     $script:RetryAfterRebootAttempt = [string]$previousAttempts
