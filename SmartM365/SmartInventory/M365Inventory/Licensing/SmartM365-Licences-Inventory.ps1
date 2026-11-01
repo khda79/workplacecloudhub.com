@@ -30,7 +30,7 @@
   readable headers, AD domain and country columns, colored reasons and dates, print setup and a tenant or domain file name.
   The script parses under Windows PowerShell 5.1 again (1.65), so SmartInventory.cmd can resolve and start it.
 .VERSION
-1.69
+1.70
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -38,7 +38,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.69
+     Version : 1.70
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -2862,7 +2862,7 @@ function Get-LicensesDecisionSettings {
     if (-not $sku -or -not ([string]$item.Reason).Trim()) { throw 'Each versioned license exclusion needs SkuPartNumber and Reason.' }
     $excluded[$sku.ToUpperInvariant()] = [string]$item.Reason
   }
-  foreach ($item in @(Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseDecisionAdditionalExcludedSkus' -DefaultValue @())) {
+  foreach ($item in @((Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseDecisionAdditionalExcludedSkus' -DefaultValue @()))) {
     if ($null -eq $item) { continue }
     $sku = ([string]$item.SkuPartNumber).Trim()
     if (-not $sku -or -not ([string]$item.Reason).Trim()) { throw 'LicenseDecisionAdditionalExcludedSkus entries need SkuPartNumber and Reason.' }
@@ -3951,7 +3951,7 @@ function Get-LicensesDomainMailSettings {
   $tenantSchedule = Get-LicensesMailSchedule -Config $Config
   $entries = [System.Collections.Generic.List[object]]::new()
   $seen = @{}
-  foreach ($item in @(Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseSummaryDomainMails' -DefaultValue @())) {
+  foreach ($item in @((Get-ScriptLocalConfigValue -Config $Config -Name 'LicenseSummaryDomainMails' -DefaultValue @()))) {
     if ($null -eq $item) { continue }
     $read = { param($Name) if ($item -is [System.Collections.IDictionary]) { $item[$Name] } else { Get-LicensesOptionalProperty $item $Name } }
     $domain = ([string](& $read 'Domain')).Trim().ToLowerInvariant()
@@ -4793,7 +4793,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.69"
+$ScriptVersion = "1.70"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -5589,8 +5589,8 @@ if ($smartM365RunGuard.ExitCode -ne 0) { exit $smartM365RunGuard.ExitCode }
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2DvMHX1/dw7l2
-# IKpWdloD5zD64lSRdfUCqwXzUo5mG6CCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAToyBZThBjIQb9
+# IyGLlV9ICxRulWBHMm+2bwCC4Im4OaCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5727,31 +5727,31 @@ if ($smartM365RunGuard.ExitCode -ne 0) { exit $smartM365RunGuard.ExitCode }
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgj8UsnfxgPHW/
-# BUMHKEuk++RlDPTLu5WGrR/DffPsTVwwDQYJKoZIhvcNAQEBBQAEggGAd21SYKYB
-# k+9/PT7pAxverhyC3UH/JqAVR73Gn1bE/040WmtxX8nOUCF8Dw6X9MnX0WZ6SMSH
-# tz/Ol/3UqEKHsfo/JeF8ZLq+Nb7uoOr8Qu+uihDD+ueVPeCGuiOpu9GIYo1pbG21
-# 4stxjkn5XIjyqCW6wntAUDUwHcOq2T2wOC6dAnskFYxc5kl5jrUcOV95Ljld0zXg
-# cZdtiCxmq7p3mgaGgZxNwxj2hNa0CVAk9HG1oh9YcuxFhdEL+KiYtw/q+V/FZjpA
-# f7yHhdsyBEnoDsjMcpyKDyc3INtoqV/tkuMU0R/EAL125HU/lYn460udYLhpT+0L
-# JtDhO+1PmTMviXAv2BnzFW3e7SQgIjf3NZQvYb6HLPcV4HE3DNXZR+Cn6AvWOumP
-# GmcS9SqvFL1L+ib6xvraB1GTTHFJCP4eFqHW+DJj1u0MyhQi1evxHjKAvnEHQx6x
-# qL0lONZ1nCG0T0Zr/mOuhqpV78Fgkv4XliuQaEuhc3E3Dx8AEz3uUjNkoYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgSWYlTqdkQykV
+# v2t/YSe92A8appJgFp5Trpz7YoR1X6wwDQYJKoZIhvcNAQEBBQAEggGAKT+cXxxa
+# 6ldOV6UyE4zA3Ig+5lbrA2e0zcRfBjnlyOx4hwXqtkGtemXCoI8mxrEWxnIOUkoN
+# w/rNoyNTzgGIlcyn3fZaKOSYv5fK88mzCYhY5fTdDG7Zd1Y40bWS55nP5/1EwtFw
+# yC+0zCEFJ8A0gq8MPDQ/vhDctxDrqoTbURag+EBSQTkUaKkmXy6Ymjx7fuKs/Khv
+# esrCMsb9XqiylvGhV8F2IjVo+ssOWM5nM7Uy+swR8kWAfHZI0M4PIVWE9vT+UE/7
+# gJer5U3InVEkogXR5wheX0odd1Uz7PU32mI1MjCQQuGlvI+FsOZADSY8PhVgoSrW
+# nnvsVkWdHMnb4GvZ//xPa06omMtrl7szEnwZ+9JN6xrWiLozfhgwI/sx5oPR+DfC
+# QcyrH5uM2T6j6GuiPfE1Ob03NPA3pjpl6l4+q0/WHUgrxpHqWlzU+16s0rmjFwA2
+# ZpWq83blnzgWmyrrak1HUZ5w/3JpiTOy2AfHbFWH1bSPBSDx7PusqdJvoYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTAxMTQzMjMwWjA/BgkqhkiG9w0BCQQxMgQwQ+R5Y2ReOjYVtk2jEjQjw80m
-# ESqNNaRpnvHzdhJ9KPTPvMZZeg7n7WWj49bj4KpwMA0GCSqGSIb3DQEBAQUABIIC
-# ACZujEU3kdhNW0sJ0Lzk71gKXcjlNrvkqVa6R1U5no2yIFNccgCxyrppw1jCQKH6
-# VbVGZ+p9tCWo4Qy22C3+smj3rXr3Ya1kdQMbj/NMwp6wgQNZ5XTQIclSvbj+CXj0
-# 4M2eEP37qfZbQ5Gibjeo8NGmKMHdaI0OaHQilPKAXny1Og/pvYrOnZj78iSE3PdU
-# IfHQSWgl1JvL4De3c9Zm4YMBmCLEOZfgPSldp1ENl9klgAgsf+y+UUfpfwGR4N+y
-# +FmKyHrXN/7sNs5rAMCaT2fQynNS6+iGOjgFYoNWQ1Ah4bK7Zt7LVA69epFuOSms
-# QxqupjQU4qU8YnUBt/tNWl2Rx2YwgrzicD4QmTyTCMwiyFPGF0lNkkk/aRhmG1pR
-# 7270blUV2ASnhcz6o+nu2i8QwggfAyamTq4IXBPhgXGztM3hdf+oghQCocHUrh4A
-# 0Y/UyeEq3jEwDth1tc6B53Xnv1DzfDdDbqZEvAsbi0P4m6vv47N9dGV8U023ct7A
-# bqHtI4EO8XtTUTXjSzHKNzKeuoHZG/WHM2JpWX8glo8TE9tMGxHOh70QWYuPQUj8
-# x6EX/OFxg4KTcFXywhq3Fir1R81U1YxloPbzYOlVp16OjzVfxJ/azH06QWJ2II26
-# 9b9JcwxEsAFYsMlG2hClwPw14ab0leLAwlFF2IMVId7U
+# MjYxMTAxMTY1OTE3WjA/BgkqhkiG9w0BCQQxMgQw5qOFB1AWKkpOohqUqcDWypTo
+# XBEoXIZv15owTD3Yn3TTQ4feCsmFCDkmL2bhIl0MMA0GCSqGSIb3DQEBAQUABIIC
+# ABVObxdqylRVFF4vdbd+bkhspjoVg/vygYkS4vd5LtDYQvHgzasp8G0/u8dL313c
+# rW3GmSRQuQJGwpbuH4+xFgUoB03XyAkVwBruJb6g3QN66bDBrn4MHnjrT+A2t1pi
+# QCXjBKbtIJxuz60Jii+nq9/b9zF0093ZUajqXAr9rpJZJqdcjPSYWJijluLSECDz
+# 7sWsZugij5HO0VhwYgTCTe7Ie5MlctDpshcz7Yq3qobpHktJ3WyzyJnYzAEoYk1K
+# azebdIj0SXUSXBmdrR4GYBHTTQGDqgQN8X15f4Y9vcp2Vzkcy3+ki8hE34U653gm
+# zZ/9iUee9lOpjOqpjoJET9hF0KECHNCQ1SiPWg6bsepARWnHLTwxOLJQGjolrocb
+# qJr7oiGOdfrW7fPFXY9CT4Q+EQ7LBzDONhEPKvK4PEATfvdoVkVyG5ktfoE3QkPO
+# bwfu1NHwEEDTo7VGj240Mvz/ofIViGedQBwZzbd6pCymeezz8TO5uTkm87oQmvM2
+# Oq3qQ/QPhhe4GnZ0FNQ/UAO/oONWG2u5kpu4wPgOwFq8erUgrW8TDkfWsl79JFNE
+# 6glL1t56ApkyEoecUAiE7tBMGNF1N5BhjHmC424sOwjQSDVB0AlumP3PHchnmXQj
+# 5ns4y/jdRu1lRhkcvw7lV5DmxlezQUwM8Pdtr9HoEb4I
 # SIG # End signature block
