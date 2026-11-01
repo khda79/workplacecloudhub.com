@@ -17,7 +17,7 @@ Since 1.34, -Reports All also collects email client usage, OneDrive user activit
 and Microsoft 365 groups activity.
 
 .VERSION
-1.38
+1.39
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
@@ -43,6 +43,17 @@ param(
     [switch]$ValidateOnly,
     [int]$MaxItems = 0
 )
+# Preserve the collector lifecycle before initializing the upload policy.
+$smartM365LifecycleRoot = $PSScriptRoot
+while ($smartM365LifecycleRoot -and -not (Test-Path -LiteralPath (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1') -PathType Leaf)) {
+    $parent = Split-Path $smartM365LifecycleRoot -Parent
+    if ($parent -eq $smartM365LifecycleRoot) { break }
+    $smartM365LifecycleRoot = $parent
+}
+if (-not $smartM365LifecycleRoot) { throw 'SmartM365 lifecycle support is missing; update the complete runtime.' }
+. (Join-Path $smartM365LifecycleRoot 'Modules/SmartM365.Core/SmartM365-InventoryLifecycle.ps1')
+$smartM365RunGuard = Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
+try {
 if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
     $global:SmartM365MaxItems = [int]$MaxItems
     $global:SmartM365TestMaxItems = [int]$MaxItems
@@ -56,7 +67,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.38"
+$ScriptVersion = "1.39"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -899,11 +910,22 @@ finally {
     try { Stop-SmartM365UsageTranscript } catch {}
 }
 
+    $smartM365RunGuard.ReachedTerminal = $true
+    $smartM365RunGuard.ReturnedNormally=$true
+} catch {
+    if ($_.Exception -isnot [Management.Automation.PipelineStoppedException] -and $_.Exception -isnot [OperationCanceledException]) { $smartM365RunGuard.ErrorRecord = $_ }
+    throw
+} finally {
+    Complete-SmartM365InventoryRun -State $smartM365RunGuard
+    if($smartM365RunGuard.ExitCode -eq 130){exit 130}
+}
+if ($smartM365RunGuard.ExitCode -ne 0) { exit $smartM365RunGuard.ExitCode }
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBktQvatZBqsAzI
-# Gs99nYrMWNFp6RmxKuWoSBDJPoPFPKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBgplel/wjVhOqC
+# zjy3lTHwfglRTxz6nYVr0AFgRVjxnqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1036,31 +1058,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJJdeUWspCErJS26LiSn+C1f7Inoi19fRsFd9NlEXupkMA0GCSqG
-# SIb3DQEBAQUABIIBgJLOW3lR0Boewhhf11PIJIzwN0chv7EzgB4uAz8W8rUWrXig
-# r1y5yuWTlJJb4XqfsROKwTTWZPaTBzouOs74KcpwPU0dBMzphJ+lkU9qQlDyo5bd
-# SFh5PXE+FJzOhy38lY0LfgM+luWvcHQ4DfKXxbnG67BqU4VjCBgX+Pyj044RuzV6
-# /hJXC8gIlqGwClO+CwMEeINPLcUsy1n42Ylv/FTgwwDnCeAfJMeuIN5SOpjn08OO
-# DhlDGx1o5fg3fLmhYBEi5JVJhZLe8SxjItTndKhrkIlRWt9RWFp4PkoCHhN9HuNV
-# YsikuQC3izLFhvSsx7M3MvwhB1fgGIjOebb3rRdLEeR0+VHsFGmk4HcxGGVxFvtu
-# sQXfCulxFurGfGiIim4T7LJ0Y/prqr//6qeB7rFst8aj3NT8yqzTayWf9rLbee4R
-# BY23FuJL6H8rTrps9mGRwkb6iwpG4oHnG0Q9BDiJASv2m3FxEHY2SJbRSlW+RBs2
-# 3WjKVSHNsNAmBTwV/qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMO7bpKyp6sRnO3G44zo2ICBjU9/Kua6pVpP8HRWIC0fMA0GCSqG
+# SIb3DQEBAQUABIIBgILgVhicGyqGyOK2K55DryZIR/XSlU7X6ej0MPxuP+O/wjpN
+# GhxixHLnzIl/4LwTNK2aV5QfRjRgOZV7RgHq9y1mgWTOteZVa/awheRDYoVtmuPU
+# 2/GwYPq/rvbwebKCLNLIO+JyxaZPTeC5rGta/OuhVGUjBcdnfL8mLLFsVt13Z8pt
+# rOhU60QVLQGzvSMPoKbmStMvggonP2Vw3Qcxgu47rSNYHj+7mmhsh+u68S430On3
+# RELsNsZetVq/4RGDsyFuUKRO5lJDE1me7y10a0xO3aIEeSC3PHmo34ZO9HuSxMRD
+# /hun+7kd1ypDQtEK3vC953mHw4KnyINRJ03VIE5FsAT/tSDD3bfRmlqCB2XgzOy5
+# VIwsbj2kY4JB0BL8c3NpLg2HjxWF14fk+9+nykWSWLCjkdyANeA0ctSzSxOqmWl5
+# tTtUBBeQSUz0Ebi14hZA++Y9narv34JRSI/HLtwHSl77eql0qbxyYs9BRwO3hVnj
+# tmzYb99R7JdgW9y3c6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
-# MzJaMC8GCSqGSIb3DQEJBDEiBCC/hiyU1O6GvFeSJnovnZbkWBd0eJU7jZiDyuXP
-# X0bKODANBgkqhkiG9w0BAQEFAASCAgCVel5/pe1CggTtfAjjy8wnp7aTF+BgfJZD
-# KqjkDbvF++AK6GIqNIB3K9gXRLMe0pCvIbzW8aTja+j3dVixCQgQfxu5gCb4+OmI
-# k3sJHXN/E4vz6csgdtIZAzNgxReus7G0NngCkWsF0ZZgegI2TvDjfvMt4ZtiheD6
-# Ld7z2I/0fHJfl7GSwElPySSS5KFvnzwaTUGJDJl+3bkOJekcQYMHANuxnhKKLPso
-# ibYSt5fP4ovWwtndMPiRHoM3GXOenyCjP0NqCmWo4gX0kaPErwJf/dCD0xUKSCZ0
-# Y6Sm2pppUJr5m4Hlc5EKDnsqUdaGEne15mZ27I22NDm0QaSd+FTHLlvsgIuKeEMs
-# VKgB4qpwgHc9vHkR/QRHjciDtDVCc+GRb9A2raUzQ7Vwh6NMvgni5vkWYHZmaM8J
-# WNfjTrawPq0QzohPJ9wzbkrf2YLUkcBpmdScIRyY8EOUN/LPAGHk+j+kHxUrVzef
-# 06qBM9LvjcFQmv+8jsFcyQm6U2Dwx/a4cV+kaLGQwbXV6bMbCL+jopf3zBhNOlrS
-# x4Ja83p0gVdCn9PbNbiclwkJwuzWP4M9d4NLFoGMWeWnYtlJKUatiavRMEgOn/Iy
-# PiZ+8VZduucCfDJbxw6PEvEYH6LT5yeEJEIPRdC5roQGZKK1GbYRKEu7zGnqYCFt
-# TBTLbTIbrg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzM3
+# MzNaMC8GCSqGSIb3DQEJBDEiBCDgzaJ0UaiTmksy/EhaUT+hfg4ul0z05QxzgRCF
+# UdEEkzANBgkqhkiG9w0BAQEFAASCAgBRgO7YqWLnvY4vql5TlQ715mFt0eKStoN5
+# 3oob0P8GSkZWDVEHvwn1LtiSW22ZJk231WLLmc8COpOpQBIZpQaATPFC/N2Ku+vC
+# L6XvTdLyFOpQougvhBs7B0C4sdk8QsN0zIQxi8YCICGTug+7hMOt7+fTHW1/dmr9
+# Nlm9VvBoJeCcQGzOcZwquxeK4Kt/KZJRc9Qhj8UcjubajDHNkCzUf67A4QTrFm5P
+# kDOFUqM4fy7vLaWhUdthw62sEdli2arHvlicyngT+f6Qdiq2b9Uw5l+jkwv+iVk8
+# BojJq/2yuxc/U59IvJnIxibFLfCbKL6obqVoOR+U7Dx+eZziplVW/WW6iairQWMD
+# Da0W6kdwoA3EZenG/2dMwHM0jPPAw4EqrEAIptWiR9qlNGAv0/sBrS94C8r5wdgh
+# UtbaYaCWUCzOunZrPjWHXAI49Udkql/6Ug4NQIXhruzc3YJC0vpqQKVY+mngaCKq
+# uypqV50C5LttCChkE6ohxo+/BAtywkjujt13hl+fTrF9AMFnESRMOQJ9hCYSTATb
+# FwfLybM3GhIV2C1vZ9Xluz7K1Jjw6VPH8r5fVk0t6g+mNHQCJmZEoHmT274yrk4J
+# TzIx50d9mZsr/QhmEO96HbYAVOaWtjRnzvyUElLm/gA9O62Mi5pRTjWNAnZ4b0ob
+# c4ra/zTOrQ==
 # SIG # End signature block

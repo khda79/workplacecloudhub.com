@@ -110,7 +110,7 @@ detailed tables for the last 24 hours and 7 days, then exits without acquiring t
 lock or launching inventory jobs.
 
 .VERSION
-1.5.86
+1.5.87
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -123,7 +123,7 @@ lock or launching inventory jobs.
     inside its own child process.
 
 .NOTES
-    Version : 1.5.86
+    Version : 1.5.87
     Author: https://github.com/khda79/workplacecloudhub.com
     Exit codes: 0 = normal end (recycle, DryRun, Once, summary sent), 1 = fatal error or summary send failure,
     2 = configuration or manifest error at startup, 3 = another live instance holds the lock,
@@ -160,7 +160,7 @@ $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -Requi
 try {
 $ErrorActionPreference = 'Stop'
 
-$ScriptVersion = "1.5.86"
+$ScriptVersion = "1.5.87"
 $ScriptName = 'SmartM365-Inventory-Orchestrator'
 $global:SmartM365ScriptFileName = [System.IO.Path]::GetFileName($PSCommandPath)
 $global:SmartM365ScriptVersion = $ScriptVersion
@@ -1192,6 +1192,9 @@ function ConvertTo-NormalizedJob {
         $Errors.Add("Job '$name': EstimatedDurationMinutes must be greater than zero.")
     }
     $requiredLogPatterns = @('Execution context:|Environment initialized successfully|Starting .* v|(?s:Execution summary:.*Status:\s*(?:Success|CompletedWithWarnings).*Errors:\s*0)')
+    if ($name -eq 'Maintenance-ServerDataCleanup') {
+        $requiredLogPatterns = @('(?m)^SmartM365-ServerDataCleanup: Execute completed; FailedActions=0\.\r?$')
+    }
     if ($RawJob.PSObject.Properties['RequiredLogPatterns']) {
         $requiredLogPatterns = @($RawJob.RequiredLogPatterns | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
     }
@@ -9168,8 +9171,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAeOhic90LzxyS8
-# NfUkEwE76GR9knNpN6CcanwfyrzjOaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpbWC1OPdy/P9W
+# XW7LXqpuC8Ik1DOVubuRhoz44998raCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -9302,31 +9305,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIFoTsAUEPtoVB0QVy7qBJbc1xCz3fQhlDryfNOhoYGjbMA0GCSqG
-# SIb3DQEBAQUABIIBgGaAOlQ52YQ8GOYF/Q11a2v4KMHdE61wSvBzacwF4mesYjES
-# plpyzlP/5lJ4Ar0s/QJmZ2FEWdpiyVvYksEaQ77YJOqyBDlfDwKMOKD16usug+SP
-# Mx+BiLnioaigvgKnVX9XtR4jdVfnA1YKB/rN7ddt2MjvVHkIG8KQk57teBDigV+E
-# YqWxuTR3DwTghF17VZmryXG6p75Cvf8xweK/yTW7dcv3VLVXK+RMd+lyiWWGtp7g
-# +vsbRn+WMHaISfmWiKsu3ao8v5l2hF5zeMS3d3KcPVOM/LMuDdpQezECKm2mVCGY
-# 30GIVHChq6z7v8RweW7Yrg9IkdLJQ93DB9V4onhJiN7uVwwV2rzPWztD19EGikaI
-# 1eTcNmY9v59Cly6h3CpRWQjduy3PSqwEcggKjycpJYtb525So90gJxJ/b6Q1hE7C
-# 7VGVEVxcgIX2Zf3xx+Y48xxeTQkRXvBjPY4EXX/Vcsg7aB64r7X+KFTHJRy1KG/f
-# JknrxdwkmXuIigx5bKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBsyAj72AjlbIHUXlTkneeg1u0dXgOiLro1Y8mh49dikMA0GCSqG
+# SIb3DQEBAQUABIIBgHbExKClFwLJIeHo9GIE5N++bmiyvDp85rlxRj4HSYTqdm9O
+# 6t3Dh+xawaQxd4ivMmz+6wHwqzUZQK5UEeYBPxmiGGYVvRY2A3695GufL//rIHbZ
+# W468BqphQffykjKp/AKLvK/HQiWuB1mB6V6fZht0sPbWyStH95aeFU2U24ZeuBvZ
+# W1wpXYZIA2jEyq5qVAYmjJPKc7p64+STrKmkiQUDC6i6rduBvo04yAY6lB2wfvDv
+# rnRlQTDdMP2yhrz1GFj+it63MLSNDgV/VSmeGHXWot6ZHLlXV7B2l4+PkeK8FyBe
+# zwek7Kkp3wdKQaESaU0WjtVbIPTlebiABPfgUgcmHKBQpozOD8jGL9QwVic8j/m2
+# ZoxXuOh1fEbAZ42gzxR6AbCmJvyi+QLx+7PQWUsMWmgJl03dvgrXRuxhew2hc6XW
+# YrZs0yaYpd4NH3Y2gEFgKaBiG3bQmuUVjTfaoa3VkXfEN6cmDRTRa/KsYxiWso+i
+# LLgWtmr/xsddDy5wX6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
-# MzRaMC8GCSqGSIb3DQEJBDEiBCDmipEI2bbRFtLq2bFhlYgyOFk+c29eHQEf35bx
-# lSqOCzANBgkqhkiG9w0BAQEFAASCAgCP3NTmUGVTrxx2U/4prTtHkf9uAzs8SqDG
-# zTnFXae/lOFJYtd/VbRRbJozFnZmno0U03WvZ+kvA5qszCTgLnrWyRlwgHzJR+Uv
-# jUQxZdWIJaKUe0b1eJLMT6/urjiCSgRcFnJd/Gp5hE8BztSK0CzRbc8bJx5OZpod
-# WYpzo4O9ONQ6/QfRkZXg7s8h4X9IpGLAcKVNyKZ6M3euJLbPkoLUIgvuGD+n00U6
-# DauhCmiGDkkhwj4KprMh4rCfHPUGPz0FQEZ+OKwIWsnRWQi//EjqbnIt5M3egNvy
-# ZtCy1y5pmwqhb5zr1EJCvgxVsxGfufu230ay4m/vAdJVx5DO0j12HWorFIB3D3Hm
-# Ivbk//FQpD+tSxQ8Le4FEi4FVilUe69ezDirQaS4FHGAgO0sWQ0LpqYyTafkfLSu
-# o+dp6TmGhS+4AmW3cnZaDaHoPYhpoJlkE13Ogbb9d8V4WafH94t0lmvh99os7y67
-# sPcj4CE57Jz1oYm5TBQ5tEeaX9ej6Bm6KlQvQrWWOAmhf757jWUWtDY9bp2XR9cE
-# NV+Z5q8AY0Q0ZYHsi9DA0+uv4KRnJKzU2UTPx0TDd/OAW9Yf3652UMGNy0JjyfE0
-# zCeomMsSwJvb2eEGKVQAXeURL9dvWF6uNYso6x5FL052JunXWpk/WSQbZpqPcSw4
-# LhWkvMNN9A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzM3
+# MzNaMC8GCSqGSIb3DQEJBDEiBCD06MHhfLMTbbG4j+UApQDXJP0sX/IeM/6CXZeU
+# QM2+2DANBgkqhkiG9w0BAQEFAASCAgCzQIWMWN4Qhgo8udC+wQAsjKWshzzQ8Tmf
+# 4XkgRnQ+grukQll4BwGY2mPfG7Ray9cAwk6+96qBzw/Bz/XZ7bEoFJjb5bF2S1s0
+# ZpnB22cucfdOLljDH8i1xp1JVNC1JubCOivGJu6khbchrPrQKOf6atT4mMTddMI/
+# zbqtGs+H2edKXByBaGnZZYtE7Ovo8mGrr8fR43SaE+Bnv+OGu0/UlZWpo0hLTqNw
+# QRAcMNZPBaeMovjJJT2cu9dxeS5+UtRtKJNf68qb0vL90KYtCDx91TjNslFvQgK4
+# JRhlkKBU4mtKTHHL2epXmKQsiKSQDz10qkj7jH5ut4azLyR4g2kFQl5KGX732jSA
+# 5NxbDbFchLcN66Tik0PlfmLBObT9+0CbHacXWm8alTV7tfBKJ1pcsD7s4EFkH2WI
+# dRZiDGs/NyFIymyLl1FDpYlcWFyvgLymzehfWKKDsuiFt4auKkljj3pOaU3HTypj
+# 7mIxYVnPZJWvSNtqoNHY5oYkw0cXP3nU7BXbklDCse4+hJL5VNmDsI/s/vUJiJU8
+# vhrPH8b9BxMZA3UGvJzZk6UKKXrgCXHA8d6DyNSqtHDNR/09q398NGkZexcuTVAK
+# sDh54ugtGpSlU/FMina9xsmL2iXqEi+3OXLyPFZ7nXOxhh0TmyvPAh536kFWlWNs
+# XiqFZJlDAA==
 # SIG # End signature block

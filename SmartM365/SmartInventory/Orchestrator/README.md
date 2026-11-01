@@ -704,6 +704,11 @@ This button does not change Teams notifications or initiate any email.
 
 ## Jobs manifest schema (`Orchestrator-Jobs.json`)
 
+`Maintenance-ServerDataCleanup` requires its terminal `Execute completed; FailedActions=0`
+evidence as well as a zero exit code. The orchestrator supplies this default for existing
+shared manifests that omit `RequiredLogPatterns`; an explicit setting in the shared manifest
+continues to override it and must be reviewed separately. Preview never emits that evidence.
+
 ```json
 {
   "Jobs": [

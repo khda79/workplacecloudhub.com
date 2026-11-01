@@ -1920,6 +1920,7 @@
       "Name": "Maintenance-ServerDataCleanup",
       "ScriptPath": "Maintenance\\Invoke-SmartM365-ServerDataCleanup.ps1",
       "Arguments": "-Execute",
+      "RequiredLogPatterns": ["(?m)^SmartM365-ServerDataCleanup: Execute completed; FailedActions=0\\.\\r?$"],
       "Enabled": false,
       "Group": "Maintenance",
       "DependsOn": [],
