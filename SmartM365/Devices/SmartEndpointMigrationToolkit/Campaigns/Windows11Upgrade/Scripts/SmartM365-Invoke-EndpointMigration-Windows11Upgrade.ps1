@@ -1666,33 +1666,6 @@ function Get-Windows11IndicatorSummary {
     }
 }
 
-function Invoke-SemtGpUpdateWithTimeout {
-    param([int]$TimeoutSeconds = 180, [Parameter(Mandatory=$true)][string]$OutputFile)
-    $stdout = Join-Path $env:TEMP ('SEMT_W11_{0}_stdout.tmp' -f [guid]::NewGuid().ToString('N'))
-    $stderr = Join-Path $env:TEMP ('SEMT_W11_{0}_stderr.tmp' -f [guid]::NewGuid().ToString('N'))
-    $timedOut = $false
-    $exitCode = ''
-    $stopDetail = ''
-    try {
-        $process = Start-Process -FilePath 'gpupdate.exe' -ArgumentList @('/target:computer','/force') -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            $timedOut = $true
-            try { $process.Kill() } catch { $stopDetail = $_.Exception.Message }
-            try { if (-not $process.WaitForExit(5000)) { $stopDetail = 'Process did not exit after termination was requested.' } } catch { if (-not $stopDetail) { $stopDetail = $_.Exception.Message } }
-        } else {
-            try { $process.Refresh() } catch { }
-            $exitCode = $process.ExitCode
-        }
-        $parts = @()
-        if (Test-Path -LiteralPath $stdout) { $parts += Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue }
-        if (Test-Path -LiteralPath $stderr) { $parts += Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue }
-        (($parts | Out-String).Trim()) | Out-File -LiteralPath $OutputFile -Encoding UTF8 -Force
-        return [pscustomobject]@{ TimedOut=$timedOut; ExitCode=$exitCode; StopDetail=$stopDetail; OutputFile=$OutputFile }
-    } finally {
-        Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
-    }
-}
-
 function Repair-WindowsUpdatePolicyBlockers {
     Write-SmartLog 'Repairing legacy Windows Update policy blockers.'
     $wuPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
@@ -1715,10 +1688,9 @@ function Repair-WindowsUpdatePolicyBlockers {
         }
     }
 
-    $outputFile = Join-Path $script:OutputDir ('gpupdate_policy_{0}.txt' -f $script:RunId)
-    $result = Invoke-SemtGpUpdateWithTimeout -TimeoutSeconds 180 -OutputFile $outputFile
-    Write-SmartLog ('gpupdate finished. TimedOut={0}; ExitCode={1}; OutputFile={2}; StopDetail={3}' -f $result.TimedOut,$result.ExitCode,$result.OutputFile,$result.StopDetail)
-    return $result
+    # gpupdate is never run: the policy is read again as it is after the values are removed.
+    Write-SmartLog 'Legacy Windows Update policy values removed; gpupdate is not run.'
+    return [pscustomobject]@{ TimedOut=$false; ExitCode=''; StopDetail=''; OutputFile='' }
 }
 
 function Reset-WindowsUpdateComponents {

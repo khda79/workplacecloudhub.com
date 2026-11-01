@@ -266,7 +266,8 @@ function Update-EndpointInstanceState {
         RunId = $RunId
         ComputerName = $ComputerName
         ProcessId = $PID
-        StartTimeUtc = $Timestamp.ToUniversalTime().ToString("o")
+        # Script scope: Write-RunLog calls this function and has its own string $timestamp.
+        StartTimeUtc = $script:Timestamp.ToUniversalTime().ToString("o")
         HeartbeatUtc = $nowUtc.ToString("o")
         Status = $Status
         ScriptPath = $script:EndpointScriptPath
@@ -1311,8 +1312,6 @@ $RetrySleepMinutes = 20
 $RetryMaxRetries   = 2
 $UserTaskWaitSeconds = 30
 $UserPrtRetryWaitSeconds = 30
-$GpUpdateWaitSeconds = 30
-$GpUpdateTimeoutSeconds = 180
 $UserTaskFolderPath = "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin"
 $UserStatusTaskName = "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserDsregStatus"
 $UserRefreshPrtTaskName = "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserRefreshPrt"
@@ -1323,7 +1322,7 @@ Write-RunLog ("Retry policy: SleepMinutes={0}; MaxRetries={1}; Mode=LocalWait" -
 Write-RunLog ("Intune retry policy: SleepMinutes={0}; MaxRetries={1}; Mode=LocalWait" -f $IntuneRetrySleepMinutes, $IntuneRetryMaxRetries)
 Write-RunLog ("User task policy: Folder={0}; StatusTask={1}; RefreshPrtTask={2}; IntuneAutoEnrollTask={3}; NextLogonTask={4}; WaitSeconds={5}; RefreshWaitSeconds={6}" -f $UserTaskFolderPath, $UserStatusTaskName, $UserRefreshPrtTaskName, $UserIntuneAutoEnrollTaskName, $UserNextLogonAutoEnrollTaskName, $UserTaskWaitSeconds, $UserPrtRetryWaitSeconds)
 Write-RunLog "DNS policy: FlushDNS=True"
-Write-RunLog ("GPUpdate policy: Force=True; TimeoutSeconds={0}; PostWaitSeconds={1}" -f $GpUpdateTimeoutSeconds,$GpUpdateWaitSeconds)
+Write-RunLog "GPUpdate policy: never run."
 Write-RunLog ("Non-Intune MDM removal policy: AllowRemoveNonIntuneMdmEnrollment={0}" -f [bool]$AllowRemoveNonIntuneMdmEnrollment)
 
 # Transcript (best effort)
@@ -3133,6 +3132,9 @@ function Export-RecentEventLog {
         return [PSCustomObject]@{ Success=$true; Path=""; Count=0; Detail="No events found." }
     }
     catch {
+        if ([string]$_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') {
+            return [PSCustomObject]@{ Success=$true; Path=""; Count=0; Detail="No events found." }
+        }
         Write-RunLog ("Event log export failed. LogName={0}; Error={1}" -f $LogName,$_.Exception.Message)
         return [PSCustomObject]@{ Success=$false; Path=""; Count=0; Detail=$_.Exception.Message }
     }
@@ -3982,118 +3984,10 @@ try {
 
     $domainPreflightComplete = $true
 
-    if ($AuditOnly) {
-        Write-RunLog "AuditOnly: skipping gpupdate; collecting existing Entra and MDM state."
-    }
-    else {
-        # Refresh computer policy before checking local MDM/GPO state.
-        $gpUpdateAttempted = $true
-        $gpUpdateOutputFile = Join-Path $OutputDir ("{0}_gpupdate_{1}.txt" -f $ComputerName, $RunId)
-        Write-Host "Refreshing computer Group Policy..." -ForegroundColor Cyan
-        Write-RunLog "Running gpupdate /target:computer /force."
-
-        try {
-            $gpResultProcess = Invoke-ProcessWithTimeout -FilePath 'gpupdate.exe' -Arguments @('/target:computer','/force') -TimeoutSeconds $GpUpdateTimeoutSeconds -OutputFile $gpUpdateOutputFile
-            $gpUpdateExitCode = $gpResultProcess.ExitCode
-            $gpupdateOutput = $gpResultProcess.Output
-            $gpUpdateTimedOut = $gpResultProcess.TimedOut
-            $gpUpdateStopDetail = $gpResultProcess.StopDetail
-            Write-RunLog ("gpupdate finished. TimedOut={0}; ExitCode={1}; OutputFile={2}" -f $gpUpdateTimedOut,$gpUpdateExitCode,$gpUpdateOutputFile)
-
-            $gpupdateText = (($gpupdateOutput | Out-String).Trim())
-            if (-not $gpUpdateTimedOut -and $gpupdateText -match "MDM Policy") {
-                $gpUpdateMdmPolicyWarning = $true
-                $gpUpdateMdmPolicyState = "Warning"
-                $gpUpdateMdmPolicyDetail = "gpupdate reported MDM Policy processing issue."
-                $gpResult = Export-ComputerGpResultEvidence -ComputerName $ComputerName -RunId $RunId -OutputDir $OutputDir -Reason "gpupdate reported an MDM Policy warning"
-                $gpResultHtmlFile = $gpResult.HtmlFile
-                $gpResultTextFile = $gpResult.TextFile
-
-                $gpPolicyDiagnosticText = $gpupdateText
-                try {
-                    if (Test-Path -LiteralPath $gpResultHtmlFile) {
-                        $gpPolicyDiagnosticText += "`r`n" + (Get-Content -LiteralPath $gpResultHtmlFile -Raw -ErrorAction Stop)
-                    }
-                }
-                catch {
-                    Write-RunLog ("gpresult HTML read failed for MDM Policy classification: {0}" -f $_.Exception.Message)
-                }
-
-                try {
-                    if (Test-Path -LiteralPath $gpResultTextFile) {
-                        $gpPolicyDiagnosticText += "`r`n" + (Get-Content -LiteralPath $gpResultTextFile -Raw -ErrorAction Stop)
-                    }
-                }
-                catch {
-                    Write-RunLog ("gpresult text read failed for MDM Policy classification: {0}" -f $_.Exception.Message)
-                }
-
-                try {
-                    $gpPolicyDiagnosticText = [System.Net.WebUtility]::HtmlDecode($gpPolicyDiagnosticText)
-                }
-                catch {
-                    Write-RunLog ("HTML decode failed for MDM Policy classification: {0}" -f $_.Exception.Message)
-                }
-
-                $gpPolicyDiagnosticFolded = $gpPolicyDiagnosticText `
-                    -replace ([string][char]0x00E0), "a" `
-                    -replace ([string][char]0x00E1), "a" `
-                    -replace ([string][char]0x00E2), "a" `
-                    -replace ([string][char]0x00E3), "a" `
-                    -replace ([string][char]0x00E4), "a" `
-                    -replace ([string][char]0x00E7), "c" `
-                    -replace ([string][char]0x00E8), "e" `
-                    -replace ([string][char]0x00E9), "e" `
-                    -replace ([string][char]0x00EA), "e" `
-                    -replace ([string][char]0x00EB), "e" `
-                    -replace ([string][char]0x00ED), "i" `
-                    -replace ([string][char]0x00EE), "i" `
-                    -replace ([string][char]0x00EF), "i" `
-                    -replace ([string][char]0x00F3), "o" `
-                    -replace ([string][char]0x00F4), "o" `
-                    -replace ([string][char]0x00F5), "o" `
-                    -replace ([string][char]0x00F6), "o" `
-                    -replace ([string][char]0x00FA), "u" `
-                    -replace ([string][char]0x00F9), "u" `
-                    -replace ([string][char]0x00FB), "u" `
-                    -replace ([string][char]0x00FC), "u"
-
-                if (($gpPolicyDiagnosticFolded -match "(?i)deja\s+inscrit") -or
-                    ($gpPolicyDiagnosticFolded -match "(?i)already\s+(enrolled|registered)") -or
-                    ($gpPolicyDiagnosticFolded -match "(?i)\b(ja|ya)\s+esta\s+(inscrit|inscrito|registrad)") -or
-                    ($gpPolicyDiagnosticFolded -match "(?i)\bgia\s+(iscritto|registrat)") -or
-                    ($gpPolicyDiagnosticFolded -match "(?i)bereits\s+(registriert|angemeldet|eingeschrieben)") -or
-                    ($gpPolicyDiagnosticFolded -match "(?i)(al\s+ingeschreven|reeds\s+ingeschreven)") -or
-                    ($gpPolicyDiagnosticFolded -match "(?i)juz\s+(zarejestrowan|zapisany)")) {
-                    $gpUpdateMdmPolicyState = "AlreadyEnrolled"
-                    $gpUpdateMdmPolicyDetail = "The local Windows MDM policy client reports an existing enrollment. This is a weak local signal only; it does not prove confirmed Intune enrollment."
-                    Write-RunLog ("gpupdate MDM Policy classification: State={0}; Detail={1}" -f $gpUpdateMdmPolicyState,$gpUpdateMdmPolicyDetail)
-                }
-                else {
-                    Write-RunLog ("gpupdate MDM Policy classification: State={0}; Detail={1}" -f $gpUpdateMdmPolicyState,$gpUpdateMdmPolicyDetail)
-                }
-            }
-        }
-        catch {
-            $gpUpdateExitCode = ""
-            Write-RunLog ("gpupdate failed to start: {0}" -f $_.Exception.Message)
-        }
-
-        if ($gpUpdateTimedOut) {
-            $warning = "Initial gpupdate exceeded {0} seconds. Termination requested; stop detail: {1}. Existing policy will be checked; enrollment checks continue. OutputFile={2}" -f $GpUpdateTimeoutSeconds,$gpUpdateStopDetail,$gpUpdateOutputFile
-            Write-Host $warning -ForegroundColor Yellow
-            Write-RunLog $warning
-        }
-
-        if ($GpUpdateWaitSeconds -gt 0 -and -not $gpUpdateTimedOut) {
-            Write-RunLog ("Waiting {0} seconds after gpupdate." -f $GpUpdateWaitSeconds)
-            Start-Sleep -Seconds $GpUpdateWaitSeconds
-        }
-
-    }
+    # gpupdate is never run: the existing computer policy is checked as it is.
 
     if ($domainPreflightComplete) {
-        Write-RunLog ("Domain/DC preflight already completed before gpupdate. Domain={0}; DCReachable={1}" -f $domainName,$dcTest.Reachable)
+        Write-RunLog ("Domain/DC preflight already completed. Domain={0}; DCReachable={1}" -f $domainName,$dcTest.Reachable)
     }
     else {
     # Domain joined?
@@ -4244,8 +4138,10 @@ try {
     else {
         $intuneEnrolled = $false
         Write-RunLog "Confirmed local Intune enrollment not detected."
+        # Earlier enrollment and PRT attempts explain the missing enrollment; events written since
+        # this script started are usually none.
         $intuneEnrollmentDiagnosticsInitialFiles = Export-EnrollmentDiagnostics `
-            -Since $Timestamp `
+            -Since $Timestamp.AddHours(-24) `
             -OutputDirPath $OutputDir `
             -ComputerNameValue $ComputerName `
             -RunIdValue ("{0}_initial" -f $RunId)
@@ -4965,50 +4861,6 @@ try {
         }
         $ExitCode = 3
         Write-RunLog $dsregStatusErrorMessage
-    }
-
-    $finalGpUpdateReasons = New-Object System.Collections.Generic.List[string]
-    if ($leaveAttempted) {
-        [void]$finalGpUpdateReasons.Add("DsregLeaveAttempted")
-    }
-    if ($nonIntuneMdmRemovalAttempted) {
-        [void]$finalGpUpdateReasons.Add("NonIntuneMdmRemovalAttempted")
-    }
-    if ($gpUpdateMdmPolicyWarning -and ($gpUpdateMdmPolicyState -ne "AlreadyEnrolled" -or $intuneEnrolled -ne $true)) {
-        [void]$finalGpUpdateReasons.Add("InitialGpUpdateMdmPolicyWarning")
-    }
-
-    if (-not $AuditOnly -and -not $gpUpdateTimedOut -and $finalGpUpdateReasons.Count -gt 0) {
-        $finalGpUpdateReason = ($finalGpUpdateReasons -join ";")
-        if ($rebootAttempted) {
-            Write-RunLog ("Final gpupdate skipped because a reboot is already scheduled. Reason={0}" -f $finalGpUpdateReason)
-        }
-        else {
-            $finalGpUpdateAttempted = $true
-            $finalGpUpdateOutputFile = Join-Path $OutputDir ("{0}_gpupdate_final_{1}.txt" -f $ComputerName, $RunId)
-            Write-Host "Refreshing computer Group Policy after repair action..." -ForegroundColor Cyan
-            Write-RunLog ("Running final gpupdate /target:computer /force. Reason={0}" -f $finalGpUpdateReason)
-            try {
-                $finalGpResult = Invoke-ProcessWithTimeout -FilePath 'gpupdate.exe' -Arguments @('/target:computer','/force') -TimeoutSeconds $GpUpdateTimeoutSeconds -OutputFile $finalGpUpdateOutputFile
-                $finalGpUpdateExitCode = $finalGpResult.ExitCode
-                $finalGpUpdateTimedOut = $finalGpResult.TimedOut
-                $finalGpUpdateStopDetail = $finalGpResult.StopDetail
-                Write-RunLog ("Final gpupdate finished. TimedOut={0}; ExitCode={1}; OutputFile={2}" -f $finalGpUpdateTimedOut,$finalGpUpdateExitCode,$finalGpUpdateOutputFile)
-            }
-            catch {
-                $finalGpUpdateExitCode = ""
-                Write-RunLog ("Final gpupdate failed to start: {0}" -f $_.Exception.Message)
-            }
-            if ($finalGpUpdateTimedOut) {
-                $warning = "Final gpupdate exceeded {0} seconds after repair; enrollment status remains {1}. Termination requested; stop detail: {2}. OutputFile={3}" -f $GpUpdateTimeoutSeconds,$status,$finalGpUpdateStopDetail,$finalGpUpdateOutputFile
-                Write-Host $warning -ForegroundColor Yellow
-                Write-RunLog $warning
-            }
-        }
-    }
-
-    if (-not $AuditOnly -and $gpUpdateTimedOut -and $finalGpUpdateReasons.Count -gt 0) {
-        Write-RunLog 'Final gpupdate skipped because the initial invocation timed out; enrollment result is preserved.'
     }
 
     # Enrollment events describe observations in a time window, not necessarily the
