@@ -12,7 +12,7 @@ files for SmartInventory and SmartFinOps.
 but suppresses SharePoint uploads and Teams notifications during a controlled run.
 
 .VERSION
-1.0.7
+1.0.8
 
 .REQUIREMENTS
     PowerShell 7+.
@@ -59,7 +59,7 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0.7'
+$ScriptVersion = '1.0.8'
 $TaskName = "SmartM365-PowerBIFabricActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 $script:PowerBIActivityApiUri = 'https://api.powerbi.com/v1.0/myorg/admin/activityevents'
@@ -100,7 +100,7 @@ $tenantContextPath = & {
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 $scriptConfigPath = Join-Path -Path $PSScriptRoot -ChildPath 'SmartM365-PowerBIFabricActivity-Inventory.local.json'; $scriptConfigPath = Resolve-SmartM365JsonConfigurationPath -Path $scriptConfigPath
-$script:PowerBIActivityConfig = Read-SmartM365JsonConfig -Path $scriptConfigPath -Required
+$script:PowerBIActivityConfig = Read-SmartM365ScriptConfiguration -Path $scriptConfigPath -AsHashtable
 
 function Test-SmartM365ConfigFallbackValue {
     [CmdletBinding()]
@@ -112,46 +112,13 @@ function Test-SmartM365ConfigFallbackValue {
 }
 
 function Get-PowerBIActivityRawConfigValue {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$Name,
-        [AllowNull()]$DefaultValue = $null
-    )
-
-    $scriptProperty = $script:PowerBIActivityConfig.PSObject.Properties[$Name]
-    if ($null -ne $scriptProperty -and -not (Test-SmartM365ConfigFallbackValue -Value $scriptProperty.Value)) {
-        return $scriptProperty.Value
-    }
-
-    $tenantProperty = $script:SmartM365EffectiveConfig.PSObject.Properties[$Name]
-    if ($null -ne $tenantProperty -and -not (Test-SmartM365ConfigFallbackValue -Value $tenantProperty.Value)) {
-        return $tenantProperty.Value
-    }
-
-    return $DefaultValue
+    param([Parameter(Mandatory)][string]$Name, [AllowNull()]$DefaultValue = $null)
+    Get-SmartM365ConfigurationValue -Name $Name -LocalConfig $script:PowerBIActivityConfig -EffectiveConfig $script:SmartM365EffectiveConfig -DefaultValue $DefaultValue -Raw
 }
 
 function Resolve-PowerBIActivityConfigValue {
-    [CmdletBinding()]
     param([AllowNull()]$Value)
-
-    if ($Value -isnot [string] -or [string]::IsNullOrWhiteSpace($Value)) { return $Value }
-    $resolved = [string]$Value
-    for ($index = 0; $index -lt 10; $index++) {
-        $configMatches = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
-        if ($configMatches.Count -eq 0) { break }
-        $changed = $false
-        foreach ($match in $configMatches) {
-            $replacement = Get-PowerBIActivityRawConfigValue -Name $match.Groups['Name'].Value
-            if ($null -eq $replacement) { continue }
-            $replacement = Resolve-PowerBIActivityConfigValue -Value $replacement
-            if ($null -eq $replacement) { continue }
-            $resolved = $resolved.Replace($match.Value, [string]$replacement)
-            $changed = $true
-        }
-        if (-not $changed) { break }
-    }
-    return $resolved
+    Resolve-SmartM365ConfigurationTokens -Value $Value -Config (Merge-SmartM365Configuration -EffectiveConfig $script:SmartM365EffectiveConfig -LocalConfig $script:PowerBIActivityConfig)
 }
 
 function Get-PowerBIActivityConfigValue {
@@ -166,7 +133,7 @@ function Get-PowerBIActivityConfigValue {
 
 $smartM365RootPath = [string](Get-PowerBIActivityConfigValue -Name 'SmartM365RootPath' -DefaultValue '')
 $coreModulePath = Join-Path -Path $smartM365RootPath -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $coreModulePath -MinimumVersion '1.0.119' -Force -ErrorAction Stop
+Import-Module -Name $coreModulePath -MinimumVersion '1.0.121' -Force -ErrorAction Stop
 
 $global:SmartM365ExecutionStartTime = Get-Date
 $global:SmartM365ExecutionSummaryWritten = $false
@@ -1106,8 +1073,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAF0DPwkQYqNNZp
-# oUwXeaVREjNdl1Y6GGpZ9RpyqjLZ0qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCi7OxJL8XUTMSR
+# gkDSzcALc68lj43a1KRSH3+nmSFEDaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1240,31 +1207,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPcmYSQqIDTJ5+oh5XP0E6AJL7b73W/GWAeRMMVWHrTuMA0GCSqG
-# SIb3DQEBAQUABIIBgAJBlNVF2+GQPzbv5aXfCBJQnrF0UxU65kW6C3a4E4g4cxpq
-# 3vHeH5sOEBt1IwuqUCfG5n31ToYEvc17e0o8lYtZgAfA+kGSlMtFavNCWe/r2OJC
-# 15QyPzIRaRuQ7axj9jMyyKnsz3aOpX+pTpxJ5OnPwFEa+/CsnEQYQqctQUZsGKkm
-# 9nFFbxE529L4iKaHolElZ7PaPr5pfGQVJBqwNXUBJP5sSHYkHlplG0pfAplcDNe1
-# l68L9o1xQKQxxZ1/JoaxKjh4rfmGbMZHoQPWN+htledtOPVH9uRVdblC96ukMG9f
-# ISd9rpm5YfwPzDeTBu03mB6VH9Mi603rAbsIFaxZyOfru+2VQ9zEW4mspsPYNEGx
-# /2zkCwg0U0gRNC4wzoSWkbEIDIwITIoE5E3NgbkflIJ2kYPp4UE5GgpiAPcUvEsi
-# AIcwQ3nTFGzGSUnU4Bu4iGDfDfaPRgmq5yCouZt3OS89q2tLgbDnFcxDhKhxsRI4
-# vK/hoCBi5+vWCnLXtaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIABs/6hHvy0Nmjt9tAdkGgtHQg3uaRso2deNCni+r+tUMA0GCSqG
+# SIb3DQEBAQUABIIBgI/nVFQggRZoKtGCSd5bJQZWU5GjMPatr5Smtu6VW5nVbNPx
+# QwCKUVlnI6AfMu7rTtN4ooSnRLWpdLDrP0lcmdtJ3IJJE0ukBdOnMjiOq051GK21
+# jTa/qM6DLNT/xU3JpWof7ZqZ/TFDArTTqSuq0+ejMrlCObexxWGo0zqbSpLnb856
+# Y4fbsBKIwqyhoLfUxY4hkdQqglVtqryCzu1bH+7UmGwvuG8f6XNwR7bOlQwKE8Xf
+# y0t1D/SXyRQZQsQyj92SOMAG0F6nOQzP+L0pVgYK3K8K10XysNRzcICLD0yV9jcz
+# 45sFdgQxirfyFmsbFg+b8qDMbEud1Iapp6mn90lecvFAuKL/Y0ZsyBkeolgaah1x
+# on7GrEczhkXEK6MN/sgiYrnUeViO9kQywYifHW3BroKFV2/t4g0p1Uclhqbqs7sl
+# vaFgwxCA2Sy2YkOtyEl+O8JfiCnt9CW2AuPjsCBJm4v2lHQxeIB5N357ECbLLz3T
+# 9jq9/que2tNOJ1nvFqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
-# MjRaMC8GCSqGSIb3DQEJBDEiBCAvF7r5qljnQ02/06TKt4yG8q2o7rgd48UNVAlU
-# poq6zTANBgkqhkiG9w0BAQEFAASCAgCantwcyL7XbpM1VUzlU1y9Vfb+ZP9JFyjc
-# 4cb3Gd/jD4Qcjdhg31RHuifUMwNPn6l4TzCiiMxDR6a4fpINmbh23Eem5u8KULNQ
-# nQ/wBm5ZWjG/Es4bk9CU1O5DgxcZ2n8ck/PXhDjLkTaWh/u+YCfCnoOm3hQMWf8G
-# mxILNBTI7a4ajnbdRW+bxn35tDDkls/AQeY6Nj1vKpAnbfYOIw+C2gmJzK4dIvRq
-# qzWW7/KIwIVKO2giLnRuGhSwaZ/0cdPsvV3NURpEGYNagAqSN80L1lYvdxdPql2P
-# hjPtIY0Y8lONEo2c2viEYCshg+D07/PqfwMOsVRM5oaAXGw3dSjWrsXcrA36/As7
-# ogpmL0NY0X+92zu0VEPmPqqBwn9Wis9nsFZ9fRjPtqkM8cNyQZGbAu0WBQH1Mrce
-# XSodVDpluIxdaUcIAQVRy0W7m09KkVFzVJwe4saYeAvT5CeibQ1sckeWRjYawbr5
-# 2mvCZjP6IX6WXwV+L1qq6uCM4k2vRqBiw/La4aE8ps4pMFH0ix9KJcG28GgrKtC8
-# y1o/5aIKxiXozfsQz5DuyImxoww086DtcStrwI76c/hbStsGL4N4rnvbyTVOcb6F
-# ej0rneHFF+vPW8D9pMnE7SXg1Iq1WamaEOXrSwiBPMZfH5Xx51DEs4tw8nQEe9jC
-# zBI0XDlffA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
+# MzFaMC8GCSqGSIb3DQEJBDEiBCC+hNvgZ149kNNDupMcELSsy/wUcpRFR/GngilG
+# coDsaTANBgkqhkiG9w0BAQEFAASCAgCS8YLAY/cg8+hjmiG4NbbXF6Y/1OmmpxOJ
+# UUn0GiDPQdpujcQB/LX3jXc+tcUvZpyA3/jqlIZyPFxLU+r8L+LUy0cuEo19Zpqp
+# Z/rMu93L8ImG+tC1SUv1Ag/qe5YGYnv+FOh6ueZvThESoAUYhVY7Ejy/SuaOn+vH
+# utSEb8fmv3Veyfk2Rl8iP29NwIAiX53Uz6dAkW7Q7fTWGKyamUcZPyWlYB84cqii
+# VhVHkpkR8Y7L7Rwnrix7293L475Dko9/rscbqcYYIG9PQ/Yc2cHR+uMgRoHZmdoU
+# ukfWFea55EmeFeMRXZyPi9yvRQGYCbZNCrawmT1M1K+J4VWahCzv2DLk8wBEM+Vf
+# HfBVHj41yDm3o4ADKZWsO2opz9webOAsgir5bcsadN1u3EVgRc0I8OvJszLPUCC4
+# Kn7VbNVQoMqdDxscjHCCy876fUfsxI9Hil/3wpoGOWs/jzmRN5DEZQ1jt/U07c7u
+# C0MOCWUpZRQSAIwcbcLWzAFt7v+TGOILhUw2SwFS8uqhTDkII+azWAn09iJsL7er
+# j0SDdwLgWwq2HKD5/mYtIosuUN484a5c/G0kZK2U46yoUg3PKbeWJTLaIZA8cjzO
+# pTYW4uD339oTBCLa5yuIEwr5uHe6kuRc29rvXal7b3Z2O0XEOCRsrl3SATbC9guy
+# Zljj7amnZw==
 # SIG # End signature block

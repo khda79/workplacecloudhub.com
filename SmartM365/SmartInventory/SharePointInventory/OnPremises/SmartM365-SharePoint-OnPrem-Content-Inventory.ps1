@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only SharePoint Server 2016/2019 site collection and web inventory.
 .VERSION
-    1.0.16
+    1.0.17
 .REQUIREMENTS
     Windows PowerShell 5.1 x64 on a SharePoint farm server; SharePoint Shell and content read access.
 #>
@@ -34,46 +34,21 @@ while ($root -and -not (Test-Path -LiteralPath (Join-Path $root 'Config\SmartM36
 }
 . (Join-Path $root 'Config\SmartM365-TenantContext.ps1')
 $script:EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-$localConfig = Read-SmartM365JsonConfig -Path (Join-Path $PSScriptRoot "$script:ScriptName.local.json") -Required
-$merged = ConvertTo-SmartM365Hashtable -InputObject $script:EffectiveConfig
-foreach ($key in $localConfig.Keys) {
-    $value = $localConfig[$key]
-    if ($value -is [string] -and ($value -eq '' -or $value -in @('__USE_GLOBAL__','USE_GLOBAL'))) { continue }
-    $merged[$key] = $value
-}
+$localConfig = Read-SmartM365ScriptConfiguration -Path (Join-Path $PSScriptRoot "$script:ScriptName.local.json") -AsHashtable
+$merged = ConvertTo-SmartM365Hashtable -InputObject (Merge-SmartM365Configuration -EffectiveConfig $script:EffectiveConfig -LocalConfig $localConfig -Mode Evidence)
 if ($null -eq $merged['EnableSharePointUpload']) { $merged['EnableSharePointUpload'] = $true }
 $script:EffectiveConfig = [pscustomobject]$merged
 $global:SmartM365GlobalConfig = $script:EffectiveConfig
 $global:EnableSharePointUpload = [bool]$merged['EnableSharePointUpload'] -and -not $ValidateOnly -and $MaxItems -eq 0
 
 function Get-InventoryConfigValue {
-    param([string]$Name, $DefaultValue = $null)
-    $property = $script:EffectiveConfig.PSObject.Properties[$Name]
-    if ($null -eq $property -or $null -eq $property.Value) { return $DefaultValue }
-    $value = $property.Value
-    if ($value -is [string] -and ($value -in @('', '__USE_GLOBAL__', 'USE_GLOBAL'))) { return $DefaultValue }
-    if ($value -isnot [string]) { return $value }
-    return Resolve-InventoryConfigTokens -Value $value -Name $Name
+    param([Parameter(Mandatory)][string]$Name, [AllowNull()]$DefaultValue = $null)
+    Get-SmartM365ConfigurationValue -Name $Name -EffectiveConfig $script:EffectiveConfig -DefaultValue $DefaultValue -Strict
 }
 
 function Resolve-InventoryConfigTokens {
     param([string]$Value, [string]$Name)
-    $resolved = $Value
-    for ($pass = 0; $pass -lt 10; $pass++) {
-        $tokens = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
-        if ($tokens.Count -eq 0) { break }
-        $previous = $resolved
-        foreach ($token in $tokens) {
-            $property = $script:EffectiveConfig.PSObject.Properties[$token.Groups['Name'].Value]
-            if ($null -eq $property -or $null -eq $property.Value) { throw "Unresolved configuration value: $Name" }
-            $replacement = [string]$property.Value
-            if ([string]::IsNullOrWhiteSpace($replacement) -or $replacement -in @('__USE_GLOBAL__','USE_GLOBAL')) { throw "Unresolved configuration value: $Name" }
-            $resolved = $resolved.Replace($token.Value, $replacement)
-        }
-        if ($resolved -eq $previous) { break }
-    }
-    if ($resolved -match '\{\{' -or $resolved -in @('__USE_GLOBAL__','USE_GLOBAL')) { throw "Unresolved configuration value: $Name" }
-    return $resolved
+    Resolve-SmartM365ConfigurationTokens -Value $Value -Config $script:EffectiveConfig -Strict -Name $Name
 }
 
 $global:SharePointSiteHostname = [string](Get-InventoryConfigValue 'SharePointSiteHostname' '')
@@ -635,7 +610,7 @@ function Flush-RunRows {
 }
 
 $coreManifest = Join-Path $root 'Modules\SmartM365.Core\Compatibility\WindowsPowerShell5\SmartM365-WindowsPowerShell5.psd1'
-Import-Module -Name $coreManifest -MinimumVersion '1.0.68' -ErrorAction Stop
+Import-Module -Name $coreManifest -MinimumVersion '1.0.70' -ErrorAction Stop
 . (Join-Path $root 'Modules\SmartM365.Core\SmartM365-SharePointUploadPolicy.ps1')
 $oldPolicyVariable=Get-Variable SmartM365CollectorUploadPolicies -Scope Global -ErrorAction SilentlyContinue
 $oldPolicy=if($oldPolicyVariable){@{Value=$oldPolicyVariable.Value}}else{$null}
@@ -1026,8 +1001,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCC7BqMoyGL6NKR
-# 9WOmIllbG0wO84zeK1L2+9jMlRtpKaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDHJEXoEk2PdBBt
+# pW97nYzueAUoRu8Zg3q46HSBSgory6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1160,31 +1135,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINAyEZ+2uj0VbzyEz/mR/h9C7Ee4oeJBoBiLBgH7lLKxMA0GCSqG
-# SIb3DQEBAQUABIIBgJi6Et+eUrgkl4qWnXDZYna2jk5nHa94xHAoagFeYelRJLTw
-# MznrByRcdL5e1cdxF1HqDqd5fbDSduKddHkBZD0G5Q8zmld1CyFKfqUkBO/PulF3
-# MT0SymbNIebRPhO93enyFjQ0VM7P6QmcfZtezdwBEpQWTdnzbRZIdwpj339XHPCM
-# ETyaiJGd/d/xtqd6CPQbe0aTxkBs3TlqPtsnRmhlm3pKEzhONeGRN4XDAFHSkV2Z
-# M9h/QsF37sSs/H99m6IHNjWuPCIjY4FzZoDR/hkPGBsEDZn3rAvkzVIrBALLatCp
-# dPIcs2GhzI1QaOha/Aryfd6OimIxPHbCEtPzCPasW+F+8yL+uHkq/VrpVkd3IH3z
-# 0VgEOQ0Ps2gHzSCb7Ab8eij30X7R8NghD0seM1NlLsOmeKV/obDn0lBuaGN6CXbz
-# 34WOYRuWVxKEbODWAOUt4YNMfqXmhbnrEjBzCjsZPU6UVUK/GUddjT6Fif8byJqB
-# /RxsZolRnD8yXsHCH6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBgofUhTnZhSkwowK2zG4KxW6yI3IklQXUy0PULOxF43MA0GCSqG
+# SIb3DQEBAQUABIIBgIP+3dIPYgJYS5GFIlfJOLRzlZt9Jq8wrpWSX21C42DPoT69
+# cxn3zewzKjzLmq4Mn6r0QmXg2G1SXBx5dI3JgxT08E3su762TOo1eRCT4HRTbHTn
+# XGPu6efQ7mSvHocKSyHQQoAURs60b+gDb5jJYpfyqGc0RgRsXj7vGyRtv9VdghbP
+# syRYMNiw+W9TkwKAepJHDUv4HHEXJ8BHV+ziPKzf+FRMoaJ6G/ET3/rfGHtelY/8
+# kkTt5/fhRVibzoXBnxWrPbkdk0SJLl9pEZCe/RKbsvPI5f9f5IBe2INH1LhaE+6g
+# +c9tNzfi0rEMwYqaACm8czMLnlugpZdsUJbY5y+IDueXA7RJFpDWZOtn+Gd91Zxb
+# L9YNDwYUcsRY8TPpWEcFpSnt49fD6aaybpaSmLtqZGivUiJEdyHGwlDbcqZlJcc8
+# ZvHEcSNZzWgh2k0i/TJu4YF9gya5k38FK+htUhI229abiKQm1AHrmWLftpOrawsI
+# ZM8wJZp7PJcl63kCiaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA4
-# MDVaMC8GCSqGSIb3DQEJBDEiBCC2m0skLHFf1hwaZ8c8ZymNkM5DvabCzp0wNBHA
-# M/AGuDANBgkqhkiG9w0BAQEFAASCAgCxAf+G9gDg7U8QHsX9AGlPy9QzjxoBKe9D
-# IGzJagHxSbpDa5Z/BlvhkD6MenNDzYLmqEwSHAW6dOBJ9i8mNgo6LJGDtG5imCQo
-# LOGtH3eVwXfGV99HpS6vrdaQYJwh6I5SHZpvt2EWFSqm2Bhu1ipMpdZ2oEhoX0U3
-# SdBVVwaTBid7wDSLv3zKvJRFzABNbA4km79p3H8kMPFzKOkhyQCkXJfioKGfhVPK
-# YwXFR8OGRPyAmbkuzju8r5df+cORTC0RDNjgGKmnjm5dcEJOeYAMRzYFMf1Yjq+J
-# AN10Sz+ibtTLg5lvnVWwKPjUZcrNKxA4QoCCE9j2/i/qilltOboa1bznL5KTjPXL
-# +1OKLxZtpyvwH+MgqT3ZR7lthxazUCef3jwz9Ak3WyFtBCteXo0a2+5gbSt4z7cR
-# tgG7145SHhxMVSuQybskwqvjnAh4dfElBHqnbPziB19/HV+s86eWT2RsQ6bq7yLZ
-# r3AGv5sNCBkslQqMaIaKNTOvpUDdiso2z32wzvV8XjbhnNPv/jqVFSULcxcxBuVO
-# CyqLXSM2B+6PzjWJ8C2mibu7+4Lo6qPXwQyMoxKeMIoZcPno3VM6DJ9gobLCj0oV
-# IpyA6oxT3PNeWeRE8J2pSBT9dgStwT4eGySKbmkag8Y3IsjzoyS514LUOmmQMqGr
-# 3t2BwEVbQw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
+# MzRaMC8GCSqGSIb3DQEJBDEiBCBjCHqnhe+tdDDFnUNIhn3N0bW69x3/7fhF1cil
+# 0/rOAjANBgkqhkiG9w0BAQEFAASCAgA8lEqT9WwHUBP98xfo5nzxx4Mew10rv4qF
+# fAIViOetTsMW3Ji+Qzz/aTNPrDK5BYh3umOYx8mcgJNSADrqS8DVrrUUORFUfSqK
+# Udqc/cGIJI4GKn2kVvLZSut5yK8XH7jGXEO3LepVUqh48vBfsCnX+U6Po9jrSEhw
+# Vpli2rMEXOKBAlVZFMDomyaEgyCXYB9KCXbqSNlzMR41Hbj8Hp5wBtZiGfvQRwli
+# ZtwymEcQsW50Apsk7bYdqd0OIPI5TNQB17SqDR4tBHtevx71jxOmC39G/8edrIId
+# 2pcvpkGO6CAPdRBL4BcPseZBxMlgwk8E5tnyK6IptdVDNeYKiPzCHJokeKtFgdKX
+# x0XeQvW5XPEfUM5sR9+ErPQ3IZ1jZDfVoVoc5y19OU0Gim/tQN9VVex713jIOgiL
+# cfYmTLNSJmU9saykjxp6I0dbqRJCTN5DPI9kd9LXbtoTycaaWunCku8/ibraJA0J
+# Ez6lft5+H1vOH1y3sly+mjxlX6Uu1vdFWLqCO5E2LSPQDrRl5akdwa8ZvWNGXP9u
+# QTpXc1sbLKQc36OGUjrhP4tMs5Fa+QcEXoY5BSKgdrol+2+KfXZZRInjng7a5/BM
+# vGr7Ylv24IZT+r1Gk73hdkGQJI5WW+o4/LAPlkRN7otFuznYUFtvfKiPcCy0ZJkz
+# wrtAOBNIBw==
 # SIG # End signature block

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Microsoft 365 Backup protected SharePoint site and OneDrive protection units.
 .VERSION
-1.0.6
+1.0.7
 .REQUIREMENTS
 Microsoft Graph application or delegated permission BackupRestore-Configuration.Read.All.
 #>
@@ -21,17 +21,17 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.0.6';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.0.7';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-BackupProtectionRows{
     param([object[]]$Units,[ValidateSet('SharePointSite','OneDrive')][string]$Workload,[string]$RunId,[string]$CollectedAtUtc,[switch]$KeepNonProtected)
     return @($Units|Where-Object{$KeepNonProtected-or [string](Get-SmartM365EvidenceProperty $_ @('status'))-ieq'protected'}|ForEach-Object{[pscustomobject][ordered]@{RunId=$RunId;CollectedAtUtc=$CollectedAtUtc;CollectionStatus='Observed';IsPartialInventory=$false;SourceScriptVersion=$ScriptVersion;Workload=$Workload;ProtectionUnitId=[string](Get-SmartM365EvidenceProperty $_ @('id'));DirectoryObjectId=[string](Get-SmartM365EvidenceProperty $_ @('siteId','driveId','userId'));DisplayName=[string](Get-SmartM365EvidenceProperty $_ @('siteName','displayName'));WebUrl=[string](Get-SmartM365EvidenceProperty $_ @('siteWebUrl','webUrl'));Email=[string](Get-SmartM365EvidenceProperty $_ @('email'));Status=[string](Get-SmartM365EvidenceProperty $_ @('status'));CreatedDateTime=[string](Get-SmartM365EvidenceProperty $_ @('createdDateTime'));LastModifiedDateTime=[string](Get-SmartM365EvidenceProperty $_ @('lastModifiedDateTime'));RawIdentityJson=ConvertTo-SmartM365EvidenceJson $_}})
 }
-if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -Force;$test=ConvertTo-BackupProtectionRows @([pscustomobject]@{id='1';siteId='s';status='protected'},[pscustomobject]@{id='2';status='unprotected'}) SharePointSite r n;if($test.Count-ne 1 -or $test[0].DirectoryObjectId-ne's'){throw 'Backup protection self-test failed.'};'PASS: Backup sites and drives offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
+if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.23' -Force;$test=ConvertTo-BackupProtectionRows @([pscustomobject]@{id='1';siteId='s';status='protected'},[pscustomobject]@{id='2';status='unprotected'}) SharePointSite r n;if($test.Count-ne 1 -or $test[0].DirectoryObjectId-ne's'){throw 'Backup protection self-test failed.'};'PASS: Backup sites and drives offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1';. $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.23' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'M365\Backup\ProtectedSitesAndDrives' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest) -ScopeParameters @{IncludeNonProtected=$IncludeNonProtected}
     Connect-SmartM365EvidenceGraph $script:Runtime @('BackupRestore-Configuration.Read.All') -InteractiveAuth:$InteractiveAuth
@@ -66,8 +66,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAYFJCORefmQ49a
-# znGKP9qZEdBEUKwaZI6zWn8pq05xiqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBBe+Vaa8K2y0pD
+# kTJ5138bgy9p+cT6blUQW0O+MOF2maCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -200,31 +200,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJBt/z42MP8T1YJJos9std+SPIn21bkWMp/E3oreOdtzMA0GCSqG
-# SIb3DQEBAQUABIIBgHqjhlGAUU7ty3L3Qc1KB0j21QrE5Oi5ZzjpZJPPA/pGNIY7
-# ruQ7iQnbFeD1OBD3vr9TK4Yw+ZGnXhGV5UhjMzwYbVCJ1ncr5ed1cEtO/XtIJTcT
-# ADNbEtJ7w8hDuyKnmanZpezBTSP3QvF19w67W6tfM0TvX5H7qmuS9ksYeYy5qp3D
-# 8fEfIB3XpTbu5eh3L2PpNNXIQWd+uYfyrhCNSNSRy+BQoMwiMMTYyW3f8ltrAlCf
-# Ekn1TmNJaMpbrmlc0I6nvzTb0sKaoZ9rAhSLz0voAOJRYwBHfMyf5HgAFPr+K22s
-# BctZpdMdaqjh0WP+6/Lrmhh9mtcF+7/m4sZOnVYsQrpPUwOwzDbz5Xiaq92o6nv8
-# 4kQm9DSZrGwXKpreYTWOLVT24apNITTEpiFWzY93GJYH763YiqO+tjITOhRtYnRS
-# T7CPmAaxMxICuN8FlqWqH2de8+yvJKsR0GQ+st7/OR5hB25Dl5VDOWaVgvkDL8ZD
-# J82ojyLX1tIPEPBXeKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIElEIiwtpvYHRozyGwDqTqHEQ6nguIKXWS2MZd++cJ56MA0GCSqG
+# SIb3DQEBAQUABIIBgEA5Uc2N1Px6vRVkNB1k9NH+LgkdM3MGp8Ei2A20xdakKWSJ
+# vNaJ1Iqu+GMYtqePuRgX5QfgegFiE03kuHcMu/hTxfjhtlbN8MUVc/IorCeRwoAg
+# VxPA+4MFqUqCMRyDJZBPuJ3pIi9wwJpcyjhswixyQVZeyXjXCgOp9eDJUrovDNkW
+# x1kQCPbkv6WcBqVp1K0wSIHn/ns08zAXUHip58wxdY5W8rPWjImf1n651pl7p9zj
+# v5W/njx1N9W1CXsn5DFBAj+Eh2wONoNWCCYkE0Ar4soZjTYZwHltSINaX8sAjhSI
+# 3nHelpNfuNrVA2xs1dXfhKTcxoc67n5m0CEKdYwy94R3att/zWG9cJ8WUaSC8e1U
+# oqBtwi3rg7EDV11DetCZczNuOJ9Cm5CMR4dcQ8tMlTN8ARsyd8Be/eGgTuwcyq1n
+# c6IwQXahBzRbDE/u7f8IWbST9hjc9cpSsKMiCUoXHBvYYcPvAzOghCmLB38Ttw1S
+# h79ubtizrAALhGKqRqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
-# MThaMC8GCSqGSIb3DQEJBDEiBCDa3yfoUEhBsf+JCSLiOjxVvMkWhipqaYJkBWFs
-# RSNHOzANBgkqhkiG9w0BAQEFAASCAgCCx18k2l2Qv3FvwlRVOyrzzNI6mP1lEQ5t
-# ieRf7MSMwXACgh47MaPiw1ktGuVFeNmtqv0yWYqqwnBj5di23pj8jYCKoEduwFg5
-# MAgfT1hdIUc9+gdkiLrzP69HORtfmfeo5GTuQILoMlpgkHVlkzGjs9hWZ8oTvMY3
-# OhIEQJ5YnLcng4s4r9yYyWsPiu+xriSTA/ciMIc8D0uI9CNVy1id806d1aVdkg7/
-# RJdbJkSDaxrOOV16l3Kn/QeRbexGBGyLRpkThrn//6r+7XGQWTgQWIcEhRgD5MJw
-# VNkukuHFZFTL+UTKgzg+2SrlbZKWhZEr7OpTgfIlwIuEsLU82G7FYn6J2/KhkUBz
-# PHQOFAaX3edq59OQcmscTrygspUAxv7UL0+wuK3utUPaawUAR8JV9npdgXQvpevR
-# nzvxff6xCEX09ah9W11oVimXuwWle/0jcIK8CyGghbuI7uSGzLYEIxuNkMxNKV0K
-# SvzQbiHjWQ7kKfeEBtrQjJJm0Vc/4/nMohty2P/PB51wkM0hnQVKLCH3/ELEXamP
-# 3MFgoSZe5b5PP1tpCi/eYx6KLhvrFwe00F10qSovF8cPDQjvRymjXNeOatPF7K5c
-# xZ5xwwqYgg49d5IKsmYesy6tuq5Nc0t2l19do9I4tMvA3zBsTujlgFkkee9rBNdp
-# xIBpQXkNTA==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
+# MjVaMC8GCSqGSIb3DQEJBDEiBCAq2nQQvOmIfNBRKHRDM3dwN5UAjBdHRdQuOe+H
+# r9uMUjANBgkqhkiG9w0BAQEFAASCAgA/pB9zp0UOFegHRzsOc2SVc/CMoLKoIzbm
+# 8RqpMqDVR5bQrPEZJMQk+h8PB1rGgOzW1QaOjqbB+o8xEYbq2myW7mLa32vs4Yut
+# aMphBC50KN/wvwsLVETc32JHVJYM/Ya9zzrIUic6mP/WEphRk/TIVJkXq7BaMR9R
+# l9B7T92Ffw7Z0OnHgaqu72r2rI4XXVrJcmreED8VX8SMMWjX11/gTvUWeZti48h0
+# R01AjPHG7u2Nz6ZWSXKzdTlZfjmcVUfjeacmC1WEtIQVP90pGnZwhc6Gr6oeoYAv
+# 0mI8xmi7+V8T6aglfItrRS+O1fcq5qjjR/fGJKx2f65TwamYoBeQDq+ZTH13afvu
+# GtHPSfLwyniQY+aQrjsRqDPGmedRYpEXntLm/Kmf6aDoE8vyQvF7a0A0nilnOUtz
+# kvkwF1xP+LjbVWXdStN7YyB1guF7ekPnXqzSBgZncWWLPzbnC8TpvFy+aGUZmNGT
+# gBD395gJeBA95SwWCA3KC3mIqi4DgMRl92fTWRmCpwOCEzXeGTLfMGe5/ZPoyNI5
+# E2Sf6kW++KQqpOaB4KaLt1G/Fsl5aDptAjUzApwHx1ZzyS3+5ymHgrnIP5ql2ws8
+# FJcXuoMqGEf1+6AhneXjP3tXLaDCoS/wOpOiEFIE0loi4C4C7Vd8ybqE8OiJ1RHa
+# jDD90O6a4g==
 # SIG # End signature block

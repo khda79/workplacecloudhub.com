@@ -58,7 +58,7 @@
     Uses delegated interactive Graph authentication instead of app-only certificate authentication.
 
 .VERSION
-0.46
+0.47
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; ImportExcel. PnP.PowerShell enables tenant capacity collection and optional sharing scans.
@@ -128,7 +128,7 @@ Set-StrictMode -Version Latest
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 $ErrorActionPreference = 'Stop'
 $MaximumFunctionCount = 32768
-$ScriptVersion = "0.46"
+$ScriptVersion = "0.47"
 $TenantCapacityEnabled = -not [bool]$SkipPnPTenantCapacity -and ([bool]$UsePnPTenantCapacity -or [bool](Get-Module -ListAvailable PnP.PowerShell | Select-Object -First 1))
 $CurrentOperation = 'Initialize'
 
@@ -159,7 +159,7 @@ function Import-SmartM365CoreModule {
     $searchRoot = $PSScriptRoot
     while ($searchRoot) {
         $candidate = Join-Path -Path $searchRoot -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.119' -Force -ErrorAction Stop; return }
+        if (Test-Path -LiteralPath $candidate) { Import-Module -Name $candidate -MinimumVersion '1.0.121' -Force -ErrorAction Stop; return }
         $parent = Split-Path -Path $searchRoot -Parent
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $searchRoot) { break }
         $searchRoot = $parent
@@ -167,52 +167,24 @@ function Import-SmartM365CoreModule {
     throw 'SmartM365.Core module manifest not found.'
 }
 
-function Get-SmartM365GlobalConfig { if ($null -ne $script:SmartM365GlobalConfig) { return $script:SmartM365GlobalConfig }; $script:SmartM365GlobalConfig = [pscustomobject]@{}; return $script:SmartM365GlobalConfig }
+function Get-SmartM365GlobalConfig {
+    param()
+    return $script:SmartM365GlobalConfig
+}
 
 function Resolve-SmartM365ConfigValue {
     param([AllowNull()]$Value)
-    if ($Value -isnot [string] -or [string]::IsNullOrWhiteSpace($Value) -or $Value -notmatch '\{\{[^}]+\}\}') { return $Value }
-    $globalConfig = Get-SmartM365GlobalConfig
-    $resolved = $Value
-    for ($i = 0; $i -lt 10; $i++) {
-        $tokenMatches = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
-        if ($tokenMatches.Count -eq 0) { break }
-        $changed = $false
-        foreach ($match in $tokenMatches) {
-            $tokenProperty = $globalConfig.PSObject.Properties[$match.Groups['Name'].Value]
-            if ($null -eq $tokenProperty -or $null -eq $tokenProperty.Value) { continue }
-            $tokenValue = Resolve-SmartM365ConfigValue -Value $tokenProperty.Value
-            if ($null -eq $tokenValue) { continue }
-            $resolved = $resolved.Replace($match.Value, [string]$tokenValue)
-            $changed = $true
-        }
-        if (-not $changed) { break }
-    }
-    return $resolved
+    Resolve-SmartM365ConfigurationTokens -Value $Value -Config $script:SmartM365GlobalConfig
 }
 
 function Get-ScriptLocalConfig {
-    $configPath = Join-Path -Path $PSScriptRoot -ChildPath ("{0}.local.json" -f [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)); $configPath = Resolve-SmartM365JsonConfigurationPath -Path $configPath
-    if (-not (Test-Path -LiteralPath $configPath)) {
-        $templatePath = (Get-SmartM365JsonTemplateName -Path $configPath)
-        if (Get-Command Initialize-SmartM365LocalJsonFromTemplate -ErrorAction SilentlyContinue) { Initialize-SmartM365LocalJsonFromTemplate -Path $configPath -TemplatePath $templatePath -ConfigDescription 'script local configuration' | Out-Null }
-        else { if (-not (Test-Path -LiteralPath $templatePath)) { throw "Missing local config and template: $configPath" }; Write-SmartM365JsonBytesAtomically -Path $configPath -Bytes ([IO.File]::ReadAllBytes($templatePath)) -ExpectedSHA256 'ABSENT' -Validate {param($document) if($document -isnot [pscustomobject]){throw 'Configuration template must be an object.'}} | Out-Null }
-    }
-    $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-    return (Sync-SmartM365JsonConfigWithTemplate -Config $config -Path $configPath -TemplatePath (Get-SmartM365JsonTemplateName -Path $configPath))
+    param()
+    Read-SmartM365ScriptConfiguration -ScriptPath $PSCommandPath
 }
 
 function Get-ScriptLocalConfigValue {
-    param([Parameter(Mandatory)]$Config,[Parameter(Mandatory)][string]$Name,$DefaultValue)
-    $property = $Config.PSObject.Properties[$Name]
-    if ($null -ne $property -and $null -ne $property.Value) {
-        if ($property.Value -is [string]) { $localValue = $property.Value.Trim(); if ($localValue -and $localValue -notin @('__USE_GLOBAL__','USE_GLOBAL')) { return Resolve-SmartM365ConfigValue -Value $property.Value } }
-        else { return Resolve-SmartM365ConfigValue -Value $property.Value }
-    }
-    $globalConfig = Get-SmartM365GlobalConfig
-    $globalProperty = $globalConfig.PSObject.Properties[$Name]
-    if ($null -ne $globalProperty -and $null -ne $globalProperty.Value) { if ($globalProperty.Value -is [string] -and [string]::IsNullOrWhiteSpace($globalProperty.Value)) { return $DefaultValue }; return Resolve-SmartM365ConfigValue -Value $globalProperty.Value }
-    return $DefaultValue
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$Name, [AllowNull()]$DefaultValue = $null)
+    Get-SmartM365ConfigurationValue -Name $Name -LocalConfig $Config -EffectiveConfig $script:SmartM365GlobalConfig -DefaultValue $DefaultValue -EffectiveFallback Blank
 }
 
 function Write-SpoLog { param([Parameter(Mandatory)][string]$Message,[ValidateSet('INFO','SUCCESS','WARNING','ERROR')][string]$Level='INFO') if (Get-Command WriteLog -ErrorAction SilentlyContinue) { WriteLog -Message $Message -Level $Level; return }; Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [$Level] $Message" }
@@ -1703,8 +1675,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBuAHwv4PhrQhTe
-# 1z7t2f61tv3ON02h9gQIh1naKopjwKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA7RhB17ojI7/pX
+# 9OE8XWp7nNRB01Z6n2ygUNfYcrlV9qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1837,31 +1809,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEQKeltgDfXzByanfUa5pueJ5bdVPOcqmcr8kOygtYk8MA0GCSqG
-# SIb3DQEBAQUABIIBgGRUm/p8XT/vYHHLHZ88+6zs326j4bEtSUdk9ESwX8WTev2j
-# 4M4ahzzPbRZJVYNk0+JYsU+ZfBrqGB67aqI5Wyert3Bn65UMZ6Gdc/decQeis47L
-# ZPYmLxqTbSt0nPuIRvB9DeuygVBGxtcbaL1gmXF1RjWQ8pcQO2nut6vw1M6G2E6F
-# 7VAR/lq0UeNjhGKKSu7FJcyvijetNMv8XT6Ql8UjqfVI03ab7CdL9IH7cnAygXvq
-# yh1OW0EK2rGGo0eDcK+UvYVhMqvQ3VXG+fw5MhxXV7VOpYA3i9ADBlxufFZfTfko
-# d4Iqfjf4L+qAl2Imbq056v1BkR/REevudgZ4eQae8AmDo0KXpG2+Qatp2KxdRzyO
-# 28baLoHari8X9EE+NiOi1DJ1kmk5pIHNOWCWflEJVah8+HrlwIJkDusGiySTVrRz
-# 45l9inLl2im1NqVshlgCaPWZKUMVmYGjaR9HSnlX623OtjDk/LzuAnyghiBQ8+hY
-# h9D9iC1+ieDLW/9TfaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIA+8IjxJLhqRIkJuYYTKpqzdKK0W2mgDu0g+MEjiw0QrMA0GCSqG
+# SIb3DQEBAQUABIIBgJBuZYyV+M+AhfXxALBMKGAVCguA2qW/7yoyvkPGPiLZXCLG
+# V0BUNsFTxr5QBijVvywdBvVg8u1TIPJqU1PGak//EWqGby/kDc0aBJNRc/iy0Med
+# KH7j5L/GG4zbIRpd/Wi8yg4MMXDZkMl0x3by4qtr4l88Z6Eip0Ft9zi2V0r2UP5S
+# M4FvE7zxlf+KGBAAz199fB86QAEuOYfXDd938eMwftGfl0ulvQmL6PagGnbsDKjD
+# YQzFudzami0JzOGQE7pASq8vnC0cMpNg6lG5u3c4ouduB32h2yXIUuU7gRB8wL15
+# unrypaycqRh6R2tVqfZj7zps6GF3Lz19UDFCAYEtb9MQvPJs1r28kyw+gyGQOZZU
+# zqlCa49vVHpMwXIxOp19mJzZj1hkmKmZoH6O7mkU7tViWFV8MbXd4K38RKuPjT/j
+# pfzXMP9ngikabx/Q7UYtvaweqdPB8Ekm6LQ7KVKUrKNVY1rnP+NE2bPtTaoL78Xw
+# Zp+zExZgH6fO8vW6GKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
-# NTZaMC8GCSqGSIb3DQEJBDEiBCCBitBa1veOPCPH/8UoCLNcfjHJXpqcLCQ/JTGZ
-# RqDzJzANBgkqhkiG9w0BAQEFAASCAgCjp+m2euNLEuB9ZifSxFjdzQgCSjQKP28+
-# gQWhp6qd3M4ujB88bjOFkL38F83087dFZxk9INL1OWDWzDyu2CSrYH5O2nllvS43
-# dSpCUiTKXQaVWnIcyNeOzxVVQAejYYsaXm4shkI72AwLuXgqYdYyjHs5v4vm8ViY
-# dvnJHlKsXcentcDfGrpbrJasYhPunf4737DRTD/tNXkoZa0JaGNWwJNIt1GSYAAo
-# Npvg0BkULX6NlXGqA55na5Z6HwVrIImiV6sYFW1lIfs9dmtu3AVcOTAqGB3r4edh
-# D9X1Q/pqsYWoN0pQ4SOor4YmyyZMXrXYiA1s79tBf+LHCUIGm1p/pm5/DaWQXSfb
-# QMeCwHKIBF58R9GpPRj2FGIHcLVI4UX74LHJ9jxaF/3M4p0ivMmsXB9vLM+/L5Vo
-# NQvjSsHyKKs2KIm5LciC7JI0zChQWyT2qVuK7tB75cHjreIMoRqMHwE+jsuVXGAd
-# 5SwZlkJozAT9mD9ZxpYHv3mX6LoH90XxGtsLU2m47ndI5SFhGfWUk/tLDuscJhlO
-# N761dNFHFgclFeWiNPPibyGpH+yQQ2GvZiiq7x1B5AAq5eG9gG2dAOiZcgvBXdNS
-# 0IA6fMUwG3AqJV/FZPNeH6O/K1EEoFVd9BMLYVhGxbWyPGQRiWQH8qMa9EEz04ls
-# d4NME/0lSw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
+# MzFaMC8GCSqGSIb3DQEJBDEiBCDV5IPwLYQHt28Ts4dsd3v1oG8knYLwxQnfDG08
+# Vy/ZRTANBgkqhkiG9w0BAQEFAASCAgCpiEXNvQ+LkVRfQjFpys0vaKqOfMBDsBhd
+# 8oJjP3AxnqN1dov+xyckWocEZEMZnDHZNiU6n53BmKD69sd4p02ki3w+NONPcYPg
+# SDEy+m70yxSdxw3EkuC1dG8D8KZya2o6H9g55ruviuEN76rj1oAnWY4mgJhPbDL3
+# 7l1nWaI9/ytdx+5IHoARmjrjFpfWxP5Y8NeYtNumllVcCn/+9WHlPhAbU9emOfvf
+# i8hYGZGjso/K//SqFSLQ7x4XEgmK65zu7GNTvm+wLLDY2mj9qIJpsD1wGJqsWblr
+# 42MH/CbdSTu6f6g4o6hOtnXU2AaJ2TAPCGXVJjuVD6WnQlh5YgXSlv0W73xmvsSa
+# 7DBAltMBN4fqZyMrfLZ15wI2PDgTPj1JghyNbIN/Y0Cl/uCpG92tMPMTvkFzpyeM
+# 0jj3BYs1Wf+CuKRefEiwmAkixfi/6LfN/u0aDgSP9yXIYCiGuTC+M5Rn+9rFyduc
+# kN8XxOg54vmBXxO6iBBGqshLQjBSrclZzie2t3hbfEXhBSPZLu0RffjzI1iT9ITj
+# FKcHmgbqum0hFP0H3EdiptPcnj9HG1rgzg086pVe7UAMYYx0cGVnnNWvDkgnxVH1
+# hk843NuUHQ1+CIu8XHs8wq5qCoApb5YBN/gETvhRF4pgWa3/lPF768nSEeOSqPvP
+# F1D/vCnJOQ==
 # SIG # End signature block

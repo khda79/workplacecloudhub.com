@@ -1,4 +1,5 @@
-﻿Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.1.0' -Global -ErrorAction Stop
+﻿. (Join-Path $PSScriptRoot '../../Config/SmartM365-TenantContext.ps1')
+Import-Module (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365.JsonTransport.psd1') -MinimumVersion '1.1.0' -Global -ErrorAction Stop
 . (Join-Path $PSScriptRoot '../../Modules/SmartM365.Core/SmartM365-SharePointUploadPolicy.ps1')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -30,61 +31,14 @@ function ConvertTo-SmartM365EvidenceJson {
 }
 
 function Resolve-SmartM365EvidenceToken {
-    param([AllowNull()]$Value,[Parameter(Mandatory)]$EffectiveConfig)
-    if ($Value -isnot [string]) { return $Value }
-    $resolved = [string]$Value
-    for ($iteration=0; $iteration -lt 10; $iteration++) {
-        $tokenMatches = [regex]::Matches($resolved,'\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
-        if ($tokenMatches.Count -eq 0) { break }
-        $changed = $false
-        foreach ($match in $tokenMatches) {
-            $property = $EffectiveConfig.PSObject.Properties[$match.Groups['Name'].Value]
-            if ($null -eq $property -or $null -eq $property.Value) { continue }
-            $resolved = $resolved.Replace($match.Value,[string]$property.Value)
-            $changed = $true
-        }
-        if (-not $changed) { break }
-    }
-    return $resolved
+    param([AllowNull()]$Value, [Parameter(Mandatory)]$EffectiveConfig)
+    Resolve-SmartM365ConfigurationTokens -Value $Value -Config $EffectiveConfig
 }
 
 function Get-SmartM365EvidenceConfig {
-    param(
-        [Parameter(Mandatory)][string]$ScriptPath,
-        [Parameter(Mandatory)]$EffectiveConfig
-    )
-    $base = [System.IO.Path]::GetFileNameWithoutExtension($ScriptPath)
-    $folder = Split-Path -Path $ScriptPath -Parent
-    $localPath = Join-Path $folder "$base.local.json"; $localPath = Resolve-SmartM365JsonConfigurationPath -Path $localPath
-    $sourcePath = $localPath
-    if (-not (Test-Path -LiteralPath $localPath -PathType Leaf -ErrorAction Stop)) {
-        # Templates stay next to the script when SmartInventoryConfigRootPath relocates the private file.
-        $names = Get-SmartM365JsonNames -Path (ConvertFrom-SmartM365InventoryConfigLocation -Path $localPath)
-        $templatePaths = @(($names.Preferred + '.template'), (Get-SmartM365JsonTemplateName -Path $localPath))
-        $sourcePath = $null
-        foreach ($candidate in $templatePaths) {
-            if (Test-Path -LiteralPath $candidate -ErrorAction Stop) {
-                if (-not (Test-Path -LiteralPath $candidate -PathType Leaf -ErrorAction Stop)) {
-                    throw "Collector configuration template is not a file: $candidate"
-                }
-                $sourcePath = $candidate
-                break
-            }
-        }
-        if ($null -eq $sourcePath) { throw "Collector configuration templates not found: $($templatePaths -join '; ')" }
-    }
-    # A malformed preferred file must fail, never silently select older configuration.
-    $local = Get-Content -LiteralPath $sourcePath -Raw | ConvertFrom-Json -NoEnumerate -ErrorAction Stop
-    if ($local -isnot [System.Management.Automation.PSCustomObject]) { throw "Collector configuration must be a JSON object: $sourcePath" }
-    $result = [ordered]@{}
-    foreach ($property in $EffectiveConfig.PSObject.Properties) { $result[$property.Name] = $property.Value }
-    foreach ($property in $local.PSObject.Properties) {
-        if ($property.Name -match '^EnableSharePointUpload(DataAll|DataLast|DataPowerBI|LogAll)$' -and $null -eq $property.Value) { continue }
-        if ($property.Value -is [string] -and $property.Value.Trim() -in @('','__USE_GLOBAL__','USE_GLOBAL')) { continue }
-        $result[$property.Name] = Resolve-SmartM365EvidenceToken -Value $property.Value -EffectiveConfig ([pscustomobject]$result)
-    }
-    foreach ($key in @($result.Keys)) { $result[$key] = Resolve-SmartM365EvidenceToken -Value $result[$key] -EffectiveConfig ([pscustomobject]$result) }
-    return [pscustomobject]$result
+    param([Parameter(Mandatory)][string]$ScriptPath, [Parameter(Mandatory)]$EffectiveConfig)
+    $local = Read-SmartM365ScriptConfiguration -ScriptPath $ScriptPath -MissingPolicy Template
+    Merge-SmartM365Configuration -EffectiveConfig $EffectiveConfig -LocalConfig $local -Mode Evidence -ResolveTokens
 }
 
 function Initialize-SmartM365EvidenceRuntime {
@@ -101,7 +55,7 @@ function Initialize-SmartM365EvidenceRuntime {
     $root = [string](Get-SmartM365EvidenceProperty $EffectiveConfig @('SmartM365RootPath'))
     $coreManifest = Join-Path $root 'Modules\SmartM365.Core\SmartM365.Core.psd1'
     # Keep receipt exports visible to the caller and preserve the loaded Core context.
-    Import-Module -Name $coreManifest -MinimumVersion '1.0.119' -Global -ErrorAction Stop
+    Import-Module -Name $coreManifest -MinimumVersion '1.0.121' -Global -ErrorAction Stop
     $dataAllRoot = [string](Get-SmartM365EvidenceProperty $config @('DataAllRootPath'))
     $resolvedOutput = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath } elseif (-not [string]::IsNullOrWhiteSpace([string](Get-SmartM365EvidenceProperty $config @('ScriptCsvLogFolderPath')))) { [string](Get-SmartM365EvidenceProperty $config @('ScriptCsvLogFolderPath')) } else { Join-Path $dataAllRoot $DefaultOutputRelativePath }
     $resolvedLatest = if (-not [string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { $LatestCsvFolderPath } else { [string](Get-SmartM365EvidenceProperty $config @('LatestCsvFolderPath')) }
@@ -409,8 +363,8 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDX6zpEAFPPhrIt
-# r4MqS6oMh+mtDXSWa4vIUnb4G4TbmaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDKS1rG0FR11YEu
+# Z7UB34jvN48GgCoWA3ZeloIV0fpNTKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -543,31 +497,31 @@ Export-ModuleMember -Function Get-SmartM365EvidenceProperty,ConvertTo-SmartM365E
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIG+rnxgqIQloXbZ3BR6UzfFpZeEGKSXKwrF/ho6ktQaVMA0GCSqG
-# SIb3DQEBAQUABIIBgHs0f7nxhlBjmBzOI5pIfRznpkGlrote+dNyrMOVgFGLA/2P
-# fnSPtAqZAXC7s1ySt2nqSdTdflEPHTcljvciF2yaer2St0baikcsO2jQftciqnyQ
-# QGuvTrfmHeRBn0SxMexV5wIyqFiXwqWUOUKLATKUUUadrqeAW0RCCcc9vCaswAH4
-# 09qLEJ/Blx7Ic+XWXheuUUh2Shuxeqs3+U7MKTZotNrsMWP/781qo3esAkYP07Kd
-# EAooor1wyiCr7/nTFhH+2UP1hiBCJe10jsJ95THQy9861EntLH3epdsWfoMCbTw9
-# fh1iLfGFsfFVNYiAT3P/5s14BQiLUlphc4Wzts4XnX/dw2OYKae95eyMRVRyHrF8
-# 23ZES3BOC5pg7gGLPesLTev53YlFVb1ZojgGbW/6WTtsj+UJjvhafi7GJsgrA29q
-# dOeAsWUbmU4E07AA/g0nnmMuEmbsYd91FXqprVSf2HPd+oTnVmLs5FcaWDFCuU1y
-# 7IiYQRVlE0xegw6JYKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMTXJBpk1s4GGHptKOMY0vCIBSd0o2Sidzd3VwxWgc/MMA0GCSqG
+# SIb3DQEBAQUABIIBgKQ83Cx9R147oORP3Tnxix5tk+ZrGVIQrowuI6gXQWpYdVK1
+# kdQt3y6H1kgaOSOjaEVYBfNQFy0fpQcSVh9xu4Da+n/FlMt6LIoKqPy8kh2AN4MZ
+# ceGkLkf5fsu5Zplqf7Y9oN+Z7rhVeJZB2tAYn3Iv1ySIwG2wsF/Du7WIztEZrcpO
+# xdyCbeaZ9VS9lwGHXV51zpeS0vCbEVAOmo0TxrF7cSM3av9Z4e5zNXJtTQJXM/ka
+# cc/Z6XEzIIo5sTe+RG9PL/w1B85X6E12x1LhSw0ULz4YXGkfEZbFadkqpjYz0zGP
+# g1dNEuAkse/T25f/66/cnS+NO0m3brucCiR0MVhcuQKVw6F9e5UhXURF6hhgG1Aq
+# 3faO34iFlZA4U3/Fmf5GPYjoUrKag69ox9JuwHtjB0V59JE32+oH7eLm1C5+ujE/
+# 55fo6I5SqeW+ET1HVgogYBqfgrhAoONxQZy2ZPGlO5cOQjtY1uIvUHZLJVOGBYfs
+# +3qC+wdSo1pWAN+8YKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
-# MTdaMC8GCSqGSIb3DQEJBDEiBCCNdcEQxkLoqccT6vIPB9yRgJEU9JKDklyMuRIX
-# wHgnNDANBgkqhkiG9w0BAQEFAASCAgAi8qDX+e+cQWSMFV2MbXyHMOvup7IG0nWq
-# qs7eigxUATp731wAJsnzN+LiUijQt07RNwwYqkbRGWP/l4c2nHGeR0844wWtJNdm
-# ivPuiTkQ0MtRrHkETLr0kFtPQ1rIA67FtjsvO9S6Iha3vho3GBE9w0OogSBHorzO
-# 6tnDOQhRiDJNgjdnRhpnc1FQosK5Xkidq8vs4f10Bo655i1nI8mKqDzK3dovS5AU
-# pMusEL8vKVlboKY4mXIHse+ryoHA+vl0wyul1HLPkf9u2jiI8BGe8qyeTkiGBQL5
-# wJAeV0ZmDFjp/NKrS1Zz28E0apJ9b5aGXGhNLpr6vfVUUJnnyN1ihDCtAPdDBBYC
-# iXokMShCznCbwsAElaFS+etA0cWGYClJWYXaElY8FQToToand5ROZ6Un9b5S2k32
-# gqGzKBz594zUlPP0Frc3IoiGQmGGVf6Yu6J5A3JPcQxehWOwI/PQpVf92O1C8tjs
-# b5YJrtslfTAblLICj7HcLMjSH264pI9mDW0Aiy7Yg5rIqQjE12oYpxjTtODcjbSH
-# O2MpTBSA2LYj07ojHf7sJEkNFAJX7VOcyJ74Y6Gt88WvK6fb6ely1H129DuzEkJT
-# veUGMZ1J+V9NNeozkRQ9WtLjGQKFVH4oyET/p8s0T+vO01pbDZk4YUYN8JMRdA+e
-# DxkJnEd//A==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
+# MjRaMC8GCSqGSIb3DQEJBDEiBCCDk3Lu+2yC5KJLmCiB7hYlAxG2HZP9gec2m6HV
+# YHrx/jANBgkqhkiG9w0BAQEFAASCAgAi24mzmlNozZgOJX197q3xNkK4yDpFRxM8
+# 4IKcRZhy2Utwu5f2ClP7g+ffcpwz2Rz16z5LuFwJbWNtqeoNtQB1QkGNTM42E3E+
+# 9fEusTlbUrXLomfNWYthLYNhFbEC3AeEaf8LJa8zJmHhHeTp+PS0siJM894ZqXi5
+# v98Ol2N404TG6AfZgavDrUTIolbfRL9z807WvvGpnb38lelkCQSitDLqpgB+jU5t
+# DiLPSmLCikH5iWIkj+96d6OeK1B8M7JPD/Rnz3FCJlasdQFmgXYpGXDbsbfLHf/k
+# v+wOfpuqQc/lLSKlre209HSGryBpJG8uPkHv0irQjGcjHQ48jWt2dPfZLrL8ql2P
+# TyAd5WlakvS8PjqEqdoSE+6QjcgTtIYIFm1c8NZ2aPq4mM1Y5b6tTXzCyzyBMbhp
+# u+z6N64tnrkQ/1z7X3pglYAESdsqbvui81MJyyBQRqWBpymOS/licBpbIX2b1oS2
+# 0nQQnqpk10tjRVAXHsJiNaU0xTgMwv0gCbkA75jBgiZZU/95BKBjMeLHbe6VKJ56
+# LUQfdc+tED9rJr3T9VC+ZfObUZhhzKIdo+1eCAbXuYs8zaW5ZoAlCLUom9NJXc4k
+# QcBArsJKbxPQ2MtVa2XdYkTx7Gy1wuytL0v9uVIdj6/o4/lyYwSDrzK+SWRc5qco
+# e8+Q0ecGSQ==
 # SIG # End signature block

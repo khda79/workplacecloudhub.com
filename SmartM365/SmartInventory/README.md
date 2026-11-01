@@ -4,6 +4,11 @@ Inventory scripts that can feed Power BI datasets, operational reports, CSV expo
 
 ## Reliability and distribution
 
+Configuration loading is shared by all 51 publication collectors, the inventory
+orchestrator, WorkplaceEvidence Prepare, and its retention entry point. See
+[the configuration contract](CONFIGURATION.md) for precedence, relocated private
+files, compatibility rules, and offline verification.
+
 SmartInventory is a collection of independently versioned scripts and shared
 modules; this README does not assign a suite version or stable qualification.
 Shared CSV persistence, distributed orchestration, Graph collection and the

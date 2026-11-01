@@ -2,7 +2,7 @@
 .SYNOPSIS
 Verifies SharePoint configuration keys and inheritance without tenant access.
 .VERSION
-1.0.3
+1.0.4
 #>
 [CmdletBinding()]
 param()
@@ -49,9 +49,10 @@ foreach($relative in @(
     if($errors.Count){throw "Exchange collector parser failed: $relative"}
     $node=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Merge-SmartM365ScriptLocalConfig'},$true)
     if(-not $node){throw "Local merge missing: $relative"}
-    $testModule=New-Module -ScriptBlock ([scriptblock]::Create($node.Extent.Text))
+    $helpers = $tenantAst.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -in @('Get-SmartM365ConfigurationProperty','Test-SmartM365ConfigurationInheritance','Merge-SmartM365Configuration')},$true)
+    $testModule=New-Module -ScriptBlock ([scriptblock]::Create((($helpers.Extent.Text -join "`n") + "`n" + $node.Extent.Text)))
     $passed=& $testModule {
-        function Read-SmartM365JsonConfig {param($Path,[switch]$Required) return $script:FakeLocal}
+        function Read-SmartM365ScriptConfiguration {param($ConfigurationPath) return $script:FakeLocal}
         function ConvertTo-SmartM365Hashtable {param($InputObject) $copy=@{};foreach($p in $InputObject.PSObject.Properties){$copy[$p.Name]=$p.Value};return $copy}
         $n=0
         foreach($key in @('EnableSharePointUploadDataAll','EnableSharePointUploadDataLast','EnableSharePointUploadDataPowerBI','EnableSharePointUploadLogAll')){
@@ -85,12 +86,12 @@ foreach($item in @(
     function Initialize-SmartM365CollectorUploadContext {param($LocalConfig,$GlobalConfig,$DataAllRoot,$DataLastRoot,$LogAllRoot,$ExternalActionsAllowed) return @($LocalConfig,$GlobalConfig)}
     $captured=@(& ([scriptblock]::Create($call.Extent.Text)))
     if($captured.Count -ne 2 -or $captured[0].EnableSharePointUploadDataAll -ne $false -or $captured[1].EnableSharePointUploadDataAll -ne $true){throw "Local/tenant policy not passed by $($item.File)"}
-    if($item.Local -eq 'SmartM365UploadLocalConfig' -and $ast.Extent.Text -notmatch 'Read-SmartM365JsonConfig\s+-Path\s+\(Join-Path\s+\$PSScriptRoot\s+''SmartM365-M365UserActivity-Inventory.local.json''\)'){throw 'M365 User Activity does not read its local config.'}
+    if($item.Local -eq 'SmartM365UploadLocalConfig' -and $ast.Extent.Text -notmatch 'Read-SmartM365ScriptConfiguration\s+-Path\s+\(Join-Path\s+\$PSScriptRoot\s+''SmartM365-M365UserActivity-Inventory.local.json''\)'){throw 'M365 User Activity does not read its local config.'}
     $checks++
 }
 $endpoint=Join-Path $inventory 'M365Inventory/IntuneInventory/EndpointAnalytics/SmartM365-EndpointAnalytics-Inventory.ps1'
 $source=Get-Content -LiteralPath $endpoint -Raw
-if ($source -notmatch 'Read-SmartM365JsonConfig\s+-Path' -or $source -notmatch 'Initialize-SmartM365CollectorUploadContext\s+-LocalConfig\s+\$localConfig') { throw 'Endpoint Analytics does not load its local upload configuration.' }
+if ($source -notmatch 'Read-SmartM365ScriptConfiguration\s+-Path' -or $source -notmatch 'Initialize-SmartM365CollectorUploadContext\s+-LocalConfig\s+\$localConfig') { throw 'Endpoint Analytics does not load its local upload configuration.' }
 $checks++
 Import-Module (Join-Path $inventory 'Common/SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -Force
 . (Join-Path $root 'Modules/SmartM365.Core/SmartM365-SharePointUploadPolicy.ps1')
@@ -150,8 +151,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkjWLMICOjw1i/
-# D8gzYHChEcJ1g+1hDMskM2E6PGq/xKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDnD74kHZ5sBr+p
+# 7Shp+7yOxl6JSJa74GEaV5POrY5u+qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -284,31 +285,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEID2bPJaKVM7Nbni5wVgZsqyjVnvtj3ML0ydhHh+asWTAMA0GCSqG
-# SIb3DQEBAQUABIIBgFHjhQITUL6bjnRHVKE1LOOrHQz2VngndNm0/O7eFNsMOz8A
-# E9IPXH0J0N0Y8QHWgOB4Cb2pp/OwsjgsD5hxgTwz2HoqlTY1ajRs2Aj+8OYZDghL
-# tX4vjt3wQ2Io1kJw1YC4B8Ys4HjcsqTiD6RnXarru2OW8jsDf7GX8GgXaVozZylH
-# ggqUI4Bmc2OjsGhpa9uYi99UjxFLJtIeV3HKxYCuTQ8Fe0t4harJ3TqSkyCL1nBt
-# HA0Pf3HpBENd8k4TLWc5S9AklU2jnPMpkhgx+lv0BYLUmW+vO9EmVhF9GlkOKGqR
-# HWOx9gPYLa/QODCt8PR2w3i8sYBHE6bMPS2YH7Bamc0TCyzWfzoEJXlbTEB4SgYm
-# jxMbyBSOywLatBFadF1S253RV2tfpdGdHUOr6PcLq4rvXYNP3MWfzZWQrAcbzo2t
-# B4popRLpekBygkHKtQadUXar5gT6rCs/WD0Eo9tx50YF1wXBRZN/4UT7onFvsJ93
-# n2l20oFRwIDX/kIyEaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJG1KjR46dlpfHStMEYuyQJB14jR/ylkeOUJNyLERh3FMA0GCSqG
+# SIb3DQEBAQUABIIBgK2k8egya1/nAlhe3X0AdHlSxwKBPVASGsqjX4HwBDPepCqY
+# hpBvD67ycLos6fuo5Tw+9a+cqHwYz3SQJrTev5Hyo7fZJJ/0kmlqm2fZkDT3UCuo
+# 1FfruZY0UdQNWulNox7xCJjOsXGZRbY/UiEBpN8vdgsXr98AV8pUwEKSIaAf7ehq
+# G/me1HyF7e4kes4h48G8PO1jnbjtBeSeRX1Mg6Wl2Xh5NPCQoDYSyFny6G7+1e1Y
+# 645IuYWyeXi7hTwqE6yM22iRIKzADAhqKsND27F/JF1Qu1vjeGQg8qGnmSolkUOL
+# ocCpd8NLKMqah9V6z8zOQ7K1GFpa3WaaCQn8N8yfo42Wa/xdGJMaWbR6D4PUOzIZ
+# GEYCt5rYluxOKaSlzeT1/IMvK6DSj7y4j3t1cAEDj1TC025xY0f3kV4XICJI1vbU
+# 1wk8zbKamin3Gynqgg0Ti1uVmrb7/lZhnMzjc32tnzEbuY/Zh9b+ZMgbhEltZEj/
+# ctZPEo8gobzRVjQmUaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDQ0
-# NDJaMC8GCSqGSIb3DQEJBDEiBCD2G5YCPrpyJacgcHxUYwREvCymhemsbKnoRFwo
-# ax/7KTANBgkqhkiG9w0BAQEFAASCAgC19J98+OyIgsmXUo4enzTQMfY4gf0BZZaQ
-# SiQHOXuC6TE4afVpCDHuzZsrKpbUzyR0x1brZ8MF1eZ70md0Q1/3Ts5yzWcFoXSK
-# 7RNqxrCQNWw0UmsYnCKNZJy3yUudyKbkYOYWDVqunEPkuI/fB207V5gn7EgKI2vA
-# hmYF4fwWuqGG63XApsDwG9qjt9Mmrj7UXLxpJOaeEp5QQpkKg9I3oLPDkdUZT7vb
-# FKBjLtmE8sUoOthhV5ZvaoKp1OoJZd++L4Zv0Nn44j8zUATeC91+tAfUECrhvlqe
-# 6Gxc8+KkJa+zJzZFKLEcQ6rRon1dWiuQn/GCzq4CssIWUini5vPaDaz0rWczLnDB
-# iI381+oPIBy9ds2uxg1AiXjjec9ao1ZuFQAwRWtQ3StjYEtSaRrTtdLLikU9cnOw
-# CHSvTM0htYmkNMGqVf0CAYrzAPQM3bghKOgGdH5uQtPcGaALkkPZvwq5c/H5BZ2z
-# 11ePIimnmH5nXsRWGtJL7DLBk0HUf4Wdfqrn3RXOBicRHC9YRoP4dTPx2ODPiBT7
-# gm5itUFUtvMTwflhgWbkMJfPhmhBAFTHs5WrvB4WSsAuUuAu1mk2uEQAf2RcOH0Y
-# CedTP2DZ3IHO3XIWHSPODDZSKnliuMQEmQTaMa37u9WL5rVDJe0QFjxaaqHrA1YT
-# DCk/6rgUuQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
+# MzVaMC8GCSqGSIb3DQEJBDEiBCBLSkh6FKHinIrQK5JflepNdrR6y8mF623m09cz
+# s4saWDANBgkqhkiG9w0BAQEFAASCAgAsi3TvyZhJmBANbZQ0Z9oeCrpp1HWqZpK0
+# l3TS0V7ndylzXNIreZ2kysF8EcxFXKaXnRJAg28l84HoblkGx8HOMTZInv/9SqPQ
+# FceXC/KSPaKkMqxH/N4Nefivt6sfrfe3x2bfy6wXuNaOyKiqfkUUdH8SDKv/St93
+# H/zrd6IZOo3wTPiCxojzF/4grTyQXCWRbBJ7D7+Az7oIgZXlQcUr0WYaSR0LuP4I
+# tNRhT5qQdeyYscFMXdMofCbYeL0Nt5mDa33hL45kkH8O03rVHQBhwalOrIX8t6cS
+# Y0Ayy4G39tmIcdpJPxPD52OpFnjj2JoHrVyIXM6mwXTRuKrbAqiptxduuOq5SlDS
+# LLMv4YafNkh3EzCmsgOmsSWgMGfWYYISyOMY6EL9k/dM6fCqkWUrVcJuz0Yhsh55
+# Pje97ivMX/b8zYIOS9BkbjhduVRhbIyW5guzPZfTs4yv4qtcbtdvPgBZPtV1jZSQ
+# +g+vzturNiSR72ztgT1ufXWLGjnbAnRvtmJWjSfAFgFX52NyrLfT9lkD+GYpVjrW
+# NODRP/mKgdkjjsCv9YH0psa2NyOzwllOoicx9y5ecXFQQ5cOH4MimVFkKBVXARgs
+# ZD21voe+qL8FV47RdGZKvCMHlcuXqbNrKxurqkMGHDbOAgxZIztMp6Qqh9GPID2k
+# kZdW0acmUA==
 # SIG # End signature block

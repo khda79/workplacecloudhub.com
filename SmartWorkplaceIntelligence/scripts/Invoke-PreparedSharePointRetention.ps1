@@ -1,8 +1,8 @@
-<#
+﻿<#
 .SYNOPSIS
     Inspect or apply qualified server/SharePoint retention without preparing evidence.
 .VERSION
-    1.2.2
+    1.2.3
 #>
 [CmdletBinding()]
 param([string]$Tenant='test',[ValidateSet('Configured','Preview','Apply')][string]$Mode='Preview',
@@ -15,7 +15,7 @@ $repository=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $smartRoot=Join-Path $repository 'SmartM365'
 . (Join-Path $smartRoot 'Config/SmartM365-TenantContext.ps1')
 $effective=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $smartRoot
-Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.87' -ErrorAction Stop
+Import-Module (Join-Path $smartRoot 'Modules/SmartM365.Core/SmartM365.Core.psd1') -MinimumVersion '1.0.121' -ErrorAction Stop
 Import-Module (Join-Path $PSScriptRoot 'PreparedSharePointTransfer.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PreparedSharePointRetention.psm1') -Force
 if($Simple){Import-Module (Join-Path $PSScriptRoot 'PreparedSimpleRetention.psm1') -Force}
@@ -23,21 +23,10 @@ if(-not $ConfigurationPath){$ConfigurationPath=Join-Path $smartRoot 'SmartInvent
 # The private wrapper configuration follows SmartInventoryConfigRootPath when it is set.
 $ConfigurationPath=Get-SmartM365JsonReadPath (ConvertTo-SmartM365InventoryConfigLocation -Path $ConfigurationPath)
 # The matching wrapper template adds missing runtime parameters without replacing local values.
-$config=Read-SmartM365JsonConfig -Path $ConfigurationPath -Required
-function Get-Setting([string]$Name){
-    $value=$config[$Name]
-    if($null -eq $value -or $value -in @('','__USE_GLOBAL__','USE_GLOBAL')){$value=$effective.$Name}
-    if($value -is [string]){
-        for($i=0;$i -lt 10 -and $value -match '\{\{';$i++){
-            foreach($match in [regex]::Matches($value,'\{\{([A-Za-z0-9_.-]+)\}\}')){
-                $replacement=$effective.($match.Groups[1].Value)
-                if($null -eq $replacement){throw 'Unresolved retention configuration token.'}
-                $value=$value.Replace($match.Value,[string]$replacement)
-            }
-        }
-        if($value -match '\{\{'){throw 'Unresolved retention configuration.'}
-    }
-    $value
+$config=Read-SmartM365ScriptConfiguration -ConfigurationPath $ConfigurationPath -AsHashtable
+function Get-Setting {
+    param([string]$Name)
+    Get-SmartM365ConfigurationValue -Name $Name -LocalConfig $config -EffectiveConfig $effective -Strict -ResolveDefault
 }
 $latest=[IO.Path]::GetFullPath((Get-Setting 'LatestCsvFolderPath'))
 if((Split-Path $latest -Leaf) -cne 'DATA-LAST'){throw 'Retention requires the configured server DATA-LAST root.'}
@@ -76,8 +65,8 @@ try {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAtMjFdMyhiSO3d
-# iILUm8k6i87NbWYD1FiwULzYbO99IaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5nr8kPPv4BTuJ
+# 5sxzTa4v12YNHKIcO6DV1YEmk4dn26CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -210,31 +199,31 @@ try {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIDluvY6lcLNkXcl7Adgz65aFeiHxMp253Pk50nHN1AI7MA0GCSqG
-# SIb3DQEBAQUABIIBgEOeEzaMCWTGPmm/EscUMC8jFqllwhVKsEH6zngXPajsDzC4
-# /R2lAG9rn/6oTd22zjZhdJed0AOqlghUIsfrdL9zQ1/Xwne6Fxt52eY+ZlhJViJy
-# WZ23XyEjJcqT9cCxYZj/tLPKQ57MJMIRSh66sQ0ICgiNopAaIWBSfCoRnWhau7VV
-# oudCYH6kfnqg4GLs/tYWH/DSBuvykUX2USjzc5eRdkYBgbpaM/+USKcFtqkugo64
-# w9ANR4VRa3e7OmzeCGBn0g+A/qw1HkWl6ns9KGQyaLEkOYyGcKVH1yqI58OuprSB
-# 5DxUeKP63dw4A9wy4b6CrLvOJGRqcFNLeaftwwNR3YbD2siz4z3YStyoJXIzcpVB
-# Q3FVorG1nmuXdBjB7A0o2eM8iLYcBGoMUwMrS1ZcXY23IuY4gMdqcaJixTnCIejO
-# mllmTKsu/dRtEAcN5NVPwUyruYCc6+5R3/y2O3m7RE99AWe9gXf666ilbnbcya8g
-# LA98unedVEdL3IuK+aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIMwRnVswKiTL2LxMSuKLPAoaWf6/38NwlSliG/1QS1WFMA0GCSqG
+# SIb3DQEBAQUABIIBgLAOvOvEz+yNlpbM9RFEbBegwW7j2gvHrwNGkmqrRdmtkYo3
+# 7v0L9yr0mua/muleaBqlzgNBHvINW/XKvXAtlLH2olrTyG8UG4va/j2fYqq4Errc
+# FOIZvJdggr0ToNfG78k/KiNLSIhh5siRuicOpJs3wFtwdb9KMxmBLOiOfcDEtu+C
+# vFz2eMyA4XC7G31F/mzquoVaTAhSwkskG6wETgCvKNYEVX85o5iMPzV8zbU8m2Yv
+# acnkcgE8kSMVviPrX5dejTvP/vBzFZZty1qfRza9Qg+olV3ecT8L+vN6ye3Ylt6m
+# dezp8knJWuHa99W06Qawx8a1w1tKcQc9yvZlLgQNvibTiT1vgPkGDpwtn77IW3Zc
+# 7Xq4zfQulwWIOnv6E1PenkWf8mJbIHOjs98aH9daUDOQcaCB0QdI9OrTgcsz0m0L
+# lN2RFGdNIoVFSJRZC5Z4p6C03Dsqafdu5ktJJceiI+TVIyY0RZyBKmgX0F5veTB6
+# sNATSgHLkT3saBaTgaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNTI2
-# NDJaMC8GCSqGSIb3DQEJBDEiBCD9CGjA5aKqCHYJD/8D0wSNEHw/+lCJMrVDE7KE
-# oabq4zANBgkqhkiG9w0BAQEFAASCAgCZgRA3a79Uu7pPbyqPMDoJSz+jroMqOOX+
-# pvtaawId/LvFtVMvc2gTQ5WeJZCmK5eUOX6XKoPsOQQDItDMyNcCMK2ApEOV7zQl
-# Lezhd0G8viSdkSA22L6RCZi6mCCxOANwXEZo6U4EtSd0FUlIbA6vnsto6zk8sznM
-# IPq1RW+wvQJWFI8SsJ3ZFd2NWkqhkB44Z1TbIfrWeDLNyClH4w5OBMNsdV2JZnI8
-# AV1Ed9qQkexVAndH5/QnEBkzYgwH6bUrDf/SeYVUsiq862Xlo1/iRF/CV/OK2E8N
-# nIBOtWBNQIhXNgIwIBo2fiK3kYupKfT9q6YDMgF6ptugNjsBDNUZYk2g8AafoSCv
-# vYYC02HzyEVi2UIuLEkAgiS4HsG9RGPYNiL6J+8rXAI/zjCu6hcuyrxxUtjvbEyI
-# JhIxhwpGuSo9rKjCwSuFp6xRmTlPfdbzoVzdFo8p+8Fa1EAINzLhoThs0r5W082z
-# IRMzVIHUEm7BLMtga3RPZtY+BVRlER1FE15zYALUzvoIGsfEom3cqazWY+2z6JJW
-# D1b/iMNkoA1c5pVGMFP8DiwybFLkmLsG6Nqwiur1bk6papKrPQWG+QzJ/+T33V/i
-# 04/OqFrAl++xyJg+9dTcMr23ZPeyyC28jVrKhKNko/ROwEUPWaWC0f/dNC5w+n3I
-# efufPHf8rg==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
+# MzVaMC8GCSqGSIb3DQEJBDEiBCCNdaBVTV0IlKocgCerwOODW0eVM8lfyGBRfj/H
+# 6tMLIDANBgkqhkiG9w0BAQEFAASCAgCBRJyyx1Y8je/cZJjWbBarRXcxpMhTF+Eg
+# Ix6y2CS2Z6TTJpMERKR29pOuQdjJQ94g4c7zS9J1Zc0lNH34/8wK6k0Y7ixdsyM0
+# m/YZXAePxdBIqTsT0t20WmC9bS5Yc6hvV+wikwg3IoJCfcjtXaNTksLVtZJ54ADT
+# bcopafz2PVgQuCu0Tq3porjC+De5lrU1K9mH7OEe29OaBWi1ML4GhIMJamYL0kWr
+# 9XcuDDdTn/rKDfVaX3BiB9Nv1Q9EaZ0dnQDtI2/AfCoYHhMdFKo+08MgzKpmWruw
+# SB4MYJKjFOCx8//gtA8wCX4FE9KQjVs6vgV+DBVwwpbEjcKUZPFrpAmEBs1ReWoj
+# vcpV+kHTWk08h02nwVzoMSqjqD2w+A9dDZXZL037Nxpt8lLF2wEC0Ce9XzHXe4Nq
+# WdWCnlUSmi7wKwzCTpyajdjm7TM49dmB9UPGf7tdckfLjtIewzERBU9fua+FVOsI
+# YMhuF+928XiYrtQPZTxvlgtycVSvp7VtaEvckgtUIyMJI6Hmtd7Hz2r5ZdFTUQUy
+# 15PPQvBYxln78x6bWZIMeoYPQ25AxmLOgVVBJC6rs9kD7G5MMS1Am2de1ZJ0omua
+# Dz6fqfWkm9uud9ELyenBvHAaKXSG0eAWYCd7e1xZddng2smXX3ANdQcOX7WnRbAg
+# 0gYq98+eAQ==
 # SIG # End signature block

@@ -3,7 +3,7 @@
 .SYNOPSIS
 Collects Intune Defender agent and firewall health reports through exportJobs.
 .VERSION
-1.0.8
+1.0.9
 .REQUIREMENTS
 Microsoft Graph application or delegated permission DeviceManagementManagedDevices.ReadWrite.All.
 #>
@@ -21,7 +21,7 @@ if(-not $smartM365LifecycleRoot){throw 'SmartM365 lifecycle support is missing; 
 $smartM365RunGuard=Start-SmartM365InventoryRun -ScriptPath $PSCommandPath -RequireReturn
 try {
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop';$ScriptVersion='1.0.8';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
+$ErrorActionPreference='Stop';$ScriptVersion='1.0.9';$script:Runtime=$null;$script:CompletionStatus='Success';$script:CompletionError=$null
 
 function ConvertTo-EndpointSecurityRow{
     param([Parameter(Mandatory)]$Row,[Parameter(Mandatory)][string]$ReportName,[string]$RunId,[string]$CollectedAtUtc,[bool]$IsPartialInventory=$false)
@@ -58,11 +58,11 @@ function Invoke-EndpointSecurityReportSet{
     return [pscustomobject]@{Raw=$rawByReport;Quality=$quality;MissingRequired=$missingRequired}
 }
 
-if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -Force;$test=ConvertTo-EndpointSecurityRow ([pscustomobject]@{DeviceId='d';RealTimeProtectionEnabled=$true}) DefenderAgents r n;if($test.DeviceId-ne'd'-or $test.RealTimeProtectionEnabled-ne$true){throw 'Endpoint security self-test failed.'};'PASS: Endpoint security offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
+if($SelfTest){Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.23' -Force;$test=ConvertTo-EndpointSecurityRow ([pscustomobject]@{DeviceId='d';RealTimeProtectionEnabled=$true}) DefenderAgents r n;if($test.DeviceId-ne'd'-or $test.RealTimeProtectionEnabled-ne$true){throw 'Endpoint security self-test failed.'};'PASS: Endpoint security offline contract';$smartM365RunGuard.ReachedTerminal=$true; $smartM365RunGuard.ExplicitExit=$true; return}
 try{
     $tenantContextPath=Join-Path (Split-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent) -Parent) 'Config\SmartM365-TenantContext.ps1';. $tenantContextPath
     $effectiveConfig=Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
-    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.22' -Force
+    Import-Module (Join-Path $PSScriptRoot '..\..\..\Common\SmartM365.EvidenceCollector.Common.psd1') -MinimumVersion '1.0.23' -Force
     $script:Runtime=Initialize-SmartM365EvidenceRuntime -ScriptPath $PSCommandPath -EffectiveConfig $effectiveConfig -DefaultOutputRelativePath 'Intune\EndpointSecurity' -OutputPath $OutputPath -LatestCsvFolderPath $LatestCsvFolderPath -ValidateOnly:$ValidateOnly -EnableConfiguredExternalActions:$EnableConfiguredExternalActions
     Start-SmartM365SourceReceipt -ScriptPath $PSCommandPath -SourceRootPath $script:Runtime.LatestCsvFolderPath -ReadOnly:($ValidateOnly -or $SelfTest)
     Connect-SmartM365EvidenceGraph $script:Runtime @('DeviceManagementManagedDevices.ReadWrite.All') -InteractiveAuth:$InteractiveAuth -DisableSdkRetry
@@ -111,8 +111,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDkjRS6Nsx58GEw
-# R09MCZHGk+aOKkNjIvHd31ds1RpOgqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCFn23NQOvPofx2
+# d8dKYkTQ41thsiF7fmH9G3AXD4EYEaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -245,31 +245,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIE+2NPrmSXoqEJJ3HbZEIvLBMZAWFZanKr5WPdbgxZfJMA0GCSqG
-# SIb3DQEBAQUABIIBgDXLF0G8bpEAVhzj65P25B3UK+aFBirZ06OLx6N1htwh/zHr
-# y/n9DXUtv1JYfHq5DgVFqM46sKvGKpJJ9FcQDk/hupM13t4wO8EKwM5Yi2lPTl/s
-# hg+wNWiZyuFe/VPLZWkE3EU0wsk23iQ5lSIEnM6mcO0Uwsxx6XzYyFkyDwg+CoFf
-# yV2OGmzt5xq+3SxM1MWB6wJlF4VikllCVivFLEaD1Ut5bv5zSMljr+YitEDhlk6Q
-# Ba5Y9ZpzKPvAz39ZAQkIeoKJDuURWSCRlYvulQCLpVhwt0uAqPsCU5608i8lu+qk
-# J6Tk1fclkN7ki6cW0x+E3nhOmAmLsolAw1apbHu0MJBH0+msxERg7g67xy3EOdLR
-# h1ACagwUqWRpaG8q58/lLE6M8tzqXokvOhIQsPtqhgZS4sgStvYchkHBW+Ca/8Ej
-# qsw0f6f65nSvw09ZmP64iTzEjWMy5NbjdE54pjjAczFXQXajI5Mxoe+13yinoDTm
-# y/TdKWMdlp4JxeGLQKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEINZT9g1we2of/AU4+rtC9/Gs8vb8RNiVBx+5pt1oEKRGMA0GCSqG
+# SIb3DQEBAQUABIIBgGC5SFtg7Fph7acGSWq1QmB1uMM0V4ZAETz8dNkePbaQskLZ
+# htloKa1rthtojqEHeKeTcFCQEqNjoVNrIrlW3RTGqx1SxuZiSQq6Guky0wOhKcFT
+# /z8x+ZAeaQUZb4gtuNgku0RqfnxPdLfCMhjoMcPKkEanA1aOgQhaPZjIEW7Jlf/B
+# mGE4dlf3PwimJ0ilsciBakXfpx7Vjjje8LDB/0BM9fM9Ov6yaQCqfdW9Wpq8ll9X
+# tokEzzN4JXwn37TZmOo8tBwLIIBzCxpj3451aUalmh5tdua4+Tqi7Q2m2C5PGA/s
+# qL8NPwRJAWNtE6kMNJBFCtuWa2R4z3Gmd8EaKvp1RYFuMqP3LHyYhDuPkHYumZpn
+# rpyFTAbsH1cVGOOQH7Ql45OZ5J81i26RWhZflJEz1wpovvulzEoTWvisErgJicmn
+# o8HfHxNbKfarMtlXaXXd57tF9SgXWWNM59oMNrJSUlrmkaAtvXv7iNbqk9774VOj
+# u99x4stf5tlNlSIKR6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA3
-# MjNaMC8GCSqGSIb3DQEJBDEiBCDxkNxTyQDqhRdFWG4tSWHVl8DcE6+7FB/Z3cib
-# le+kCjANBgkqhkiG9w0BAQEFAASCAgACjeH7L3ZHALFp5qYNJF/uqSGg2syueS/w
-# sE90fgojm4XBWB7C6lQL4RgQMzhU926ZQcPBJfjLoyFtrPT0n/+bN8HSUGlRLPvO
-# 0iV3k05cPbdJxQRupui1uyeQb0hSNVHdAbwflR+hqy0E0CmL9lB+p5UWGr1F7YMr
-# PkTrxtZOQdOGgWWvSWTUvVoMUVwkjdWjmQQsCGSY4qQJvpSnOCIg5H0imva3vaOY
-# oj8jVzKmrI1b6o510g7yALEAy/M8vDwtzreB/AOe6EOju5gn/pWlo/+U581MMhzH
-# hkJJXN/B7D9o6oDiToBN5DBcAMX/TeTVR2Ue/xOBdBuxjZgil1UCcmoSHITLtYeo
-# +W8N1vKtZX/TU/bHV8On3V7GJgInfM5HhvpRoyPZY3w/kzLThlRJhp/tLWLRmwT4
-# L3Z9/NGezRNsqoNSZttz1UtLq4l41xsdTwdVbPJahAgxr3Gs7uwmBRyqE9DyhExN
-# XnFageH9M+W7Hzx3DslzDMmUT5KFuw2GtKr0NAlT4Fg2sgP3UE2qsqaY4Xb/jnOC
-# 2Ucgq2I2RNoZzAohg9UCTZ9yzlevX6mS7ViMzGZ1Ny1sAjIW3qk3Eu8trpzpUnvd
-# vB0+VHUt6OUVbNTzlxDxVigEbcuMUGOftNE3ZPEGx2ktw9LdYEiOtHjoRyuAbkhy
-# RDeyZxui/g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
+# MzBaMC8GCSqGSIb3DQEJBDEiBCC8IplMkW9sAZeOT09ILlVHImCbZB/Kk2drjGFv
+# M04H0jANBgkqhkiG9w0BAQEFAASCAgAEQApRjuIKYhB01HCR7B+mQwWdujwge9sb
+# OxKMsPQlVveaNTrBdj++A5SDfUonmLJZAOTwQIp4vEwJQUDJaqm6qO5Ak3K6J3c7
+# Uw8imZ4Bb9HdsM35nlTlRxw6wT0jYMQEzkSWA3e06KveX33WgqZ/p4AslEtaFXPg
+# WHhrwVObyoSJiKTgzvGR5Vd+BcQCKD70aTSPfrX5ZUC8GuZdVVBhTa+hcnAgLSIZ
+# dxu5nmsMmwG5p0nEMRJvqbqT/p0ClGKpBCOJVujUEywZzFcIN+Je308DucVXSCKC
+# isXPnh9qLPQgjYQsSpVlueDGVteUdOsxKWVwsuJEHopycMKaED07kK/BYteN0DSR
+# TSAcmdHZfNgzP90PTvtnNB/geC9lL5rgf284utRTG/XEkQ86AjVot51T/JsEJu0B
+# mO2N67yHHJS/ZqfcCuvVjLuuhK4pb7ahuFQ99QVaGCIZJkmgKkhc7X4UQDWKJh0Y
+# 8LPNikzbtrlNgCswKm7x39X9BxX0sUPP/+F2W/rkGq+NuW4cU2t459GsWMDexwoV
+# K+zuMb8rMLPwgPYCUN5/3QrJ0FJgwssvpaogNqoYgUeQ//e2Ri9L+lhtX+c3+iRW
+# zFaoru1dhiKLFxpNlDtUEOvTHioWN+7dltejEbLyaS6tC0bWS/uL59hBR+xuNqO2
+# 1Q0aqSMDfA==
 # SIG # End signature block

@@ -26,7 +26,7 @@
     New-CimSession is used over DCOM only, to start the Health Checker scheduled task.
 
 .VERSION
-1.8.14
+1.8.15
 .REQUIREMENTS
     Windows PowerShell 5.1 on an Exchange 2016/on-premises management host.
     Modules/snap-ins: SmartM365 WindowsPowerShell5 compatibility module; Exchange Management snap-in;
@@ -38,7 +38,7 @@
     and the Health Checker scheduled task must be installed there.
 .NOTES
     Script Name : SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory.ps1
-    Version     : 1.8.12
+    Version     : 1.8.15
     Requirements:
       - Windows PowerShell 5.1 with Exchange 2016 Management Tools
       - Exchange 2016 read RBAC for Get-ExchangeServer, Get-MailboxDatabase,
@@ -280,7 +280,7 @@ $tenantContextPath = & {
 . $tenantContextPath
 
 $ScriptName = "SmartM365-Exchange-OnPrem-InfrastructureAndReadiness-Inventory"
-$ScriptVersion = "1.8.14"
+$ScriptVersion = "1.8.15"
 $RunId = (Get-Date).ToString("yyyyMMdd-HHmmss")
 # Vendored Microsoft CSS-Exchange Health Checker (see ThirdParty\CSS-Exchange\HealthChecker\PROVENANCE.md).
 $HealthCheckerRelativePath = 'ThirdParty\CSS-Exchange\HealthChecker\HealthChecker.ps1'
@@ -295,23 +295,9 @@ $HealthCheckerTaskName = 'SmartM365 Exchange Health Checker'
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 function Merge-SmartM365ScriptLocalConfig {
-    param(
-        [Parameter(Mandatory)]
-        [string]$ConfigPath
-    )
-
-    $localConfig = Read-SmartM365JsonConfig -Path $ConfigPath -Required
-    if ($null -eq $localConfig -or $localConfig.Count -eq 0) { return }
-
-    $effectiveConfig = ConvertTo-SmartM365Hashtable -InputObject $script:SmartM365EffectiveConfig
-    foreach ($key in $localConfig.Keys) {
-        $value = $localConfig[$key]
-        if ($key -match '^EnableSharePointUpload(DataAll|DataLast|DataPowerBI|LogAll)$' -and ($null -eq $value -or ($value -is [string] -and $value.Trim() -in @('', '__USE_GLOBAL__', 'USE_GLOBAL')))) { continue }
-        if ($value -is [string] -and $value -in @('__USE_GLOBAL__', 'USE_GLOBAL')) { continue }
-        $effectiveConfig[$key] = $value
-    }
-
-    $script:SmartM365EffectiveConfig = [pscustomobject]$effectiveConfig
+    param([Parameter(Mandatory)][string]$ConfigPath)
+    $localConfig = Read-SmartM365ScriptConfiguration -ConfigurationPath $ConfigPath
+    $script:SmartM365EffectiveConfig = Merge-SmartM365Configuration -EffectiveConfig $script:SmartM365EffectiveConfig -LocalConfig $localConfig -Mode Overlay
 }
 
 Merge-SmartM365ScriptLocalConfig -ConfigPath (Join-Path -Path $PSScriptRoot -ChildPath "$ScriptName.local.json")
@@ -320,37 +306,8 @@ $script:ExchangeCertificateContext = $null
 $script:InfrastructureCertificateWorkerPath = Join-Path $PSScriptRoot 'SmartM365-Exchange-OnPrem-CertificateWorker.ps1'
 
 function Resolve-SmartM365ConfigTokenValue {
-    param(
-        [AllowNull()]
-        [object]$Value
-    )
-
-    if ($Value -isnot [string] -or [string]::IsNullOrWhiteSpace($Value)) {
-        return $Value
-    }
-
-    $resolved = [string]$Value
-    for ($i = 0; $i -lt 10; $i++) {
-        $matches = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
-        if ($matches.Count -eq 0) { break }
-
-        $changed = $false
-        foreach ($match in $matches) {
-            $tokenName = $match.Groups['Name'].Value
-            $property = $script:SmartM365EffectiveConfig.PSObject.Properties[$tokenName]
-            if ($null -eq $property -or $null -eq $property.Value) { continue }
-
-            $tokenValue = Resolve-SmartM365ConfigTokenValue -Value $property.Value
-            if ($null -eq $tokenValue) { continue }
-
-            $resolved = $resolved.Replace($match.Value, [string]$tokenValue)
-            $changed = $true
-        }
-
-        if (-not $changed) { break }
-    }
-
-    return $resolved
+    param([AllowNull()]$Value)
+    Resolve-SmartM365ConfigurationTokens -Value $Value -Config $script:SmartM365EffectiveConfig
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
@@ -449,26 +406,8 @@ function Ensure-Directory {
 }
 
 function Get-SmartM365EffectiveConfigValue {
-    param(
-        [Parameter(Mandatory)]
-        [string]$Name,
-
-        [AllowNull()]
-        [object]$DefaultValue = $null
-    )
-
-    if ($null -ne $script:SmartM365EffectiveConfig) {
-        $property = $script:SmartM365EffectiveConfig.PSObject.Properties[$Name]
-        if ($null -ne $property -and $null -ne $property.Value) {
-            if ($property.Value -is [string] -and [string]::IsNullOrWhiteSpace($property.Value)) {
-                return $DefaultValue
-            }
-
-            return Resolve-SmartM365ConfigTokenValue -Value $property.Value
-        }
-    }
-
-    return $DefaultValue
+    param([Parameter(Mandatory)][string]$Name, [AllowNull()]$DefaultValue = $null)
+    Get-SmartM365ConfigurationValue -Name $Name -EffectiveConfig $script:SmartM365EffectiveConfig -DefaultValue $DefaultValue -EffectiveFallback Blank
 }
 
 function Resolve-SmartM365InfrastructureHealthCheckerEnabled {
@@ -3955,8 +3894,8 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC++Ke6KbmHPgHO
-# HTgp1HE7bT/KBtslBbjHzeXTvOOILaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCuCYoGB7wa5HIz
+# IBccVXOD4r+76mYWgxRo3y8Qb2LS2KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -4089,31 +4028,31 @@ if($smartM365RunGuard.ExitCode -ne 0){exit $smartM365RunGuard.ExitCode}
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIKh2ezsq6YmFC+MIyepU6ImFkq1dhRJOHSD1hvUSHzwKMA0GCSqG
-# SIb3DQEBAQUABIIBgK2lQFMudibdKBW8lAkEUg8jQm2vVN/bpvTiddd1Rbl7PGV1
-# v2mLQlY/kYP1rX4lWiY1wK7hpED0ETum5IJj62f6IZVY2UJTfh+sRhHboxypROxv
-# bDE1ZhnTQh77aIAYa+82qfO7TPXpVIDqIfsEw0MuDB6UcGD/Ok3WS2dfBT0ME8zL
-# t2qmZ07LozuLmBxqF7VdPNyFf7oKLsKk2rszZ5SzvXZoE7Fe/eg6u7KX4XAlkrju
-# 6chG04LZv/rBwkCWvxxpCRna4o825xg5Ub2ocIIQFoemUDNVujTrvaPXHbLhaQWx
-# dpwzF1nmR7esdMqp/y3W5PSm3lKsvUq0Hq/RJjnS00uKtz5+6ZbNGBJRofok165n
-# EIrEOg2vItCUUfdDpfEX32emNCpClPUa+GsDa6+JgOk6n81iO+MrMGEbzSj/BP6P
-# 5Ov6il+zcLIVZgDx59zOFFYnxXyj4uwkreV9F3PPzG/XtpZQuiVg0Zb7+WhKNCC3
-# 3arYvDcwk+nr+ZvlpaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIF0tYncfW97zfa7n7Fy1AxfIAUd7RBovaBijLmsHrI4BMA0GCSqG
+# SIb3DQEBAQUABIIBgEiqszhUFOgHUV3Yn7i5S4vvlGMnsxBJrS0WTm/q34bgaKnW
+# SX3LQ0SDEriPGP74INA8Tp8V23hRKaSpZ2Od/zM2YCwnRBJdsVqGHnG0+hSoz8/x
+# YU5hpeVdvSaxnrkQ0DbTtW/TCgQhXKvKc48xZPq3pre2IzM6mwAHE7UJVxHJ3GPD
+# 1/hK3gzhRKr+obBpgGoW3KnAc2uCtwHegVD87HLlBsDpFaLKeEhJVNWdK7iAIxXn
+# PlWhNpt/KHcxU6vhd2TXZJvMzLpqeKySJ9n8vM2UgY9C6qJKvNujfGkrad0sPT53
+# cTYauXs6yFbivH49fvNDP+O5ai0MMSACNY3sXA5Ht/87N7XcuTQUK1P/5tZ29yjp
+# Ri5wIKQW5pe6N7YofKAdmgnLZL6G/qUVH3aLP5j+tZe5RzZwydT6SiyNJVGR4D+J
+# ZmEjfC1v2eYpwjr2izXnWbnvA0Iap4qH5TXdRMVqicAO4HbpCQP2UlLCDYG+7KYX
+# pa1k3ALRpDG22tyXzqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExMzU1
-# MzBaMC8GCSqGSIb3DQEJBDEiBCBKe4esPu3ayfx3CciuzfwWhnMmOMg86r0jUo1F
-# KV3XnzANBgkqhkiG9w0BAQEFAASCAgC17UW+H8Xv1JnQu/7OSeKr+wWkRKutO3lw
-# 3Z77ttmw25MFa6JCuTrdIpOd14j52XU70YfV+orWEad/TRC2c4w3q3saGb41w9vX
-# xCGLUp+TGw/gUr2Mwyi/IP4w8UHaAzm0CNjgspXHuLO1bktNqO1S7h+ke1vH0a1B
-# pPiq39cU/C63SiW4zuvas/D4MUcHJylkIt9RJsaCTo0exhGNfPDnJPWYTFoyXjrR
-# ctsQzv7hMrFB/q7DYUltbMm1UzLNHzfdNrKN4oHDbwwB9RWyVk/JwBD4Ah8Gf6jl
-# ME8/eceNDCW5MLnPxNxqIjcGhmoNwPH0t80w4ZGaX3+kSRhsf7IVvcKYWeEVWAJ0
-# cMF/aMOJqj1Qll6iqphYePOgqs2XI9Ry3VdMhUdEFV3oNoZanUbf4WM4FzxJOBdz
-# qS3EsWIfgnt7XQz+74lN/tjv5YkITIiAUqZzKTfil9q2oBmVmRtEqC2zgaSimqF3
-# A3CQgQ6GzuBtGIIGIVV+OEDmEe+PRPnPlMwtdK3GV8kyN5h83gkzbPLe+pcH29cb
-# 54t0y3FWooJJ0C1G0BB+ea9FcAUbQOZ3RRQr8y2ijNHgNRy0tzABIFQOxYGPt85S
-# Pl5rEzMf6lHz9EWOjgo3dIDiif0brXvpRpCQI+A2gjl1HB57Dt/SMjyj1Tu4jKUo
-# wMF0egBEHw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
+# MjdaMC8GCSqGSIb3DQEJBDEiBCA+aoZRDRrzIWZ+BE0/4npzCG6cPlBUNZLhmXZS
+# cGqjxjANBgkqhkiG9w0BAQEFAASCAgBGm2qtyQMX43BKM/bwegMv0AEhh00W4/4K
+# CItyWgsm9D3b14keY5zl23th/l41xnxvFb8eqCbD8/lKOW0iqzIA6oLoy6/sRhsR
+# eL1qN8QkFzOorI9Cc17U08d3lAh1tfSlawjyvCSSVHdjXy19Wp8bXUbbVgvzaCPZ
+# Jv62+Rc84EWcff6MeybkGTmX2R9YRIVSctd1dFukDCEo3FS3obsblDgCTfGssX0K
+# BFuYWXgE+K/jes65xSjpyvx3hM1U2q29ME20ggDLDZ0H30oxX7NzI3cXF+sRwY9a
+# H8tTUL+qPn3IOa80MKN1ePR/gYtuq++x8ngBuihaBKHyXW1ZaISpnsidaHAZyWiZ
+# rwrGYPXxmrtt1NREVh25E/MZEecdtGVrx1YuGt3HVwpuCmcYHwyRMb9Dxs9/2zFZ
+# KAAe/WDa09/rwELQY3RLZ5Ox54JWYLnp7jjHtVo08hF8/GV3pwXK8GbMR/49yVmK
+# qwXa4WflCuM7u1Ee+GhSCabe3WurcX524tiqNNHQhTRi7rUQrxpeTCB/oz7yfSxk
+# f0rY3BGo3X4f1TGofEO995w4Lo4wjXuNvAL/wsNDsnLsbRUMSg9ZX4Br1Kpxqms2
+# gLBt24vnPGRv/vt8sxXOuuck92lIBHOQLqzy1fJN2zkq/hY+UzLghYOsBg/l0auW
+# Xd9TwO7fsg==
 # SIG # End signature block

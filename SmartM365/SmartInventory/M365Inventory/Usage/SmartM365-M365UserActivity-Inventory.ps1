@@ -17,7 +17,7 @@ Since 1.34, -Reports All also collects email client usage, OneDrive user activit
 and Microsoft 365 groups activity.
 
 .VERSION
-1.37
+1.38
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Reports.
@@ -56,7 +56,7 @@ if ($PSBoundParameters.ContainsKey('MaxItems') -and $MaxItems -gt 0) {
 }
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = "1.37"
+$ScriptVersion = "1.38"
 $TaskName = "SmartM365-M365UserActivity-Inventory v$ScriptVersion"
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss'
 
@@ -84,35 +84,13 @@ $tenantContextPath = & {
 $script:SmartM365EffectiveConfig = Initialize-SmartM365TenantContext -Tenant $Tenant -StartPath $PSScriptRoot
 
 function Resolve-SmartM365TokenValue {
-    [CmdletBinding()]
     param([AllowNull()]$Value)
-
-    if ($Value -isnot [string] -or [string]::IsNullOrWhiteSpace($Value)) { return $Value }
-    $resolved = $Value
-    for ($i = 0; $i -lt 10; $i++) {
-        $tokenMatches = [regex]::Matches($resolved, '\{\{(?<Name>[A-Za-z0-9_.-]+)\}\}')
-        if ($tokenMatches.Count -eq 0) { break }
-        $changed = $false
-        foreach ($match in $tokenMatches) {
-            $property = $script:SmartM365EffectiveConfig.PSObject.Properties[$match.Groups['Name'].Value]
-            if ($null -eq $property -or $null -eq $property.Value) { continue }
-            $tokenValue = Resolve-SmartM365TokenValue -Value $property.Value
-            if ($null -eq $tokenValue) { continue }
-            $resolved = $resolved.Replace($match.Value, [string]$tokenValue)
-            $changed = $true
-        }
-        if (-not $changed) { break }
-    }
-    return $resolved
+    Resolve-SmartM365ConfigurationTokens -Value $Value -Config $script:SmartM365EffectiveConfig
 }
 
 function Get-SmartM365ConfigValue {
-    [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Name, [AllowNull()]$DefaultValue = $null)
-
-    $property = $script:SmartM365EffectiveConfig.PSObject.Properties[$Name]
-    if ($null -eq $property -or $null -eq $property.Value) { return $DefaultValue }
-    return Resolve-SmartM365TokenValue -Value $property.Value
+    Get-SmartM365ConfigurationValue -Name $Name -EffectiveConfig $script:SmartM365EffectiveConfig -DefaultValue $DefaultValue -EffectiveFallback Null
 }
 
 function ConvertTo-DateOrNull {
@@ -709,7 +687,7 @@ $logFolder = Join-Path -Path $logAllRoot -ChildPath $logFileBaseName
 $logPath = Join-Path -Path $logFolder -ChildPath ("{0}_{1}.log" -f $logFileBaseName,$runId)
 
 $modulePath = Join-Path -Path ([string](Get-SmartM365ConfigValue -Name 'SmartM365RootPath' -DefaultValue (Split-Path -Path $PSScriptRoot -Parent))) -ChildPath 'Modules\SmartM365.Core\SmartM365.Core.psd1'
-Import-Module -Name $modulePath -MinimumVersion '1.0.119' -Force -ErrorAction Stop
+Import-Module -Name $modulePath -MinimumVersion '1.0.121' -Force -ErrorAction Stop
 
 $global:RetentionMaxCSV = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxCSV' -DefaultValue 30)
 $global:RetentionMaxLogs = [int](Get-SmartM365ConfigValue -Name 'RetentionMaxLogs' -DefaultValue 30)
@@ -728,7 +706,7 @@ $global:logTextFile = $logPath
 $global:LogPath = $logFolder
 $global:logTranscriptFile = Join-Path -Path $logFolder -ChildPath ("{0}_{1}_Transcript.log" -f $logFileBaseName,$runId)
 . (Join-Path (Split-Path $modulePath -Parent) 'SmartM365-SharePointUploadPolicy.ps1')
-$script:SmartM365UploadLocalConfig = Read-SmartM365JsonConfig -Path (Join-Path $PSScriptRoot 'SmartM365-M365UserActivity-Inventory.local.json') -Required
+$script:SmartM365UploadLocalConfig = Read-SmartM365ScriptConfiguration -Path (Join-Path $PSScriptRoot 'SmartM365-M365UserActivity-Inventory.local.json') -AsHashtable
 Initialize-SmartM365CollectorUploadContext -LocalConfig $script:SmartM365UploadLocalConfig -GlobalConfig $script:SmartM365EffectiveConfig -DataAllRoot $OutputPath -DataLastRoot $LatestCsvFolderPath -LogAllRoot $logFolder -ExternalActionsAllowed (-not $ValidateOnly)
 $global:csvGeneratedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 function Stop-SmartM365UsageTranscript {
@@ -924,8 +902,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCO85AMqkSWFxUS
-# bnKlfrBBcjLgAis/7fQ4W3uewuc+jKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBktQvatZBqsAzI
+# Gs99nYrMWNFp6RmxKuWoSBDJPoPFPKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1058,31 +1036,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIG7AP0YlUImygDZ13fjfas1cs9sAJ1xwOBXYd1in5H5MA0GCSqG
-# SIb3DQEBAQUABIIBgA/m5XcHFh17V3FQwZO0k4qOVr2J0V+59vfwj/Odx+r3zaRr
-# q7zqRYFZHEOffus3JHJPASbMroXnejWHlv4dCQNHoWXpbW7eQ2u2vfeu1W+PGViO
-# dWnhYi8iZPWD0h01eUP0RQx4Ef0ypq6rGaH5ZnIWPFOO0jcL4FcATKY9KyQX/Iyt
-# AWM1K9cYQHZcHdoBw7xEfrNn7L4BtTXO6K5IcYCDtythDBKhxU4296HUr12j14Bz
-# wgvH2h12frXUbWX7n7lwfR6xExNvDlgJ91mTB4UWUxDm+5JtSC4DyayaCXObjIV7
-# tBoy27VF+vTqFJhcpoTfdDUmSmQuaIb6LwallCpyhYepOjtbHb3k6ZZMFvWI/UUi
-# 2kqdJUBG/Rc0asLD+1LY61DLCI+mK6MPSAQQrJaGp/ee7j9UzToml8pf4G0enY85
-# rsBXNGvfe+Bc3lhuNfNv7miLv338zuDnWmorG8UQmgBp6nDq/EfQKgB7VRsRpSEj
-# +z/E7ALKjaJSqhxntqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJJdeUWspCErJS26LiSn+C1f7Inoi19fRsFd9NlEXupkMA0GCSqG
+# SIb3DQEBAQUABIIBgJLOW3lR0Boewhhf11PIJIzwN0chv7EzgB4uAz8W8rUWrXig
+# r1y5yuWTlJJb4XqfsROKwTTWZPaTBzouOs74KcpwPU0dBMzphJ+lkU9qQlDyo5bd
+# SFh5PXE+FJzOhy38lY0LfgM+luWvcHQ4DfKXxbnG67BqU4VjCBgX+Pyj044RuzV6
+# /hJXC8gIlqGwClO+CwMEeINPLcUsy1n42Ylv/FTgwwDnCeAfJMeuIN5SOpjn08OO
+# DhlDGx1o5fg3fLmhYBEi5JVJhZLe8SxjItTndKhrkIlRWt9RWFp4PkoCHhN9HuNV
+# YsikuQC3izLFhvSsx7M3MvwhB1fgGIjOebb3rRdLEeR0+VHsFGmk4HcxGGVxFvtu
+# sQXfCulxFurGfGiIim4T7LJ0Y/prqr//6qeB7rFst8aj3NT8yqzTayWf9rLbee4R
+# BY23FuJL6H8rTrps9mGRwkb6iwpG4oHnG0Q9BDiJASv2m3FxEHY2SJbRSlW+RBs2
+# 3WjKVSHNsNAmBTwV/qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMzExNDA4
-# MDNaMC8GCSqGSIb3DQEJBDEiBCC2Cei7BzsOYhWwJp8jBSIBwTuhUWZSzHnsOU2C
-# W9sV4zANBgkqhkiG9w0BAQEFAASCAgAxCOtbMqBX5p5i1KGl30ojk08SvZg8C3Ui
-# DcXdMp2MyNEHjwP/8S3wM9zV9Oro/gxL+24vrQVvZEAo4zEZssXl6W8kL1V5EW6S
-# oRhEObeMo5ybzPZAPGhFDP9YIi51m250UarYhPjef8KZDhiEyPkWuTFBtcg4S4+0
-# CH10OJqq3N49VHDid6rqSKGy5LXbrtkjw8p8qyTXIAtE0j+cT+Ep+eO7VZhhjtRR
-# pL9UiIDrDyHJ6JtcWKh7aCFGUHD9hjaJa3iw79UUyx5JPSx+xhMXBJwZDe0LMXWE
-# sOEBXg4hjEb7gJuUzi7HVDtVwFZromO6VtsZz1ToyVNtFMlURt6Mpa+A+9mUGDuc
-# GqkePRBMHUaad79ql+zBl/VtF+soJ70rnHx//cu/ahacpfndPEUaEON3SDWszLed
-# b9qJKKt6xhpPf1CXavMU/eJAlX622XKVRm9zZQH9IClQVPHmgZ4USGeNImwwxS+X
-# Po5YNIZpgUzRPdgGNIx7Xjb74ZZdZ1LUfyJNv9XTl5wCd1PKP5oFNXoJahbTTwbz
-# rSdeBoezRC/L6MmdNvzlaQiHQQnTg90kmKxJfHyp3k5ZPdEa4U5ONkWdDCJmozOs
-# V8l/zmDCPBktjM04K91K6uPr0tNnclBIj+rmaZ2xmX9YoExwauelIiKHs7cjul1n
-# PxV26pP76Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
+# MzJaMC8GCSqGSIb3DQEJBDEiBCC/hiyU1O6GvFeSJnovnZbkWBd0eJU7jZiDyuXP
+# X0bKODANBgkqhkiG9w0BAQEFAASCAgCVel5/pe1CggTtfAjjy8wnp7aTF+BgfJZD
+# KqjkDbvF++AK6GIqNIB3K9gXRLMe0pCvIbzW8aTja+j3dVixCQgQfxu5gCb4+OmI
+# k3sJHXN/E4vz6csgdtIZAzNgxReus7G0NngCkWsF0ZZgegI2TvDjfvMt4ZtiheD6
+# Ld7z2I/0fHJfl7GSwElPySSS5KFvnzwaTUGJDJl+3bkOJekcQYMHANuxnhKKLPso
+# ibYSt5fP4ovWwtndMPiRHoM3GXOenyCjP0NqCmWo4gX0kaPErwJf/dCD0xUKSCZ0
+# Y6Sm2pppUJr5m4Hlc5EKDnsqUdaGEne15mZ27I22NDm0QaSd+FTHLlvsgIuKeEMs
+# VKgB4qpwgHc9vHkR/QRHjciDtDVCc+GRb9A2raUzQ7Vwh6NMvgni5vkWYHZmaM8J
+# WNfjTrawPq0QzohPJ9wzbkrf2YLUkcBpmdScIRyY8EOUN/LPAGHk+j+kHxUrVzef
+# 06qBM9LvjcFQmv+8jsFcyQm6U2Dwx/a4cV+kaLGQwbXV6bMbCL+jopf3zBhNOlrS
+# x4Ja83p0gVdCn9PbNbiclwkJwuzWP4M9d4NLFoGMWeWnYtlJKUatiavRMEgOn/Iy
+# PiZ+8VZduucCfDJbxw6PEvEYH6LT5yeEJEIPRdC5roQGZKK1GbYRKEu7zGnqYCFt
+# TBTLbTIbrg==
 # SIG # End signature block

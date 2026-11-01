@@ -1,9 +1,9 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
 Tests evidence collector configuration precedence with isolated offline fixtures.
 .VERSION
-1.0.0
+1.0.1
 #>
 [CmdletBinding()]
 param()
@@ -23,10 +23,10 @@ $cases = @(
     @{ Name='preferred template wins'; Files=@{ 'json.txt.template'=$preferred; 'json.template'=$legacy }; Marker='preferred' },
     @{ Name='preferred local configuration wins'; Files=@{ 'json.txt'=$local; 'json.txt.template'=$preferred; 'json.template'=$legacy }; Marker='local' },
     @{ Name='legacy local configuration wins'; Files=@{ 'json'=$local; 'json.txt.template'=$preferred }; Marker='local' },
-    @{ Name='local configuration does not require a valid template'; Files=@{ 'json.txt'=$local; 'json.txt.template'='invalid' }; Marker='local' },
+    @{ Name='invalid template blocks required enrichment of an existing configuration'; Files=@{ 'json.txt'=$local; 'json.txt.template'='invalid' }; Error='*template*' },
     @{ Name='invalid preferred template cannot fall back'; Files=@{ 'json.txt.template'='invalid'; 'json.template'=$legacy }; Error='*' },
     @{ Name='preferred template directory cannot fall back'; Files=@{ 'json.template'=$legacy }; Directory='json.txt.template'; Error='*not a file*' },
-    @{ Name='missing templates list both names'; Files=@{}; Error='*json.txt.template*json.template*' },
+    @{ Name='missing templates fail explicitly'; Files=@{}; Error='*template*' },
     @{ Name='invalid local configuration cannot fall back'; Files=@{ 'json.txt'='invalid'; 'json.txt.template'=$preferred }; Error='*' },
     @{ Name='conflicting local configurations fail'; Files=@{ 'json.txt'=$local; 'json'=$legacy; 'json.txt.template'=$preferred }; Error='*Conflicting JSON transport names*' },
     @{ Name='template must be a JSON object'; Files=@{ 'json.txt.template'='[]'; 'json.template'=$legacy }; Error='*JSON object*' },
@@ -116,8 +116,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCC/dOzVFXfkRoh
-# Cs+u9ARF3PyAnkyh2aSkr5LWm8W5s6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCABFOeoEA2SbFgX
+# u6NEdMZv+XNvciK27V0JQNS6Baiio6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -250,31 +250,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIJAXMBsYZ2maAlC8ImILXUpRvTPiYTfeBcom1dd1laarMA0GCSqG
-# SIb3DQEBAQUABIIBgA//zPkBWeSnkmKxKAkFI6sonOHy4QDzfmroda/vM+gZMtDZ
-# 5HrUDk8Q0Uww4VcHdERofVQLkQQh2khrhy5rcCFbHpWKW+mvo2+AKwt9u5fS3OtX
-# 1mkvnQQFMK76yoqSEmZ0u+7SltmzPtjYgv3MncEyf5BGlNuGFvt58mR/ayKmfYfX
-# f75YEaEuczEcD4gzX00TvgaHCIY+yU8hW4lcNrV1klo+PyeiBM5qCrqsxz6TIrw4
-# uOgMQsIkU6fZoQ4o9ANfRa11fYhO/hFCuvNAnBsmHkyhMRjkPjhbu1esSoh9dDMg
-# eobf9d8mYVnMvRU4H5N8SBbaAi1u4k2H5saflwQB7UD7SPSaQ/Mits7fm7v82rUg
-# PXj2Ul8vfiCoPAa6CMJHFClpTlQwYYD++AhUIcmgn5yVvVJ1B77+74aMROOAOdwj
-# hw0EA6wDuSiJEHXKYwQDwHGBIPJ9rHNCOQnRxJHIDZ/zPZz2H6Wr7MJXuqDTn8ND
-# 9+Mk39E1ZoB3rvZj6aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIM+7FvxUTjsq2+SjJMlFuMnThGr4nP3rHyLztBIBA9xmMA0GCSqG
+# SIb3DQEBAQUABIIBgKjW7Z4KfkRM3HtW9y9TC+94AUNsrsprlHxFG5ifBVSoqyH6
+# aX/EBAoNRKHatLhWNkg45k7Auy2aTSgz6vPK0kpvZY8rCpHmBLzdX3wi7OlNRicF
+# b6NO7H0Hm/WiVA7QT8pXIFJxng0idZR4lffPFMB+6UVQMvau/saeBzcelMUfgSNs
+# pvYzOQniWjN/gJ4WjEPHDulJS4aUkxrDFKy/p8BRB8TCIPhybIMqvUH7Y1d7PDW0
+# HkRsKgG4dnYS/t6hNAR8CMnVOkFaW/4DsSf7o4RRR5N+zl4nptREMEj2/c3pGhA5
+# 7bjoPXtrHGfMpwL08sWW98044zzGyoWkNBtR5+DjTjdgcgkSZeTii7IsS0U2+N1J
+# rOettwyta76abzxlkW2/Gj1Ekwq+foI5XC+i9EyICeyh3e0C8DI89ip5T+swulZZ
+# bvryyEOVDgpvdsvFQwzRbfgdsjqonyxvEu7/LZ8NKJaL6DYQsEuHBMHlB3Gym5Vm
+# znvZi47LScyCvH85z6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDQxMTAy
-# MjZaMC8GCSqGSIb3DQEJBDEiBCBfbB8pR1/qU4CWWQ7jVxkYKjMKFZ1UcfiA72pT
-# +k0hGDANBgkqhkiG9w0BAQEFAASCAgBPdjy2uKx53+r16mUeH1lEPJIOdFugYXNg
-# HfFn/pOFgof7A6UvcsA/SRj34mjAQ3z55o8tB2m4EY+nTcaRTas+439WP7eeiWGi
-# FzXw0JSV1Fdh5diIhnd9hGwlvFdUKYQxm8HXIbAQ4nddt8JgS5fCZY9RbdlR1HNH
-# 5I7oh4HW3DDxTeaNCXeM292aI/gPKKEBloJra8foLqWND5umikud/6W3o/27yeyt
-# DNrvFXBYIW7avpEz44GM5EPcvlZQ3Il/hdVvBwuVMdjRY/mqDYmxkK3Y9ssb5ncG
-# PXrlUPWWMB6yAbKuy2ea37IZOeIC8pWOPx0K1qBl09UwNd2/wJi8+rfK3paDeofp
-# q/X9TP9SnaS/96WAeH/jFxYDaM5FuXVYB2vXgn0I7FcisdmROJM/oo0qJRLXIyLJ
-# pGrVDuvAaxm/kGVaIpBqWlGc/7VOZWtH2SOAN/Clk7m+eeSqhnhNg0F/rSLSDzd2
-# jBBeaCc3WK5OiMykbi0ikr2+8nAwbA8aGQIcMLK/JjIGbUYb30t3XORWdFqK/L9Q
-# 1CAYgULlNaRaESOhkqglIOaXS/RliDyGTDjuIgMEUA501+Y/MpUzaEcQplQByMLJ
-# Rf0Nw7YiHFHdqEWFKK5LOPaZugbPLLtP+wp5HdtcVc/dFePv0Ryg5vvtkuc37RsR
-# k1F+RPsoSw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
+# MzRaMC8GCSqGSIb3DQEJBDEiBCCho0Zap+MjD/2dP7ReIIFDv02La5vghjArnDKh
+# wiiioDANBgkqhkiG9w0BAQEFAASCAgAH8FHqnK8khLlRx0Ew0/hook6XqQUaDp4z
+# dH3ICvABs9kASlciuA/s17191GxJz5rLaxPCT57ozDy0HV5tFD3V/Ft1mKCdhCmo
+# BdaudRnlcfjPsvDy5iCAEG4tewmtezJZOlPwKxNFdAwaRCSCUeE/H9A+HkPH7/zA
+# xI0Y3WZ3kLz3WUA4BI7biPdfRHWwPTYo7MFi/5NIWMPcQZ6WGLfmU4B4quwGpCmZ
+# Dj0rtLdJnPV+5u8iZUekCjtS5vPCfsMLG5BPXnZLSATLInxF+UC9hyuM0Wf0342p
+# hjN9rSXtcU4WSivKPp2zmNtQr3u9wt8qVdmA+RKANFJza8+ZLzYvg6Hp6SwMcvPl
+# qDC4EJ8zmJNc2vYbND0Xg4utsXY03GQadA6PYdYjRNtnHiEYrMThL3gh0bK517Ie
+# yZKF0Qz9y/Isp8aGf0G0m9cn0a+9Uy0eEt/nn9Kdm6X8joJVBkJJ7oTGiDM+EEU6
+# 6Z9aCHVTlb8Iu57XGRxph+YC8zidTXtlFSJeUdQ0K8uNy8vP4flrP9Dd7nBmvluu
+# +05W10B/rX9H/BdgMTVqra/SU8gF1uCUqt4vLUD5zQ74SZUiy8NLCXC+AQTwKqVc
+# 2ZEkPqJr1JUtFDZ2QDIDD8OHs7qQkam8FztjPkIlaoH8qNWj8W/+/8TRKJWtTR4S
+# ULU1GuMiUg==
 # SIG # End signature block
