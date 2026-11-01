@@ -135,6 +135,51 @@
           "type": "CustomTheme"
         },
         {
+          "name": "swi-section-applications-20261028.png",
+          "path": "swi-section-applications-20261028.png",
+          "type": "Image"
+        },
+        {
+          "name": "swi-section-collaboration-20261028.png",
+          "path": "swi-section-collaboration-20261028.png",
+          "type": "Image"
+        },
+        {
+          "name": "swi-section-devices-20261028.png",
+          "path": "swi-section-devices-20261028.png",
+          "type": "Image"
+        },
+        {
+          "name": "swi-section-licensing-20261028.png",
+          "path": "swi-section-licensing-20261028.png",
+          "type": "Image"
+        },
+        {
+          "name": "swi-section-messaging-20261028.png",
+          "path": "swi-section-messaging-20261028.png",
+          "type": "Image"
+        },
+        {
+          "name": "swi-section-migrations-20261028.png",
+          "path": "swi-section-migrations-20261028.png",
+          "type": "Image"
+        },
+        {
+          "name": "swi-section-overview-20261028.png",
+          "path": "swi-section-overview-20261028.png",
+          "type": "Image"
+        },
+        {
+          "name": "swi-section-security-20261028.png",
+          "path": "swi-section-security-20261028.png",
+          "type": "Image"
+        },
+        {
+          "name": "swi-section-workforce-20261028.png",
+          "path": "swi-section-workforce-20261028.png",
+          "type": "Image"
+        },
+        {
           "name": "WorkplaceCloudHub-lockup-WPF-20260924.png",
           "path": "WorkplaceCloudHub-lockup-WPF-20260924.png",
           "type": "Image"
@@ -148,7 +193,8 @@
     "allowChangeFilterTypes": true,
     "useEnhancedTooltips": true,
     "pagesPosition": "Bottom",
-    "useDefaultAggregateDisplayName": true
+    "useDefaultAggregateDisplayName": true,
+    "locale": "en-US"
   },
   "annotations": [
     {

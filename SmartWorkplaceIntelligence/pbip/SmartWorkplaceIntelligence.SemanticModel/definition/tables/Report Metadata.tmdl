@@ -117,8 +117,8 @@ table 'Report Metadata'
 
 	/// Loaded batch date (Europe/Paris) and ID, independent of page filters. Mixed lineage remains explicit.
 	measure 'Dataset Footer' =
-			VAR _id=[Dataset Loaded Batch ID]
-			RETURN IF(NOT ISBLANK(_id), "Dataset: " & FORMAT([Dataset Batch Date Paris],"dd/MM/yyyy") & " | " & _id, [Loaded Batch Banner])
+			VAR _id = [Dataset Loaded Batch ID]
+			RETURN IF(NOT ISBLANK(_id), "Dataset: " & FORMAT([Dataset Batch Date Paris], "MM/dd/yyyy", "en-US") & " | " & _id, [Loaded Batch Banner])
 		displayFolder: Report presentation
 		lineageTag: 30622803-4848-4fed-9cf0-ffc867151cca
 

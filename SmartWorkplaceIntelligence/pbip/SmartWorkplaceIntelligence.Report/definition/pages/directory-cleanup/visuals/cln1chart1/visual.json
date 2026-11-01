@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "User Cleanup Evidence.Inactivity Bucket",
-              "nativeQueryRef": "Inactivity Bucket"
+              "nativeQueryRef": "Inactivity Bucket",
+              "active": true
             }
           ]
         },

@@ -63,8 +63,13 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#B73F4A'"
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Account Explorer Inventory"
+                        }
+                      },
+                      "Property": "Account Stale Findings Color"
                     }
                   }
                 }
@@ -175,8 +180,13 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#B73F4A'"
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Account Explorer Inventory"
+                        }
+                      },
+                      "Property": "Account Stale Findings Color"
                     }
                   }
                 }

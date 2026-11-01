@@ -16,8 +16,6 @@ table 'Mailbox License Membership'
 
 	column 'Loaded Batch ID'
 		dataType: string
-		isHidden
-		isAvailableInMdx: false
 		lineageTag: 22b1bb16-f3f0-431c-9e9e-acb0100e8b0b
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID

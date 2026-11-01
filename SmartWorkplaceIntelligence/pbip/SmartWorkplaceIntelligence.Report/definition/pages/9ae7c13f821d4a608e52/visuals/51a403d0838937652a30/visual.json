@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "User Inventory Evidence.Unclassified Workforce Accounts",
-              "nativeQueryRef": "Unclassified Workforce Accounts"
+              "nativeQueryRef": "Unclassified Workforce Accounts",
+              "displayName": "Unclassified accounts"
             },
             {
               "field": {
@@ -41,7 +42,8 @@
                 }
               },
               "queryRef": "User Inventory Evidence.Workforce Accounts Requiring Persona Review",
-              "nativeQueryRef": "Workforce Accounts Requiring Persona Review"
+              "nativeQueryRef": "Workforce Accounts Requiring Persona Review",
+              "displayName": "Persona review needed"
             },
             {
               "field": {
@@ -55,7 +57,8 @@
                 }
               },
               "queryRef": "User Inventory Evidence.Job Title Completeness",
-              "nativeQueryRef": "Job Title Completeness"
+              "nativeQueryRef": "Job Title Completeness",
+              "displayName": "Job title completeness"
             },
             {
               "field": {
@@ -69,7 +72,8 @@
                 }
               },
               "queryRef": "User Inventory Evidence.Workforce Accounts Without M365 Usage Report",
-              "nativeQueryRef": "Usage evidence missing"
+              "nativeQueryRef": "Usage evidence missing",
+              "displayName": "No M365 usage report"
             }
           ]
         }

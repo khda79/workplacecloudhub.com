@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Mailbox Cleanup Evidence.Account Population",
-              "nativeQueryRef": "Account Population"
+              "nativeQueryRef": "Account Population",
+              "active": true
             }
           ]
         }

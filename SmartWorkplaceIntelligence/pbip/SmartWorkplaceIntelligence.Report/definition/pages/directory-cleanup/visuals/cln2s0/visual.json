@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Computer Cleanup Evidence.Cleanup State",
-              "nativeQueryRef": "Cleanup State"
+              "nativeQueryRef": "Cleanup State",
+              "active": true
             }
           ]
         }

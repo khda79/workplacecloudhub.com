@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Mailbox Cleanup Evidence.Workforce Persona",
-              "nativeQueryRef": "Workforce Persona"
+              "nativeQueryRef": "Workforce Persona",
+              "active": true
             }
           ]
         }

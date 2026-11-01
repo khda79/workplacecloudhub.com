@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
   "name": "7e703070ffe685a52305",
-  "displayName": "Backup & Resilience",
+  "displayName": "– Backup & Resilience",
   "displayOption": "FitToPage",
   "height": 1080,
   "width": 1920,

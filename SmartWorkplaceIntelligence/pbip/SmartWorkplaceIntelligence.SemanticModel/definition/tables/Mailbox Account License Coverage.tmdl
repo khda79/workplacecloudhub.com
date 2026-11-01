@@ -207,7 +207,7 @@ table 'Mailbox Account License Coverage'
 		sourceColumn: Has M365 License
 
 	column 'M365 License Count'
-		dataType: int64
+		dataType: string
 		lineageTag: 1e86fd2f-0fb2-5708-82c1-02b460af629e
 		summarizeBy: none
 		sourceColumn: M365 License Count
@@ -265,4 +265,4 @@ table 'Mailbox Account License Coverage'
 				      #"Review Action"=if Review then "Review observed license assignments" else if not Link then "Qualify native AD/cloud link" else if WF[State]<>"Matched" then "Qualify Workforce coverage: "&WF[State] else "Review assignment suitability; no Exchange entitlement inferred"],
 				 Columns={"TenantKey","Mailbox GUID","AD Object GUID","Account UPN","Display Name","Coverage State","Native Link State","Workforce Match State","Account State","Identity Match Status","Has M365 License","M365 License Count","Backlog Country","Backlog AD Domain","Review Action"},
 				 Rows=Table.FromRecords(List.Transform(Table.ToRecords(Local),Project),Columns,MissingField.UseNull)
-				in R[Finish](Table.TransformColumnTypes(Rows, {{"M365 License Count", Int64.Type}}))
+				in R[Finish](Rows)

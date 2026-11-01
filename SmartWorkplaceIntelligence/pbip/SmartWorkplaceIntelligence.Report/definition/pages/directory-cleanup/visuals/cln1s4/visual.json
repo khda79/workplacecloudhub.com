@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "User Cleanup Evidence.User Type",
-              "nativeQueryRef": "User Type"
+              "nativeQueryRef": "User Type",
+              "active": true
             }
           ]
         }

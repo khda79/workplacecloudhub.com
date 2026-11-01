@@ -3553,6 +3553,16 @@ cultureInfo en-US
 			          }
 			        },
 			        {
+			          "Persona review needed": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
 			          "Accounts requiring review": {
 			            "State": "Suggested",
 			            "Source": {
@@ -13595,7 +13605,7 @@ cultureInfo en-US
 			      "State": "Generated",
 			      "Terms": [
 			        {
-			          "Total Exchange Storage (TB)": {
+			          "Exchange storage (TB)": {
 			            "State": "Suggested",
 			            "Source": {
 			              "Type": "External",
@@ -13626,7 +13636,7 @@ cultureInfo en-US
 			      "State": "Generated",
 			      "Terms": [
 			        {
-			          "Total SharePoint Storage (TB)": {
+			          "SharePoint storage (TB)": {
 			            "State": "Suggested",
 			            "Source": {
 			              "Type": "External",
@@ -26128,6 +26138,372 @@ cultureInfo en-US
 			      "Terms": [
 			        {
 			          "Account / mailbox selection": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_cleanup_evidence.user_cleanup_total": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Cleanup Evidence",
+			          "ConceptualProperty": "User Cleanup Total"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Users total": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_cleanup_evidence.user_cleanup_candidates": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Cleanup Evidence",
+			          "ConceptualProperty": "User Cleanup Candidates"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "User candidates": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
+			          "Users candidates": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_cleanup_evidence.user_cleanup_review": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Cleanup Evidence",
+			          "ConceptualProperty": "User Cleanup Review"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Users review": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_cleanup_evidence.user_cleanup_active": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Cleanup Evidence",
+			          "ConceptualProperty": "User Cleanup Active"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Users active": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "computer_cleanup_evidence.computer_cleanup_total": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Computer Cleanup Evidence",
+			          "ConceptualProperty": "Computer Cleanup Total"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Computers total": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "computer_cleanup_evidence.computer_cleanup_candidates": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Computer Cleanup Evidence",
+			          "ConceptualProperty": "Computer Cleanup Candidates"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Computer candidates": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
+			          "Computers candidates": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "computer_cleanup_evidence.computer_cleanup_review": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Computer Cleanup Evidence",
+			          "ConceptualProperty": "Computer Cleanup Review"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Computers review": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "computer_cleanup_evidence.computer_cleanup_active": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Computer Cleanup Evidence",
+			          "ConceptualProperty": "Computer Cleanup Active"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Computers active": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_cleanup_evidence.mailbox_cleanup_total": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Cleanup Evidence",
+			          "ConceptualProperty": "Mailbox Cleanup Total"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Mailboxes total": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_cleanup_evidence.mailbox_cleanup_candidates": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Cleanup Evidence",
+			          "ConceptualProperty": "Mailbox Cleanup Candidates"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Mailbox candidates": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
+			          "Mailboxes candidates": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_cleanup_evidence.mailbox_cleanup_review": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Cleanup Evidence",
+			          "ConceptualProperty": "Mailbox Cleanup Review"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Mailboxes review": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "mailbox_cleanup_evidence.mailbox_cleanup_active": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Mailbox Cleanup Evidence",
+			          "ConceptualProperty": "Mailbox Cleanup Active"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Mailboxes active": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "content_storage_evidence.messaging_and_collaboration_storage_tb": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Content Storage Evidence",
+			          "ConceptualProperty": "Messaging and Collaboration Storage (TB)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Messaging + collaboration (TB)": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "content_storage_evidence.messaging_and_collaboration_storage_per_workforce_account_gb": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Content Storage Evidence",
+			          "ConceptualProperty": "Messaging and Collaboration Storage per Workforce Account (GB)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Storage / workforce (GB)": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.job_title_completeness": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "Job Title Completeness"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Job title completeness": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "user_inventory_evidence.workforce_accounts_without_m365_usage_report": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "User Inventory Evidence",
+			          "ConceptualProperty": "Workforce Accounts Without M365 Usage Report"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "No M365 usage report": {
 			            "State": "Suggested",
 			            "Source": {
 			              "Type": "External",

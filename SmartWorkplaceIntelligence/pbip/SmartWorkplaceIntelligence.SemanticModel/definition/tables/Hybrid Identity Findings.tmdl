@@ -314,6 +314,11 @@ table 'Hybrid Identity Findings'
 		displayFolder: Remediation Backlog
 		lineageTag: e29a63fa-f0cf-5169-956c-a60b0e46791a
 
+	/// Red for positive blocker findings, blue for an observed zero, gray for unavailable or unexpected values.
+	measure 'Backlog Blocker Findings Color' = VAR _n = [Backlog Identity Blocker Findings] RETURN SWITCH(TRUE(), ISBLANK(_n), "#6B7280", _n > 0, "#B42318", _n = 0, "#1764AB", "#6B7280")
+		isHidden
+		lineageTag: e3cffd90-2f72-4884-b7e1-fc9f55a46bd2
+
 	column TenantKey
 		dataType: string
 		isHidden
@@ -495,7 +500,7 @@ table 'Hybrid Identity Findings'
 
 	/// Lot 1b operational evidence context; unknown attribution stays explicit.
 	column 'Severity Sort'
-		dataType: int64
+		dataType: string
 		isHidden
 		lineageTag: 22eb995d-1794-5890-a982-2685c30686f0
 		summarizeBy: none
@@ -521,4 +526,4 @@ table 'Hybrid Identity Findings'
 				  in [#"Backlog Country"=K[Field](Co,"Country"),#"Backlog AD Domain"=K[Field](AD,"DomainName"),#"Country Match State"=Co[State],#"Domain Match State"=AD[State],
 				      #"Rule Observation"=[Rule ID]&" - "&(if [Observed Value]=null then "" else [Observed Value]),#"Severity Sort"=if SeverityOrder<0 then 9 else SeverityOrder],type record),
 				 Expanded=Table.ExpandRecordColumn(Added,"__context",{"Backlog Country","Backlog AD Domain","Country Match State","Domain Match State","Rule Observation","Severity Sort"})
-				in Table.TransformColumnTypes(Expanded, {{"Severity Sort", Int64.Type}})
+				in Expanded

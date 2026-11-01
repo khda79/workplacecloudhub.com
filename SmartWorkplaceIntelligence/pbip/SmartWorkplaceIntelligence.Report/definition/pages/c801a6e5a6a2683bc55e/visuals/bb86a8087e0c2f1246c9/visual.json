@@ -62,8 +62,13 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#C62828'"
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Enterprise Operational Signals"
+                        }
+                      },
+                      "Property": "Critical Signal Observations Color"
                     }
                   }
                 }
@@ -195,8 +200,13 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": {
-                      "Value": "'#C62828'"
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Enterprise Operational Signals"
+                        }
+                      },
+                      "Property": "Critical Signal Observations Color"
                     }
                   }
                 }

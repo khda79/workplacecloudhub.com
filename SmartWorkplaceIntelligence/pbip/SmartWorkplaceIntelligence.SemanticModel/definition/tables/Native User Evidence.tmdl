@@ -394,6 +394,38 @@ table 'Native User Evidence'
 		lineageTag: a44764f0-55ab-420f-be58-76999e9736f3
 		summarizeBy: none
 
+	column CountryRaw
+		dataType: string
+		lineageTag: 6fe14181-6bb8-4311-b9d4-3766188ee90f
+		summarizeBy: none
+		sourceColumn: CountryRaw
+
+		annotation SummarizationSetBy = Automatic
+
+	column CountryName
+		dataType: string
+		lineageTag: 8ea4552c-281a-4b19-8032-a7cb4c0d9f28
+		summarizeBy: none
+		sourceColumn: CountryName
+
+		annotation SummarizationSetBy = Automatic
+
+	column CountrySource
+		dataType: string
+		lineageTag: b85801ab-fc60-42cf-ac2e-8e56eba0317d
+		summarizeBy: none
+		sourceColumn: CountrySource
+
+		annotation SummarizationSetBy = Automatic
+
+	column UsageLocation
+		dataType: string
+		lineageTag: 9df89458-6df4-46f6-bcbc-38ab1e38b36c
+		summarizeBy: none
+		sourceColumn: UsageLocation
+
+		annotation SummarizationSetBy = Automatic
+
 	partition 'Native User Evidence' = m
 		mode: import
 		source =

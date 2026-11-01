@@ -33,7 +33,7 @@ table 'Backup Mailbox Evidence'
 		lineageTag: 5b4b6680-876b-4556-85fb-1f8eccd4306d
 
 	/// Expected mailboxes absent from protected-mailbox evidence.
-	measure 'Expected Mailboxes Not Protected' = CALCULATE(COUNTROWS('Backup Mailbox Evidence'), KEEPFILTERS('Backup Mailbox Evidence'[Reconciliation State] = "Expected not protected"))
+	measure 'Expected Mailboxes Not Protected' = VAR _scope=[Expected Mailboxes] VAR _positive=CALCULATE(COUNTROWS('Backup Mailbox Evidence'),KEEPFILTERS('Backup Mailbox Evidence'[Reconciliation State]="Expected not protected")) VAR _unknown=CALCULATE(COUNTROWS('Backup Mailbox Evidence'),KEEPFILTERS('Backup Mailbox Evidence'[Reconciliation State]="Protection inventory unavailable")) RETURN SWITCH(TRUE(), _positive>0,_positive, _unknown>0,BLANK(), NOT ISBLANK(_scope) && _scope>0,0,BLANK())
 		formatString: #,0
 		displayFolder: Backup | Risk
 		lineageTag: c4171ea3-3905-46ee-8d7d-3854ff397467

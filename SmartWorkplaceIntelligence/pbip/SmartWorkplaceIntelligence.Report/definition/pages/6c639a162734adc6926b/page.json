@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
   "name": "6c639a162734adc6926b",
-  "displayName": "Devices & Compliance (Mobile)",
+  "displayName": "– Devices & Compliance (Mobile)",
   "displayOption": "FitToPage",
   "height": 1080,
   "width": 1920,

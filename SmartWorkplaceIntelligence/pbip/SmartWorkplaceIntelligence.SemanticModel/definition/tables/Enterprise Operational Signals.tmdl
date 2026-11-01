@@ -79,6 +79,11 @@ table 'Enterprise Operational Signals'
 		displayFolder: Enterprise Signals
 		lineageTag: f8008f79-a26e-4e36-ab19-9fb8290f3be9
 
+	/// Positive critical observations are red; zero is blue only when each selected signal has observations and positive coverage; otherwise gray.
+	measure 'Critical Signal Observations Color' = VAR _n=[Affected Signal Observations] VAR _signals=VALUES('Enterprise Operational Signals'[Signal Sort]) VAR _unknown=SUMX(_signals, VAR _affected=CALCULATE([Affected Signal Observations]) VAR _covered=CALCULATE([Enterprise Signal Covered]) RETURN IF(ISBLANK(_affected) || ISBLANK(_covered) || _covered<=0,1,0)) RETURN SWITCH(TRUE(), _n>0,"#C62828", ISBLANK(_n) || COUNTROWS(_signals)=0 || _unknown>0,"#6B7280", _n=0,"#1764AB", "#6B7280")
+		isHidden
+		lineageTag: 39afb1f5-7293-40cb-8e10-29f30c2d49bc
+
 	column 'Signal Sort'
 		dataType: int64
 		formatString: #,0

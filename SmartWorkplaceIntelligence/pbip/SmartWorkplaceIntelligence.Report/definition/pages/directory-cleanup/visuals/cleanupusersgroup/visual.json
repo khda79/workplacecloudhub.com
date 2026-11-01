@@ -13,5 +13,5 @@
     "displayName": "Users",
     "groupMode": "ScaleMode"
   },
-  "isHidden": false
+  "isHidden": true
 }

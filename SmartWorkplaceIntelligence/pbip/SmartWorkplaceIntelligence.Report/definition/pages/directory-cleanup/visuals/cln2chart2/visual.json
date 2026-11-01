@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Computer Cleanup Evidence.AD Domain",
-              "nativeQueryRef": "AD Domain"
+              "nativeQueryRef": "AD Domain",
+              "active": true
             }
           ]
         },

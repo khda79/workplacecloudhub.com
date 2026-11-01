@@ -151,8 +151,6 @@ table 'Mailbox Exploration Inventory'
 
 	column 'Loaded Batch ID'
 		dataType: string
-		isHidden
-		isAvailableInMdx: false
 		lineageTag: a5aef240-7c15-44c7-83a7-e516835911e7
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID

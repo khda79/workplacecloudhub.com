@@ -196,6 +196,11 @@ table 'Account Explorer Inventory'
 		displayFolder: Private account and device explorer
 		lineageTag: ab5c234d-0bf8-421d-8e3a-b0830f0f0f65
 
+	/// Positive stale counts are red; zero is blue only with an observed scoped population and no missing activity; otherwise gray.
+	measure 'Account Stale Findings Color' = VAR _n=[Account Inventory Stale >90D] VAR _scope=[Account Inventory Accounts] VAR _missing=[Account Inventory Missing Activity] RETURN SWITCH(TRUE(), _n>0,"#B73F4A", ISBLANK(_n) || ISBLANK(_scope) || _scope<=0,"#6B7280", ISBLANK(_missing) || _missing>0,"#6B7280", _n=0,"#1764AB", "#6B7280")
+		isHidden
+		lineageTag: 6e974761-2fc2-40ae-a375-c59ba255540d
+
 	column 'User Source ID'
 		lineageTag: c67c6306-05ff-40e9-838e-fdffee00b306
 		isNameInferred

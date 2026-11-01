@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "User Cleanup Evidence.Cleanup State",
-              "nativeQueryRef": "Cleanup State"
+              "nativeQueryRef": "Cleanup State",
+              "active": true
             }
           ]
         }
