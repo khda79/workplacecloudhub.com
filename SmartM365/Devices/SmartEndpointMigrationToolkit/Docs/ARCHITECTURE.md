@@ -39,7 +39,7 @@ Campaigns\<C>\Scripts\SmartM365-Invoke-EndpointMigration-<C>.ps1   (single-file 
   `<CorrelationId>-R<timestamp>`.
 - Every computer row uses the common result schema (Campaign, Wave, Run, cycle, computer,
   CorrelationId, status, next action, launcher/remote status, network preflight, copy, hashes,
-  PsExec, target guard, legacy activity, evidence paths, contract version) plus campaign
+  PsExec, target guard, evidence paths, contract version) plus campaign
   extension fields.
 
 ## Integrity

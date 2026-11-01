@@ -24,26 +24,10 @@ The only data reused is the Windows 11 setup media already present on targets (b
 | Retry-after-reboot tasks | `SmartM365-IntuneHybridJoinToolkit-RetryAfterReboot`, `SmartM365-Windows11UpgradeToolkit-RetryAfterReboot` | `SmartM365-SEMT-HybridJoin-RetryAfterReboot`, `SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot` |
 | Intune Win32 (Windows 11) | `HKLM\SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages`, task `SmartM365 Windows 11 Upgrade Toolkit - Intune` | `HKLM\SOFTWARE\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade\IntunePackages`, task `SmartM365 SEMT Windows 11 Upgrade - Intune`, PackageId prefix `SmartM365-SEMT-Windows11Upgrade-` |
 
-## Legacy activity detection on the target
+## No legacy activity check on the target
 
-Before acting, both endpoint scripts inspect the previous toolkits **read-only**: they never
-write, delete, lock, wait on a legacy mutex, stop a process or change a task or registry key.
-The mere presence of a previous toolkit does not block.
-
-| Status | Blocking with Block | Meaning | Next action |
-| --- | --- | --- | --- |
-| `LEGACY_ABSENT` | no | No trace of the previous toolkits | |
-| `LEGACY_INSTALLED_IDLE` | no | Folders, tasks or packages exist; nothing is running | |
-| `LEGACY_INTUNE_PACKAGE_ASSIGNED` | no | A legacy Windows 11 Intune Win32 package is installed; its media is reused in place | `REVIEW_LEGACY_INTUNE_ASSIGNMENT` |
-| `LEGACY_ENDPOINT_RUNNING` | yes | A legacy endpoint script, retry runner or task is running, or the legacy Hybrid Join mutex is held | `WAIT_LEGACY_TOOLKIT_OPERATION` |
-| `LEGACY_SETUP_IN_PROGRESS` | yes | Windows Setup runs from legacy media | `WAIT_LEGACY_WINDOWS_SETUP` |
-| `LEGACY_COPY_IN_PROGRESS` | yes | Robocopy into legacy media, or a legacy media lock held by a live process | `WAIT_LEGACY_MEDIA_COPY` |
-| `LEGACY_RETRY_AFTER_REBOOT_PENDING` | yes | A legacy retry task will resume a legacy run at startup | `WAIT_OR_REMOVE_LEGACY_RETRY_TASK` |
-| `LEGACY_STATE_UNREADABLE` | yes | Legacy state could not be read: the state is indeterminate | `VERIFY_LEGACY_TOOLKIT_STATE` |
-
-The option `LegacyActivityPolicy` (`Warn` by default, or `Block`) controls the reaction to a
-blocking status; `Warn` records the status and continues, while `Block` stops the endpoint. The status and its detail are in every result row (`LegacyActivityStatus`,
-`LegacyActivityDetail`).
+The endpoint scripts do not inspect the previous toolkits (folders, tasks, mutex, processes,
+locks or Intune packages) and never block on them.
 
 Hybrid Join also stops with `TARGET_WINDOWS_SETUP_ACTIVE` (`WAIT_WINDOWS_SETUP_COMPLETION`)
 while any Windows Setup is running.
@@ -113,8 +97,7 @@ product never touches the legacy media folder.
 ## Running both products
 
 - Do not run the previous toolkit and this product against the same computers at the same time.
-  The target-side detection blocks the new product while a legacy operation is active, but the
-  previous toolkits do not know about the new product.
+  Neither product detects the other.
 - Hybrid Join and Windows 11 Waves of this product can run at the same time: the target guard
   allows one operation per computer and a pending Windows 11 setup blocks Hybrid Join until reboot.
 - The technician-side shared worker cap covers both Campaigns of this product only.

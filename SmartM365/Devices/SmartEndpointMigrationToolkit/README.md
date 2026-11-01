@@ -115,7 +115,7 @@ and the engine can be called directly:
 | Mode | Technician side | Endpoint side |
 | --- | --- | --- |
 | Dry run (`DryRun`) | DNS, ping, SMB 445, administrative share | Nothing is copied or executed |
-| Remote audit (`AuditOnly`) | Checks, copy, selected transport | Hybrid Join skips gpupdate; no repair, MDM cleanup, upgrade or reboot. It may flush DNS and register diagnostic tasks. |
+| Remote audit (`AuditOnly`) | Checks, copy, selected transport | Hybrid Join skips gpupdate; no repair, MDM cleanup, upgrade or reboot. It may flush DNS; it registers no scheduled task and runs nothing in the user context. |
 | Repair (default) | Full checks, copy, selected transport | Applies the enabled actions only |
 
 `RemoteExecutionMode` applies to both campaigns: `ScheduledTask` (default), `WinRM`, or

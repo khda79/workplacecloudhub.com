@@ -86,7 +86,6 @@ param(
 
     [string]$DataRoot = 'C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade',
     [string]$CorrelationId,
-    [ValidateSet('Block','Warn')][string]$LegacyActivityPolicy = 'Warn',
     [switch]$ReuseLegacySetupMedia,
     [switch]$AllowSetupMediaDuplication,
     [string]$SetupMediaPath
@@ -120,8 +119,6 @@ $script:RetryAfterRebootTaskName = 'SmartM365-SEMT-Windows11Upgrade-RetryAfterRe
 if ([string]::IsNullOrWhiteSpace($CorrelationId)) { $CorrelationId = [guid]::NewGuid().ToString('N') }
 elseif ($RetryAfterRebootTaskRun) { $CorrelationId = '{0}-R{1}' -f $CorrelationId,(Get-Date -Format 'yyyyMMddHHmmss') }
 $script:SemtTargetGuardStatus = ''
-$script:SemtLegacyActivityStatus = ''
-$script:SemtLegacyActivityDetail = ''
 $script:SemtLegacyMediaDecision = $null
 $script:SetupMediaReuseDecision = ''
 # The retry task runs as SYSTEM: its runner, its state (script path and arguments) and the endpoint
@@ -508,7 +505,6 @@ function Test-SemtTrustedDataFolder {
 $script:SemtTargetMutexName = 'Global\SmartM365_SEMT_TargetOperation'
 $script:SemtTargetMutex = $null
 $script:SemtTargetMutexAcquired = $false
-$script:SemtLegacyHybridJoinRoot = 'C:\ProgramData\SmartM365\IntuneHybridJoinToolkit'
 $script:SemtLegacyWindows11Root = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit'
 
 function Get-SemtTargetProductRoot {
@@ -684,115 +680,6 @@ function Test-SemtWindowsSetupActive {
         }
     }
     return [pscustomobject]@{ Active = ($signals.Count -gt 0); Detail = ($signals -join '; ') }
-}
-
-function Get-SemtLegacyEndpointActivity {
-    <#
-    READ-ONLY inspection of the previous toolkits on this computer. It never writes, deletes,
-    takes a lock or waits on a legacy mutex.
-    Statuses: LEGACY_ABSENT, LEGACY_INSTALLED_IDLE and LEGACY_INTUNE_PACKAGE_ASSIGNED (not blocking;
-    media owned by a legacy Intune package is reused in place), LEGACY_ENDPOINT_RUNNING, LEGACY_SETUP_IN_PROGRESS,
-    LEGACY_COPY_IN_PROGRESS, LEGACY_RETRY_AFTER_REBOOT_PENDING (blocking),
-    LEGACY_STATE_UNREADABLE (blocking).
-    #>
-    param([Parameter(Mandatory = $true)][string]$Campaign)
-
-    $signals = New-Object System.Collections.Generic.List[string]
-    $active = New-Object System.Collections.Generic.List[string]
-    $installed = $false
-    try {
-        foreach ($root in @($script:SemtLegacyHybridJoinRoot,$script:SemtLegacyWindows11Root)) {
-            if (Test-Path -LiteralPath $root -PathType Container) { $installed = $true; $signals.Add(('Folder={0}' -f $root)) }
-        }
-
-        $legacyScripts = '(?i)(SmartM365-Invoke-Windows11UpgradeRepair\.ps1|SmartM365-Invoke-IntuneHybridJoinRepair\.ps1|Run-IntuneUpgrade\.ps1|\\(IntuneHybridJoinToolkit|Windows11UpgradeToolkit)\\State\\RetryAfterRebootRunner\.ps1)'
-        $legacyMedia = [regex]::Escape((Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'SetupMedia'))
-        foreach ($process in @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)) {
-            $name = [string]$process.Name
-            $commandLine = [string]$process.CommandLine
-            $executable = [string]$process.ExecutablePath
-            if ($name -match '(?i)^(powershell|pwsh)\.exe$' -and $commandLine -match $legacyScripts) { $active.Add(('LEGACY_ENDPOINT_RUNNING|Process {0}:{1}' -f $name,$process.ProcessId)) }
-            elseif ($name -match '(?i)^(setup|setuphost|setupprep)\.exe$' -and ($executable -match $legacyMedia -or $commandLine -match $legacyMedia)) { $active.Add(('LEGACY_SETUP_IN_PROGRESS|Process {0}:{1}' -f $name,$process.ProcessId)) }
-            elseif ($name -match '(?i)^robocopy\.exe$' -and $commandLine -match $legacyMedia) { $active.Add(('LEGACY_COPY_IN_PROGRESS|Process {0}:{1}' -f $name,$process.ProcessId)) }
-        }
-
-        $legacyMutex = $null
-        if ([System.Threading.Mutex]::TryOpenExisting('Global\SmartM365_IntuneHybridJoinToolkit_Endpoint', [ref]$legacyMutex)) {
-            $active.Add('LEGACY_ENDPOINT_RUNNING|Legacy Hybrid Join endpoint mutex is held')
-            try { $legacyMutex.Dispose() } catch { }
-        }
-
-        $taskNames = @(
-            @{ Path = '\'; Name = 'SmartM365-Windows11UpgradeToolkit-RetryAfterReboot'; State = (Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'State\RetryAfterReboot.json') },
-            @{ Path = '\'; Name = 'SmartM365-IntuneHybridJoinToolkit-RetryAfterReboot'; State = (Join-Path -Path $script:SemtLegacyHybridJoinRoot -ChildPath 'State\RetryAfterReboot.json') },
-            @{ Path = '\'; Name = 'SmartM365 Windows 11 Upgrade Toolkit - Intune'; State = '' }
-        )
-        foreach ($taskName in $taskNames) {
-            $task = Get-ScheduledTask -TaskPath $taskName.Path -TaskName $taskName.Name -ErrorAction SilentlyContinue
-            if (-not $task) { continue }
-            $installed = $true
-            $signals.Add(('Task={0}; State={1}' -f $taskName.Name,$task.State))
-            if ([string]$task.State -eq 'Running') { $active.Add(('LEGACY_ENDPOINT_RUNNING|Task {0} is running' -f $taskName.Name)) }
-            elseif (-not [string]::IsNullOrWhiteSpace($taskName.State) -and (Test-Path -LiteralPath $taskName.State -PathType Leaf)) { $active.Add(('LEGACY_RETRY_AFTER_REBOOT_PENDING|Task {0} will resume a legacy run at startup' -f $taskName.Name)) }
-        }
-        foreach ($task in @(Get-ScheduledTask -TaskPath '\SmartM365\IntuneHybridJoinToolkit\' -ErrorAction SilentlyContinue)) {
-            $installed = $true
-            if ([string]$task.State -eq 'Running') { $active.Add(('LEGACY_ENDPOINT_RUNNING|Task {0} is running' -f $task.TaskName)) }
-        }
-
-        $lockRoot = Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'Locks'
-        if (Test-Path -LiteralPath $lockRoot -PathType Container) {
-            foreach ($lockFile in @(Get-ChildItem -LiteralPath $lockRoot -Filter 'lock.json' -File -Recurse -ErrorAction Stop)) {
-                $lock = Read-SemtTargetJson -Path $lockFile.FullName
-                $lockPid = 0
-                if ($lock -and $lock.PSObject.Properties['PID']) { [void][int]::TryParse([string]$lock.PID, [ref]$lockPid) }
-                if ($lockPid -gt 0 -and (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) { $active.Add(('LEGACY_COPY_IN_PROGRESS|Legacy media lock {0} held by PID {1}' -f $lockFile.Directory.Name,$lockPid)) }
-            }
-        }
-
-        $packageRoot = 'SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages'
-        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
-        try {
-            $packages = $baseKey.OpenSubKey($packageRoot, $false)
-            if ($packages) {
-                try {
-                    foreach ($packageName in @($packages.GetSubKeyNames())) {
-                        $package = $packages.OpenSubKey($packageName, $false)
-                        if (-not $package) { continue }
-                        try {
-                            $installed = $true
-                            $installState = [string]$package.GetValue('InstallState', '')
-                            $signals.Add(('IntunePackage={0}; InstallState={1}; Cache={2}' -f $packageName,$installState,[string]$package.GetValue('SetupCacheFolder', '')))
-                            if ($installState -in @('Installed','RepairRequired')) { $active.Add(('LEGACY_INTUNE_PACKAGE_ASSIGNED|Legacy Intune Win32 package {0} is {1}' -f $packageName,$installState)) }
-                        }
-                        finally { $package.Dispose() }
-                    }
-                }
-                finally { $packages.Dispose() }
-            }
-        }
-        finally { $baseKey.Dispose() }
-    }
-    catch {
-        return [pscustomobject]@{ Status = 'LEGACY_STATE_UNREADABLE'; Blocking = $true; NextAction = 'VERIFY_LEGACY_TOOLKIT_STATE'; Detail = ('Legacy toolkit state could not be read: {0}' -f $_.Exception.Message) }
-    }
-
-    $priority = @('LEGACY_SETUP_IN_PROGRESS','LEGACY_COPY_IN_PROGRESS','LEGACY_ENDPOINT_RUNNING','LEGACY_RETRY_AFTER_REBOOT_PENDING','LEGACY_INTUNE_PACKAGE_ASSIGNED')
-    foreach ($candidate in $priority) {
-        $found = @($active | Where-Object { $_.StartsWith($candidate + '|') })
-        if ($found.Count -eq 0) { continue }
-        $blocking = ($candidate -ne 'LEGACY_INTUNE_PACKAGE_ASSIGNED')
-        $nextAction = switch ($candidate) {
-            'LEGACY_SETUP_IN_PROGRESS' { 'WAIT_LEGACY_WINDOWS_SETUP' }
-            'LEGACY_COPY_IN_PROGRESS' { 'WAIT_LEGACY_MEDIA_COPY' }
-            'LEGACY_ENDPOINT_RUNNING' { 'WAIT_LEGACY_TOOLKIT_OPERATION' }
-            'LEGACY_RETRY_AFTER_REBOOT_PENDING' { 'WAIT_OR_REMOVE_LEGACY_RETRY_TASK' }
-            default { 'REVIEW_LEGACY_INTUNE_ASSIGNMENT' }
-        }
-        return [pscustomobject]@{ Status = $candidate; Blocking = $blocking; NextAction = $nextAction; Detail = (($found | ForEach-Object { $_.Substring($candidate.Length + 1) }) -join '; ') }
-    }
-    if ($installed) { return [pscustomobject]@{ Status = 'LEGACY_INSTALLED_IDLE'; Blocking = $false; NextAction = ''; Detail = ($signals -join '; ') } }
-    return [pscustomobject]@{ Status = 'LEGACY_ABSENT'; Blocking = $false; NextAction = ''; Detail = '' }
 }
 
 function Write-SemtAttemptResult {
@@ -5267,7 +5154,6 @@ function New-RetryAfterRebootArgumentList {
         LocalFileRetentionCount = $LocalFileRetentionCount
         DataRoot = $DataRoot
         CorrelationId = ($CorrelationId -replace '-R\d{14}$','')
-        LegacyActivityPolicy = $LegacyActivityPolicy
     }
 
     foreach ($entry in $valueParameters.GetEnumerator()) {
@@ -5844,7 +5730,7 @@ New-SmartDirectory -Path $script:OutputDir
 New-SmartDirectory -Path $script:StateDir
 $script:LocalIPv4Addresses = ''
 try { $script:LocalIPv4Addresses = (@(Get-LocalIPv4Addresses) -join ',') } catch { $script:LocalIPv4Addresses = '' }
-Write-SmartLog ("===== {0} v{1} started. ComputerName={2}; LocalIPv4={3}; RunId={4}; CorrelationId={5}; DataRoot={6}; LegacyActivityPolicy={7}; ReuseLegacySetupMedia={8}; AllowSetupMediaDuplication={9} =====" -f $script:ScriptName,$script:ScriptVersion,$script:ComputerName,$script:LocalIPv4Addresses,$script:RunId,$CorrelationId,$DataRoot,$LegacyActivityPolicy,[bool]$ReuseLegacySetupMedia,[bool]$AllowSetupMediaDuplication)
+Write-SmartLog ("===== {0} v{1} started. ComputerName={2}; LocalIPv4={3}; RunId={4}; CorrelationId={5}; DataRoot={6}; ReuseLegacySetupMedia={7}; AllowSetupMediaDuplication={8} =====" -f $script:ScriptName,$script:ScriptVersion,$script:ComputerName,$script:LocalIPv4Addresses,$script:RunId,$CorrelationId,$DataRoot,[bool]$ReuseLegacySetupMedia,[bool]$AllowSetupMediaDuplication)
 
 $exitCode = 3
 $status = 'UNKNOWN'
@@ -5881,8 +5767,6 @@ function Write-SemtWindows11AttemptResult {
         LogPath = $script:LogPath
         CsvPath = $script:CsvPath
         TargetGuardStatus = $script:SemtTargetGuardStatus
-        LegacyActivityStatus = $script:SemtLegacyActivityStatus
-        LegacyActivityDetail = $script:SemtLegacyActivityDetail
         SetupMediaReuseDecision = $script:SetupMediaReuseDecision
     }
     if ($Result) {
@@ -6013,21 +5897,6 @@ try {
     }
 
     $os = Get-OsSummary
-    if ($os.MajorFamily -eq 'Windows10') {
-        $semtLegacy = Get-SemtLegacyEndpointActivity -Campaign $script:SemtCampaign
-        $script:SemtLegacyActivityStatus = $semtLegacy.Status
-        $script:SemtLegacyActivityDetail = $semtLegacy.Detail
-        if ($semtLegacy.Blocking -and $LegacyActivityPolicy -eq 'Block') {
-            $status = $semtLegacy.Status
-            $nextAction = $semtLegacy.NextAction
-            $detail = ("Previous toolkit activity detected (read-only check): {0}" -f $semtLegacy.Detail)
-            $exitCode = 3
-            throw [System.OperationCanceledException]::new($detail)
-        }
-        elseif ($semtLegacy.Status -ne 'LEGACY_ABSENT') {
-            Write-SmartLog ("Previous toolkit inspection: Status={0}; Blocking={1}; Policy={2}; Detail={3}" -f $semtLegacy.Status,$semtLegacy.Blocking,$LegacyActivityPolicy,$semtLegacy.Detail) 'WARN'
-        }
-    }
     Write-SmartLog ("Startup OS before upgrade: ComputerName={0}; LocalIPv4={1}; Caption={2}; Version={3}; Build={4}; Architecture={5}; Family={6}" -f $script:ComputerName,$script:LocalIPv4Addresses,$os.Caption,$os.Version,$os.BuildNumber,$os.Architecture,$os.MajorFamily)
     $script:DeviceUptimeSummary = Get-DeviceUptimeSummary -LastBootUpTime $os.LastBootUpTime
     Write-SmartLog ("Startup uptime before upgrade: {0}" -f $script:DeviceUptimeSummary.Detail)
@@ -6514,8 +6383,6 @@ finally {
         Campaign = $script:SemtCampaign
         CorrelationId = $CorrelationId
         TargetGuardStatus = $script:SemtTargetGuardStatus
-        LegacyActivityStatus = $script:SemtLegacyActivityStatus
-        LegacyActivityDetail = $script:SemtLegacyActivityDetail
         SetupMediaReuseDecision = $script:SetupMediaReuseDecision
     }
 

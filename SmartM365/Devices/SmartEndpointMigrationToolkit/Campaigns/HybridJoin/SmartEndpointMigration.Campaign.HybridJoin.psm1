@@ -340,7 +340,7 @@ function Get-SemtHybridJoinProfile {
     [CmdletBinding()]
     param()
 
-    $coreColumns = @('Timestamp','CycleNumber','ComputerName','ConnectionTarget','RemoteExecutionMode','Status','NextAction','LauncherStatus','RemoteStatus','RemoteNextAction','ExitCode','Detail','StatusBeforePostCycle','BackoffStatus','BackoffUntilUtc','BackoffCount','DnsResolved','DnsAddressList','PingReachable','SmbPort445Reachable','AdminShareReachable','AdminShareFailureType','RemotePayloadCopyAttempts','LocalScriptVersion','LocalScriptSha256','RemoteScriptSha256','PsExecExitCode','TargetGuardStatus','LegacyActivityStatus','LegacyActivityDetail')
+    $coreColumns = @('Timestamp','CycleNumber','ComputerName','ConnectionTarget','RemoteExecutionMode','Status','NextAction','LauncherStatus','RemoteStatus','RemoteNextAction','ExitCode','Detail','StatusBeforePostCycle','BackoffStatus','BackoffUntilUtc','BackoffCount','DnsResolved','DnsAddressList','PingReachable','SmbPort445Reachable','AdminShareReachable','AdminShareFailureType','RemotePayloadCopyAttempts','LocalScriptVersion','LocalScriptSha256','RemoteScriptSha256','PsExecExitCode','TargetGuardStatus')
     $tail = @('RemoteLogsPath','PsExecLogPath','JobErrorMessage','CorrelationId','RunId','WaveName','Campaign','WorkerContractVersion')
     $columns = @($coreColumns) + @($script:HybridJoinExtensionFields) + @(Get-SemtInventoryFieldNames -Kind AD) + @(Get-SemtInventoryFieldNames -Kind Intune) + @(Get-SemtInventoryFieldNames -Kind Entra) + @($script:HybridJoinEngineFields | Where-Object { $coreColumns -notcontains $_ }) + $tail
     return [pscustomobject]@{

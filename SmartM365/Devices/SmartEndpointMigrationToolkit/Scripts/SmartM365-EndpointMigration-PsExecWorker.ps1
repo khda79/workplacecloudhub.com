@@ -109,8 +109,6 @@ function Set-ResultFromAttempt {
     $result.ExitCode = [string](Get-SemtPropertyValue -InputObject $Attempt -Name 'ExitCode' -Default '')
     $result.Detail = [string](Get-SemtPropertyValue -InputObject $Attempt -Name 'Detail' -Default '')
     $result.TargetGuardStatus = [string](Get-SemtPropertyValue -InputObject $Attempt -Name 'TargetGuardStatus' -Default '')
-    $result.LegacyActivityStatus = [string](Get-SemtPropertyValue -InputObject $Attempt -Name 'LegacyActivityStatus' -Default '')
-    $result.LegacyActivityDetail = [string](Get-SemtPropertyValue -InputObject $Attempt -Name 'LegacyActivityDetail' -Default '')
     foreach ($field in @($campaignProfile.ProjectedFields)) { $result[$field] = [string](Get-SemtPropertyValue -InputObject $Attempt -Name $field -Default '') }
     $result.LauncherStatus = 'ENDPOINT_COMPLETED'
 }

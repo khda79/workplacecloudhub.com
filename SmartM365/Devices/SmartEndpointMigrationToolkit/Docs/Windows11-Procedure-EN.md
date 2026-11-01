@@ -113,4 +113,3 @@ target the same devices at the same time.
 | `SETUP_MEDIA_LEGACY_UNTRUSTED` | Legacy media present but modifiable by non-administrators (or containing a reparse point); not used and its permissions not changed. Secure or remove it (administrator decision), or allow duplication |
 | `SETUP_MEDIA_STATE_INDETERMINATE` | Ownership, use, permissions or folder tree of the media could not be read; nothing changed. Check the device, then retry |
 | `TARGET_OPERATION_ACTIVE` | Another toolkit operation runs on the target; next cycle |
-| `LEGACY_*` | See [LEGACY-COEXISTENCE.md](LEGACY-COEXISTENCE.md) |

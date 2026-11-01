@@ -149,7 +149,7 @@ function Get-Windows11CentralLogBucket {
         if ($value -in @('WINDOWS11_COMPAT_BLOCKER','WINDOWS11_HARDWARE_NOT_CAPABLE')) { return 'Compatibility' }
         if ($value -like 'PSEXEC_TIMEOUT*') { return 'PsExecTimeout' }
         if ($value -like 'SKIPPED_*') { return 'Skipped' }
-        if ($value -like 'TARGET_*' -or $value -like 'LEGACY_*' -or $value -eq 'RUN_GUARD_ACTIVE') { return 'TargetBusy' }
+        if ($value -like 'TARGET_*' -or $value -eq 'RUN_GUARD_ACTIVE') { return 'TargetBusy' }
         if ($value -eq 'SETUP_PROCESS_TIMEOUT') { return 'SetupProcessTimeout' }
         if ($value -eq 'SETUP_MEDIA_COPY_TIMEOUT') { return 'SetupMediaCopyTimeout' }
         if ($value -eq 'SETUP_MEDIA_COPY_FAILED') { return 'SetupMediaCopyFailure' }
@@ -204,7 +204,7 @@ function Get-Windows11FailureCategory {
     if ($status -like '*ADMIN_SHARE_UNREACHABLE' -or $evidence -match 'FailureType=(DNS_FAILED|SMB_PORT_445_UNREACHABLE|PING_OK_ADMIN_SHARE_FAILED|PING_FAILED_ADMIN_SHARE_FAILED)') { return 'NetworkTransient' }
     if ($status -in @('DIRECT_SETUP_UPGRADE_FAILED','SETUP_UPGRADE_FAILED','SETUP_MIGRATION_PROFILE_FAILURE','SETUP_MIGRATION_PROFILE_REPAIR_FAILED','SETUP_MIGRATION_PLUGIN_FAILURE','SETUP_PROCESS_TIMEOUT','SETUP_PROCESS_MONITOR_INTERRUPTED','SETUP_MEDIA_COPY_FAILED','SETUP_MEDIA_COPY_TIMEOUT','SETUP_MEDIA_MANIFEST_VALIDATION_FAILED')) { return 'SetupFailure' }
     if ($status -in @('INSUFFICIENT_DISK','INSUFFICIENT_DISK_AFTER_CLEANUP','UNSUPPORTED_OS','NOT_INTUNE_ENROLLED','WINDOWS11_COMPAT_BLOCKER','WINDOWS11_HARDWARE_NOT_CAPABLE','WU_POLICY_BLOCKER','SETUP_SOURCE_LANGUAGE_UNAVAILABLE','SETUP_MEDIA_DUPLICATION_BLOCKED','SETUP_MEDIA_LEGACY_ADOPTION_FAILED','SETUP_MEDIA_LEGACY_UNTRUSTED','SETUP_MEDIA_STATE_INDETERMINATE','SETUP_MEDIA_PATH_REJECTED','DATA_FOLDER_UNTRUSTED','PROGRAM_FOLDER_UNTRUSTED')) { return 'OperatorAction' }
-    if ($status -like 'TARGET_*' -or $status -like 'LEGACY_*') { return 'ExecutionTransient' }
+    if ($status -like 'TARGET_*') { return 'ExecutionTransient' }
     if ($status -in @('ERROR','JOB_ERROR','RUNSPACE_BROKEN','PSEXEC_EXIT_UNKNOWN','PSEXEC_COMMUNICATION_LOST','PSEXEC_TIMEOUT','PSEXEC_TIMEOUT_REMOTE_RUNNING','REMOTE_LOG_COLLECTION_FAILED','REMOTE_RESULT_INCOMPLETE','REMOTE_PAYLOAD_COPY_FAILED','SETUP_CACHE_LOCKED','SETUP_MEDIA_IN_USE','SETUP_SUBNET_COPY_LEASE_TIMEOUT','SETUP_SOURCE_COPY_LEASE_TIMEOUT') -or $status -like 'PSEXEC_EXIT_*') { return 'ExecutionTransient' }
     return ''
 }
@@ -334,7 +334,7 @@ function Get-SemtWindows11UpgradeProfile {
     [CmdletBinding()]
     param()
 
-    $coreColumns = @('Timestamp','CycleNumber','ComputerName','ConnectionTarget','RemoteExecutionMode','Status','NextAction','LauncherStatus','RemoteStatus','RemoteNextAction','ExitCode','Detail','RetryAfterUtc','FailureCategory','ConsecutiveFailureCount','DnsResolved','DnsAddressList','PingReachable','SmbPort445Reachable','AdminShareReachable','AdminShareFailureType','RemotePayloadCopyAttempts','LocalScriptVersion','LocalScriptSha256','RemoteScriptSha256','PsExecExitCode','TargetGuardStatus','LegacyActivityStatus','LegacyActivityDetail')
+    $coreColumns = @('Timestamp','CycleNumber','ComputerName','ConnectionTarget','RemoteExecutionMode','Status','NextAction','LauncherStatus','RemoteStatus','RemoteNextAction','ExitCode','Detail','RetryAfterUtc','FailureCategory','ConsecutiveFailureCount','DnsResolved','DnsAddressList','PingReachable','SmbPort445Reachable','AdminShareReachable','AdminShareFailureType','RemotePayloadCopyAttempts','LocalScriptVersion','LocalScriptSha256','RemoteScriptSha256','PsExecExitCode','TargetGuardStatus')
     $tail = @('RemoteLogsPath','PsExecLogPath','JobErrorMessage','CorrelationId','RunId','WaveName','Campaign','WorkerContractVersion')
     $columns = @($coreColumns) + @($script:Windows11ExtensionFields) + @(Get-SemtInventoryFieldNames -Kind AD) + @(Get-SemtInventoryFieldNames -Kind Intune) + $tail
     return [pscustomobject]@{

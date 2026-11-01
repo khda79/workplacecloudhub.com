@@ -555,7 +555,7 @@ $script:SemtCoreResultFields = @(
     'Status','NextAction','LauncherStatus','RemoteStatus','RemoteNextAction','ExitCode','Detail',
     'DnsResolved','DnsAddressList','PingReachable','SmbPort445Reachable','AdminShareReachable','AdminShareFailureType',
     'RemoteExecutionMode','RemotePayloadCopyAttempts','LocalScriptVersion','LocalScriptSha256','RemoteScriptSha256','PsExecExitCode',
-    'TargetGuardStatus','LegacyActivityStatus','LegacyActivityDetail','RemoteLogsPath','PsExecLogPath','JobErrorMessage','WorkerContractVersion'
+    'TargetGuardStatus','RemoteLogsPath','PsExecLogPath','JobErrorMessage','WorkerContractVersion'
 )
 
 function Get-SemtCoreResultFields {

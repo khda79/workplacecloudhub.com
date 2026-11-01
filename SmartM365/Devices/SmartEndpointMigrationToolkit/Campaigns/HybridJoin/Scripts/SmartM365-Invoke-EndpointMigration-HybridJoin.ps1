@@ -79,9 +79,6 @@ Campaign runtime folder. Defaults to C:\ProgramData\WCH\SmartM365\SmartEndpointM
 .PARAMETER CorrelationId
 Attempt identifier supplied by the technician worker. A local run generates one.
 
-.PARAMETER LegacyActivityPolicy
-Warn (default) records previous toolkit activity and continues. Block stops when previous toolkit activity is detected.
-
 .VERSION
 1.0.0
 
@@ -115,8 +112,7 @@ param(
     [ValidateRange(1,30)][int]$RetryAfterRebootMaxAttempts = 3,
     [switch]$RetryAfterRebootTaskRun,
     [string]$DataRoot = 'C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin',
-    [string]$CorrelationId,
-    [ValidateSet('Block','Warn')][string]$LegacyActivityPolicy = 'Warn'
+    [string]$CorrelationId
 )
 
 # Endpoint scripts run in Windows PowerShell 5.1 (the worker and the Intune runner start them with
@@ -176,8 +172,6 @@ try {
             $argList += "-DataRoot"
             $argList += "`"$DataRoot`""
             if (-not [string]::IsNullOrWhiteSpace($CorrelationId)) { $argList += "-CorrelationId"; $argList += $CorrelationId }
-            $argList += "-LegacyActivityPolicy"
-            $argList += $LegacyActivityPolicy
 
             $p = Start-Process -FilePath $sysNativePS -ArgumentList $argList -Wait -PassThru
             exit $p.ExitCode
@@ -232,8 +226,6 @@ if ([string]::IsNullOrWhiteSpace($CorrelationId)) { $CorrelationId = [guid]::New
 elseif ($RetryAfterRebootTaskRun) { $CorrelationId = "{0}-R{1}" -f $CorrelationId,(Get-Date -Format "yyyyMMddHHmmss") }
 $script:SemtAttemptStartUtc = (Get-Date).ToUniversalTime()
 $script:SemtTargetGuardStatus = ""
-$script:SemtLegacyActivityStatus = ""
-$script:SemtLegacyActivityDetail = ""
 $script:SemtCsvPath = Join-Path $DataRoot ("SEMT_HybridJoin_{0}.csv" -f $ComputerName)
 $script:SemtTranscriptPath = ""
 
@@ -354,8 +346,6 @@ function Write-SemtHybridJoinAttemptResult {
         CsvPath = $script:SemtCsvPath
         TranscriptPath = $script:SemtTranscriptPath
         TargetGuardStatus = $script:SemtTargetGuardStatus
-        LegacyActivityStatus = $script:SemtLegacyActivityStatus
-        LegacyActivityDetail = $script:SemtLegacyActivityDetail
         RetryAfterRebootTaskRun = [bool]$RetryAfterRebootTaskRun
     }
     foreach ($name in @("gpUpdateTimedOut","gpUpdateStopDetail","finalGpUpdateTimedOut","finalGpUpdateStopDetail","mdmDiagnosticStatus","mdmDiagnosticZip","interactiveUserName","interactiveUserSid","mdmEnrollmentRecentEvidence","interactiveUserDomain","interactiveUserAccountName","interactiveUserAccountType","interactiveSessionName","interactiveSessionState","userIsUserAzureAD","userAzureAdPrt","userSessionIsNotRemote","intuneEnrolled","dsregAzureAdJoined","dsregDeviceAuthStatus","leaveAttempted","rebootAttempted","rebootReason")) {
@@ -746,7 +736,6 @@ function Test-SemtTrustedDataFolder {
 $script:SemtTargetMutexName = 'Global\SmartM365_SEMT_TargetOperation'
 $script:SemtTargetMutex = $null
 $script:SemtTargetMutexAcquired = $false
-$script:SemtLegacyHybridJoinRoot = 'C:\ProgramData\SmartM365\IntuneHybridJoinToolkit'
 $script:SemtLegacyWindows11Root = 'C:\ProgramData\SmartM365\Windows11UpgradeToolkit'
 
 function Get-SemtTargetProductRoot {
@@ -922,115 +911,6 @@ function Test-SemtWindowsSetupActive {
         }
     }
     return [pscustomobject]@{ Active = ($signals.Count -gt 0); Detail = ($signals -join '; ') }
-}
-
-function Get-SemtLegacyEndpointActivity {
-    <#
-    READ-ONLY inspection of the previous toolkits on this computer. It never writes, deletes,
-    takes a lock or waits on a legacy mutex.
-    Statuses: LEGACY_ABSENT, LEGACY_INSTALLED_IDLE and LEGACY_INTUNE_PACKAGE_ASSIGNED (not blocking;
-    media owned by a legacy Intune package is reused in place), LEGACY_ENDPOINT_RUNNING, LEGACY_SETUP_IN_PROGRESS,
-    LEGACY_COPY_IN_PROGRESS, LEGACY_RETRY_AFTER_REBOOT_PENDING (blocking),
-    LEGACY_STATE_UNREADABLE (blocking).
-    #>
-    param([Parameter(Mandatory = $true)][string]$Campaign)
-
-    $signals = New-Object System.Collections.Generic.List[string]
-    $active = New-Object System.Collections.Generic.List[string]
-    $installed = $false
-    try {
-        foreach ($root in @($script:SemtLegacyHybridJoinRoot,$script:SemtLegacyWindows11Root)) {
-            if (Test-Path -LiteralPath $root -PathType Container) { $installed = $true; $signals.Add(('Folder={0}' -f $root)) }
-        }
-
-        $legacyScripts = '(?i)(SmartM365-Invoke-Windows11UpgradeRepair\.ps1|SmartM365-Invoke-IntuneHybridJoinRepair\.ps1|Run-IntuneUpgrade\.ps1|\\(IntuneHybridJoinToolkit|Windows11UpgradeToolkit)\\State\\RetryAfterRebootRunner\.ps1)'
-        $legacyMedia = [regex]::Escape((Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'SetupMedia'))
-        foreach ($process in @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)) {
-            $name = [string]$process.Name
-            $commandLine = [string]$process.CommandLine
-            $executable = [string]$process.ExecutablePath
-            if ($name -match '(?i)^(powershell|pwsh)\.exe$' -and $commandLine -match $legacyScripts) { $active.Add(('LEGACY_ENDPOINT_RUNNING|Process {0}:{1}' -f $name,$process.ProcessId)) }
-            elseif ($name -match '(?i)^(setup|setuphost|setupprep)\.exe$' -and ($executable -match $legacyMedia -or $commandLine -match $legacyMedia)) { $active.Add(('LEGACY_SETUP_IN_PROGRESS|Process {0}:{1}' -f $name,$process.ProcessId)) }
-            elseif ($name -match '(?i)^robocopy\.exe$' -and $commandLine -match $legacyMedia) { $active.Add(('LEGACY_COPY_IN_PROGRESS|Process {0}:{1}' -f $name,$process.ProcessId)) }
-        }
-
-        $legacyMutex = $null
-        if ([System.Threading.Mutex]::TryOpenExisting('Global\SmartM365_IntuneHybridJoinToolkit_Endpoint', [ref]$legacyMutex)) {
-            $active.Add('LEGACY_ENDPOINT_RUNNING|Legacy Hybrid Join endpoint mutex is held')
-            try { $legacyMutex.Dispose() } catch { }
-        }
-
-        $taskNames = @(
-            @{ Path = '\'; Name = 'SmartM365-Windows11UpgradeToolkit-RetryAfterReboot'; State = (Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'State\RetryAfterReboot.json') },
-            @{ Path = '\'; Name = 'SmartM365-IntuneHybridJoinToolkit-RetryAfterReboot'; State = (Join-Path -Path $script:SemtLegacyHybridJoinRoot -ChildPath 'State\RetryAfterReboot.json') },
-            @{ Path = '\'; Name = 'SmartM365 Windows 11 Upgrade Toolkit - Intune'; State = '' }
-        )
-        foreach ($taskName in $taskNames) {
-            $task = Get-ScheduledTask -TaskPath $taskName.Path -TaskName $taskName.Name -ErrorAction SilentlyContinue
-            if (-not $task) { continue }
-            $installed = $true
-            $signals.Add(('Task={0}; State={1}' -f $taskName.Name,$task.State))
-            if ([string]$task.State -eq 'Running') { $active.Add(('LEGACY_ENDPOINT_RUNNING|Task {0} is running' -f $taskName.Name)) }
-            elseif (-not [string]::IsNullOrWhiteSpace($taskName.State) -and (Test-Path -LiteralPath $taskName.State -PathType Leaf)) { $active.Add(('LEGACY_RETRY_AFTER_REBOOT_PENDING|Task {0} will resume a legacy run at startup' -f $taskName.Name)) }
-        }
-        foreach ($task in @(Get-ScheduledTask -TaskPath '\SmartM365\IntuneHybridJoinToolkit\' -ErrorAction SilentlyContinue)) {
-            $installed = $true
-            if ([string]$task.State -eq 'Running') { $active.Add(('LEGACY_ENDPOINT_RUNNING|Task {0} is running' -f $task.TaskName)) }
-        }
-
-        $lockRoot = Join-Path -Path $script:SemtLegacyWindows11Root -ChildPath 'Locks'
-        if (Test-Path -LiteralPath $lockRoot -PathType Container) {
-            foreach ($lockFile in @(Get-ChildItem -LiteralPath $lockRoot -Filter 'lock.json' -File -Recurse -ErrorAction Stop)) {
-                $lock = Read-SemtTargetJson -Path $lockFile.FullName
-                $lockPid = 0
-                if ($lock -and $lock.PSObject.Properties['PID']) { [void][int]::TryParse([string]$lock.PID, [ref]$lockPid) }
-                if ($lockPid -gt 0 -and (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) { $active.Add(('LEGACY_COPY_IN_PROGRESS|Legacy media lock {0} held by PID {1}' -f $lockFile.Directory.Name,$lockPid)) }
-            }
-        }
-
-        $packageRoot = 'SOFTWARE\SmartM365\Windows11UpgradeToolkit\IntunePackages'
-        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
-        try {
-            $packages = $baseKey.OpenSubKey($packageRoot, $false)
-            if ($packages) {
-                try {
-                    foreach ($packageName in @($packages.GetSubKeyNames())) {
-                        $package = $packages.OpenSubKey($packageName, $false)
-                        if (-not $package) { continue }
-                        try {
-                            $installed = $true
-                            $installState = [string]$package.GetValue('InstallState', '')
-                            $signals.Add(('IntunePackage={0}; InstallState={1}; Cache={2}' -f $packageName,$installState,[string]$package.GetValue('SetupCacheFolder', '')))
-                            if ($installState -in @('Installed','RepairRequired')) { $active.Add(('LEGACY_INTUNE_PACKAGE_ASSIGNED|Legacy Intune Win32 package {0} is {1}' -f $packageName,$installState)) }
-                        }
-                        finally { $package.Dispose() }
-                    }
-                }
-                finally { $packages.Dispose() }
-            }
-        }
-        finally { $baseKey.Dispose() }
-    }
-    catch {
-        return [pscustomobject]@{ Status = 'LEGACY_STATE_UNREADABLE'; Blocking = $true; NextAction = 'VERIFY_LEGACY_TOOLKIT_STATE'; Detail = ('Legacy toolkit state could not be read: {0}' -f $_.Exception.Message) }
-    }
-
-    $priority = @('LEGACY_SETUP_IN_PROGRESS','LEGACY_COPY_IN_PROGRESS','LEGACY_ENDPOINT_RUNNING','LEGACY_RETRY_AFTER_REBOOT_PENDING','LEGACY_INTUNE_PACKAGE_ASSIGNED')
-    foreach ($candidate in $priority) {
-        $found = @($active | Where-Object { $_.StartsWith($candidate + '|') })
-        if ($found.Count -eq 0) { continue }
-        $blocking = ($candidate -ne 'LEGACY_INTUNE_PACKAGE_ASSIGNED')
-        $nextAction = switch ($candidate) {
-            'LEGACY_SETUP_IN_PROGRESS' { 'WAIT_LEGACY_WINDOWS_SETUP' }
-            'LEGACY_COPY_IN_PROGRESS' { 'WAIT_LEGACY_MEDIA_COPY' }
-            'LEGACY_ENDPOINT_RUNNING' { 'WAIT_LEGACY_TOOLKIT_OPERATION' }
-            'LEGACY_RETRY_AFTER_REBOOT_PENDING' { 'WAIT_OR_REMOVE_LEGACY_RETRY_TASK' }
-            default { 'REVIEW_LEGACY_INTUNE_ASSIGNMENT' }
-        }
-        return [pscustomobject]@{ Status = $candidate; Blocking = $blocking; NextAction = $nextAction; Detail = (($found | ForEach-Object { $_.Substring($candidate.Length + 1) }) -join '; ') }
-    }
-    if ($installed) { return [pscustomobject]@{ Status = 'LEGACY_INSTALLED_IDLE'; Blocking = $false; NextAction = ''; Detail = ($signals -join '; ') } }
-    return [pscustomobject]@{ Status = 'LEGACY_ABSENT'; Blocking = $false; NextAction = ''; Detail = '' }
 }
 
 function Write-SemtAttemptResult {
@@ -1222,20 +1102,10 @@ if ($semtSetupActivity.Active) {
     Stop-SemtEndpointEarly -Status "TARGET_WINDOWS_SETUP_ACTIVE" -ExitCode 3 -Detail ("Windows Setup is active on this computer; Hybrid Join repair is postponed. Signals={0}" -f $semtSetupActivity.Detail) -NextAction "WAIT_WINDOWS_SETUP_COMPLETION"
 }
 
-$semtLegacy = Get-SemtLegacyEndpointActivity -Campaign $script:SemtCampaign
-$script:SemtLegacyActivityStatus = $semtLegacy.Status
-$script:SemtLegacyActivityDetail = $semtLegacy.Detail
-if ($semtLegacy.Blocking -and $LegacyActivityPolicy -eq "Block") {
-    Stop-SemtEndpointEarly -Status $semtLegacy.Status -ExitCode 3 -Detail ("Previous toolkit activity detected (read-only check): {0}" -f $semtLegacy.Detail) -NextAction $semtLegacy.NextAction
-}
-elseif ($semtLegacy.Status -ne "LEGACY_ABSENT") {
-    Write-RunLog ("Previous toolkit inspection: Status={0}; Blocking={1}; Policy={2}; Detail={3}" -f $semtLegacy.Status,$semtLegacy.Blocking,$LegacyActivityPolicy,$semtLegacy.Detail)
-}
-
 try { Update-EndpointInstanceState -Force } catch { Write-RunLog ("Endpoint instance metadata write failed; mutex protection remains active. Error={0}" -f $_.Exception.Message) }
 
 Write-Host "Smart Endpoint Migration Toolkit - Hybrid Join endpoint version $ScriptVersion"
-Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. CorrelationId=$CorrelationId. DataRoot=$DataRoot. LegacyActivityPolicy=$LegacyActivityPolicy. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). SkipVirtualMachines=$([bool]$SkipVirtualMachines). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). IgnoreRunGuard=$([bool]$IgnoreRunGuard). RetryAfterRebootTaskRun=$([bool]$RetryAfterRebootTaskRun)."
+Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. CorrelationId=$CorrelationId. DataRoot=$DataRoot. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). SkipVirtualMachines=$([bool]$SkipVirtualMachines). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). IgnoreRunGuard=$([bool]$IgnoreRunGuard). RetryAfterRebootTaskRun=$([bool]$RetryAfterRebootTaskRun)."
 Invoke-OldEvidenceCleanup -Paths @($LogsDir, $OutputDir, $TranscriptDir) -RetentionDays $CleanupRetentionDays
 
 function Get-ComputerSystemSummary {
@@ -3707,7 +3577,6 @@ function New-RetryAfterRebootArgumentList {
         RetryAfterRebootMaxAttempts = $RetryAfterRebootMaxAttempts
         DataRoot = $DataRoot
         CorrelationId = ($CorrelationId -replace '-R\d{14}$','')
-        LegacyActivityPolicy = $LegacyActivityPolicy
     }
 
     foreach ($entry in $valueParameters.GetEnumerator()) {
@@ -4521,7 +4390,11 @@ try {
 
     Write-RunLog ("Interactive user detection: HasUser={0}; User={1}; Domain={2}; AccountName={3}; AccountType={4}; IdentityResolved={5}; SessionName={6}; SessionId={7}; State={8}; IsRemote={9}; Detail={10}; IdentityDetail={11}" -f $interactiveUserDetected,$interactiveUserName,$interactiveUserDomain,$interactiveUserAccountName,$interactiveUserAccountType,$interactiveUserIdentityResolved,$interactiveSessionName,$interactiveSessionId,$interactiveSessionState,$interactiveSessionIsRemote,$interactiveSessionDetail,$interactiveUserIdentityDetail)
 
-    if ($interactiveUserDetected -and $interactiveUserAccountType -ne "Local") {
+    if ($AuditOnly -and $interactiveUserDetected -and $interactiveUserAccountType -ne "Local") {
+        # AuditOnly only reads: no scheduled task is registered or started in the user context.
+        Write-RunLog ("AuditOnly: skipping user-context helper tasks and user dsreg status for {0}." -f $interactiveUserAccountName)
+    }
+    elseif ($interactiveUserDetected -and $interactiveUserAccountType -ne "Local") {
         # User-context status is collected through SmartM365 on-demand scheduled tasks.
         $helperTaskResult = Ensure-UserContextHelperTasks
         if (-not $helperTaskResult.Success) {

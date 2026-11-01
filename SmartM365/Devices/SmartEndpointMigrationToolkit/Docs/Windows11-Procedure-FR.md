@@ -120,4 +120,3 @@ outil : les deux packages ne doivent jamais cibler les mêmes postes en même te
 | `SETUP_MEDIA_LEGACY_UNTRUSTED` | Média de l'ancien outil présent mais modifiable par un non-administrateur (ou contenant un point de réanalyse) ; non utilisé, permissions non modifiées. Le sécuriser ou le supprimer (décision d'administrateur), ou autoriser la duplication |
 | `SETUP_MEDIA_STATE_INDETERMINATE` | Propriétaire, utilisation, permissions ou arborescence du média illisibles ; rien n'est modifié. Vérifier le poste puis relancer |
 | `TARGET_OPERATION_ACTIVE` | Une autre opération de l'outil tourne sur le poste ; cycle suivant |
-| `LEGACY_*` | Voir [LEGACY-COEXISTENCE.md](LEGACY-COEXISTENCE.md) |

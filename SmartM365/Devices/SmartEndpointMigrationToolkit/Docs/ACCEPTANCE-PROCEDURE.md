@@ -78,8 +78,6 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtProgramFolde
 
 ## 6. Coexistence avec les anciens outils
 
-- [ ] Poste avec ancien outil installé et inactif : `LEGACY_INSTALLED_IDLE`, non bloquant.
-- [ ] Ancien outil en cours d'exécution sur le poste : statut `LEGACY_*` bloquant explicite.
 - [ ] Média Windows 11 de l'ancien outil, non géré par Intune : déplacé sur le même volume,
       validé, journalisé (`Moved`), preuves dans `State\MediaAdoption`.
 - [ ] Adoption interrompue (par exemple média invalide après déplacement, sur un poste de

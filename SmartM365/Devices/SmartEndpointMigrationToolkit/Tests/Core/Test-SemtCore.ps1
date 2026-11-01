@@ -92,13 +92,10 @@ try {
     }
     Test-Step 'no Batch/LOT wording in option labels or descriptions' { @($catalog.Options | Where-Object { ('{0} {1}' -f $_.Label,$_.Description) -match '\b(LOT|LOTs|Batch|batch)\b' }).Count -eq 0 }
     Test-Step 'D11: Hybrid Join AllowRebootAfterDsregLeave defaults to false' { (Get-SemtOptionDefault -Definition $catalog.ByName['HybridJoin.AllowRebootAfterDsregLeave'] -Campaign HybridJoin) -eq $false }
-    foreach ($campaign in @('HybridJoin','Windows11Upgrade')) {
-        Test-Step "legacy activity defaults to Warn for $campaign" { (Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign $campaign)['LegacyActivityPolicy'].Value -eq 'Warn' }
-        Test-Step "legacy activity Block override remains available for $campaign" { (Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign $campaign -GlobalLayer @{ LegacyActivityPolicy = 'Block' })['LegacyActivityPolicy'].Value -eq 'Block' }
-    }
+    Test-Step 'no legacy activity option remains' { -not $catalog.ByName.ContainsKey('LegacyActivityPolicy') }
     foreach ($endpoint in @('Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1','Campaigns\Windows11Upgrade\Scripts\SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1')) {
         $content = Get-Content -LiteralPath (Join-Path $script:PackageRoot $endpoint) -Raw
-        Test-Step "standalone endpoint defaults legacy activity to Warn: $endpoint" { $content -match "\[string\]\`$LegacyActivityPolicy\s*=\s*'Warn'" }
+        Test-Step "endpoint does not inspect previous toolkit activity: $endpoint" { $content -notmatch 'LegacyActivity|Get-SemtLegacyEndpointActivity' }
     }
     #endregion
 
@@ -535,10 +532,6 @@ $script:HostLines.Clear()
     $w11Region = Get-RegionText -Path $w11Endpoint -Region 'SEMT shared target guards v1'
     Test-Step 'shared target guard region is identical in both endpoint scripts' { $hjRegion -ceq $w11Region }
     Test-Step 'target mutex has its own SEMT name (not a legacy name)' { $hjRegion -match "Global\\SmartM365_SEMT_TargetOperation" -and $hjRegion -notmatch "SemtTargetMutexName = 'Global\\SmartM365_(IntuneHybridJoin|Windows11Upgrade)Toolkit" }
-    Test-Step 'legacy detection never writes, deletes or waits on legacy state' {
-        $body = ([regex]::Match($hjRegion, '(?s)function Get-SemtLegacyEndpointActivity.*?\n}\n')).Value
-        $body -notmatch '(Remove-Item|Set-Content|Write-SemtTargetJson|Move-Item|New-Item|\.WaitOne|Unregister-ScheduledTask|Stop-Process|SetValue|CreateSubKey|DeleteSubKey)'
-    }
     . ([scriptblock]::Create($w11Region))
     $targetRoot = Join-Path $tempRoot 'TargetData'
     $hjData = Join-Path $targetRoot 'HybridJoin'
@@ -581,32 +574,6 @@ $script:HostLines.Clear()
     Test-Step 'attempt results keep the newest 50 files' {
         for ($i = 0; $i -lt 55; $i++) { [void](Write-SemtAttemptResult -CampaignDataRoot $hjData -Data @{ CorrelationId = ('c-{0:000}' -f $i); State = 'Completed' }) }
         @(Get-ChildItem -LiteralPath (Join-Path $hjData 'State\Results') -Filter '*.json.txt').Count -eq 50
-    }
-    #endregion
-
-    #region Legacy detection (read-only, synthetic roots)
-    $script:SemtLegacyHybridJoinRoot = Join-Path $tempRoot 'Legacy\IntuneHybridJoinToolkit'
-    $script:SemtLegacyWindows11Root = Join-Path $tempRoot 'Legacy\Windows11UpgradeToolkit'
-    $baseline = Get-SemtLegacyEndpointActivity -Campaign HybridJoin
-    Test-Step 'legacy detection returns a known status on this computer' { $baseline.Status -in @('LEGACY_ABSENT','LEGACY_INSTALLED_IDLE','LEGACY_INTUNE_PACKAGE_ASSIGNED','LEGACY_ENDPOINT_RUNNING','LEGACY_SETUP_IN_PROGRESS','LEGACY_COPY_IN_PROGRESS','LEGACY_RETRY_AFTER_REBOOT_PENDING','LEGACY_STATE_UNREADABLE') }
-    if ($baseline.Status -eq 'LEGACY_ABSENT') {
-        New-Item -ItemType Directory -Path $script:SemtLegacyHybridJoinRoot -Force | Out-Null
-        $idle = Get-SemtLegacyEndpointActivity -Campaign HybridJoin
-        Test-Step 'installed but idle legacy toolkit does not block' { $idle.Status -eq 'LEGACY_INSTALLED_IDLE' -and -not $idle.Blocking }
-        $lockDir = Join-Path $script:SemtLegacyWindows11Root 'Locks\Win11-fr-FR'
-        New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $lockDir 'lock.json') -Value ('{ "PID": ' + $PID + ' }') -Encoding ASCII
-        $copy = Get-SemtLegacyEndpointActivity -Campaign Windows11Upgrade
-        Test-Step 'legacy media lock held by a live process blocks (LEGACY_COPY_IN_PROGRESS)' { $copy.Status -eq 'LEGACY_COPY_IN_PROGRESS' -and $copy.Blocking }
-        Set-Content -LiteralPath (Join-Path $lockDir 'lock.json') -Value '{ "PID": 999999 }' -Encoding ASCII
-        Test-Step 'legacy media lock of a dead process does not block' { -not (Get-SemtLegacyEndpointActivity -Campaign Windows11Upgrade).Blocking }
-        Set-Content -LiteralPath (Join-Path $lockDir 'lock.json') -Value '{ broken' -Encoding ASCII
-        $unknown = Get-SemtLegacyEndpointActivity -Campaign Windows11Upgrade
-        Test-Step 'unreadable legacy state gives an explicit blocking status' { $unknown.Status -eq 'LEGACY_STATE_UNREADABLE' -and $unknown.Blocking }
-        Test-Step 'legacy files were not modified by detection' { [IO.File]::ReadAllText((Join-Path $lockDir 'lock.json')).Trim() -eq '{ broken' }
-    }
-    else {
-        Write-Host ("INFO: real legacy state present on this computer ({0}); synthetic legacy status checks skipped." -f $baseline.Status)
     }
     #endregion
 

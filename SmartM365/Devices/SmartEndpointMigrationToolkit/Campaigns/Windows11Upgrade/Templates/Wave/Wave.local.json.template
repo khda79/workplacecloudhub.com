@@ -31,7 +31,6 @@
                     "SkipVirtualMachines":  "__INHERIT__",
                     "RetryAfterRebootDelaySeconds":  "__INHERIT__",
                     "RetryAfterRebootMaxAttempts":  "__INHERIT__",
-                    "LegacyActivityPolicy":  "__INHERIT__",
                     "CentralLogCollection":  "__INHERIT__",
                     "CentralLogCollectionMode":  "__INHERIT__",
                     "KeepCentralLogHistory":  "__INHERIT__",

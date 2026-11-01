@@ -11,8 +11,7 @@ defaults, rules, Waves, Runs, run guard history, GUI choices and report columns.
 | `Windows11Upgrade` | The device runs Windows 11, or is reported not capable | `REBOOT_AND_RETRY_SETUP`, `CHECK_SETUP_LOGS`, `VERIFY_LEGACY_MEDIA_LOCATION` |
 
 Statuses shared by both Campaigns: `TARGET_OPERATION_ACTIVE` (`WAIT_ACTIVE_TARGET_OPERATION`),
-`TARGET_PENDING_OPERATION` (`WAIT_OTHER_CAMPAIGN_PENDING_OPERATION`), the `LEGACY_*` statuses of
-[LEGACY-COEXISTENCE.md](LEGACY-COEXISTENCE.md), `RUN_GUARD_ACTIVE`, and the technician-side
+`TARGET_PENDING_OPERATION` (`WAIT_OTHER_CAMPAIGN_PENDING_OPERATION`), `RUN_GUARD_ACTIVE`, and the technician-side
 `DRYRUN_*`, `PSEXEC_*`, `REMOTE_*`, `COMPONENT_INTEGRITY_MISMATCH` and `CANCELLED_BY_OPERATOR*`.
 
 Completed computers leave `Computers.txt` and are archived next to it

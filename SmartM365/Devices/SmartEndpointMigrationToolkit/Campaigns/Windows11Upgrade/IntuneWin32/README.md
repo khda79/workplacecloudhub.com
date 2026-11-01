@@ -314,9 +314,7 @@ package state is only read by the new endpoint:
   copied), a WithCacheOnly package fails explicitly.
 - Prefer the WithCacheOnly package for devices that already have legacy media, to avoid the
   download of the media by Intune.
-- A real active legacy operation (running setup, running legacy task, legacy media copy) blocks the
-  endpoint with `-LegacyActivityPolicy Block`. The default `Warn` records the activity and continues; an installed but idle legacy package
-  does not.
+- The endpoint does not check for legacy toolkit activity.
 - The new app never removes the old scheduled task, registry key or media.
 
 ## Updates and uninstall scope
