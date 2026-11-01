@@ -137,6 +137,10 @@ try {
     }
     Test-Throws 'out-of-range value is rejected with its source' { Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign HybridJoin -WaveLayer @{ ThrottleLimit = 100000 } } 'Wave|range|between|maximum'
     Test-Throws 'unknown option is rejected' { Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign HybridJoin -WaveLayer @{ NotAnOption = 1 } } 'SEMT_OPTION_UNKNOWN'
+    Test-Step 'retired option left in existing files (LegacyActivityPolicy) is ignored in every layer' {
+        $r = Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign HybridJoin -GlobalLayer @{ Options = @{ LegacyActivityPolicy = '__INHERIT__' } } -WaveLayer @{ legacyactivitypolicy = 'Block' } -GuiLayer @{ LegacyActivityPolicy = 'Ignore' }
+        -not $r.Contains('LegacyActivityPolicy') -and $r['ThrottleLimit'].Source -eq 'Default'
+    }
     Test-Step 'option of the other Campaign is ignored, not applied' {
         $r = Resolve-SemtEffectiveOptions -Catalog $catalog -Campaign HybridJoin -GlobalLayer @{ 'Windows11Upgrade.AllowReboot' = $true }
         -not $r.Contains('Windows11Upgrade.AllowReboot')

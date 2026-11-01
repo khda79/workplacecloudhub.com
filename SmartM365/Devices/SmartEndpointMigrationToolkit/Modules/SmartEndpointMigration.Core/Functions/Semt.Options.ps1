@@ -23,6 +23,9 @@
 
 $script:SemtInheritMarkers = @('__INHERIT__','__USE_GLOBAL__','USE_GLOBAL','__USE_DEFAULT__')
 $script:SemtOptionLayers = @('Default','Global','Wave','Environment','Gui','Cli','Rule')
+# Options removed from the catalog: still present in existing global, Wave and GUI files (the
+# template self-healing only adds keys), they are ignored instead of stopping the Run.
+$script:SemtRetiredOptions = @('LegacyActivityPolicy')
 
 function Import-SemtOptionCatalog {
     [CmdletBinding()]
@@ -212,6 +215,7 @@ function Resolve-SemtEffectiveOptions {
             if ($known.ContainsKey($key)) { continue }
             $otherCampaign = $Catalog.ByName.ContainsKey($key)
             if ($otherCampaign) { continue }
+            if ($script:SemtRetiredOptions -contains $key) { continue }
             throw ("SEMT_OPTION_UNKNOWN: '{0}' from {1} is not a known option. Check the option catalog." -f $key,$layerName)
         }
     }
