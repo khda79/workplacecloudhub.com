@@ -117,12 +117,8 @@ and the engine can be called directly:
 | Mode | Technician side | Endpoint side |
 | --- | --- | --- |
 | Dry run (`DryRun`) | DNS, ping, SMB 445, administrative share | Nothing is copied or executed |
-| Remote audit (`AuditOnly`) | Checks, copy, selected transport | No repair, MDM cleanup, upgrade or reboot. It may flush DNS; it registers no scheduled task and runs nothing in the user context. Prerequisites only reports the tasks that are present, missing or different. |
+| Remote audit (`AuditOnly`) | Checks, copy, selected transport | Hybrid Join skips gpupdate; no repair, MDM cleanup, upgrade or reboot. It may flush DNS; it registers no scheduled task and runs nothing in the user context. Prerequisites only reports the tasks that are present, missing or different. |
 | Repair (default) | Full checks, copy, selected transport | Applies the enabled actions only |
-
-No endpoint script runs `gpupdate`, in any mode: the computer policy is used as it is. Windows 11
-policy repair removes the legacy Windows Update values and reads the policy again without
-`gpupdate`; a GPO that still sets them restores them at its next background refresh.
 
 `RemoteExecutionMode` applies to both campaigns: `ScheduledTask` (default), `WinRM`, or
 `PsExec`. The first uses remote Task Scheduler RPC. `WinRM` uses PowerShell Remoting to create
