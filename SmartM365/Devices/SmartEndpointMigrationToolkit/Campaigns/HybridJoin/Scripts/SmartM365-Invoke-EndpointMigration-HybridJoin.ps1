@@ -16,7 +16,9 @@ by default C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin
 - If not domain joined => Exit 2.
 - If DC not reachable => Exit 4.
 - Run dsregcmd /status as SYSTEM and parse machine/device fields only. User PRT shown in SYSTEM context is intentionally ignored.
-- Create and run SmartM365 user-context scheduled tasks to capture and refresh the actual interactive user's PRT when available.
+- Run the user-context scheduled tasks created by the Prerequisites campaign to capture and refresh the actual interactive user's PRT when available.
+  This script never creates a scheduled task: missing tasks are logged and their step is skipped (auto-enrollment then uses the native EnterpriseMgmt task).
+  The next-logon and retry-after-reboot tasks, created disabled by the Prerequisites campaign, are only enabled when needed and disabled afterwards.
 - If AzureAdJoined=YES and DeviceAuthStatus contains SUCCESS, or older dsreg output has KeySignTest=PASSED without DeviceAuthStatus, verify Intune enrollment.
 - If Hybrid Join is healthy but Intune is not enrolled => verify MDM auto-enrollment GPO/registry policy and HTTPS connectivity, then trigger auto-enrollment using the configured credential type.
 - If the launcher reports that the Entra hybrid object is pending, and the local device join is healthy => trigger Automatic-Device-Join and perform a bounded retry without dsregcmd /leave.
@@ -933,6 +935,83 @@ function Write-SemtAttemptResult {
     return $path
 }
 #endregion SEMT shared target guards v1
+
+#region SEMT prerequisite tasks v1 (identical in every endpoint script; checked by Tests\Core)
+# Scheduled tasks are created only by the Prerequisites Campaign (disabled by default). The
+# HybridJoin and Windows11Upgrade endpoints start, enable or disable these tasks; they never create,
+# change or delete a task definition, and a missing task is reported, not created.
+# The retry-after-reboot task has a fixed command: the runner under Program Files reads the script
+# path and arguments from RetryAfterReboot.json.txt next to it. The task is therefore created
+# disabled in advance and enabled only while a campaign waits for a restart.
+# Principals are compared by SID: Task Scheduler shows localized account names.
+
+$script:SemtHybridJoinTaskPath = '\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\'
+
+function Get-SemtRetryAfterRebootTaskSpec {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade')][string]$Campaign,
+        [string]$ProgramFilesPath = $env:ProgramFiles,
+        [string]$WindowsPath = $env:WINDIR
+    )
+    $runner = Join-Path $ProgramFilesPath ('WCH\SmartM365\SmartEndpointMigrationToolkit\{0}\RetryAfterReboot\RetryAfterRebootRunner.ps1' -f $Campaign)
+    return [pscustomobject]@{
+        Campaign = $Campaign
+        TaskPath = '\'
+        TaskName = ('SmartM365-SEMT-{0}-RetryAfterReboot' -f $Campaign)
+        Execute = (Join-Path $WindowsPath 'System32\WindowsPowerShell\v1.0\powershell.exe')
+        Arguments = ('-NoProfile -ExecutionPolicy RemoteSigned -File "{0}"' -f $runner)
+        RunnerPath = $runner
+    }
+}
+
+function ConvertTo-SemtTaskPrincipalSid {
+    param([AllowNull()][string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return '' }
+    if ($Name -match '^S-1-[0-9-]+$') { return $Name }
+    try { return (New-Object System.Security.Principal.NTAccount($Name)).Translate([System.Security.Principal.SecurityIdentifier]).Value }
+    catch { return '' }
+}
+
+function Get-SemtScheduledTaskState {
+    # Read-only. Exists is $null when the Task Scheduler could not be read.
+    param([Parameter(Mandatory = $true)][string]$TaskPath,[Parameter(Mandatory = $true)][string]$TaskName)
+
+    $state = [pscustomobject]@{ TaskPath = $TaskPath; TaskName = $TaskName; Exists = $false; Enabled = $false; Actions = @(); TriggerCount = 0; UserSid = ''; GroupSid = ''; Detail = 'Task not found.' }
+    $readErrors = $null
+    $task = @(Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue -ErrorVariable readErrors) | Select-Object -First 1
+    if ($null -eq $task) {
+        $failure = @($readErrors | Where-Object { [string]$_.CategoryInfo.Category -ne 'ObjectNotFound' }) | Select-Object -First 1
+        if ($failure) { $state.Exists = $null; $state.Detail = ('Task Scheduler read failed: {0}' -f $failure.Exception.Message) }
+        return $state
+    }
+    $state.Exists = $true
+    $state.Enabled = [bool]$task.Settings.Enabled
+    $state.Actions = @($task.Actions | ForEach-Object {
+        $execute = if ($_.PSObject.Properties['Execute']) { [Environment]::ExpandEnvironmentVariables(([string]$_.Execute).Trim()) } else { '' }
+        $arguments = if ($_.PSObject.Properties['Arguments']) { ([string]$_.Arguments).Trim() } else { '' }
+        '{0}|{1}' -f $execute,$arguments
+    })
+    $state.TriggerCount = @($task.Triggers).Count
+    $state.UserSid = ConvertTo-SemtTaskPrincipalSid -Name ([string]$task.Principal.UserId)
+    $state.GroupSid = ConvertTo-SemtTaskPrincipalSid -Name ([string]$task.Principal.GroupId)
+    $state.Detail = ('Enabled={0}; State={1}' -f $state.Enabled,[string]$task.State)
+    return $state
+}
+
+function Test-SemtRetryAfterRebootTaskState {
+    # True when the task exists, runs as SYSTEM and starts exactly the fixed runner command.
+    param([Parameter(Mandatory = $true)]$State,[Parameter(Mandatory = $true)]$Spec)
+    if ($State.Exists -ne $true -or $State.UserSid -ne 'S-1-5-18' -or @($State.Actions).Count -ne 1) { return $false }
+    return ([string]@($State.Actions)[0] -ieq ('{0}|{1}' -f $Spec.Execute,$Spec.Arguments))
+}
+
+function Set-SemtScheduledTaskEnabled {
+    # Enables or disables an existing task; the definition is not changed.
+    param([Parameter(Mandatory = $true)][string]$TaskPath,[Parameter(Mandatory = $true)][string]$TaskName,[Parameter(Mandatory = $true)][bool]$Enabled)
+    if ($Enabled) { [void](Enable-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop) }
+    else { [void](Disable-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop) }
+}
+#endregion SEMT prerequisite tasks v1
 
 function ConvertTo-CleanNativeOutput {
     param([AllowNull()][object[]]$Output)
@@ -1995,188 +2074,46 @@ function ConvertTo-SemtCommandLineArgument {
     return ('"{0}"' -f $escaped)
 }
 
-function Invoke-SemtSchtasks {
-    <# Runs schtasks.exe with an explicit command line (see ConvertTo-SemtCommandLineArgument). #>
-    param([Parameter(Mandatory = $true)][string[]]$Arguments)
-
-    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = Join-Path $env:WINDIR 'System32\schtasks.exe'
-    $startInfo.Arguments = (@($Arguments | ForEach-Object { ConvertTo-SemtCommandLineArgument -Value $_ }) -join ' ')
-    $startInfo.UseShellExecute = $false
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    $startInfo.CreateNoWindow = $true
-    $process = [System.Diagnostics.Process]::Start($startInfo)
-    $standardError = $process.StandardError.ReadToEndAsync()
-    $standardOutput = $process.StandardOutput.ReadToEnd()
-    $process.WaitForExit()
-    return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = ('{0} {1}' -f $standardOutput,$standardError.Result).Trim() }
-}
-
-function Ensure-ScheduledTaskFolder {
-    param([Parameter(Mandatory=$true)][string]$TaskPath)
-
-    $normalizedPath = $TaskPath.Trim()
-    if ([string]::IsNullOrWhiteSpace($normalizedPath) -or $normalizedPath -eq "\") {
-        return $true
-    }
-
-    if (-not $normalizedPath.StartsWith("\")) {
-        $normalizedPath = "\$normalizedPath"
-    }
-    $normalizedPath = $normalizedPath.TrimEnd("\")
-
-    try {
-        $service = New-Object -ComObject Schedule.Service
-        $service.Connect()
-        [void]$service.GetFolder($normalizedPath)
-        return $true
-    }
-    catch { }
-
-    try {
-        $service = New-Object -ComObject Schedule.Service
-        $service.Connect()
-        $root = $service.GetFolder("\")
-        $parts = @($normalizedPath.Trim("\").Split("\") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-        $currentFolder = $root
-        $currentPath = ""
-
-        foreach ($part in $parts) {
-            $currentPath = if ([string]::IsNullOrWhiteSpace($currentPath)) { "\$part" } else { "$currentPath\$part" }
-            try {
-                $currentFolder = $service.GetFolder($currentPath)
-            }
-            catch {
-                try {
-                    [void]$currentFolder.CreateFolder($part, $null)
-                }
-                catch {
-                    $hresult = $_.Exception.HResult
-                    if ($hresult -ne -2147024713) {
-                        throw
-                    }
-                    Write-RunLog ("Scheduled task folder already exists while creating it. Continuing. TaskPath={0}" -f $currentPath)
-                    if ($currentPath -eq $normalizedPath) {
-                        return $true
-                    }
-                }
-                $currentFolder = $service.GetFolder($currentPath)
-            }
-        }
-
-        return $true
-    }
-    catch {
-        Write-RunLog ("Scheduled task folder creation failed. TaskPath={0}; Error={1}" -f $normalizedPath,$_.Exception.Message)
-        return $false
-    }
-}
-
-function ConvertTo-SchtasksRunArguments {
+function Get-HybridJoinTaskState {
+    # Read-only state of a task given by its full name (\Folder\...\Name).
     param([Parameter(Mandatory=$true)][string]$TaskName)
 
-    if ($TaskName -match '"') {
-        throw "Scheduled task name contains an unsupported double quote: $TaskName"
-    }
-
-    return ('/Run /TN "{0}"' -f $TaskName)
+    $normalized = "\" + $TaskName.Trim().TrimStart("\")
+    $leaf = Split-Path -Path $normalized -Leaf
+    $folder = $normalized.Substring(0, $normalized.Length - $leaf.Length)
+    return (Get-SemtScheduledTaskState -TaskPath $folder -TaskName $leaf)
 }
 
-function Register-InteractiveUserScheduledTask {
-    param(
-        [Parameter(Mandatory=$true)][string]$TaskName,
-        [Parameter(Mandatory=$true)][string]$Description,
-        [Parameter(Mandatory=$true)][string]$CommandArguments
-    )
-
-    $normalizedTaskName = $TaskName.Trim()
-    if (-not $normalizedTaskName.StartsWith("\")) {
-        $normalizedTaskName = "\$normalizedTaskName"
-    }
-
-    $parts = @($normalizedTaskName.Trim("\").Split("\") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    if ($parts.Count -lt 2) {
-        throw "Interactive user task must include a task folder: $TaskName"
-    }
-
-    $leafName = [string]$parts[-1]
-    $folderPath = "\" + (($parts | Select-Object -First ($parts.Count - 1)) -join "\")
-    if (-not (Ensure-ScheduledTaskFolder -TaskPath $folderPath)) {
-        throw "Unable to create or open scheduled task folder: $folderPath"
-    }
-
-    $service = New-Object -ComObject Schedule.Service
-    $service.Connect()
-    $folder = $service.GetFolder($folderPath)
-    $definition = $service.NewTask(0)
-
-    $definition.RegistrationInfo.Author = "Smart Endpoint Migration Toolkit - Hybrid Join"
-    $definition.RegistrationInfo.Description = $Description
-    $definition.Settings.Enabled = $true
-    $definition.Settings.Hidden = $false
-    $definition.Settings.AllowDemandStart = $true
-    $definition.Settings.StartWhenAvailable = $true
-    $definition.Settings.DisallowStartIfOnBatteries = $false
-    $definition.Settings.StopIfGoingOnBatteries = $false
-    $definition.Settings.ExecutionTimeLimit = "PT10M"
-    $definition.Settings.MultipleInstances = 2
-
-    $definition.Principal.GroupId = "S-1-5-4"
-    $definition.Principal.LogonType = 4
-    $definition.Principal.RunLevel = 0
-
-    $action = $definition.Actions.Create(0)
-    $action.Path = "cmd.exe"
-    $action.Arguments = $CommandArguments
-
-    [void]$folder.RegisterTaskDefinition($leafName, $definition, 6, $null, $null, 4, $null)
-
-    return [PSCustomObject]@{
-        Success = $true
-        TaskName = $normalizedTaskName
-        Detail = "Registered or updated interactive-user scheduled task."
-    }
-}
-
-function Ensure-UserContextHelperTasks {
-    $taskDefinitions = @(
-        [PSCustomObject]@{
-            Name = $UserStatusTaskName
-            Description = "Smart Endpoint Migration Toolkit - Hybrid Join - capture dsregcmd /status in the active interactive user context."
-            Arguments = "/d /c %windir%\System32\dsregcmd.exe /status > %windir%\Temp\SEMT-HJ-UserDsregStatus_%USERNAME%.txt 2>&1"
-        },
-        [PSCustomObject]@{
-            Name = $UserRefreshPrtTaskName
-            Description = "Smart Endpoint Migration Toolkit - Hybrid Join - run dsregcmd /refreshprt in the active interactive user context."
-            Arguments = "/d /c %windir%\System32\dsregcmd.exe /refreshprt > %windir%\Temp\SEMT-HJ-UserRefreshPrt_%USERNAME%.txt 2>&1"
-        },
-        [PSCustomObject]@{
-            Name = $UserIntuneAutoEnrollTaskName
-            Description = "Smart Endpoint Migration Toolkit - Hybrid Join - run deviceenroller /AutoEnrollMDM in the active interactive user context."
-            Arguments = "/d /c %windir%\System32\deviceenroller.exe /c /AutoEnrollMDM > %windir%\Temp\SEMT-HJ-UserMdmAutoEnroll_%USERNAME%.txt 2>&1"
-        }
-    )
-
+function Test-UserContextHelperTasks {
+    <#
+    The user-context helper tasks are created by the Prerequisites campaign; this script only
+    checks that they exist. A missing task is logged and its step is skipped (auto-enrollment then
+    falls back to the native EnterpriseMgmt task).
+    #>
     $results = @()
-    foreach ($taskDefinition in $taskDefinitions) {
-        try {
-            $result = Register-InteractiveUserScheduledTask -TaskName $taskDefinition.Name -Description $taskDefinition.Description -CommandArguments $taskDefinition.Arguments
-            $results += $result
-            Write-RunLog ("User-context helper task ready. TaskName={0}; Detail={1}" -f $result.TaskName,$result.Detail)
-        }
-        catch {
-            $results += [PSCustomObject]@{ Success=$false; TaskName=$taskDefinition.Name; Detail=$_.Exception.Message }
-            Write-RunLog ("User-context helper task registration failed. TaskName={0}; Error={1}" -f $taskDefinition.Name,$_.Exception.Message)
-        }
+    foreach ($taskName in @($UserStatusTaskName,$UserRefreshPrtTaskName,$UserIntuneAutoEnrollTaskName)) {
+        $state = Get-HybridJoinTaskState -TaskName $taskName
+        $results += [PSCustomObject]@{ TaskName=$taskName; Present=($state.Exists -eq $true); Detail=$state.Detail }
+    }
+    $missing = @($results | Where-Object { -not $_.Present })
+    $detail = (($results | ForEach-Object { "{0}: {1}" -f $_.TaskName,$(if ($_.Present) { "present" } else { "missing ({0})" -f $_.Detail }) }) -join " | ")
+    if ($missing.Count -gt 0) {
+        Write-RunLog ("User-context helper task(s) missing; run the Prerequisites campaign on this computer to create them. {0}" -f $detail)
+    }
+    else {
+        Write-RunLog ("User-context helper tasks present. {0}" -f $detail)
     }
 
     return [PSCustomObject]@{
-        Success = (@($results | Where-Object { -not $_.Success }).Count -eq 0)
+        Success = ($missing.Count -eq 0)
+        StatusTaskPresent = [bool](@($results | Where-Object { $_.TaskName -eq $UserStatusTaskName -and $_.Present }).Count)
+        RefreshPrtTaskPresent = [bool](@($results | Where-Object { $_.TaskName -eq $UserRefreshPrtTaskName -and $_.Present }).Count)
+        AutoEnrollTaskPresent = [bool](@($results | Where-Object { $_.TaskName -eq $UserIntuneAutoEnrollTaskName -and $_.Present }).Count)
         Results = $results
-        Detail = (($results | ForEach-Object { "{0}: {1}" -f $_.TaskName,$_.Detail }) -join " | ")
+        Detail = $detail
     }
 }
+
 function Start-AutoDeviceJoinTask {
     try {
         $tn = "\Microsoft\Windows\Workplace Join\Automatic-Device-Join"
@@ -2273,15 +2210,17 @@ function Start-UserContextIntuneAutoEnrollment {
     )
 
     $startedAt = Get-Date
-    $customResult = Invoke-OnDemandScheduledTask -TaskName $PreferredTaskName
+    $preferredState = Get-HybridJoinTaskState -TaskName $PreferredTaskName
+    if ($preferredState.Exists -eq $true) {
+        $customResult = Invoke-OnDemandScheduledTask -TaskName $PreferredTaskName
+    }
+    else {
+        # Created by the Prerequisites campaign only: when it is missing, the native task is used.
+        $customResult = [PSCustomObject]@{ Success=$false; ExitCode=""; Detail=("Task missing; run the Prerequisites campaign to create it. {0}" -f $preferredState.Detail); ResolvedTaskName=$PreferredTaskName }
+    }
     if ($customResult.Success) {
-        if ($WaitSeconds -gt 0) { Start-Sleep -Seconds $WaitSeconds }
-        $expectedFileName = ""
-        if (-not [string]::IsNullOrWhiteSpace($ExpectedUserName)) {
-            $expectedFileName = "SEMT-HJ-UserMdmAutoEnroll_{0}.txt" -f $ExpectedUserName
-        }
-        $sourceFile = Get-LatestUserTaskOutputFile -Filter "SEMT-HJ-UserMdmAutoEnroll_*.txt" -Since $startedAt -ExpectedFileName $expectedFileName
-
+        # The task starts deviceenroller.exe directly (no cmd.exe, no output file): the result is
+        # checked through the enrollment state, the MDM registry and the DeviceManagement logs.
         return [PSCustomObject]@{
             Success=$true
             ToolFound=$true
@@ -2289,7 +2228,7 @@ function Start-UserContextIntuneAutoEnrollment {
             Detail=("Triggered user-context Intune auto-enrollment task '{0}' resolved as '{1}'. {2}" -f $PreferredTaskName,$customResult.ResolvedTaskName,$customResult.Detail)
             Mode="UserTask"
             TaskName=$customResult.ResolvedTaskName
-            OutputFile=($(if ($sourceFile) { $sourceFile.FullName } else { "" }))
+            OutputFile=""
         }
     }
 
@@ -2707,23 +2646,19 @@ function Invoke-UserRefreshPrtTask {
         [Parameter(Mandatory=$false)][string]$ExpectedUserName
     )
 
-    $startedAt = Get-Date
     Write-RunLog ("Running user-context refresh PRT scheduled task. TaskName={0}" -f $TaskName)
     $taskResult = Invoke-OnDemandScheduledTask -TaskName $TaskName
     Write-RunLog ("User-context refresh PRT task result. Success={0}; TaskName={1}; ResolvedTaskName={2}; ExitCode={3}; Detail={4}" -f $taskResult.Success,$TaskName,$taskResult.ResolvedTaskName,$taskResult.ExitCode,$taskResult.Detail)
 
+    # The task starts dsregcmd.exe /refreshprt directly (no cmd.exe, no output file). The delay
+    # leaves time for the refresh before the user dsreg status is read again.
     if ($WaitSeconds -gt 0) { Start-Sleep -Seconds $WaitSeconds }
-    $expectedFileName = ""
-    if (-not [string]::IsNullOrWhiteSpace($ExpectedUserName)) {
-        $expectedFileName = "SEMT-HJ-UserRefreshPrt_{0}.txt" -f $ExpectedUserName
-    }
-    $sourceFile = Get-LatestUserTaskOutputFile -Filter "SEMT-HJ-UserRefreshPrt_*.txt" -Since $startedAt -ExpectedFileName $expectedFileName
 
     return [PSCustomObject]@{
         Success=$taskResult.Success
         ExitCode=$taskResult.ExitCode
         Detail=$taskResult.Detail
-        SourceFile=($(if ($sourceFile) { $sourceFile.FullName } else { "" }))
+        SourceFile=""
     }
 }
 
@@ -3056,90 +2991,53 @@ function Export-ComputerGpResultEvidence {
     }
 }
 
-function Register-UserAutoEnrollAtLogonTask {
-    param(
-        [Parameter(Mandatory=$true)][string]$StatusTaskName,
-        [Parameter(Mandatory=$true)][string]$AutoEnrollTaskName
-    )
-
+function Enable-UserAutoEnrollAtLogonTask {
+    <#
+    The next-logon task is created disabled by the Prerequisites campaign. It is enabled only when
+    auto-enrollment waits for an interactive user logon, and disabled again once Intune enrollment
+    is confirmed. Its two actions start the user-context status and auto-enrollment tasks.
+    #>
     $taskName = $UserNextLogonAutoEnrollTaskName
-
     try {
-        $helperTaskResult = Ensure-UserContextHelperTasks
-        if (-not $helperTaskResult.Success) {
-            Write-RunLog ("Next-logon helper prerequisites were not fully registered. Detail={0}" -f $helperTaskResult.Detail)
+        $helperTaskResult = Test-UserContextHelperTasks
+        if (-not ($helperTaskResult.StatusTaskPresent -and $helperTaskResult.AutoEnrollTaskPresent)) {
+            throw ("SEMT_PREREQUISITE_TASK_MISSING: the user-context tasks started at next logon are missing. {0}" -f $helperTaskResult.Detail)
         }
-
-        $taskFolderReady = Ensure-ScheduledTaskFolder -TaskPath $UserTaskFolderPath
-        if (-not $taskFolderReady) {
-            throw "Next-logon auto-enrollment helper task folder could not be confirmed: $UserTaskFolderPath"
+        $state = Get-HybridJoinTaskState -TaskName $taskName
+        if ($state.Exists -ne $true) {
+            throw ("SEMT_PREREQUISITE_TASK_MISSING: {0} ({1}). Run the Prerequisites campaign on this computer." -f $taskName,$state.Detail)
         }
-
-        $normalizedTaskName = $taskName.Trim()
-        if (-not $normalizedTaskName.StartsWith("\")) {
-            $normalizedTaskName = "\$normalizedTaskName"
-        }
-
-        $parts = @($normalizedTaskName.Trim("\").Split("\") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-        if ($parts.Count -lt 2) {
-            throw "Next-logon task must include a task folder: $taskName"
-        }
-
-        $leafName = [string]$parts[-1]
-        $folderPath = "\" + (($parts | Select-Object -First ($parts.Count - 1)) -join "\")
-        $schtasksPath = Join-Path $env:WINDIR "System32\schtasks.exe"
-        $statusTaskArguments = ConvertTo-SchtasksRunArguments -TaskName $StatusTaskName
-        $autoEnrollTaskArguments = ConvertTo-SchtasksRunArguments -TaskName $AutoEnrollTaskName
-
-        $service = New-Object -ComObject Schedule.Service
-        $service.Connect()
-        $folder = $service.GetFolder($folderPath)
-        $definition = $service.NewTask(0)
-
-        $definition.RegistrationInfo.Author = "Smart Endpoint Migration Toolkit - Hybrid Join"
-        $definition.RegistrationInfo.Description = "Smart Endpoint Migration Toolkit - Hybrid Join - trigger user-context auto-enrollment helper tasks at next user logon."
-        $definition.Settings.Enabled = $true
-        $definition.Settings.Hidden = $false
-        $definition.Settings.AllowDemandStart = $true
-        $definition.Settings.StartWhenAvailable = $true
-        $definition.Settings.DisallowStartIfOnBatteries = $false
-        $definition.Settings.StopIfGoingOnBatteries = $false
-        $definition.Settings.ExecutionTimeLimit = "PT10M"
-        $definition.Settings.MultipleInstances = 2
-
-        $definition.Principal.UserId = "SYSTEM"
-        $definition.Principal.LogonType = 5
-        $definition.Principal.RunLevel = 1
-
-        $trigger = $definition.Triggers.Create(9)
-        $trigger.Enabled = $true
-
-        $statusAction = $definition.Actions.Create(0)
-        $statusAction.Path = $schtasksPath
-        $statusAction.Arguments = $statusTaskArguments
-
-        $autoEnrollAction = $definition.Actions.Create(0)
-        $autoEnrollAction.Path = $schtasksPath
-        $autoEnrollAction.Arguments = $autoEnrollTaskArguments
-
-        [void]$folder.RegisterTaskDefinition($leafName, $definition, 6, "SYSTEM", $null, 5, $null)
-        Write-RunLog ("Next-logon auto-enrollment helper task registration succeeded. TaskName={0}; Action={1}; StatusArgs={2}; AutoEnrollArgs={3}" -f $normalizedTaskName,$schtasksPath,$statusTaskArguments,$autoEnrollTaskArguments)
-
+        if (-not $state.Enabled) { Set-SemtScheduledTaskEnabled -TaskPath $state.TaskPath -TaskName $state.TaskName -Enabled $true }
+        Write-RunLog ("Next-logon auto-enrollment task enabled. TaskName={0}; WasEnabled={1}" -f $taskName,$state.Enabled)
         return [PSCustomObject]@{
             Success = $true
-            TaskName = $normalizedTaskName
+            TaskName = $taskName
             ExitCode = 0
-            Detail = "Registered SYSTEM ONLOGON task with direct schtasks actions."
+            Detail = "Enabled the SYSTEM ONLOGON task created by the Prerequisites campaign."
         }
     }
     catch {
-        Write-RunLog ("Next-logon auto-enrollment helper task registration failed: {0}" -f $_.Exception.Message)
+        Write-RunLog ("Next-logon auto-enrollment task could not be enabled: {0}" -f $_.Exception.Message)
         return [PSCustomObject]@{
             Success = $false
             TaskName = $taskName
             ExitCode = ""
             Detail = $_.Exception.Message
         }
+    }
+}
+
+function Disable-UserAutoEnrollAtLogonTask {
+    param([string]$Reason = "")
+    try {
+        $state = Get-HybridJoinTaskState -TaskName $UserNextLogonAutoEnrollTaskName
+        if ($state.Exists -eq $true -and $state.Enabled) {
+            Set-SemtScheduledTaskEnabled -TaskPath $state.TaskPath -TaskName $state.TaskName -Enabled $false
+            Write-RunLog ("Next-logon auto-enrollment task disabled. TaskName={0}; Reason={1}" -f $UserNextLogonAutoEnrollTaskName,$Reason)
+        }
+    }
+    catch {
+        Write-RunLog ("Next-logon auto-enrollment task could not be disabled: {0}" -f $_.Exception.Message)
     }
 }
 
@@ -3216,22 +3114,6 @@ function Get-NextActionForStatus {
     }
 }
 
-function Copy-LatestMatchingFile {
-    param(
-        [Parameter(Mandatory=$true)][string]$Filter,
-        [Parameter(Mandatory=$true)][datetime]$Since,
-        [Parameter(Mandatory=$true)][string]$DestinationDirectory,
-        [Parameter(Mandatory=$true)][string]$Prefix
-    )
-
-    $sourceFile = Get-LatestUserTaskOutputFile -Filter $Filter -Since $Since
-    if (-not $sourceFile) { return "" }
-
-    $destination = Join-Path $DestinationDirectory ("{0}_{1}" -f $Prefix,$sourceFile.Name)
-    Copy-Item -LiteralPath $sourceFile.FullName -Destination $destination -Force
-    return $destination
-}
-
 function Export-RecentEventLog {
     param(
         [Parameter(Mandatory=$true)][string]$LogName,
@@ -3266,14 +3148,6 @@ function Export-EnrollmentDiagnostics {
 
     $prefix = "{0}_enrollment_diag_{1}" -f $ComputerNameValue,$RunIdValue
     $files = @()
-
-    $autoEnrollCopy = Copy-LatestMatchingFile `
-        -Filter "SEMT-HJ-UserMdmAutoEnroll_*.txt" `
-        -Since $Since `
-        -DestinationDirectory $OutputDirPath `
-        -Prefix $prefix
-
-    if (-not [string]::IsNullOrWhiteSpace($autoEnrollCopy)) { $files += $autoEnrollCopy }
 
     $logs = @(
         @{ Name="Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Enrollment"; Suffix="DeviceManagement_Enrollment" },
@@ -3610,6 +3484,16 @@ function Register-RetryAfterRebootTask {
     param([Parameter(Mandatory=$true)][string]$Reason)
 
     $script:RetryAfterRebootAction = "ScheduleRequested"
+    # The task is created disabled by the Prerequisites campaign; it is only verified and enabled
+    # here, before anything is written, so a missing task leaves no state behind.
+    $taskSpec = Get-SemtRetryAfterRebootTaskSpec -Campaign $script:SemtCampaign
+    $taskState = Get-SemtScheduledTaskState -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName
+    if ($taskState.Exists -ne $true) {
+        throw ("SEMT_PREREQUISITE_TASK_MISSING: {0}{1} ({2}). Run the Prerequisites campaign on this computer." -f $taskSpec.TaskPath,$taskSpec.TaskName,$taskState.Detail)
+    }
+    if (-not (Test-SemtRetryAfterRebootTaskState -State $taskState -Spec $taskSpec)) {
+        throw ("SEMT_PREREQUISITE_TASK_MISMATCH: {0}{1} does not run '{2} {3}' as SYSTEM. Run the Prerequisites campaign on this computer." -f $taskSpec.TaskPath,$taskSpec.TaskName,$taskSpec.Execute,$taskSpec.Arguments)
+    }
     if (-not (Test-Path -LiteralPath $StateDir -PathType Container)) {
         New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
     }
@@ -3650,12 +3534,7 @@ function Register-RetryAfterRebootTask {
     $programTrust = Test-SemtTrustedProgramPath -Path $script:RetryAfterRebootProgramDir -Recurse
     if (-not $programTrust.Trusted) { throw ("SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} ({1}) {2}" -f $script:RetryAfterRebootProgramDir,$programTrust.State,$programTrust.Detail) }
 
-    $taskPowerShell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
-    $taskCommand = '"{0}" -NoProfile -ExecutionPolicy RemoteSigned -File "{1}"' -f $taskPowerShell,$script:RetryAfterRebootRunnerPath
-    $create = Invoke-SemtSchtasks -Arguments @('/Create','/TN',$script:RetryAfterRebootTaskName,'/SC','ONSTART','/RU','SYSTEM','/RL','HIGHEST','/TR',$taskCommand,'/F')
-    if ($create.ExitCode -ne 0) {
-        throw ("schtasks.exe failed with exit code {0}: {1}" -f $create.ExitCode,$create.Output)
-    }
+    Set-SemtScheduledTaskEnabled -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName -Enabled $true
 
     $script:RetryAfterRebootAction = "Scheduled"
     $script:RetryAfterRebootAttempt = [string]$previousAttempts
@@ -3700,12 +3579,15 @@ function Unregister-RetryAfterRebootTask {
     param([string]$Reason = "")
 
     $messages = New-Object System.Collections.Generic.List[string]
-    $queryOutput = & schtasks.exe /Query /TN $script:RetryAfterRebootTaskName 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        $deleteOutput = & schtasks.exe /Delete /TN $script:RetryAfterRebootTaskName /F 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            [void]$messages.Add(("Task delete failed: {0}" -f (@($deleteOutput) -join " ")))
-        }
+    # The task belongs to the Prerequisites campaign: it is disabled, never deleted.
+    try {
+        $taskSpec = Get-SemtRetryAfterRebootTaskSpec -Campaign $script:SemtCampaign
+        $taskState = Get-SemtScheduledTaskState -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName
+        if ($null -eq $taskState.Exists) { [void]$messages.Add(("Task state unreadable: {0}" -f $taskState.Detail)) }
+        elseif ($taskState.Exists -and $taskState.Enabled) { Set-SemtScheduledTaskEnabled -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName -Enabled $false }
+    }
+    catch {
+        [void]$messages.Add(("Task disable failed: {0}" -f $_.Exception.Message))
     }
 
     $paths = @($script:RetryAfterRebootRunnerPath,$script:RetryAfterRebootStatePath)
@@ -4394,13 +4276,13 @@ try {
         # AuditOnly only reads: no scheduled task is registered or started in the user context.
         Write-RunLog ("AuditOnly: skipping user-context helper tasks and user dsreg status for {0}." -f $interactiveUserAccountName)
     }
+    elseif ($interactiveUserDetected -and $interactiveUserAccountType -ne "Local" -and -not (Test-UserContextHelperTasks).StatusTaskPresent) {
+        # The user-context tasks are created by the Prerequisites campaign; without the status task
+        # the user PRT is not read and auto-enrollment uses the native EnterpriseMgmt task.
+        Write-RunLog ("User-context dsreg status task missing: user PRT status and refreshprt are skipped for {0}." -f $interactiveUserAccountName)
+    }
     elseif ($interactiveUserDetected -and $interactiveUserAccountType -ne "Local") {
-        # User-context status is collected through SmartM365 on-demand scheduled tasks.
-        $helperTaskResult = Ensure-UserContextHelperTasks
-        if (-not $helperTaskResult.Success) {
-            Write-RunLog ("User-context helper tasks were not fully registered. Detail={0}" -f $helperTaskResult.Detail)
-        }
-
+        # User-context status is collected through the on-demand tasks created by the Prerequisites campaign.
         $userStatusAttempted = $true
         $userStatus = Invoke-UserDsregStatusTaskSnapshot `
             -TaskName $UserStatusTaskName `
@@ -4440,18 +4322,16 @@ try {
 
         Write-RunLog ("User dsreg initial: Success={0}; IsUserAzureAD={1}; SessionIsNotRemote={2}; AzureAdPrt={3}; AzureAdPrtExpiryTime={4}; RefreshPrtAttemptStatus={5}; RefreshPrtHttpStatus={6}; RefreshPrtHttpError={7}; EnterprisePrt={8}; OnPremTgt={9}; CloudTgt={10}; WamDefaultSet={11}; WorkplaceJoined={12}; RefreshNeeded={13}; RefreshReason={14}; Error={15}" -f $userStatus.Success,$userIsUserAzureAD,$userSessionIsNotRemote,$userAzureAdPrt,$userAzureAdPrtExpiryTime,$userRefreshPrtAttemptStatus,$userRefreshPrtHttpStatus,$userRefreshPrtHttpError,$userEnterprisePrt,$userOnPremTgt,$userCloudTgt,$userWamDefaultSet,$userWorkplaceJoined,$userPrtRefreshDecision.Needed,$userRefreshPrtReason,$userStatusErrorMessage)
 
-        if ($userStatus.Success -and $userPrtRefreshDecision.Needed -and -not $AuditOnly) {
+        $refreshPrtTaskPresent = ((Get-HybridJoinTaskState -TaskName $UserRefreshPrtTaskName).Exists -eq $true)
+        if ($userStatus.Success -and $userPrtRefreshDecision.Needed -and -not $AuditOnly -and -not $refreshPrtTaskPresent) {
+            Write-RunLog ("User-context refresh PRT task missing; refreshprt skipped (run the Prerequisites campaign). Reason it was needed: {0}" -f $userRefreshPrtReason)
+        }
+        if ($userStatus.Success -and $userPrtRefreshDecision.Needed -and -not $AuditOnly -and $refreshPrtTaskPresent) {
             Write-RunLog ("Running user-context refresh PRT scheduled task because: {0}" -f $userRefreshPrtReason)
             $userRefreshPrtAttempted = $true
             $refreshResult = Invoke-UserRefreshPrtTask -TaskName $UserRefreshPrtTaskName -WaitSeconds $UserPrtRetryWaitSeconds -ExpectedUserName $interactiveUserName
             $userRefreshPrtExitCode = $refreshResult.ExitCode
             $userRefreshPrtFile = $refreshResult.SourceFile
-
-            if (-not [string]::IsNullOrWhiteSpace($userRefreshPrtFile) -and (Test-Path $userRefreshPrtFile)) {
-                $refreshCopy = Join-Path $OutputDir ("{0}_dsreg_user_refreshprt_{1}_{2}.txt" -f $ComputerName, $RunId, (Split-Path $userRefreshPrtFile -Leaf))
-                Copy-Item -LiteralPath $userRefreshPrtFile -Destination $refreshCopy -Force
-                $userRefreshPrtFile = $refreshCopy
-            }
 
             $userStatusAfterRefresh = Invoke-UserDsregStatusTaskSnapshot `
                 -TaskName $UserStatusTaskName `
@@ -4984,7 +4864,7 @@ try {
                     $ExitCode = 3
 
                     if ($status -eq "INTUNE_USER_AUTOENROLL_NO_INTERACTIVE_USER" -and $AllowRebootWhenNoInteractiveUser) {
-                        $nextLogonTask = Register-UserAutoEnrollAtLogonTask -StatusTaskName $UserStatusTaskName -AutoEnrollTaskName $UserIntuneAutoEnrollTaskName
+                        $nextLogonTask = Enable-UserAutoEnrollAtLogonTask
                         $nextLogonTaskRegistered = $nextLogonTask.Success
                         $nextLogonTaskName = $nextLogonTask.TaskName
                         $nextLogonTaskDetail = $nextLogonTask.Detail
@@ -5578,6 +5458,9 @@ finally {
     catch {
         Write-RunLog ("Retry-after-reboot final cleanup failed. Error={0}" -f $_.Exception.Message)
     }
+
+    # Exit code 0: Hybrid Join healthy and Intune enrolled, the next-logon task is no longer needed.
+    if (-not $AuditOnly -and $ExitCode -eq 0) { Disable-UserAutoEnrollAtLogonTask -Reason $status }
 
     try {
         if ($TranscriptStarted) {

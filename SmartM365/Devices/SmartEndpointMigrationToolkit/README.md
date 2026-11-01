@@ -9,6 +9,7 @@ computer, with one engine, one GUI and one set of protections:
 | --- | --- |
 | `HybridJoin` | Hybrid Entra join diagnostics and repair, then Intune (MDM) enrollment |
 | `Windows11Upgrade` | Windows 10 to Windows 11 in-place upgrade (readiness, setup media, Windows Setup) |
+| `Prerequisites` | Creates the scheduled tasks that the two other Campaigns start, enable or disable. Disabled by default (`Prerequisites.Enabled`). |
 
 It replaces day-to-day use of IntuneHybridJoinToolkit and Windows11UpgradeToolkit. Those two
 products stay installed and usable; nothing is migrated from them (see
@@ -18,7 +19,7 @@ products stay installed and usable; nothing is migrated from them (see
 
 | Term | Meaning |
 | --- | --- |
-| Campaign | The kind of migration: `HybridJoin` or `Windows11Upgrade`. Options, Waves, Runs, history and GUI choices are kept per Campaign. |
+| Campaign | The kind of migration: `HybridJoin` or `Windows11Upgrade`, plus `Prerequisites` for their scheduled tasks. Options, Waves, Runs, history and GUI choices are kept per Campaign. |
 | Wave | A named list of computers of one Campaign: `Waves\<Campaign>\<Wave>\Computers.txt`, its `Wave.local.json.txt` options and its Loop/Once launchers. |
 | Run | One execution of a Wave (or of a Single PC): `Runs\<Campaign>\<Wave>\<RunId>\` with logs, reports, effective options and evidence. |
 | Cycle | One pass over the computers still pending in a Run. A Loop Run repeats cycles until every computer is complete, the cycle limit is reached or the Run is stopped. |
@@ -108,6 +109,7 @@ and the engine can be called directly:
 ```powershell
 .\Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1 -Campaign HybridJoin -WavePath .\Waves\HybridJoin\WAVE-PILOT -RunMode Once -DryRun
 .\Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1 -Campaign Windows11Upgrade -ComputerName PC-0142 -RunMode Once -ValidateOnly
+.\Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1 -Campaign Prerequisites -ComputerName PC-0142 -RunMode Once -AuditOnly -Option @{ 'Prerequisites.Enabled' = $true }
 ```
 
 ## Execution modes
@@ -115,7 +117,7 @@ and the engine can be called directly:
 | Mode | Technician side | Endpoint side |
 | --- | --- | --- |
 | Dry run (`DryRun`) | DNS, ping, SMB 445, administrative share | Nothing is copied or executed |
-| Remote audit (`AuditOnly`) | Checks, copy, selected transport | Hybrid Join skips gpupdate; no repair, MDM cleanup, upgrade or reboot. It may flush DNS; it registers no scheduled task and runs nothing in the user context. |
+| Remote audit (`AuditOnly`) | Checks, copy, selected transport | Hybrid Join skips gpupdate; no repair, MDM cleanup, upgrade or reboot. It may flush DNS; it registers no scheduled task and runs nothing in the user context. Prerequisites only reports the tasks that are present, missing or different. |
 | Repair (default) | Full checks, copy, selected transport | Applies the enabled actions only |
 
 `RemoteExecutionMode` applies to both campaigns: `ScheduledTask` (default), `WinRM`, or
@@ -143,6 +145,37 @@ Missing, stale or ambiguous evidence remains `Unknown` and is not reported as an
 license. Refresh the users and licenses inventory from the GUI when needed; an assigned SKU
 alone does not confirm that its Intune service plan is enabled.
 
+## Prerequisites Campaign (scheduled tasks)
+
+The `HybridJoin` and `Windows11Upgrade` endpoint scripts never create, change or delete a
+scheduled task definition. Every task they use is created by the `Prerequisites` Campaign, run
+beforehand on the same computers:
+
+| Task | Used by | Created |
+| --- | --- | --- |
+| `\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserDsregStatus`, `SEMT-HJ-UserRefreshPrt`, `SEMT-HJ-UserMdmAutoEnroll` | HybridJoin (started on demand in the interactive user context) | enabled, no trigger, group INTERACTIVE. Only `dsregcmd /status` goes through `cmd.exe` (its output is read back); `dsregcmd.exe /refreshprt` and `deviceenroller.exe /c /AutoEnrollMDM` are started directly, without output file: their result is checked through the status, the MDM registry and the DeviceManagement logs |
+| `\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-RunUserAutoEnrollAtLogon` | HybridJoin (enabled only while auto-enrollment waits for a user logon, disabled once Intune enrollment is confirmed) | **disabled**, SYSTEM, at logon |
+| `\SmartM365-SEMT-HybridJoin-RetryAfterReboot`, `\SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot` | the Campaign of the same name (enabled when it schedules a retry after a restart, disabled afterwards) | **disabled**, SYSTEM, at startup |
+
+The retry-after-reboot task has a fixed command: it runs
+`C:\Program Files\WCH\SmartM365\SmartEndpointMigrationToolkit\<Campaign>\RetryAfterReboot\RetryAfterRebootRunner.ps1`,
+which reads the script path and arguments from `RetryAfterReboot.json.txt` next to it. The
+Campaign writes the runner and its state, checks that the pre-created task runs exactly this
+command as SYSTEM, and only then enables it. When a task is missing, the endpoint logs it and
+carries on without it: Hybrid Join skips the user PRT status and refreshprt and uses the native
+Windows EnterpriseMgmt auto-enrollment task; a retry after reboot is not scheduled
+(`RetryAfterRebootAction=ScheduleFailed`, `SEMT_PREREQUISITE_TASK_MISSING`), so no reboot is
+triggered for it.
+
+The Campaign is **disabled by default**. Set `"Prerequisites.Enabled": true` in
+`Config\SmartEndpointMigrationToolkit.local.json.txt` (or `SEMT_PREREQUISITES_ENABLED=1`, or
+`-Option @{ 'Prerequisites.Enabled' = $true }`) to use it; until then the engine refuses it
+(`SEMT_CAMPAIGN_DISABLED`, nothing written) and the GUI does not list it. A Wave or a GUI choice
+cannot enable it. A task that already has the expected definition is left unchanged; a task with
+another definition is updated and keeps its enabled state. Computers whose tasks are ready leave
+the Wave (`Computers.PrerequisitesReady.txt`). The Campaign reads no inventory and has no
+Automatic Wave.
+
 ## Options
 
 All options come from [Config/SmartEndpointMigrationToolkit.options.json.txt](Config/SmartEndpointMigrationToolkit.options.json.txt).
@@ -161,9 +194,9 @@ when a new key appears. They are never committed.
   reservations with heartbeat and stale recovery; the strictest active limit wins.
 - One Run per Wave at a time; run guard history per Campaign; Windows 11 copy limits per source
   and per subnet.
-- On the target: one Smart Endpoint Migration Toolkit operation at a time across Campaigns, a
-  pending Windows 11 setup blocks Hybrid Join, and an active legacy toolkit operation blocks
-  with an explicit status.
+- On the target: one Smart Endpoint Migration Toolkit operation at a time across Campaigns, and a
+  pending Windows 11 setup blocks the other Campaigns. The previous toolkits are not inspected and
+  never block.
 - Every attempt has a CorrelationId; only the result with the same CorrelationId is trusted.
 - Component integrity is checked against the distribution manifest shipped in the package.
 

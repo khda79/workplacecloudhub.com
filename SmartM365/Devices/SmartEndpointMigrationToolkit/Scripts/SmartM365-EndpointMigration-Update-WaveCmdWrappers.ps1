@@ -3,13 +3,13 @@
 Regenerates the Loop/Once launch wrappers of Smart Endpoint Migration Toolkit Waves.
 
 .DESCRIPTION
-Calls Write-SemtWaveWrappers for every Wave folder of the selected Campaign (both
-Campaigns when -Campaign is omitted), or for the single Wave given with -WavePath.
+Calls Write-SemtWaveWrappers for every Wave folder of the selected Campaign (every
+Campaign when -Campaign is omitted), or for the single Wave given with -WavePath.
 Obsolete Start-Wave-*.cmd files are removed by the engine. Prints one timestamped line
 per Wave and a final summary. Exit code 0 when every Wave was updated, 1 otherwise.
 
 .PARAMETER Campaign
-HybridJoin or Windows11Upgrade. Both Campaigns are processed when omitted.
+HybridJoin, Windows11Upgrade or Prerequisites. Every Campaign is processed when omitted.
 
 .PARAMETER WavePath
 Optional single Wave folder (<Package>\Waves\<Campaign>\<Wave>).
@@ -28,7 +28,7 @@ Author: https://github.com/khda79/workplacecloudhub.com
 
 [CmdletBinding()]
 param(
-    [ValidateSet('HybridJoin', 'Windows11Upgrade')]
+    [ValidateSet('HybridJoin', 'Windows11Upgrade', 'Prerequisites')]
     [string]$Campaign,
     [string]$WavePath,
     [string]$PackageRoot
@@ -71,8 +71,8 @@ try {
         $waveFull = [System.IO.Path]::GetFullPath($WavePath).TrimEnd('\')
         if (-not (Test-Path -LiteralPath $waveFull -PathType Container)) { throw "Wave folder not found: $waveFull" }
         $waveCampaign = Split-Path -Leaf (Split-Path -Parent $waveFull)
-        if (@('HybridJoin', 'Windows11Upgrade') -notcontains $waveCampaign) {
-            throw "The Wave must be under Waves\HybridJoin or Waves\Windows11Upgrade: $waveFull"
+        if (@('HybridJoin', 'Windows11Upgrade', 'Prerequisites') -notcontains $waveCampaign) {
+            throw "The Wave must be under Waves\HybridJoin, Waves\Windows11Upgrade or Waves\Prerequisites: $waveFull"
         }
         if (-not [string]::IsNullOrWhiteSpace($Campaign) -and $Campaign -ne $waveCampaign) {
             throw ("The Wave belongs to Campaign {0}, not {1}: {2}" -f $waveCampaign, $Campaign, $waveFull)
@@ -84,7 +84,7 @@ try {
         $targets.Add([pscustomobject]@{ Campaign = $waveCampaign; Name = (Split-Path -Leaf $waveFull); Path = $waveFull })
     }
     else {
-        $campaigns = if ([string]::IsNullOrWhiteSpace($Campaign)) { @('HybridJoin', 'Windows11Upgrade') } else { @($Campaign) }
+        $campaigns = if ([string]::IsNullOrWhiteSpace($Campaign)) { @('HybridJoin', 'Windows11Upgrade', 'Prerequisites') } else { @($Campaign) }
         foreach ($campaignName in $campaigns) {
             foreach ($wave in @(Get-SemtWaves -PackageRoot $effectivePackageRoot -Campaign $campaignName)) {
                 $targets.Add([pscustomobject]@{ Campaign = $campaignName; Name = [string]$wave.Name; Path = [string]$wave.Path })

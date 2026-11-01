@@ -153,6 +153,12 @@ try {
         $rows = @{}; foreach ($row in @((Get-Content -LiteralPath $optionsFile.FullName -Raw | ConvertFrom-Json).Options)) { $rows[[string]$row.Option] = $row }
         [string]$rows['DryRun'].Value -eq 'True' -and [string]$rows['DryRun'].Source -eq 'Cli'
     }
+    $refused = Invoke-Child -Arguments @('-NoProfile','-ExecutionPolicy','Bypass','-File',$engine,'-Campaign','Prerequisites','-ComputerName','SEMT-QUALIF-PC','-RunMode','Once','-ValidateOnly')
+    Test-Step 'extracted package: the Prerequisites Campaign is refused by default (SEMT_CAMPAIGN_DISABLED) and no Run is created' { $script:ChildExitCode -ne 0 -and ($refused -join "`n") -match 'SEMT_CAMPAIGN_DISABLED' -and -not (Test-Path -LiteralPath (Join-Path $pkg 'Runs\Prerequisites')) }
+    $env:SEMT_PREREQUISITES_ENABLED = '1'
+    try { $validatePrereq = Invoke-Child -Arguments @('-NoProfile','-ExecutionPolicy','Bypass','-File',$engine,'-Campaign','Prerequisites','-ComputerName','SEMT-QUALIF-PC','-RunMode','Once','-ValidateOnly') }
+    finally { Remove-Item Env:\SEMT_PREREQUISITES_ENABLED -ErrorAction SilentlyContinue }
+    Test-Step 'extracted package: Prerequisites engine -ValidateOnly succeeds once enabled (endpoint verified by the manifest)' { $script:ChildExitCode -eq 0 -and ($validatePrereq -join "`n") -match 'ValidateOnly: options, rules and component integrity are valid' -and ($validatePrereq -join "`n") -match 'SmartM365-Invoke-EndpointMigration-Prerequisites\.ps1' }
     Test-Step 'Single PC Run is created under Runs\<Campaign>\_SinglePC of the extracted package' { @(Get-ChildItem -LiteralPath (Join-Path $pkg 'Runs\HybridJoin\_SinglePC') -Directory -ErrorAction SilentlyContinue).Count -ge 1 }
     $gui = Invoke-Child -Arguments @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $pkg 'Scripts\SmartM365-EndpointMigration-GUI.ps1'),'-ValidateOnly')
     Test-Step 'extracted package: GUI -ValidateOnly succeeds' { $script:ChildExitCode -eq 0 -and @($gui | Where-Object { $_ -match '^ValidateOnly: GUI 1\.0\.0 loaded' }).Count -eq 2 }

@@ -22,7 +22,7 @@ Campaigns\<C>\Scripts\SmartM365-Invoke-EndpointMigration-<C>.ps1   (single-file 
 | Campaign module | One profile per Campaign: endpoint script, option rules, pre-cycle and post-cycle hooks, per-computer arguments, completion rules, run guard policy, evidence rules, report columns. |
 | Engine | Resolves options, checks integrity, prepares the Run, holds the Wave lock, runs cycles, launches workers under the shared cap, writes CSV/HTML reports and the Run history. |
 | Worker | Executes one attempt from its contract. Refuses a contract of another `ContractVersion` or engine version. |
-| Endpoint scripts | Self-contained, Windows PowerShell 5.1 only. They share the region "SEMT shared target guards v1", identical in both scripts (tested). The Windows 11 script also carries "SEMT setup media resolution v1", identical to the copy in the Intune package helper (tested). |
+| Endpoint scripts | Self-contained, Windows PowerShell 5.1 only. They share the regions "SEMT shared target guards v1" and "SEMT prerequisite tasks v1", identical in the three scripts (tested). Only the Prerequisites endpoint creates scheduled tasks; the HybridJoin and Windows11Upgrade endpoints start, enable or disable them. The Windows 11 script also carries "SEMT setup media resolution v1", identical to the copy in the Intune package helper (tested). |
 
 ## Worker contract and results
 
@@ -125,10 +125,10 @@ evidence collection is enabled, within the configured size limit.
 
 | Item | Value |
 | --- | --- |
-| Environment variables | `SEMT_*`, `SEMT_HYBRIDJOIN_*`, `SEMT_WINDOWS11_*` |
+| Environment variables | `SEMT_*`, `SEMT_HYBRIDJOIN_*`, `SEMT_WINDOWS11_*`, `SEMT_PREREQUISITES_*` |
 | Endpoint mutex (Hybrid Join) | `Global\SmartM365_SEMT_HybridJoin_Endpoint` |
 | Target mutex | `Global\SmartM365_SEMT_TargetOperation` |
-| Retry tasks | `SmartM365-SEMT-HybridJoin-RetryAfterReboot`, `SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot` |
+| Retry tasks | `SmartM365-SEMT-HybridJoin-RetryAfterReboot`, `SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot` (created disabled by the Prerequisites Campaign; enabled only while a retry is scheduled) |
 | Intune Win32 (Windows 11) | see [IntuneWin32 README](../Campaigns/Windows11Upgrade/IntuneWin32/README.md) |
 | Target data roots | `C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\<Campaign>` |
 | Target program roots | `C:\Program Files\WCH\SmartM365\SmartEndpointMigrationToolkit\<Campaign>` (`RetryAfterReboot\`, `Intune\`) |

@@ -3,7 +3,8 @@
     Smart Endpoint Migration Toolkit GUI (WPF).
 
 .DESCRIPTION
-    Hybrid Join, Intune Enrollment and Windows 11 Upgrade campaigns from one launcher:
+    Hybrid Join, Intune Enrollment and Windows 11 Upgrade campaigns from one launcher, plus the
+    Prerequisites campaign (scheduled tasks), listed only when Prerequisites.Enabled is true:
     Campaign selector, Waves, New Wave, Automatic Wave (Preview distinct from Create),
     Single PC, Launch Wave, Launch All Waves (selected Campaign only, staggered), Runs and
     reports, controlled stop. Options are generated from the option catalog; the choices
@@ -269,11 +270,13 @@ function Get-InventoryRefreshPlan {
     same connection); Windows11Upgrade needs Intune only.
     #>
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade')][string]$Campaign,
+        [Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade','Prerequisites')][string]$Campaign,
         # Inventories to refresh ("Refresh old inventories only"); all of the Campaign when omitted.
         [ValidateSet('AD','Intune','Entra','Users')][string[]]$Kinds
     )
 
+    # Prerequisites reads no inventory.
+    if ($Campaign -eq 'Prerequisites') { return @() }
     if (-not $PSBoundParameters.ContainsKey('Kinds')) { $Kinds = if ($Campaign -eq 'HybridJoin') { @('AD','Intune','Entra','Users') } else { @('AD','Intune') } }
     if ($Campaign -ne 'HybridJoin') { $Kinds = @($Kinds | Where-Object { $_ -ne 'Entra' }) }
     $ad = [pscustomobject]@{ Label = 'AD'; Script = 'SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }
@@ -1022,6 +1025,9 @@ function Get-SemtGuiOptionValues {
 #endregion
 
 $script:Catalog = Import-SemtOptionCatalog -PackageRoot $script:PackageRoot
+# The Prerequisites Campaign is listed only when Prerequisites.Enabled is true (global configuration
+# or SEMT_PREREQUISITES_ENABLED); the launcher refuses it otherwise.
+if (Test-SemtCampaignEnabled -Catalog $script:Catalog -Campaign 'Prerequisites' -GlobalLayer (Read-SemtGlobalConfig -PackageRoot $script:PackageRoot).Data) { $script:CampaignTitles['Prerequisites'] = 'Prerequisites (scheduled tasks)' }
 $script:Editors = @{}
 $script:WaveEditors = @{}
 $script:CurrentCampaign = ''
@@ -1166,7 +1172,7 @@ function Get-AutomaticInventoryChecks {
     #>
     param([Parameter(Mandatory = $true)][string]$Campaign,[string]$Source = 'Both')
 
-    $kinds = if ($Campaign -eq 'Windows11Upgrade') { switch ($Source) { 'AD' { @('AD') } 'Intune' { @('Intune') } default { @('AD','Intune') } } } else { @('AD','Intune','Entra','Users') }
+    $kinds = if ($Campaign -eq 'Windows11Upgrade') { switch ($Source) { 'AD' { @('AD') } 'Intune' { @('Intune') } default { @('AD','Intune') } } } elseif ($Campaign -eq 'Prerequisites') { @() } else { @('AD','Intune','Entra','Users') }
     foreach ($kind in $kinds) {
         $maxAge = 24
         if ($kind -eq 'Users') {
@@ -1204,6 +1210,15 @@ function Get-AutomaticInventoryWarning {
 }
 
 function Update-AutomaticView {
+    # Prerequisites has no Automatic Wave (no inventory): the tab is hidden for this Campaign.
+    if ($script:CurrentCampaign -eq 'Prerequisites') {
+        if ($controls.MainTabs.SelectedItem -eq $controls.AutomaticWaveTab) { $controls.MainTabs.SelectedItem = $controls.WavesTab }
+        $controls.AutomaticWaveTab.Visibility = 'Collapsed'
+        $script:AutomaticPreviewSignature = ''
+        $controls.AutomaticCreateButton.IsEnabled = $false
+        return
+    }
+    $controls.AutomaticWaveTab.Visibility = 'Visible'
     $isWindows11 = ($script:CurrentCampaign -eq 'Windows11Upgrade')
     $controls.AutomaticSourcePanel.Visibility = if ($isWindows11) { 'Visible' } else { 'Collapsed' }
     $parts = foreach ($check in @(Get-AutomaticInventoryChecks -Campaign $script:CurrentCampaign)) {

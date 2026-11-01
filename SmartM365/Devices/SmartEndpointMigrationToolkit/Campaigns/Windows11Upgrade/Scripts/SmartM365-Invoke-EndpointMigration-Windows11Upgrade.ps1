@@ -15,6 +15,9 @@
       unmanaged media is moved on the same volume (validated, rolled back on failure); media
       still owned by a legacy Intune Win32 package is reused in place and never moved or cleaned.
     - Each attempt writes State\Results\<CorrelationId>.json.txt for the technician worker.
+    - No scheduled task is created: the retry-after-reboot task is created disabled by the
+      Prerequisites campaign; this script only enables it when it schedules a retry and disables it
+      afterwards. A missing task cancels the retry (RetryAfterRebootAction=ScheduleFailed).
 
     By default the script is diagnostic-only. Corrective actions require explicit switches.
     Setup-based upgrade requires -AllowSetupUpgrade and a validated setup source/cache.
@@ -702,6 +705,83 @@ function Write-SemtAttemptResult {
     return $path
 }
 #endregion SEMT shared target guards v1
+
+#region SEMT prerequisite tasks v1 (identical in every endpoint script; checked by Tests\Core)
+# Scheduled tasks are created only by the Prerequisites Campaign (disabled by default). The
+# HybridJoin and Windows11Upgrade endpoints start, enable or disable these tasks; they never create,
+# change or delete a task definition, and a missing task is reported, not created.
+# The retry-after-reboot task has a fixed command: the runner under Program Files reads the script
+# path and arguments from RetryAfterReboot.json.txt next to it. The task is therefore created
+# disabled in advance and enabled only while a campaign waits for a restart.
+# Principals are compared by SID: Task Scheduler shows localized account names.
+
+$script:SemtHybridJoinTaskPath = '\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\'
+
+function Get-SemtRetryAfterRebootTaskSpec {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade')][string]$Campaign,
+        [string]$ProgramFilesPath = $env:ProgramFiles,
+        [string]$WindowsPath = $env:WINDIR
+    )
+    $runner = Join-Path $ProgramFilesPath ('WCH\SmartM365\SmartEndpointMigrationToolkit\{0}\RetryAfterReboot\RetryAfterRebootRunner.ps1' -f $Campaign)
+    return [pscustomobject]@{
+        Campaign = $Campaign
+        TaskPath = '\'
+        TaskName = ('SmartM365-SEMT-{0}-RetryAfterReboot' -f $Campaign)
+        Execute = (Join-Path $WindowsPath 'System32\WindowsPowerShell\v1.0\powershell.exe')
+        Arguments = ('-NoProfile -ExecutionPolicy RemoteSigned -File "{0}"' -f $runner)
+        RunnerPath = $runner
+    }
+}
+
+function ConvertTo-SemtTaskPrincipalSid {
+    param([AllowNull()][string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return '' }
+    if ($Name -match '^S-1-[0-9-]+$') { return $Name }
+    try { return (New-Object System.Security.Principal.NTAccount($Name)).Translate([System.Security.Principal.SecurityIdentifier]).Value }
+    catch { return '' }
+}
+
+function Get-SemtScheduledTaskState {
+    # Read-only. Exists is $null when the Task Scheduler could not be read.
+    param([Parameter(Mandatory = $true)][string]$TaskPath,[Parameter(Mandatory = $true)][string]$TaskName)
+
+    $state = [pscustomobject]@{ TaskPath = $TaskPath; TaskName = $TaskName; Exists = $false; Enabled = $false; Actions = @(); TriggerCount = 0; UserSid = ''; GroupSid = ''; Detail = 'Task not found.' }
+    $readErrors = $null
+    $task = @(Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue -ErrorVariable readErrors) | Select-Object -First 1
+    if ($null -eq $task) {
+        $failure = @($readErrors | Where-Object { [string]$_.CategoryInfo.Category -ne 'ObjectNotFound' }) | Select-Object -First 1
+        if ($failure) { $state.Exists = $null; $state.Detail = ('Task Scheduler read failed: {0}' -f $failure.Exception.Message) }
+        return $state
+    }
+    $state.Exists = $true
+    $state.Enabled = [bool]$task.Settings.Enabled
+    $state.Actions = @($task.Actions | ForEach-Object {
+        $execute = if ($_.PSObject.Properties['Execute']) { [Environment]::ExpandEnvironmentVariables(([string]$_.Execute).Trim()) } else { '' }
+        $arguments = if ($_.PSObject.Properties['Arguments']) { ([string]$_.Arguments).Trim() } else { '' }
+        '{0}|{1}' -f $execute,$arguments
+    })
+    $state.TriggerCount = @($task.Triggers).Count
+    $state.UserSid = ConvertTo-SemtTaskPrincipalSid -Name ([string]$task.Principal.UserId)
+    $state.GroupSid = ConvertTo-SemtTaskPrincipalSid -Name ([string]$task.Principal.GroupId)
+    $state.Detail = ('Enabled={0}; State={1}' -f $state.Enabled,[string]$task.State)
+    return $state
+}
+
+function Test-SemtRetryAfterRebootTaskState {
+    # True when the task exists, runs as SYSTEM and starts exactly the fixed runner command.
+    param([Parameter(Mandatory = $true)]$State,[Parameter(Mandatory = $true)]$Spec)
+    if ($State.Exists -ne $true -or $State.UserSid -ne 'S-1-5-18' -or @($State.Actions).Count -ne 1) { return $false }
+    return ([string]@($State.Actions)[0] -ieq ('{0}|{1}' -f $Spec.Execute,$Spec.Arguments))
+}
+
+function Set-SemtScheduledTaskEnabled {
+    # Enables or disables an existing task; the definition is not changed.
+    param([Parameter(Mandatory = $true)][string]$TaskPath,[Parameter(Mandatory = $true)][string]$TaskName,[Parameter(Mandatory = $true)][bool]$Enabled)
+    if ($Enabled) { [void](Enable-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop) }
+    else { [void](Disable-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop) }
+}
+#endregion SEMT prerequisite tasks v1
 
 function Invoke-LocalFileRetention {
     param([ValidateRange(1, 1000)][int]$KeepLast = 10)
@@ -5186,44 +5266,20 @@ exit `$exitCode
     $runnerContent | Set-Content -LiteralPath $script:RetryAfterRebootRunnerPath -Encoding UTF8
 }
 
-function ConvertTo-SemtCommandLineArgument {
-    <#
-    Quotes one argument for a native command line (CommandLineToArgvW rules: quotes escaped as \",
-    backslashes doubled before a quote and at the end). Windows PowerShell 5.1 passes an argument
-    that starts and ends with a quote without quoting it, so a /TR value such as
-    "C:\...\powershell.exe" -File "C:\Program Files\..." was split and schtasks.exe failed with
-    "Invalid argument/option".
-    #>
-    param([AllowEmptyString()][string]$Value)
-
-    if (-not [string]::IsNullOrEmpty($Value) -and $Value -notmatch '[\s"]') { return $Value }
-    $escaped = [regex]::Replace([string]$Value, '(\\*)"', { param($match) ($match.Groups[1].Value * 2) + '\"' })
-    $escaped = [regex]::Replace($escaped, '(\\+)$', { param($match) $match.Groups[1].Value * 2 })
-    return ('"{0}"' -f $escaped)
-}
-
-function Invoke-SemtSchtasks {
-    <# Runs schtasks.exe with an explicit command line (see ConvertTo-SemtCommandLineArgument). #>
-    param([Parameter(Mandatory = $true)][string[]]$Arguments)
-
-    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = Join-Path $env:WINDIR 'System32\schtasks.exe'
-    $startInfo.Arguments = (@($Arguments | ForEach-Object { ConvertTo-SemtCommandLineArgument -Value $_ }) -join ' ')
-    $startInfo.UseShellExecute = $false
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    $startInfo.CreateNoWindow = $true
-    $process = [System.Diagnostics.Process]::Start($startInfo)
-    $standardError = $process.StandardError.ReadToEndAsync()
-    $standardOutput = $process.StandardOutput.ReadToEnd()
-    $process.WaitForExit()
-    return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = ('{0} {1}' -f $standardOutput,$standardError.Result).Trim() }
-}
-
 function Register-RetryAfterRebootTask {
     param([Parameter(Mandatory = $true)][string]$Reason)
 
     $script:RetryAfterRebootAction = 'ScheduleRequested'
+    # The task is created disabled by the Prerequisites campaign; it is only verified and enabled
+    # here, before anything is written, so a missing task leaves no state behind.
+    $taskSpec = Get-SemtRetryAfterRebootTaskSpec -Campaign $script:SemtCampaign
+    $taskState = Get-SemtScheduledTaskState -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName
+    if ($taskState.Exists -ne $true) {
+        throw ('SEMT_PREREQUISITE_TASK_MISSING: {0}{1} ({2}). Run the Prerequisites campaign on this computer.' -f $taskSpec.TaskPath,$taskSpec.TaskName,$taskState.Detail)
+    }
+    if (-not (Test-SemtRetryAfterRebootTaskState -State $taskState -Spec $taskSpec)) {
+        throw ("SEMT_PREREQUISITE_TASK_MISMATCH: {0}{1} does not run '{2} {3}' as SYSTEM. Run the Prerequisites campaign on this computer." -f $taskSpec.TaskPath,$taskSpec.TaskName,$taskSpec.Execute,$taskSpec.Arguments)
+    }
     New-SmartDirectory -Path $script:StateDir
     Protect-Windows11ToolkitPathAcl -Path $DataRoot -Directory -RequireSuccess
     Protect-Windows11ToolkitPathAcl -Path $script:StateDir -Directory -RequireSuccess
@@ -5260,12 +5316,7 @@ function Register-RetryAfterRebootTask {
     $programTrust = Test-SemtTrustedProgramPath -Path $script:RetryAfterRebootProgramDir -Recurse
     if (-not $programTrust.Trusted) { throw ('SEMT_PROGRAM_FOLDER_UNTRUSTED: {0} ({1}) {2}' -f $script:RetryAfterRebootProgramDir,$programTrust.State,$programTrust.Detail) }
 
-    $taskCommand = 'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "{0}"' -f $script:RetryAfterRebootRunnerPath
-    $createArgs = @('/Create','/TN',$script:RetryAfterRebootTaskName,'/SC','ONSTART','/RU','SYSTEM','/RL','HIGHEST','/TR',$taskCommand,'/F')
-    $create = Invoke-SemtSchtasks -Arguments $createArgs
-    if ($create.ExitCode -ne 0) {
-        throw ("schtasks.exe failed with exit code {0}: {1}" -f $create.ExitCode,$create.Output)
-    }
+    Set-SemtScheduledTaskEnabled -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName -Enabled $true
 
     $script:RetryAfterRebootAction = 'Scheduled'
     $script:RetryAfterRebootAttempt = [string]$previousAttempts
@@ -5309,9 +5360,15 @@ function Unregister-RetryAfterRebootTask {
     param([string]$Reason = '')
 
     $messages = New-Object System.Collections.Generic.List[string]
-    $deleteOutput = & schtasks.exe /Delete /TN $script:RetryAfterRebootTaskName /F 2>&1
-    if ($LASTEXITCODE -ne 0 -and (@($deleteOutput) -join ' ') -notmatch 'cannot find|The system cannot find') {
-        [void]$messages.Add(("Task delete failed: {0}" -f (@($deleteOutput) -join ' ')))
+    # The task belongs to the Prerequisites campaign: it is disabled, never deleted.
+    try {
+        $taskSpec = Get-SemtRetryAfterRebootTaskSpec -Campaign $script:SemtCampaign
+        $taskState = Get-SemtScheduledTaskState -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName
+        if ($null -eq $taskState.Exists) { [void]$messages.Add(('Task state unreadable: {0}' -f $taskState.Detail)) }
+        elseif ($taskState.Exists -and $taskState.Enabled) { Set-SemtScheduledTaskEnabled -TaskPath $taskSpec.TaskPath -TaskName $taskSpec.TaskName -Enabled $false }
+    }
+    catch {
+        [void]$messages.Add(('Task disable failed: {0}' -f $_.Exception.Message))
     }
 
     $paths = @($script:RetryAfterRebootRunnerPath,$script:RetryAfterRebootStatePath)

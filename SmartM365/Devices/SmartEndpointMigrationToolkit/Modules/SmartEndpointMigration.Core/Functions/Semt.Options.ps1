@@ -248,6 +248,31 @@ function Resolve-SemtEffectiveOptions {
     return $effective
 }
 
+function Test-SemtCampaignEnabled {
+    <#
+    A Campaign with a '<Campaign>.Enabled' option in the catalog (Prerequisites) is available only
+    when the option resolves to true; the other Campaigns are always available. Only the default,
+    the global configuration, the SEMT_* environment variable and an explicit CLI value decide:
+    a Wave or a GUI choice cannot enable a Campaign.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Catalog,
+        [Parameter(Mandatory = $true)][string]$Campaign,
+        [AllowNull()]$GlobalLayer,
+        [AllowNull()]$CliLayer
+    )
+
+    [void](Assert-SemtCampaign -Campaign $Campaign)
+    $name = '{0}.Enabled' -f $Campaign
+    if (-not $Catalog.ByName.ContainsKey($name)) { return $true }
+    $cli = ConvertTo-SemtOptionLayer -Layer $CliLayer
+    $cliValue = @{}
+    if ($cli.ContainsKey($name)) { $cliValue[$name] = $cli[$name] }
+    $resolved = Resolve-SemtEffectiveOptions -Catalog $Catalog -Campaign $Campaign -GlobalLayer $GlobalLayer -EnvironmentLayer (Get-SemtEnvironmentOptionLayer -Catalog $Catalog -Campaign $Campaign) -CliLayer $cliValue
+    return [bool]$resolved[$name].Value
+}
+
 function Get-SemtOption {
     [CmdletBinding()]
     param(

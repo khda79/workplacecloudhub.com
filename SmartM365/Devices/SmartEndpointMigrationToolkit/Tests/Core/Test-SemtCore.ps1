@@ -87,13 +87,35 @@ try {
     Test-Step 'every catalog option has Type, Category, Label, Description and SEMT_* EnvVar' {
         @($catalog.Options | Where-Object { -not $_.Type -or -not $_.Category -or -not $_.Label -or -not $_.Description -or [string]$_.EnvVar -notmatch '^SEMT_' }).Count -eq 0
     }
-    Test-Step 'campaign env vars use SEMT_HYBRIDJOIN_* / SEMT_WINDOWS11_* prefixes' {
-        @($catalog.Options | Where-Object { ($_.Scope -eq 'HybridJoin' -and $_.EnvVar -notmatch '^SEMT_HYBRIDJOIN_') -or ($_.Scope -eq 'Windows11Upgrade' -and $_.EnvVar -notmatch '^SEMT_WINDOWS11_') }).Count -eq 0
+    Test-Step 'campaign env vars use SEMT_HYBRIDJOIN_* / SEMT_WINDOWS11_* / SEMT_PREREQUISITES_* prefixes' {
+        @($catalog.Options | Where-Object { ($_.Scope -eq 'HybridJoin' -and $_.EnvVar -notmatch '^SEMT_HYBRIDJOIN_') -or ($_.Scope -eq 'Windows11Upgrade' -and $_.EnvVar -notmatch '^SEMT_WINDOWS11_') -or ($_.Scope -eq 'Prerequisites' -and $_.EnvVar -notmatch '^SEMT_PREREQUISITES_') }).Count -eq 0
+    }
+    Test-Step 'every option scope is Common or a known Campaign' { @($catalog.Options | Where-Object { $_.Scope -ne 'Common' -and (Get-SemtProductInfo).Campaigns -notcontains $_.Scope }).Count -eq 0 }
+    Test-Step 'Prerequisites Campaign is disabled by default (Prerequisites.Enabled=false, technician only, hidden in the GUI)' {
+        $definition = $catalog.ByName['Prerequisites.Enabled']
+        $definition.Default -eq $false -and $definition.Target -eq 'Technician' -and $definition.GuiVisible -eq $false -and -not (Test-SemtCampaignEnabled -Catalog $catalog -Campaign Prerequisites)
+    }
+    Test-Step 'Prerequisites is enabled by the global configuration, SEMT_PREREQUISITES_ENABLED or -Option only' {
+        $previous = [Environment]::GetEnvironmentVariable('SEMT_PREREQUISITES_ENABLED')
+        try {
+            [Environment]::SetEnvironmentVariable('SEMT_PREREQUISITES_ENABLED', $null)
+            $global = Test-SemtCampaignEnabled -Catalog $catalog -Campaign Prerequisites -GlobalLayer @{ Options = @{ 'Prerequisites.Enabled' = $true } }
+            $cli = Test-SemtCampaignEnabled -Catalog $catalog -Campaign Prerequisites -CliLayer @{ 'Prerequisites.Enabled' = $true; ThrottleLimit = 2 }
+            $cliOff = Test-SemtCampaignEnabled -Catalog $catalog -Campaign Prerequisites -GlobalLayer @{ Options = @{ 'Prerequisites.Enabled' = $true } } -CliLayer @{ 'Prerequisites.Enabled' = $false }
+            [Environment]::SetEnvironmentVariable('SEMT_PREREQUISITES_ENABLED', '1')
+            $environment = Test-SemtCampaignEnabled -Catalog $catalog -Campaign Prerequisites
+        }
+        finally { [Environment]::SetEnvironmentVariable('SEMT_PREREQUISITES_ENABLED', $previous) }
+        $global -and $cli -and -not $cliOff -and $environment -and (Test-SemtCampaignEnabled -Catalog $catalog -Campaign HybridJoin) -and (Test-SemtCampaignEnabled -Catalog $catalog -Campaign Windows11Upgrade)
+    }
+    Test-Step 'Wave templates never carry a <Campaign>.Enabled option' {
+        $text = [IO.File]::ReadAllText((Join-Path $script:PackageRoot 'Campaigns\Prerequisites\Templates\Wave\Wave.local.json.template'))
+        $text -notmatch 'Prerequisites\.Enabled' -and $text -match 'Prerequisites\.HybridJoinTasks'
     }
     Test-Step 'no Batch/LOT wording in option labels or descriptions' { @($catalog.Options | Where-Object { ('{0} {1}' -f $_.Label,$_.Description) -match '\b(LOT|LOTs|Batch|batch)\b' }).Count -eq 0 }
     Test-Step 'D11: Hybrid Join AllowRebootAfterDsregLeave defaults to false' { (Get-SemtOptionDefault -Definition $catalog.ByName['HybridJoin.AllowRebootAfterDsregLeave'] -Campaign HybridJoin) -eq $false }
     Test-Step 'no legacy activity option remains' { -not $catalog.ByName.ContainsKey('LegacyActivityPolicy') }
-    foreach ($endpoint in @('Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1','Campaigns\Windows11Upgrade\Scripts\SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1')) {
+    foreach ($endpoint in @('Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1','Campaigns\Windows11Upgrade\Scripts\SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1','Campaigns\Prerequisites\Scripts\SmartM365-Invoke-EndpointMigration-Prerequisites.ps1')) {
         $content = Get-Content -LiteralPath (Join-Path $script:PackageRoot $endpoint) -Raw
         Test-Step "endpoint does not inspect previous toolkit activity: $endpoint" { $content -notmatch 'LegacyActivity|Get-SemtLegacyEndpointActivity' }
     }
@@ -144,7 +166,8 @@ try {
     Test-Step 'endpoint arguments: switch emitted when true' { $arguments -contains '-AuditOnly' }
     $w11Endpoint = Join-Path $script:PackageRoot 'Campaigns\Windows11Upgrade\Scripts\SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1'
     $hjEndpoint = Join-Path $script:PackageRoot 'Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1'
-    foreach ($pair in @(@('HybridJoin',$hjEndpoint),@('Windows11Upgrade',$w11Endpoint))) {
+    $prereqEndpoint = Join-Path $script:PackageRoot 'Campaigns\Prerequisites\Scripts\SmartM365-Invoke-EndpointMigration-Prerequisites.ps1'
+    foreach ($pair in @(@('HybridJoin',$hjEndpoint),@('Windows11Upgrade',$w11Endpoint),@('Prerequisites',$prereqEndpoint))) {
         $tokens = $null; $errors = $null
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($pair[1], [ref]$tokens, [ref]$errors)
         $parameters = @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
@@ -472,8 +495,29 @@ $script:HostLines.Clear()
     Test-Step 'central logs: skipped virtual machines go to Skipped, run guards to TargetBusy (not Errors)' {
         (Get-HybridJoinCentralLogBucket -Result ([pscustomobject]@{ Status = 'SKIPPED_VIRTUAL_MACHINE' })) -eq 'Skipped' -and (Get-HybridJoinCentralLogBucket -Result ([pscustomobject]@{ Status = 'RUN_GUARD_ACTIVE' })) -eq 'TargetBusy' -and (Get-Windows11CentralLogBucket -Result ([pscustomobject]@{ RemoteStatus = 'SKIPPED_VIRTUAL_MACHINE'; Status = 'SKIPPED_VIRTUAL_MACHINE'; ExitCode = '0' })) -eq 'Skipped' -and (Get-Windows11CentralLogBucket -Result ([pscustomobject]@{ RemoteStatus = 'RUN_GUARD_ACTIVE'; ExitCode = '3' })) -eq 'TargetBusy'
     }
+    Import-Module (Join-Path $script:PackageRoot 'Campaigns\Prerequisites\SmartEndpointMigration.Campaign.Prerequisites.psd1') -MinimumVersion 1.0.0 -Force
+    $prereqProfile = Get-SemtPrerequisitesProfile
+    Test-Step 'Prerequisites profile: endpoint path, no inventory, report columns and hooks' {
+        $prereqProfile.Campaign -eq 'Prerequisites' -and $prereqProfile.EndpointScriptRelativePath -eq 'Campaigns\Prerequisites\Scripts\SmartM365-Invoke-EndpointMigration-Prerequisites.ps1' -and @($prereqProfile.InventoryKinds).Count -eq 0 -and $prereqProfile.ReportColumns -contains 'TasksMissing' -and $prereqProfile.ReportColumns -contains 'TasksCreated' -and @($prereqProfile.Hooks.PSObject.Properties).Count -eq 11
+    }
+    Test-Step 'Prerequisites profile: next actions, central log buckets and completed rule' {
+        (& $prereqProfile.Hooks.NextAction 'PREREQUISITES_READY') -eq 'NO_ACTION_PREREQUISITES_READY' -and (& $prereqProfile.Hooks.NextAction 'AUDIT_PREREQUISITES_MISSING') -eq 'RUN_PREREQUISITES_WITHOUT_AUDIT' -and (& $prereqProfile.Hooks.CentralLogBucket ([pscustomobject]@{ Status = 'PREREQUISITES_READY' })) -eq 'Success' -and (& $prereqProfile.Hooks.CentralLogBucket ([pscustomobject]@{ Status = 'PREREQUISITES_TASK_FAILED' })) -eq 'Errors' -and (& $prereqProfile.Hooks.CentralLogBucket ([pscustomobject]@{ Status = 'TARGET_OPERATION_ACTIVE' })) -eq 'TargetBusy' -and (& $prereqProfile.CompletedRules[0].Test ([pscustomobject]@{ Status = 'PREREQUISITES_READY'; RemoteStatus = 'PREREQUISITES_READY' })) -and -not (& $prereqProfile.CompletedRules[0].Test ([pscustomobject]@{ Status = 'AUDIT_PREREQUISITES_PRESENT'; RemoteStatus = 'AUDIT_PREREQUISITES_PRESENT' }))
+    }
+    Test-Step 'Prerequisites run guard: ready result waits TechnicianRunGuardHours, audit leaves no entry, transport error retries soon' {
+        $meta = @{ WaveName = 'W'; RunId = 'R'; TechnicianAccount = 'T'; LauncherVersion = '1.0.0' }
+        $ready = & $prereqProfile.Hooks.RunGuardEntry $null 'pc.example' 'PC' 'Result' ([pscustomobject]@{ Status = 'PREREQUISITES_READY'; RemoteStatus = 'PREREQUISITES_READY'; NextAction = '' }) 'J' 1 12 $meta
+        $audit = & $prereqProfile.Hooks.RunGuardEntry $null 'pc.example' 'PC' 'Result' ([pscustomobject]@{ Status = 'AUDIT_PREREQUISITES_MISSING'; RemoteStatus = 'AUDIT_PREREQUISITES_MISSING'; NextAction = '' }) 'J' 1 12 $meta
+        $network = & $prereqProfile.Hooks.RunGuardEntry $null 'pc.example' 'PC' 'Result' ([pscustomobject]@{ Status = 'ADMIN_SHARE_UNREACHABLE'; RemoteStatus = ''; NextAction = '' }) 'J' 1 12 $meta
+        $decision = & $prereqProfile.Hooks.RunGuardDecision $ready @{}
+        $ready.CooldownHours -eq 12 -and $null -eq $audit -and $network.CooldownHours -eq 0.25 -and $decision.Block -and $decision.Status -eq 'SKIPPED_BY_TECH_RUN_GUARD' -and $null -ne $decision.Fields
+    }
     Test-Step 'Run engine: a technician back-off skip shows the previous status, the next try time and the bypass' {
         $engineText -match "previous status \{2\};\{3\} a run mode 'ignore run guard' bypasses it" -and $engineText -match "next try after \{0:yyyy-MM-dd HH:mm\} \(local\)"
+    }
+    Test-Step 'Run engine: a disabled Campaign is refused before the Run folder is created' {
+        $refusal = $engineText.IndexOf('SEMT_CAMPAIGN_DISABLED')
+        $runContext = $engineText.IndexOf('New-SemtRunContext')
+        $refusal -gt 0 -and $runContext -gt $refusal -and $engineText -match "ValidateSet\('HybridJoin','Windows11Upgrade','Prerequisites'\)"
     }
     Test-Step 'Run engine: a stop requested during an inventory refresh does not start the next refresh' {
         $engineText -match '(?s)foreach \(\$kind in @\(\$script:CampaignProfile\.InventoryKinds\)\) \{\s*# A stop requested[^\n]*\n\s*if \(\(Get-SemtCancellationState\)\.Requested\)'
@@ -484,15 +528,27 @@ $script:HostLines.Clear()
     }
     # Retry-after-reboot task: Windows PowerShell 5.1 split a /TR value that starts and ends with a quote
     # ("C:\Program Files\..." became two arguments) and schtasks.exe failed with "Invalid argument/option".
-    foreach ($endpointText in @($hjEndpointText,$w11EndpointText)) {
+    foreach ($endpointText in @($hjEndpointText)) {
         $quotingAst = [System.Management.Automation.Language.Parser]::ParseInput($endpointText, [ref]$null, [ref]$null)
         . ([scriptblock]::Create($quotingAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'ConvertTo-SemtCommandLineArgument' }, $true).Extent.Text))
         Test-Step 'endpoint native arguments: quotes and spaces are escaped for schtasks.exe /TR' {
             (ConvertTo-SemtCommandLineArgument -Value '"C:\P\ps.exe" -File "C:\Program Files\r.ps1"') -eq '"\"C:\P\ps.exe\" -File \"C:\Program Files\r.ps1\""' -and (ConvertTo-SemtCommandLineArgument -Value '/Create') -eq '/Create' -and (ConvertTo-SemtCommandLineArgument -Value 'C:\a b\') -eq '"C:\a b\\"' -and (ConvertTo-SemtCommandLineArgument -Value '') -eq '""'
         }
     }
-    Test-Step 'endpoints create the retry-after-reboot task through Invoke-SemtSchtasks (no direct schtasks.exe /Create)' {
-        $hjEndpointText -match "Invoke-SemtSchtasks -Arguments @\('/Create','/TN',\`$script:RetryAfterRebootTaskName" -and $w11EndpointText -match 'Invoke-SemtSchtasks -Arguments \$createArgs' -and $hjEndpointText -notmatch '& schtasks\.exe /Create' -and $w11EndpointText -notmatch '& schtasks\.exe @createArgs'
+    # Unregister-ScheduledTask stays: Hybrid Join can remove the EnterpriseMgmt tasks of a confirmed non-Intune MDM (opt-in).
+    Test-Step 'HybridJoin and Windows11Upgrade endpoints never create or change a scheduled task definition' {
+        $creation = '(?i)RegisterTaskDefinition|(?<!Un)Register-ScheduledTask|New-ScheduledTask|Set-ScheduledTask|schtasks(\.exe)?[^\r\n]*/(Create|Delete|Change)|Invoke-SemtSchtasks'
+        $hjEndpointText -notmatch $creation -and $w11EndpointText -notmatch $creation -and $hjEndpointText -notmatch 'function (Ensure-UserContextHelperTasks|Register-InteractiveUserScheduledTask|Register-UserAutoEnrollAtLogonTask)'
+    }
+    Test-Step 'retry-after-reboot: both endpoints verify and enable the pre-created task, then disable it (never delete)' {
+        $ok = $true
+        foreach ($text in @($hjEndpointText,$w11EndpointText)) {
+            if ($text -notmatch 'SEMT_PREREQUISITE_TASK_MISSING' -or $text -notmatch 'SEMT_PREREQUISITE_TASK_MISMATCH' -or $text -notmatch 'Set-SemtScheduledTaskEnabled -TaskPath \$taskSpec\.TaskPath -TaskName \$taskSpec\.TaskName -Enabled \$true' -or $text -notmatch 'Set-SemtScheduledTaskEnabled -TaskPath \$taskSpec\.TaskPath -TaskName \$taskSpec\.TaskName -Enabled \$false') { $ok = $false }
+        }
+        $ok
+    }
+    Test-Step 'Hybrid Join: missing user-context tasks fall back to the native task; the next-logon task is only enabled or disabled' {
+        $hjEndpointText -match 'function Test-UserContextHelperTasks' -and $hjEndpointText -match '\$nextLogonTask = Enable-UserAutoEnrollAtLogonTask' -and $hjEndpointText -match 'Disable-UserAutoEnrollAtLogonTask -Reason \$status' -and $hjEndpointText -match 'when it is missing, the native task is used'
     }
     Test-Step 'Run engine: report names omit the Wave name; a cycle HTML report failure never fails the Run' {
         $engineText -match "'SEMT_\{0\}_cycle\{1\}_\{2\}\.csv' -f \`$Campaign,\`$cycle" -and $engineText -match "'SEMT_\{0\}_\{1\}_final\.html' -f \`$Campaign,\`$script:RunId" -and $engineText -match 'HTML report update failed' -and $engineText -match 'Final report failed'
@@ -530,7 +586,34 @@ $script:HostLines.Clear()
     #region Shared target guards (endpoint)
     $hjRegion = Get-RegionText -Path $hjEndpoint -Region 'SEMT shared target guards v1'
     $w11Region = Get-RegionText -Path $w11Endpoint -Region 'SEMT shared target guards v1'
-    Test-Step 'shared target guard region is identical in both endpoint scripts' { $hjRegion -ceq $w11Region }
+    $prereqRegion = Get-RegionText -Path $prereqEndpoint -Region 'SEMT shared target guards v1'
+    Test-Step 'shared target guard region is identical in the three endpoint scripts' { $hjRegion -ceq $w11Region -and $prereqRegion -ceq $w11Region }
+    $taskRegions = @(@($hjEndpoint,$w11Endpoint,$prereqEndpoint) | ForEach-Object { Get-RegionText -Path $_ -Region 'SEMT prerequisite tasks v1' })
+    Test-Step 'prerequisite tasks region is identical in the three endpoint scripts' { $taskRegions[0] -ceq $taskRegions[1] -and $taskRegions[0] -ceq $taskRegions[2] }
+    . ([scriptblock]::Create($taskRegions[0]))
+    Test-Step 'retry-after-reboot task spec: fixed SYSTEM command that starts the runner under Program Files with RemoteSigned' {
+        $spec = Get-SemtRetryAfterRebootTaskSpec -Campaign Windows11Upgrade -ProgramFilesPath 'C:\Program Files' -WindowsPath 'C:\Windows'
+        $spec.TaskPath -eq '\' -and $spec.TaskName -eq 'SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot' -and $spec.Execute -eq 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -and $spec.Arguments -eq '-NoProfile -ExecutionPolicy RemoteSigned -File "C:\Program Files\WCH\SmartM365\SmartEndpointMigrationToolkit\Windows11Upgrade\RetryAfterReboot\RetryAfterRebootRunner.ps1"'
+    }
+    Test-Step 'retry-after-reboot task check: SYSTEM by SID, one action, exact command' {
+        $spec = Get-SemtRetryAfterRebootTaskSpec -Campaign HybridJoin
+        $command = '{0}|{1}' -f $spec.Execute,$spec.Arguments
+        $good = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command); UserSid = 'S-1-5-18'; GroupSid = '' }
+        $otherUser = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command); UserSid = 'S-1-5-32-544'; GroupSid = '' }
+        $otherCommand = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @(('powershell.exe|{0}' -f $spec.Arguments)); UserSid = 'S-1-5-18'; GroupSid = '' }
+        $twoActions = [pscustomobject]@{ Exists = $true; Enabled = $false; Actions = @($command,$command); UserSid = 'S-1-5-18'; GroupSid = '' }
+        $missing = [pscustomobject]@{ Exists = $false; Enabled = $false; Actions = @(); UserSid = ''; GroupSid = '' }
+        (Test-SemtRetryAfterRebootTaskState -State $good -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $otherUser -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $otherCommand -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $twoActions -Spec $spec) -and -not (Test-SemtRetryAfterRebootTaskState -State $missing -Spec $spec)
+    }
+    Test-Step 'task principals are compared by SID, whatever the display language' {
+        $localizedSystem = (New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')).Translate([System.Security.Principal.NTAccount]).Value
+        $localizedInteractive = (New-Object System.Security.Principal.SecurityIdentifier('S-1-5-4')).Translate([System.Security.Principal.NTAccount]).Value
+        (ConvertTo-SemtTaskPrincipalSid -Name $localizedSystem) -eq 'S-1-5-18' -and (ConvertTo-SemtTaskPrincipalSid -Name $localizedInteractive) -eq 'S-1-5-4' -and (ConvertTo-SemtTaskPrincipalSid -Name 'S-1-5-18') -eq 'S-1-5-18' -and (ConvertTo-SemtTaskPrincipalSid -Name '') -eq ''
+    }
+    Test-Step 'task state read: a missing task gives Exists=false, not an error (read-only query)' {
+        $state = Get-SemtScheduledTaskState -TaskPath '\' -TaskName ('SEMT-Test-Missing-' + [guid]::NewGuid().ToString('N'))
+        $state.Exists -eq $false -and -not $state.Enabled
+    }
     Test-Step 'target mutex has its own SEMT name (not a legacy name)' { $hjRegion -match "Global\\SmartM365_SEMT_TargetOperation" -and $hjRegion -notmatch "SemtTargetMutexName = 'Global\\SmartM365_(IntuneHybridJoin|Windows11Upgrade)Toolkit" }
     . ([scriptblock]::Create($w11Region))
     $targetRoot = Join-Path $tempRoot 'TargetData'

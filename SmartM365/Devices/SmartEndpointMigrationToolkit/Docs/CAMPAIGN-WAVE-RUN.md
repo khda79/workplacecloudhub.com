@@ -9,14 +9,37 @@ defaults, rules, Waves, Runs, run guard history, GUI choices and report columns.
 | --- | --- | --- |
 | `HybridJoin` | The device is Hybrid Entra joined and enrolled in Intune (also detected after the cycle from a scoped Intune/Entra inventory) | `REBOOT_DEVICE`, `WAIT_USER_LOGOFF_OR_REBOOT_DEVICE`, `FIX_INTUNE_ENROLLMENT_FIRST` |
 | `Windows11Upgrade` | The device runs Windows 11, or is reported not capable | `REBOOT_AND_RETRY_SETUP`, `CHECK_SETUP_LOGS`, `VERIFY_LEGACY_MEDIA_LOCATION` |
+| `Prerequisites` | Every requested scheduled task exists with its expected definition (`PREREQUISITES_READY`) | `CHECK_EDR_OR_TASK_SCHEDULER`, `RUN_PREREQUISITES_WITHOUT_AUDIT` |
 
-Statuses shared by both Campaigns: `TARGET_OPERATION_ACTIVE` (`WAIT_ACTIVE_TARGET_OPERATION`),
+Statuses shared by every Campaign: `TARGET_OPERATION_ACTIVE` (`WAIT_ACTIVE_TARGET_OPERATION`),
 `TARGET_PENDING_OPERATION` (`WAIT_OTHER_CAMPAIGN_PENDING_OPERATION`), `RUN_GUARD_ACTIVE`, and the technician-side
 `DRYRUN_*`, `PSEXEC_*`, `REMOTE_*`, `COMPONENT_INTEGRITY_MISMATCH` and `CANCELLED_BY_OPERATOR*`.
 
 Completed computers leave `Computers.txt` and are archived next to it
 (`Computers.AlreadyEnrolled.txt`, `Computers.AlreadyWindows11.txt`,
-`Computers.HardwareNotCapable.txt`).
+`Computers.HardwareNotCapable.txt`, `Computers.PrerequisitesReady.txt`).
+
+### Prerequisites
+
+The `Prerequisites` Campaign creates on the targets the scheduled tasks that `HybridJoin` and
+`Windows11Upgrade` only start, enable or disable (list and rules: README, "Prerequisites Campaign").
+It is disabled by default: set `Prerequisites.Enabled` to true in the global configuration first.
+Run it on a Wave before the other two Campaigns, in audit first (`AuditOnly`: present, missing or
+different tasks, nothing created), then in repair. `Prerequisites.HybridJoinTasks` and
+`Prerequisites.Windows11UpgradeTasks` select the tasks. The next-logon and retry-after-reboot
+tasks are created disabled; an existing task keeps its enabled state.
+
+| Status | Exit | Meaning |
+| --- | --- | --- |
+| `PREREQUISITES_READY` | 0 | Every requested task present, created or updated (the computer leaves the Wave) |
+| `AUDIT_PREREQUISITES_PRESENT` | 0 | Audit: every requested task present |
+| `AUDIT_PREREQUISITES_MISSING` | 3 | Audit: at least one task missing or different |
+| `PREREQUISITES_TASK_FAILED` | 1 | A task could not be created or read back (for example blocked by an EDR) |
+| `PREREQUISITES_NOTHING_SELECTED` | 3 | Both task options are off |
+
+The report columns `TasksExpected`, `TasksPresent`, `TasksCreated`, `TasksUpdated`, `TasksMissing`,
+`TasksFailed` and `TasksDetail` give the count and the result of each task; the endpoint CSV
+(`Output\SEMT_Prerequisites_<Computer>_<RunId>.csv`) lists every task with its state before and after.
 
 ## Wave
 
@@ -116,4 +139,4 @@ asks for an explicit confirmation). A dry run is limited to one cycle.
 
 Launches every launchable Wave of the **selected Campaign** that is not already running, one
 every 5 seconds, with the same run mode and GUI choices, after one confirmation. It never
-launches Waves of the other Campaign.
+launches Waves of another Campaign.

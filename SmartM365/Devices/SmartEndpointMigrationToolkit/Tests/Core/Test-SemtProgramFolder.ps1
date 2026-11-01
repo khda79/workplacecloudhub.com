@@ -45,6 +45,7 @@ $script:Failed = 0
 $packageRoot = Split-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -Parent
 $w11Endpoint = Join-Path $packageRoot 'Campaigns\Windows11Upgrade\Scripts\SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1'
 $hjEndpoint = Join-Path $packageRoot 'Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1'
+$prereqEndpoint = Join-Path $packageRoot 'Campaigns\Prerequisites\Scripts\SmartM365-Invoke-EndpointMigration-Prerequisites.ps1'
 $installer = Join-Path $packageRoot 'Campaigns\Windows11Upgrade\IntuneWin32\Source\SmartM365-EndpointMigration-Install.ps1'
 $runner = Join-Path $packageRoot 'Campaigns\Windows11Upgrade\IntuneWin32\Source\SmartM365-EndpointMigration-Run-IntuneUpgrade.ps1'
 $coreRemote = Join-Path $packageRoot 'Modules\SmartEndpointMigration.Core\Functions\Semt.Remote.ps1'
@@ -94,7 +95,7 @@ New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 try {
     #region 1. Shared region
     $reference = Get-RegionText -Path $w11Endpoint -Region $regionName
-    foreach ($copy in @($hjEndpoint, $installer, $runner, $coreRemote)) {
+    foreach ($copy in @($hjEndpoint, $prereqEndpoint, $installer, $runner, $coreRemote)) {
         Test-Step ("trusted program folder region identical in {0}" -f (Split-Path -Path $copy -Leaf)) { (Get-RegionText -Path $copy -Region $regionName) -ceq $reference }
     }
     #endregion
@@ -413,7 +414,7 @@ try {
 
     # Real endpoints: a data root that is not below ProgramData stops them before any write.
     $ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    foreach ($endpoint in @($w11Endpoint, $hjEndpoint)) {
+    foreach ($endpoint in @($w11Endpoint, $hjEndpoint, $prereqEndpoint)) {
         $badRoot = Join-Path $tempRoot ('endpoint-data-' + [IO.Path]::GetFileNameWithoutExtension($endpoint))
         $ErrorActionPreference = 'Continue'
         $output = @(& $ps51 -NoProfile -ExecutionPolicy Bypass -File $endpoint -DataRoot $badRoot -CorrelationId 'qualif-data-boundary' 2>&1 | ForEach-Object { [string]$_ })
@@ -425,8 +426,8 @@ try {
 
     #region 4. Retry after reboot (endpoint functions)
     function Invoke-RetryCase {
-        param([string]$Campaign, [string]$EndpointPath, [string]$ProgramFolderState = 'Trusted')
-        $case = Join-Path $tempRoot ('retry-' + $Campaign + '-' + $ProgramFolderState)
+        param([string]$Campaign, [string]$EndpointPath, [string]$ProgramFolderState = 'Trusted', [ValidateSet('Present','Missing','Different')][string]$TaskState = 'Present')
+        $case = Join-Path $tempRoot ('retry-' + $Campaign + '-' + $ProgramFolderState + '-' + $TaskState)
         $script:StateDir = Join-Path $case 'Data\State'; $StateDir = $script:StateDir
         $script:DataRoot = Join-Path $case 'Data'; $DataRoot = $script:DataRoot
         New-Item -ItemType Directory -Path $script:StateDir -Force | Out-Null
@@ -442,7 +443,9 @@ try {
         $script:RetryAfterRebootMaxAttempts = 3; $RetryAfterRebootMaxAttempts = 3
         $script:RetryAfterRebootDelaySeconds = 0; $RetryAfterRebootDelaySeconds = 0
         $script:ComputerName = 'SEMT-QUALIF-PC'; $ComputerName = 'SEMT-QUALIF-PC'
-        $names = @('Register-RetryAfterRebootTask','Write-RetryAfterRebootRunner','Write-RetryAfterRebootState','Read-RetryAfterRebootState','Unregister-RetryAfterRebootTask','Start-RetryAfterRebootTaskRun','Set-RetryAfterRebootStateProperty')
+        $script:SemtCampaign = $Campaign
+        $script:TaskState = $TaskState
+        $names = @('Register-RetryAfterRebootTask','Write-RetryAfterRebootRunner','Write-RetryAfterRebootState','Read-RetryAfterRebootState','Unregister-RetryAfterRebootTask','Start-RetryAfterRebootTaskRun','Set-RetryAfterRebootStateProperty','Get-SemtRetryAfterRebootTaskSpec','Test-SemtRetryAfterRebootTaskState')
         . ([scriptblock]::Create((Get-FunctionText -Path $EndpointPath -Name $names)))
         function Initialize-SemtTrustedProgramFolder { param([string]$Path, [string]$BasePath) New-Item -ItemType Directory -Path $Path -Force | Out-Null; return $Path }
         function Test-SemtTrustedProgramPath {
@@ -457,8 +460,15 @@ try {
         function Write-SmartLog { param([string]$Message, [string]$Level = 'INFO') }
         function Write-RunLog { param([string]$Message) }
         function schtasks.exe { $script:Schtasks.Add(($args -join ' ')); $global:LASTEXITCODE = 0 }
-        # The task is created through Invoke-SemtSchtasks (explicit native command line); recorded the same way.
         function Invoke-SemtSchtasks { param([string[]]$Arguments) $script:Schtasks.Add(($Arguments -join ' ')); return [pscustomobject]@{ ExitCode = 0; Output = '' } }
+        # The task is created by the Prerequisites campaign; the endpoint only reads, enables and disables it.
+        function Get-SemtScheduledTaskState {
+            param([string]$TaskPath, [string]$TaskName)
+            $spec = Get-SemtRetryAfterRebootTaskSpec -Campaign $script:SemtCampaign
+            $command = if ($script:TaskState -eq 'Different') { 'powershell.exe|-File other.ps1' } else { '{0}|{1}' -f $spec.Execute,$spec.Arguments }
+            return [pscustomobject]@{ TaskPath = $TaskPath; TaskName = $TaskName; Exists = ($script:TaskState -ne 'Missing'); Enabled = ($script:Schtasks -contains ('Enable ' + $TaskName)); Actions = @($command); TriggerCount = 1; UserSid = 'S-1-5-18'; GroupSid = ''; Detail = 'synthetic' }
+        }
+        function Set-SemtScheduledTaskEnabled { param([string]$TaskPath, [string]$TaskName, [bool]$Enabled) $script:Schtasks.Add(('{0} {1}' -f $(if ($Enabled) { 'Enable' } else { 'Disable' }),$TaskName)) }
         $outcome = [pscustomobject]@{ Error = ''; Case = $case; TaskRunError = ''; Unregistered = $false }
         try { Register-RetryAfterRebootTask -Reason 'qualification' } catch { $outcome.Error = $_.Exception.Message }
         if (-not $outcome.Error) {
@@ -473,17 +483,24 @@ try {
         return $outcome
     }
 
+    . ([scriptblock]::Create((Get-RegionText -Path $w11Endpoint -Region 'SEMT prerequisite tasks v1')))
     foreach ($retry in @(@{ Campaign = 'Windows11Upgrade'; Path = $w11Endpoint }, @{ Campaign = 'HybridJoin'; Path = $hjEndpoint })) {
         $o = Invoke-RetryCase -Campaign $retry.Campaign -EndpointPath $retry.Path
         $programDir = Join-Path $o.Case ('ProgramFiles\WCH\SmartM365\SmartEndpointMigrationToolkit\{0}\RetryAfterReboot' -f $retry.Campaign)
         $copy = Join-Path $programDir (Split-Path -Path $retry.Path -Leaf)
         Test-Step ("{0} retry: state points to the endpoint copy under Program Files (same SHA256)" -f $retry.Campaign) { $o.Error -eq '' -and [string]$o.State.ScriptPath -eq $copy -and -not $o.Unregistered -eq $false }
-        Test-Step ("{0} retry: the SYSTEM task starts the runner under Program Files" -f $retry.Campaign) { @($script:Schtasks | Where-Object { $_ -like '/Create*' }).Count -eq 1 -and @($script:Schtasks | Where-Object { $_ -like ('*{0}*' -f (Join-Path $programDir 'RetryAfterRebootRunner.ps1')) }).Count -eq 1 }
+        $spec = Get-SemtRetryAfterRebootTaskSpec -Campaign $retry.Campaign
+        Test-Step ("{0} retry: the pre-created SYSTEM task is enabled, never created; it starts the runner under Program Files" -f $retry.Campaign) { @($script:Schtasks | Where-Object { $_ -like '/Create*' -or $_ -like '/Delete*' }).Count -eq 0 -and @($script:Schtasks | Where-Object { $_ -eq ('Enable ' + $spec.TaskName) }).Count -eq 1 -and $spec.RunnerPath -eq (Join-Path $env:ProgramFiles ('WCH\SmartM365\SmartEndpointMigrationToolkit\{0}\RetryAfterReboot\RetryAfterRebootRunner.ps1' -f $retry.Campaign)) -and $spec.Arguments -like ('*-File "{0}"' -f $spec.RunnerPath) }
+        Test-Step ("{0} retry: cleanup disables the task (never deletes it)" -f $retry.Campaign) { @($script:Schtasks | Where-Object { $_ -eq ('Disable ' + $spec.TaskName) }).Count -eq 1 }
         Test-Step ("{0} retry: runner reads its state from Program Files; no script or state under ProgramData" -f $retry.Campaign) { $o.Runner.Contains((Join-Path $programDir 'RetryAfterReboot.json.txt').Replace("'", "''")) -and @(Get-ChildItem -LiteralPath (Join-Path $o.Case 'Data\State') -Force).Count -eq 0 }
         Test-Step ("{0} retry: a task run refuses an untrusted program folder" -f $retry.Campaign) { $o.TaskRunError -like 'SEMT_PROGRAM_FOLDER_UNTRUSTED*' }
         Test-Step ("{0} retry: cleanup removes runner, state and endpoint copy" -f $retry.Campaign) { $o.Unregistered }
         $o = Invoke-RetryCase -Campaign $retry.Campaign -EndpointPath $retry.Path -ProgramFolderState 'Untrusted'
-        Test-Step ("{0} retry: untrusted program folder: refused before the task is registered" -f $retry.Campaign) { $o.Error -like 'SEMT_PROGRAM_FOLDER_UNTRUSTED*' -and @($script:Schtasks | Where-Object { $_ -like '/Create*' }).Count -eq 0 }
+        Test-Step ("{0} retry: untrusted program folder: refused before the task is enabled" -f $retry.Campaign) { $o.Error -like 'SEMT_PROGRAM_FOLDER_UNTRUSTED*' -and @($script:Schtasks | Where-Object { $_ -like 'Enable *' -or $_ -like '/Create*' }).Count -eq 0 }
+        $o = Invoke-RetryCase -Campaign $retry.Campaign -EndpointPath $retry.Path -TaskState 'Missing'
+        Test-Step ("{0} retry: task missing (Prerequisites not run): refused, nothing written, nothing created" -f $retry.Campaign) { $o.Error -like 'SEMT_PREREQUISITE_TASK_MISSING*' -and @($script:Schtasks).Count -eq 0 -and -not (Test-Path -LiteralPath (Join-Path $o.Case ('ProgramFiles\WCH\SmartM365\SmartEndpointMigrationToolkit\{0}\RetryAfterReboot' -f $retry.Campaign))) }
+        $o = Invoke-RetryCase -Campaign $retry.Campaign -EndpointPath $retry.Path -TaskState 'Different'
+        Test-Step ("{0} retry: task with another command: refused, never enabled" -f $retry.Campaign) { $o.Error -like 'SEMT_PREREQUISITE_TASK_MISMATCH*' -and @($script:Schtasks).Count -eq 0 }
     }
     Remove-Item -Path Function:\Test-SemtTrustedProgramPath -ErrorAction SilentlyContinue
     #endregion

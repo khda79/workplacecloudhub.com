@@ -4,6 +4,7 @@ rem Usage: Run-EndpointMigrationWave.cmd "<Wave folder>" Loop|Once Default|Ignor
 rem The Campaign is the parent folder name of the Wave (Waves\<Campaign>\<Wave>).
 rem Options are resolved by the engine: SEMT_* environment variables, Wave.local.json.txt,
 rem Config\SmartEndpointMigrationToolkit.local.json.txt and the campaign defaults.
+rem The Prerequisites Campaign is refused by the engine while Prerequisites.Enabled is false.
 setlocal DisableDelayedExpansion
 
 set "SEMT_WAVE_ARG=%~1"
@@ -17,7 +18,8 @@ for %%I in ("%SEMT_WAVE_ARG%") do set "SEMT_WAVE_DIR=%%~fI"
 for %%I in ("%SEMT_WAVE_DIR%\..") do set "SEMT_CAMPAIGN=%%~nxI"
 if /I "%SEMT_CAMPAIGN%"=="HybridJoin" goto :campaign_ok
 if /I "%SEMT_CAMPAIGN%"=="Windows11Upgrade" goto :campaign_ok
-echo ERROR: the Wave must be under Waves\HybridJoin or Waves\Windows11Upgrade.
+if /I "%SEMT_CAMPAIGN%"=="Prerequisites" goto :campaign_ok
+echo ERROR: the Wave must be under Waves\HybridJoin, Waves\Windows11Upgrade or Waves\Prerequisites.
 exit /b 2
 :campaign_ok
 

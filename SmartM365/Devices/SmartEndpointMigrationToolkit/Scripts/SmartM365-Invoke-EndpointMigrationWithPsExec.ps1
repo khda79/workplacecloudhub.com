@@ -6,7 +6,8 @@
     Technician-side engine of the Smart Endpoint Migration Toolkit (Hybrid Join, Intune
     Enrollment and Windows 11 Upgrade).
 
-    Campaign  : HybridJoin or Windows11Upgrade.
+    Campaign  : HybridJoin, Windows11Upgrade or Prerequisites (disabled by default:
+                Prerequisites.Enabled must be true).
     Wave      : group of computers, Waves\<Campaign>\<Wave>\Computers.txt.
     Run       : one execution of a Wave, Runs\<Campaign>\<Wave>\<RunId>.
     Cycle     : one iteration inside a Run (Loop mode repeats cycles).
@@ -24,7 +25,8 @@
     - repair: the endpoint applies the actions allowed by the campaign options.
 
 .PARAMETER Campaign
-    HybridJoin or Windows11Upgrade.
+    HybridJoin, Windows11Upgrade or Prerequisites. Prerequisites is refused while the option
+    Prerequisites.Enabled is false (default).
 
 .PARAMETER WavePath
     Wave folder under Waves\<Campaign>. Mutually exclusive with -ComputerName.
@@ -55,7 +57,7 @@
 
 [CmdletBinding(PositionalBinding = $false)]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade')][string]$Campaign,
+    [Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade','Prerequisites')][string]$Campaign,
     [string]$WavePath,
     [string]$ComputerName,
     [ValidateSet('Loop','Once')][string]$RunMode = 'Loop',
@@ -84,6 +86,11 @@ $script:PackageRoot = Split-Path -Path $PSScriptRoot -Parent
 Import-Module (Join-Path -Path $script:PackageRoot -ChildPath 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
 Import-Module (Join-Path -Path $script:PackageRoot -ChildPath ("Campaigns\{0}\SmartEndpointMigration.Campaign.{0}.psd1" -f $Campaign)) -MinimumVersion 1.0.0 -Force
 $script:CampaignProfile = & ("Get-Semt{0}Profile" -f $Campaign)
+# A Campaign disabled by its <Campaign>.Enabled option (Prerequisites by default) is refused before
+# anything is written; only the global configuration, SEMT_* variables and -Option can enable it.
+if (-not (Test-SemtCampaignEnabled -Catalog (Import-SemtOptionCatalog -PackageRoot $script:PackageRoot) -Campaign $Campaign -GlobalLayer (Read-SemtGlobalConfig -PackageRoot $script:PackageRoot).Data -CliLayer $Option)) {
+    throw ("SEMT_CAMPAIGN_DISABLED: the {0} Campaign is disabled. Set the option {0}.Enabled to true in Config\SmartEndpointMigrationToolkit.local.json.txt to use it." -f $Campaign)
+}
 $script:Product = Get-SemtProductInfo
 $script:RunId = New-SemtRunId
 

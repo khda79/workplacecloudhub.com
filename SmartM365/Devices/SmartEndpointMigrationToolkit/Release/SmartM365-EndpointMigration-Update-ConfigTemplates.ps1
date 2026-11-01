@@ -5,7 +5,8 @@
 .DESCRIPTION
     Writes Config\SmartEndpointMigrationToolkit.local.json.template (every option, inherit marker)
     and Campaigns\<Campaign>\Templates\Wave\Wave.local.json.template (options applicable to the
-    campaign). Tests fail when the committed templates differ from this generator.
+    campaign; a <Campaign>.Enabled option is global only and never written to a Wave). Tests fail
+    when the committed templates differ from this generator.
 
 .VERSION
     1.0.0
@@ -43,9 +44,9 @@ $targets.Add([pscustomobject]@{
         Options = $globalOptions
     })
 })
-foreach ($campaign in @('HybridJoin','Windows11Upgrade')) {
+foreach ($campaign in @((Get-SemtProductInfo).Campaigns)) {
     $waveOptions = [ordered]@{}
-    foreach ($definition in @(Get-SemtCampaignOptionDefinitions -Catalog $catalog -Campaign $campaign)) { $waveOptions[[string]$definition.Name] = '__INHERIT__' }
+    foreach ($definition in @(Get-SemtCampaignOptionDefinitions -Catalog $catalog -Campaign $campaign | Where-Object { [string]$_.Name -ne ('{0}.Enabled' -f $campaign) })) { $waveOptions[[string]$definition.Name] = '__INHERIT__' }
     $targets.Add([pscustomobject]@{
         Path = Join-Path $packageRoot ("Campaigns\{0}\Templates\Wave\Wave.local.json.template" -f $campaign)
         Text = ConvertTo-TemplateText -Object ([ordered]@{

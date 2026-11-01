@@ -10,7 +10,7 @@ Highest first:
 1. Explicit CLI (`-Option @{ Name = Value }`, `-DryRun`, `-AuditOnly`, `-IgnoreRunGuard`)
 2. GUI choices captured for the Run (`Runs\<Campaign>\_GuiSelections\*.json.txt`, Campaign checked)
 3. Wave (`Waves\<Campaign>\<Wave>\Wave.local.json.txt`)
-4. `SEMT_*` environment variables (`SEMT_*` common, `SEMT_HYBRIDJOIN_*`, `SEMT_WINDOWS11_*`)
+4. `SEMT_*` environment variables (`SEMT_*` common, `SEMT_HYBRIDJOIN_*`, `SEMT_WINDOWS11_*`, `SEMT_PREREQUISITES_*`)
 5. Global configuration (`Config\SmartEndpointMigrationToolkit.local.json.txt`)
 6. Campaign default (catalog `CampaignDefaults`, else `Default`)
 
@@ -20,7 +20,12 @@ Then rules: `DryRunSingleCycle` (dry run with unlimited cycles runs one cycle), 
 In the global, Wave and environment layers, these values mean "inherit from the lower layer":
 empty, `null`, `__INHERIT__`, `__USE_GLOBAL__`, `USE_GLOBAL`, `__USE_DEFAULT__`. Values are
 validated against type, range and choices; an invalid or unknown option stops the Run with the
-layer that supplied it. An option of the other Campaign is ignored.
+layer that supplied it. An option of another Campaign is ignored.
+
+`Prerequisites.Enabled` (default false) makes the Prerequisites Campaign available. Only the
+global configuration, `SEMT_PREREQUISITES_ENABLED` and an explicit `-Option` decide: a Wave or a
+GUI choice cannot enable it, and Wave templates do not carry it. While it is false the engine
+refuses the Campaign before writing anything (`SEMT_CAMPAIGN_DISABLED`) and the GUI does not list it.
 
 Every Run records `EffectiveOptions.json.txt` (value and source of each option) and the report shows
 the same table. The GUI keeps its last choices per Campaign in `Config\GuiState.<Campaign>.local.json.txt`.
@@ -48,7 +53,7 @@ Defaults were taken from the real behaviour of the two previous toolkits, then r
 | `GlobalWorkerLimit` | 15 | Shared by both Campaigns on the technician computer; 0 disables the shared cap. |
 ## Option reference
 
-Generated from catalog SHA256 `466140DF637E8CADE5F99FF8730BB5BCFD83A89045DA3EE7E01D5022FCB7B3E8`.
+Generated from catalog SHA256 `188F600B518EEAD6F9977C09D1856E0B12BC771CA60B6AE9A7B002FB616A7754`.
 
 ### Common options
 
@@ -148,3 +153,11 @@ Generated from catalog SHA256 `466140DF637E8CADE5F99FF8730BB5BCFD83A89045DA3EE7E
 | `Windows11Upgrade.SetupSubnetConcurrencyGateRoot` | Path | (empty) |  | `SEMT_WINDOWS11_SETUP_SUBNET_CONCURRENCY_GATE_ROOT` | Setup | yes |
 | `Windows11Upgrade.PreCycleAdInventoryRefresh` | Boolean | True |  | `SEMT_WINDOWS11_PRE_CYCLE_AD_INVENTORY_REFRESH` | Inventory | yes |
 | `Windows11Upgrade.PreCycleIntuneInventoryRefresh` | Boolean | False |  | `SEMT_WINDOWS11_PRE_CYCLE_INTUNE_INVENTORY_REFRESH` | Inventory | yes |
+
+### Prerequisites options
+
+| Option | Type | Default | Range / choices | Env var | Category | GUI |
+| --- | --- | --- | --- | --- | --- | --- |
+| `Prerequisites.Enabled` | Boolean | False |  | `SEMT_PREREQUISITES_ENABLED` | Mode | no |
+| `Prerequisites.HybridJoinTasks` | Boolean | True |  | `SEMT_PREREQUISITES_HYBRIDJOIN_TASKS` | Actions | yes |
+| `Prerequisites.Windows11UpgradeTasks` | Boolean | True |  | `SEMT_PREREQUISITES_WINDOWS11_TASKS` | Actions | yes |

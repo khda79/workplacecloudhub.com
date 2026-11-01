@@ -1,6 +1,6 @@
 @echo off
 rem Smart Endpoint Migration Toolkit - regenerates the Start-Wave-*.cmd wrappers of every Wave.
-rem Optional arguments: -Campaign HybridJoin or Windows11Upgrade and/or -WavePath "<Wave folder>".
+rem Optional arguments: -Campaign HybridJoin, Windows11Upgrade or Prerequisites and/or -WavePath "<Wave folder>".
 rem Set SEMT_NO_PAUSE=1 to skip the final pause (unattended use).
 setlocal DisableDelayedExpansion
 

@@ -131,6 +131,7 @@ $declared = [ordered]@{
     'Scripts/SmartM365-EndpointMigration-GUI.ps1' = $versionManifest.Components.GUI
     'Campaigns/HybridJoin/Scripts/SmartM365-Invoke-EndpointMigration-HybridJoin.ps1' = $versionManifest.Components.HybridJoinEndpoint
     'Campaigns/Windows11Upgrade/Scripts/SmartM365-Invoke-EndpointMigration-Windows11Upgrade.ps1' = $versionManifest.Components.Windows11UpgradeEndpoint
+    'Campaigns/Prerequisites/Scripts/SmartM365-Invoke-EndpointMigration-Prerequisites.ps1' = $versionManifest.Components.PrerequisitesEndpoint
 }
 foreach ($path in $declared.Keys) {
     $entry = @($entries | Where-Object { $_.Path -eq $path })
@@ -227,7 +228,7 @@ $notes = @(
     '',
     '## Scope',
     '',
-    '- Campaigns: Hybrid Join and Intune enrollment, Windows 11 upgrade.',
+    '- Campaigns: Hybrid Join and Intune enrollment, Windows 11 upgrade, Prerequisites (scheduled tasks used by the other two; disabled by default, option Prerequisites.Enabled).',
     '- Waves, Single PC Runs, Automatic Wave, Launch All Waves (selected Campaign only), controlled stop.',
     '- Coexists with IntuneHybridJoinToolkit and Windows11UpgradeToolkit; no configuration, Wave, inventory, history or report is migrated. Existing Windows 11 setup media is reused or moved as documented in Docs/LEGACY-COEXISTENCE.md.',
     '- Windows 11 setup media: one read-only resolution for PsExec and Intune (new cache, legacy media owned by the previous Intune package used in place, idle legacy media adopted with verified rollback, no silent duplication). Legacy media that is present but not write-restricted is Untrusted (explicit status, never used, permissions never changed, second copy only with the duplication authorization); unreadable permissions are Indeterminate and block.',

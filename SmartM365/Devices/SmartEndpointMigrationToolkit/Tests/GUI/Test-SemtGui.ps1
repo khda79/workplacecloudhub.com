@@ -48,7 +48,7 @@ $previousUpdate = $env:SEMT_GUI_UPDATE_CHECK
 try {
     New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
     foreach ($item in @('Assets','Campaigns','Config','Modules','Scripts')) { Copy-Item -LiteralPath (Join-Path $sourceRoot $item) -Destination $packageRoot -Recurse -Force }
-    foreach ($item in @('Runs','Waves\HybridJoin','Waves\Windows11Upgrade')) { New-Item -ItemType Directory -Path (Join-Path $packageRoot $item) -Force | Out-Null }
+    foreach ($item in @('Runs','Waves\HybridJoin','Waves\Windows11Upgrade','Waves\Prerequisites')) { New-Item -ItemType Directory -Path (Join-Path $packageRoot $item) -Force | Out-Null }
     Get-ChildItem -LiteralPath (Join-Path $packageRoot 'Config') -Filter '*.local.json.txt' -File | Remove-Item -Force
     $env:SEMT_RUNTIME_ROOT_OVERRIDE = Join-Path $tempRoot 'Runtime'
     $env:SEMT_GUI_UPDATE_CHECK = '0'
@@ -266,6 +266,12 @@ try {
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $validate = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -ValidateOnly 2>&1 | ForEach-Object { [string]$_ })
     Test-Step 'GUI -ValidateOnly loads under Windows PowerShell 5.1 STA for both Campaigns' { $LASTEXITCODE -eq 0 -and @($validate | Where-Object { $_ -match '^ValidateOnly: GUI 1\.0\.0 loaded; campaign=(HybridJoin|Windows11Upgrade); options=\d+' }).Count -eq 2 }
+    Test-Step 'GUI hides the Prerequisites Campaign while Prerequisites.Enabled is false (default)' { @($validate | Where-Object { $_ -match 'campaign=Prerequisites' }).Count -eq 0 }
+    $globalConfig = Join-Path $packageRoot 'Config\SmartEndpointMigrationToolkit.local.json.txt'
+    [IO.File]::WriteAllText($globalConfig, '{ "SchemaVersion": 1, "Options": { "Prerequisites.Enabled": true } }')
+    try { $validateEnabled = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -ValidateOnly 2>&1 | ForEach-Object { [string]$_ }) }
+    finally { Remove-Item -LiteralPath $globalConfig -Force -ErrorAction SilentlyContinue }
+    Test-Step 'GUI lists the Prerequisites Campaign when Prerequisites.Enabled is true in the global configuration' { $LASTEXITCODE -eq 0 -and @($validateEnabled | Where-Object { $_ -match '^ValidateOnly: GUI 1\.0\.0 loaded; campaign=(HybridJoin|Windows11Upgrade|Prerequisites); options=\d+' }).Count -eq 3 -and @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; options=\d+' }).Count -eq 1 }
     $popupScript = Join-Path $tempRoot 'popup-check.ps1'
     @'
 param($Gui)

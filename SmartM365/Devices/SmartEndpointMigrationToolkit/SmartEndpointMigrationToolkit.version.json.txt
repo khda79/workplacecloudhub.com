@@ -6,13 +6,14 @@
   "ReleaseTag": "endpoint-migration-toolkit-v1.0.0",
   "ReleaseDate": "2026-10-24",
   "WorkerContractVersion": 1,
-  "Campaigns": [ "HybridJoin", "Windows11Upgrade" ],
+  "Campaigns": [ "HybridJoin", "Windows11Upgrade", "Prerequisites" ],
   "Components": {
     "Engine": "1.0.0",
     "Worker": "1.0.0",
     "CoreModule": "1.0.0",
     "GUI": "1.0.0",
     "HybridJoinEndpoint": "1.0.0",
-    "Windows11UpgradeEndpoint": "1.0.0"
+    "Windows11UpgradeEndpoint": "1.0.0",
+    "PrerequisitesEndpoint": "1.0.0"
   }
 }

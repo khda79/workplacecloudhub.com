@@ -90,6 +90,9 @@
                     "Windows11Upgrade.SetupSubnetConcurrencyLeaseMinutes":  "__INHERIT__",
                     "Windows11Upgrade.SetupSubnetConcurrencyGateRoot":  "__INHERIT__",
                     "Windows11Upgrade.PreCycleAdInventoryRefresh":  "__INHERIT__",
-                    "Windows11Upgrade.PreCycleIntuneInventoryRefresh":  "__INHERIT__"
+                    "Windows11Upgrade.PreCycleIntuneInventoryRefresh":  "__INHERIT__",
+                    "Prerequisites.Enabled":  "__INHERIT__",
+                    "Prerequisites.HybridJoinTasks":  "__INHERIT__",
+                    "Prerequisites.Windows11UpgradeTasks":  "__INHERIT__"
                 }
 }
