@@ -1,4 +1,4 @@
-﻿# Extracts the actual mail entrypoints. Authentication and transport are mocked.
+# Extracts the actual mail entrypoints. Authentication and transport are mocked.
 $ErrorActionPreference='Stop'
 $core=Join-Path $PSScriptRoot '../Modules/SmartM365.Core'
 . (Join-Path $core 'SmartM365-DeferredMail.ps1')
@@ -9,7 +9,7 @@ $script:cfg=[pscustomobject]@{ProfileKey='demo';ReportMailSchedule=[pscustomobje
 $script:sent=0
 function Get-SmartM365MailUtcNow {$script:clock}
 function Get-SmartM365EffectiveModuleGlobalConfig {$script:cfg}
-function Resolve-SmartM365ConfigValue {param($Value) $Value}
+function Resolve-SmartM365ConfigValue {param($Value) $Value.Replace('{{WorkspaceRootPath}}','C:\SyntheticWorkspace').Replace('{{TenantKey}}','synthetic-demo')}
 function Test-SmartM365DeferredMailDirectory {param($Path,$TrustedSids) $Path -eq $root}
 function Get-PSCallStack {[pscustomobject]@{ScriptName='C:\synthetic\SmartInventory\Collector.ps1'}}
 function Get-ModuleLocalConfig {[pscustomobject]@{}}
@@ -37,6 +37,14 @@ function Send-MailMessage {param($SmtpServer,$Port,$From,$To,$Cc,$Subject,$Body,
  $script:sent++
 }
 try {
+ foreach ($configuredPath in @('', ' ', '__USE_GLOBAL__', 'USE_GLOBAL', '{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\MAIL')) {
+  $script:cfg.ReportMailSchedule.QueuePath=$configuredPath
+  if((Get-SmartM365DeferredMailSettings).Path -ne 'C:\SyntheticWorkspace\Tenants\synthetic-demo\MAIL'){throw 'Default queue path did not resolve under WorkspaceRootPath'}
+ }
+ $script:cfg.ReportMailSchedule.PSObject.Properties.Remove('QueuePath')
+ if((Get-SmartM365DeferredMailSettings).Path -ne 'C:\SyntheticWorkspace\Tenants\synthetic-demo\MAIL'){throw 'Missing QueuePath did not use the default'}
+ $script:cfg.ReportMailSchedule | Add-Member -NotePropertyName QueuePath -NotePropertyValue $root
+ if((Get-SmartM365DeferredMailSettings).Path -ne $root){throw 'Explicit QueuePath was overwritten'}
  if(& $aclVerifier -Path $root -TrustedSids @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)){throw 'Unprotected queue was accepted'}
  foreach ($edition in @('SmartM365.Core.psm1','Compatibility/WindowsPowerShell5/SmartM365-WindowsPowerShell5.psm1')) {
   $tokens=$null;$errors=$null
@@ -79,11 +87,12 @@ try {
  Remove-Item -LiteralPath $resolved -Recurse -Force
 }
 
+
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQgikMVwM+IYPK
-# VHG5DWlnX7dK2N96mVPpDAn/7yMqRKCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBpX/0lReiQIOWk
+# gWJKXHxYiItgBDg4iU8TtQSmoOJMgqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -113,14 +122,14 @@ try {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBMbTlwjGv9N11vSizjmWfS
-# /BP00wPa2PpJ3qiswweLVzANBgkqhkiG9w0BAQEFAASCAYA7WxcaPjCoF/WfDEfE
-# i+YLmXNf3y6p0sWmtUohpy5FxEkdbMkh1zCGPqiQDlUuWlMDppUnKSjkqWLE742x
-# PYvb2lr8lCsmqe0yAeo0T3pJ5uEGsKsnm2EO/1vpiy7QXEKgS/4aHpZv9UlfqUkr
-# Y8Bv03UsBkh0V9DIWtb3BhjjTzNbFdS8IopGeprlzaGU4bPqDefGF8poFb0yZZ+b
-# oeDMf++Etj9yQdqUeBOaGKT49ZmgrjL4t1F50cC9ml/7/s4SpOZA2n0170ICIkr1
-# LgAgzbae6ItaAt97NealtpAjOZ1gBtO5rmAkKT6StvhS2NQ6qH107kW8qpsrGuYW
-# TMOVnRjWk7esPHuG3gQOWAOPrIsSFCWWLZr5etcfv83TRpI5TXEZ5jNFER/syOtj
-# 2cfRdc88Q4fdELmSqiw0cLy36FV+RmBTI/oKJpoTIJXPxShddpkflwZoMymVdYKJ
-# ZnQBv5vY8cIrQkPczWMCVzpM+w8PLLH5KB7eHInsm7dvvFc=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCOWluq3BcnAiSHQ8kUu5A3
+# dM0lVF++U1L2pZCYWRqPCjANBgkqhkiG9w0BAQEFAASCAYCa8NcBM/qzR9uAYM36
+# ySvKLNW5szmJK+z91QWVgZ+WQtIlhVYstse0mq08F4OZeVAUHRO1UpZHQxqEV1bq
+# 6Hu/zArSA4AZyeti9kL3OanVO1T1z/hTXEub8b8QLlP13wHP8s0i5I/nNrBuQPcn
+# CJa0eLj/HGUaoZUEpvLsLxyY3GaNvjE+XtMLBGy1oPq+j2m4lqW+9urkAcH8QYKe
+# piDaPPl1qJgSGZjoaG+WvMCuhpiCD7lRUeZEnqKaTlcDhZW/8LS7laXvV71P28nR
+# Gl7mZLfdEBkd1JDVqu8qiLcqoleg52ZIVsY9KRxJ+js9jo2yGKrUajzM/CmAhK7x
+# 4f52q5BiNtAd702cJa9PusoQ9I2cm/4R2y/d8b+JQvIT4mASYuNoj8q74LGyIPLr
+# YM9I+u4nLNc2ZUAfM/HMHe7zQAK2cujKkCJaPDjTVpWtWCZJV80NUlOVgHxwg7U/
+# Wk32ziDGlZu1bE6dUxn4OiErHe8fXhNOqP5ulQM784iSnlc=
 # SIG # End signature block

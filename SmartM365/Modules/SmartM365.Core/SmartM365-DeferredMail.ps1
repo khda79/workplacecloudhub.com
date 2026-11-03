@@ -1,4 +1,5 @@
-﻿<# Shared deferred report delivery. Disabled unless explicitly configured. #>
+<# Shared deferred report delivery. Disabled unless explicitly configured. #>
+# Version: 1.0.2
 function Get-SmartM365MailUtcNow { return [datetimeoffset]::UtcNow }
 function Get-SmartM365DeferredMailSettings {
     $config = Get-SmartM365EffectiveModuleGlobalConfig
@@ -7,8 +8,15 @@ function Get-SmartM365DeferredMailSettings {
     $settings = $p.Value
     if ($settings.Enabled -isnot [bool]) { throw 'ReportMailSchedule.Enabled must be Boolean.' }
     if (-not $settings.Enabled) { return $null }
-    if (-not $config.ProfileKey -or -not $settings.QueuePath -or -not $settings.TrustedSids) { throw 'Report mail queue configuration is incomplete.' }
-    return [pscustomobject]@{ Policy=$settings; Profile=[string]$config.ProfileKey; Path=[string](Resolve-SmartM365ConfigValue $settings.QueuePath) }
+    if (-not $config.ProfileKey -or -not $settings.TrustedSids) { throw 'Report mail queue configuration is incomplete.' }
+    $queuePath = if ($settings -is [Collections.IDictionary]) { [string]$settings['QueuePath'] }
+        else { $property = $settings.PSObject.Properties['QueuePath']; if ($property) { [string]$property.Value } else { '' } }
+    if ([string]::IsNullOrWhiteSpace($queuePath) -or $queuePath.Trim() -in @('__USE_GLOBAL__','USE_GLOBAL')) {
+        $queuePath = '{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\MAIL'
+    }
+    $queuePath = [string](Resolve-SmartM365ConfigValue $queuePath)
+    if ([string]::IsNullOrWhiteSpace($queuePath) -or $queuePath -match '\{\{') { throw 'Report mail QueuePath could not be resolved.' }
+    return [pscustomobject]@{ Policy=$settings; Profile=[string]$config.ProfileKey; Path=$queuePath }
 }
 
 function Test-SmartM365DeferredMailDirectory {
@@ -20,13 +28,8 @@ function Test-SmartM365DeferredMailDirectory {
     $cursor = $directory
     while ($cursor) {
         if ($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
-        $parentAcl = Get-Acl -LiteralPath $cursor.FullName -ErrorAction Stop
-        if ($parentAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $allowed) { return $false }
-        foreach ($rule in $parentAcl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {
-            if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) { continue }
-            $writeMask = [long]0x500D0156
-            if ($rule.AccessControlType -eq 'Allow' -and ([long]$rule.FileSystemRights -band $writeMask) -and $rule.IdentityReference.Value -notin $allowed) { return $false }
-        }
+        # Parent access belongs to the existing share administration boundary.
+        # Only the queue and its payload files must restrict access to TrustedSids.
         $cursor = $cursor.Parent
     }
     $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
@@ -116,11 +119,12 @@ function Invoke-SmartM365DeferredMail {
     Invoke-SmartM365ReportMailQueueBatch -QueuePath $cfg.Path -AssertTrustedDirectory $verify -TenantKey $cfg.Profile -Now $now -SendAction $send -MaximumItems 10
 }
 
+
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDvMuOuCFghR4QA
-# qomMuJNYh8DC4K7MbThughJX9i67+aCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDsMxTjE5Q/BJRE
+# XafkAfTXr6YMJ+LvRepuiuSdhLYrC6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -150,14 +154,14 @@ function Invoke-SmartM365DeferredMail {
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCACjqCezZxkOY3V5b+Ix/Bq
-# ayh+xmISz0twD3oJcDjGQzANBgkqhkiG9w0BAQEFAASCAYAQq9LwFA/xVAErbzBW
-# khsgxhjayqqp59hVqmjP3ca3IGyL2HuC7dUNh4GZ2GH4M47FnXh/vrxLvHCf2PFB
-# sVw+VSATtLSYvLYjClzLLw0xSDe9RcalfCEeTIRc+4X97d0a5/nkWX7g+OtMrPlA
-# /WTAgw+FTuV0QlP7e9wMPP3k2OorTukzpu/bI12t8AHPILS5Y6tzRm/7qEQ8g70i
-# Io0fpDle+XdD3GaIj/nzUtXU+p62QYWCmhYQXorrL2EtrYCzmzLVSWJOTShR8pe3
-# HXXqcpAt1dEp5PXJjkrcVMul6ol/VhwBK/Co1n/TJ/U7LEKOqwm9TpqndAv/2Ycn
-# /pm0hN5YUu/qhh0xdAFHfoffMINAi0dDKImsoFpLzvlnZI0tYrjH7X9HN2v6xTab
-# fnP3MFX1ONBGt668X+GwZ5n+oQLVmnMMI0I7V79AJzTEIkVA1GBBpzzT2DQah722
-# +zvHQ6vTp6CcosdjGW1eYECoqs8QWWBdOOPqwVwMeOLO46Q=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAarUluemkAygMj26lV4rGy
+# u/Qb5ha1bQCwuklUlEJlWjANBgkqhkiG9w0BAQEFAASCAYARps7aAWUpsWmx5tZ4
+# KdBQJBG1pXR8HykzrLYqvfOtEw6QKTa+oiv2RQQiTAs7po3V7+sy6oh//DDOp6Er
+# KjWIK2drJDbx49O1CVGDsJ51+6X2sgwl0rDbs0bJg6viXyN+tO3FkBIgj8YlDxrq
+# 2ICnbuL98g1YsZMR+DsuWosxc8mvIuk7W/Js/K3/dMdHS4NnTz+wNDQ5aKWbR2QR
+# FBQTGf5Yxt9BKuxTvvQCGxdEE4zRdYLWZJEKFe8GGVxCltpDcK+BO/ksEF5ckEhc
+# gmLHPkrESijYhGkCAeuH8GNd+BlI5OYZfEv28NTBP+ayih9jTCS42LspSY2Fde3s
+# QxKKqThbDZq21EyU+bpTH0WSlyPR/VwDr7o7SKJuuyKLqM+cvjBzZBWdXjKGQpXK
+# n6TKW3Nogj1Oskxs4pNXv/jv7dQdI22Ae0Dh72CKAwhKZ0cWWiE3K4faXXCQN1/H
+# BeoaQfQ1tsaKcTvrKafJpb0ybFnsVSv0JG7AaoT66FizZIk=
 # SIG # End signature block

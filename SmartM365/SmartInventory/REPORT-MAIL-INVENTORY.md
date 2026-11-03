@@ -80,10 +80,13 @@ the existing recipient purpose and passes an independent delivery class.
 
 `ReportMailSchedule` in effective global/tenant configuration defaults to disabled.
 Its fields are Enabled (Boolean), NotBefore (HH:mm), TimeZone (Windows time-zone ID),
-QueuePath (existing dedicated directory), and TrustedSids (approved service/administrator SIDs).
-No private configuration was changed. The queue must be provisioned separately with
-protected NTFS permissions. Untrusted owners, writeable ancestors, linked paths and
-unauthorized access rules are refused. Local SYSTEM and Administrators are trusted;
+QueuePath (defaults to `{{WorkspaceRootPath}}\Tenants\{{TenantKey}}\MAIL`, existing dedicated directory),
+and TrustedSids (approved service/administrator SIDs). Missing, blank or inheritance
+markers for QueuePath use this default; an explicit tenant path is preserved.
+The queue must be provisioned separately with
+protected NTFS permissions. Untrusted queue/file owners, linked paths and
+unauthorized queue/file access rules are refused. Parent ACLs remain under the
+existing share administration policy and are not an admission requirement. Local SYSTEM and Administrators are trusted;
 all other required owners/accounts must be explicitly listed. Share availability and
 service-account access still require server qualification before activation.
 
