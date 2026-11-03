@@ -21,5 +21,12 @@
   "MailBrandingEnabled": true,
   "MailClientName": "",
   "MailClientLogoPath": "",
-  "MailClientLogoMaxKB": 200
+  "MailClientLogoMaxKB": 200,
+  "ReportMailSchedule": {
+    "Enabled": false,
+    "NotBefore": "07:30",
+    "TimeZone": "Romance Standard Time",
+    "QueuePath": "",
+    "TrustedSids": []
+  }
 }
