@@ -2,6 +2,14 @@
 
 Inventory scripts that can feed Power BI datasets, operational reports, CSV exports, SharePoint publishing, and other downstream consumers.
 
+Report email delivery can optionally wait until 07:30 (Paris). The effective
+global/tenant `ReportMailSchedule` setting ships disabled. Reports are submitted
+durably, then dispatched by the resident orchestrator after the cutoff; operational
+notifications and errors stay immediate. Before enabling, provision a dedicated
+queue with protected permissions. See [mail classification, configuration and
+offline validation](REPORT-MAIL-INVENTORY.md). Daily markers track submission;
+queue receipts track transport acceptance.
+
 ## Reliability and distribution
 
 Configuration loading is shared by all 51 publication collectors, the inventory
