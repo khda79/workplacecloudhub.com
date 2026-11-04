@@ -1,9 +1,53 @@
-﻿<#
+<#
 .SYNOPSIS
 Detailed managed-device hardware acquisition helpers. No execution on import.
 .VERSION
-1.0.0
+1.1.0
 #>
+function Test-SmartM365DeviceNotFound {
+    param([Parameter(Mandatory)]$Record)
+    $exception=$Record.Exception
+    while($null -ne $exception){
+        foreach($name in @('ResponseStatusCode','StatusCode')){
+            $property=$exception.PSObject.Properties[$name]
+            if($property -and $null -ne $property.Value){
+                try { $code=[int]$property.Value; if($code -gt 0){return ($code -eq 404)} } catch { }
+            }
+        }
+        if([string]$exception.Message -match '(?i)Status:\s*404\b|^\s*\[ResourceNotFound\]\s*:'){return $true}
+        $exception=$exception.InnerException
+    }
+    return $false
+}
+
+function Confirm-SmartM365MissingDevices {
+    param([object[]]$Devices,[hashtable]$Hardware,[string[]]$CandidateIds)
+    if(-not $CandidateIds.Count){return ,@($Devices)}
+    # A full, successful enumeration is required even for preview runs.
+    $current=@(Get-MgDeviceManagementManagedDevice -All -ErrorAction Stop)
+    $currentIds=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach($item in $current){
+        $currentId=[string](Get-SafeProperty $item 'Id')
+        if([string]::IsNullOrWhiteSpace($currentId) -or -not $currentIds.Add($currentId)){throw 'Invalid identity in full managed-device verification.'}
+    }
+    $excluded=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach($id in $CandidateIds){
+        if($currentIds.Contains($id)){throw 'A device with a 404 remains in the full managed-device list.'}
+        try {
+            $null=Get-MgDeviceManagementManagedDevice -ManagedDeviceId $id -ErrorAction Stop
+            throw 'A device with a 404 became visible during final verification.'
+        } catch {
+            if(-not (Test-SmartM365DeviceNotFound $_)){throw}
+        }
+        [void]$excluded.Add($id)
+    }
+    foreach($id in $excluded){
+        [void]$Hardware.Remove($id)
+        WriteLog -Message ("Managed device absent during collection: $id; full list and individual 404 confirmed at $([datetimeoffset]::UtcNow.ToString('o')).") -Level WARNING
+    }
+    return ,@($Devices | Where-Object {-not $excluded.Contains([string](Get-SafeProperty $_ 'Id'))})
+}
+
 function ConvertTo-SmartM365HardwareRecord {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -42,12 +86,12 @@ function Get-SmartM365ManagedDeviceHardware {
     for($offset=0;$offset -lt $ids.Count;$offset+=20){
         $pending=@($ids[$offset..([math]::Min($offset+19,$ids.Count-1))])
         for($attempt=1;$pending.Count -and $attempt -le $MaxAttempts;$attempt++){
-            $requestIndex=@{}; $requests=@()
+            $batchPending=@($pending); $requestIndex=@{}; $requests=@()
             foreach($id in $pending){
                 $rid=[string]($requests.Count+1);$requestIndex[$rid]=$id
                 $requests+=@{id=$rid;method='GET';url=('/deviceManagement/managedDevices/'+[uri]::EscapeDataString($id)+'?$select='+$select)}
             }
-            $retry=[Collections.Generic.List[string]]::new();$waitSeconds=5*$attempt
+            $retry=[Collections.Generic.List[string]]::new();$notFound=[Collections.Generic.List[string]]::new();$waitSeconds=5*$attempt
             try {
                 $response=Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' -Body (@{requests=$requests}|ConvertTo-Json -Depth 6) -ContentType 'application/json' -ErrorAction Stop
                 $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -58,6 +102,8 @@ function Get-SmartM365ManagedDeviceHardware {
                     if($status -eq 200){
                         try {$result[$id]=ConvertTo-SmartM365HardwareRecord -ManagedDeviceId $id -Device (Get-SafeProperty $part 'body')}
                         catch {$retry.Add($id);WriteLog -Message ('Hardware response rejected: '+$_.Exception.Message) 'WARNING'}
+                    } elseif($status -eq 404){
+                        $notFound.Add($id)
                     } elseif($status -in @(408,429) -or $status -ge 500){
                         $retry.Add($id)
                         $headers=Get-SafeProperty $part 'headers';$delay=0
@@ -66,10 +112,21 @@ function Get-SmartM365ManagedDeviceHardware {
                 }
                 foreach($rid in $requestIndex.Keys){if(-not $seen.Contains($rid)){$retry.Add($requestIndex[$rid])}}
                 $pending=@($retry | Sort-Object -Unique)
+                foreach($id in $notFound){
+                    try {
+                        $device=Get-MgDeviceManagementManagedDevice -ManagedDeviceId $id -Property $select -ErrorAction Stop
+                        $result[$id]=ConvertTo-SmartM365HardwareRecord -ManagedDeviceId $id -Device $device
+                    } catch {
+                        if(Test-SmartM365DeviceNotFound $_){$result[$id]=[pscustomobject]@{ManagedDeviceId=$id;CollectionStatus='NotFound';CollectedAtUtc=[datetimeoffset]::UtcNow.ToString('o')}}
+                        else {$retry.Add($id)}
+                    }
+                }
+                $pending=@($retry | Sort-Object -Unique)
             } catch {
                 WriteLog -Message ('Hardware batch could not be qualified: '+$_.Exception.Message) 'WARNING'
                 # Reject the entire unqualified response envelope, not just its tail.
-                foreach($id in $pending){$result.Remove($id)}
+                foreach($id in $batchPending){[void]$result.Remove($id)}
+                $pending=$batchPending
             }
             if($pending.Count -and $attempt -lt $MaxAttempts){Start-Sleep -Seconds $waitSeconds}
         }
@@ -78,7 +135,8 @@ function Get-SmartM365ManagedDeviceHardware {
                 $device=Get-MgDeviceManagementManagedDevice -ManagedDeviceId $id -Property $select -ErrorAction Stop
                 $result[$id]=ConvertTo-SmartM365HardwareRecord -ManagedDeviceId $id -Device $device
             } catch {
-                $result[$id]=[pscustomobject]@{ManagedDeviceId=$id;CollectionStatus='Failed';CollectedAtUtc=[datetimeoffset]::UtcNow.ToString('o')}
+                $status=if(Test-SmartM365DeviceNotFound $_){'NotFound'}else{'Failed'}
+                $result[$id]=[pscustomobject]@{ManagedDeviceId=$id;CollectionStatus=$status;CollectedAtUtc=[datetimeoffset]::UtcNow.ToString('o')}
                 WriteLog -Message ("Detailed hardware collection failed for native device $id : "+$_.Exception.Message) 'WARNING'
             }
         }
@@ -90,8 +148,8 @@ function Get-SmartM365ManagedDeviceHardware {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDeZmtsO+o7qRlr
-# 5A8TBaYi9B919F7hKLCoLMGRefIXBaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBAzQRiLfFomJZh
+# MGCPJKflo3JnQ+/6ZB/1NbPNkpbwxqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -224,31 +282,31 @@ function Get-SmartM365ManagedDeviceHardware {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIM1Tt0bkkC/PJe0jFnpUIDOlOx+o19yBv75AXc1bi5rcMA0GCSqG
-# SIb3DQEBAQUABIIBgHQ+AvEeMcDBbyMfvUYHLJdBwmflK9EROT4wJ8E1JNwlDvpv
-# kKyaSumh68Fyo8zeIAtdXKWho0k16Pqeu2IsOOwaWtubKcldooJxnRt8bDzI8qmg
-# +PA08d7FZckMk8/or+uvMqDR6rG/f86Wvtz1x+y8mt9hwTqQfVzd3lgdYYW8jp1E
-# r4togMsoqe9rBT76LhNcetJ4VljogsV45Sv5TCitS+fPBR5EppnlMnYaSEgwmoEg
-# 1mDRUX8rtuTeRw/CzugYR3dcpfSpJ4klDvugkWSo8JxAeh9aK3YkDExGjapCK5lv
-# MUmXMcoSQlioRHLGCMfkalm/jKxUs68P9tnhgPw+vfgrXj/NwyPIEVA76N+7f6A9
-# UVzrHWhsuZQ2uACritSa6WnIdmVKhQ6GUVaMBDSQ4vuAdwd+L4HAit1KA/v14qWl
-# RL0EzaI/UVcCOI/QxFzxqAio0IDq2xXjeRa4yB6so9tROiEkrCLgtK1wK7a9zZpc
-# TA+W9p/nFSSNwxyHSKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIASoimEQ0otQ/7jp1llTSWhyJHX0CJ55YL9EElXjSoaaMA0GCSqG
+# SIb3DQEBAQUABIIBgAZ+pk9qTda6SEtPUvMHwplFVk/qn0BqXzm546qnpF1mc8dB
+# tiJmCSG51zkfPIieXnM02RHTEf9PcHRI3HmY+tUYUJNkT3K9GB57ZFZuesUe37JU
+# qSJAoefhrNx0Qe9BgzxSEv72Cui9fJA+A7iSjCMc7zMchrtxfiw67P/17q3xFwVH
+# BwlWuPnXk3WaF3e7Ud/D/M6kLTCkP0Yx6++fqvOYXslh/I6pBxgp2deAhOdVjGuo
+# 7sQuC4sJ0qzE7pMdOvOUO2hSH2zirIV6c2/IISGrPCgU6Nc6Af92bDyAntcKTsZK
+# Z/y3hqJph255nf+PUZGditTlTseOYPm6MTNhJFqpwqaEgFbUtxFFhA8ofw8jTnl/
+# b5/ScBWnoUpVN286vtghrIM9fZzDxh0qAcAGIs2J3SfiaZjiMd9Mjf4MlalZ/zm5
+# cwh+vqXnQgQZvF3kyYeKqZgV4c5KEOyOdkq/fEjig/3WPEdbdCAXGcL9dElPqIxQ
+# K72LmPAjt6OTxKlbtKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxOTQx
-# MDVaMC8GCSqGSIb3DQEJBDEiBCAZ4057MN3XYXADz0NkqW6n1HTdt92ekxYY6SM7
-# MOZP8zANBgkqhkiG9w0BAQEFAASCAgBTdbnRWjm5hxyDktsTmCrRAxRQ8G4aAyVu
-# +09/PNDywhiDnJ2FUPl3EyzaRCD1BN+OP8t0mL/s7BUDP5g2SWjEdRF1cDgWz4tR
-# J4qB1HRZpFcawCXqaanZmuXVih8Cd15qz5b4YJu3Ktvqpd6fth/SHTLin9Igs6B7
-# rbmcYelF15BpbCnh984BtLHxQbgKBrw1I3VMXH0XEjmZTKmJdbkqOkiI+yp8vsSS
-# zT2yfB2ieCwuXCt7Kj26PLhz9KHDr9mnjU7zzOIK6Ik0bfrO0DAHcLdfO85GBGHD
-# NxlkjC6t0HD9wr2hfIkn6hP2vzrQXi60zScXYJWQHzjZcuQ1OursJ5ve3zI+dkt+
-# Oj0u/2U0i8RxR4oMv1zbrPKA6N/jXRs31gjaqzN0AfzwCPIY1R5wPhKS9TzqOI/B
-# BmcEOtS3H+m2bwPxebG3lWsQaD6SyoA5aIuhoR0az4Pwaac3n0xKP1wToCFb/k0l
-# 3KctXL91hBb7yFNQXnxQmooRGb7qav2LEnRLJwtm9zHGEo5A5nlk/eYnZHLmIxh0
-# YD5yM5YYxn30s0jyBrDVkgWw3Wzux3O0DCVWoTV9iYP5jqHFyTl/PsFGMN3RHG5s
-# i1IiCpW+8NhWASTMlKhqnKwwQcGGbIpNrPUNC2vVWN9OlsQg0Gz/KI8ZS/D6RTlH
-# ACDVn1bSmw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDQxNTIy
+# NDVaMC8GCSqGSIb3DQEJBDEiBCCFqzQRL+ZPgF1j4+qsujpogLbIPkonitWU1vKS
+# wZdolTANBgkqhkiG9w0BAQEFAASCAgAjpiasokaBVHW+RKPjKHQQbstOtxHmxzJM
+# 82VaAba6l7zXQwgefR1k+srXZQSHQaS9bZ7DOqgBVQEbkBNJDUfx5gPjTypzxOSD
+# KPsQ80EANLO0lmFii0ItjXEzS3USUX0LdnQ3hXYK7HC1nURNWxgH9yfxMsuzmcMl
+# jCpuC9UhOcd/ZvJx1mo82iCRCkfA4PFF3orBI1/sBp7sEtjmqm9yd1wPGlOtB+hI
+# Y8Ch5Bsw4EPsr88jujTet4R5JpBk6s2Wo4O5V6SGdFWmquA+w6yTWprWf/sBu2rC
+# S3jGVaEGd0AYtC8D8Hltjp9NMFA2RPrEN/7N63DdMqc2bg90t5aYlwk9HHGwxxR3
+# gM/6fuN3pwcMozJsFvm4TXF23CN8sLgmfz/qS4T+3SfvuP2Lb8NDuBkztzC8kpBT
+# 8XdX7q0dg3ip67eTPkXVJi348DdFP2yWs63lQRSt88txplIswqO9xGWakMtPUb1u
+# 8duSj4zqzwoopKOsvwbOvjjyWEGrr92JW0ZKomK9nD9Y+nm+631bNnD4l6YYbR5J
+# rMKDGq8tOO3HXnYSmZ+uKmDDdszhesXdFpw8Me+cmTogr3Fc9vEjt+gSaoz2w22d
+# rkyK19e5R5Jl/5ENJycoRYKRu+IGgudP9aO56LLY2tZUUIJFbQ/jn9TvmfSOtFcI
+# ZpDRduwoBw==
 # SIG # End signature block

@@ -2,7 +2,7 @@
 .SYNOPSIS
 Bounded independent Intune identity observations. No execution on import.
 .VERSION
-1.0.0
+1.1.0
 #>
 function Get-SmartM365ManagedColumns {
     @('ManagedDeviceId','AzureADDeviceId','DeviceName','OperatingSystem','OsVersion','ManagedDeviceOwnerType','ComplianceState','ManagementAgent','DeviceEnrollmentType','EnrolledDateTime','LastSyncDateTime','UserId','UserPrincipalName','Manufacturer','Model','SerialNumber','IsEncrypted','TotalStorageSpaceInBytes','FreeStorageSpaceInBytes','CollectedAtUtc')
@@ -43,10 +43,14 @@ function Resolve-SmartM365DeviceIdentity {
         for($attempt=1;$attempt -le 3;$attempt++){
             if($attempt -gt 1){Start-Sleep -Seconds (2*($attempt-1))}
             # Two independent reads. Transport/404/identity failures escape before publication.
-            $fresh=Get-MgDeviceManagementManagedDevice -ManagedDeviceId $id -ErrorAction Stop
+            try { $fresh=Get-MgDeviceManagementManagedDevice -ManagedDeviceId $id -ErrorAction Stop } catch {
+                if(Test-SmartM365DeviceNotFound $_){$_.Exception.Data['SmartM365MissingDeviceId']=$id}; throw
+            }
             if(([string](Get-SafeProperty $fresh 'Id')).Trim() -ine $id){throw 'Managed re-read response identity mismatch.'}
             $freshManaged=ConvertTo-SmartM365ManagedObservation $fresh ([datetimeoffset]::UtcNow.ToString('o'))
-            $raw=Invoke-MgGraphRequest -Method GET -Uri ('https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/'+[uri]::EscapeDataString($id)+'?$select='+$select) -ErrorAction Stop
+            try { $raw=Invoke-MgGraphRequest -Method GET -Uri ('https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/'+[uri]::EscapeDataString($id)+'?$select='+$select) -ErrorAction Stop } catch {
+                if(Test-SmartM365DeviceNotFound $_){$_.Exception.Data['SmartM365MissingDeviceId']=$id}; throw
+            }
             $freshHardware=ConvertTo-SmartM365HardwareRecord -ManagedDeviceId $id -Device $raw
             $observations.Add(@{Attempt=$attempt;Managed=$freshManaged;Hardware=$freshHardware;NativeManaged=$fresh})
             WriteLog -Message ("Device identity attempt $attempt : $id; managed=$($freshManaged.AzureADDeviceId); hardware=$($freshHardware.azureADDeviceId)") -Level INFO
@@ -69,8 +73,8 @@ function Resolve-SmartM365DeviceIdentity {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAVj1cQlB3opQUE
-# RjzTIdkPDIZYTYF/SAGMAxHLPwqS7qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDADKIblODnpopP
+# 930gmszlghhzeW6s+Zj4kCfr8+YrEKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -203,31 +207,31 @@ function Resolve-SmartM365DeviceIdentity {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIN7NdwRUnABomgGBE9vWDCA3to0Xg+pYfSu/FEEfLt8wMA0GCSqG
-# SIb3DQEBAQUABIIBgBHP898Bpzzrbygut1gY93GaZUqWgfnpHMs6KhEDLl7J4A0+
-# 5OseGasEMcd4rwVuMvw6hJmaZrwdm0yvqceZSSkx/GQbuTetiChuHookU7+9UHrH
-# oJPc0weEYGTZftGtvmV8MlJ3WGbzncLC9PZzyF37qO5rS61YxO4LDAdrwJg3afTe
-# qdNgwJGMyMdkqsKzNMBL4oDVqbjAOX/UB5+r+UJ//ow+bXWsuhmCGQooGJmx3Anr
-# jIJGOx5JvNEeJ9MijjBaN0oE/uctSmNaco4UCtL2KsCTHVLSSJAU6dZgw2M2Xllw
-# 9jMXAdomXIRSD6OdHyEspSdLm3BYG4rQySJiUwv1lPsJG5IFVksKKY55Eyhy/3X9
-# 4qNaE5ZlI9Z1BgW+25QV4aI8IC5UDmtDITvpPklA/+bYDef5QCWLNdvYeIRjzqw4
-# 0CY5EoT/9cEzrs6pSQQCGgtTlxU8ZZj7bzrrJVdy5hsbPLf8GJCv0IsZuKryhQK0
-# cztwxB9+0HbPUW7Cx6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJ61CM13osgIgP6kU/Fj2xtJOLrpXesC+cvGZfihnaCrMA0GCSqG
+# SIb3DQEBAQUABIIBgB21zRdRIK4LI1kVXXcuCWYt7AYi3VHzfA8icjF/mjiZYy05
+# 6woh2fAjJWLTiaiG8IZohqqPQEOt9wLT2ONLgiEVfQ76Qvgjjlhq/eipPruRrmcm
+# a55TsxabgUNxWnz2ufGBHXIdoRYPklNUwP/rgF51FsZGF0NmdLvgzhpuIoER1iie
+# 9qbKITQjywiBQITwvECVoirQ+UiHyUrHabSn19mGUZeEQdkm2VRdQtFteuScjV89
+# EOfVN8jQCUvFE3eZJFbYH1IC7Kwk0xyFPbYq/tdFnTr1axXtuwdOt0C1AEzvMs52
+# zSJGlxeS+Qte8b69zvHUC+9CwjfI+fup8KJRBtJlD9A/u4+qAJ3jDErtYMIPJmfe
+# tKRRzSSGZzIyZUUUAvleorLBvhK6MYnU/TlwIsaSE2yQGeN1063z/46hmpyI5PkS
+# 01Wu+PKXorz1kgDdt+H2ZT1L/G1+0dG3Xy7ZI2zkDVtcGbiqTkmeSnXL4uFLBXWx
+# TVebnJBMM583gaLKzaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
-# NTJaMC8GCSqGSIb3DQEJBDEiBCCYgnAbKXQjennvd7kf1qTSle1LTff/suo+EjIt
-# VaOEADANBgkqhkiG9w0BAQEFAASCAgAm2+kPKVNGyy15ik5jopERK1IAkyAgPE7A
-# Qmap/42N4SYRRebUHLBKaB4s7R8sxj+OTvnJpfGX8FpOOtNS5Ysd2G0AED+Sf1Wj
-# in1MG2Wv7rSfJraA5g9zyBysUra3uEWX3fO0SH53ujS4dL83OAQ7HwbvNw0ehh5L
-# RsdsewJZeAYak/eV6DhWKE6i3ij2IxVwU9HOqhNQffEfZK64z1Hwz/UiW2jGi4zf
-# UXNybx9AbUKczy4ZZcf8RUzkZot/4LXBwQSnGrdSGCrAe4ce4X/ULtWRjMOUh2NI
-# vDP02pMMM+gt28Tti10pbL3eJWfMjNHLcFd/3yK1eNhPBqOBNqR6ONFOLygwxlGW
-# h1hZ8zAk3Dw8PWLHDDHt6BxvtSoFzINlMmkXWwRsVQ2UDeGjNM9hDIf3NHXI2w93
-# AAsehXTmSByLTTht01GWhma0mRfcVEG9IZgYnRHonSf+JFFkFmFATFqZdlYIpxw7
-# i8Yokle2O4F0YXRKBlLNATClfwLKV1EQNJ8BcZyYOUqzcjjNZDHF3LlEG3ewiKfS
-# Su9HGTQku8KGyd6PnDds2yl5W7k3fYP4QYnGfEnFinqfNnA61FqFVaVv9R4LLqik
-# ofvtvfNrSicscrMI6gBmbIqvvUdhF+2pm3GUM4H+Yi+BwL2Ckp4mz2LM3Qtd8j+E
-# NwMZlhCA8w==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDQxNTIy
+# NDVaMC8GCSqGSIb3DQEJBDEiBCBQhtDuCxieQAMMqOnY0gKS1z0SI/NYHY5iThYE
+# 5xDdhDANBgkqhkiG9w0BAQEFAASCAgAm66GUPmcoHNO+REQSlsGHLOp+3YOqWS00
+# FK3NohHG5OTCJml4CIo+Y7uEvb1oeDBTc13m466pW5pKk7/WYroxiTsh4FJv7nh7
+# 1ycQBX+qkgtgLD9+B8QWqO7wE64VXwnYlIwRMfJQ3en6agoACPwqmNPEBLqAEd1K
+# 0rI+kYTUN7HI7WASsIqM5QJOK05Ny1sP2SLxvfOMNflue+NG44Gr3R5+vvndzWJF
+# ppinYLcZdZ6RjdtNZQ3VB81DMkzkPthkbeej8KUuxeJE/i6rQxrWRzSPT3OrSj9t
+# eLvLX0wLpxOwBcCwO59c1v10li6UcxVKenmw9TW9IG156Onms9wwe/u/5wd0MC5G
+# cfRoOe1ICzdAU7mjYCJ5SXBZqowKNs58FgoSR7rUd2pL0LvQKEnrcbm6wpLr7yCm
+# ZcVb+IO5Am6R4LxOLPnKE9J1xwPv+bycTmAmBg85fEaDvBNQPVorM3lfPqIVcSTW
+# sEf+0Sn6ymH/lVnkS+vX5hzexohzpPdKCxrLYAqER4yPexwaEca9Sx6EWNjrmFI4
+# T5sCSfXS4ahXzL/HZtzHZweauuU6W6xo4KRA3Yq8ptuuVJigBzgNEV6Ksjiyv8cg
+# 7VelaPH1ZW69oMnrn3hHtbYW6VemFCJHZXpFHYAMxlK+UOdWiqD3n1uRi4qN8Kvp
+# T7/b4n+0pg==
 # SIG # End signature block

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Generates all-platform Intune source evidence and a detailed Windows inventory with PhysicalMemoryGB.
 
@@ -18,14 +18,14 @@ Forces a (re)connection to Microsoft Graph (disconnects any existing session fir
 .PARAMETER InteractiveAuth
 Uses interactive authentication instead of app-only certificate authentication.
 .VERSION
-1.25
+1.26
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication.
     Minimum Graph application permissions: DeviceManagementManagedDevices.Read.All; Device.Read.All.
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
-    Version : 1.25
+    Version : 1.26
     Author: https://github.com/khda79/workplacecloudhub.com
 Requires: SmartM365.Core module (logging, init, CSV, cleanup, cloud connectivity)
 Scopes: DeviceManagementManagedDevices.Read.All
@@ -277,7 +277,7 @@ function Get-InventoryColumns {
 # ==========================================================
 # Initialization via SmartM365.Core
 # ==========================================================
-$ScriptVersion = "1.25"
+$ScriptVersion = "1.26"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'DeviceUsersCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -398,12 +398,31 @@ try {
     else {
         $allPlatformDevices = @(Get-MgDeviceManagementManagedDevice -All -ErrorAction Stop)
     }
+    $initialIds=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach($device in $allPlatformDevices){
+        $id=[string](Get-SafeProperty $device 'Id')
+        if([string]::IsNullOrWhiteSpace($id) -or -not $initialIds.Add($id)){throw 'Missing or duplicate managed-device identity.'}
+    }
     $managedDevicesCollectedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
     $publication=Get-SmartM365CurrentSourcePublication
     $identityRunId=if($publication){$publication.RunId}else{'preview-'+[guid]::NewGuid().ToString('N')}
     $hardwareMap = Get-SmartM365ManagedDeviceHardware -ManagedDeviceIds @($allPlatformDevices | ForEach-Object { Get-SafeProperty $_ 'Id' })
-    $identity=Resolve-SmartM365DeviceIdentity -Devices $allPlatformDevices -Hardware $hardwareMap -CollectedAtUtc $managedDevicesCollectedAtUtc -TenantKey $global:SmartM365TenantKey -RunId $identityRunId
+    $initialDeviceCount=$allPlatformDevices.Count
+    $missingIds=@($hardwareMap.Keys | Where-Object { $hardwareMap[$_].CollectionStatus -eq 'NotFound' })
+    if($missingIds.Count){$allPlatformDevices=Confirm-SmartM365MissingDevices -Devices $allPlatformDevices -Hardware $hardwareMap -CandidateIds $missingIds}
+    while($true){
+        try {
+            $identity=Resolve-SmartM365DeviceIdentity -Devices $allPlatformDevices -Hardware $hardwareMap -CollectedAtUtc $managedDevicesCollectedAtUtc -TenantKey $global:SmartM365TenantKey -RunId $identityRunId
+            break
+        } catch {
+            $missingId=[string]$_.Exception.Data['SmartM365MissingDeviceId']
+            if(-not $missingId -or -not $hardwareMap.ContainsKey($missingId)){throw}
+            $allPlatformDevices=Confirm-SmartM365MissingDevices -Devices $allPlatformDevices -Hardware $hardwareMap -CandidateIds @($missingId)
+        }
+    }
     $allPlatformDevices=$identity.Devices
+    $excludedDeviceCount=$initialDeviceCount-$allPlatformDevices.Count
+    if($excludedDeviceCount){WriteLog -Message ("Managed-device scope: initial=$initialDeviceCount; retained=$($allPlatformDevices.Count); absent during collection=$excludedDeviceCount. Full list and individual 404 confirmed; list is not a transactional snapshot.") -Level WARNING}
     $fullManagedColumns=Get-SmartM365ManagedColumns
     $fullManagedRows=$identity.ManagedRows
     $identityColumns=@('RunId','ManagedDeviceId','ContractVersion','Resolution','EvidenceJson','EvidenceSHA256')
@@ -665,8 +684,8 @@ finally {
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCjV5111BWXFLls
-# qjKSnBKNZilBEI0UH8+gqZViQgIztaCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD1naRY4Ry62fHP
+# jm0gtvmaGsnJvpvZDHhNL1jal/kBZKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -799,31 +818,31 @@ finally {
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIEnS04IJmeB/BlabJR9lka6Grb2oB7XMLJW9fGJIbhiWMA0GCSqG
-# SIb3DQEBAQUABIIBgBVg8LnJcUxO9gfBDKl4DySDHuVJLTD4Y2F0MS6SQZ52mj5j
-# qKCADRsi0KLJlb+jjAWH/J2eHy3j1C4lFIvoQdmKUSiottXDv247Dj8grl7d1e2c
-# 6TglQzH6Vzrwr/iIy/Rv47KysML/Ew4LkAwFUAigmt4rdmrLr/HEBcHadFpUfT+r
-# qsTvkovjQHVuqgxM8WWa4smUJ9d5RdaCDw5DHC4RB9Su+jKthD9jyEPv3a3pD2W+
-# ZiSBEtof6L07V6HeTDxD/q7XgioqDsYx/dwKusgwKapV0Nlb6E0QdllHa62o6YaY
-# yRajP3KNcNhwef44t6y+nOCdst58IP/a7wuY4vEItarAzXz698kZ49JFcC/Dmyji
-# /HJC2SNV8fTPS7m9tAN6iVxfgMgjaieoQrigHPmMBHN4isFa3CmCezXWReZVDl64
-# eDP+PWepTKE8TZIKTuZpySxZVJn4uKUbFWbgcce79O6Hfg6um9Q/OD6MIylTsmV2
-# XnLoVh1NP2M4gt10AKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIGiesx3eS6JGI7hyDGQfSmR+yyPE0Z0lLrbKTJ5DAI8OMA0GCSqG
+# SIb3DQEBAQUABIIBgEHLG11110uUxk42a3PZ+DXnl1Dtuc/Bs8oRSUeSNcDwo1Ij
+# KhVKp1UDIUT2lGJ2HkogkqVUkf2jukbl9WpvNwqCKa8bJhNo5FetPTTR5qdTs7u3
+# VnIBCSHIvd6QCo5JbtEC3xZjK7UE/BdLet+UZKnTj74qn6hFBPky71froSAJwXEi
+# x0W4n4QgXxG1VRP2WJdh7zTfT0X7Ng8VDZdHBZasS62wwYXsw6fwjZ73kd3AjmHF
+# pO4phCPxSyH10R+YJLibQ6JNHr/muEG9BvFVZNP/a75LmpAjSVVBuAY9de0ZwmQp
+# 7BQ4jb+2SxPuv4dpMjOn52XCcFe5mDO7o+2s8SA2XmjxE4KUmHmN74EwYjwUKX2V
+# 9I/Ykdj6xsSHK1d+ZPgLnHPmiXI+HXP8nsOsgzdxP3oLOTW/Lyu0pSVn8tiZozfK
+# A79WcOA9NzRUWnKdiSAjauHexv7amDdFqUySyzwcpI/uSAuh8DyBgn2f86Dtqc6H
+# UgMmzQzQScmMlYudhqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDExMzA1
-# MjlaMC8GCSqGSIb3DQEJBDEiBCBwgFVJsmBZ/ju2aEXBVYMm5iYCsu0mcvB+pebT
-# Y8puCTANBgkqhkiG9w0BAQEFAASCAgA6m30qhzaklfV2ogAaPrZ26nWn3GrnIl5h
-# pdISaNF/8pHgq1rwYwsOPlj+U2ytFWrx8npVoL8p/iowCz8+up8UmHDPKcrbtxCW
-# PZPP/IUoaygjAxHKBcrGs90BtLX+N1Fm4XiFM03OX9R75PHDULcjGhtrMkb9C0V0
-# cDrqsQyUd/19SILzcNS1qTJvB/PXQdcSj/k8A+7cSAmjenwZ+XKQx+PvzJ98QP81
-# LB6mrFwMsxFY3hLMcAPsibykkrlglpTZOQJ8jmI9F1Mkw/IsvIPwK1Msv4rew3yI
-# +Qwj7YBdqX+rx4yLgUrI9m1G+Iviwoe3CHG5XClST2UJ2cjcmEdm4xDBmqPVm1Kf
-# qy+/P/q+o+q12K3f1wu/D0RoY4ayfYoNR9+KX3cAjcd+69G/hODf3kKH4irwH9YH
-# vaQSdXFZ5jM2FIW2a9WlupnhppVv7UtGlPuQgXSmUohAxoAlvwEUTGy9lgViwlcr
-# mBzYasYh5cHNW+1oKibRNY6qC1jnMbqFfyfQyxmFZ4cZ6N+An7fos1QJA4IMtd+T
-# eySFOIbfVHNXnkPoYW1ECLzscLi4eau1OpaUqRh5pu8BJqltnt6bNRNJhpk54EQE
-# yPrmreR079B31Blz4+HFWUFMVpZOg6jDfAsVI9Fvbw0z0WpWkPxTySme/lXfBkgd
-# 241GuQni7Q==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDQxNTIy
+# NDVaMC8GCSqGSIb3DQEJBDEiBCDJ0VIMTBDjF7DjGPy+unOMggRF0T/CdyAlbJ3a
+# /zuXtDANBgkqhkiG9w0BAQEFAASCAgAS1+N/knT/FLiWkXHnaou6nWTGGANKs5XK
+# ujwowKdJbMj27TLjyMSqmtAsRh6Z6I2fXKX41EpW4Vuu+droO0j9HmP5cQqj9mjh
+# KK7HiwvLPAy3bqRaeKJ3z7rEcnaZv/6AWJUPYoi+0iPconMUbsKmA4PeaTdY0i73
+# D6Qe3WQPxUwsLKVO7U/KA/mOFTx/BJRtggGp+e5V0fmPSqE7HaGwvzBR2I5EZ+wT
+# PCWWboILs47+ZHxdWT7GPBzU5sEkIBLiKZC8zU96j4jnSz1BFbNI0lbB0ZtMKvzU
+# XDIFRl7Ji2y95eufapJHC3RBxy9hUzZqQ/m7YViMK87/IMyW6M5ZVbZbaCrVvfGU
+# 9J9E3D1dOEFaYi/V3OxdZuFgBE0hanQdXg9+sUgI7W30DdBKBOvsdHOBXJvKGBSE
+# XLtOTVj+MGO6VxRqoHDy3dguw9tkGiU2iNS9A5R5uHEUfPGRXrVUZcvqgjWqvM6Q
+# VraqZFWNLM0lWdKSaNlxOsPZJFZ3I05RUMXloXlzZLJQQC6OPNJVDXhY3WB710WK
+# o+EBuXAZMzZH99zcgaVek4C9G+wL95gsyf2KXZtZ1j+lMiQPJcw1Y4uZpzn/rEqZ
+# tIJXym5z1slLgCNvEFHcwtPVwuAouV6lnPpea6fYksUxx8VRxMGB1c4N1X2sURiP
+# xLO7bVd0wg==
 # SIG # End signature block
