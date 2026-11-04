@@ -1,4 +1,4 @@
-# Version 1.9.0: directory cleanup candidates (AD users, AD workstations, user mailboxes); earlier: optional Microsoft 365 usage signals, hybrid identity findings and device readiness gap facts.
+# Version 1.9.1: directory cleanup candidates (AD users, AD workstations, user mailboxes); earlier: optional Microsoft 365 usage signals, hybrid identity findings and device readiness gap facts.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DataRoot,
@@ -113,7 +113,7 @@ if ($ReuseStagedWorkforce) {
 if ($EndpointProtectionPolicyPath) {
     Add-Task 'EndpointProtection' 'Devices' 'New-EndpointProtectionEvidence.ps1' (@('-DataRoot',$DataRoot,'-InventoryEvidencePath',(OutPath 'DeviceInventoryEvidence'),'-SystemEvidencePath',(OutPath 'DeviceSystemEvidence'),'-PolicyPath',$EndpointProtectionPolicyPath,'-OutputRoot',$OutputRoot)+$clockArgs) -DependsOn 'DeviceInventory'
 }
-Add-Task 'WindowsMigration' 'Devices' 'New-WindowsMigrationEvidence.ps1' (@('-DataRoot',$DataRoot,'-PreparedInventoryPath',(OutPath 'DeviceInventoryEvidence'),'-OutputRoot',$OutputRoot)+$countryArgs) -DependsOn 'DeviceInventory'
+Add-Task 'WindowsMigration' 'Devices' 'New-WindowsMigrationEvidence.ps1' (@('-DataRoot',$DataRoot,'-PreparedInventoryPath',(OutPath 'DeviceInventoryEvidence'),'-OutputRoot',$OutputRoot,'-PythonCommand',$PythonCommand)+$countryArgs) -DependsOn 'DeviceInventory'
 Add-Task 'DeviceLifecycle' 'Devices' 'New-DeviceLifecycleExperienceTrendEvidence.ps1' @('-DataRoot',$DataRoot,'-WindowsOutputPath',(OutPath 'WindowsLifecycleTrendEvidence'),'-EndpointOutputPath',(OutPath 'EndpointExperienceTrendEvidence'))
 Add-Task 'Applications' 'Applications' 'New-ApplicationInventoryEvidence.ps1' @('-DataRoot',$DataRoot,'-InventoryOutputPath',(OutPath 'ApplicationInventoryEvidence'),'-TrendOutputPath',(OutPath 'ApplicationTrendEvidence'))
 Add-Task 'Collaboration' 'Collaboration' 'New-CollaborationEvidence.ps1' (@('-DataRoot',$DataRoot,'-AdoptionOutputPath',(OutPath 'CollaborationAdoptionEvidence'),'-ObjectOutputPath',(OutPath 'CollaborationObjectEvidence'),'-TrendOutputPath',(OutPath 'CollaborationTrendEvidence'))+$clockArgs)
@@ -258,8 +258,8 @@ Write-Host 'Preparation finished. Outputs are staging only; schema/data validati
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCARNBzqqMjzkQUd
-# p2mWbWnA6pI4yOrTqGEb2OtSvCrIBqCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBambJBRqx5MU0i
+# z5Spu3dEbrafKT8w3uSFGZfLeVTj/KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -392,31 +392,31 @@ Write-Host 'Preparation finished. Outputs are staging only; schema/data validati
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEINq3yBOU1NbmZrPYTGcJDHHO5O86uKI0VAUEVVbvXGT1MA0GCSqG
-# SIb3DQEBAQUABIIBgAvsYqnNhSWayj/xSaeeyLbkKXTN3PgSLnn6jpVxwLoa0j+B
-# +UrmcsSiNYW+5Nim9ekboTQC59ZLQqRDNGxtwLNk5YgYXWxND7TSMDKCZG4LM3Ov
-# LS2pBEeGoL7DIGUp7NsWkn+KAlCo+4yErN9HMnjdVfugzY0UtFUmZstaznbfhQSv
-# LgH5mUiSDfeEiQMigMs8O7/GBZc8fm0znuz+q20uRq6v4Om6FocFSj1A+tcMAPuo
-# UyRk48i15u798z3jXPFE6fbkUOJlyiT9b60YCBigoN/QKW3AMQuAQprJmJQkixgW
-# W+QUaVsRgDYwuIvQD3sOhmomIftNJypCFPBfKuN3XP+msLeQDGKzWYM4EGbgWIKa
-# ayhlHSpcqOdQTXbYx1e9K1QxC9k11nEQhEl4ILpyTYDVRyxdrZlR09Qkh6l/tJ8p
-# /gSNNN6OnU0EJNXgKGspNn5/bkyBrrIA9gqq915Q8aN2zDsFcgbkpLUe+p8tTGG7
-# yE+pX1QO/V1cqWcCf6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEILl9PWcfZgDSFp9S4kG1z+1KcBbYLG2Xk0yzJ1HBiAx/MA0GCSqG
+# SIb3DQEBAQUABIIBgJ30hSUD5Klsm24MI9vK+uP0AFXSGTB0GReKbYcMQyFCy7iB
+# qHA8X0n9wMZ2fgPrCnADcaZQOwFLmz6KKkDTJS85WbYiwForKmq8OPucgjUMRl/1
+# fE6DXNmkoyquLG7FBD84zPErRMioPtxS29gbmxGMOesIYPg6x/X7g7kB64voFYdH
+# 5dCKtw/Q0kQ7WmeBsarI5oJb6vXhvnECdxZ1Woefjm9HyL+foBV7JHMndP/JhsQ7
+# t/99OENeOp4Iih5rIYgqeSPYpsnXn1WENsnU1mBjLDK/GyTIHVsSJI3qwqH9QVuB
+# i4TXV4KgykgBMY4q97/WXcaQ3il9nQJ7x9/0YGguRLlW+MBrhPMoZtuySuP3bTlC
+# 96SNTAvHnfbElM4BUANaK9Lj3NCP4mBga71Kmb0vVrYX8QbSGQmmKKZ9mzIPHzvM
+# 0IP7ez6wqxjkvynPi+D3hjsqc7IjVt+KiDXEU4oUdP/nhck6FQUikq21vmUjpEnR
+# qNk3PmaE4yCNL3jBTqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjgxOTUx
-# NDJaMC8GCSqGSIb3DQEJBDEiBCDDLt1KLEVvkVEyUlABsjcCfxSo3D3Mrn1VUBSW
-# J2pf6jANBgkqhkiG9w0BAQEFAASCAgApP5Z9EnyS4l0kdtRPnZ5N+Hle79AUqNDo
-# 332dJYBSE4I3mZKZO4tk6T0dRYxwYTdUBA6GAvmqlqTy9hALBWMmLOasviZlx/Dp
-# YZrPfoFcqQhu+S2Fepmg/9RUKUMTjXk608BWYoCzsJws1PASVOtis0PT/ci6VCg9
-# 9CgBAyPUe9yKeqPDSfU/JFeiws3QQZKNIqdtOAK7q0bsrsgCdUlOFzrXUmYCNxqT
-# KkgtN2w58bhEp7VtW97XZyK6BqA31tKQUebVStUt25w/jE8CQz5FbFyuuDwvhKvj
-# B7IY31yyrDJUvlY0v+Y3qR4VLsl/ULaYfjNDUBBAZuaBlTVX2FAkXNdMIAH2ALm5
-# TujdSOEDrTxrND8u71ODE1UCn5ugjT1ntlsyEQM9P9q+rMKou5n1RAB3N20RQlEC
-# Rl8h+fa/iG5EzWkcGTw/TqoYx7lFfXf30tmjjs5sYsFgeVF7Ea53+EuyTzvwKd6n
-# lbyD3zzEgWkYrOhMa11AefRJkz78O0SqdivHyW00d+1XfeHHhiGxVX9X4G/QsQxf
-# UCVGVT3lrJPm8tzT/Xlp7Cc5PHuQW4urBspxZLg1KkA1sQ/DDT0aE9ty1oVxtUBB
-# esEwdBsKWZsT2r4NlEoGQQKFO8l3TsGya6u9zhMPawahpmMkJlZ9bbwKVmOqKgZ6
-# Sq8gRxGDHQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDQyMjQx
+# MDBaMC8GCSqGSIb3DQEJBDEiBCDu1eNf2A75qHjDlJ9rfnlMizmv5CohPvtRxrFJ
+# Z/V0/jANBgkqhkiG9w0BAQEFAASCAgAHgbTtbX4vhEovtyiWjzuXwLhSrvYTuiBR
+# vNooQcejwsAeqFMfznues6Pjd67EXitx+Ne6xt489w4g83+8J91zskeNa7tpdPPT
+# KyZ3ogLXKRERfdW084AhD4+pa6HKa/MUU7KhwPuw8WJHgRz1i83KCt4MQH4cD34/
+# P8PSZs33Mg4Ddwx7+pTCUUo94pQCf/DqSYTv8JhN0JknTpk4DDotaNn10NEzKQ9T
+# d9np+O/RaZxHeWqQLNbtUcnixF10Ypme/GFHYUWlL3bi0oziAABkZX1VJj0osQxS
+# QuUoRF+Ezla4T1MUL+RW+eNNYiiV52swfhOsNDowZy1MMDuEQXGXpKnvJGDBHk3E
+# ibQ3yVwDNYHgnnBrlXJ6k/+cBgeOIE0ebVvO8MWcFyXXXByJbxlAwsmRszff1UTF
+# JOYDWwDbszfU1F/KTPkakCf85j0/v+Jj8kQ0RYTZ7YuY/d8nRZ63+dMbu3jSNUqD
+# VyLKZpi2aiTc/4wLHaFnwDN7OnT3ljAj/uVpKDBrFCByqftxliomOshnuCBSVWL6
+# LTHuR43VDZfF/jM0XjBJ5VmSraatc7uTHiIm8PAIVHeuJmyExhr6Rq2oljcCEGVl
+# ZdqpeOsCTk6Ge9KiEsSc5WEkfVx5PQg1E/W2sSZXfG93xNwRCF8mpVU10cDWQoJ1
+# 6VEE38ETtA==
 # SIG # End signature block

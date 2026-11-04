@@ -1,4 +1,4 @@
-# Version 1.4.0: mailbox inventories, mailbox usage and all-platform Intune devices used by directory cleanup are listed; 1.3.1: an absent Intune inventory no longer stops Data Trust; 1.3.0: optional Microsoft 365 usage reports are reported Not collected instead of Blocked; 1.2.0: qualified device identity conflicts remain usable with explicit warnings.
+# Version 1.4.1: mailbox inventories, mailbox usage and all-platform Intune devices used by directory cleanup are listed; 1.3.1: an absent Intune inventory no longer stops Data Trust; 1.3.0: optional Microsoft 365 usage reports are reported Not collected instead of Blocked; 1.2.0: qualified device identity conflicts remain usable with explicit warnings.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -64,6 +64,7 @@ $sources = @(
     New-SourceDefinition 'Endpoint' 'Intune managed devices (all platforms)' 'Intune_ManagedDevices_All.csv' @('ManagedDeviceId', 'AzureADDeviceId')
     New-SourceDefinition 'Endpoint' 'AD computer inventory' 'AD_Computers_AllDomains.csv' @('DistinguishedName', 'Name')
     New-SourceDefinition 'Endpoint' 'Windows 11 readiness assessment' 'Intune_Devices_UpgradeEligibility.csv' @('GraphId', 'UpgradeEligibility') @('ExportDateTime')
+    New-SourceDefinition 'Endpoint' 'Historical Windows 11 hardware readiness' 'Endpoint_Windows11_HistoricalReadiness.csv' @('TenantKey','pc.name','HistoricalObservationUtc','pc.GLOBALResult') @('HistoricalObservationUtc') -Optional $true
     New-SourceDefinition 'Endpoint' 'Windows Update status' 'Intune_WindowsUpdate_Status.csv' @('DeviceId', 'ExportDateTime') @('ExportDateTime')
     New-SourceDefinition 'Endpoint' 'Endpoint Analytics device performance' 'Intune_EndpointAnalytics_DevicePerformance.csv' @('DeviceId', 'EndpointAnalyticsScore') @('ReportRefreshDate')
     New-SourceDefinition 'Endpoint' 'Endpoint Analytics startup devices' 'Intune_EndpointAnalytics_StartupDevices.csv' @('DeviceId', 'StartupScore') @('ReportRefreshDate')
@@ -152,6 +153,12 @@ foreach ($source in $sources) {
         }
     }
 
+    if ($source.FileName -eq 'Endpoint_Windows11_HistoricalReadiness.csv' -and $rows.Count -gt 0 -and -not $readError -and $columns -contains 'HistoricalObservationUtc') {
+        $parsedHistoricalDates = @($rows | ForEach-Object { Convert-ToDateOrNull $_.HistoricalObservationUtc } | Where-Object { $null -ne $_ } | Sort-Object -Descending)
+        if ($parsedHistoricalDates.Count -ne $rows.Count) { $readError = 'One or more historical observation dates are invalid.'; $snapshotDate = $null }
+        elseif ($parsedHistoricalDates[0].ToUniversalTime() -gt $AsOfUtc.ToUniversalTime()) { $readError = 'Historical source contains a future observation.'; $snapshotDate = $null }
+        else { $snapshotDate = $parsedHistoricalDates[0]; $snapshotBasis = 'Latest historical observation UTC; not a current collection date' }
+    }
     $missingColumns = @($source.ExpectedColumns | Where-Object { $columns -notcontains $_ })
     $schemaState = if (-not $fileExists) { 'Not tested' } elseif ($readError) { 'Unreadable' } elseif ($missingColumns.Count -gt 0) { 'Schema mismatch' } else { 'Qualified' }
     $fileState = if (-not $fileExists) { 'Missing' } elseif ($readError) { 'Unreadable' } elseif ($rows.Count -eq 0 -and $source.EmptyAllowed) { 'Valid empty findings output' } elseif ($rows.Count -eq 0) { 'Unexpected empty' } else { 'Populated' }
@@ -186,6 +193,12 @@ foreach ($source in $sources) {
         $decisionReadiness = 'Optional unavailable'
         $evidenceStatus = 'Not collected'
         $recommendedAction = 'Collect this optional usage report; dependent views show Not collected until it is available. Other evidence is not blocked.'
+    }
+
+    if ($source.FileName -eq 'Endpoint_Windows11_HistoricalReadiness.csv' -and $fileExists -and -not $readError -and $rows.Count -gt 0 -and $missingColumns.Count -eq 0) {
+        $evidenceStatus = 'Historical evidence only'
+        $decisionReadiness = 'Review required'
+        $recommendedAction = 'Use only as a dated historical observation; confirm name matches and collect current compatibility evidence.'
     }
 
     if ($source.FileName -eq 'AD_HealthCheck.csv') {
@@ -269,8 +282,8 @@ $evidence | Sort-Object 'Evidence Domain', 'Source Name' | Export-Csv -LiteralPa
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3A9Te8bt/M5Lu
-# hamEMQn14gNxpkWgTTVeOmwUsVAFf6CCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDpw292AGljjPHT
+# hHN/MecZ8iHqiWRayGcRjLGs7jPKPKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -403,31 +416,31 @@ $evidence | Sort-Object 'Evidence Domain', 'Source Name' | Export-Csv -LiteralPa
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIPoxWwijo3C1+xzM5Cf2Y/YLYDuVhL0ENVCZ6Ik5zKTpMA0GCSqG
-# SIb3DQEBAQUABIIBgBfxBfQAOTtogOoj2bNjMX8Trw2Tj47XiyQcXfv4e6CcAYLx
-# gM8iTlquJT1/5TLN3gl+EyrQBa/Qj+Mi1P/kxlDweN0OqySHy61ZsHxNUJwM/xRQ
-# nY1ub3VUaCF/rJnm5kvRJ48+DbfSCj5OoDC715zzSavYzfRX0+A8bdQS7thFVlxP
-# 0olfk+fijntzQSMqXn1xTw/fR7dMuEf8TO+0K2wlLauLZbLmtc429OhtUg8mg9wj
-# s5dKF9Dric8NcZeuBg5WuGzqgQfSnQU+SOgRmzLSv8Y0TP6JW3tCEYo+1pX0UhOy
-# +es/Z+8zvuWwqA+ZY9D3kMuRF3D14YZRgJWYXixRdCQhig/znhqUpehj5/UjNrus
-# 0qr2pgScVtNB3Y8LGuvSgUa+kkKsLqq2zx+rKeB2khDgCkfM8bYXcD1g3rwV7Y+e
-# LeTfMflATT7Hp1WxFuxi4aCvfT2qs3B62gSA+PPAhS8mUWcLDl+BkKcU2+9hCD+z
-# 8YGqS38ribYQyA3DEKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIKWmPN3wW/1CAFW+kjT4KrmMZ6Jx45Aiv/7r/XEdynVnMA0GCSqG
+# SIb3DQEBAQUABIIBgBuSeo8k3C/juSj8q5D0BnHuNIN/gLtVe/jkNuoyW6MiqnPf
+# LZceq2JdZ9p60bP25JZbL5aKjlNpVlzkU/Je4l19XFgTA5+b7p6eM+iSStU654xh
+# iRhWEJGiDHehBm44Xk1raHFmLLGB81CMnkQRYo7ZNjcSl8T/GqKM69l7B7HhAf0j
+# y9ZWgzT24/DgqIK+9jUKeLcUZ/MfDwj7ut38WjZAa4ynwi8FdP73fN9KHGRrSuKP
+# wFD5bIT/ARiLMiREfBK9bycOdJ/WYdwJgWa0kZPmmF0ilZrGUPRi+3fWh5MLVXbN
+# ZqTSzYm0RPb1xA705HXW7QwluT+gOHJ1GunNhWd68AhsxSiWSdqGuu5Nm5nfKRww
+# sLHBzEkncak7jsvWAtcXNgPlQIEc5BvlK1C9wQj5chSq1IS0R/pbvFIDsMYaw4QD
+# paL2OzLmphFNwfzsNPapi0f7SYHEyd+dquE89KLcSJyEmL9Hpuj36XLXrxPH7lao
+# yJHDCCcsnKm5rvmahaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjgxOTUx
-# NDJaMC8GCSqGSIb3DQEJBDEiBCDQkL4ymb8kRS0pKxxqvdiMdTf8gRUXfffkdUsX
-# 8nNezjANBgkqhkiG9w0BAQEFAASCAgAIau19F5V0DYzsdBs8/arfyp+MyvlhKBtN
-# Ugjx5i+zOk+ARzHWc/MoDohcjA7cAyRVnW2zF6r8DJGMFVOVy6eldldFGP8cFCHH
-# HsPoun5a1rCI0JwI8OLV5NAa1fBtxgglv8DvhPQaJo3zCGDbuqWJWe38MDx3SzqU
-# B9iqH1JJvjkgt+9i+TUkxLegCokE3ImqpaCsHC7JUGb+wH+bfi9/n68fcIgpb8NE
-# r+INuL9I9CwfLvpWJNBEaSh3g9JncCpN8/D6dyHuRfm5kgOtw4PkXUXfDSu/WQAH
-# s8QL555ZB0lKR0XeqXFPGNksZBc9liNKYuvjZRZcU2L7KIcJ/TcP4guLGwmMZocO
-# rxOeC/KZy7aQVL6gGNgvsPFkbkAcMQC7BSeGEwNPsGQN7QgmMwts7G1hMnMFs5nn
-# qzuUk7B7QfCcp/kvx8V7dtkCp6bc2cPslbru3TQgoRmN/U1v4qW+5EVdlosMEJnr
-# x3To9gBmAk8Kk9FEkhkKASvchpFZ1VRXLKett4+p8UoS6KnvsodZfQzsbyQ1+rsy
-# +5DjglmGqD4RuB2vqoCBBk/8xX2L7fjx/rnHVTqAg6/uyIhyeBNTMoCcRuIORuo1
-# U4gKa4fECEC2fJYLbiK8b+68zkuhHri9v0ptGpCk1NI9oLQvyEKmZVYpTVp7pwUL
-# jfz762XXog==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDQyMjQx
+# MDBaMC8GCSqGSIb3DQEJBDEiBCCirjdorRyW/UmJugpwvtsOUawWt7OgyJ/LQpEr
+# iKGM+zANBgkqhkiG9w0BAQEFAASCAgBNyPzZR7zOEsj2aClZQd1hMaqu+Wgpuqfs
+# 9SxwClwm+eDuIkWNjRl9eSL4mjG+FH9GKtWesrYl3nJnrgEnYKfFrv7MoHtbvG3e
+# t5CbsHRfA8Zg3jmGK6WR3A6T9n9wKL6iDKitVp00NqHtGjo7H6ASfOh74vXQM8KA
+# 2VY248qQpuw5MqBahmfwxWwXLMoQKaw6jI4CFeCcPBfP+GaSR/kkT3OP8kVWbDHV
+# vcb3j0s7AnZoSOYENQWyBX5iuIiulZAg5br0Muy2Umy9kWkHKHEE7EEofSrsozM2
+# cvGsbe+KU/iLVydlAr84mSuoMUysN0EukDTBFjD5f5i0BZhTF4Z6ffnshs/sQBy0
+# iTUyxSwT/WYf1ksmvnd6dknYn6cqTiOBujowI9cRMdHFGlIn4s+h8X03NGdKHpKB
+# GAO97weUw3EazUNBk8dT/1Q6sONl+GU1SLl86XWNtPIGS/IwjRhZO9utJk46jX36
+# Armhqu7DFcFa0170n/2dJAZ4TaXUwm7BbylUcY0BMlf+hPxV2m+FLClaHIOYWV7i
+# 1IdBqiur+iTX0Qxg5yD7/U0t/G4RRh9xEqqgex3jKfyHBEKQn+T3+YqnC1q4SuxB
+# HbocezGdA7h2n2eOXvsQoIXJ7vEOP+8xnABe1SRTOld6bK7L25PbVEPjg44xUe+x
+# MSORa5t9Vg==
 # SIG # End signature block

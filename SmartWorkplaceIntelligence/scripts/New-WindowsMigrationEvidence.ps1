@@ -1,11 +1,12 @@
-# Version 1.1.0
+# Version 1.1.1
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DataRoot,
     [Parameter(Mandatory)][string]$PreparedInventoryPath,
     [Parameter(Mandatory)][string]$OutputRoot,
     [string]$PolicySelectorsPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config/windows-migration-policy-selectors.json.txt'),
-    [string]$AdCountryRulesPath
+    [string]$AdCountryRulesPath,
+    [string]$PythonCommand = 'python'
 )
 # Staging only. No collection, publication, upload or Power BI refresh.
 Set-StrictMode -Version Latest
@@ -78,15 +79,21 @@ function Export-Projection([string]$Name,$Rows,[string[]]$Columns) {
 }
 Export-Projection 'WindowsMigrationEvidence.csv' $result.Windows $result.Columns
 Export-Projection 'WindowsMigrationADObservations.csv' $result.ADOnly $result.ADColumns
-$audit=[ordered]@{SchemaVersion=1;CreatedUtc=[datetime]::UtcNow.ToString('O');Projection=$result.Audit;Sources=$sources.ToArray();PolicySelectorsSHA256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($selectorBytes));AdCountryRulesSHA256=$(if($AdCountryRulesPath){(Get-FileHash -LiteralPath $AdCountryRulesPath).Hash}else{''});Publication=$false}
+$historicalSource=Join-Path $last 'Endpoint_Windows11_HistoricalReadiness.csv'
+$historicalOutput=Join-Path $output 'HistoricalWindowsReadiness.csv'
+$historicalGenerator=Join-Path $PSScriptRoot 'historical_windows_readiness.py'
+$historicalReport=& $PythonCommand -B $historicalGenerator --source $historicalSource --output $historicalOutput --migration (Join-Path $output 'WindowsMigrationEvidence.csv') --inventory (Join-Path $last 'Intune_Devices_Inventory.csv') --ad (Join-Path $last 'AD_Computers_AllDomains.csv') --tenant-key $tenants[0]
+if ($LASTEXITCODE -ne 0) { throw 'Historical Windows readiness projection failed.' }
+$historicalAudit=($historicalReport | Out-String | ConvertFrom-Json -ErrorAction Stop)
+$audit=[ordered]@{SchemaVersion=1;CreatedUtc=[datetime]::UtcNow.ToString('O');Projection=$result.Audit;HistoricalReadiness=$historicalAudit;Sources=$sources.ToArray();PolicySelectorsSHA256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($selectorBytes));AdCountryRulesSHA256=$(if($AdCountryRulesPath){(Get-FileHash -LiteralPath $AdCountryRulesPath).Hash}else{''});Publication=$false}
 [IO.File]::WriteAllText((Join-Path $output 'WindowsMigrationAudit.json.txt'),($audit | ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false))
 $result.Audit | ConvertTo-Json -Depth 6
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDIQzFLe4+y4CzS
-# RGgVR3jrUh0IM9VMCRWDFlmJmAsW8qCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHBSqeu9qTPUMA
+# rtwI+EbF8NgjvXRF1bBixAhD1Fl7zKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -219,31 +226,31 @@ $result.Audit | ConvertTo-Json -Depth 6
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIIRpBdGFiGGA3F3pCbeFnSd9VfOt3tjxbGCnZKZvInJZMA0GCSqG
-# SIb3DQEBAQUABIIBgDTL6n0606dtJlJ83+Brz/8Ggp29Y3X3WwVg7JdaCY2l5w5a
-# bqtlziWpI4CtFfJ8Hejp057jDYM4wzEBQ+pRQPVUSG4VpXwyvY783fCXjqCcuo9k
-# P6kqevMi11Wu7/qmUS/1utO18SWsYOc3vDuMm3eOmonxLbXKsyRv4nJh6R471Qet
-# 8eXbD67YdCZ7jH9Pq+iaVp08G8/g8ntrY2PAE29YX7KKGTF00n0iqKu63FRUdBsn
-# LafXVY3uK4Uy41D9AL29RzElAWg8+y15sCd55mU9Sm+jG5i4BnT2jW9AjZ5UeNKZ
-# ulsPwvATzdYktncyiOg5E7/Ql6owhdBIq17mIvLeEnZrhDUhhf4Duxyp/0zd3f2X
-# nhiAiZvVG0mePbOyHIpPImdOAbBjZvg4uuZRwZULoZiBjSQnNU9Kz6hX7tGHt2xF
-# dBCe5qBnA8ehoRSlQYj2Q0FPWxdrSMSjGiJgcT3OcDbQpS3XMgzjaRLEGg3tiBwz
-# zuBjeAyNdAX8GfWFM6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIBqXi9ZyrkHOoNtik1I8I958umysWLwvw/6GauoN7wzdMA0GCSqG
+# SIb3DQEBAQUABIIBgA0OgQv93G4qWCHpSiYqcdTYBXcHny2tgR/On5mx1BduJBLD
+# TtkT/huYHvT9V4EQBPbSUtruZyQw4qtxIPuPkAdIR+5h5gqjXDiw/67BGSb9B59S
+# 50UbsHnEjWWFNC6ZyIKpwmd16+1k8O0PbMNUg7xs7FDiZSG+gpZ/4M2FLYbM8lIV
+# TbbFW+zIPzsNDE0cSw3FulpktItYpbC25JYShAPK/EWJ250Po4TjkXufF3wA8UWa
+# 7aK2mUQS1ZvSOT6avZ93EIvmeSCcMEsWsSxx5WDbB8oKxD+gSN9q4jtJ1DI1JHQl
+# FJ32qbA4b7zwOA+gAnOiXiLNKLuq/nuVuhMwmGRNnXBd6F7x48TMSfDlPgjgQOUK
+# T9acSAwckOwDl4WYn7xOeLo4b5bKcfhkYLvZTI83TRUqqpXWPim/0DdJib364j/c
+# rb2asDtK2GFQ6QP1/drnQpsPjUb5eFB3/GnLxKZaHlSzHyv+24FaETRQYdJtiIp4
+# BslXLnVTt8bKN7UnE6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMjcxMzIz
-# NTRaMC8GCSqGSIb3DQEJBDEiBCBAT13UBMWyvugDJpVF+i6WModITheLLwNzm550
-# Y4Pt2TANBgkqhkiG9w0BAQEFAASCAgCr26Nc7fGLYEbDhQuB3MjQoGsGtBX0RUNS
-# xHwSs26aLKIfv6cxhjyfYN1exA8w+uow2hi8qFzrU+EqEnI+ufyuxVM6Ljk4uCyj
-# PlpGNlPDv04uh/wLdxaNbIUoAGLOZ3BYRu4g7VKXwWQT2EirNIZwj4d+EMJDnyTJ
-# pCEyNznVVaB+khJtjktskvPQh1O/KnUsyVTjkumf0y0koPLeDNmEHzeGzfG6zUpz
-# 9g8AZRORaADYjdNg5QYy+TNamr1oj5T2NoklkszNOHTDjflK7aiedfxeVK6N33+W
-# f98RDed0eYq0NzOFZd3r74dRqQluEebU4UYAbhyBV+DBhKoamQ0wAZswB+tYuH4d
-# blYeRsZRBw9c8D1SjSd/2cjiATITP1vt6AOCXxSoBV/eDjqmbxhJWBb46lNlQxtj
-# TibrD4GvoQVQs8KOb5/MxvhFWVLXrS4W2dWIDIInXAAuekMoluXDyS8zqDTWQ/i9
-# AVzYQZ2VTtrvxQDFBzgJc1Lhc+HiIhweRJ7p4pAmUz8Eh56w6pOBVrBDeIPf3WTe
-# HeHzCXUDvGMIX4lxpyWUoNhZrTOEZq2NNMq0GYAfqqirgecDZjicAVG+SKssOmOC
-# Hvy/fe7mJOEwBxU51+Xr7sM0uKaDFR+cJLczNHaUlxOZMmutOXGV2ZmP+inag2uU
-# zHxC9VRJCQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDQyMjQx
+# MDBaMC8GCSqGSIb3DQEJBDEiBCDMLBT96pyy1b/jZECb6Tut2HEoVjC92Lzte6Hx
+# Y/TJuDANBgkqhkiG9w0BAQEFAASCAgCWilgGDoTBkV8uAYHMD4BwdbsFnpERZ6Pb
+# N+VvsERBufueazjll7XgYbdZ5mNYjOK2iPL2ZsCQTVe+T+mGpYoov2JXrz6BIqVT
+# zIAaDXLo+qbCsOgMvUl69h5RIk7nIHJMb11BcDNMLNE2hbAhMP4sYAruapCtK5IT
+# mOspIBjod/DlqKlnguZX0qtIlZ00s34hTbdRJ9W5uszFnOltmgIF2UFYG/5j3YhS
+# FtU5gWjZKib/XvsKMAC7HylkbmrAZI6Nu1rTGc2Ppp3lBKbOvKvDsoYN3P8KKrDC
+# nFXHtPZK3XS7TAWph0Ij0svI81aV4HsUQRsCs7zocjl0HxT1O8z6TwIpHYdcrIIL
+# LBoXUZ4IzY9yGtpdWQQ+JkAnTwzncqkZwH1qm1ml3lppkdoAowLl1pcfSpA3S6Qg
+# 6PNn0RvJIDnifuel9j2DY5uw6RASZNxDQMXvmMd+ilh5GQwqtrXi/c3ER7uh3frA
+# bm8MD3bIQYeqskTrp4MiTPmiXF7bc5R666EWbZzNJ/J1z4V8GQWnuH2T5mh6F8Rz
+# 2BnZjU/WhjKcw0I6NPU+Mxqxt/Pi08SMsvRu516jvGHUSEflAwyfYchlsjkMEcpF
+# p1JJLLPXhi+yXHasSZgmNxY26tN6aqdA/1bn4PpXyRD8TFwUfWGJwx2SAUScM/aT
+# SQCQPI0WqA==
 # SIG # End signature block

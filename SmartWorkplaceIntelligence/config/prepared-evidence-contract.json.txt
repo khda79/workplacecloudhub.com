@@ -855,6 +855,32 @@
       ]
     },
     {
+      "table": "Historical Windows Readiness",
+      "file": "HistoricalWindowsReadiness.csv",
+      "uniqueKey": ["ObservationKey"],
+      "allowEmpty": true,
+      "columns": [
+        {"name":"TenantKey","type":"string"},
+        {"name":"ObservationKey","type":"string"},
+        {"name":"Device Name","type":"string"},
+        {"name":"Observation UTC","type":"string"},
+        {"name":"Historical Result","type":"string"},
+        {"name":"Storage Check","type":"string"},
+        {"name":"Memory Check","type":"string"},
+        {"name":"TPM Check","type":"string"},
+        {"name":"Processor Check","type":"string"},
+        {"name":"Secure Boot Check","type":"string"},
+        {"name":"Manufacturer","type":"string"},
+        {"name":"Model","type":"string"},
+        {"name":"Source Files","type":"string"},
+        {"name":"Source SHA256","type":"string"},
+        {"name":"Duplicate Count","type":"string"},
+        {"name":"Observation Status","type":"string"},
+        {"name":"Match Status","type":"string"},
+        {"name":"Candidate Device Source ID","type":"string"}
+      ]
+    },
+    {
       "table": "Windows Migration Evidence",
       "file": "WindowsMigrationEvidence.csv",
       "uniqueKey": ["Device Source ID"],
