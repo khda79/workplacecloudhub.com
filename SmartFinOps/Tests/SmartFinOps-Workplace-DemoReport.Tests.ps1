@@ -48,7 +48,7 @@ try {
 
     #region 2. Manifest
     Check ($manifest.Owner -eq 'SmartFinOps-DemoReport' -and $manifest.TenantKey -eq 'contoso-demo' -and $manifest.LeakScan -eq 'Passed' -and $manifest.SourceCommit -eq 'test-commit') 'manifest identity, tenant key, leak scan and source commit'
-    Check ($manifest.ValuationVersion -match '^\d+\.\d+\.\d+$' -and $manifest.ReportVersion -match '^\d+\.\d+\.\d+$' -and $manifest.GeneratorVersion -eq '1.0.3' -and $manifest.FixtureVersion -eq '1.1.0') 'manifest versions'
+    Check ($manifest.ValuationVersion -match '^\d+\.\d+\.\d+$' -and $manifest.ReportVersion -match '^\d+\.\d+\.\d+$' -and $manifest.GeneratorVersion -eq '1.0.4' -and $manifest.FixtureVersion -eq '1.1.0') 'manifest versions'
     Check (@($manifest.ValuationExitCodes).Count -eq 2 -and @($manifest.ValuationExitCodes | Where-Object { $_ -notin @(0,3) }).Count -eq 0 -and $manifest.ReportExitCode -in @(0,3)) 'two valuation runs and the report ended with 0 or 3'
     Check ($manifest.ReportSHA256 -eq (Get-FileHash -LiteralPath $page -Algorithm SHA256).Hash) 'manifest hash matches the page'
     Check (-not ((Get-Content -LiteralPath $manifestPath -Raw) -match '(?i)[a-z]:\\|\\\\|temp')) 'manifest holds no local path'
@@ -79,6 +79,7 @@ try {
     'SmartFinOps\Config\SmartFinOps-TenantContext.ps1', 'SmartFinOps\Config\SmartFinOps-Contracts.local.json.template'
     'SmartM365\SmartInventory\M365Inventory\Licensing\SmartM365-Licences-Inventory.ps1', 'SmartM365\SmartInventory\M365Inventory\Licensing\SmartM365-LicensePricing-Inventory.ps1'
     'SmartM365\SmartInventory\ActiveDirectoryInventory\SmartM365-ActiveDirectory-Inventory.ps1', 'SmartM365\SmartInventory\M365Inventory\Users\SmartM365-ActiveUsers-Inventory.ps1'
+    'SmartM365\Config\SmartM365-TenantContext.ps1', 'SmartM365\Config\SmartM365-JsonTransport.policy.psd1'
   )
   foreach ($relative in $needed) {
     $target = Join-Path $isolated $relative

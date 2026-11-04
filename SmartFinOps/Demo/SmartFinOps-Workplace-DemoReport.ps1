@@ -4,7 +4,8 @@
   Builds the SmartFinOps Workplace demo report from synthetic data with the real valuation engine and report.
 .DESCRIPTION
   1. Creates an isolated temporary runtime: the V2 engine, report, tenant context and templates, plus the tracked
-     SmartM365.Core module files (no local configuration, export, profile or tenant is copied or read).
+     SmartM365.Core module files and the shared SmartM365 tenant context and JSON transport policy that the module
+     loads (1.0.4; no local configuration, export, profile or tenant is copied or read).
   2. Writes a fictional SmartInventory DATA-LAST (SmartFinOps-Workplace-DemoFixture.ps1, contoso.invalid) with real
      SmartM365.Core source receipts, in two stages: a baseline plateau, then the current day after a reduction.
   3. Runs SmartFinOps-Workplace-Valuation.ps1 on each stage, then SmartFinOps-Workplace-Report.ps1, unchanged, with
@@ -16,7 +17,7 @@
      WorkplaceCloudHub logo) and writes the page and a manifest
      to -OutputPath.
 .VERSION
-1.0.3
+1.0.4
 .NOTES
   Read-only and offline: no API call, no SharePoint upload, no mail. -OutputPath must lie outside the SmartFinOps
   code folder. The page and its manifest are generated files: never commit them.
@@ -33,7 +34,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ScriptVersion = '1.0.3'
+$script:ScriptVersion = '1.0.4'
 $script:Invariant = [Globalization.CultureInfo]::InvariantCulture
 $script:DemoTenantKey = 'contoso-demo'
 $script:DemoProfileKey = 'demo'
@@ -171,6 +172,12 @@ try {
     Copy-Item -LiteralPath (Join-Path $project $file) -Destination $target
   }
   Copy-DemoCoreModule -Source (Join-Path $repository 'SmartM365\Modules\SmartM365.Core') -Destination (Join-Path $runtime 'SmartM365\Modules\SmartM365.Core')
+  # SmartM365.Core dot-sources the shared tenant context, which loads the JSON transport policy (1.0.4).
+  foreach ($file in @('SmartM365-TenantContext.ps1','SmartM365-JsonTransport.policy.psd1')) {
+    $target = Join-Path $runtime "SmartM365\Config\$file"
+    New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repository "SmartM365\Config\$file") -Destination $target
+  }
   # Fixed TenantKey, no SharePoint mirror, no daily email: the SmartM365 context is never resolved.
   ([ordered]@{ SmartM365TenantKey=$script:DemoTenantKey; EnableSharePointUpload=$false; Report=[ordered]@{ ShowbackMinimumGroupUsers=5; EnableDailyEmail=$false } } | ConvertTo-Json -Depth 3) |
     Set-Content -LiteralPath (Join-Path $runtime 'SmartFinOps\SmartFinOps.global.local.json') -Encoding utf8NoBOM
