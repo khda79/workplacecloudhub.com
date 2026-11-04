@@ -30,7 +30,7 @@
   readable headers, AD domain and country columns, colored reasons and dates, print setup and a tenant or domain file name.
   The script parses under Windows PowerShell 5.1 again (1.65), so SmartInventory.cmd can resolve and start it.
 .VERSION
-1.71
+1.74
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -38,7 +38,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.70
+     Version : 1.74
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -59,6 +59,8 @@ param(
   [switch]$RequireSkuNameCsv,
   [switch]$InteractiveAuth,
   [switch]$SendLicenseSummaryEmailOnly,
+  [string]$LicenseSummaryTestTo,
+  [string]$LicenseSummaryTestDataPath,
   [switch]$ForceLicenseSummaryEmail,
   [string]$LicenseSummaryEmailDomain,
   [switch]$ForceAdCsvAnalysis,
@@ -148,7 +150,7 @@ $OrgDomain = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'OrgDom
 # ==========================================================
 $modulePath = & { $d = $PSScriptRoot; while ($d) { $p = Join-Path $d 'Modules\SmartM365.Core\SmartM365.Core.psd1'; if (Test-Path -LiteralPath $p) { return $p }; $parent = Split-Path -Path $d -Parent; if ($parent -eq $d) { break }; $d = $parent }; throw 'SmartM365.Core module not found.' }
 try {
-    Import-Module -Name $modulePath -MinimumVersion '1.0.121' -ErrorAction Stop
+    Import-Module -Name $modulePath -MinimumVersion '1.0.123' -ErrorAction Stop
 } catch {
     Write-Host "Failed to import SmartM365.Core module from '$modulePath' : $_" -ForegroundColor Red
     exit 1
@@ -1490,7 +1492,7 @@ function Get-LicensesFocusedUsageRows {
   param([AllowNull()][System.Collections.IDictionary]$ScopeUsers)
   $recoveryDetails = [System.Collections.Generic.List[object]]::new()
   $metricRows = foreach ($product in $products) {
-    $count = @{ Assigned=0; Disabled=0; DisabledUnknown=0; AdEntraInactive=0; AdEntraUnknown=0; MailboxInactive=0; MailboxUnknown=0; M365Inactive=0; M365Unknown=0; LocalAppsInactive=0; LocalAppsUnknown=0; Multiple=0; MultipleUnknown=0; MultipleAll=0; MultipleAllUnknown=0; SharedLicensed=0; SharedUnder50=0; SharedEligible=0; SharedUnknown=0; RecoveryCandidates=0; RecoveryUnknown=0; RecoveryPrimaryPc=0; RecoveryPrimaryPcUnknown=0 }
+    $count = @{ Assigned=0; Disabled=0; DisabledUnknown=0; AdEntraInactive=0; AdEntraUnknown=0; MailboxInactive=0; MailboxUnknown=0; M365Inactive=0; M365Unknown=0; LocalAppsInactive=0; LocalAppsUnknown=0; Multiple=0; MultipleUnknown=0; MultipleAll=0; MultipleAllUnknown=0; SharedLicensed=0; SharedUnder50=0; SharedEligible=0; SharedUnknown=0; SharedE3Plan2Review=0; RecoveryCandidates=0; RecoveryUnknown=0; RecoveryPrimaryPc=0; RecoveryPrimaryPcUnknown=0 }
     if (-not $licenseSource.Ready) { [pscustomobject]@{ Product=$product.Name; Counts=$count; Available=$false }; continue }
     $candidateUsers = @{}
     $candidateReasons = @{}
@@ -1521,6 +1523,11 @@ function Get-LicensesFocusedUsageRows {
           $litigationHold = ([string]$mailbox.LitigationHoldEnabled).Trim().ToLowerInvariant()
           $retentionHold = ([string]$mailbox.RetentionHoldEnabled).Trim().ToLowerInvariant()
           if ($null -ne $sizeGb -and $sizeGb -lt 50) { $count.SharedUnder50++ }
+          # EXO exports round to two decimal places: 50.00 and 100.00 cannot
+          # establish which side of the exact boundary the mailbox is on.
+          if ($product.Name -eq 'Microsoft 365 E3' -and $null -ne $sizeGb -and $sizeGb -gt 50 -and $sizeGb -lt 100) {
+            $count.SharedE3Plan2Review++
+          }
           if ($null -eq $sizeGb -or $archiveStatus -notin @('none','disabled','false','active','enabled','true') -or
               $litigationHold -notin @('true','false') -or $retentionHold -notin @('true','false')) {
             $sharedStatus = 'Unknown'
@@ -2483,6 +2490,87 @@ function Publish-LicensesReportCsv {
   return $publishedPaths.ToArray()
 }
 
+function Get-LicensesStandalonePlan2Stock {
+  param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows, [Parameter(Mandatory)][string]$CollectedAtUtc)
+  $rows = @($TenantRows | Where-Object { ([string]$_.TenantSkuPartNumber).Trim() -ieq 'EXCHANGEENTERPRISE' })
+  if ($rows.Count -ne 1) { return $null }
+  $row = $rows[0]; $enabled = 0L; $consumed = 0L
+  $status = [string](Get-LicensesOptionalProperty $row 'CapabilityStatus')
+  $id = [string](Get-LicensesOptionalProperty $row 'Id')
+  if (-not $id.Trim() -or $status -ne 'Enabled' -or
+      -not [long]::TryParse([string]$row.TenantPrepaidEnabled, [ref]$enabled) -or
+      -not [long]::TryParse([string]$row.TenantConsumedUnits, [ref]$consumed) -or
+      $enabled -lt 0 -or $consumed -lt 0 -or $enabled -lt $consumed) { return $null }
+  return [ordered]@{ SkuId=$id; Enabled=$enabled; Consumed=$consumed; Available=($enabled-$consumed); CollectedAtUtc=$CollectedAtUtc }
+}
+
+function Get-LicensesEquivalentPlan2Stock {
+  param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TenantRows,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$CatalogRows,
+        [Parameter(Mandatory)][string]$TenantKey)
+  $catalog = @{}
+  foreach ($row in $CatalogRows) {
+    if ([string]$row.TenantKey -cne $TenantKey) { throw 'Service plan catalog contains another tenant.' }
+    $id=([string]$row.SkuId).Trim().ToLowerInvariant(); $name=([string]$row.PlanName).Trim().ToUpperInvariant()
+    if (-not $id -or -not $name) { throw 'Service plan catalog has an incomplete SKU or plan identity.' }
+    if (-not $catalog.ContainsKey($id)) { $catalog[$id]=@{} }
+    $catalog[$id][$name]=$true
+  }
+  $seen=@{}; $rows=[Collections.Generic.List[object]]::new(); $unknown=0
+  foreach ($sku in $TenantRows) {
+    $id=([string](Get-LicensesOptionalProperty $sku 'Id')).Trim().ToLowerInvariant()
+    $part=([string]$sku.TenantSkuPartNumber).Trim()
+    if (-not $id -or $seen.ContainsKey($id)) { throw 'Tenant SKU identity is missing or duplicated.' }
+    $seen[$id]=$true
+    if ($part -ieq 'EXCHANGEENTERPRISE') { continue }
+    if (-not $catalog.ContainsKey($id)) { $unknown++; continue }
+    if (-not $catalog[$id].ContainsKey('EXCHANGE_S_ENTERPRISE')) { continue }
+    $enabled=0L; $consumed=0L
+    if ([string](Get-LicensesOptionalProperty $sku 'CapabilityStatus') -ne 'Enabled' -or
+        -not [long]::TryParse([string]$sku.TenantPrepaidEnabled,[ref]$enabled) -or
+        -not [long]::TryParse([string]$sku.TenantConsumedUnits,[ref]$consumed) -or
+        $enabled -lt 0 -or $consumed -lt 0 -or $consumed -gt $enabled) { $unknown++; continue }
+    $rows.Add([ordered]@{SkuId=$id;SkuPartNumber=$part;Enabled=$enabled;Consumed=$consumed;Available=($enabled-$consumed)})
+  }
+  return [ordered]@{Rows=@($rows.ToArray());UnknownSkuCount=$unknown}
+}
+
+function Get-LicensesSharedMigrationEvidence {
+  param([Parameter(Mandatory)][string]$Folder, [Parameter(Mandatory)][string]$TenantKey, [string]$EvidenceScriptPath='')
+  # A missing, stale, or unqualified prepared batch is not zero demand.
+  $root=Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($Folder))) 'DATA-POWERBI'
+  if (-not (Test-Path -LiteralPath (Join-Path $root 'current.json.txt') -PathType Leaf)) { return $null }
+  $base=$PSScriptRoot; $producer=$EvidenceScriptPath
+  while (-not $producer -and $base) {
+    $candidate=Join-Path $base 'SmartWorkplaceIntelligence\scripts\shared_mailbox_license_evidence.py'
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $producer=$candidate; break }
+    $parent=Split-Path -Parent $base
+    if (-not $parent -or $parent -eq $base) { break }
+    $base=$parent
+  }
+  $python=Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $producer -or -not $python) { return $null }
+  try {
+    $output=@(& $python.Source -B $producer --root $root --tenant $TenantKey 2>&1)
+    if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1) { throw 'Prepared mailbox evidence failed qualification.' }
+    $jsonText=[string]$output[0]
+    $evidence=($jsonText | ConvertFrom-Json -ErrorAction Stop)
+    # ConvertFrom-Json can coerce ISO timestamps to local DateTime and lose the offset.
+    $jsonDocument=[Text.Json.JsonDocument]::Parse($jsonText)
+    try { $createdText=$jsonDocument.RootElement.GetProperty('BatchCreatedUtc').GetString(); $exceptionDate=$jsonDocument.RootElement.GetProperty('ExceptionSnapshotDate').GetString() } finally { $jsonDocument.Dispose() }
+    $evidence.BatchCreatedUtc=$createdText
+    $evidence.ExceptionSnapshotDate=$exceptionDate
+    if ([string]$evidence.BatchId -notmatch '^\d{8}T\d{9}Z-[0-9a-f]{8}$' -or -not $evidence.Counts) { throw 'Prepared mailbox evidence has an invalid result.' }
+    $created=[datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParse([string]$evidence.BatchCreatedUtc,[ref]$created) -or $created -gt [datetimeoffset]::UtcNow.AddMinutes(5) -or $created -lt [datetimeoffset]::UtcNow.AddDays(-7)) { throw 'Prepared mailbox batch is stale or has an invalid timestamp.' }
+    foreach($name in @('Required','AssignedCoverage','ToComplete','CoverageReview','Excluded','IdentityOrRegisterReview','SizeReview','Under50','E3ToPlan2Review','E3Under50Review','F3Under50Review')) {
+      $p=$evidence.Counts.PSObject.Properties[$name]; if(-not $p -or $p.Value -isnot [long] -and $p.Value -isnot [int] -or [long]$p.Value -lt 0) { throw 'Prepared mailbox evidence has an invalid count.' }
+    }
+    if ([long]$evidence.Counts.Required -ne ([long]$evidence.Counts.AssignedCoverage + [long]$evidence.Counts.ToComplete + [long]$evidence.Counts.CoverageReview)) { throw 'Prepared mailbox coverage counts do not reconcile.' }
+    return $evidence
+  } catch { WriteLog -Message 'Prepared shared mailbox migration evidence is unavailable or unqualified.' 'WARNING'; return $null }
+}
+
 function Publish-LicensesReportSnapshot {
   param(
     [Parameter(Mandatory)][string]$Folder,
@@ -2503,7 +2591,7 @@ function Publish-LicensesReportSnapshot {
                        'MailboxInactive','MailboxUnknown','M365Inactive','M365Unknown',
                        'LocalAppsInactive','LocalAppsUnknown','Multiple','MultipleUnknown',
                        'MultipleAll','MultipleAllUnknown','SharedLicensed','SharedUnder50',
-                       'SharedEligible','SharedUnknown','RecoveryCandidates','RecoveryUnknown',
+                       'SharedEligible','SharedUnknown','SharedE3Plan2Review','RecoveryCandidates','RecoveryUnknown',
                        'RecoveryPrimaryPc','RecoveryPrimaryPcUnknown')) {
       $counts[$key] = if (($key -like 'LocalApps*' -and $Product -notin @('Microsoft 365 E3','Microsoft 365 E5')) -or
                           ($key -like 'Shared*' -and -not $Usage.SharedSourceReady) -or
@@ -2536,6 +2624,18 @@ function Publish-LicensesReportSnapshot {
   if (-not (Test-Path -LiteralPath $tenantPath -PathType Leaf)) { throw 'Tenant license CSV is missing before report snapshot publication.' }
   $tenantHashBefore = (Get-FileHash -LiteralPath $tenantPath -Algorithm SHA256).Hash
   $tenantSource = Read-LicensesTenantSnapshot -Path $tenantPath -ExpectedTenantKey $TenantKey
+  # A missing or ambiguous SKU is not evidence of zero stock. Count only the
+  # active standalone SKU; other suites are deliberately not added here.
+  $plan2Stock = Get-LicensesStandalonePlan2Stock -TenantRows $tenantSource.Rows -CollectedAtUtc $tenantSource.CollectedAtUtc
+  $sharedMigration=Get-LicensesSharedMigrationEvidence -Folder $Folder -TenantKey $TenantKey
+  $equivalentStock=$null; $planCatalogSource=$null
+  try {
+    $currentProof=if($ReceiptRun){[pscustomobject]@{RunId=[string]$ReceiptRun.RunId;Hashes=$ReceiptRun.Hashes}}else{$null}
+    $planCatalogSource=Get-LicensesCsvSource -Folder $Folder -FileName 'M365_Licenses_ServicePlans_Catalog.csv' -Columns @('TenantKey','SkuId','PlanName') -AsOfUtc ([datetimeoffset]::Parse($CollectedAtUtc).UtcDateTime) -CollectorManifestName 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt' -RequireFileReceipt -CurrentRunPublication $currentProof
+    if ($planCatalogSource.Ready) {
+      $equivalentStock=Get-LicensesEquivalentPlan2Stock -TenantRows $tenantSource.Rows -CatalogRows @(Import-LicensesSourceCsv -Source $planCatalogSource) -TenantKey $TenantKey
+    }
+  } catch { WriteLog -Message ("Equivalent Plan 2 stock not qualified: {0}" -f $_.Exception.Message) 'WARNING'; $equivalentStock=$null }
   foreach ($pair in @(
       @{ Sent=$SummaryRows; Published=@(Get-LicensesFocusedSummaryRows -TenantRows $tenantSource.Rows) },
       @{ Sent=$AdditionalRows; Published=@(Get-LicensesAdditionalOverviewRows -TenantRows $tenantSource.Rows) })) {
@@ -2556,6 +2656,7 @@ function Publish-LicensesReportSnapshot {
   $reportSources = [System.Collections.Generic.List[object]]::new()
   if ($Usage) { foreach ($source in @($Usage.Sources)) { $reportSources.Add($source) } }
   if ($AssignmentIssues) { foreach ($source in @($AssignmentIssues.Sources)) { $reportSources.Add($source) } }
+  if ($planCatalogSource) { $reportSources.Add($planCatalogSource) }
   foreach ($source in $reportSources) {
       if ($seenSources.ContainsKey([string]$source.Name)) { continue }
       $seenSources[[string]$source.Name] = $true
@@ -2701,6 +2802,9 @@ function Publish-LicensesReportSnapshot {
     GeneratedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
     LicenseCollectedAtUtc = $CollectedAtUtc
     TenantFileCollectedAtUtc = $tenantSource.CollectedAtUtc
+    ExchangePlan2StandaloneStock = $plan2Stock
+    ExchangePlan2EquivalentStock = $equivalentStock
+    SharedMailboxMigrationEvidence = $sharedMigration
     Products = @($products)
     OtherProducts = @($otherProducts)
     E3ToF3Review = if ($Usage -and $Usage.DowngradeReview) { $Usage.DowngradeReview } else { $null }
@@ -3536,6 +3640,11 @@ function Read-LicensesPublishedReport {
   return [pscustomobject]@{
     SnapshotId = [string]$document.SnapshotId
     CollectedAtUtc = [string]$document.LicenseCollectedAtUtc
+    TenantFileCollectedAtUtc = [string]$document.TenantFileCollectedAtUtc
+    ExchangePlan2StandaloneStock = if ($document.PSObject.Properties['ExchangePlan2StandaloneStock']) { $document.ExchangePlan2StandaloneStock } else { $null }
+    ExchangePlan2EquivalentStock = if ($document.PSObject.Properties['ExchangePlan2EquivalentStock']) { $document.ExchangePlan2EquivalentStock } else { $null }
+    SharedMailboxMigrationEvidence = if ($document.PSObject.Properties['SharedMailboxMigrationEvidence']) { $document.SharedMailboxMigrationEvidence } else { $null }
+    HasSharedPlan2Evidence = [bool]($document.PSObject.Properties['ExchangePlan2StandaloneStock'] -and @($document.Products | Where-Object { $_.Counts -and $_.Counts.PSObject.Properties['SharedE3Plan2Review'] }).Count -gt 0)
     SummaryRows = $summaryRows
     AdditionalRows = $additionalRows
     Usage = $usage
@@ -3600,6 +3709,9 @@ function Get-LicensesDomainPublishedReport {
   $result.Report = [pscustomobject]@{
     SnapshotId = $Report.SnapshotId
     CollectedAtUtc = $Report.CollectedAtUtc
+    TenantFileCollectedAtUtc = if ($Report.PSObject.Properties['TenantFileCollectedAtUtc']) { $Report.TenantFileCollectedAtUtc } else { '' }
+    ExchangePlan2StandaloneStock = if ($Report.PSObject.Properties['ExchangePlan2StandaloneStock']) { $Report.ExchangePlan2StandaloneStock } else { $null }
+    ExchangePlan2EquivalentStock = if ($Report.PSObject.Properties['ExchangePlan2EquivalentStock']) { $Report.ExchangePlan2EquivalentStock } else { $null }
     SummaryRows = $Report.SummaryRows
     AdditionalRows = $Report.AdditionalRows
     Usage = $usage
@@ -3752,6 +3864,29 @@ function New-LicensesSummaryMailContent {
     '<tr><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:700;">{0}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">{1}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">{2}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#0f766e;">{3}</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">{4}</td></tr>' -f `
        [System.Net.WebUtility]::HtmlEncode($row.Product.Replace('Microsoft 365 ','')), $licensed, $under50, $eligible, $unknown
   }
+  $sharedE3 = if ($usageByProduct.ContainsKey('Microsoft 365 E3')) { $usageByProduct['Microsoft 365 E3'] } else { $null }
+  $sharedE3Plan2Review = if ($usage -and $usage.SharedSourceReady -and $sharedE3 -and $sharedE3.Available -and
+      $sharedE3.Counts.ContainsKey('SharedE3Plan2Review') -and $null -ne $sharedE3.Counts['SharedE3Plan2Review']) {
+    [string]$sharedE3.Counts['SharedE3Plan2Review']
+  } else { 'N/D' }
+  $plan2Stock = if ($publishedReport.PSObject.Properties['ExchangePlan2StandaloneStock']) { $publishedReport.ExchangePlan2StandaloneStock } else { $null }
+  $plan2Available = if ($plan2Stock -and $null -ne $plan2Stock.Available) { [string]$plan2Stock.Available } else { 'N/D' }
+  $plan2Enabled = if ($plan2Stock -and $null -ne $plan2Stock.Enabled) { [string]$plan2Stock.Enabled } else { 'N/D' }
+  $plan2Consumed = if ($plan2Stock -and $null -ne $plan2Stock.Consumed) { [string]$plan2Stock.Consumed } else { 'N/D' }
+  $plan2Date = if ($plan2Stock) { [System.Net.WebUtility]::HtmlEncode([string]$plan2Stock.CollectedAtUtc) } elseif ($publishedReport.PSObject.Properties['TenantFileCollectedAtUtc'] -and $publishedReport.TenantFileCollectedAtUtc) { [System.Net.WebUtility]::HtmlEncode([string]$publishedReport.TenantFileCollectedAtUtc) } else { 'N/D' }
+  $equivalentStock=if($publishedReport.PSObject.Properties['ExchangePlan2EquivalentStock']){$publishedReport.ExchangePlan2EquivalentStock}else{$null}
+  $equivalentText=if($null -eq $equivalentStock){'N/D - service plan catalog not qualified'}else{
+    $parts=@(foreach($sku in @($equivalentStock.Rows)) { '{0}: {1} available ({2} enabled, {3} consumed)' -f [System.Net.WebUtility]::HtmlEncode([string]$sku.SkuPartNumber),[long]$sku.Available,[long]$sku.Enabled,[long]$sku.Consumed })
+    $label=if($parts.Count){$parts -join '; '}else{'No qualified equivalent SKU observed'}
+    if([long]$equivalentStock.UnknownSkuCount -gt 0){$label += ' | ' + [long]$equivalentStock.UnknownSkuCount + ' SKU(s) require qualification'}
+    $label
+  }
+  $migration=if($publishedReport.PSObject.Properties['SharedMailboxMigrationEvidence']){$publishedReport.SharedMailboxMigrationEvidence}else{$null}
+  $migrationText=if($null -eq $migration){'N/D - no qualified prepared migration batch'}else{
+    $c=$migration.Counts
+    'Known minimum: {0} required; {1} assigned coverage; {2} to complete; {3} coverage review. Excluded/retained: {4}; identity or register review: {5}; size review: {6}. Under 50 GB: {7}, including {8} E3 and {9} F3 assignments for review. E3 to Plan 2 review: {10}. Prepared batch {11}, created {12}; exception snapshot {13}.' -f `
+      [long]$c.Required,[long]$c.AssignedCoverage,[long]$c.ToComplete,[long]$c.CoverageReview,[long]$c.Excluded,[long]$c.IdentityOrRegisterReview,[long]$c.SizeReview,[long]$c.Under50,[long]$c.E3Under50Review,[long]$c.F3Under50Review,[long]$c.E3ToPlan2Review,[System.Net.WebUtility]::HtmlEncode([string]$migration.BatchId),[System.Net.WebUtility]::HtmlEncode([string]$migration.BatchCreatedUtc),[System.Net.WebUtility]::HtmlEncode([string]$migration.ExceptionSnapshotDate)
+  }
   $gap05 = if ($usage -and $usage.MailboxGap) { $usage.MailboxGap.UserMailboxes } else { $null }
   $gap06 = if ($usage -and $usage.MailboxGap) { $usage.MailboxGap.NoUserMailbox } else { $null }
   $gap05Total = if ($gap05 -and $gap05.Available) { [string]$gap05.Total } else { 'N/D' }
@@ -3891,6 +4026,9 @@ function New-LicensesSummaryMailContent {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">No AD or Entra activity (90d)</th><th style="$headStyle">No mailbox activity (90d)</th><th style="$headStyle">No local Apps use (180d)</th><th style="$headStyle">Multiple assigned SKUs</th></tr></thead><tbody>$($activityRows -join "`n")</tbody></table>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">05 &nbsp; Licensed shared mailboxes</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">License</th><th style="$headStyle">Shared mailboxes with target SKU</th><th style="$headStyle">Under 50 GB</th><th style="$headStyle">Removal candidates after archive and hold checks</th><th style="$headStyle">Not qualified</th></tr></thead><tbody>$($sharedRows -join "`n")</tbody></table>
+  <p style="margin:8px 0;font-size:12px;line-height:18px;color:#334155;"><strong>E3 to Exchange Online Plan 2 review: $sharedE3Plan2Review</strong> existing EXO shared mailboxes with E3 and rounded size above 50 and below 100 GB. Review all other service, compliance, assignment and contract dependencies before any change. This is not a released license or a purchase quantity. Rounded boundary values require separate review; on-premises migration candidates are not included.</p>
+  <p style="margin:8px 0;font-size:12px;line-height:18px;color:#334155;">Standalone Exchange Online Plan 2 tenant stock: <strong>$plan2Available available</strong> ($plan2Enabled enabled; $plan2Consumed consumed; license snapshot: $plan2Date). Equivalent SKU stock: $equivalentText. These tenant stocks are shared, not reserved, and include SKUs excluded from recovery recommendations. Missing or unqualified capacity is N/D.</p>
+  <p style="margin:8px 0;font-size:12px;line-height:18px;color:#334155;"><strong>On-premises shared mailbox migration:</strong> $migrationText Counts exclude confirmed retained mailboxes; unresolved register, identity, service classification and size stay in review. E3/F3 recovery counts overlap and are review signals, not released stock. Coverage review is not included in to complete; stock is not subtracted.</p>
   <h2 style="margin:22px 0 8px;font-size:16px;line-height:22px;color:#0f172a;">06 &nbsp; User mailboxes without licence F1/F3/E3/E5</h2>
   <p style="margin:0 0 8px;padding:11px 13px;background:#eff6f8;border-left:4px solid #0f766e;font-size:12px;color:#334155;"><strong style="font-size:19px;color:#0f766e;">$gap05Total</strong> of $gap05Universe qualified EXO UserMailbox &nbsp;&middot;&nbsp; <strong>$gap05Percent</strong></p>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="$tableStyle"><thead><tr><th style="$headStyle">Entra enabled</th><th style="$headStyle">Entra disabled</th><th style="$headStyle">Entra state N/D</th><th style="$headStyle">With other SKUs</th><th style="$headStyle">With no assigned SKU</th><th style="$headStyle">Not qualified</th></tr></thead><tbody><tr><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05EntraEnabled</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05EntraDisabled</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05EntraUnknown</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05Other</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05None</td><td style="padding:10px 8px;border-bottom:1px solid #e2e8f0;">$gap05Unknown</td></tr></tbody></table>
@@ -3991,6 +4129,7 @@ function Send-LicensesSummaryMailScope {
     [string]$Domain = '',
     [switch]$Manual,
     [switch]$ForceLicenseSummaryEmail,
+    [switch]$IsTest,
     [Parameter(Mandatory)]$Schedule,
     # Runs once, only when this mail passes its gate (the pause before the first domain mail).
     [scriptblock]$BeforeSend
@@ -4015,9 +4154,11 @@ function Send-LicensesSummaryMailScope {
 
     # The email never recomputes: it renders the report already published and qualified by the receipt.
     $report = & $ReadReport
+    if ($IsTest -and -not $report.HasSharedPlan2Evidence) { throw 'The published report predates the shared mailbox Plan 2 changes; no test mail was sent.' }
     # The tenant mail keeps the global Cc; a domain mail uses only its own recipients.
     $mailArgs = @{ From=$From; To=$To; MailPurpose='Report' }
     if ($Domain) { $mailArgs.Cc = $Cc }
+    if ($IsTest) { $mailArgs.Cc = ''; $mailArgs.ExpectedSingleRecipient = $To }
     $scoped = if ($Domain) { Get-LicensesDomainPublishedReport -Report $report -Domain $Domain } else { $null }
     if ($scoped -and -not $scoped.Available) {
       # A configured domain without qualified data gets an explicit N/D notice, never an empty report.
@@ -4039,7 +4180,12 @@ function Send-LicensesSummaryMailScope {
       [void](New-LicensesRecoveryWorkbook -Path $attachmentPath -SummaryRows $content.SummaryRows -Usage $content.Usage -AssignmentIssues $content.AssignmentIssues -CollectedAtUtc $content.CollectedAtUtc `
         -ScopeLabel ([string]$OrgDomain) -ScopeDomain ([string]$content.ScopeDomain) -SnapshotId ([string]$content.SnapshotId) -UserScopes $content.UserScopes)
       $mailArgs.Subject = $content.Subject
+      if ($IsTest) { $mailArgs.Subject = '[TEST] ' + $mailArgs.Subject }
       $mailArgs.BodyHtml = $content.Body
+      if ($IsTest) {
+        $banner = '<div style="padding:12px;background:#fff4ce;color:#513b00;font-family:Segoe UI,Arial,sans-serif;">TEST PREVIEW: the E3 shared mailbox indicator and Plan 2 stock were recalculated in memory from verified files of the published licensing run. The snapshot and production send state were not changed. Migration evidence, when present, is from the prepared batch identified below.</div>'
+        $mailArgs.BodyHtml = [regex]::Replace($mailArgs.BodyHtml, '(?i)(<body\b[^>]*>)', { param($m) $m.Value + $banner }, 1)
+      }
       $mailArgs.Attachments = @($attachmentPath)
       $mailArgs.AllowAttachments = $true
       $mailArgs.SuppressAttachmentLinks = $true
@@ -4082,7 +4228,8 @@ function Send-LicensesFocusedSummaryEmail {
     # Email-only mode: one AD domain, or All for every configured domain without the tenant mail.
     [string]$Domain = '',
     # Email-only mode without a domain: the tenant mail only. A full run sends the tenant mail and every domain.
-    [switch]$TenantOnly
+    [switch]$TenantOnly,
+    [string]$TestTo = ''
   )
 
   if (-not $Manual -and -not [bool](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'EnableLicenseSummaryEmail' -DefaultValue $true)) {
@@ -4097,7 +4244,43 @@ function Send-LicensesFocusedSummaryEmail {
   # One verified read of the published report serves the tenant mail and every domain mail.
   $reportCache = @{}
   $readReport = {
-    if (-not $reportCache.ContainsKey('Report')) { $reportCache['Report'] = Read-LicensesPublishedReport -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey }
+    if (-not $reportCache.ContainsKey('Report')) {
+      $report = Read-LicensesPublishedReport -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey
+      if ($TestTo) {
+        # Preview only: derive the new indicators from the exact same source bytes
+        # as the receipt-qualified report, and never rewrite the published snapshot.
+        $snapshotPath = Join-Path $CsvFolderPath 'M365_Licenses_ReportSnapshot.json.txt'
+        $snapshotHash = (Get-FileHash -LiteralPath $snapshotPath -Algorithm SHA256).Hash
+        $snapshot = Get-Content -LiteralPath $snapshotPath -Raw | ConvertFrom-Json
+        if ([string]$snapshot.SnapshotId -cne [string]$report.SnapshotId) { throw 'Test snapshot changed during read.' }
+        $verified = @{}
+        foreach ($name in @('M365_Licenses_Tenant.csv','M365_Licenses_Users.csv','Exchange_EXO_Mailboxes_AllDomains.csv')) {
+          $entry = @($snapshot.Sources | Where-Object { [string]$_.Name -ceq $name })
+          $path = Join-Path $CsvFolderPath $name
+          if ($entry.Count -ne 1 -or -not $entry[0].Ready -or -not $entry[0].SHA256 -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Test source is not qualified: $name" }
+          $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+          if ($hash -cne [string]$entry[0].SHA256) { throw "Test source differs from the published snapshot: $name" }
+          $verified[$name] = $hash
+        }
+        $tenantData = Read-LicensesTenantSnapshot -Path (Join-Path $CsvFolderPath 'M365_Licenses_Tenant.csv') -ExpectedTenantKey $ExpectedTenantKey
+        $previewUsage = Get-LicensesFocusedUsageRows -CsvFolderPath $CsvFolderPath -ExpectedTenantKey $ExpectedTenantKey -LicenseSnapshotUtc ([datetimeoffset]::Parse($report.CollectedAtUtc))
+        $previewE3 = @($previewUsage.Rows | Where-Object Product -eq 'Microsoft 365 E3')
+        $publishedE3 = @($report.Usage.Rows | Where-Object Product -eq 'Microsoft 365 E3')
+        if (-not $previewUsage.SharedSourceReady -or $previewE3.Count -ne 1 -or -not $previewE3[0].Available -or $publishedE3.Count -ne 1 -or -not $publishedE3[0].Available) { throw 'E3 shared mailbox evidence is not qualified for test.' }
+        foreach ($name in $verified.Keys) {
+          if ((Get-FileHash -LiteralPath (Join-Path $CsvFolderPath $name) -Algorithm SHA256).Hash -cne $verified[$name]) { throw "Test source changed during calculation: $name" }
+        }
+        if ((Get-FileHash -LiteralPath $snapshotPath -Algorithm SHA256).Hash -cne $snapshotHash) { throw 'Test snapshot changed during calculation.' }
+        $publishedE3[0].Counts['SharedE3Plan2Review'] = $previewE3[0].Counts['SharedE3Plan2Review']
+        $report.ExchangePlan2StandaloneStock = Get-LicensesStandalonePlan2Stock -TenantRows $tenantData.Rows -CollectedAtUtc $tenantData.CollectedAtUtc
+        $catalog=Get-LicensesCsvSource -Folder $CsvFolderPath -FileName 'M365_Licenses_ServicePlans_Catalog.csv' -Columns @('TenantKey','SkuId','PlanName') -AsOfUtc ([datetimeoffset]::Parse($report.CollectedAtUtc).UtcDateTime) -CollectorManifestName 'SmartInventory_SmartM365-Licences-Inventory.current.json.txt' -RequireFileReceipt
+        $report.ExchangePlan2EquivalentStock=if($catalog.Ready){Get-LicensesEquivalentPlan2Stock -TenantRows $tenantData.Rows -CatalogRows @(Import-LicensesSourceCsv -Source $catalog) -TenantKey $ExpectedTenantKey}else{$null}
+        $report.SharedMailboxMigrationEvidence=Get-LicensesSharedMigrationEvidence -Folder $CsvFolderPath -TenantKey $ExpectedTenantKey
+        $report.TenantFileCollectedAtUtc = $tenantData.CollectedAtUtc
+        $report.HasSharedPlan2Evidence = $true
+      }
+      $reportCache['Report'] = $report
+    }
     return $reportCache['Report']
   }
   $from = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'From' -DefaultValue '')
@@ -4108,6 +4291,11 @@ function Send-LicensesFocusedSummaryEmail {
     return $false
   }
   $sent = $false
+  if ($TestTo) {
+    if (-not $Manual -or $Domain -or -not $TenantOnly -or $TestTo -notmatch '^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$') { throw 'A test mail requires one explicit recipient and tenant-only manual mode.' }
+    return Send-LicensesSummaryMailScope -ReadReport $readReport -ExpectedTenantKey $ExpectedTenantKey -MailStatePath $MailStatePath `
+      -To $TestTo -From $from -Manual -ForceLicenseSummaryEmail -Schedule $tenantSchedule -IsTest
+  }
   if (-not $Domain) {
     $sent = Send-LicensesSummaryMailScope -ReadReport $readReport -ExpectedTenantKey $ExpectedTenantKey -MailStatePath $MailStatePath `
       -To ([string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'To' -DefaultValue '')) -From $from -Manual:$Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail `
@@ -4793,7 +4981,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.71"
+$ScriptVersion = "1.74"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -4805,6 +4993,10 @@ catch { Write-Warning ("Optional license workbook unavailable at startup: {0}" -
 if ($LicenseSummaryEmailDomain -and -not $SendLicenseSummaryEmailOnly) {
   throw '-LicenseSummaryEmailDomain applies to -SendLicenseSummaryEmailOnly; a full run sends the tenant mail and every configured AD domain mail.'
 }
+if ($LicenseSummaryTestTo -and (-not $SendLicenseSummaryEmailOnly -or $LicenseSummaryEmailDomain)) {
+  throw '-LicenseSummaryTestTo requires tenant-only -SendLicenseSummaryEmailOnly.'
+}
+if ($LicenseSummaryTestDataPath -and -not $LicenseSummaryTestTo) { throw '-LicenseSummaryTestDataPath requires -LicenseSummaryTestTo.' }
 if ($SendLicenseSummaryEmailOnly) {
   if ($MaxItems -gt 0 -or $TopUsers -gt 0 -or $FastSample -or $InteractiveAuth) {
     throw '-SendLicenseSummaryEmailOnly cannot be combined with collection or sampling switches.'
@@ -4813,6 +5005,7 @@ if ($SendLicenseSummaryEmailOnly) {
     throw '-ForceAdCsvAnalysis applies to a full collection run; email-only mode sends the license report already published by that run.'
   }
   if ([string]::IsNullOrWhiteSpace($LatestCsvFolderPath)) { throw 'LatestCsvFolderPath is required for email-only mode.' }
+  if ($LicenseSummaryTestDataPath) { $LatestCsvFolderPath = (Resolve-Path -LiteralPath $LicenseSummaryTestDataPath -ErrorAction Stop).ProviderPath }
   $expectedTenantKey = if ($global:SmartM365TenantKey) { [string]$global:SmartM365TenantKey } else { $Tenant }
   $global:AppId = [string]$AppId
   $global:TenantId = [string]$TenantId
@@ -4820,8 +5013,14 @@ if ($SendLicenseSummaryEmailOnly) {
   $global:Thumbprint = [string](Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'Thumbprint' -DefaultValue $Thumb)
   $global:OrgDomain = [string]$OrgDomain
   # Email-only mode sends exactly what is asked: the tenant mail, one AD domain, or All domains.
-  $mailSent = Send-LicensesFocusedSummaryEmail -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -MailStatePath $licenseSummaryMailStatePath -Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail `
-    -Domain ([string]$LicenseSummaryEmailDomain) -TenantOnly:([string]::IsNullOrWhiteSpace($LicenseSummaryEmailDomain))
+  $testStatePath = if ($LicenseSummaryTestTo) { Join-Path ([IO.Path]::GetTempPath()) ('SmartM365-LicenseTest-' + [guid]::NewGuid().ToString('N') + '.json.txt') } else { '' }
+  try {
+    $effectiveState = if ($testStatePath) { $testStatePath } else { $licenseSummaryMailStatePath }
+    $mailSent = Send-LicensesFocusedSummaryEmail -CsvFolderPath $LatestCsvFolderPath -ExpectedTenantKey $expectedTenantKey -MailStatePath $effectiveState -Manual -ForceLicenseSummaryEmail:$ForceLicenseSummaryEmail `
+      -Domain ([string]$LicenseSummaryEmailDomain) -TenantOnly:([string]::IsNullOrWhiteSpace($LicenseSummaryEmailDomain)) -TestTo $LicenseSummaryTestTo
+  } finally {
+    if ($testStatePath -and (Test-Path -LiteralPath $testStatePath -PathType Leaf)) { Remove-Item -LiteralPath $testStatePath -Force }
+  }
   $mailScope = if (-not $LicenseSummaryEmailDomain) { 'tenant' } elseif ($LicenseSummaryEmailDomain.Trim() -ieq 'All') { 'all AD domains' } else { "AD domain $LicenseSummaryEmailDomain" }
   if ($mailSent) { Write-Host ("License summary email ({0}) sent from the published license report: {1}" -f $mailScope, $LatestCsvFolderPath) }
   else { Write-Host ("License summary email ({0}) skipped: already sent or pending today (Europe/Paris)." -f $mailScope) }
@@ -5586,10 +5785,10 @@ finally {
 if ($smartM365RunGuard.ExitCode -ne 0) { exit $smartM365RunGuard.ExitCode }
 
 # SIG # Begin signature block
-# MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD22ZfeaecDF8V/
-# RTibZJ8NuLeEWInPwS7JMLjNtB7db6CCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZlo6Lk7bk5S0n
+# n/N2bcSQ6IPKM8kVt0D3MfHVGA29f6CCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5614,19 +5813,143 @@ if ($smartM365RunGuard.ExitCode -ne 0) { exit $smartM365RunGuard.ExitCode }
 # PI5wrVTjV/pR7IrtSIfq8UladlrSZJyyDn3NV2ATvIZ6wNxbTmPFcE0uMg/EYzwd
 # Tek+CgXL3TxUKeldJM4YDWPimNBRhOPXzBDiOQIj6WNswt/KM1oDLnA00CNtciPN
 # dn+dXlneMvTEUah9wyt8o8tkLpoBw+KN+Bq/K0O1qPtS7umi70l45pPiej+mwbwq
-# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjGCApQw
-# ggKQAgEBMGIwTjEeMBwGA1UEAwwVd29ya3BsYWNlY2xvdWRodWIuY29tMSwwKgYJ
-# KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
-# 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAsE7F1WFX1Zs6+r6caSFEY
-# E41zXAuwxcf2nC6CDco8zjANBgkqhkiG9w0BAQEFAASCAYBm6FKBCAe5py6DhAHl
-# mHlVAVW4WV83M1OpJz2UrhuOv7QEIx/XOstF6wgFtJNJGgTCyMfnbev60IlZDKI6
-# vfB/wZxZFzjzcZEjkpYujq7F3CuiBtUWPxkCCBxrpIqzWnMz8pWdhKGav0QiTjXP
-# Lj5EKpVyJshwDv3n4Td1AX8RHfxwRn2AKrWvPxKVr3Yh/Pao4kU2luW+6jmFsBbY
-# 1uRxkloc0AFrEMyQb5u+pgEdGjBsxcTqL0S62KF374n+kJGYO+5ATMGqZpRLCHY5
-# 9U5PgyFlOUpeKBjMEBemPXyZnCSrOTEziUdfaFVUzaaGry8n5GVTpKyvgRQfjA+j
-# LyV0dKCj+P0CFjYGR/ykzPP/JJf8/W5y6HuueLG+c17vH/49eZkUfBpZtfpye2gn
-# Er8kPSTr40rHQrCrlJ6/CP5GqymLQr8nYPgKFvWvjwCZHDsBuZEh3NwRpBF0BU7x
-# SsoLlM3V6ZmLHKnjmnDbu1WA9JRYSaAMXNmS/LPQstCzD8w=
+# ztcaoVD7a8ggHP1Vdp/rnafM4GtyCAE6b7U9Yzgvp1/a1kh7XffmqVhRRjCCBoIw
+# ggRqoAMCAQICEDbCsL18Gzrno7PdNsvJdWgwDQYJKoZIhvcNAQEMBQAwgYgxCzAJ
+# BgNVBAYTAlVTMRMwEQYDVQQIEwpOZXcgSmVyc2V5MRQwEgYDVQQHEwtKZXJzZXkg
+# Q2l0eTEeMBwGA1UEChMVVGhlIFVTRVJUUlVTVCBOZXR3b3JrMS4wLAYDVQQDEyVV
+# U0VSVHJ1c3QgUlNBIENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4XDTIxMDMyMjAw
+# MDAwMFoXDTM4MDExODIzNTk1OVowVzELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1Nl
+# Y3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFt
+# cGluZyBSb290IFI0NjCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAIid
+# 2LlFZ50d3ei5JoGaVFTAfEkFm8xaFQ/ZlBBEtEFAgXcUmanU5HYsyAhTXiDQkiUv
+# pVdYqZ1uYoZEMgtHES1l1Cc6HaqZzEbOOp6YiTx63ywTon434aXVydmhx7Dx4IBr
+# Aou7hNGsKioIBPy5GMN7KmgYmuu4f92sKKjbxqohUSfjk1mJlAjthgF7Hjx4vvyV
+# DQGsd5KarLW5d73E3ThobSkob2SL48LpUR/O627pDchxll+bTSv1gASn/hp6IuHJ
+# orEu6EopoB1CNFp/+HpTXeNARXUmdRMKbnXWflq+/g36NJXB35ZvxQw6zid61qmr
+# lD/IbKJA6COw/8lFSPQwBP1ityZdwuCysCKZ9ZjczMqbUcLFyq6KdOpuzVDR3ZUw
+# xDKL1wCAxgL2Mpz7eZbrb/JWXiOcNzDpQsmwGQ6Stw8tTCqPumhLRPb7YkzM8/6N
+# nWH3T9ClmcGSF22LEyJYNWCHrQqYubNeKolzqUbCqhSqmr/UdUeb49zYHr7ALL8b
+# AJyPDmubNqMtuaobKASBqP84uhqcRY/pjnYd+V5/dcu9ieERjiRKKsxCG1t6tG9o
+# j7liwPddXEcYGOUiWLm742st50jGwTzxbMpepmOP1mLnJskvZaN5e45NuzAHteOR
+# lsSuDt5t4BBRCJL+5EZnnw0ezntk9R8QJyAkL6/bAgMBAAGjggEWMIIBEjAfBgNV
+# HSMEGDAWgBRTeb9aqitKz1SA4dibwJ3ysgNmyzAdBgNVHQ4EFgQU9ndq3T/9ARP/
+# FqFsggIv0Ao9FCUwDgYDVR0PAQH/BAQDAgGGMA8GA1UdEwEB/wQFMAMBAf8wEwYD
+# VR0lBAwwCgYIKwYBBQUHAwgwEQYDVR0gBAowCDAGBgRVHSAAMFAGA1UdHwRJMEcw
+# RaBDoEGGP2h0dHA6Ly9jcmwudXNlcnRydXN0LmNvbS9VU0VSVHJ1c3RSU0FDZXJ0
+# aWZpY2F0aW9uQXV0aG9yaXR5LmNybDA1BggrBgEFBQcBAQQpMCcwJQYIKwYBBQUH
+# MAGGGWh0dHA6Ly9vY3NwLnVzZXJ0cnVzdC5jb20wDQYJKoZIhvcNAQEMBQADggIB
+# AA6+ZUHtaES45aHF1BGH5Lc7JYzrftrIF5Ht2PFDxKKFOct/awAEWgHQMVHol9ZL
+# Syd/pYMbaC0IZ+XBW9xhdkkmUV/KbUOiL7g98M/yzRyqUOZ1/IY7Ay0YbMniIibJ
+# rPcgFp73WDnRDKtVutShPSZQZAdtFwXnuiWl8eFARK3PmLqEm9UsVX+55DbVIz33
+# Mbhba0HUTEYv3yJ1fwKGxPBsP/MgTECimh7eXomvMm0/GPxX2uhwCcs/YLxDnBdV
+# VlxvDjHjO1cuwbOpkiJGHmLXXVNbsdXUC2xBrq9fLrfe8IBsA4hopwsCj8hTuwKX
+# JlSTrZcPRVSccP5i9U28gZ7OMzoJGlxZ5384OKm0r568Mo9TYrqzKeKZgFo0fj2/
+# 0iHbj55hc20jfxvK3mQi+H7xpbzxZOFGm/yVQkpo+ffv5gdhp+hv1GDsvJOtJinJ
+# mgGbBFZIThbqI+MHvAmMmkfb3fTxmSkop2mSJL1Y2x/955S29Gu0gSJIkc3z30vU
+# /iXrMpWx2tS7UVfVP+5tKuzGtgkP7d/doqDrLF1u6Ci3TpjAZdeLLlRQZm867eVe
+# XED58LXd1Dk6UvaAhvmWYXoiLz4JA5gPBcz7J311uahxCweNxE+xxxR3kT0WKzAS
+# o5G/PyDez6NHdIUKBeE3jDPs2ACc6CkJ1Sji4PKWVT0/MIIGpzCCBI+gAwIBAgIR
+# AJCsCHIg/cWnxGtcxw33PQYwDQYJKoZIhvcNAQEMBQAwVzELMAkGA1UEBhMCR0Ix
+# GDAWBgNVBAoTD1NlY3RpZ28gTGltaXRlZDEuMCwGA1UEAxMlU2VjdGlnbyBQdWJs
+# aWMgVGltZSBTdGFtcGluZyBSb290IFI0NjAeFw0yNjAzMjUwMDAwMDBaFw00MTAz
+# MjQyMzU5NTlaMFUxCzAJBgNVBAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0
+# ZWQxLDAqBgNVBAMTI1NlY3RpZ28gUHVibGljIFRpbWUgU3RhbXBpbmcgQ0EgUjQx
+# MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAruRKogGtghxi+WYtW5oD
+# zPDVF8GGSfgbUKh6bONxi0wvrI1S8qbAYfvLr/ky5ILVRg//70pgNKq8xC3/WEQo
+# djEwAP2hmkGShoNAUQps4kd6Wwp74Fo7RlwQ1Mp949ytpWQDvCsYBbZccDmBAJC/
+# ggqiuL/c805fGcMw6TzIgyBWuUx5PGp9YnheSNPXFzaz0MPtREdZYk4WhtM+hazq
+# asMWVpj0WUAcNhN9vO/FAdWy9Gafdb7lmYLDKTTYjwqAY9P9RfixPPjUaJH6mnBS
+# NBdrX7a0Qdlux0ApS0fc48RW1m+W3tq3HiHzch1FHyhiLzCNjc6MUpcV5xalBvPO
+# w/FtQo/AxaJOvPCSsVrx0f/WkMpEm3fvVbrY9+oo9rIKv9ducE6VGfwIAtKYedG0
+# bO4Ba1MmlxPcErDqjLwggvrBJu73fwXpkhtE0hzV0psgm2vhQs3pHll9N00SHBdy
+# 2qndEcNuDh+46XouM2hoXCO533YQQOHPEUnMTWOo3hyxx5kjDE5PVqp+x+HS4VAT
+# +WBMG4GzeLr9YvZbU5x5YvLdcR1dErV/QRYK55rp019fZFF2NR+TkSW0WcmQ3b5t
+# aGcrXg49EpzKM6/mEpnSJXg1E13X6GO29rWs/LNvkGzsS8XGoRCGBls6ruofeebS
+# sHADR3GeIE5gIU927bjokLECAwEAAaOCAW4wggFqMB8GA1UdIwQYMBaAFPZ3at0/
+# /QET/xahbIICL9AKPRQlMB0GA1UdDgQWBBQ6dKUMZ8ZCUML9tfzHuyk0gvR6uTAO
+# BgNVHQ8BAf8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBADATBgNVHSUEDDAKBggr
+# BgEFBQcDCDAjBgNVHSAEHDAaMAgGBmeBDAEEAjAOBgwrBgEEAbIxAQIBAwgwTAYD
+# VR0fBEUwQzBBoD+gPYY7aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVi
+# bGljVGltZVN0YW1waW5nUm9vdFI0Ni5jcmwwfAYIKwYBBQUHAQEEcDBuMEcGCCsG
+# AQUFBzAChjtodHRwOi8vY3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1l
+# U3RhbXBpbmdSb290UjQ2LnA3YzAjBggrBgEFBQcwAYYXaHR0cDovL29jc3Auc2Vj
+# dGlnby5jb20wDQYJKoZIhvcNAQEMBQADggIBADLeUkdm8Z4DZvjfKHOhqu+hsdXN
+# t+X5F+48PB6PTAJCRgA3qxxO3YbAV7baps4K/+2WWoWUspBkT4T2NXK49NvJAfCs
+# ztHSgtqkAQMLX4KjCypJF/+m2Ktrk993g+gcgKdv1yg9C3JmYdJCnnL0ga+pZ/Wo
+# 1+rtXZ8dnwO8RCstTN6gYX0ElFi7Y7NpxbdBC1S6bc05V/SA9HC/ojj33W6Gdwnp
+# U/iVylSkdkoHtHeGIhQLT2ZH0qPM9Wdce8v2fZsDCJQQJ8rll7OGLDbsXa2CLf0M
+# RN9TwzifQ3rEuAXOx/TkzkZRFfwL34hf1XqSmaYq2tTMy2LgsPrqC2Z/6ZKb3fgr
+# zU0vphB4wSTWulitY/KlxbvoyKvrBvUCCx4sgeqf8aR65CbvM5MN/d/lahfXipU2
+# NlY0cXcnGS61XpmeGKd8It92/lufApZR9x6o5qMJWe0jq4JsfGMGDpIKx7FzkB8g
+# aejuBUW/CJ9Phc40+xJRonvVewn4S9yJVRWeM47irGbR9YlN3xruM/yZzhk+rAm9
+# AW06nv7ob6RQkAXR+cTxiAPy620FF41NrViYB4UyKpzfx7x8jh4ubTOMz954YIdq
+# yeiqqtsbBwXjWLP0dfMUPA3iIPnPdBKGnodGJTdSlPAMmKJdyvTPqmOXs/LMnf+2
+# Za0Z6FXsIB9z9aXLMIIG4jCCBMqgAwIBAgIRAOdO8lWwUE/626bf9/yLoxUwDQYJ
+# KoZIhvcNAQEMBQAwVTELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBDQSBS
+# NDEwHhcNMjYwMzI1MDAwMDAwWhcNMzcwNjI0MjM1OTU5WjByMQswCQYDVQQGEwJH
+# QjEXMBUGA1UECBMOR3JlYXRlciBMb25kb24xGDAWBgNVBAoTD1NlY3RpZ28gTGlt
+# aXRlZDEwMC4GA1UEAxMnU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGluZyBTaWdu
+# ZXIgUjM3MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAsv/DbUvcUNlF
+# LQURd9m4+1St5+JudFKo5P803Iks4mFeNB9SymodP6BJJWBuNhOFQj9w77AVAeg5
+# qQpA2dIwp2QTyBHr2h9eWSTkMBVj9mV6+WI5SaW+vDZW7PhJTbysd9v9WB3Xt6ql
+# Ei8m47pcTy8+k/OfhziKiuzNQXqfC7KcoRD/6up8OZBsU0qxr7n5nh/iRfAp1QXF
+# TBQONBZSGIdHAyVRYYX033VoC8v71rizEKCpH97Pxbwcn9eq9K7W8h5v4npsMUoq
+# CS/c8mQwylDQGx15dHYV6NlcVFdjXD11l7qCrIy/unH5OlZtgx58QJRXRbGgQyBd
+# STpEpwuj3i5Qc52Z9m7hd7yCGCXKujf83hUQpOPx1w8+84EbEUTHVAfq4cpORaGW
+# gY8NJy6txmd3wpS1MeXrOaVAMczTgzAZ+yZBWIqdgQBgTxEeXldEToZOrRkxvn1I
+# jIlfr4I4NWJz+Rb52FshLVnkA/wdoad789Eb7XZDNKd4oMmnc636TgauaaVZP2LL
+# oU0JD/fYr53hwBn4uXu5ZsSfpnqAT60S7szJm/Na882xEoyRzLJ+UVbXOlHLO63D
+# KkAtdz1CDuwWxgRE1drnwplepT06dz+1yTr5p1AkUz21bzE6cT/8/kjh4OPzggYY
+# qrOBQPfuKEL5ZJPcN9jRgEpYvRlq5ucCAwEAAaOCAY4wggGKMB8GA1UdIwQYMBaA
+# FDp0pQxnxkJQwv21/Me7KTSC9Hq5MB0GA1UdDgQWBBRhEOl6Eq9RxIXU8s+kdA9Q
+# zSCv+DAOBgNVHQ8BAf8EBAMCBsAwDAYDVR0TAQH/BAIwADAWBgNVHSUBAf8EDDAK
+# BggrBgEFBQcDCDBKBgNVHSAEQzBBMAgGBmeBDAEEAjA1BgwrBgEEAbIxAQIBAwgw
+# JTAjBggrBgEFBQcCARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwSgYDVR0fBEMw
+# QTA/oD2gO4Y5aHR0cDovL2NybC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGlt
+# ZVN0YW1waW5nQ0FSNDEuY3JsMHoGCCsGAQUFBwEBBG4wbDBFBggrBgEFBQcwAoY5
+# aHR0cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljVGltZVN0YW1waW5n
+# Q0FSNDEuY3J0MCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTAN
+# BgkqhkiG9w0BAQwFAAOCAgEAA+o9jdGszfoZepOmygef1OlbkjrPd2QW9z3M8vVb
+# QSCruPeO2eRsC9GhZ4CMZfhkrixayYD67gQkbyiRCbJu5L/i0NQjlQhBvbWfiEba
+# +KHFKGud5YHRWhDZUtDeMIJGZG0BD7/sftZUo2Ifk+CXi/ZlM50+xK3OkqeXVi5G
+# ubDD/5txmYuqCT3T3LAilmoB+5th9sQxiMhyQuT3R/aYb4vypoZJLYklUzTalXle
+# W1nV9s4UROlE389CHDKAi/fepRSMnV8TghODDQxwzNGrOJZ04k/yhzHHDupfHPU5
+# 1FYJqXIvWq9SAAWdlNV1JGIxhkp/TAtxBwz/Vd/VbgVb2d9/wRFfxFkka39O0+4x
+# aZSl/oEK/1DqjxjJRO2Se9lGlJDScu21Zd23Cys3aYyB8y5H/+DFWtVe8PMKgr+V
+# uIDp0Rk5bneVDAEW0TPAT8Ufwl2F6DJiDg/KZk5NmsYES+CxvF7bnISEnQh0ZrWn
+# AJixquV0mElUx01wA5TuPIgyodxzNq/fC0hen9LBtdnfFfSZ+wt8A1Injsbio+DH
+# Vq1voYiVNpBfO7+nh9NB4AhRXNldPgr3zgjJ+47s0uNYy2iDXAZSlkP3ym/7gy31
+# jlu989SNpRWO14/LUNV2LSuXkRI1iLTPI6ZdXG0DnPPG7UftF0tk5m6BP9eNfr2t
+# j1sxggW7MIIFtwIBATBiME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNsb3VkaHViLmNv
+# bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
+# EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
+# DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgJMBwLSRlZIUt
+# fwe0/wuESu+p0KsD86OD5ZW+V/E1KB0wDQYJKoZIhvcNAQEBBQAEggGAgVMsw4MD
+# aQBALDtw+766+HZ4VCI1NR7dyOsyBm4uPYZby3p8nzMoPonGDPRuV0taJ7rXkzaC
+# IJJY100O1K7xxcsyGtWgj0G/YoTq4JoxgEl46xfo85P1VZU3ebrXCVcPCPwR3q8c
+# 3F5/7EHfRZScCvYMEjAqJLmZ1JvLJXc0J0qUw2tjgEAlNJ7mvp8Ute03YZ9xLjcI
+# /RP/bvD0M9mCl4VIa4zfUmkLUxDH9XsT0tWDJC9tk5M7eLxs82JVpIFE0Dhb8uZ/
+# 3+BStiwzdNACP9GC05K8zfeL72JVam5vlxFPLgZhA9U8jt/hCP339nI9UkLyIkL1
+# E1Yu4kufxMA+2kBP4A+hY9oDQw1q6FexzTmaUxc2Ju3z5hOXvvF0uk9wNuo2LACy
+# ii8iZTj6CFSpnoF/XyFLy7wkMXCLGN6/I7y/12K6ggyRTDsvz5bRtCPAJcSXcqtM
+# Am7kvPcavIh9YbySI2zYy8SMkfQL1dMdO3T2kPt5nbK7W5DYfRDep+zdoYIDIzCC
+# Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
+# BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
+# ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
+# AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
+# MjYxMTA0MTYxNDA4WjA/BgkqhkiG9w0BCQQxMgQwtD+ETxI+HjkorvqEnB1VIDPj
+# gvT0PBHGWMnwA0ILXQ8FwN7/DB0LUTUnvCC3v6QNMA0GCSqGSIb3DQEBAQUABIIC
+# AKFl/JzVkO7xDEtSNQT9aehqQykFxvfwItYMC5NXAEz4lPLEsp1msMJ45xvR8de/
+# 7tKmr9z2kB74RhcZWy9YVphBBoKWGu2yTnP+8U1Wy6GslMf1Yf8QEO3vaCJFFB+q
+# 8MZYanveGEWQJz/xIuVqH18hmGEpfWRvruQ9l2I3Mt4vgmruMzJYQSSFuWwHrw+9
+# 6Uvv4XaQ19YR416WjA5b1C66VkmWN0pIVzqHyJOvX9HbG3pATGb3D4wXavQ7V12G
+# Yy0gGFoupg+WhpeMRYXsxAC/o1o4Nbp1KIZcWZwSl3hLvzhJJde7RO0pX4KcCzFk
+# 6AVD3gmQChaALXmtYPDrRhQGhOGPZdrCMck+1aoPEi1sFWrS7qgtKb/vVso3H3go
+# NzeBVb9PFR0UnSPzPqC51ARIkkEF0uLBe0AOn3lqm2U6JR9XSog1aFHbv2nYztXA
+# ZaN7OEc9n7rxw/8yu6Cx1Gz0ygSeHutzCU2wCNRk7hoHHOKqkYEdIw9QMNCk2RsV
+# DDnDfpDMQj8R0Mk5ABMoDPl0MJ88w1Z6e3ZgGL7JIBan77GyjjBKyWXm+B7BAlYl
+# GUfwFr345Zdfu7Yx3V3a3tfG9aVniawP/g4jueKySuGh1HEOZ/mzkcTbOI50Tz1+
+# FcqSNLYChj3yynHKwLALy17io/veVrSRQ1IYkNJJ0PRY
 # SIG # End signature block

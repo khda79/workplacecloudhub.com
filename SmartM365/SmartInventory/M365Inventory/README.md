@@ -130,6 +130,37 @@ recorded by that receipt, and that every report row carries the snapshot ID. The
 mail footer prints that ID. The full collector completes and qualifies its source
 receipt before sending the email. A receipt failure stops the email instead of
 publishing unqualified recovery KPIs.
+
+The tenant report also shows shared-mailbox licensing review. The standalone
+Exchange Online Plan 2 stock is separate from other tenant SKUs whose qualified
+service-plan catalog contains `EXCHANGE_S_ENTERPRISE`. Available means enabled
+minus consumed; these units are tenant-wide, unreserved, and include SKUs
+excluded from recovery recommendations. A missing or invalid SKU/catalog is
+`N/D` or explicitly incomplete, never a verified zero. E3-to-Plan-2 and E3/F3
+under-50-GB recovery indicators are reviews, not released seats or purchases.
+
+When a recent qualified `DATA-POWERBI/current.json.txt` batch is available next
+to `DATA-LAST`, the licensing report invokes the read-only
+`SmartWorkplaceIntelligence/scripts/shared_mailbox_license_evidence.py` reader
+with Python 3. It verifies the pointer, manifest, input hashes, tenant, native
+source receipts and exception-register qualification. Confirmed retained
+mailboxes are excluded; unresolved register hints, ambiguous identity, missing
+classification, unknown sizes and unverified coverage remain review. Required,
+assigned coverage and to-complete are known minimums; coverage review is shown
+separately. The prepared batch and exception snapshot dates are printed because
+they can differ from the license-stock snapshot. If Python or a qualified batch
+is unavailable or older than seven days, migration evidence is `N/D`. The
+prepared-batch reader never runs Prepare and never modifies a Power BI project.
+
+For an isolated test, use `-SendLicenseSummaryEmailOnly -LicenseSummaryTestTo <one-address>`
+with the intended tenant. This labels the mail `[TEST]`, rechecks
+the published snapshot and source hashes, recomputes the new indicators in
+memory, and uses a temporary send-state file. The final Graph or SMTP route must
+still contain exactly that address and no copies after the normal administrator
+and maintenance policy is applied; otherwise the test fails without sending.
+`-LicenseSummaryTestDataPath` optionally selects a verified local `DATA-LAST`
+copy for the test. The normal email-only mode continues to render the published
+snapshot without recomputation.
 The licensing consumer accepts AD `PartialAccepted` coverage only from a completed,
 error-free AD producer with `ConsumerScopeQualified=true`, matching successful
 file/domain proofs and an unchanged CSV hash. All expected domains must be accounted
