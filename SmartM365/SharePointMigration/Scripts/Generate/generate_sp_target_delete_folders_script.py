@@ -1,4 +1,4 @@
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 import argparse
 import builtins
 import json
@@ -24,7 +24,7 @@ def print(*args, **kwargs):
 
 SCRIPT_HEADER = r'''<#
 .SYNOPSIS
-    Deletes SharePoint Online folders that no longer exist in the SP2019 source file paths.
+    Deletes SharePoint Online folders that no longer exist in the source file paths.
 
 .DESCRIPTION
     This script is generated for one comparison result. The target folders are
@@ -485,7 +485,7 @@ def main():
             output_ps1.unlink()
         remove_ps7_launcher(output_ps1)
         print("Folder deletion script generation skipped.")
-        print("Reason: no SPO folder path was found missing from the SP2019 source file paths.")
+        print("Reason: no SPO folder path was found missing from the source file paths.")
         print(f"PowerShell file not created: {output_ps1}")
         return
 

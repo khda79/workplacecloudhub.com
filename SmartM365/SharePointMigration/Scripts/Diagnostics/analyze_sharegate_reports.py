@@ -1,6 +1,6 @@
 """Read-only ShareGate report analysis and private HTML/CSV output."""
 
-__version__ = "1.0.8"
+__version__ = "1.0.12"
 
 import argparse
 import collections
@@ -108,22 +108,53 @@ def normalize_message(value, *, legacy_metadata=False):
     return value[:500] or "No diagnostic message"
 
 
+def spo_site_collection(url):
+    """Return a conservative SPO collection key; ambiguous encodings are rejected."""
+    try:
+        parsed = urlsplit(url)
+        if (parsed.scheme.casefold() != "https" or parsed.port not in (None, 443) or
+                parsed.username or parsed.password or
+                not re.search(r"\.sharepoint\.(?:com|cn|de)$", parsed.hostname or "", re.I)):
+            return None
+        if ("\\" in parsed.path or re.search(r"%(?:2e|2f|5c|25)|%(?![0-9a-f]{2})", parsed.path, re.I) or
+                any(part in (".", "..") for part in parsed.path.split("/"))):
+            return None
+        segments = parsed.path.split("/")
+        if len(segments) < 3 or segments[0] or segments[1].casefold() not in ("sites", "teams"):
+            return None
+        name = segments[2]
+        if not name or name in (".", "..") or re.search(r"[%\\:\x00-\x1f]", name):
+            return None
+        return (parsed.hostname.casefold(), segments[1].casefold(), name.casefold())
+    except (ValueError, AttributeError):
+        return None
+
+
 def failing_endpoint(row):
-    """Attribute only explicit failing URLs from the ShareGate exception trace."""
+    """Attribute explicit failing URLs by host or unambiguous SPO collection."""
     source_host = (urlsplit(row.get("SourceUrl", "")).hostname or "").casefold()
     target_host = (urlsplit(row.get("DestinationUrl", "")).hostname or "").casefold()
+    source_collection = spo_site_collection(row.get("SourceUrl", ""))
+    target_collection = spo_site_collection(row.get("DestinationUrl", ""))
     findings = []
     for match in FAILED_URL.finditer("\n".join((row.get("Message", ""), row.get("Details", "")))):
         url = match.group("web") or match.group("failure")
         host = (urlsplit(url).hostname or "").casefold()
         side = "Source" if host == source_host and host != target_host else (
             "Destination" if host == target_host and host != source_host else "Undetermined")
+        if (side == "Undetermined" and source_host and source_host == target_host and
+                source_collection and target_collection and source_collection != target_collection):
+            failed_collection = spo_site_collection(url)
+            if failed_collection == source_collection:
+                side = "Source"
+            elif failed_collection == target_collection:
+                side = "Destination"
         findings.append((side, match.group(0).strip()))
     if not findings:
         return "Undetermined", ""
     sides = {side for side, _ in findings}
     if len(sides) != 1 or "Undetermined" in sides:
-        return "Undetermined", "Multiple or ambiguous failing URL hosts in trace."
+        return "Undetermined", "Multiple or ambiguous failing URLs in trace."
     return findings[0][0], findings[0][1][:500]
 
 
@@ -340,6 +371,13 @@ def classify(row, rules, project_root):
         prior_key = hashlib.sha256(("SG-ACCESS-UNKNOWN|" + pattern.casefold()).encode("utf-8")).hexdigest()
         if state_path(project_root, prior_key).exists():
             state = state_for(project_root, prior_key, state)
+    if found["Id"] == "SG-FIELD-VALUE-NOT-IMPORTED" and not state_path(project_root, key).exists():
+        previous_patterns = (pattern, normalize_message(row["Message"] or row["Details"], legacy_metadata=True))
+        for previous_pattern in previous_patterns:
+            prior_key = hashlib.sha256(("UNKNOWN|" + previous_pattern.casefold()).encode("utf-8")).hexdigest()
+            if state_path(project_root, prior_key).exists():
+                state = state_for(project_root, prior_key, state)
+                break
     row.update({"PatternKey": key, "Pattern": pattern, "Category": found["Category"],
                 "RuleId": found["Id"], "State": state,
                 "Action": found["ShareGateAction"], "ProbableCause": found["ProbableCause"],
@@ -460,6 +498,7 @@ def make_html(summary):
     peak = max(summary["AccessTimeBuckets"], key=lambda row: row["Lines"], default=None)
     cards = "".join((metric_card("Report lines", summary["Lines"], "ok"),
                      metric_card("Successful lines", f"{status.get('Success', 0)} ({100*status.get('Success',0)/summary['Lines']:.1f}%)", "ok"),
+                     metric_card("Skipped lines", status.get("Skipped", 0), "note" if status.get("Skipped", 0) else "muted"),
                      metric_card("Error / warning lines", status.get("Error", 0) + status.get("Warning", 0), "bad"),
                      metric_card("Distinct keyed items", summary["DistinctItems"], "ok"),
                      metric_card("Unkeyed lines", summary["UnkeyedRows"], "muted"),
@@ -498,7 +537,7 @@ def make_html(summary):
     matrix_table = table(("5-minute window (UTC)", "Source site", "Source list",) + access_headers,
                          [(row["WindowUtc"], row["SourceSite"], row["SourceList"], row["Lines"], row["Items"], row["Source"], row["Destination"], row["Undetermined"])
                           for row in summary["AccessTimeBySiteList"]])
-    body = ("<section class='section'><h2>Interpretation</h2><p>Raw success is based on report lines. Distinct item counts require a source site, list and positive Source ID; version rows share an item. Residual rates exclude Accepted issues from the denominator and count To fix issues in the numerator. Fixed is a tracking state, not proof that a new migration run succeeded. Access attribution uses explicit failing URL hosts in ShareGate traces; unmatched or ambiguous hosts remain undetermined.</p></section>"
+    body = ("<section class='section'><h2>Interpretation</h2><p>Raw success is based on report lines. Skipped items are not proof of matching content or permissions; compare current inventories, especially after permission-only changes and incremental copies. Distinct item counts require a source site, list and positive Source ID; version rows share an item. Residual rates exclude Accepted issues from the denominator and count To fix issues in the numerator. Fixed is a tracking state, not proof that a new migration run succeeded. Access attribution uses explicit failing URLs in ShareGate traces: distinct hosts, or unambiguous distinct SPO site collections on the same host. Other or ambiguous URLs remain undetermined.</p></section>"
             + "<section class='section'><h2>Access failures over time</h2><p>Five-minute UTC windows reflect the original report timestamps. A concentrated window can suggest an authentication interruption; repeated failures for the same elements across windows can suggest unique permissions. These patterns alone do not establish the cause.</p>"
             + windows_table + "</section>"
             + f"<section class='section'><h2>Access failures by source site and list</h2>{site_list_table}</section>"

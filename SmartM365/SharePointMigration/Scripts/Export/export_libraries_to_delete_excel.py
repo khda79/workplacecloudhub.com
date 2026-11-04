@@ -1,4 +1,4 @@
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 import argparse
 import builtins
 import csv
@@ -146,7 +146,7 @@ def build_delete_rows(library_summary_path):
             rows.append(
                 {
                     "Action": "Move SPO library to the recycle bin after review, then rerun ShareGate copy",
-                    "Reason": "SPO library contains file paths absent from the normalized SP2019 source inventory",
+                    "Reason": "SPO library contains file paths absent from the normalized source inventory",
                     "TargetWebUrl": target_web_url,
                     "TargetLibraryTitle": row.get("TargetLibraryTitle", ""),
                     "TargetLibraryUrl": target_library_url,

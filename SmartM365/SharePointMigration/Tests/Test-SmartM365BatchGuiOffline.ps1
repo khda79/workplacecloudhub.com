@@ -5,7 +5,7 @@
     Uses synthetic launchers and summaries only. No SharePoint, Graph, real scans
     or prerequisite probes are invoked. Renders the WPF tab at two window widths.
 .VERSION
-    1.0.2
+    1.0.3
 #>
 #requires -Version 7.4
 [CmdletBinding()]
@@ -28,7 +28,7 @@ $env:SPMIG_NO_CLOSE_PROMPT='1'
 try {
     # Missing, empty and single-row summaries must remain arrays under StrictMode.
     $summaryFixtureRoot=Join-Path $temp 'summary fixtures'
-    foreach($kind in @('Source','Target','Comparison')){
+    foreach($kind in @('Source','SpoSource','Target','Comparison')){
         $parent=Join-Path $summaryFixtureRoot ('Migrations\logs\'+(Get-SmartM365BatchDefinition $kind).LogFolder)
         $r=Get-SmartM365BatchResult $summaryFixtureRoot $kind
         Assert-BatchGui ($r.Total -eq 0 -and $r.State -eq 'No batch result yet.') 'Absent batch was treated as a result.'
@@ -60,11 +60,12 @@ try {
         Assert-BatchGui ($r.Total -eq 1 -and $r.Success -eq 0 -and $r.Failed -eq 1 -and
             $r.State -eq 'Completed with errors.') 'One failed result failed.'
     }
-    foreach($kind in @('Source','Target','Comparison')){
+    foreach($kind in @('Source','SpoSource','Target','Comparison')){
         $c=Get-SmartM365BatchCommand -Kind $kind -Root $root -Names @('A','B') -Mode PermissionsOnly -AuthMode Certificate -PlanOnly
         Assert-BatchGui ($c.Command -match '-MigrationNames "A,B"' -and $c.Command.EndsWith('-PlanOnly')) 'Subset or preview flag missing.'
-        Assert-BatchGui (($c.Command -match '-MaxParallel 2') -eq ($kind -eq 'Target')) 'Destination parallel limit missing or applied to another batch.'
+        Assert-BatchGui (($c.Command -match '-MaxParallel 2') -eq ($kind -in @('Target','SpoSource'))) 'SPO parallel limit missing or applied to another batch.'
         Assert-BatchGui (($c.Command -match '-AuthMode Certificate') -eq ($kind -ne 'Source')) 'Incorrect authentication routing.'
+        Assert-BatchGui (($c.Command -match '-Side Source') -eq ($kind -eq 'SpoSource')) 'SPO source routing is incorrect.'
     }
     foreach($bad in @('Bad%Path','Bad"Path','Bad!Path','Bad^Path')){
         $blocked=$false;try{$null=Get-SmartM365BatchCommand Target -Root $bad}catch{$blocked=$true}
@@ -72,12 +73,13 @@ try {
     }
     $stub=Join-Path $root 'fake.ps1'
     @'
-param([string]$InventoryMode,[string]$ComparisonMode,[string]$AuthMode,[int]$MaxParallel,[string]$MigrationNames,[string]$BatchId,[switch]$PlanOnly,[string]$Kind,[string]$Root)
+param([string]$InventoryMode,[string]$ComparisonMode,[string]$AuthMode,[int]$MaxParallel,[string]$MigrationNames,[string]$BatchId,[switch]$PlanOnly,[string]$Kind,[string]$Root,[string]$Side)
 $ErrorActionPreference='Stop'
+if($Side -eq 'Source'){$Kind='SpoSource'}
 $argsRecord=@{InventoryMode=$InventoryMode;ComparisonMode=$ComparisonMode;AuthMode=$AuthMode;MaxParallel=$MaxParallel;MigrationNames=$MigrationNames;BatchId=$BatchId;PlanOnly=[bool]$PlanOnly;Kind=$Kind}
 $argsRecord | ConvertTo-Json | Set-Content (Join-Path $Root 'arguments.json')
 if($PlanOnly){exit 0}
-$folder=@{Source='source-scan-batches';Target='target-scan-batches';Comparison='comparison-batches'}[$Kind]
+$folder=@{Source='source-scan-batches';SpoSource='spo-source-scan-batches';Target='target-scan-batches';Comparison='comparison-batches'}[$Kind]
 $output=Join-Path $Root "Migrations\logs\$folder\$BatchId"
 [void](New-Item -ItemType Directory -Path $output)
 $rows=@([pscustomobject]@{Migration='A';Action='Files';Status='SUCCESS';ExitCode=0},[pscustomobject]@{Migration='B';Action='Files';Status='FAILED';ExitCode=9})
@@ -110,6 +112,20 @@ exit 9
             }
         }
     }
+    $id='20261005-100000-'+[guid]::NewGuid().ToString('N').Substring(0,8)
+    $requestPath=Join-Path $temp "$id.json.txt"
+    @{Kind='SpoSource';Root=$root;Mode='FilesOnly';AuthMode='Certificate';Names=@('A');PlanOnly=$true;BatchId=$id;Status='Starting'} | ConvertTo-Json | Set-Content $requestPath
+    & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File (Join-Path $generic 'SmartM365-SharePointMigration-BatchGuiRun.ps1') -RequestPath $requestPath
+    $receipt=Get-Content $requestPath -Raw | ConvertFrom-Json
+    $actual=Get-Content (Join-Path $root 'arguments.json') -Raw | ConvertFrom-Json
+    Assert-BatchGui ($receipt.Status -eq 'Previewed' -and $actual.Kind -eq 'SpoSource' -and $actual.AuthMode -eq 'Certificate') 'SPO source worker did not route the preview independently.'
+    $id='20261005-100000-'+[guid]::NewGuid().ToString('N').Substring(0,8)
+    $requestPath=Join-Path $temp "$id.json.txt"
+    @{Kind='SpoSource';Root=$root;Mode='Both';AuthMode='Interactive';Names=@('A');PlanOnly=$false;BatchId=$id;Status='Starting'} | ConvertTo-Json | Set-Content $requestPath
+    & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File (Join-Path $generic 'SmartM365-SharePointMigration-BatchGuiRun.ps1') -RequestPath $requestPath
+    $receipt=Get-Content $requestPath -Raw | ConvertFrom-Json
+    $r=Get-SmartM365BatchResult $root 'SpoSource' -BatchId $id
+    Assert-BatchGui ($receipt.Status -eq 'Failed' -and $receipt.ExitCode -eq 9 -and $r.Total -eq 2 -and $r.Failed -eq 1 -and $r.Directory -like '*spo-source-scan-batches*') 'SPO source receipt or separate results were lost.'
     # WPF controls and events use the actual GUI resource dictionary.
     $guiText=[IO.File]::ReadAllText((Join-Path $projectRoot 'SmartM365-SharePointMigration-GUI.ps1'))
     $match=[regex]::Match($guiText,"(?s)\[xml\]\`$xaml\s*=\s*@'\r?\n(.*?)\r?\n'@")
@@ -123,7 +139,7 @@ exit 9
     Sync-SmartM365BatchMigrations @('A','B')
     $v=$script:BatchGui.View
     Assert-BatchGui (-not $v.FindName('batchSourceRun').IsEnabled) 'Source execution enabled before prerequisite verification.'
-    Assert-BatchGui ($v.FindName('batchTargetRun').IsEnabled -and $v.FindName('batchComparisonRun').IsEnabled) 'Available destination/comparison actions disabled.'
+    Assert-BatchGui ($v.FindName('batchSpoSourceRun').IsEnabled -and $v.FindName('batchTargetRun').IsEnabled -and $v.FindName('batchComparisonRun').IsEnabled) 'Available SPO source/destination/comparison actions disabled.'
     $script:CurrentMigration=[pscustomobject]@{Name='UnrelatedHeaderMigration'}
     $selection=Get-SmartM365BatchSelection Target
     Assert-BatchGui ($selection.Names.Count -eq 0 -and $selection.Mode -eq 'Both') 'Default batch scope depends on migration header.'
@@ -178,7 +194,7 @@ exit 9
     Assert-BatchGui (-not $script:BatchGui.Active.ContainsKey('Source')) 'Source request launched without verified prerequisites.'
     # Verify actual button handlers route each card, without launching real processes.
     function Start-SmartM365BatchFromGui {param([string]$Kind,[switch]$PlanOnly) $script:Clicked+= "$Kind/$([bool]$PlanOnly)"}
-    foreach($kind in @('Source','Target','Comparison')){
+    foreach($kind in @('Source','SpoSource','Target','Comparison')){
         $v.FindName("batch${kind}Preview").RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
         Assert-BatchGui ($script:Clicked[-1] -eq "$kind/True") 'Preview button routes to the wrong card.'
     }

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Qualifies one item-scoped ShareGate copy into an explicit SPO folder.
 .VERSION
-    1.0.1
+    1.0.7
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -10,6 +10,9 @@ param(
     [Parameter(Mandatory)][string]$ProjectRoot,
     [Parameter(Mandatory)][string]$AnalysisDirectory,
     [Parameter(Mandatory)][string]$SessionId,
+    [ValidateSet('Default','Browser','ModernAuth')][string]$SourceAuthMode = 'Default',
+    [ValidateSet('Default','Browser','ModernAuth')][string]$DestinationAuthMode = 'Browser',
+    [ValidatePattern('^SmartM365SpoIdentity-[0-9a-f]{32}$')][string]$SpoIdentityPipe,
     [Parameter(Mandatory)][ValidateRange(1,2147483647)][int]$SourceItemId,
     [ValidateNotNullOrEmpty()][string]$FarmTimeZoneId = 'W. Europe Standard Time',
     [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedAnalysisHash = '',
@@ -20,8 +23,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$version = '1.0.1'
+$version = '1.0.7'
 . (Join-Path $PSScriptRoot '..\Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateAuth.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-SpoIdentityBridgeClient.ps1')
 $script:ConsoleLifecycleContext = Start-SmartM365MigrationConsoleLifecycle -ScriptPath $PSCommandPath
 $script:ConsoleLifecycleFailure = $null
 $script:ConsoleLifecycleStatus = 'SUCCESS'
@@ -63,19 +68,19 @@ try {
     }
     $route = Resolve-SmartM365ShareGateDestinationPath -Row $row
     if (-not $route.DestinationFolder) { throw 'Qualification requires an item in a destination subfolder.' }
-    $sourceUri = [uri]$row.SourceUrl
-    $destinationUri = [uri]$row.DestinationUrl
-    if ($sourceUri.Host -eq $destinationUri.Host -or $destinationUri.Scheme -ne 'https' -or
-        $destinationUri.Host -notmatch '(?i)\.sharepoint\.(com|cn|de)$') {
-        throw 'Destination must be a distinct HTTPS SharePoint Online host.'
-    }
+    Assert-SmartM365ShareGateDistinctSites -SourceUrl $row.SourceUrl -DestinationUrl $row.DestinationUrl
     Write-Output ('{0} Mode={1}; item=1; source writes=none; destination write={2}; Session={3}; AnalysisSHA256={4}' -f
         (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $(if ($Run) { 'Run' } else { 'DryRun' }),
         $(if ($Run) { 'one overwrite after confirmation' } else { 'none' }), $SessionId, $hash)
+    Write-Output ('{0} SourceAuth={1}; DestinationAuth={2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $SourceAuthMode, $DestinationAuthMode)
     Write-Output ('ID={0}; source={1} | {2} | {3}; destination={4} | {5} | {6}; folder={7}' -f
         $SourceItemId, $row.SourceUrl, $row.SourceList, $route.SourceFilePath,
         $row.DestinationUrl, $row.DestinationList, $route.DestinationFilePath, $route.DestinationFolder)
     if (-not $Run) { return }
+
+    if ((Test-SmartM365SpoSourceHost -Url $row.SourceUrl) -and -not $SpoIdentityPipe) {
+        throw 'SPO source qualification requires a running source identity bridge. DryRun remains available.'
+    }
 
     $phrase = 'QUALIFY ONE ITEM ' + $SourceItemId + ' v' + $version
     $entered = Read-Host ('Type exactly "{0}" to authorize one SPO destination overwrite' -f $phrase)
@@ -136,26 +141,26 @@ try {
         return $exact[0]
     }
     try {
-        Write-QualificationLog ('Actor={0}; Machine={1}; SourceReadOnly=True; DestinationCopyLimit=1; Mode=Overwrite; AnalysisSHA256={2}' -f
-            $result.Actor, $result.Machine, $hash)
-        $module = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
+        Write-QualificationLog ('Actor={0}; Machine={1}; SourceReadOnly=True; DestinationCopyLimit=1; Mode=Overwrite; AnalysisSHA256={2}; SourceAuth={3}; DestinationAuth={4}' -f
+            $result.Actor, $result.Machine, $hash, $SourceAuthMode, $DestinationAuthMode)
+        $module = @(Get-SmartM365ShareGateModule)
         if ($module.Count -ne 1) { throw 'ShareGate module is not installed.' }
         Import-Module -Name $module[0].Path -ErrorAction Stop
         Write-QualificationLog ('ShareGate module version={0}; path={1}' -f $module[0].Version, $module[0].Path)
         foreach ($name in @('Connect-Site','Get-List','Get-Folder','Get-File','Copy-Content','New-CopySettings','Export-Report')) {
-            if (-not (Get-Command -Name $name -Module ShareGate -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
+            if (-not (Get-Command -Name ('ShareGate\' + $name) -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
         }
-        $copy = Get-Command Copy-Content -Module ShareGate
+        $copy = Get-Command -Name 'ShareGate\Copy-Content'
         $required = @('SourceList','DestinationList','SourceItemId','DestinationFolder','CopySettings','TaskName')
         if (-not @($copy.ParameterSets | Where-Object {
             $names = @($_.Parameters | ForEach-Object Name)
             @($required | Where-Object { $_ -notin $names }).Count -eq 0
         }).Count) { throw 'Installed Copy-Content does not support the required item-scoped DestinationFolder parameter set.' }
-        $sourceSite = ShareGate\Connect-Site -Url $row.SourceUrl -ErrorAction Stop
+        $sourceSite = Connect-SmartM365ShareGateEndpoint -Url $row.SourceUrl -Mode $SourceAuthMode
         $sourceList = Get-ExactShareGateList -Site $sourceSite -Name $row.SourceList
         $sourceFile = Get-OneShareGateFile -List $sourceList -Path $route.SourceFilePath
         $result.SourceRead = [string]$sourceFile.Address
-        $destinationSite = ShareGate\Connect-Site -Url $row.DestinationUrl -Browser -ErrorAction Stop
+        $destinationSite = Connect-SmartM365ShareGateEndpoint -Url $row.DestinationUrl -Mode $DestinationAuthMode
         $destinationList = Get-ExactShareGateList -Site $destinationSite -Name $row.DestinationList
         Assert-SmartM365ShareGateDestinationFolder -DestinationList $destinationList -DestinationFolder $route.DestinationFolder
         $before = Get-OneShareGateFile -List $destinationList -Path $route.DestinationFilePath
@@ -164,6 +169,10 @@ try {
         if ($rootBefore) { throw 'A file with the same name already exists at the destination library root; cannot use it as an unambiguous placement control.' }
         $result.RootBefore = 'Absent'
         $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmZone -Phase 'one-item ShareGate copy'
+        if (Test-SmartM365SpoSourceHost -Url $row.SourceUrl) {
+            $identity = Get-SmartM365BridgedSpoSourceIdentity -PipeName $SpoIdentityPipe -SiteUrl $row.SourceUrl -ListName $row.SourceList -SourceFilePath $route.SourceFilePath -ExpectedItemId $SourceItemId
+            Write-QualificationLog ('Source identity verified; ID={0}; LibraryId={1}; VerifiedUtc={2}' -f $identity.SourceItemId,$identity.LibraryId,$identity.VerifiedUtc)
+        }
         $settings = ShareGate\New-CopySettings -OnContentItemExists Overwrite -ErrorAction Stop
         $taskName = 'SmartM365 path qualification ' + $SessionId + ' ID=' + $SourceItemId + ' ' + $runId
         Write-QualificationLog ('Copy-Content starts: ID={0}; DestinationFolder={1}; TaskName={2}' -f $SourceItemId,$route.DestinationFolder,$taskName)
@@ -200,6 +209,9 @@ try {
         $rootAfter = Get-OneShareGateFile -List $destinationList -Path $route.FileName -AllowMissing
         $result.RootAfter = if ($rootAfter) { [string]$rootAfter.Address } else { 'Absent' }
         if ($rootAfter) { throw 'A file appeared at the destination library root; placement failed. No other item will be copied.' }
+        if (Test-SmartM365SpoSourceHost -Url $row.SourceUrl) {
+            Assert-SmartM365ShareGateCleanSpoReport -Rows $reportRows -SourceItemId ([string]$SourceItemId) -ExpectedDestinationPath $route.DestinationFilePath -Aliases $reportAliases
+        }
         if ($statuses.Count -ne 1 -or $statuses[0] -notmatch '(?i)^success$') { throw 'ShareGate did not report one unambiguous Success result.' }
         if ($result.ExportedDestinationPath -and
             (ConvertTo-SmartM365ShareGateRelativePath -Path $result.ExportedDestinationPath -Side ExportedDestination) -ne $route.DestinationFilePath) {

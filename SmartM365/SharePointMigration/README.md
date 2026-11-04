@@ -297,6 +297,10 @@ scans to exist without an `-Errors.csv` sidecar; a disabled comparison displays
 the missing or incomplete scan reason. History **Compare** requires two different
 completed scans on the selected side. Existing comparison reports remain accessible.
 Source-versus-target comparisons also require a non-empty source inventory.
+When an inventory has a scan receipt, the file and permission comparators verify
+its hash, row count, schema, side and inventory kind before writing comparison
+results. A mismatched receipt blocks the comparison. Older inventories without
+receipts remain available with unverified scan evidence.
 An empty destination file inventory is allowed so missing files can be reported;
 an empty destination permission inventory is blocked, matching the launcher.
 The GUI checks receipt row counts, or reads only the first record for older scans,
@@ -359,8 +363,8 @@ For a local resource check without displaying the GUI or contacting a tenant:
 
 In the dashboard, click `+ New` to enter a migration name, source and target
 types, the first source/target web URL pair, any additional mapping pairs, and
-the SPO target admin URL when applicable. The wizard checks every web through
-an authenticated SharePoint read and verifies the SPO admin endpoint before
+the SPO admin URLs when needed. The wizard checks every web through
+an authenticated SharePoint read and verifies each supplied SPO admin endpoint before
 creating a directory. SharePoint Server checks use the current Windows account
 and the `/_api/web` endpoint; SPO checks use the selected PnP authentication
 mode and `Get-PnPWeb`. A missing site, denied access, unavailable module or
@@ -389,6 +393,124 @@ Migrations\MyMigration\migration.mapping.txt
 ```
 
 `Source.Type` and `Target.Type` define which inventory engine is used for each side. Supported values are `SP2016`, `SP2019`, and `SPO`; for example, `SPO` to `SPO` migrations are supported by setting both sides to `SPO`. When `Source.UrlsFile` and `Target.UrlsFile` are omitted, the launcher derives both scan URL files from `migration.mapping.txt`.
+
+For individual inventory scans, each SPO endpoint can optionally set
+`AuthConfigPath` to a private PowerShell data file with the same keys as
+`Config/SPOAuth.sample.psd1`. A relative path is resolved from the migration
+folder; an absolute path is also accepted. A specified but missing file stops
+the scan. If omitted, the existing shared `Config/SPOAuth.local.psd1` remains
+the fallback. Keep profiles outside Git and restrict their access. The target
+profile is also used for the destination Entra users cache. The migration
+creation wizard accepts optional absolute paths and sign-in modes for source
+and target profiles, plus optional source and target admin URLs. The target admin
+URL is not required for scans of explicitly mapped sites; configure it for
+operations that need tenant administration. The generic launcher
+uses the selected mode per side unless a command-line authentication switch
+overrides it. ShareGate operation coverage is not yet complete.
+
+In a same-tenant synthetic pilot, list-item copies exercised Text, Number,
+Choice, Person and DateTime fields and a separate attachment. Unique item and
+folder ACLs and an incremental metadata update were
+also checked independently. This is scoped evidence, not qualification of all
+field types, permissions or migration operations. In that pilot, ShareGate
+26.11.1 did not resolve either synthetic list while both were hidden, by name
+or ID; after making those test lists visible, lookup and copy succeeded. Check
+hidden-list handling with the actual installed version and reviewed scope; do
+not change a list's visibility automatically to make it discoverable.
+
+Cross-tenant permission comparisons require distinct SPO hosts, explicit source
+and target authentication profile paths, distinct non-empty `TenantId` GUIDs,
+and `Comparison.CrossTenantIdentityMappingPath`. Every source assignment row
+must have a confirmed identity mapping; the mapped target web must agree with
+the full source and target HTTPS URLs in `Comparison.PathMappingsFile` and be
+present in the target inventory. The site mapping file must contain one
+source URL and target URL per line; the most specific source web route applies
+to its descendants. A matching path on a different host is rejected. The comparator
+uses exact scoped target principals rather than heuristic aliases and does not
+infer source account state from the target directory. It does not load an Entra
+user cache for this cross-tenant mode. Results always require review: confirmed
+mapping does not establish member equivalence, nested group membership or
+effective access. This mode has offline synthetic tests only; a real
+cross-tenant pilot remains required.
+
+For complete same-tenant SharePoint group inventories, `GroupMembershipReview.csv`
+also lists source-only and target-only raw login strings. Matching is
+case-insensitive but retains the original claim text in the report. A raw-only
+entry may be an alias; it does not prove that a person is absent or lacks access.
+Incomplete membership evidence produces no raw difference list. In cross-tenant
+mode the raw difference lists are not calculated. The CSV and workbook contain
+identity information and must remain in the private migration workspace.
+
+For ShareGate content copies, do not assume an incremental pass propagates a
+permission-only change. ShareGate documents that such changes do not update an
+item's modified timestamp and therefore are not brought over by incremental
+copy. Compare permissions separately and review the appropriate correction for
+each item; do not automatically overwrite items to resolve the discrepancy.
+See [ShareGate's content permissions guidance](https://help.sharegate.com/en/articles/10236191-copy-content-permissions).
+
+ShareGate does not preserve existing internal or external sharing links during
+migration. Inventory and review these links separately, plan their replacement
+and communication, and do not treat matching item role assignments as proof
+that sharing links were preserved. See [ShareGate's sharing-link limitation](https://help.sharegate.com/en/articles/10236544-internal-and-external-sharing-links).
+The `SharedWithUsers` field warning is not proof that permissions or links were
+copied or lost: investigate the affected items and retain the warning until its
+impact is understood. The SharePoint `Shared With` display can itself be stale;
+Microsoft recommends checking Manage Access, audit logs or the site's sharing
+report instead. See [Microsoft's SharedWith guidance](https://learn.microsoft.com/en-us/troubleshoot/sharepoint/sharing-and-permissions/shared-with-column-users-no-access).
+Independently compare the item-level role assignments after a copy, including
+explicitly mapped owner groups. A clean or warning-only ShareGate report does
+not establish that every expected assignment was applied. Check mapped group
+membership separately, and do not use a copy without permissions as a general
+workaround for this warning. Repairing an item permission can create a new
+target version, which must be considered in subsequent version comparisons.
+
+For 401 traces where source and destination share an SPO host, the report
+analyzer and pre-checks may attribute an explicit failing URL to a side when
+it identifies one of two distinct `/sites/<name>` or `/teams/<name>` site
+collections. Tenant-root URLs, same-collection webs, ambiguous encodings and
+conflicting or unrelated URLs remain undetermined. This classification is
+diagnostic evidence; it does not verify current item identity or authorize a
+correction.
+
+The offline `Scripts/Compare/cross_tenant_identity.py` validator can check
+mapping coverage against a completed source permission inventory:
+
+```powershell
+python .\Scripts\Compare\cross_tenant_identity.py --source-csv 'C:\Migration\source-permissions.csv' --mapping-csv 'C:\Migration\identity-mapping.csv'
+```
+
+The mapping is a UTF-8 comma-separated file with these exact columns:
+`SourceWebUrl,SourcePrincipalType,SourcePrincipalLoginName,TargetWebUrl,TargetPrincipalType,TargetPrincipalLoginName,Status`.
+Every mapping must be explicitly marked `Confirmed`. Conflicting source rows,
+ambiguous merges and invalid URLs are rejected. The JSON output gives input
+hashes, scan evidence and resolved/unresolved row counts, without printing
+principal names. Exit code 2 means that some source rows remain unresolved.
+Add `--unresolved-csv 'C:\Migration\unresolved.csv'` to create a private list
+of those identities. The destination must not already exist; publication uses
+a same-directory atomic operation and fails if the filesystem does not support it.
+The result is only a mapping preflight; it never validates permissions,
+group membership or migration completion. Keep this file and its inputs in
+the private migration workspace.
+Alternatively, set `Comparison.CrossTenantIdentityMappingPath` in the private
+migration configuration and run the generic launcher with
+`-Action ValidateCrossTenantIdentityMappings`. It uses the newest source
+permission inventory unless `-SourceCsv` is supplied and writes an unresolved
+identity CSV under that migration's `identity-mapping-reviews` folder. A
+nonzero status means unresolved rows or a validation failure. A successful
+preflight is necessary but does not prove permission or identity equivalence.
+Optionally supply `-TargetCsv` to count mapped principals observed in that
+target permission inventory. A principal not observed in that inventory is
+not proof that the identity is absent from the target tenant.
+For a source SPO site lock operation, configure `Source.TenantAdminUrl` too.
+
+New migration configurations set `Source.IncludeVersionCounts = $true`. For a
+SPO source file scan this reads each file's previous versions using
+[`Get-PnPFileVersion`](https://pnp.github.io/powershell/cmdlets/Get-PnPFileVersion.html),
+which excludes the current version. This can substantially increase scan
+duration. If any version history cannot be read, the scan fails rather than
+publishing an incomplete inventory. Existing configurations without this key
+retain their prior behavior: version counts are unavailable until explicitly
+enabled and the affected complexity criteria remain unqualified.
 
 Set `Name` in the copied config to a report label other than `NewMigration`.
 The GUI selects the migration **directory name**, which may differ from this
@@ -422,8 +544,9 @@ https://source.workplacecloudhub.com/SOURCE https://workplacecloudhub.sharepoint
 Run both file inventories, inspect their logs/errors, then CompareFiles. Review
 HTML/CSV results and Excel workbooks, including versions, sizes, modified dates,
 missing files and duplicate keys. Repeat with permission inventories and
-ComparePermissions. Permission comparison requires a fresh Entra users cache
-and at least one SPO endpoint; the current launcher rejects an on-premises-only
+ComparePermissions. The existing same-tenant and SharePoint Server permission
+comparison requires a fresh Entra users cache and at least one SPO endpoint;
+the explicit cross-tenant mapping mode does not use that cache. The launcher rejects an on-premises-only
 permission comparison. This restriction does not prevent file comparisons.
 The cache contains identity fields for all Entra users returned by Microsoft
 Graph. By default, migrations targeting the same SPO host and configured tenant
@@ -435,6 +558,13 @@ An explicit `Comparison.EntraUsersCachePath` still overrides the shared default.
 If a required Graph submodule is absent, the script asks before installing only
 that submodule for the current PowerShell 7 user. Older migration configs still
 set to 24 hours are capped at 12 hours at runtime.
+Permission comparisons also create `GroupMembershipReview.csv` and an Excel
+sheet for matched SharePoint group assignments. `EqualRaw` means the collected
+direct-member login sets match; `DifferentCount` means the collected direct
+member counts differ; `Unknown` covers incomplete reads or different names
+that cannot be safely equated. Different or unknown results require review,
+even if assignment percentages match. Rows represent assignments and can repeat
+the same group. This check does not validate nested groups or effective access.
 Permission scan history comparison reads two CSV inventories from the same
 endpoint and requires neither SharePoint authentication nor an Entra cache.
 It writes `PermissionChanges.csv`, `Summary.csv`, and a branded HTML report
@@ -576,6 +706,16 @@ required. Run on the workstation or server that has access to the migration
 files; SharePoint farm snap-ins are not required for comparison actions.
 
 ### Batch source scans on a SharePoint farm server
+
+For SPO sources, the SPO batch launcher also accepts `-Side Source`; use
+`-PlanOnly` first. It selects migrations with `Source.Type = 'SPO'` and a
+`Source.SiteUrl`, and uses each source authentication profile. Source batch
+logs are kept under `spo-source-scan-batches`. This option does not run the
+farm batch described below.
+
+```powershell
+pwsh -File .\Scripts\Launchers\Generic\SmartM365-SharePointMigration-TargetScanBatch.ps1 -Side Source -PlanOnly
+```
 
 `SmartM365-SharePointMigration-SourceScanBatch.ps1` replaces the private
 `Get-SP2019FileInventory-LocalWrapper.ps1` workflow. Run it on a SharePoint
@@ -971,8 +1111,9 @@ them when run on a host that can reach the source. With
 `-SourceAuthMode Default`, `Connect-Site -Url` uses the current Windows user
 for the on-premises source, without a supplied credential. On a GUI machine
 with access to both environments, one `-Run -ProbeSource` checks both sides.
-Destination checks
-use only `Connect-Site -Browser` and `Get-List`, with no supplied username,
+`-SourceAuthMode Browser` can be selected for a SPO source. Destination checks
+default to `Connect-Site -Browser`; `-DestinationAuthMode` also accepts
+`Default` or `ModernAuth`. Checks use `Get-List`, with no supplied username,
 password, or saved-connection option. `Probe-Access.csv` attributes a denial
 to Source or Destination only when that side returns an access-denied error
 and the opposite endpoint is readable. Other cases remain Undetermined because
@@ -1014,10 +1155,19 @@ only on the licensed GUI machine with Windows PowerShell 5.1. Re-run phase 2a
 first so the latest `ClassifiedRows.csv` contains the new access attribution.
 Both DryRun and Run require an explicit `-WhatIf`; the script refuses to start
 without it. Only `-Run -WhatIf` imports ShareGate. It groups access cases by
-source/destination list, connects with the current Windows user on-prem and
-`Connect-Site -Browser` for SPO, then invokes exactly one
+source/destination list, defaults to the current Windows source identity and
+`Connect-Site -Browser` for the destination, then invokes exactly one
 `Copy-Content -SourceItemId <id> -WhatIf` per distinct keyed item. It never
 invokes a migration without `-WhatIf` or any other Copy cmdlet.
+`-SourceAuthMode` and `-DestinationAuthMode` select `Default`, `Browser`, or
+`ModernAuth` independently. Validate the installed ShareGate version and the
+selected modes in a test environment before relying on the pre-check.
+The witness, pilot review, qualification, correction and prepared batch scripts
+also accept these independent modes. Their existing confirmation, evidence,
+maintenance and real-copy blocks remain in force. Same-host qualification is
+limited to two distinct explicit `/sites/` or `/teams/` site collections;
+same-collection and ambiguous paths are rejected. No real cross-tenant copy
+has been qualified by the offline tests.
 
 Each returned ShareGate pre-check result is exported with `Export-Report` to
 a separate CSV in a private `ShareGate/Diagnostics/Precheck-<timestamp-id>/Reports`
@@ -1043,8 +1193,10 @@ the largest affected list, and one source 401 item from another list. The
 selection is deterministic and displayed by `-DryRun`. The original warning
 is a witness candidate, not a guarantee that ShareGate's pre-check will
 reproduce it. Both modes require `-WhatIf`; only `-Run` imports ShareGate.
-Source connections use the current Windows identity and destination
-connections use `Connect-Site -Browser`.
+Source connections default to the current Windows identity and destination
+connections default to `Connect-Site -Browser`. `-SourceAuthMode` and
+`-DestinationAuthMode` can independently select `Default`, `Browser`, or
+`ModernAuth`; validate the installed ShareGate version before use.
 
 The run invokes only five item-scoped `Copy-Content -WhatIf` calls. It writes
 the complete `Format-List *` output of each CopyResult, an available session
@@ -1076,10 +1228,65 @@ treat ShareGate Success counts as proof that the intended paths were updated.
 is a separate one-file qualification for the ShareGate GUI machine. Its default
 DryRun derives one source and destination path from a reviewed source-401 file
 row without loading ShareGate. A real run requires the reviewed analysis hash,
-`-Run -ConfirmQualification`, and a versioned console phrase. It reads the
-on-premises source using the current Windows identity, authenticates to SPO
-with `Connect-Site -Browser`, and checks that the source file, destination
+`-Run -ConfirmQualification`, and a versioned console phrase. Source and
+destination authentication can be selected independently with `-SourceAuthMode`
+and `-DestinationAuthMode`. Their defaults retain Windows authentication for an
+on-premises source and browser authentication for the destination; select
+`Browser` or `ModernAuth` explicitly for a SPO source. The installed ShareGate
+PowerShell integration and an appropriate subscription are required; see the
+[ShareGate Connect-Site documentation](https://help.sharegate.com/en/articles/10236278-connect-site).
+The diagnostic scripts discover a PowerShell module on `PSModulePath`, then the
+registered ShareGate installation or the standard ShareGate program directory.
+The selected manifest is validated before import; the actual installed version,
+license and supported parameters still need to be checked on the execution host.
+Their command checks use ShareGate-qualified names so exported commands in a
+nested module are detected. For repeated operations within one PowerShell
+process, an operator may explicitly register existing site objects with
+`Register-SmartM365ShareGateSessionConnection` from the ShareGateAuth helper.
+Each registration is tied to the site's exact address and authentication mode;
+connections are never registered automatically or shared across processes.
+Call `Clear-SmartM365ShareGateSessionConnections` to clear the in-memory
+registrations. An expired or rejected session must be reauthenticated; reuse is
+not proof that permission to a site remains valid.
+Within the same PowerShell process, the operator can explicitly create and
+register another endpoint with `Connect-SmartM365ShareGateEndpointWithExistingCredentials`
+and a previously connected ShareGate site. The default requires the same host,
+protocol and port; use `-AllowDifferentHost` only when deliberately reusing
+that identity across hosts. Alternatively, pass an explicitly selected
+ShareGate Connection Manager object to
+`Connect-SmartM365ShareGateEndpointWithSavedConnection`. These helpers do not
+create or save credentials and never choose a source or target identity
+automatically. ShareGate must support and allow the selected authentication.
+The qualification checks that the source file, destination
 folder, and original target file exist while no same-named root file exists.
+The current ShareGate qualification checks the source path and selects the copy
+by the reported `SourceItemId`, but ShareGate's file read does not itself prove
+that the ID still belongs to that path. Do not consider a live source-401
+correction fully qualified from that check alone. For an SPO source, the
+read-only PowerShell 7 helper
+`Scripts/Diagnostics/SmartM365-SharePointMigration-SpoSourceIdentity.ps1`
+provides `Get-SmartM365SpoSourceIdentity`: given an existing PnP connection,
+source site, document library, relative file path and expected item ID, it
+verifies the exact web, library, path and current item ID. It fails closed on
+ambiguous paths or a mismatch. This helper is integrated into the
+Windows PowerShell 5.1 ShareGate correction flow through an explicitly started
+local, current-user-only named-pipe bridge. In a PowerShell 7 session, dot-source
+`Scripts/Diagnostics/SmartM365-SharePointMigration-SpoIdentityBridge.ps1` and
+run `$bridge = Start-SmartM365SpoIdentityBridge -Connection $sourceConnection`. Keep that
+session and its connection open; pass the returned `PipeName` as
+`-SpoIdentityPipe` to the Windows PowerShell 5.1 qualification or correction
+script. The bridge carries no credentials and reuses the supplied connection;
+stop it with `Stop-SmartM365SpoIdentityBridge -Bridge $bridge` when finished.
+Avoid concurrent use of that PnP connection while a bridge request is running.
+For an SPO source, each Run checks the ID, web, library and path immediately
+before its corresponding copy; a missing bridge or failed check blocks that
+copy. Three-item correction also requires a qualification that recorded this
+check with script version 1.0.6 or later. DryRun does not require a bridge. The check is point-in-time evidence and
+does not make the later copy atomic. Existing correction gates
+remain in force.
+For an SPO source, qualification additionally requires the complete report to
+be free of item and roll-up errors or warnings and to show a finished Microsoft
+365 import. The three-item correction repeats that report check before Run.
 It then makes exactly one `Copy-Content -SourceItemId` call with the explicit
 `-DestinationFolder` and `New-CopySettings -OnContentItemExists Overwrite`.
 This **overwrites one file in the selected SPO destination**; use it only on
@@ -1108,8 +1315,10 @@ export, and log. No customer IDs or URLs are built into the script.
 A future real run needs `-Run -ConfirmPathCorrection`, all three reviewed
 fingerprints, and the exact interactive phrase. It runs only under Windows
 PowerShell 5.1 with the same ShareGate module version as the qualification.
-It reads the on-premises source with the current Windows identity and connects
-to SPO using `-Browser`. For each selected ID, it verifies the existing target
+The default authentication uses the current Windows identity for the source and
+`-Browser` for the destination. Select source and destination authentication
+independently with `-SourceAuthMode` and `-DestinationAuthMode`; an SPO source
+also requires the identity bridge described above. For each selected ID, it verifies the existing target
 file and folder, then calls item-scoped `Copy-Content` with the explicit
 `-DestinationFolder` and `New-CopySettings -OnContentItemExists Overwrite`.
 This overwrites up to three files in the selected SPO destination; it never
@@ -1187,6 +1396,9 @@ real execution separately. No bulk 401 remediation is part of this pilot.
 five-item pilot. Its default `-DryRun` reads local evidence only. `-Run` uses
 ShareGate read cmdlets to look up the destination item and, for a skipped
 item, the source and destination Modified dates. It does not copy content.
+For `-Run`, `-SourceAuthMode` and `-DestinationAuthMode` independently select
+`Default`, `Browser`, or `ModernAuth`; their defaults preserve the existing
+Windows-source and browser-destination behavior.
 The CSV labels each SPO item URL as verified, inferred, or unavailable; an
 inferred URL must be checked in SPO. The original ShareGate export may leave
 `Destination path` blank, in which case the review tries the source-relative
@@ -1264,14 +1476,17 @@ script and target before running it.
 
 The **Batch runs** tab follows **Migration Diagnostics**. Its scope is independent
 of the migration selected in the header: all configured migrations by default,
-or a selected subset. Three cards launch the existing source scan, destination
-scan and comparison CMD launchers in dedicated consoles.
+or a selected subset. Four cards launch SharePoint Server source scans, SPO
+source scans, destination scans and comparisons in dedicated consoles.
 
 - **Both** is the default; **Files** and **Permissions** are also available.
 - **Preview plan** passes `-PlanOnly`; it does not start a scan or comparison.
-- Destination scans explicitly use `-MaxParallel 2` in Interactive and Certificate
-  modes. Source scans and comparisons remain sequential.
-- Source **Run batch** is disabled until **Check prerequisites** succeeds on the
+- SPO source and destination scans explicitly use `-MaxParallel 2` in Interactive
+  and Certificate modes. The SPO source card selects `-Side Source` and stores
+  results separately. With all migrations selected it skips unsupported source
+  types; an explicitly selected incompatible migration fails preflight.
+  SharePoint Server source scans and comparisons remain sequential.
+- SharePoint Server source **Run batch** is disabled until **Check prerequisites** succeeds on the
   local source farm server: elevated Windows PowerShell 5.1, SharePoint snap-in
   and Shell/database access, trusted toolkit dependencies, Python availability
   and writable logs. The batch validates local staging again before collection.

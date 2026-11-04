@@ -2,7 +2,7 @@
 .SYNOPSIS
     Verify file and permission scan library scope without SharePoint connections.
 .VERSION
-    1.0.1
+    1.0.2
 #>
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
@@ -37,7 +37,8 @@ function New-TestList {
     return $list
 }
 function Get-PnPList { param($Connection) return $script:FixtureLists }
-function Get-PnPProperty { param($ClientObject, $Property) return $ClientObject.$Property }
+$script:TestDeniedTitle = ''
+function Get-PnPProperty { param($ClientObject, $Property) if ($ClientObject.Title -eq $script:TestDeniedTitle) { throw 'Synthetic root access denied' }; return $ClientObject.$Property }
 function Write-Host { param($Object) [void]$script:Messages.Add([string]$Object) }
 function Write-Info { param($Color, $Message) [void]$script:Messages.Add([string]$Message) }
 function Write-ConsoleMessage { param($Message) [void]$script:Messages.Add([string]$Message) }
@@ -87,6 +88,17 @@ foreach ($side in @('Source', 'Target')) {
             } else { $args.Connection = 'offline' }
             Assert-Names @(Get-DocumentLibraries @args) @('SiteAssets', 'SitePages') "$name default"
             Assert-Names @(Get-DocumentLibraries @args -IncludeHidden -IncludeSystem) @('SiteAssets', 'SitePages', '_catalogs/masterpage', 'HiddenLibrary') "$name opt-ins"
+            if ($side -eq 'Target') {
+                $script:TestDeniedTitle = 'HiddenLibrary'
+                Assert-Names @(Get-DocumentLibraries @args) @('SiteAssets', 'SitePages') "$name inaccessible excluded hidden library"
+                $blocked = $false
+                try { [void]@(Get-DocumentLibraries @args -IncludeHidden -IncludeSystem) } catch { $blocked = $_.Exception.Message -match 'Synthetic root access denied' }
+                if (-not $blocked) { throw 'An inaccessible included hidden library was not rejected.' }
+                $script:TestDeniedTitle = 'SitePages'; $blocked = $false
+                try { [void]@(Get-DocumentLibraries @args) } catch { $blocked = $_.Exception.Message -match 'Synthetic root access denied' }
+                if (-not $blocked) { throw 'An inaccessible visible library was not rejected.' }
+                $script:TestDeniedTitle = ''
+            }
             foreach ($reason in @('hidden', 'system', 'zero items')) {
                 if (-not @($script:Messages | Where-Object { $_ -like "*: $reason*" }).Count) { throw "$name did not log $reason exclusions" }
             }

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Reads ShareGate migration and pre-check CSV columns through configured aliases.
 .VERSION
-    1.0.1
+    1.0.5
 #>
 
 function Get-SmartM365ShareGateReportAliases {
@@ -15,7 +15,7 @@ function Get-SmartM365ShareGateReportAliases {
     }
     else { $null }
     $aliases = @{}
-    foreach ($field in @('Status', 'Errors', 'Warnings', 'Messages', 'Details', 'SourceItemId', 'DestinationUrl', 'DestinationPath', 'DestinationItemId')) {
+    foreach ($field in @('Status', 'Errors', 'Warnings', 'Messages', 'Details', 'SourceItemId', 'DestinationUrl', 'DestinationPath', 'DestinationItemId', 'ImportStatus')) {
         $names = [System.Collections.Generic.List[string]]::new()
         foreach ($source in @($local, $template)) {
             if ($null -eq $source) { continue }
@@ -47,6 +47,90 @@ function Test-SmartM365ShareGateReportField {
     return $false
 }
 
+function Assert-SmartM365ShareGateCleanSpoReport {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object[]]$Rows, [Parameter(Mandatory)][string]$SourceItemId,
+        [Parameter(Mandatory)][string]$ExpectedDestinationPath, [Parameter(Mandatory)][hashtable]$Aliases)
+    if (-not $Rows.Count -or -not (Test-SmartM365ShareGateReportField -Row $Rows[0] -Field 'SourceItemId' -Aliases $Aliases)) {
+        throw 'ShareGate report lacks source item identity.'
+    }
+    function Get-NonEmptySpoReportValues {
+        param($Row,[string]$Field)
+        foreach($name in @($Aliases[$Field])) {
+            $property=$Row.PSObject.Properties[$name]
+            if($property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) { [string]$property.Value }
+        }
+    }
+    foreach ($row in $Rows) {
+        if (@(Get-NonEmptySpoReportValues -Row $row -Field 'SourceItemId' | Sort-Object -Unique).Count -gt 1) {
+            throw 'ShareGate report contains conflicting source item identifiers.'
+        }
+    }
+    $selected = @($Rows | Where-Object { (Get-SmartM365ShareGateReportValue -Row $_ -Field 'SourceItemId' -Aliases $Aliases) -eq $SourceItemId })
+    if ($selected.Count -ne 1 -or (Get-SmartM365ShareGateReportValue -Row $selected[0] -Field 'Status' -Aliases $Aliases) -ne 'Success') {
+        throw 'ShareGate report does not show exactly one successful selected item.'
+    }
+    $path = Get-SmartM365ShareGateReportValue -Row $selected[0] -Field 'DestinationPath' -Aliases $Aliases
+    if (-not $path -or (ConvertTo-SmartM365ShareGateRelativePath -Path $path -Side ExportedDestination) -ne $ExpectedDestinationPath) {
+        throw 'ShareGate report does not prove the exact destination path.'
+    }
+    foreach ($row in $Rows) {
+        $states = @(Get-NonEmptySpoReportValues -Row $row -Field 'Status')
+        if (@($states | Where-Object { $_ -ne 'Success' }).Count -or
+            @(Get-NonEmptySpoReportValues -Row $row -Field 'Errors').Count -or
+            @(Get-NonEmptySpoReportValues -Row $row -Field 'Warnings').Count) {
+            throw 'ShareGate report contains a non-success status, error or warning, including a roll-up row.'
+        }
+    }
+    $imports = @($Rows | ForEach-Object { Get-NonEmptySpoReportValues -Row $_ -Field 'ImportStatus' })
+    if (-not $imports.Count -or @($imports | Where-Object { $_ -ne 'Finished' }).Count) {
+        throw 'ShareGate report does not prove that Microsoft 365 import finished.'
+    }
+}
+
+function Get-SmartM365ShareGateSpoCollectionKey {
+    param([Parameter(Mandatory)][string]$Url)
+    $rawMatch = [regex]::Match($Url, '(?i)^https?://[^/?#]+(?<path>/[^?#]*)?')
+    if (-not $rawMatch.Success) { return '' }
+    $rawPath = $rawMatch.Groups['path'].Value
+    if ($rawPath -match '(?i)%(?:2e|2f|5c|25)|%(?![0-9a-f]{2})|\\' -or
+        @($rawPath.Split('/') | Where-Object { $_ -in @('.','..') }).Count) { return '' }
+    $uri = $null
+    if (-not [uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$uri) -or
+        $uri.Scheme -ne 'https' -or $uri.Port -ne 443 -or $uri.UserInfo -or
+        $uri.Host -notmatch '(?i)\.sharepoint\.(com|cn|de)$') { return '' }
+    $parts = @($uri.AbsolutePath.Split('/'))
+    if ($parts.Count -lt 3 -or $parts[0] -or $parts[1] -notin @('sites','teams') -or
+        -not $parts[2] -or $parts[2] -in @('.','..') -or $parts[2] -match '[%\\:\x00-\x1f]') { return '' }
+    return ('{0}|{1}|{2}' -f $uri.Host.ToLowerInvariant(), $parts[1].ToLowerInvariant(), $parts[2].ToLowerInvariant())
+}
+
+function Get-SmartM365ShareGateFailingUrlSide {
+    param([Parameter(Mandatory)][string]$Text, [Parameter(Mandatory)][string]$SourceUrl, [Parameter(Mandatory)][string]$DestinationUrl)
+    $sourceHost = ([uri]$SourceUrl).Host.ToLowerInvariant()
+    $destinationHost = ([uri]$DestinationUrl).Host.ToLowerInvariant()
+    $sourceCollection = Get-SmartM365ShareGateSpoCollectionKey -Url $SourceUrl
+    $destinationCollection = Get-SmartM365ShareGateSpoCollectionKey -Url $DestinationUrl
+    $urlMatches = @([regex]::Matches($Text, "(?i)(?:WebUri\s*:\s*'(?<web>https?://[^']+)'|URL\s*'(?<failure>https?://[^']+)'\s*was not authorized)"))
+    if (-not $urlMatches.Count) { return 'Undetermined' }
+    $sides = @(@(foreach ($match in $urlMatches) {
+        $url = if ($match.Groups['web'].Success) { $match.Groups['web'].Value } else { $match.Groups['failure'].Value }
+        $failed = $null
+        if (-not [uri]::TryCreate($url, [UriKind]::Absolute, [ref]$failed)) { 'Undetermined'; continue }
+        $hostName = $failed.Host.ToLowerInvariant()
+        if ($sourceHost -ne $destinationHost -and $hostName -eq $sourceHost) { 'Source'; continue }
+        if ($sourceHost -ne $destinationHost -and $hostName -eq $destinationHost) { 'Destination'; continue }
+        if ($sourceHost -eq $destinationHost -and $sourceCollection -and $destinationCollection -and $sourceCollection -ne $destinationCollection) {
+            $collection = Get-SmartM365ShareGateSpoCollectionKey -Url $url
+            if ($collection -and $collection -eq $sourceCollection) { 'Source'; continue }
+            if ($collection -and $collection -eq $destinationCollection) { 'Destination'; continue }
+        }
+        'Undetermined'
+    }) | Select-Object -Unique)
+    if ($sides.Count -ne 1 -or $sides[0] -eq 'Undetermined') { return 'Undetermined' }
+    return $sides[0]
+}
+
 function Get-SmartM365ShareGatePrecheckAssessment {
     param(
         [object[]]$Rows,
@@ -65,15 +149,9 @@ function Get-SmartM365ShareGatePrecheckAssessment {
     }) -join "`n"
     $status = ''
     if ($text -match '(?i)(?:\(401\)|HTTP\s*401|401\s+Unauthorized)') {
-        $hosts = @([regex]::Matches($text, "(?i)(?:WebUri\s*:\s*'(?<web>https?://[^']+)'|URL\s*'(?<failure>https?://[^']+)'\s*was not authorized)") |
-            ForEach-Object {
-                $url = if ($_.Groups['web'].Success) { $_.Groups['web'].Value } else { $_.Groups['failure'].Value }
-                ([uri]$url).Host.ToLowerInvariant()
-            } | Select-Object -Unique)
-        $sourceHost = ([uri]$SourceUrl).Host.ToLowerInvariant()
-        $destinationHost = ([uri]$DestinationUrl).Host.ToLowerInvariant()
-        if ($hosts.Count -eq 1 -and $hosts[0] -eq $sourceHost -and $sourceHost -ne $destinationHost) { $status = 'Source 401 observed' }
-        elseif ($hosts.Count -eq 1 -and $hosts[0] -eq $destinationHost -and $sourceHost -ne $destinationHost) { $status = 'Destination 401 observed' }
+        $side = Get-SmartM365ShareGateFailingUrlSide -Text $text -SourceUrl $SourceUrl -DestinationUrl $DestinationUrl
+        if ($side -eq 'Source') { $status = 'Source 401 observed' }
+        elseif ($side -eq 'Destination') { $status = 'Destination 401 observed' }
         else { $status = '401 observed - side undetermined' }
     }
     $hasId = Test-SmartM365ShareGateReportField -Row $Rows[0] -Field 'SourceItemId' -Aliases $Aliases

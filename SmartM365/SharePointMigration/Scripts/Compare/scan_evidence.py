@@ -1,5 +1,5 @@
 """Create a portable, copy-resistant receipt for a completed inventory CSV."""
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 import argparse
 import csv
@@ -74,15 +74,20 @@ def write_manifest(path, side, kind, scope):
     return target
 
 
-def read_scan_time(path):
+def read_scan_time(path, expected_side=None, expected_kind=None):
     path = Path(path)
     assert_inventory_complete(path)
     receipt = manifest_path(path)
     if receipt.is_file():
         data = json.loads(receipt.read_text(encoding="utf-8"))
-        digest, _ = inspect_csv(path)
+        digest, rows = inspect_csv(path)
         if data.get("InventoryFile") != path.name or data.get("Sha256", "").lower() != digest:
             raise ValueError(f"Scan manifest does not match inventory: {path}")
+        if expected_side is not None or expected_kind is not None:
+            if (data.get("SchemaVersion") != 1 or data.get("Rows") != rows or
+                    (expected_side is not None and data.get("Side") != expected_side) or
+                    (expected_kind is not None and data.get("Kind") != expected_kind)):
+                raise ValueError(f"Scan manifest side, kind, row count or schema does not match the requested comparison: {path}")
         return datetime.fromisoformat(data["CompletedAtUtc"]).astimezone(timezone.utc), "Manifest"
     found = re.search(r"-(\d{8})-(\d{6})(?:-[^.]+)?\.csv$", path.name, re.I)
     if found:
@@ -91,9 +96,9 @@ def read_scan_time(path):
     return None, "Unknown"
 
 
-def describe_pair(source, target, max_gap_hours=12, max_age_hours=24):
-    source_at, source_kind = read_scan_time(source)
-    target_at, target_kind = read_scan_time(target)
+def describe_pair(source, target, max_gap_hours=12, max_age_hours=24, inventory_kind=None):
+    source_at, source_kind = read_scan_time(source, "Source" if inventory_kind else None, inventory_kind)
+    target_at, target_kind = read_scan_time(target, "Target" if inventory_kind else None, inventory_kind)
     if not source_at or not target_at:
         return {"ScanEvidenceStatus": "Unverified", "SourceScanCompletedUtc": "", "TargetScanCompletedUtc": ""}
     now = datetime.now(timezone.utc)

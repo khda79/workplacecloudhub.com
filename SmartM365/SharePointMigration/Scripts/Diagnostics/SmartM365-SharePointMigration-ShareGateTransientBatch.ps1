@@ -1,8 +1,8 @@
-﻿<#
+<#
 .SYNOPSIS
     Approval-gated item-scoped batches for source 401 cases after a reviewed pilot.
 .VERSION
-    1.0.4
+    1.0.7
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -14,6 +14,8 @@ param(
     [Parameter(Mandatory)][string]$QualificationDirectory,
     [Parameter(Mandatory)][string]$PathCorrectionDirectory,
     [Parameter(Mandatory)][string]$SessionId,
+    [ValidateSet('Default','Browser','ModernAuth')][string]$SourceAuthMode = 'Default',
+    [ValidateSet('Default','Browser','ModernAuth')][string]$DestinationAuthMode = 'Browser',
     [ValidateRange(1,100)][int]$BatchSize = 50,
     [ValidateRange(0,100)][int]$MaxErrorsPerBatch = 0,
     [ValidateRange(0,1440)][int]$MaintenanceMarginMinutes = 60,
@@ -33,8 +35,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$version = '1.0.4'
+$version = '1.0.7'
 . (Join-Path $PSScriptRoot '..\Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateAuth.ps1')
 $script:ConsoleLifecycleContext = Start-SmartM365MigrationConsoleLifecycle -ScriptPath $PSCommandPath
 $script:ConsoleLifecycleFailure = $null
 $script:ConsoleLifecycleStatus = 'SUCCESS'
@@ -231,6 +234,7 @@ function Write-TransientLog {
 $script:logPath = ''
 Write-TransientLog ('Mode={0}; script=v{1}; session={2}; source 401 items={3}; pilot Success excluded=4; pilot Home.aspx Skipped excluded=1; other Home.aspx separate={4}; remaining={5}; batches={6}; batchSize={7}; maxErrorsPerBatch={8}; copySettings=IncrementalUpdate; maintenance=23:45-00:15 farm time; writes={9}' -f
     $(if ($Run) { 'Run' } else { 'DryRun' }),$version,$SessionId,@($evidence.AccessItems).Count,$separatePages.Count,$remaining.Count,$batches.Count,$BatchSize,$MaxErrorsPerBatch,$(if ($Run) { 'possible after confirmation' } else { 'none' }))
+Write-TransientLog ('SourceAuth={0}; DestinationAuth={1}' -f $SourceAuthMode,$DestinationAuthMode)
 Write-TransientLog ('AnalysisSHA256={0}; WitnessSHA256={1}; PilotManifestSHA256={2}; PlanSHA256={3}' -f
     $evidence.AnalysisSHA256,$witnessHash,$evidence.PilotManifestSHA256,$planHash)
 Write-TransientLog ('Placement proof: qualified=1; corrected=3; ShareGate={0}; QualificationSHA256={1}; PathCorrectionSHA256={2}; correction folder={3}' -f
@@ -264,16 +268,16 @@ if ($entered -cne $phrase) { throw 'Exact confirmation phrase was not entered. N
 $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmZone -Phase 'Transient real copy startup'
 $null = Assert-TransientSchedule -ItemCount $remaining.Count -Phase 'transient real copy startup'
 
-$module = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
+$module = @(Get-SmartM365ShareGateModule)
 if (-not $module.Count) { throw 'ShareGate module is not discoverable in Windows PowerShell 5.1.' }
 Import-Module -Name $module[0].Path -ErrorAction Stop
 if ([string]$module[0].Version -ne $placement.ShareGateVersion) {
     throw 'Installed ShareGate version differs from the qualified path-correction version.'
 }
 foreach ($name in @('Connect-Site','Get-List','Get-Folder','Copy-Content','New-CopySettings','Export-Report')) {
-    if (-not (Get-Command -Name $name -Module ShareGate -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
+    if (-not (Get-Command -Name ('ShareGate\' + $name) -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
 }
-$copyCommand = Get-Command -Name Copy-Content -Module ShareGate
+$copyCommand = Get-Command -Name 'ShareGate\Copy-Content'
 $requiredParameters = @('SourceList','DestinationList','SourceItemId','DestinationFolder','CopySettings','TaskName')
 if (-not @($copyCommand.ParameterSets | Where-Object {
     $names = @($_.Parameters | ForEach-Object Name)
@@ -357,8 +361,8 @@ function Get-ExactTransientList {
     $siteKey = $Side + '|' + $SiteUrl.TrimEnd('/').ToLowerInvariant()
     if (-not $siteCache.ContainsKey($siteKey)) {
         $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmZone -Phase ("$Side site connection")
-        $site = if ($Side -eq 'Source') { ShareGate\Connect-Site -Url $SiteUrl -ErrorAction Stop }
-                else { ShareGate\Connect-Site -Url $SiteUrl -Browser -ErrorAction Stop }
+        $mode = if ($Side -eq 'Source') { $SourceAuthMode } else { $DestinationAuthMode }
+        $site = Connect-SmartM365ShareGateEndpoint -Url $SiteUrl -Mode $mode
         if (-not $site) { throw "Connect-Site returned no $Side site: $SiteUrl" }
         $siteCache[$siteKey] = $site
     }
@@ -385,8 +389,8 @@ function Get-TransientCopySessionId {
 }
 
 Save-TransientState
-Write-TransientLog ('Actor={0}\{1}; Machine={2}; ShareGate={3}; SourceAuth=CurrentWindowsIdentity; DestinationAuth=Browser; CopySettings=IncrementalUpdate; plan={4}; results={5}; horsLot={6}' -f
-    $env:USERDOMAIN,$env:USERNAME,$env:COMPUTERNAME,$module[0].Version,$planPath,$resultPath,$outOfBatchPath)
+Write-TransientLog ('Actor={0}\{1}; Machine={2}; ShareGate={3}; SourceAuth={4}; DestinationAuth={5}; CopySettings=IncrementalUpdate; plan={6}; results={7}; horsLot={8}' -f
+    $env:USERDOMAIN,$env:USERNAME,$env:COMPUTERNAME,$module[0].Version,$SourceAuthMode,$DestinationAuthMode,$planPath,$resultPath,$outOfBatchPath)
 $currentBatch = $null
 $currentCopyStarted = $false
 $currentCopySession = ''

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Approval-gated, five-item ShareGate remediation pilot for source 401 cases.
 .VERSION
-    1.0.5
+    1.0.8
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -11,6 +11,8 @@ param(
     [Parameter(Mandatory)][string]$AnalysisDirectory,
     [Parameter(Mandatory)][string]$WitnessDirectory,
     [Parameter(Mandatory)][string]$SessionId,
+    [ValidateSet('Default','Browser','ModernAuth')][string]$SourceAuthMode = 'Default',
+    [ValidateSet('Default','Browser','ModernAuth')][string]$DestinationAuthMode = 'Browser',
     [ValidateNotNullOrEmpty()][string]$FarmTimeZoneId = 'W. Europe Standard Time',
     [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedAnalysisHash = '',
     [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedWitnessHash = '',
@@ -22,6 +24,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateAuth.ps1')
 $script:ConsoleLifecycleContext = Start-SmartM365MigrationConsoleLifecycle -ScriptPath $PSCommandPath
 $script:ConsoleLifecycleFailure = $null
 $script:ConsoleLifecycleStatus = 'SUCCESS'
@@ -146,6 +149,7 @@ foreach ($entry in $selection) {
     $entry | Add-Member -NotePropertyName Path -NotePropertyValue (Resolve-SmartM365ShareGateDestinationPath -Row $entry.Row)
 }
 Write-Output ('{0} Mode={1}; Session={2}; AnalysisSHA256={3}; WitnessSHA256={4}; selected=5; writes={5}; FarmTimeZone={6}; Maintenance=23:45-00:15' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $(if ($Run) { 'Run' } else { 'DryRun' }), $SessionId, $analysisHash, $selectionHash, $(if ($Run) { 'possible after confirmation' } else { 'none' }), $farmTimeZone.Id)
+Write-Output ('{0} SourceAuth={1}; DestinationAuth={2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $SourceAuthMode, $DestinationAuthMode)
 foreach ($entry in $selection) {
     $row = $entry.Row
     Write-Output ('{0} {1}: ID={2}; {3} | {4} -> {5} | {6}; sourcePath={7}; destinationPath={8}; destinationFolder={9}; original={10}' -f
@@ -196,8 +200,8 @@ function Get-ExactList {
     param([string]$Side, [string]$Url, [string]$Name)
     $siteKey = $Side + '|' + $Url.TrimEnd('/').ToLowerInvariant()
     if (-not $siteCache.ContainsKey($siteKey)) {
-        if ($Side -eq 'Source') { $siteCache[$siteKey] = ShareGate\Connect-Site -Url $Url -ErrorAction Stop }
-        else { $siteCache[$siteKey] = ShareGate\Connect-Site -Url $Url -Browser -ErrorAction Stop }
+        $mode = if ($Side -eq 'Source') { $SourceAuthMode } else { $DestinationAuthMode }
+        $siteCache[$siteKey] = Connect-SmartM365ShareGateEndpoint -Url $Url -Mode $mode
         if (-not $siteCache[$siteKey]) { throw "Connect-Site returned no site for $Side $Url." }
     }
     $listKey = $siteKey + '|' + $Name.ToLowerInvariant()
@@ -256,7 +260,7 @@ function Test-ExpectedDestinationUrl {
 function Resolve-DestinationItemUrl {
     param($DestinationList, [string]$SiteUrl, [string]$DestinationPath, [string]$DestinationItemId, [string]$PathEvidence)
     $relativePath = $DestinationPath.Trim().TrimStart('/')
-    if ($relativePath -and (Get-Command -Name Get-File -Module ShareGate -ErrorAction SilentlyContinue)) {
+    if ($relativePath -and (Get-Command -Name 'ShareGate\Get-File' -ErrorAction SilentlyContinue)) {
         try {
             $files = @(ShareGate\Get-File -List $DestinationList -Path $relativePath -ErrorAction Stop)
             if ($files.Count -eq 1 -and $files[0].PSObject.Properties['Address']) {
@@ -270,7 +274,7 @@ function Resolve-DestinationItemUrl {
     }
     $numericId = 0
     if ([int]::TryParse($DestinationItemId, [ref]$numericId) -and $numericId -gt 0 -and
-        (Get-Command -Name Get-ListItem -Module ShareGate -ErrorAction SilentlyContinue)) {
+        (Get-Command -Name 'ShareGate\Get-ListItem' -ErrorAction SilentlyContinue)) {
         try {
             $items = @(ShareGate\Get-ListItem -List $DestinationList -Id $numericId -ErrorAction Stop)
             if ($items.Count -eq 1 -and $items[0].PSObject.Properties['Address']) {
@@ -316,14 +320,14 @@ try {
     $plan = @($selection | ForEach-Object { [pscustomobject]@{ Role=$_.Role; ItemKey=$_.Row.ItemKey; SourceUrl=$_.Row.SourceUrl; SourceList=$_.Row.SourceList; SourceItemId=$_.Row.SourceItemId; DestinationUrl=$_.Row.DestinationUrl; DestinationList=$_.Row.DestinationList; SourceFilePath=$_.Path.SourceFilePath; DestinationFilePath=$_.Path.DestinationFilePath; DestinationFolder=$_.Path.DestinationFolder } })
     Export-AtomicCsv -Path (Join-Path $output 'Pilot-Plan.csv') -Rows $plan -Columns @('Role','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','SourceFilePath','DestinationFilePath','DestinationFolder')
     Export-AtomicCsv -Path $resultPath -Rows $results.ToArray() -Columns $resultColumns
-    $module = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
+    $module = @(Get-SmartM365ShareGateModule)
     if (-not $module.Count) { throw 'ShareGate module is not discoverable in Windows PowerShell 5.1.' }
     Import-Module -Name $module[0].Path -ErrorAction Stop
     Write-PilotLog ('ShareGate module version={0}; path={1}' -f $module[0].Version, $module[0].Path)
     foreach ($name in @('Connect-Site','Get-List','Get-Folder','Copy-Content','New-CopySettings','Export-Report')) {
-        if (-not (Get-Command -Name $name -Module ShareGate -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
+        if (-not (Get-Command -Name ('ShareGate\' + $name) -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
     }
-    $copy = Get-Command Copy-Content -Module ShareGate
+    $copy = Get-Command -Name 'ShareGate\Copy-Content'
     $requiredCopyParameters = @('SourceItemId','SourceList','DestinationList','DestinationFolder','CopySettings','TaskName')
     if (-not @($copy.ParameterSets | Where-Object {
         $names = @($_.Parameters | ForEach-Object Name)

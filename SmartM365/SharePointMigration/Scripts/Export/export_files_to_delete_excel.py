@@ -1,4 +1,4 @@
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 import argparse
 import builtins
 import csv
@@ -99,7 +99,7 @@ def build_delete_file_rows(extra_in_target_path):
             rows.append(
                 {
                     "Action": "Move SPO file to the recycle bin after review",
-                    "Reason": "SPO file path is absent from the normalized SP2019 source inventory",
+                    "Reason": "SPO file path is absent from the normalized source inventory",
                     "TargetWebUrl": target_web_url,
                     "TargetLibraryTitle": row.get("LibraryTitle", ""),
                     "FileName": row.get("FileName", ""),

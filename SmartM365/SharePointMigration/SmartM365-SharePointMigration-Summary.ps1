@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only portfolio summary for the SharePoint migration GUI.
 .VERSION
-    1.0.19
+    1.0.20
 #>
 
 . (Join-Path $PSScriptRoot 'Scripts\Launchers\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -284,6 +284,14 @@ function Get-SmartM365PortfolioRow {
         $permissionValidation = if ($validationProperty) { [string]$validationProperty.Value } else { '' }
         if ($permissionValidation -and $permissionValidation -ne 'NoRelevantDifference') {
             $permissionDetail += " Validation: $permissionValidation."
+        }
+        $groupDifferences = $permissionComparison.Summary.PSObject.Properties['GroupMembershipDifferentCount']
+        $groupUnknown = $permissionComparison.Summary.PSObject.Properties['GroupMembershipUnknown']
+        $differenceCount = 0; $unknownCount = 0
+        if ($groupDifferences) { [void][int]::TryParse([string]$groupDifferences.Value, [ref]$differenceCount) }
+        if ($groupUnknown) { [void][int]::TryParse([string]$groupUnknown.Value, [ref]$unknownCount) }
+        if ($differenceCount -gt 0 -or $unknownCount -gt 0) {
+            $permissionDetail += " Group membership assignment rows: $differenceCount with different counts, $unknownCount unknown; groups may repeat."
         }
     }
     $fileStatus = $status

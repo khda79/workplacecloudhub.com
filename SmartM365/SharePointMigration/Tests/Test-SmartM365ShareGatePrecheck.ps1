@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline safety and result contract for the ShareGate -WhatIf pre-check.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -22,7 +22,7 @@ try {
 @{ RootModule='ShareGate.psm1'; ModuleVersion='99.0.0'; GUID='cb851a44-6ef6-4fbd-9719-eb19f6cc06fe'; FunctionsToExport=@('Connect-Site','Get-List','Copy-Content','Export-Report') }
 '@ | Set-Content -LiteralPath (Join-Path $moduleDir 'ShareGate.psd1') -Encoding UTF8
     @'
-function Connect-Site { [CmdletBinding()] param([string]$Url,[switch]$Browser) if ($Url -match 'target' -and -not $Browser) { throw 'Destination Browser missing' }; if ($Url -match 'source' -and $Browser) { throw 'Source must use current Windows user' }; [pscustomobject]@{ Url=$Url } }
+function Connect-Site { [CmdletBinding()] param([string]$Url,[switch]$Browser,[switch]$ModernAuth) if ($Url -match 'target' -and -not $Browser) { throw 'Destination Browser missing' }; if ($Url -match 'source' -and ($Browser -ne [bool]$env:SPMIG_TEST_SOURCE_BROWSER)) { throw 'Unexpected source authentication' }; [pscustomobject]@{ Url=$Url } }
 function Get-List { [CmdletBinding()] param($Site,[string[]]$Name) [pscustomobject]@{ Title=$Name[0]; Site=$Site } }
 function Copy-Content { [CmdletBinding()] param($SourceList,$DestinationList,[int[]]$SourceItemId,[switch]$WhatIf) if (-not $WhatIf) { throw 'Copy-Content without WhatIf' }; [pscustomobject]@{ Id=('precheck-'+$SourceItemId[0]); SourceId=$SourceItemId[0] } }
 function Export-Report { [CmdletBinding()] param($CopyResult,[string]$Path) $errorText=if($CopyResult.SourceId -eq 1){ "401 Unauthorized. URL 'https://source.example/sites/a/_vti_bin/client.svc/ProcessQuery' was not authorized" }else{ '' }; [pscustomobject]@{ 'Source ID'=[string]$CopyResult.SourceId; Status=$(if($errorText){'Error'}else{'Success'}); Errors=$errorText } | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8 }
@@ -50,9 +50,15 @@ SessionId,RowId,RuleId,ItemKey,SourceUrl,SourceList,SourceItemId,DestinationUrl,
     if ($items.Count -ne 2) { throw "Expected 2 distinct items, got $($items.Count)." }
     if ($items[0].Status -ne 'Source 401 observed' -or $items[1].Status -ne 'No 401 observed in pre-check') { throw 'Per-item pre-check statuses are incorrect.' }
     if (@(Get-ChildItem -LiteralPath (Join-Path $output.FullName 'Reports') -File -Filter '*.csv').Count -ne 2) { throw 'Export-Report did not create one CSV per item.' }
+    $env:SPMIG_TEST_SOURCE_BROWSER = '1'
+    & $scriptPath -ProjectRoot (Join-Path $root 'Project') -AnalysisDirectory $analysis -SessionId '260930-6' -SourceAuthMode Browser -WhatIf -Run | Out-Null
+    $browserOutput = @(Get-ChildItem -LiteralPath (Join-Path $root 'Project\ShareGate\Diagnostics') -Directory -Filter 'Precheck-*' | Sort-Object LastWriteTime -Descending)[0]
+    $browserItems = @(Import-Csv -LiteralPath (Join-Path $browserOutput.FullName 'Precheck-Items.csv'))
+    if ($browserItems.Count -ne 2 -or $browserItems[0].Status -ne 'Source 401 observed') { throw 'Source Browser authentication did not complete the mocked pre-check.' }
     Write-Output 'ShareGate pre-check offline contract test passed.'
 }
 finally {
+    Remove-Item Env:SPMIG_TEST_SOURCE_BROWSER -ErrorAction SilentlyContinue
     $env:PSModulePath = $oldModulePath
     if ((Test-Path -LiteralPath $root) -and $root.StartsWith($testsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $root -Recurse -Force

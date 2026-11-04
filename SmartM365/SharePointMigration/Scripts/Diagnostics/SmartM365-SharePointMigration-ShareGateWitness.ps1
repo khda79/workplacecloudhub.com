@@ -2,7 +2,7 @@
 .SYNOPSIS
     Bounded, read-only ShareGate -WhatIf witness for two known warnings and three prior 401 items.
 .VERSION
-    1.0.0
+    1.0.4
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -10,6 +10,8 @@ param(
     [Parameter(Mandatory)][string]$ProjectRoot,
     [Parameter(Mandatory)][string]$AnalysisDirectory,
     [Parameter(Mandatory)][string]$SessionId,
+    [ValidateSet('Default','Browser','ModernAuth')][string]$SourceAuthMode = 'Default',
+    [ValidateSet('Default','Browser','ModernAuth')][string]$DestinationAuthMode = 'Browser',
     [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedAnalysisHash = '',
     [switch]$DryRun,
     [switch]$Run,
@@ -126,8 +128,8 @@ function Get-ExactList {
     param([string]$Side, [string]$Url, [string]$Name)
     $siteKey = $Side + '|' + $Url.TrimEnd('/').ToLowerInvariant()
     if (-not $siteCache.ContainsKey($siteKey)) {
-        if ($Side -eq 'Source') { $siteCache[$siteKey] = ShareGate\Connect-Site -Url $Url -ErrorAction Stop }
-        else { $siteCache[$siteKey] = ShareGate\Connect-Site -Url $Url -Browser -ErrorAction Stop }
+        $mode = if ($Side -eq 'Source') { $SourceAuthMode } else { $DestinationAuthMode }
+        $siteCache[$siteKey] = Connect-SmartM365ShareGateEndpoint -Url $Url -Mode $mode
         if (-not $siteCache[$siteKey]) { throw "Connect-Site returned no site for $Side $Url." }
     }
     $listKey = $siteKey + '|' + $Name.ToLowerInvariant()
@@ -152,19 +154,20 @@ function Get-PrecheckSessionId {
 }
 
 try {
-    Write-WitnessLog ('Actor={0}\{1}; Machine={2}; Module=ShareGate; WhatIf=True; Session={3}; AnalysisSHA256={4}' -f $env:USERDOMAIN, $env:USERNAME, $env:COMPUTERNAME, $SessionId, $analysisHash)
+    Write-WitnessLog ('Actor={0}\{1}; Machine={2}; Module=ShareGate; WhatIf=True; Session={3}; AnalysisSHA256={4}; SourceAuth={5}; DestinationAuth={6}' -f $env:USERDOMAIN, $env:USERNAME, $env:COMPUTERNAME, $SessionId, $analysisHash, $SourceAuthMode, $DestinationAuthMode)
     $columns = @('Role','SessionId','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','PriorRuleId','Status','ReportRows','PrecheckSessionId','CopyResultPath','ReportPath','Error')
     $selectionRows = @($selection | ForEach-Object { [pscustomobject]@{ Role=$_.Role; ItemKey=$_.Row.ItemKey; SourceUrl=$_.Row.SourceUrl; SourceList=$_.Row.SourceList; SourceItemId=$_.Row.SourceItemId; DestinationUrl=$_.Row.DestinationUrl; DestinationList=$_.Row.DestinationList; PriorRuleId=$_.Row.RuleId } })
     Export-AtomicCsv -Path (Join-Path $output 'Witness-Selection.csv') -Rows $selectionRows -Columns @('Role','ItemKey','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','PriorRuleId')
     Export-AtomicCsv -Path (Join-Path $output 'Witness-Results.csv') -Rows @() -Columns $columns
-    $module = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
+    . (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateAuth.ps1')
+$module = @(Get-SmartM365ShareGateModule)
     if (-not $module.Count) { throw 'ShareGate module is not discoverable in Windows PowerShell 5.1.' }
     Import-Module -Name $module[0].Path -ErrorAction Stop
     Write-WitnessLog ('ShareGate module version={0}; path={1}' -f $module[0].Version, $module[0].Path)
     foreach ($name in @('Connect-Site','Get-List','Copy-Content','Export-Report')) {
-        if (-not (Get-Command -Name $name -Module ShareGate -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
+        if (-not (Get-Command -Name ('ShareGate\' + $name) -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
     }
-    $copy = Get-Command Copy-Content -Module ShareGate
+    $copy = Get-Command -Name 'ShareGate\Copy-Content'
     if (-not @($copy.ParameterSets | Where-Object { @($_.Parameters | Where-Object Name -EQ 'SourceItemId').Count -gt 0 -and @($_.Parameters | Where-Object Name -EQ 'WhatIf').Count -gt 0 }).Count) {
         throw 'Installed Copy-Content does not expose SourceItemId and WhatIf together.'
     }

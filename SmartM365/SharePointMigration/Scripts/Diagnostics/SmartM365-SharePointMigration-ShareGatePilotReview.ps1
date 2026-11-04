@@ -1,8 +1,8 @@
-﻿<#
+<#
 .SYNOPSIS
     Read-only review of an existing five-item ShareGate pilot and SPO item URLs.
 .VERSION
-    1.0.0
+    1.0.4
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -11,6 +11,8 @@ param(
     [Parameter(Mandatory)][string]$AnalysisDirectory,
     [Parameter(Mandatory)][string]$PilotDirectory,
     [Parameter(Mandatory)][string]$SessionId,
+    [ValidateSet('Default','Browser','ModernAuth')][string]$SourceAuthMode = 'Default',
+    [ValidateSet('Default','Browser','ModernAuth')][string]$DestinationAuthMode = 'Browser',
     [ValidateNotNullOrEmpty()][string]$FarmTimeZoneId = 'W. Europe Standard Time',
     [switch]$DryRun,
     [switch]$Run
@@ -18,7 +20,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$version = '1.0.0'
+$version = '1.0.4'
 . (Join-Path $PSScriptRoot '..\Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1')
 $script:ConsoleLifecycleContext = Start-SmartM365MigrationConsoleLifecycle -ScriptPath $PSCommandPath
 $script:ConsoleLifecycleFailure = $null
@@ -42,10 +44,8 @@ function Get-ExactReviewList {
     param([string]$Side, [string]$SiteUrl, [string]$ListName)
     $siteKey = $Side + '|' + $SiteUrl.TrimEnd('/').ToLowerInvariant()
     if (-not $script:siteCache.ContainsKey($siteKey)) {
-        $site = if ($Side -eq 'Source') {
-            ShareGate\Connect-Site -Url $SiteUrl -ErrorAction Stop
-        }
-        else { ShareGate\Connect-Site -Url $SiteUrl -Browser -ErrorAction Stop }
+        $mode = if ($Side -eq 'Source') { $SourceAuthMode } else { $DestinationAuthMode }
+        $site = Connect-SmartM365ShareGateEndpoint -Url $SiteUrl -Mode $mode
         if (-not $site) { throw "Connect-Site returned no $Side site: $SiteUrl" }
         $script:siteCache[$siteKey] = $site
     }
@@ -148,11 +148,12 @@ if (-not $Run) {
     return
 }
 
-$module = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateAuth.ps1')
+$module = @(Get-SmartM365ShareGateModule)
 if (-not $module.Count) { throw 'ShareGate module is not discoverable under Windows PowerShell 5.1.' }
 Import-Module -Name $module[0].Path -ErrorAction Stop
 foreach ($name in @('Connect-Site','Get-List','Get-File','Get-ListItem')) {
-    if (-not (Get-Command -Name $name -Module ShareGate -ErrorAction SilentlyContinue)) { throw "Required read-only ShareGate cmdlet is missing: $name" }
+    if (-not (Get-Command -Name ('ShareGate\' + $name) -ErrorAction SilentlyContinue)) { throw "Required read-only ShareGate cmdlet is missing: $name" }
 }
 $script:siteCache = @{}
 $script:listCache = @{}
@@ -161,8 +162,8 @@ New-Item -ItemType Directory -Path $output -Force | Out-Null
 $script:logPath = Join-Path $output 'PilotReview.log'
 $itemsPath = Join-Path $output 'PilotReview-Items.csv'
 $summaryPath = Join-Path $output 'PilotReview-Summary.json.txt'
-Write-ReviewLog ('Actor={0}\{1}; Machine={2}; ShareGate module={3}; SourceAuth=CurrentWindowsIdentity; DestinationAuth=Browser; WritesToSharePoint=none' -f
-    $env:USERDOMAIN,$env:USERNAME,$env:COMPUTERNAME,$module[0].Version)
+Write-ReviewLog ('Actor={0}\{1}; Machine={2}; ShareGate module={3}; SourceAuth={4}; DestinationAuth={5}; WritesToSharePoint=none' -f
+    $env:USERDOMAIN,$env:USERNAME,$env:COMPUTERNAME,$module[0].Version,$SourceAuthMode,$DestinationAuthMode)
 $results = [System.Collections.Generic.List[object]]::new()
 foreach ($item in $evidence.PilotItems) {
     $destinationList = $null

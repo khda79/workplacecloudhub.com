@@ -2,7 +2,7 @@
 .SYNOPSIS
     Verify destination batch concurrency with offline child processes.
 .VERSION
-    1.0.2
+    1.0.5
 #>
 #requires -Version 7.4
 $ErrorActionPreference = 'Stop'
@@ -21,7 +21,7 @@ if (@($errors).Count) { throw 'Batch parser errors.' }
 $certificateFunction = $ast.Find({ param($node)
     $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-CertificateAuth'
 }, $true)
-$source = $source.Replace($certificateFunction.Extent.Text, 'function Assert-CertificateAuth { param([string]$Root) }')
+$source = $source.Replace($certificateFunction.Extent.Text, 'function Assert-CertificateAuth { param([string]$Root, [object[]]$Migrations) }')
 # The batch copy runs outside the toolkit: load the storage helper from the repository.
 $storageHelper = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\Scripts\Launchers\SmartM365-SharePointMigration-Storage.ps1'))
 $source = $source.Replace(". (Join-Path `$PSScriptRoot '..\SmartM365-SharePointMigration-Storage.ps1')", ". '$storageHelper'")
@@ -32,7 +32,7 @@ try {
     $batchCopy = Join-Path $testRoot 'batch.ps1'
     [IO.File]::WriteAllText($batchCopy, $source)
     [IO.File]::WriteAllText($runnerPath, @'
-param([string]$Batch, [string]$Root, [string]$Mode, [int]$Limit, [int]$Delay, [switch]$Plan)
+param([string]$Batch, [string]$Root, [string]$Mode, [int]$Limit, [int]$Delay, [string]$Side = 'Target', [switch]$Plan)
 $ErrorActionPreference = 'Stop'
 function Get-Module {
     param([switch]$ListAvailable, [string]$Name)
@@ -53,7 +53,7 @@ function Start-Process {
         -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $Root "$id.out") -RedirectStandardError (Join-Path $Root "$id.err")
 }
-$options = @{ ProjectRoot=$Root; LauncherPath=(Join-Path $Root 'stub.ps1'); AuthMode=$Mode; MaxParallel=$Limit; LaunchDelaySeconds=$Delay }
+$options = @{ ProjectRoot=$Root; LauncherPath=(Join-Path $Root 'stub.ps1'); AuthMode=$Mode; MaxParallel=$Limit; LaunchDelaySeconds=$Delay; Side=$Side }
 if ($Plan) { $options.PlanOnly = $true }
 $global:LASTEXITCODE = 0
 & $Batch @options
@@ -62,6 +62,7 @@ exit $LASTEXITCODE
     foreach ($scenario in @(
         @{ Name='interactive-default'; Mode='Interactive'; Limit=0; Expected=2; Delay=0; Fail=$false; Plan=$false },
         @{ Name='certificate-default'; Mode='Certificate'; Limit=0; Expected=2; Delay=0; Fail=$false; Plan=$false },
+        @{ Name='source-certificate'; Mode='Certificate'; Limit=0; Expected=2; Delay=0; Fail=$false; Plan=$false; Side='Source' },
         @{ Name='interactive-serial'; Mode='Interactive'; Limit=1; Expected=1; Delay=0; Fail=$false; Plan=$false },
         @{ Name='interactive-failure'; Mode='Interactive'; Limit=2; Expected=2; Delay=1; Fail=$true; Plan=$false },
         @{ Name='interactive-plan'; Mode='Interactive'; Limit=2; Expected=2; Delay=0; Fail=$false; Plan=$true },
@@ -69,14 +70,15 @@ exit $LASTEXITCODE
         @{ Name='interactive-reject-three'; Mode='Interactive'; Limit=3; Expected=0; Delay=0; Fail=$false; Plan=$false }
     )) {
         $root = Join-Path $testRoot $scenario.Name
+        $side = if ($scenario.ContainsKey('Side')) { $scenario.Side } else { 'Target' }
         foreach ($name in @('SiteA','SiteB','SiteC')) {
             $dir = Join-Path $root "Migrations\$name"
             [void](New-Item -ItemType Directory -Path $dir -Force)
-            "@{ Name='$name'; Target=@{ Type='SPO'; SiteUrl='https://target.example.test/sites/$name' } }" |
+            "@{ Name='$name'; Source=@{ Type='SPO'; SiteUrl='https://source.example.test/sites/$name' }; Target=@{ Type='SPO'; SiteUrl='https://target.example.test/sites/$name' } }" |
                 Set-Content -LiteralPath (Join-Path $dir 'migration.config.psd1')
         }
         [IO.File]::WriteAllText((Join-Path $root 'stub.ps1'), @'
-param([string]$MigrationName, [string]$Action, [switch]$UseCertificate, [string]$RunResultPath, [string]$RunResultId)
+param([string]$MigrationName, [string]$Action, [switch]$UseCertificate, [switch]$InteractiveAuthentication, [string]$RunResultPath, [string]$RunResultId)
 $start = [datetime]::UtcNow
 Start-Sleep -Milliseconds 1800
 [pscustomobject]@{ Migration=$MigrationName; Action=$Action; Start=$start.ToString('o'); End=[datetime]::UtcNow.ToString('o'); Certificate=[bool]$UseCertificate } |
@@ -91,7 +93,7 @@ if ((Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) -and $MigrationNam
 '@)
         if ($scenario.Fail) { [IO.File]::WriteAllText((Join-Path $root 'fail'), '') }
         $argsList = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$runnerPath,'-Batch',$batchCopy,'-Root',$root,
-            '-Mode',$scenario.Mode,'-Limit',[string]$scenario.Limit,'-Delay',[string]$scenario.Delay)
+            '-Mode',$scenario.Mode,'-Limit',[string]$scenario.Limit,'-Delay',[string]$scenario.Delay,'-Side',$side)
         if ($scenario.Plan) { $argsList += '-Plan' }
         $output = & (Get-Command pwsh).Source @argsList 2>&1
         $code = $LASTEXITCODE
@@ -117,8 +119,9 @@ if ((Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) -and $MigrationNam
         $active = 0; $peak = 0
         foreach ($point in ($points | Sort-Object Time,Delta)) { $active += $point.Delta; $peak = [Math]::Max($peak,$active) }
         if ($peak -ne $scenario.Expected) { throw "Unexpected concurrency for $($scenario.Name): $peak" }
-        $filesEnd = ($events | Where-Object Action -EQ ScanTargetFiles | ForEach-Object { [datetime]$_.End } | Sort-Object | Select-Object -Last 1)
-        $permissionsStart = ($events | Where-Object Action -EQ ScanTargetPermissions | ForEach-Object { [datetime]$_.Start } | Sort-Object | Select-Object -First 1)
+        $filesEnd = ($events | Where-Object Action -EQ "Scan${side}Files" | ForEach-Object { [datetime]$_.End } | Sort-Object | Select-Object -Last 1)
+        $permissionsStart = ($events | Where-Object Action -EQ "Scan${side}Permissions" | ForEach-Object { [datetime]$_.Start } | Sort-Object | Select-Object -First 1)
+        if (-not $filesEnd -or -not $permissionsStart) { throw 'Expected side-specific actions were not run.' }
         if ($permissionsStart -lt $filesEnd) { throw 'Permissions started before the file phase finished.' }
         foreach ($launch in $launches) {
             if ($scenario.Mode -eq 'Interactive') {

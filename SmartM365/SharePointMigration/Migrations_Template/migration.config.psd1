@@ -4,6 +4,12 @@
     Source = @{
         # Supported values: SP2016, SP2019, SPO
         Type = 'SP2019'
+        # Optional local profile path, relative to this migration folder or absolute.
+        AuthConfigPath = ''
+        # SPO sources: collect previous file versions for complexity assessment.
+        IncludeVersionCounts = $true
+        # Required for site lock operations when this side is SPO.
+        TenantAdminUrl = ''
         WebApplicationUrl = 'https://source-sharepoint.example.com'
         PermissionRootPath = '/SOURCE'
     }
@@ -11,6 +17,7 @@
     Target = @{
         # Supported values: SP2016, SP2019, SPO
         Type = 'SPO'
+        AuthConfigPath = ''
         SiteUrl = 'https://yourtenant.sharepoint.com/sites/NewMigration'
         TenantAdminUrl = 'https://yourtenant-admin.sharepoint.com'
         PrefixToRemove = ''
@@ -25,6 +32,7 @@
         SizeToleranceBytes = 10240
         ModifiedDateToleranceMinutes = 0
         PathMappingsFile = 'migration.mapping.txt'
+        CrossTenantIdentityMappingPath = ''
         SourceModifiedTimeZone = 'Auto'
         TargetModifiedTimeZone = 'Auto'
         ShareGateReplacementCharacter = '_'

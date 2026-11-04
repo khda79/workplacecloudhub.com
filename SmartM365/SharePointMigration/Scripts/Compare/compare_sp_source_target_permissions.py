@@ -1,4 +1,4 @@
-__version__ = "1.0.2"
+__version__ = "1.0.5"
 import argparse
 import builtins
 import csv
@@ -17,7 +17,7 @@ import sys
 # The embedded Portable Python omits the script directory from sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
-from scan_evidence import assert_inventory_complete, describe_pair
+from scan_evidence import assert_inventory_complete, describe_pair, read_scan_time
 from comparison_artifacts import artifact_name
 from comparison_history_chart import render_history_section
 
@@ -89,6 +89,9 @@ NUMERIC_COLUMNS = {
     "SourceUsersNotInEntraIgnored",
     "DisabledEntraUsersNotInSPO",
     "SharePointGroupMappingsLoaded",
+    "GroupMembershipEqualRaw",
+    "GroupMembershipDifferentCount",
+    "GroupMembershipUnknown",
     "SourceRowsWithoutLibraryScopeMetadata",
     "TargetRowsWithoutLibraryScopeMetadata",
     "SourcePermissions",
@@ -467,12 +470,16 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
     not_entra = to_int(summary_row.get("SourceUsersNotInEntraIgnored"))
     source_la = to_int(summary_row.get("SourceLimitedAccessOnlyIgnored"))
     target_la = to_int(summary_row.get("TargetLimitedAccessOnlyIgnored"))
-    real_difference_count = missing + target_less + permission_different + extra
+    group_different = to_int(summary_row.get("GroupMembershipDifferentCount"))
+    group_unknown = to_int(summary_row.get("GroupMembershipUnknown"))
+    cross_tenant_review = summary_row.get("CrossTenantIdentityMode") == "ExplicitMapping"
+    no_aliases = summary_row.get("EntraIdentityValidationStatus") == "NoAliasesAvailable"
+    real_difference_count = missing + target_less + permission_different + extra + group_different
     inconclusive = not source_keys or not target_keys
     success_rate = f"{matched / source_keys * 100:.2f}%" if not inconclusive else "N/A"
     evidence_problem = summary_row.get("ScanEvidenceStatus") in ("Stale", "Unverified")
-    status_text = "Inconclusive - empty inventory" if inconclusive else ("Review scan evidence" if evidence_problem else ("Review needed" if real_difference_count or disabled_missing or target_more else "No relevant difference"))
-    status_class = "note" if inconclusive else ("warn" if real_difference_count or evidence_problem else ("note" if disabled_missing or target_more else "ok"))
+    status_text = "Inconclusive - empty inventory" if inconclusive else ("Review scan evidence" if evidence_problem else ("Review needed" if real_difference_count or disabled_missing or target_more or group_unknown or cross_tenant_review or no_aliases else "No relevant difference"))
+    status_class = "note" if inconclusive else ("warn" if real_difference_count or evidence_problem or group_unknown or cross_tenant_review or no_aliases else ("note" if disabled_missing or target_more else "ok"))
 
     cards = [
         ("Success rate", success_rate, "muted" if inconclusive else "ok"),
@@ -483,6 +490,8 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
         ("Target has less permissions", target_less, "bad" if target_less else "ok"),
         ("Permission level different", permission_different, "bad" if permission_different else "ok"),
         ("Extra in SPO", extra, "bad" if extra else "ok"),
+        ("Group membership count differs", group_different, "bad" if group_different else "ok"),
+        ("Group membership unknown", group_unknown, "note" if group_unknown else "ok"),
         ("Source users not in Entra", not_entra, "note" if not_entra else "ok"),
         ("Limited Access ignored", source_la + target_la, "muted"),
     ]
@@ -494,6 +503,12 @@ def create_permission_html_summary(path, title, summary_row, permission_summary_
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     warning = summary_row.get("ScopeWarning") or ""
+    if cross_tenant_review:
+        warning = (warning + " Cross-tenant principals use explicitly confirmed mappings; account state, group membership equivalence and effective access require independent review.").strip()
+    if no_aliases:
+        warning = (warning + " No Entra user aliases were available for identity validation.").strip()
+    if any(to_int(summary_row.get(name)) for name in ("GroupMembershipEqualRaw", "GroupMembershipDifferentCount", "GroupMembershipUnknown")):
+        warning = (warning + " Direct group membership checks compare collected counts and raw login names only. Raw-only names may be aliases, not absent identities; nested groups and effective access are not verified.").strip()
     warning_html = f'<div class="callout warn"><strong>Warning</strong><br>{html_escape(warning)}</div>' if warning else ""
 
     report_link_rows = []
@@ -1143,13 +1158,13 @@ def row_path(row, source_prefix=None, target_prefix=None, path_mappings=None):
     return normalize_default_document_library_key(row, path, source_prefix, target_prefix, path_mappings=path_mappings)
 
 
-def make_key(row, source_prefix=None, target_prefix=None, path_mappings=None, entra_user_aliases=None, sharepoint_group_mappings=None):
+def make_key(row, source_prefix=None, target_prefix=None, path_mappings=None, entra_user_aliases=None, sharepoint_group_mappings=None, cross_tenant=False):
     web_path = row_web_path(row, source_prefix, target_prefix, path_mappings=path_mappings)
     object_path = row_path(row, source_prefix, target_prefix, path_mappings=path_mappings)
     return (
         (row.get("ObjectScope") or "").strip().lower(),
         object_path,
-        normalize_principal(row, web_path=web_path, object_path=object_path, entra_user_aliases=entra_user_aliases, sharepoint_group_mappings=sharepoint_group_mappings),
+        row["CrossTenantComparisonPrincipal"] if cross_tenant else normalize_principal(row, web_path=web_path, object_path=object_path, entra_user_aliases=entra_user_aliases, sharepoint_group_mappings=sharepoint_group_mappings),
         normalize_permissions(row.get("PermissionLevels")),
     )
 
@@ -1203,6 +1218,61 @@ def source_user_not_found_in_entra(row, entra_user_aliases):
     principal = row.get("PrincipalLoginName") or row.get("PrincipalName")
     normalized = normalize_principal_text(principal)
     return bool(normalized) and normalized not in entra_user_aliases
+
+
+def group_membership_review(source_by_key, target_by_key, comparison, cross_tenant=False):
+    """Review direct SharePoint group members, never infer nested effective access."""
+    paired_targets = {source: target for source, target in comparison["target_has_more_pairs"]}
+    paired_targets.update({source: target for source, target in comparison["target_has_less_pairs"]})
+    paired_targets.update({source: target for source, target in comparison["permission_level_different_pairs"]})
+    keys = set(comparison["matched_keys"]) | set(paired_targets)
+    reviews = []
+
+    def members(row):
+        if normalize_label(row.get("PrincipalType")) != "sharepointgroup" or normalize_label(row.get("PrincipalMemberLookupStatus")) != "ok":
+            return None
+        count_value = row.get("PrincipalMemberCount")
+        raw_count = str(count_value if count_value is not None else "").strip()
+        if not raw_count.isdigit():
+            return None
+        values = [str(value).strip() for value in split_principal_member_values(row.get("PrincipalMemberLoginNames"))]
+        normalized = [value.casefold() for value in values]
+        if any(not value for value in values) or len(values) != int(raw_count) or len(set(normalized)) != len(values):
+            return None
+        return dict(zip(normalized, values))
+
+    for key in sorted(keys):
+        source = source_by_key[key]
+        if normalize_label(source.get("PrincipalType")) != "sharepointgroup":
+            continue
+        target = target_by_key.get(paired_targets.get(key, key))
+        left, right = members(source), members(target or {})
+        status = "Unknown"
+        raw_comparison, source_only, target_only = "IncompleteEvidence", "", ""
+        if left is not None and right is not None:
+            if not cross_tenant:
+                raw_comparison = "ExactRawLoginStrings"
+                source_only = " || ".join(left[value] for value in sorted(left.keys() - right.keys()))
+                target_only = " || ".join(right[value] for value in sorted(right.keys() - left.keys()))
+            else:
+                raw_comparison = "NotComparedCrossTenant"
+            if left.keys() == right.keys() and not cross_tenant:
+                status = "EqualRaw"
+            elif len(left) != len(right):
+                status = "DifferentCount"
+        reviews.append({
+            "ObjectScope": key[0], "ComparisonObjectPath": key[1],
+            "SourceWebUrl": source.get("WebUrl", ""), "TargetWebUrl": (target or {}).get("WebUrl", ""),
+            "SourceGroup": source.get("PrincipalLoginName") or source.get("PrincipalName", ""),
+            "TargetGroup": (target or {}).get("PrincipalLoginName") or (target or {}).get("PrincipalName", ""),
+            "SourceMemberCount": "" if left is None else len(left),
+            "TargetMemberCount": "" if right is None else len(right),
+            "RawMemberComparison": raw_comparison,
+            "SourceOnlyRawLoginNames": source_only,
+            "TargetOnlyRawLoginNames": target_only,
+            "Status": status,
+        })
+    return reviews
 
 
 def source_key_is_disabled_entra_user(row, key, disabled_entra_users):
@@ -1533,6 +1603,7 @@ def write_permission_comparison_report(
     sharepoint_group_mappings=None,
     sharepoint_group_mapping_rows=None,
     artifact_prefix="",
+    cross_tenant=False,
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
     sharepoint_group_mappings = sharepoint_group_mappings or {}
@@ -1548,7 +1619,7 @@ def write_permission_comparison_report(
     disabled_entra_users = disabled_entra_users or set()
 
     for row in source_rows:
-        key = make_key(row, source_root_path, target_root_path, path_mappings=path_mappings, entra_user_aliases=entra_user_aliases, sharepoint_group_mappings=sharepoint_group_mappings)
+        key = make_key(row, source_root_path, target_root_path, path_mappings=path_mappings, entra_user_aliases=entra_user_aliases, sharepoint_group_mappings=sharepoint_group_mappings, cross_tenant=cross_tenant)
         keyed = enrich_sharepoint_group_member_entra_status(attach_key(row, key), entra_user_aliases)
         if not key_has_comparable_permissions(key):
             source_limited_access_only.append(keyed)
@@ -1562,7 +1633,7 @@ def write_permission_comparison_report(
         source_by_key[key] = keyed
 
     for row in target_rows:
-        key = make_key(row, entra_user_aliases=entra_user_aliases)
+        key = make_key(row, entra_user_aliases=entra_user_aliases, cross_tenant=cross_tenant)
         keyed = attach_key(row, key)
         if not key_has_comparable_permissions(key):
             target_limited_access_only.append(keyed)
@@ -1580,6 +1651,7 @@ def write_permission_comparison_report(
     target_has_more_pairs = comparison["target_has_more_pairs"]
     target_has_less_pairs = comparison["target_has_less_pairs"]
     permission_level_different_pairs = comparison["permission_level_different_pairs"]
+    group_reviews = group_membership_review(source_by_key, target_by_key, comparison, cross_tenant=cross_tenant)
 
     summary_rows = [
         {
@@ -1603,6 +1675,11 @@ def write_permission_comparison_report(
             "DisabledEntraUsersLoaded": len(disabled_entra_users),
             "SourceUsersNotInEntraIgnored": len(source_users_not_in_entra),
             "SharePointGroupMappingsLoaded": len(sharepoint_group_mappings),
+            "GroupMembershipEqualRaw": sum(row["Status"] == "EqualRaw" for row in group_reviews),
+            "GroupMembershipDifferentCount": sum(row["Status"] == "DifferentCount" for row in group_reviews),
+            "GroupMembershipUnknown": sum(row["Status"] == "Unknown" for row in group_reviews),
+            "CrossTenantIdentityMode": "ExplicitMapping" if cross_tenant else "",
+            "EntraIdentityValidationStatus": "NotEvaluatedCrossTenant" if cross_tenant else ("TargetAliasesUsed" if entra_user_aliases else "NoAliasesAvailable"),
             "SourceRowsWithoutLibraryScopeMetadata": library_scope_metadata_missing_count(source_rows),
             "TargetRowsWithoutLibraryScopeMetadata": library_scope_metadata_missing_count(target_rows),
             "SourceScanDocumentLibrariesOnly": str(bool(source_scan_document_libraries_only)),
@@ -1670,6 +1747,7 @@ def write_permission_comparison_report(
     limited_access_target_csv = output_dir / artifact_name("LimitedAccessOnly-Target.csv", artifact_prefix)
     source_users_not_in_entra_csv = output_dir / artifact_name("SourceUsersNotInEntra.csv", artifact_prefix)
     sharepoint_group_mappings_csv = output_dir / artifact_name("SharePointGroupMappings.csv", artifact_prefix)
+    group_membership_csv = output_dir / artifact_name("GroupMembershipReview.csv", artifact_prefix)
 
     write_csv(summary_csv, summary_rows, list(summary_rows[0].keys()))
     write_csv(scope_csv, scope_rows, ["ObjectScope", "Status", "Count"])
@@ -1700,6 +1778,7 @@ def write_permission_comparison_report(
     write_csv(limited_access_source_csv, source_limited_access_only, output_fields)
     write_csv(limited_access_target_csv, target_limited_access_only, target_fields)
     write_csv(source_users_not_in_entra_csv, source_users_not_in_entra, output_fields)
+    write_csv(group_membership_csv, group_reviews, ["ObjectScope", "ComparisonObjectPath", "SourceWebUrl", "TargetWebUrl", "SourceGroup", "TargetGroup", "SourceMemberCount", "TargetMemberCount", "Status", "RawMemberComparison", "SourceOnlyRawLoginNames", "TargetOnlyRawLoginNames"])
     write_csv(sharepoint_group_mappings_csv, sharepoint_group_mapping_rows, ["MappingSourceWebPath", "MappingTargetWebPath", "MappingSourceObjectPath", "MappingRole", "MappingSourcePrincipalName", "MappingTargetPrincipalName", "MappingTargetComparisonPrincipal", "MappingMethod"])
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1723,6 +1802,7 @@ def write_permission_comparison_report(
             ("IgnoredTargetLA", list_rows_for_excel(limited_access_target_csv)),
             ("IgnoredSourceNotEntra", list_rows_for_excel(source_users_not_in_entra_csv)),
             ("SPGroupMappings", list_rows_for_excel(sharepoint_group_mappings_csv)),
+            ("GroupMembership", list_rows_for_excel(group_membership_csv)),
         ],
     )
 
@@ -1745,6 +1825,7 @@ def write_permission_comparison_report(
             ("Extra in SPO", extra_csv, "Target permissions not found in source."),
             ("Source users not in Entra", source_users_not_in_entra_csv, "Source users ignored because they are not in the Entra cache."),
             ("SharePoint group mappings", sharepoint_group_mappings_csv, "Detected and confirmed SharePoint group mappings."),
+            ("Group membership review", group_membership_csv, "Direct member counts and raw login comparison; nested and effective access are not verified."),
             ("Excel workbook", xlsx_path, "Full comparison workbook."),
         ],
     )
@@ -1777,7 +1858,8 @@ def main():
     parser.add_argument("--max-scan-age-hours", type=float, default=48)
     parser.add_argument("--source-scan-document-libraries-only", action="store_true")
     parser.add_argument("--target-scan-document-libraries-only", action="store_true")
-    parser.add_argument("--entra-users-csv", required=True)
+    parser.add_argument("--entra-users-csv", help="Required for the existing same-tenant or SharePoint Server comparison.")
+    parser.add_argument("--cross-tenant-identity-mapping", help="Private CSV of confirmed explicit source-to-target identity mappings.")
     args = parser.parse_args()
 
     if len(args.sharegate_replacement_character) != 1:
@@ -1790,27 +1872,61 @@ def main():
     target_csv = Path(args.target_csv)
     assert_inventory_complete(source_csv)
     assert_inventory_complete(target_csv)
+    read_scan_time(source_csv, "Source", "Permission")
+    read_scan_time(target_csv, "Target", "Permission")
     output_dir = Path(args.output_directory)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    cross_tenant = bool(args.cross_tenant_identity_mapping)
+    cross_preflight = None
+    if cross_tenant:
+        from cross_tenant_identity import preflight_inventory
+        cross_preflight = preflight_inventory(source_csv, args.cross_tenant_identity_mapping, target_path=target_csv)
+        if cross_preflight["UnresolvedRows"]:
+            raise ValueError(f"Cross-tenant mapping has {cross_preflight['UnresolvedRows']} unresolved source assignment rows")
     source_rows = list(read_rows(source_csv))
     target_rows = list(read_rows(target_csv))
 
+    path_mapping_hash = ""
+    if cross_tenant:
+        if not args.path_mapping_file:
+            raise ValueError("Cross-tenant comparison requires a host-aware site mapping file")
+        from cross_tenant_identity import _sha256
+        path_mapping_hash = _sha256(args.path_mapping_file)
     path_mappings = load_path_mappings(args.path_mapping_file)
     if path_mappings:
         print(f"Path mappings loaded: {len(path_mappings)}")
 
-    entra_user_aliases, disabled_entra_users = load_entra_user_aliases(args.entra_users_csv)
-    print(f"Entra user aliases loaded: {len(entra_user_aliases)} from {args.entra_users_csv}")
-    print(f"Disabled Entra users loaded: {len(disabled_entra_users)} from {args.entra_users_csv}")
+    if cross_tenant:
+        from cross_tenant_identity import expected_target_web, load_confirmed_mappings, load_web_mappings, prepare_comparison_rows
+        web_mappings = load_web_mappings(args.path_mapping_file)
+        source_rows, target_rows = prepare_comparison_rows(
+            source_rows, target_rows, load_confirmed_mappings(args.cross_tenant_identity_mapping),
+            lambda row: row_web_path(row, args.source_root_path, args.target_root_path, path_mappings=path_mappings),
+            normalize_path,
+            lambda source_web: expected_target_web(source_web, web_mappings),
+        )
+        if (_sha256(source_csv) != cross_preflight["SourceSha256"] or
+                _sha256(target_csv) != cross_preflight["TargetSha256"] or
+                _sha256(args.cross_tenant_identity_mapping) != cross_preflight["MappingSha256"] or
+                _sha256(args.path_mapping_file) != path_mapping_hash):
+            raise ValueError("A cross-tenant comparison input changed during preparation")
 
-    sharepoint_group_mappings, sharepoint_group_mapping_rows = build_sharepoint_group_mappings(
-        source_rows,
-        target_rows,
-        source_prefix=args.source_root_path,
-        target_prefix=args.target_root_path,
-        path_mappings=path_mappings,
-    )
+    if cross_tenant:
+        # Explicit mappings replace heuristic group mappings and aliases across tenants.
+        sharepoint_group_mappings, sharepoint_group_mapping_rows = {}, []
+        entra_user_aliases, disabled_entra_users = {}, set()
+        print("Cross-tenant comparison does not infer identities or source account state from the target Entra cache.")
+    else:
+        if not args.entra_users_csv:
+            raise ValueError("Entra users cache is required for the existing permission comparison")
+        entra_user_aliases, disabled_entra_users = load_entra_user_aliases(args.entra_users_csv)
+        sharepoint_group_mappings, sharepoint_group_mapping_rows = build_sharepoint_group_mappings(
+            source_rows, target_rows, source_prefix=args.source_root_path,
+            target_prefix=args.target_root_path, path_mappings=path_mappings,
+        )
+        print(f"Entra user aliases loaded: {len(entra_user_aliases)} from {args.entra_users_csv}")
+        print(f"Disabled Entra users loaded: {len(disabled_entra_users)} from {args.entra_users_csv}")
     print(f"SharePoint group mappings loaded: {len(sharepoint_group_mappings)}")
 
     source_by_key = {}
@@ -1822,7 +1938,7 @@ def main():
     source_users_not_in_entra = []
 
     for row in source_rows:
-        key = make_key(row, args.source_root_path, args.target_root_path, path_mappings=path_mappings, entra_user_aliases=entra_user_aliases, sharepoint_group_mappings=sharepoint_group_mappings)
+        key = make_key(row, args.source_root_path, args.target_root_path, path_mappings=path_mappings, entra_user_aliases=entra_user_aliases, sharepoint_group_mappings=sharepoint_group_mappings, cross_tenant=cross_tenant)
         keyed = enrich_sharepoint_group_member_entra_status(attach_key(row, key), entra_user_aliases)
         if not key_has_comparable_permissions(key):
             source_limited_access_only.append(keyed)
@@ -1836,7 +1952,7 @@ def main():
         source_by_key[key] = keyed
 
     for row in target_rows:
-        key = make_key(row, entra_user_aliases=entra_user_aliases)
+        key = make_key(row, entra_user_aliases=entra_user_aliases, cross_tenant=cross_tenant)
         keyed = attach_key(row, key)
         if not key_has_comparable_permissions(key):
             target_limited_access_only.append(keyed)
@@ -1855,6 +1971,7 @@ def main():
     target_has_less_pairs = comparison["target_has_less_pairs"]
     permission_level_different_pairs = comparison["permission_level_different_pairs"]
 
+    group_reviews = group_membership_review(source_by_key, target_by_key, comparison, cross_tenant=cross_tenant)
     summary_rows = [
         {
             "SourceCsv": str(source_csv),
@@ -1878,17 +1995,24 @@ def main():
             "DisabledEntraUsersLoaded": len(disabled_entra_users),
             "SourceUsersNotInEntraIgnored": len(source_users_not_in_entra),
             "SharePointGroupMappingsLoaded": len(sharepoint_group_mappings),
+            "GroupMembershipEqualRaw": sum(row["Status"] == "EqualRaw" for row in group_reviews),
+            "GroupMembershipDifferentCount": sum(row["Status"] == "DifferentCount" for row in group_reviews),
+            "GroupMembershipUnknown": sum(row["Status"] == "Unknown" for row in group_reviews),
+            "CrossTenantIdentityMode": "ExplicitMapping" if cross_tenant else "",
+            "CrossTenantMappingSha256": cross_preflight["MappingSha256"] if cross_tenant else "",
+            "CrossTenantSiteMappingSha256": path_mapping_hash if cross_tenant else "",
+            "EntraIdentityValidationStatus": "NotEvaluatedCrossTenant" if cross_tenant else ("TargetAliasesUsed" if entra_user_aliases else "NoAliasesAvailable"),
             "SourceRootPath": args.source_root_path,
             "TargetRootPath": args.target_root_path,
         }
     ]
-    summary_rows[0].update(describe_pair(source_csv, target_csv, args.max_scan_age_difference_hours, args.max_scan_age_hours))
+    summary_rows[0].update(describe_pair(source_csv, target_csv, args.max_scan_age_difference_hours, args.max_scan_age_hours, "Permission"))
     if not source_by_key or not target_by_key:
         summary_rows[0]["ValidationStatus"] = "InconclusiveEmptyInventory"
     elif summary_rows[0]["ScanEvidenceStatus"] in ("Stale", "Unverified"):
         summary_rows[0]["ValidationStatus"] = "ReviewScanEvidence"
     else:
-        summary_rows[0]["ValidationStatus"] = "ReviewNeeded" if any((missing_keys, disabled_entra_missing_keys, extra_keys, target_has_more_pairs, target_has_less_pairs, permission_level_different_pairs)) else "NoRelevantDifference"
+        summary_rows[0]["ValidationStatus"] = "ReviewNeeded" if cross_tenant or not entra_user_aliases or any((missing_keys, disabled_entra_missing_keys, extra_keys, target_has_more_pairs, target_has_less_pairs, permission_level_different_pairs, summary_rows[0]["GroupMembershipDifferentCount"], summary_rows[0]["GroupMembershipUnknown"])) else "NoRelevantDifference"
 
     def rows_from_keys(keys, lookup):
         return [lookup[key] for key in keys]
@@ -1941,6 +2065,7 @@ def main():
     limited_access_target_csv = output_dir / artifact_name("LimitedAccessOnly-Target.csv", args.artifact_prefix)
     source_users_not_in_entra_csv = output_dir / artifact_name("SourceUsersNotInEntra.csv", args.artifact_prefix)
     sharepoint_group_mappings_csv = output_dir / artifact_name("SharePointGroupMappings.csv", args.artifact_prefix)
+    group_membership_csv = output_dir / artifact_name("GroupMembershipReview.csv", args.artifact_prefix)
 
     write_csv(summary_csv, summary_rows, list(summary_rows[0].keys()))
     write_csv(scope_csv, scope_rows, ["ObjectScope", "Status", "Count"])
@@ -1971,6 +2096,7 @@ def main():
     write_csv(limited_access_source_csv, source_limited_access_only, output_fields)
     write_csv(limited_access_target_csv, target_limited_access_only, target_fields)
     write_csv(source_users_not_in_entra_csv, source_users_not_in_entra, output_fields)
+    write_csv(group_membership_csv, group_reviews, ["ObjectScope", "ComparisonObjectPath", "SourceWebUrl", "TargetWebUrl", "SourceGroup", "TargetGroup", "SourceMemberCount", "TargetMemberCount", "Status", "RawMemberComparison", "SourceOnlyRawLoginNames", "TargetOnlyRawLoginNames"])
     write_csv(sharepoint_group_mappings_csv, sharepoint_group_mapping_rows, ["MappingSourceWebPath", "MappingTargetWebPath", "MappingSourceObjectPath", "MappingRole", "MappingSourcePrincipalName", "MappingTargetPrincipalName", "MappingTargetComparisonPrincipal", "MappingMethod"])
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1994,6 +2120,7 @@ def main():
             ("IgnoredTargetLA", list_rows_for_excel(limited_access_target_csv)),
             ("IgnoredSourceNotEntra", list_rows_for_excel(source_users_not_in_entra_csv)),
             ("SPGroupMappings", list_rows_for_excel(sharepoint_group_mappings_csv)),
+            ("GroupMembership", list_rows_for_excel(group_membership_csv)),
         ],
     )
 
@@ -2016,6 +2143,7 @@ def main():
             ("Extra in SPO", extra_csv, "Target permissions not found in source."),
             ("Source users not in Entra", source_users_not_in_entra_csv, "Source users ignored because they are not in the Entra cache."),
             ("SharePoint group mappings", sharepoint_group_mappings_csv, "Detected and confirmed SharePoint group mappings."),
+            ("Group membership review", group_membership_csv, "Direct member counts and raw login comparison; nested and effective access are not verified."),
             ("Excel workbook", xlsx_path, "Full comparison workbook."),
         ],
         source_csv=source_csv,
@@ -2038,6 +2166,7 @@ def main():
         sharepoint_group_mappings=sharepoint_group_mappings,
         sharepoint_group_mapping_rows=sharepoint_group_mapping_rows,
         artifact_prefix=args.artifact_prefix,
+        cross_tenant=cross_tenant,
     )
     other_scope_report = write_permission_comparison_report(
         [row for row in source_rows if not is_document_library_permission(row)],
@@ -2055,6 +2184,7 @@ def main():
         sharepoint_group_mappings=sharepoint_group_mappings,
         sharepoint_group_mapping_rows=sharepoint_group_mapping_rows,
         artifact_prefix=args.artifact_prefix,
+        cross_tenant=cross_tenant,
     )
     print(f"Comparison completed.")
     print(f"Matched permissions: {len(matched_keys)}")

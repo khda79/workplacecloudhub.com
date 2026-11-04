@@ -7,7 +7,7 @@
     requested inventory, comparison, or permission action.
 
 .VERSION
-    1.0.34
+    1.0.36
 #>
 
 [CmdletBinding()]
@@ -24,6 +24,7 @@ param(
         'ScanSourcePermissions',
         'ScanTargetPermissions',
         'ComparePermissions',
+        'ValidateCrossTenantIdentityMappings',
         'CompareSourceHistory',
         'CompareScanHistory',
         'ComparePermissionScanHistory'
@@ -47,6 +48,8 @@ param(
 
     [switch]$UseCertificate,
 
+    [switch]$InteractiveAuthentication,
+
     [switch]$Force,
 
     [switch]$NonInteractive,
@@ -60,7 +63,7 @@ $ErrorActionPreference = 'Stop'
 $script:LauncherPreviousConsoleMarker = [string]$env:SPMIG_CONSOLE_LIFECYCLE_ACTIVE
 $script:LauncherOwnsLifecycle = [string]::IsNullOrWhiteSpace($script:LauncherPreviousConsoleMarker)
 if ($script:LauncherOwnsLifecycle) {
-    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.32') -ForegroundColor Cyan
+    Microsoft.PowerShell.Utility\Write-Host ('{0} Script  : {1} v{2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $MyInvocation.MyCommand.Name, '1.0.36') -ForegroundColor Cyan
 }
 $script:LauncherNonInteractive = [bool]$NonInteractive
 . (Join-Path -Path $PSScriptRoot -ChildPath '..\SmartM365-SharePointMigration-LauncherCommon.ps1')
@@ -346,12 +349,36 @@ function Open-DirectoryInExplorer {
 }
 
 function Get-SPOAuthConfig {
+    param([ValidateSet('Source', 'Target')][string]$Side = 'Target')
     $configPath = Join-Path -Path $ProjectRoot -ChildPath 'Config\SPOAuth.local.psd1'
+    $section = $Config[$Side]
+    if ($section -and -not [string]::IsNullOrWhiteSpace([string]$section.AuthConfigPath)) {
+        $configuredPath = [string]$section.AuthConfigPath
+        $configPath = if ([System.IO.Path]::IsPathRooted($configuredPath)) { $configuredPath } else { Join-Path $MigrationRoot $configuredPath }
+        if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+            throw "$Side AuthConfigPath does not exist: $configPath"
+        }
+    }
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
         return @{}
     }
 
     Import-PowerShellDataFile -LiteralPath $configPath
+}
+
+function Get-SPOAuthenticationMode {
+    param([Parameter(Mandatory = $true)][ValidateSet('Source', 'Target')][string]$Side)
+    if ($InteractiveAuthentication -and ($UseCertificate -or $DeviceLogin)) { throw 'Select only one explicit SPO authentication mode.' }
+    if ($InteractiveAuthentication) { return 'Interactive' }
+    if ($UseCertificate) { return 'Certificate' }
+    if ($DeviceLogin) { return 'DeviceLogin' }
+    $endpoint = $Config[$Side]
+    if ($endpoint -and $endpoint.ContainsKey('AuthMode') -and -not [string]::IsNullOrWhiteSpace([string]$endpoint.AuthMode)) {
+        $mode = [string]$endpoint.AuthMode
+        if ($mode -notin @('Interactive', 'DeviceLogin', 'Certificate')) { throw "Unsupported $Side.AuthMode: $mode" }
+        return $mode
+    }
+    return 'Interactive'
 }
 
 function Get-LatestCsv {
@@ -727,17 +754,20 @@ function Get-MigrationEndpointPermissionLibraryOnly {
 function Add-SPOInventoryAuthenticationParameters {
     param(
         [Parameter(Mandatory = $true)]
-        [hashtable]$Parameters
+        [hashtable]$Parameters,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source', 'Target')][string]$Side
     )
 
-    $authConfig = Get-SPOAuthConfig
+    $authConfig = Get-SPOAuthConfig -Side $Side
     foreach ($key in @('ClientId', 'Tenant', 'TenantId')) {
         if ($authConfig.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace([string]$authConfig[$key])) {
             $Parameters[$key] = $authConfig[$key]
         }
     }
 
-    if ($UseCertificate) {
+    $mode = Get-SPOAuthenticationMode -Side $Side
+    if ($mode -eq 'Certificate') {
         if ($authConfig.ContainsKey('Thumbprint') -and -not [string]::IsNullOrWhiteSpace([string]$authConfig.Thumbprint)) {
             $Parameters.Thumbprint = $authConfig.Thumbprint
         }
@@ -746,7 +776,7 @@ function Add-SPOInventoryAuthenticationParameters {
             throw "Certificate authentication requires ClientId and Thumbprint in Config\SPOAuth.local.psd1."
         }
     }
-    elseif ($DeviceLogin) {
+    elseif ($mode -eq 'DeviceLogin') {
         $Parameters.DeviceLogin = $true
     }
     else {
@@ -846,7 +876,10 @@ function Invoke-FileInventoryScan {
 
     if ($isSPO) {
         $parameters.WebUrlsFile = Resolve-MigrationUrlsFile -Side $Side
-        Add-SPOInventoryAuthenticationParameters -Parameters $parameters
+        Add-SPOInventoryAuthenticationParameters -Parameters $parameters -Side $Side
+        if ($Side -eq 'Source' -and $Config.Source.ContainsKey('IncludeVersionCounts') -and [bool]$Config.Source.IncludeVersionCounts) {
+            $parameters.IncludeVersionCounts = $true
+        }
     }
     else {
         Add-OnPremInventoryScopeParameters -Parameters $parameters -Side $Side
@@ -915,7 +948,7 @@ function Invoke-PermissionInventoryScan {
 
     if ($isSPO) {
         $parameters.WebUrlsFile = Resolve-MigrationUrlsFile -Side $Side
-        Add-SPOInventoryAuthenticationParameters -Parameters $parameters
+        Add-SPOInventoryAuthenticationParameters -Parameters $parameters -Side $Side
     }
     else {
         Add-OnPremInventoryScopeParameters -Parameters $parameters -Side $Side
@@ -1118,7 +1151,8 @@ function Update-EntraUsersCacheForComparison {
         throw "Entra users cache is mandatory for permission comparisons. At least one endpoint must be SPO to resolve destination Entra users."
     }
 
-    $authConfig = Get-SPOAuthConfig
+    $cacheSide = if ((Get-MigrationEndpointType -Side 'Target') -eq 'SPO') { 'Target' } else { 'Source' }
+    $authConfig = Get-SPOAuthConfig -Side $cacheSide
     $tenantId = Get-AuthConfigValue -AuthConfig $authConfig -Names @('TenantId')
     $tenantHint = Get-AuthConfigValue -AuthConfig $authConfig -Names @('TenantId', 'Tenant')
     $tenantHost = Get-EntraUsersCacheHost
@@ -1147,7 +1181,8 @@ function Update-EntraUsersCacheForComparison {
     if ($ForceAuthentication) {
         $arguments += '-Connect'
     }
-    if ($UseCertificate) {
+    $cacheAuthMode = Get-SPOAuthenticationMode -Side $cacheSide
+    if ($cacheAuthMode -eq 'Certificate') {
         if (-not ($tenantHint -and $clientId -and $thumbprint)) {
             throw "Certificate authentication for Entra users cache requires TenantId, ClientId and Thumbprint in Config\SPOAuth.local.psd1."
         }
@@ -1156,7 +1191,7 @@ function Update-EntraUsersCacheForComparison {
     }
     else {
         $arguments += '-InteractiveAuth'
-        if ($DeviceLogin) {
+        if ($cacheAuthMode -eq 'DeviceLogin') {
             $arguments += '-DeviceLogin'
         }
     }
@@ -1170,7 +1205,70 @@ function Update-EntraUsersCacheForComparison {
     return $cachePath
 }
 
+function Invoke-CrossTenantIdentityMappingPreflight {
+    if ((Get-MigrationEndpointType -Side 'Source') -ne 'SPO' -or (Get-MigrationEndpointType -Side 'Target') -ne 'SPO') {
+        throw 'Cross-tenant identity mapping preflight requires Source.Type=SPO and Target.Type=SPO.'
+    }
+    $mappingSetting = [string](Get-ComparisonConfigValue -Name 'CrossTenantIdentityMappingPath' -DefaultValue '')
+    if ([string]::IsNullOrWhiteSpace($mappingSetting)) { throw 'Set Comparison.CrossTenantIdentityMappingPath to a private confirmed mapping CSV.' }
+    $mappingPath = Resolve-MigrationPath $mappingSetting
+    if (-not (Test-Path -LiteralPath $mappingPath -PathType Leaf)) { throw "Identity mapping file not found: $mappingPath" }
+    $sourcePath = $SourceCsv
+    if ([string]::IsNullOrWhiteSpace($sourcePath)) {
+        $sourceDirectory = Resolve-MigrationPath $Config.Output.SourcePermissionScans
+        $sourcePath = Get-LatestCsv -Directory $sourceDirectory -Filter ("SPO-PermissionInventory-{0}-*.csv" -f $Config.Name) -Recurse
+    }
+    $outputRoot = Join-Path $MigrationRoot 'identity-mapping-reviews'
+    New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
+    $unresolvedPath = Join-Path $outputRoot ('unresolved-{0}.csv' -f (New-MigrationRunTimestamp))
+    $python = Get-PythonCommand
+    $preflightScript = Join-Path $ProjectRoot 'Scripts\Compare\cross_tenant_identity.py'
+    if (-not (Test-Path -LiteralPath $preflightScript -PathType Leaf)) { throw "Identity mapping preflight script not found: $preflightScript" }
+    $preflightArguments = @('--source-csv', $sourcePath, '--mapping-csv', $mappingPath, '--unresolved-csv', $unresolvedPath)
+    if (-not [string]::IsNullOrWhiteSpace($TargetCsv)) { $preflightArguments += @('--target-csv', $TargetCsv) }
+    $resultLines = @(& $python.Executable @($python.Arguments) $preflightScript @preflightArguments 2>&1)
+    $exitCode = $LASTEXITCODE
+    foreach ($line in $resultLines) { Microsoft.PowerShell.Utility\Write-Host ([string]$line) }
+    if (Test-Path -LiteralPath $unresolvedPath -PathType Leaf) {
+        $script:LauncherOutputCsvPath = $unresolvedPath
+        Write-Info ("Private unresolved identity report: {0}" -f $unresolvedPath) Cyan
+    }
+    if ($exitCode -eq 2) { throw 'Identity mapping preflight found unresolved source rows; review the private CSV. Permissions were not compared.' }
+    if ($exitCode -ne 0) { throw "Identity mapping preflight failed with exit code $exitCode." }
+    Write-Info 'Identity mapping coverage was checked. Permissions and group membership were not compared.' Yellow
+}
+
 function Invoke-PermissionComparison {
+    $crossTenantMapping = ''
+    if ((Get-MigrationEndpointType -Side 'Source') -eq 'SPO' -and (Get-MigrationEndpointType -Side 'Target') -eq 'SPO') {
+        $sourceUri = $null; $targetUri = $null
+        $sourceValid = [uri]::TryCreate([string]$Config.Source.SiteUrl, [UriKind]::Absolute, [ref]$sourceUri)
+        $targetValid = [uri]::TryCreate([string]$Config.Target.SiteUrl, [UriKind]::Absolute, [ref]$targetUri)
+        $hostsDiffer = $sourceValid -and $targetValid -and $sourceUri.Host -ine $targetUri.Host
+        $profilesConfigured = -not [string]::IsNullOrWhiteSpace([string]$Config.Source.AuthConfigPath) -or -not [string]::IsNullOrWhiteSpace([string]$Config.Target.AuthConfigPath)
+        $sourceTenantId = ''; $targetTenantId = ''
+        if ($profilesConfigured) {
+            $sourceTenantId = Get-AuthConfigValue -AuthConfig (Get-SPOAuthConfig -Side 'Source') -Names @('TenantId')
+            $targetTenantId = Get-AuthConfigValue -AuthConfig (Get-SPOAuthConfig -Side 'Target') -Names @('TenantId')
+            if (-not $sourceTenantId -or -not $targetTenantId) { throw 'Separate SPO profiles require explicit TenantId values for permission comparison.' }
+        }
+        $tenantsDiffer = $sourceTenantId -and $targetTenantId -and $sourceTenantId -ine $targetTenantId
+        if ($hostsDiffer -or $tenantsDiffer) {
+            if (-not $sourceValid -or -not $targetValid -or -not $hostsDiffer -or
+                [string]::IsNullOrWhiteSpace([string]$Config.Source.AuthConfigPath) -or [string]::IsNullOrWhiteSpace([string]$Config.Target.AuthConfigPath)) {
+                throw 'Cross-tenant permission comparison requires distinct SPO hosts and explicit source and target authentication profiles.'
+            }
+            $sourceGuid = [guid]::Empty; $targetGuid = [guid]::Empty
+            if (-not [guid]::TryParse($sourceTenantId, [ref]$sourceGuid) -or -not [guid]::TryParse($targetTenantId, [ref]$targetGuid) -or
+                $sourceGuid -eq [guid]::Empty -or $targetGuid -eq [guid]::Empty -or $sourceGuid -eq $targetGuid) {
+                throw 'Cross-tenant permission comparison requires distinct non-empty source and target TenantId GUIDs.'
+            }
+            $setting = [string](Get-ComparisonConfigValue -Name 'CrossTenantIdentityMappingPath' -DefaultValue '')
+            if ([string]::IsNullOrWhiteSpace($setting)) { throw 'Cross-tenant permission comparison requires Comparison.CrossTenantIdentityMappingPath.' }
+            $crossTenantMapping = Resolve-MigrationPath $setting
+            if (-not (Test-Path -LiteralPath $crossTenantMapping -PathType Leaf)) { throw "Cross-tenant identity mapping file not found: $crossTenantMapping" }
+        }
+    }
     $timestamp = New-MigrationRunTimestamp
     $logPath = New-MigrationLogPath -Action 'ComparePermissions' -Timestamp $timestamp
     $sourceDirectory = Resolve-MigrationPath $Config.Output.SourcePermissionScans
@@ -1197,10 +1295,15 @@ function Invoke-PermissionComparison {
             -MaxAgeHours $maxScanAgeHours `
             -Label 'Permission inventory'
 
+        if ($crossTenantMapping) { Invoke-CrossTenantIdentityMappingPreflight }
+
         $pathMappingsFile = Resolve-ComparisonPathMappingsFile
-        $entraUsersCachePath = Update-EntraUsersCacheForComparison
-        if ([string]::IsNullOrWhiteSpace($entraUsersCachePath) -or -not (Test-Path -LiteralPath $entraUsersCachePath -PathType Leaf)) {
-            throw "Entra users cache is mandatory for permission comparisons, but no cache file was produced."
+        $entraUsersCachePath = ''
+        if (-not $crossTenantMapping) {
+            $entraUsersCachePath = Update-EntraUsersCacheForComparison
+            if ([string]::IsNullOrWhiteSpace($entraUsersCachePath) -or -not (Test-Path -LiteralPath $entraUsersCachePath -PathType Leaf)) {
+                throw "Entra users cache is mandatory for permission comparisons, but no cache file was produced."
+            }
         }
 
         $permissionCompareArguments = @(
@@ -1224,7 +1327,8 @@ function Invoke-PermissionComparison {
         if ($pathMappingsFile) {
             $permissionCompareArguments += @('--path-mapping-file', $pathMappingsFile)
         }
-        $permissionCompareArguments += @('--entra-users-csv', $entraUsersCachePath)
+        if ($entraUsersCachePath) { $permissionCompareArguments += @('--entra-users-csv', $entraUsersCachePath) }
+        if ($crossTenantMapping) { $permissionCompareArguments += @('--cross-tenant-identity-mapping', $crossTenantMapping) }
         Invoke-PythonScript -Script (Join-Path $ProjectRoot 'Scripts\Compare\compare_sp_source_target_permissions.py') -Arguments $permissionCompareArguments
 
         Write-Info ("Permission comparison completed: {0}" -f $outputDirectory) Green
@@ -1388,6 +1492,7 @@ try {
         'ScanSourcePermissions' { Invoke-SourcePermissionScan }
         'ScanTargetPermissions' { Invoke-TargetPermissionScan }
         'ComparePermissions' { Invoke-PermissionComparison }
+        'ValidateCrossTenantIdentityMappings' { Invoke-CrossTenantIdentityMappingPreflight }
         'CompareSourceHistory' { Invoke-FileHistoryComparison -Side 'Source' -LogAction 'CompareSourceHistory' }
         'CompareScanHistory' { Invoke-FileHistoryComparison -Side $HistorySide -LogAction 'CompareScanHistory' }
         'ComparePermissionScanHistory' { Invoke-PermissionHistoryComparison -Side $HistorySide }

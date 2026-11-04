@@ -2,7 +2,7 @@
 .SYNOPSIS
     Tests real child-process host routing with mock inventory files only.
 .VERSION
-    1.0.1
+    1.0.4
 #>
 [CmdletBinding()]
 param()
@@ -22,9 +22,10 @@ try {
     Copy-Item (Join-Path $project 'Scripts/Compare/scan_evidence.py') (Join-Path $root 'Scripts/Compare')
     $fixture = @'
 [CmdletBinding()]
-param($OutputPath, $LogPath, $SiteUrl, $WebUrlsFile, $DocumentLibrariesOnly, $IncludeItemPermissions, $ItemProgressInterval, $Interactive, $ForceAuthentication)
+param($OutputPath, $LogPath, $SiteUrl, $WebUrlsFile, $DocumentLibrariesOnly, $IncludeItemPermissions, $ItemProgressInterval, $Interactive, $DeviceLogin, $Thumbprint, $ForceAuthentication, $AssessmentRulesDirectory, $ClientId, $Tenant, $TenantId, $IncludeVersionCounts)
 if ($env:SPMIG_TEST_FAIL -eq '1') { throw 'Synthetic failure' }
 [IO.File]::WriteAllText($OutputPath, "Host`n$($PSVersionTable.PSVersion.Major)`n")
+if ($ClientId) { [IO.File]::WriteAllText(($OutputPath + '.auth-test'), "$ClientId|$Tenant|$TenantId|$([bool]$IncludeVersionCounts)|$([bool]$DeviceLogin)|$([bool]$Interactive)|$Thumbprint") }
 '@
     foreach ($side in @('Source', 'Target')) {
         foreach ($kind in @('File', 'Permission')) {
@@ -33,17 +34,21 @@ if ($env:SPMIG_TEST_FAIL -eq '1') { throw 'Synthetic failure' }
     }
     $count = 0
     foreach ($type in @('SP2016', 'SP2019', 'SPO')) {
+        $sourceAuth = if ($type -eq 'SPO') { "; AuthConfigPath = 'source.local.psd1'; IncludeVersionCounts = `$true; AuthMode = 'DeviceLogin'" } else { '' }
+        $targetAuth = if ($type -eq 'SPO') { "; AuthConfigPath = 'target.local.psd1'; AuthMode = 'Certificate'" } else { '' }
         $config = @"
 @{
  Name = 'ReportLabel'
- Source = @{ Type = '$type'; SiteUrl = 'https://workplacecloudhub.sharepoint.com/source'; UrlsFile = 'urls.txt' }
- Target = @{ Type = '$type'; SiteUrl = 'https://workplacecloudhub.sharepoint.com/target'; UrlsFile = 'urls.txt' }
+ Source = @{ Type = '$type'; SiteUrl = 'https://workplacecloudhub.sharepoint.com/source'; UrlsFile = 'urls.txt' $sourceAuth }
+ Target = @{ Type = '$type'; SiteUrl = 'https://workplacecloudhub.sharepoint.com/target'; UrlsFile = 'urls.txt' $targetAuth }
  Output = @{ SourceFileScans = 'sf'; TargetFileScans = 'tf'; SourcePermissionScans = 'sp'; TargetPermissionScans = 'tp'; Logs = 'logs' }
  Permissions = @{ IncludeItemPermissions = `$true; ItemProgressInterval = 500 }
 }
 "@
         [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/migration.config.psd1"), $config)
         [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/urls.txt"), 'https://workplacecloudhub.sharepoint.com/example')
+        [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/source.local.psd1"), "@{ ClientId='source-app'; Tenant='source.example'; TenantId='source-id' }")
+        [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/target.local.psd1"), "@{ ClientId='target-app'; Tenant='target.example'; TenantId='target-id'; Thumbprint='target-thumb' }")
         foreach ($action in @('ScanSourceFiles', 'ScanTargetFiles', 'ScanSourcePermissions', 'ScanTargetPermissions')) {
             $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $launcher -MigrationName $name -Action $action -NonInteractive -ForceAuthentication:$false 2>&1
             if ($LASTEXITCODE -ne 0) { throw ($result | Out-String) }
@@ -54,9 +59,40 @@ if ($env:SPMIG_TEST_FAIL -eq '1') { throw 'Synthetic failure' }
             $latest = Get-ChildItem (Join-Path $root "Migrations/$name") -Recurse -Filter '*.csv' | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
             $expected = if ($type -eq 'SPO') { '7' } else { '5' }
             if (-not $latest -or [IO.File]::ReadAllText($latest.FullName) -ne "Host`n$expected`n") { throw "Wrong host for $type $action" }
+            if ($type -eq 'SPO') {
+                $authSide = if ($action -like '*Source*') { 'source' } else { 'target' }
+                $expectedVersions = $action -eq 'ScanSourceFiles'
+                $expectedDevice = $authSide -eq 'source'
+                $expectedInteractive = $false
+                $expectedThumb = if ($authSide -eq 'target') { 'target-thumb' } else { '' }
+                $expectedAuth = "$authSide-app|$authSide.example|$authSide-id|$expectedVersions|$expectedDevice|$expectedInteractive|$expectedThumb"
+                if ([IO.File]::ReadAllText($latest.FullName + '.auth-test') -ne $expectedAuth) { throw "Wrong authentication profile for $action" }
+            }
             if (-not (Test-Path -LiteralPath ($latest.FullName + '.manifest.json.txt') -PathType Leaf)) { throw "Scan manifest missing for $type $action" }
             $count++
         }
+    }
+    # An explicitly selected profile must never silently fall back to another tenant.
+    $missingProfileConfig = $config.Replace("source.local.psd1", "missing.local.psd1")
+    [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/migration.config.psd1"), $missingProfileConfig)
+    $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $launcher -MigrationName $name -Action ScanSourceFiles -NonInteractive -ForceAuthentication:$false 2>&1
+    if ($LASTEXITCODE -eq 0 -or ($result | Out-String) -notmatch 'Source AuthConfigPath does not exist') {
+        throw 'A missing explicit source authentication profile did not fail closed.'
+    }
+    [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/migration.config.psd1"), $config)
+    $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $launcher -MigrationName $name -Action ComparePermissions -NonInteractive 2>&1
+    if ($LASTEXITCODE -eq 0 -or ($result | Out-String) -notmatch 'Cross-tenant permission comparison requires') {
+        throw 'A cross-tenant permission comparison was not rejected.'
+    }
+    $otherHostConfig = $config.Replace('https://workplacecloudhub.sharepoint.com/target', 'https://other.sharepoint.com/target').Replace("; AuthConfigPath = 'source.local.psd1'", '').Replace("; AuthConfigPath = 'target.local.psd1'", '')
+    [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/migration.config.psd1"), $otherHostConfig)
+    $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $launcher -MigrationName $name -Action ComparePermissions -NonInteractive 2>&1
+    if ($LASTEXITCODE -eq 0 -or ($result | Out-String) -notmatch 'Cross-tenant permission comparison requires') { throw 'Different SPO hosts were not rejected for the shared authentication profile.' }
+    [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/migration.config.psd1"), $config)
+    [IO.File]::WriteAllText((Join-Path $root "Migrations/$name/target.local.psd1"), "@{ ClientId='target-app'; Tenant='source.example'; TenantId='source-id' }")
+    $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $launcher -MigrationName $name -Action ComparePermissions -NonInteractive 2>&1
+    if (($result | Out-String) -match 'Cross-tenant permission comparison requires') {
+        throw 'Same-tenant profiles were incorrectly rejected as cross-tenant.'
     }
     # A failed comparison must end with a visible status and persist that status in its run log.
     $compareConfig = @"

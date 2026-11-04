@@ -2,7 +2,7 @@
 .SYNOPSIS
     Item-level ShareGate pre-check. Copy-Content is invoked only with -WhatIf.
 .VERSION
-    1.0.2
+    1.0.7
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -10,6 +10,8 @@ param(
     [Parameter(Mandatory)][string]$ProjectRoot,
     [string]$AnalysisDirectory = '',
     [Parameter(Mandatory)][string]$SessionId,
+    [ValidateSet('Default','Browser','ModernAuth')][string]$SourceAuthMode = 'Default',
+    [ValidateSet('Default','Browser','ModernAuth')][string]$DestinationAuthMode = 'Browser',
     [switch]$DryRun,
     [switch]$Run,
     [switch]$WhatIf
@@ -99,8 +101,8 @@ function Get-ExactList {
     param([string]$Side, [string]$Url, [string]$Name)
     $siteKey = $Side + '|' + $Url.TrimEnd('/').ToLowerInvariant()
     if (-not $siteCache.ContainsKey($siteKey)) {
-        if ($Side -eq 'Source') { $siteCache[$siteKey] = ShareGate\Connect-Site -Url $Url -ErrorAction Stop }
-        else { $siteCache[$siteKey] = ShareGate\Connect-Site -Url $Url -Browser -ErrorAction Stop }
+        $mode = if ($Side -eq 'Source') { $SourceAuthMode } else { $DestinationAuthMode }
+        $siteCache[$siteKey] = Connect-SmartM365ShareGateEndpoint -Url $Url -Mode $mode
         if (-not $siteCache[$siteKey]) { throw "Connect-Site returned no site for $Side $Url." }
     }
     $listKey = $siteKey + '|' + $Name.ToLowerInvariant()
@@ -118,27 +120,25 @@ function Get-ExactList {
 function Get-PrecheckStatus {
     param([string]$Text, [string]$SourceUrl, [string]$DestinationUrl)
     if ($Text -notmatch '(?i)(?:\(401\)|HTTP\s*401|401\s+Unauthorized)') { return 'No 401 observed in pre-check' }
-    $failedHosts = @([regex]::Matches($Text, "(?i)(?:WebUri\s*:\s*'(?<web>https?://[^']+)'|URL\s*'(?<failure>https?://[^']+)'\s*was not authorized)") |
-        ForEach-Object { $url = if ($_.Groups['web'].Success) { $_.Groups['web'].Value } else { $_.Groups['failure'].Value }; ([uri]$url).Host.ToLowerInvariant() } | Select-Object -Unique)
-    $sourceHost = ([uri]$SourceUrl).Host.ToLowerInvariant()
-    $targetHost = ([uri]$DestinationUrl).Host.ToLowerInvariant()
-    if ($failedHosts.Count -eq 1 -and $failedHosts[0] -eq $sourceHost -and $sourceHost -ne $targetHost) { return 'Source 401 observed' }
-    if ($failedHosts.Count -eq 1 -and $failedHosts[0] -eq $targetHost -and $sourceHost -ne $targetHost) { return 'Destination 401 observed' }
+    $side = Get-SmartM365ShareGateFailingUrlSide -Text $Text -SourceUrl $SourceUrl -DestinationUrl $DestinationUrl
+    if ($side -eq 'Source') { return 'Source 401 observed' }
+    if ($side -eq 'Destination') { return 'Destination 401 observed' }
     return '401 observed - side undetermined'
 }
 
 try {
-    Write-PrecheckLog ('Actor={0}\{1}; Machine={2}; Module=ShareGate; WhatIf=True; Session={3}; Analysis={4}' -f $env:USERDOMAIN, $env:USERNAME, $env:COMPUTERNAME, $SessionId, $analysis)
+    Write-PrecheckLog ('Actor={0}\{1}; Machine={2}; Module=ShareGate; WhatIf=True; Session={3}; Analysis={4}; SourceAuth={5}; DestinationAuth={6}' -f $env:USERDOMAIN, $env:USERNAME, $env:COMPUTERNAME, $SessionId, $analysis, $SourceAuthMode, $DestinationAuthMode)
     Export-AtomicCsv -Path (Join-Path $output 'Precheck-SkippedRows.csv') -Rows $skipped.ToArray() -Columns @('SessionId','RowId','SourceUrl','SourceList','SourceItemId','Reason')
     Export-AtomicCsv -Path (Join-Path $output 'Precheck-Items.csv') -Rows @() -Columns @('SessionId','ItemKey','RowIds','SourceUrl','SourceList','SourceItemId','DestinationUrl','DestinationList','Status','Reason','PrecheckSessionId','ReportPath')
-    $module = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
+    . (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateAuth.ps1')
+$module = @(Get-SmartM365ShareGateModule)
     if (-not $module.Count) { throw 'ShareGate module is not discoverable in Windows PowerShell 5.1.' }
     Import-Module -Name $module[0].Path -ErrorAction Stop
     Write-PrecheckLog ('ShareGate module version={0}; path={1}' -f $module[0].Version, $module[0].Path)
     foreach ($name in @('Connect-Site','Get-List','Copy-Content','Export-Report')) {
-        if (-not (Get-Command -Name $name -Module ShareGate -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
+        if (-not (Get-Command -Name ('ShareGate\' + $name) -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
     }
-    $copy = Get-Command Copy-Content -Module ShareGate
+    $copy = Get-Command -Name 'ShareGate\Copy-Content'
     $sourceItemSet = @($copy.ParameterSets | Where-Object { @($_.Parameters | Where-Object Name -EQ 'SourceItemId').Count -gt 0 -and @($_.Parameters | Where-Object Name -EQ 'WhatIf').Count -gt 0 })
     if (-not $sourceItemSet.Count) { throw 'Installed Copy-Content does not expose SourceItemId and WhatIf together.' }
     foreach ($group in $groups) {

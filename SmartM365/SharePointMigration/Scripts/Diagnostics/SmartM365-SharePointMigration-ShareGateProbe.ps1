@@ -2,7 +2,7 @@
 .SYNOPSIS
     Read-only ShareGate capability, session and access probe. DryRun is the default.
 .VERSION
-    1.0.5
+    1.0.13
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -11,6 +11,7 @@ param(
     [string]$AnalysisDirectory = '',
     [string]$SessionId = '',
     [ValidateSet('Default','Browser','ModernAuth')][string]$SourceAuthMode = 'Default',
+    [ValidateSet('Default','Browser','ModernAuth')][string]$DestinationAuthMode = 'Browser',
     [switch]$ProbeSource,
     [switch]$DryRun,
     [switch]$Run
@@ -19,6 +20,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateAuth.ps1')
 $script:ConsoleLifecycleContext = Start-SmartM365MigrationConsoleLifecycle -ScriptPath $PSCommandPath
 $script:ConsoleLifecycleFailure = $null
 $script:ConsoleLifecycleStatus = 'SUCCESS'
@@ -79,14 +81,17 @@ function Get-EndpointKey {
     param([string]$Side, [string]$Url, [string]$List)
     return ($Side + '|' + $Url.TrimEnd('/').ToLowerInvariant() + '|' + $List.ToLowerInvariant())
 }
+function Get-ProbeRowId {
+    param($Row)
+    $property = $Row.PSObject.Properties['RowId']
+    if ($property) { return [string]$property.Value }
+    return ''
+}
 function Test-Endpoint {
     param([string]$Side, [string]$Url, [string]$List)
     if (-not $Url) { return [pscustomobject]@{ Status='Missing URL'; Error='' } }
     try {
-        $authMode = if ($Side -eq 'Source') { $SourceAuthMode } else { 'Browser' }
-        $arguments = @{ Url=$Url; ErrorAction='Stop' }
-        if ($authMode -eq 'Browser') { $arguments.Browser = $true }
-        if ($authMode -eq 'ModernAuth') { $arguments.ModernAuth = $true }
+        $authMode = if ($Side -eq 'Source') { $SourceAuthMode } else { $DestinationAuthMode }
         $siteKey = $Side + '|' + $Url.TrimEnd('/').ToLowerInvariant()
         if ($siteCache.ContainsKey($siteKey)) {
             $cached = $siteCache[$siteKey]
@@ -95,7 +100,7 @@ function Test-Endpoint {
         }
         else {
             try {
-                $site = Connect-Site @arguments
+                $site = Connect-SmartM365ShareGateEndpoint -Url $Url -Mode $authMode
                 if (-not $site) { throw 'Connect-Site returned no site.' }
                 $siteCache[$siteKey] = [pscustomobject]@{ Site=$site; Error=$null }
             }
@@ -108,7 +113,7 @@ function Test-Endpoint {
             }
         }
         if ($List) {
-            $matches = @(Get-List -Site $site -Name $List -ErrorAction Stop)
+            $matches = @(ShareGate\Get-List -Site $site -Name $List -ErrorAction Stop)
             $exact = @($matches | Where-Object {
                 ($_.PSObject.Properties['Title'] -and $_.Title -eq $List) -or
                 ($_.PSObject.Properties['Name'] -and $_.Name -eq $List)
@@ -125,7 +130,7 @@ function Test-Endpoint {
 }
 
 try {
-    Write-ProbeLog ('Mode={0}; Actor={1}\{2}; Machine={3}; Session={4}; Analysis={5}; SourceProbe={6}; DestinationAuth=Browser' -f $(if ($Run) { 'Run' } else { 'DryRun' }), $env:USERDOMAIN, $env:USERNAME, $env:COMPUTERNAME, $(if ($SessionId) { $SessionId } else { 'all' }), $analysis, $(if ($ProbeSource) { 'Enabled' } else { 'Skipped' }))
+    Write-ProbeLog ('Mode={0}; Actor={1}\{2}; Machine={3}; Session={4}; Analysis={5}; SourceProbe={6}; SourceAuth={7}; DestinationAuth={8}' -f $(if ($Run) { 'Run' } else { 'DryRun' }), $env:USERDOMAIN, $env:USERNAME, $env:COMPUTERNAME, $(if ($SessionId) { $SessionId } else { 'all' }), $analysis, $(if ($ProbeSource) { 'Enabled' } else { 'Skipped' }), $SourceAuthMode, $DestinationAuthMode)
     $allRows = @(Import-Csv -LiteralPath $classifiedPath -Encoding UTF8)
     $accessRows = @($allRows | Where-Object {
         $_.RuleId -in @('SG-ACCESS-SOURCE','SG-ACCESS-TARGET','SG-ACCESS-UNKNOWN') -and
@@ -146,35 +151,21 @@ try {
     }
     Add-ProbeResult -Area 'Input' -Name 'Distinct site/list endpoints' -Status 'Detected' -Detail ([string]$endpoints.Count)
     if (-not $ProbeSource) { Add-ProbeResult -Area 'Scope' -Name 'Source site checks' -Status 'Skipped' -Detail 'Use -ProbeSource on a host with access to the source farm to enable read-only source checks.' }
-    else { Add-ProbeResult -Area 'Scope' -Name 'Source authentication' -Status $SourceAuthMode -Detail 'Default uses the current Windows identity; no username or password is supplied.' }
-    Add-ProbeResult -Area 'Scope' -Name 'Destination authentication' -Status 'Browser only' -Detail 'Connect-Site uses -Browser without username, password, or SaveConnection.'
+    else { Add-ProbeResult -Area 'Scope' -Name 'Source authentication' -Status $SourceAuthMode -Detail 'The selected mode can reuse an explicitly registered connection.' }
+    Add-ProbeResult -Area 'Scope' -Name 'Destination authentication' -Status $DestinationAuthMode -Detail 'The selected mode can reuse an explicitly registered connection.'
     $installedApps = @(foreach ($registryRoot in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
         Get-ItemProperty -Path (Join-Path $registryRoot '*') -ErrorAction SilentlyContinue |
             Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.PSObject.Properties['DisplayVersion'] -and $_.DisplayName -match '^ShareGate( Migrate)?$' -and $_.DisplayVersion }
     })
     if ($installedApps.Count) { Add-ProbeResult -Area 'ShareGate' -Name 'Application version' -Status 'Detected' -Detail (($installedApps | ForEach-Object DisplayVersion | Sort-Object -Unique) -join ', ') }
     else { Add-ProbeResult -Area 'ShareGate' -Name 'Application version' -Status 'Undetermined' -Detail 'No ShareGate Migrate entry found in the machine uninstall registry.' }
-    $moduleInfo = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
-    if (-not $moduleInfo.Count) {
-        foreach ($app in $installedApps) {
-            if (-not $app.PSObject.Properties['InstallLocation'] -or -not $app.InstallLocation) { continue }
-            $candidate = Join-Path ([string]$app.InstallLocation) 'ShareGate\Sharegate.psd1'
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-                try {
-                    $manifest = Test-ModuleManifest -Path $candidate -ErrorAction Stop -WarningAction SilentlyContinue
-                    $moduleInfo = @([pscustomobject]@{ Version=$manifest.Version; Path=$candidate })
-                    break
-                }
-                catch { Add-ProbeResult -Area 'ShareGate' -Name 'Module manifest' -Status 'Error' -Detail $_.Exception.Message }
-            }
-        }
-    }
+    $moduleInfo = @(Get-SmartM365ShareGateModule)
     if ($moduleInfo.Count) { Add-ProbeResult -Area 'ShareGate' -Name 'Module' -Status 'Present' -Detail ("Version={0}; Path={1}" -f $moduleInfo[0].Version, $moduleInfo[0].Path) }
     else { Add-ProbeResult -Area 'ShareGate' -Name 'Module' -Status 'Missing' -Detail 'ShareGate module is not installed or discoverable by Windows PowerShell 5.1.' }
     if (-not $Run) {
         Add-ProbeResult -Area 'ShareGate' -Name 'License' -Status 'Not tested' -Detail 'DryRun does not import ShareGate or invoke any ShareGate command.'
         foreach ($row in $accessRows) {
-            $access.Add([pscustomobject]@{ SessionId=$row.SessionId; RowId=$row.RowId; SourceUrl=$row.SourceUrl; SourceList=$row.SourceList; DestinationUrl=$row.DestinationUrl; DestinationList=$row.DestinationList; SourceStatus=$(if ($ProbeSource) { 'Planned' } else { 'Skipped - source unreachable' }); DestinationStatus='Planned - Browser'; Attribution='Undetermined'; Reason='DryRun: no site connection'; SourceError=''; DestinationError='' })
+            $access.Add([pscustomobject]@{ SessionId=$row.SessionId; RowId=(Get-ProbeRowId $row); SourceUrl=$row.SourceUrl; SourceList=$row.SourceList; DestinationUrl=$row.DestinationUrl; DestinationList=$row.DestinationList; SourceStatus=$(if ($ProbeSource) { 'Planned' } else { 'Skipped - source unreachable' }); DestinationStatus=('Planned - ' + $DestinationAuthMode); Attribution='Undetermined'; Reason='DryRun: no site connection'; SourceError=''; DestinationError='' })
         }
     }
     elseif (-not $moduleInfo.Count) {
@@ -192,11 +183,11 @@ try {
         if (-not $shareGateImported) { throw 'ShareGate module import failed; live checks cannot continue.' }
         $cmdletNames = @('Find-CopySessions','Export-Report','Connect-Site','Get-List','Copy-Content','New-CopySettings','Wait-ImportCompletion')
         if ($shareGateImported) {
-            $installedCommands = @(Get-Command -Module ShareGate -ErrorAction SilentlyContinue)
+            $installedCommands = @(Get-Command -Name 'ShareGate\*' -ErrorAction SilentlyContinue)
             Add-ProbeResult -Area 'ShareGate' -Name 'Installed cmdlets' -Status 'Detected' -Detail ([string]$installedCommands.Count)
             $cmdletNames += @($installedCommands | Where-Object { $_.Name -match 'Mapping' } | Select-Object -ExpandProperty Name)
             foreach ($name in @($cmdletNames | Sort-Object -Unique)) {
-                $command = Get-Command -Name $name -Module ShareGate -ErrorAction SilentlyContinue | Select-Object -First 1
+                $command = Get-Command -Name ('ShareGate\' + $name) -ErrorAction SilentlyContinue | Select-Object -First 1
                 if (-not $command) { Add-ProbeResult -Area 'Cmdlet' -Name $name -Status 'Missing' -Detail 'Not installed in this ShareGate module.'; continue }
                 Add-ProbeResult -Area 'Cmdlet' -Name $name -Status 'Present' -Detail ([string]$command.CommandType)
                 foreach ($set in $command.ParameterSets) {
@@ -205,7 +196,7 @@ try {
                     }
                 }
             }
-            $find = Get-Command Find-CopySessions -Module ShareGate -ErrorAction SilentlyContinue
+            $find = Get-Command -Name 'ShareGate\Find-CopySessions' -ErrorAction SilentlyContinue
             $licenseConfirmed = $false
             if ($find) {
                 try {
@@ -214,7 +205,7 @@ try {
                         $date = [datetime]::ParseExact($Matches[1] + $Matches[2] + $Matches[3], 'yyMMdd', [Globalization.CultureInfo]::InvariantCulture)
                         $query.From = $date.AddDays(-1); $query.To = $date.AddDays(2)
                     }
-                    $sessionObjects = @(Find-CopySessions @query -ErrorAction Stop)
+                    $sessionObjects = @(ShareGate\Find-CopySessions @query -ErrorAction Stop)
                     $licenseConfirmed = $true
                     Add-ProbeResult -Area 'ShareGate' -Name 'License' -Status 'Pro or Enterprise inferred' -Detail 'Find-CopySessions succeeded. Exact subscription tier is not exposed by this probe.'
                     if (-not $sessionObjects.Count) {
@@ -238,7 +229,7 @@ try {
                 }
                 catch { Add-ProbeResult -Area 'ShareGate' -Name 'License/session query' -Status 'Error' -Detail $_.Exception.Message }
             }
-            if ($licenseConfirmed -and (Get-Command Connect-Site -Module ShareGate -ErrorAction SilentlyContinue) -and (Get-Command Get-List -Module ShareGate -ErrorAction SilentlyContinue)) {
+            if ($licenseConfirmed -and (Get-Command -Name 'ShareGate\Connect-Site' -ErrorAction SilentlyContinue) -and (Get-Command -Name 'ShareGate\Get-List' -ErrorAction SilentlyContinue)) {
                 foreach ($key in @($endpoints.Keys | Sort-Object)) {
                     $entry = $endpoints[$key]
                     if ($entry.Side -eq 'Source' -and -not $ProbeSource) {
@@ -261,7 +252,7 @@ try {
             $attribution = 'Undetermined'
             if ($sourceResult.Status -eq 'Access denied' -and $destinationResult.Status -eq 'Readable') { $attribution = 'Source' }
             elseif ($destinationResult.Status -eq 'Access denied' -and $sourceResult.Status -eq 'Readable') { $attribution = 'Destination' }
-            $access.Add([pscustomobject]@{ SessionId=$row.SessionId; RowId=$row.RowId; SourceUrl=$row.SourceUrl; SourceList=$row.SourceList; DestinationUrl=$row.DestinationUrl; DestinationList=$row.DestinationList; SourceStatus=$sourceResult.Status; DestinationStatus=$destinationResult.Status; Attribution=$attribution; Reason=$(if ($attribution -eq 'Undetermined') { 'Site/list reads cannot isolate the failing side; item-level access remains untested.' } else { 'One endpoint denied access while the other was readable.' }); SourceError=$sourceResult.Error; DestinationError=$destinationResult.Error })
+            $access.Add([pscustomobject]@{ SessionId=$row.SessionId; RowId=(Get-ProbeRowId $row); SourceUrl=$row.SourceUrl; SourceList=$row.SourceList; DestinationUrl=$row.DestinationUrl; DestinationList=$row.DestinationList; SourceStatus=$sourceResult.Status; DestinationStatus=$destinationResult.Status; Attribution=$attribution; Reason=$(if ($attribution -eq 'Undetermined') { 'Site/list reads cannot isolate the failing side; item-level access remains untested.' } else { 'One endpoint denied access while the other was readable.' }); SourceError=$sourceResult.Error; DestinationError=$destinationResult.Error })
         }
     }
     Write-ProbeLog "Probe completed. Output=$output"

@@ -1,6 +1,8 @@
 <#
 .SYNOPSIS
     Exercises site lock selection and the SharePoint Server scope guard offline.
+.VERSION
+    1.0.1
 #>
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
@@ -65,6 +67,39 @@ param([string]$SiteUrl, [string]$TenantAdminUrl, [string]$LockState)
     & $launcher -ToolkitRoot $fixture -MigrationName Synthetic -Side Destination -LockState Unlock 6>&1 | Out-Null
     $targetCall = Get-Content -LiteralPath (Join-Path $operations 'target-call.txt') -Raw
     Assert-Test ($targetCall.Trim() -eq 'https://tenant.sharepoint.com/sites/destination|https://tenant-admin.sharepoint.com|Unlock') 'Destination dispatch passed the wrong URL, admin URL, or state.'
+
+    # The source and destination in a cross-tenant migration must use their own
+    # tenant admin URLs. The operation itself is replaced by the stub above.
+    @'
+@{
+    Name = 'Synthetic'
+    Source = @{ Type = 'SPO'; TenantAdminUrl = 'https://source-admin.sharepoint.com' }
+    Target = @{ Type = 'SPO'; TenantAdminUrl = 'https://target-admin.sharepoint.com' }
+}
+'@ | Set-Content -LiteralPath (Join-Path $migration 'migration.config.psd1') -Encoding UTF8
+    'https://source.sharepoint.com/sites/source https://target.sharepoint.com/sites/destination' |
+        Set-Content -LiteralPath (Join-Path $migration 'migration.mapping.txt') -Encoding UTF8
+    foreach ($case in @(
+        @{ Side='Source'; Expected='https://source.sharepoint.com/sites/source|https://source-admin.sharepoint.com|ReadOnly' },
+        @{ Side='Destination'; Expected='https://target.sharepoint.com/sites/destination|https://target-admin.sharepoint.com|ReadOnly' }
+    )) {
+        $global:SiteLockTestAnswers = New-Object 'System.Collections.Generic.Queue[string]'
+        $global:SiteLockTestAnswers.Enqueue('EXECUTE')
+        & $launcher -ToolkitRoot $fixture -MigrationName Synthetic -Side $case.Side -LockState ReadOnly 6>&1 | Out-Null
+        $targetCall = Get-Content -LiteralPath (Join-Path $operations 'target-call.txt') -Raw
+        Assert-Test ($targetCall.Trim() -eq $case.Expected) "Cross-tenant $($case.Side) dispatch used the wrong tenant."
+    }
+    @'
+@{
+    Name = 'Synthetic'
+    Source = @{ Type = 'SPO'; TenantAdminUrl = '' }
+    Target = @{ Type = 'SPO'; TenantAdminUrl = 'https://target-admin.sharepoint.com' }
+}
+'@ | Set-Content -LiteralPath (Join-Path $migration 'migration.config.psd1') -Encoding UTF8
+    $missingSourceAdminBlocked = $false
+    try { & $launcher -ToolkitRoot $fixture -MigrationName Synthetic -Side Source -LockState ReadOnly -PreviewOnly 6>&1 | Out-Null }
+    catch { $missingSourceAdminBlocked = $_.Exception.Message -match 'Source.TenantAdminUrl is required' }
+    Assert-Test $missingSourceAdminBlocked 'A missing source admin URL must not fall back to the destination tenant.'
     Remove-Item function:Read-Host -ErrorAction SilentlyContinue
 
     $global:SiteLockTestUrl = 'https://farm.example/sites/source'

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Verify streaming SPO inventory retries without a SharePoint connection.
 .VERSION
-    1.1.0
+    1.1.1
 #>
 #Requires -Version 7.4
 
@@ -25,6 +25,12 @@ function Write-Warning { param([string]$Message) $script:Warnings.Add($Message) 
 function Start-Sleep { param([int]$Seconds) $script:Delays.Add($Seconds) }
 function ConvertTo-AbsoluteSharePointUrl { param([string]$WebUrl,[string]$ServerRelativeUrl) return "https://example.test$ServerRelativeUrl" }
 function Convert-PnPFieldUserValueToString { param($Value) return [string]$Value }
+function Get-PnPFileVersion {
+    [CmdletBinding()]
+    param([string]$Url,$Connection)
+    if ($script:VersionMode -eq 'Fail') { throw 'HttpClient.Timeout during version enumeration' }
+    if ($Url -match '/2\.txt$') { return @([pscustomobject]@{Label='1.0'}, [pscustomobject]@{Label='2.0'}) }
+}
 function New-FixtureItem {
     param([int]$Id)
     [pscustomobject]@{
@@ -66,6 +72,7 @@ $script:Warnings = [System.Collections.Generic.List[string]]::new()
 $script:Delays = [System.Collections.Generic.List[int]]::new()
 $script:Calls = [System.Collections.Generic.List[object]]::new()
 $script:Mode = 'PartialTimeoutOnce'
+$script:VersionMode = 'Success'
 $rows = @(Get-FileInventoryFromLibrary -Connection 'fixture' -SiteCollectionUrl $web.Url -Web $web -Library $library -BatchSize 2000)
 if (($rows.ItemId -join ',') -ne '1,2,3,4' -or $script:Calls.Count -ne 2 -or
     $script:Calls[0].PageSize -ne 2000 -or $script:Calls[1].PageSize -ne 100 -or
@@ -96,6 +103,17 @@ $rows = @(Get-FileInventoryFromLibrary -Connection 'fixture' -SiteCollectionUrl 
 if ($rows.Count -ne 3 -or ($rows.ItemId -join ',') -ne '1,2,3' -or $script:Calls.Count -ne 1) {
     throw 'Successful streaming inventory returned unexpected rows.'
 }
+if (@($rows | Where-Object { $null -ne $_.VersionsCount }).Count -ne 0) { throw 'An uncollected version count was presented as a known value.' }
+
+$script:Calls.Clear(); $script:Delays.Clear(); $script:Mode = 'Paging'
+$rows = @(Get-FileInventoryFromLibrary -Connection 'fixture' -SiteCollectionUrl $web.Url -Web $web -Library $library -BatchSize 2 -IncludeVersionCounts)
+if (($rows.VersionsCount -join ',') -ne '0,2,0') { throw 'Previous version counts were not recorded correctly.' }
+$script:Calls.Clear(); $script:Delays.Clear(); $script:VersionMode = 'Fail'
+$versionFailure = $false
+try { [void]@(Get-FileInventoryFromLibrary -Connection 'fixture' -SiteCollectionUrl $web.Url -Web $web -Library $library -BatchSize 2 -IncludeVersionCounts) }
+catch { $versionFailure = $_.Exception.Message -match '^VersionHistoryReadFailed:' }
+if (-not $versionFailure -or $script:Calls.Count -ne 1 -or $script:Delays.Count -ne 0) { throw 'A version read timeout was retried as page progress or silently accepted.' }
+$script:VersionMode = 'Success'
 
 $script:Calls.Clear(); $script:Delays.Clear(); $script:Mode = 'EmptyQuery'
 $rows = @(Get-FileInventoryFromLibrary -Connection 'fixture' -SiteCollectionUrl $web.Url -Web $web -Library $library -BatchSize 2)

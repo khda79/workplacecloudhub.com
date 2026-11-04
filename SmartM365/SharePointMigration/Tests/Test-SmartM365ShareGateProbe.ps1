@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline Windows PowerShell 5.1 probe contract test with a fake ShareGate module.
 .VERSION
-    1.0.2
+    1.0.6
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -24,7 +24,7 @@ try {
     @'
 function Find-CopySessions { [CmdletBinding()] param([datetime]$From,[datetime]$To) if (-not $env:SPMIG_TEST_EMPTY_SESSIONS) { [pscustomobject]@{ SessionId='260930-6'; Result='Success' } } }
 function Export-Report { [CmdletBinding()] param([string]$SessionId,[string]$Path) throw 'Must not be invoked' }
-function Connect-Site { [CmdletBinding()] param([string]$Url,[switch]$Browser,[switch]$ModernAuth) if ($Url -match 'target' -and -not $Browser) { throw 'Destination must use Browser' }; if ($Url -match 'source' -and $env:SPMIG_TEST_SOURCE_FORBIDDEN) { throw 'Source must not be called' }; if ($Url -match 'denied') { throw 'Access denied' }; [pscustomobject]@{ Url=$Url } }
+function Connect-Site { [CmdletBinding()] param([string]$Url,[switch]$Browser,[switch]$ModernAuth) if ($Url -match 'target' -and $(if ($env:SPMIG_TEST_DEST_MODERN) { -not $ModernAuth } else { -not $Browser })) { throw 'Unexpected destination authentication' }; if ($Url -match 'source' -and $env:SPMIG_TEST_SOURCE_FORBIDDEN) { throw 'Source must not be called' }; if ($Url -match 'source' -and $env:SPMIG_TEST_SOURCE_BROWSER -and -not $Browser) { throw 'Source must use Browser' }; if ($Url -match 'denied') { throw 'Access denied' }; [pscustomobject]@{ Url=$Url } }
 function Get-List { [CmdletBinding()] param($Site,[string[]]$Name) [pscustomobject]@{ Title=$Name[0] } }
 function Copy-Content { [CmdletBinding()] param() throw 'Copy must not be invoked' }
 function New-CopySettings { [CmdletBinding()] param() throw 'Copy settings must not be invoked' }
@@ -54,7 +54,7 @@ SessionId,RowId,RuleId,SourceUrl,SourceList,DestinationUrl,DestinationList
     if (-not $output) { throw 'Probe output was not created.' }
     $rows = @(Import-Csv -LiteralPath (Join-Path $output.FullName 'Probe-Access.csv'))
     if ($rows.Count -ne 3) { throw "Expected 3 access rows, got $($rows.Count)." }
-    if (($rows | ForEach-Object Attribution) -join ',' -ne 'Source,Destination,Undetermined') { throw 'Access attribution did not match the fake endpoint reads.' }
+    if (($rows | ForEach-Object Attribution) -join ',' -ne 'Source,Destination,Undetermined') { throw ('Access attribution did not match the fake endpoint reads: ' + (($rows | Select-Object SourceStatus,DestinationStatus,SourceError,DestinationError | Out-String).Trim())) }
     $cmdlets = @(Import-Csv -LiteralPath (Join-Path $output.FullName 'Probe-CmdletParameters.csv'))
     if (-not @($cmdlets | Where-Object Cmdlet -EQ 'Copy-Content').Count) { throw 'Copy-Content parameter metadata was not captured.' }
     $sessionProperties = @(Import-Csv -LiteralPath (Join-Path $output.FullName 'Probe-SessionProperties.csv'))
@@ -68,11 +68,27 @@ SessionId,RowId,RuleId,SourceUrl,SourceList,DestinationUrl,DestinationList
     if (@($secondRows | Where-Object { $_.Attribution -ne 'Undetermined' -or $_.SourceStatus -ne 'Skipped - source unreachable' }).Count) { throw 'Source was not skipped by default.' }
     $secondResults = @(Import-Csv -LiteralPath (Join-Path $second.FullName 'Probe-Results.csv'))
     if (-not @($secondResults | Where-Object { $_.Area -eq 'Session' -and $_.Status -eq 'No local history' }).Count) { throw 'Empty local history was not reported.' }
+    Remove-Item Env:SPMIG_TEST_SOURCE_FORBIDDEN -ErrorAction SilentlyContinue
+    $env:SPMIG_TEST_SOURCE_BROWSER = '1'; $env:SPMIG_TEST_DEST_MODERN = '1'
+    & $probe -ProjectRoot (Join-Path $root 'Project') -AnalysisDirectory $analysis -SessionId '260930-6' -ProbeSource -SourceAuthMode Browser -DestinationAuthMode ModernAuth -Run | Out-Null
+    $third = @(Get-ChildItem -LiteralPath (Join-Path $root 'Project\ShareGate\Diagnostics') -Directory -Filter 'Probe-*' | Where-Object { $_.FullName -ne $output.FullName -and $_.FullName -ne $second.FullName })[0]
+    $thirdRows = @(Import-Csv -LiteralPath (Join-Path $third.FullName 'Probe-Access.csv'))
+    if (($thirdRows | ForEach-Object Attribution) -join ',' -ne 'Source,Destination,Undetermined') { throw 'Independent authentication modes were not applied.' }
+    $thirdLog=Get-Content -LiteralPath (Join-Path $third.FullName 'Probe.log') -Raw
+    if($thirdLog -notmatch 'SourceAuth=Browser; DestinationAuth=ModernAuth'){throw 'Probe log misreports the selected authentication modes.'}
+    $legacy=Join-Path $root 'Project\ShareGate\Diagnostics\LegacyAnalysis'
+    New-Item -ItemType Directory -Path $legacy -Force | Out-Null
+    Import-Csv -LiteralPath (Join-Path $analysis 'ClassifiedRows.csv') | Select-Object * -ExcludeProperty RowId | Export-Csv -LiteralPath (Join-Path $legacy 'ClassifiedRows.csv') -NoTypeInformation -Encoding UTF8
+    $before=@(Get-ChildItem -LiteralPath (Join-Path $root 'Project\ShareGate\Diagnostics') -Directory -Filter 'Probe-*'|ForEach-Object FullName)
+    & $probe -ProjectRoot (Join-Path $root 'Project') -AnalysisDirectory $legacy -SessionId '260930-6' -ProbeSource -SourceAuthMode Browser -DestinationAuthMode ModernAuth -Run | Out-Null
+    $legacyOut=@(Get-ChildItem -LiteralPath (Join-Path $root 'Project\ShareGate\Diagnostics') -Directory -Filter 'Probe-*'|Where-Object {$_.FullName -notin $before})[0]
+    $legacyRows=@(Import-Csv -LiteralPath (Join-Path $legacyOut.FullName 'Probe-Access.csv'))
+    if($legacyRows.Count -ne 3 -or @($legacyRows|Where-Object {$_.RowId -ne ''}).Count){throw 'Missing optional RowId must remain blank without dropping rows.'}
     Write-Output 'ShareGate probe offline contract test passed.'
 }
 finally {
     $env:PSModulePath = $oldModulePath
-    Remove-Item Env:SPMIG_TEST_EMPTY_SESSIONS,Env:SPMIG_TEST_SOURCE_FORBIDDEN -ErrorAction SilentlyContinue
+    Remove-Item Env:SPMIG_TEST_EMPTY_SESSIONS,Env:SPMIG_TEST_SOURCE_FORBIDDEN,Env:SPMIG_TEST_SOURCE_BROWSER,Env:SPMIG_TEST_DEST_MODERN -ErrorAction SilentlyContinue
     if ((Test-Path -LiteralPath $root) -and $root.StartsWith($testsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $root -Recurse -Force
     }

@@ -1,4 +1,4 @@
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 import argparse
 import builtins
 import csv
@@ -157,7 +157,7 @@ def main():
             if stale_path.exists():
                 stale_path.unlink()
         print("Folders-To-Delete export skipped.")
-        print("Reason: no SPO folder path was found missing from the SP2019 source file paths.")
+        print("Reason: no SPO folder path was found missing from the source file paths.")
         print(f"Excel file not created: {output_xlsx}")
         return
 

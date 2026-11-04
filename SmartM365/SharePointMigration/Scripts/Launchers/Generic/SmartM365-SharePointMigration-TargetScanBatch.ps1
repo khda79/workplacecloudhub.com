@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-    Run destination inventories for configured SharePoint migrations.
+    Run SPO inventories for one side of configured SharePoint migrations.
 
 .DESCRIPTION
-    Runs target file scans first, then target permission scans. Both
+    Runs SPO file scans first, then permission scans for the selected side. Both
     authentication modes run up to two scans at once. Interactive scans
     use separate visible consoles for sign-in. The limit applies to this batch.
 
 .VERSION
-    1.0.4
+    1.0.7
 
 .EXAMPLE
     pwsh -File .\SmartM365-SharePointMigration-TargetScanBatch.ps1 -PlanOnly
@@ -23,6 +23,8 @@
 [CmdletBinding()]
 param(
     [string[]]$MigrationNames = @(),
+    [ValidateSet('Source', 'Target')]
+    [string]$Side = 'Target',
     [ValidateSet('FilesOnly', 'PermissionsOnly', 'Both')]
     [string]$InventoryMode = 'Both',
     [ValidateSet('Interactive', 'Certificate')]
@@ -78,16 +80,19 @@ function Get-BatchMigrations {
             throw "Migration name differs from folder name in $configPath"
         }
         if ($directory.Name -eq 'NewMigration') { continue }
-        if (-not $config.Target -or $config.Target.Type -ne 'SPO' -or
-            [string]::IsNullOrWhiteSpace([string]$config.Target.SiteUrl)) {
+        $endpoint = $config[$Side]
+        if (-not $endpoint -or $endpoint.Type -ne 'SPO' -or
+            [string]::IsNullOrWhiteSpace([string]$endpoint.SiteUrl)) {
             if ($Names -contains $directory.Name) {
-                throw "Migration $($directory.Name) needs Target.Type=SPO and Target.SiteUrl."
+                throw "Migration $($directory.Name) needs $Side.Type=SPO and $Side.SiteUrl."
             }
             continue
         }
         $available[$directory.Name] = [pscustomobject]@{
             Name = $directory.Name
-            TargetUrl = [string]$config.Target.SiteUrl
+            EndpointUrl = [string]$endpoint.SiteUrl
+            Root = $directory.FullName
+            AuthConfigPath = if ($endpoint.ContainsKey('AuthConfigPath')) { [string]$endpoint.AuthConfigPath } else { '' }
         }
     }
 
@@ -105,8 +110,12 @@ function Get-BatchMigrations {
 }
 
 function Assert-CertificateAuth {
-    param([string]$Root)
+    param([string]$Root, [object[]]$Migrations)
+    foreach ($migration in $Migrations) {
     $configPath = Join-Path $Root 'Config\SPOAuth.local.psd1'
+    if (-not [string]::IsNullOrWhiteSpace($migration.AuthConfigPath)) {
+        $configPath = if ([IO.Path]::IsPathRooted($migration.AuthConfigPath)) { $migration.AuthConfigPath } else { Join-Path $migration.Root $migration.AuthConfigPath }
+    }
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
         throw "Certificate auth requires $configPath"
     }
@@ -121,7 +130,8 @@ function Assert-CertificateAuth {
         Where-Object { $_.Thumbprint -eq $thumbprint -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date) } |
         Select-Object -First 1)
     if ($certificate.Count -eq 0) {
-        throw 'Certificate auth requires the configured, unexpired certificate with its private key on this machine.'
+        throw "Certificate auth for $($migration.Name) requires the configured, unexpired certificate with its private key on this machine."
+    }
     }
 }
 
@@ -167,11 +177,12 @@ $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 . (Join-Path $PSScriptRoot '..\SmartM365-SharePointMigration-Storage.ps1')
 if (-not $PlanOnly) {
     if (-not $BatchId) { $BatchId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([guid]::NewGuid().ToString('N').Substring(0, 8)) }
-    $batchRoot = Get-SmartM365MigrationLogsRoot -ProjectRoot $ProjectRoot -ChildPath "target-scan-batches\$batchId"
-    Write-BatchLine ("Creating destination batch log: {0}" -f (Join-Path $batchRoot 'batch.log'))
+    $batchKind = if ($Side -eq 'Source') { 'spo-source-scan-batches' } else { 'target-scan-batches' }
+    $batchRoot = Get-SmartM365MigrationLogsRoot -ProjectRoot $ProjectRoot -ChildPath "$batchKind\$batchId"
+    Write-BatchLine ("Creating $Side batch log: {0}" -f (Join-Path $batchRoot 'batch.log'))
     New-Item -ItemType Directory -Path $batchRoot -ErrorAction Stop | Out-Null
     $script:BatchLogPath = Join-Path $batchRoot 'batch.log'
-    Write-BatchLine ("Destination batch preflight started. Logs: {0}" -f $batchRoot)
+    Write-BatchLine ("$Side batch preflight started. Logs: {0}" -f $batchRoot)
 }
 try {
 Write-BatchLine 'Checking PowerShell, launcher, and authentication settings.'
@@ -182,17 +193,17 @@ if (-not (Test-Path -LiteralPath $LauncherPath -PathType Leaf)) {
 }
 $limit = if ($MaxParallel -gt 0) { $MaxParallel } else { 2 }
 
-Write-BatchLine ("Loading destination migration configurations from: {0}" -f (Get-SmartM365MigrationsRoot -ProjectRoot $ProjectRoot))
+Write-BatchLine ("Loading $Side migration configurations from: {0}" -f (Get-SmartM365MigrationsRoot -ProjectRoot $ProjectRoot))
 $migrations = @(Get-BatchMigrations -Root $ProjectRoot -Names $requestedNames.ToArray())
 if ($migrations.Count -eq 0) { throw 'No configured SPO migrations found.' }
 $actions = @()
-if ($InventoryMode -in @('FilesOnly', 'Both')) { $actions += 'ScanTargetFiles' }
-if ($InventoryMode -in @('PermissionsOnly', 'Both')) { $actions += 'ScanTargetPermissions' }
+if ($InventoryMode -in @('FilesOnly', 'Both')) { $actions += "Scan${Side}Files" }
+if ($InventoryMode -in @('PermissionsOnly', 'Both')) { $actions += "Scan${Side}Permissions" }
 
-Write-BatchLine ("Destination scan plan: {0} migrations; {1} actions; authentication={2}; maximum parallel={3}." -f $migrations.Count, $actions.Count, $AuthMode, $limit)
+Write-BatchLine ("$Side scan plan: {0} migrations; {1} actions; authentication={2}; maximum parallel={3}." -f $migrations.Count, $actions.Count, $AuthMode, $limit)
 foreach ($action in $actions) {
     foreach ($migration in $migrations) {
-        Write-BatchLine ("PLAN {0} {1} {2}" -f $action, $migration.Name, $migration.TargetUrl)
+        Write-BatchLine ("PLAN {0} {1} {2}" -f $action, $migration.Name, $migration.EndpointUrl)
     }
 }
 if ($PlanOnly) {
@@ -200,14 +211,14 @@ if ($PlanOnly) {
     return
 }
 
-Write-BatchLine 'Checking destination authentication and PnP.PowerShell.'
-if ($AuthMode -eq 'Certificate') { Assert-CertificateAuth -Root $ProjectRoot }
+Write-BatchLine "Checking $Side authentication and PnP.PowerShell."
+if ($AuthMode -eq 'Certificate') { Assert-CertificateAuth -Root $ProjectRoot -Migrations $migrations }
 if (-not (Get-Module -ListAvailable -Name PnP.PowerShell)) {
-    throw 'PnP.PowerShell is required in PowerShell 7 before destination scans can run.'
+    throw 'PnP.PowerShell is required in PowerShell 7 before SPO scans can run.'
 }
 }
 catch {
-    Write-BatchLine ("Destination batch preflight failed: {0}" -f $_.Exception.Message)
+    Write-BatchLine ("$Side batch preflight failed: {0}" -f $_.Exception.Message)
     throw
 }
 
@@ -235,6 +246,7 @@ try {
                     '-MigrationName', ('"{0}"' -f $migration.Name), '-Action', $action,
                     '-RunResultPath', ('"{0}"' -f $job.ResultPath), '-RunResultId', $job.RunId)
                 if ($AuthMode -eq 'Certificate') { $arguments += '-UseCertificate' }
+                else { $arguments += '-InteractiveAuthentication' }
                 $outputLog = if ($AuthMode -eq 'Certificate') { $stdout } else { '' }
                 try {
                     $startParameters = @{

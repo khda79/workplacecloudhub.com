@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline five-item ShareGate witness safety and CSV reader contract.
 .VERSION
-    1.0.0
+    1.0.1
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -23,7 +23,7 @@ try {
 @{ RootModule='ShareGate.psm1'; ModuleVersion='99.0.0'; GUID='5d5f7e6e-9039-4c51-ad50-9e28d3df67c3'; FunctionsToExport=@('Connect-Site','Get-List','Copy-Content','Export-Report') }
 '@ | Set-Content -LiteralPath (Join-Path $moduleDir 'ShareGate.psd1') -Encoding UTF8
     @'
-function Connect-Site { [CmdletBinding()] param([string]$Url,[switch]$Browser) if ($Url -match 'target' -and -not $Browser) { throw 'Destination Browser missing' }; if ($Url -match 'source' -and $Browser) { throw 'Source must use current Windows user' }; [pscustomobject]@{ Url=$Url } }
+function Connect-Site { [CmdletBinding()] param([string]$Url,[switch]$Browser,[switch]$ModernAuth) if ($Url -match 'target' -and -not $Browser) { throw 'Destination Browser missing' }; if ($Url -match 'source' -and ($Browser -ne [bool]$env:SPMIG_TEST_SOURCE_BROWSER)) { throw 'Unexpected source authentication' }; [pscustomobject]@{ Url=$Url } }
 function Get-List { [CmdletBinding()] param($Site,[string[]]$Name) [pscustomobject]@{ Title=$Name[0]; Site=$Site } }
 function Copy-Content { [CmdletBinding()] param($SourceList,$DestinationList,[int[]]$SourceItemId,[switch]$WhatIf) if (-not $WhatIf) { throw 'Copy-Content without WhatIf' }; [pscustomobject]@{ Id=('261003-'+$SourceItemId[0]); SourceId=$SourceItemId[0]; Marker='synthetic' } }
 function Export-Report { [CmdletBinding()] param($CopyResult,[string]$Path) if ($CopyResult.SourceId -in @(2,25)) { [pscustomobject]@{ Result='Warning'; Type='File'; Title='sample'; Path='/sample'; Version='1.0'; 'Site name'='sample'; 'Site address'='https://source.example'; 'List title'='sample'; Error=''; 'Help links'=''; Details='Known permanent warning' } | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8 } else { Set-Content -LiteralPath $Path -Value 'Result,Type,Title,Path,Version,Site name,Site address,List title,Error,Help links,Details' -Encoding UTF8 } }
@@ -65,6 +65,11 @@ SessionId,RowId,RuleId,ItemKey,SourceUrl,SourceList,SourceItemId,DestinationUrl,
     if (@(Get-ChildItem -LiteralPath (Join-Path $output.FullName 'Reports') -File -Filter '*.csv').Count -ne 5) { throw 'Export-Report was not called for all results.' }
     $log = Get-Content -LiteralPath (Join-Path $output.FullName 'Witness.log') -Raw
     if ($log -notmatch 'Both positive witnesses produced rows while all three prior 401 reports were empty') { throw 'The witness interpretation is missing.' }
+    $env:SPMIG_TEST_SOURCE_BROWSER = '1'
+    & $scriptPath -ProjectRoot $project -AnalysisDirectory $analysis -SessionId '260930-6' -SourceAuthMode Browser -WhatIf -Run | Out-Null
+    $second = @(Get-ChildItem -LiteralPath (Join-Path $project 'ShareGate\Diagnostics') -Directory -Filter 'Witness-*' | Where-Object FullName -ne $output.FullName)[0]
+    $secondResults = @(Import-Csv -LiteralPath (Join-Path $second.FullName 'Witness-Results.csv'))
+    if (@($secondResults | Where-Object { $_.Status -eq 'Pre-check warning' }).Count -ne 2) { throw 'Source Browser authentication failed in the mocked witness.' }
     . (Join-Path $testsRoot '..\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGateReportReader.ps1')
     $config = Join-Path $scratch 'Config'
     New-Item -ItemType Directory -Path $config -Force | Out-Null
@@ -77,6 +82,7 @@ SessionId,RowId,RuleId,ItemKey,SourceUrl,SourceList,SourceItemId,DestinationUrl,
     Write-Output 'ShareGate witness offline contract test passed.'
 }
 finally {
+    Remove-Item Env:SPMIG_TEST_SOURCE_BROWSER -ErrorAction SilentlyContinue
     $env:PSModulePath = $oldModulePath
     if ((Test-Path -LiteralPath $scratch) -and $scratch.StartsWith($testsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $scratch -Recurse -Force

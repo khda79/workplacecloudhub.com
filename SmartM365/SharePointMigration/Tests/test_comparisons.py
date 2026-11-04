@@ -34,6 +34,62 @@ HTML = load('report_html')
 HISTORY = load('comparison_history_chart')
 
 
+class GroupMembershipReviewTests(unittest.TestCase):
+    def test_counts_and_unresolved_members_never_become_equal(self):
+        def group(count, names, status='OK'):
+            return {'PrincipalType': 'SharePointGroup', 'PrincipalMemberLookupStatus': status,
+                    'PrincipalMemberCount': str(count), 'PrincipalMemberLoginNames': names,
+                    'WebUrl': 'https://example.test/sites/demo', 'PrincipalName': 'Members'}
+        keys = [('list', f'/sites/demo/{i}', 'group', 'read') for i in range(4)]
+        source = dict(zip(keys, [group(1, 'a@example.test'), group(2, 'a@example.test || b@example.test'),
+                                 group(1, 'a@example.test'), group(1, '')]))
+        target = dict(zip(keys, [group(1, 'A@example.test'), group(1, 'a@example.test'),
+                                 group(1, 'other@example.test'), group(1, 'a@example.test')]))
+        compared = {'matched_keys': keys, 'target_has_more_pairs': [], 'target_has_less_pairs': [],
+                    'permission_level_different_pairs': []}
+        review = PERMISSIONS.group_membership_review(source, target, compared)
+        self.assertEqual([row['Status'] for row in review], ['EqualRaw', 'DifferentCount', 'Unknown', 'Unknown'])
+        self.assertEqual((review[1]['SourceMemberCount'], review[1]['TargetMemberCount']), (2, 1))
+        self.assertEqual(review[0]['RawMemberComparison'], 'ExactRawLoginStrings')
+        self.assertEqual(review[0]['SourceOnlyRawLoginNames'], '')
+        self.assertEqual(review[1]['SourceOnlyRawLoginNames'], 'b@example.test')
+        self.assertEqual(review[2]['SourceOnlyRawLoginNames'], 'a@example.test')
+        self.assertEqual(review[2]['TargetOnlyRawLoginNames'], 'other@example.test')
+        self.assertEqual(review[3]['RawMemberComparison'], 'IncompleteEvidence')
+        self.assertEqual(review[3]['SourceOnlyRawLoginNames'], '')
+        cross = PERMISSIONS.group_membership_review(source, target, compared, cross_tenant=True)
+        self.assertEqual(cross[1]['RawMemberComparison'], 'NotComparedCrossTenant')
+        self.assertEqual(cross[1]['SourceOnlyRawLoginNames'], '')
+        self.assertEqual(cross[1]['TargetOnlyRawLoginNames'], '')
+
+    def test_claim_prefix_is_preserved_and_duplicates_are_not_compared(self):
+        key = ('web', '/sites/demo', 'group', 'read')
+        source = {'PrincipalType': 'SharePointGroup', 'PrincipalMemberLookupStatus': 'OK',
+                  'PrincipalMemberCount': '1', 'PrincipalMemberLoginNames': 'i:0#.f|membership|User@example.test'}
+        target = dict(source, PrincipalMemberLoginNames='User@example.test')
+        compared = {'matched_keys': [key], 'target_has_more_pairs': [], 'target_has_less_pairs': [],
+                    'permission_level_different_pairs': []}
+        row = PERMISSIONS.group_membership_review({key: source}, {key: target}, compared)[0]
+        self.assertEqual(row['Status'], 'Unknown')
+        self.assertEqual(row['SourceOnlyRawLoginNames'], 'i:0#.f|membership|User@example.test')
+        self.assertEqual(row['TargetOnlyRawLoginNames'], 'User@example.test')
+        source.update(PrincipalMemberCount='2', PrincipalMemberLoginNames='user@example.test || USER@example.test')
+        row = PERMISSIONS.group_membership_review({key: source}, {key: target}, compared)[0]
+        self.assertEqual(row['RawMemberComparison'], 'IncompleteEvidence')
+        self.assertEqual(row['SourceOnlyRawLoginNames'], '')
+
+    def test_target_with_more_roles_is_still_reviewed(self):
+        source_key = ('list', '/sites/demo/documents', 'group', 'read')
+        target_key = ('list', '/sites/demo/documents', 'group', 'read|write')
+        source = {'PrincipalType': 'SharePointGroup', 'PrincipalMemberLookupStatus': 'OK',
+                  'PrincipalMemberCount': '0', 'PrincipalMemberLoginNames': ''}
+        target = dict(source, PrincipalMemberCount='1', PrincipalMemberLoginNames='user@example.test')
+        compared = {'matched_keys': [source_key], 'target_has_more_pairs': [(source_key, target_key)],
+                    'target_has_less_pairs': [], 'permission_level_different_pairs': []}
+        review = PERMISSIONS.group_membership_review({source_key: source}, {target_key: target}, compared)
+        self.assertEqual(review[0]['Status'], 'DifferentCount')
+
+
 class InventoryCompletenessTests(unittest.TestCase):
     def test_error_sidecar_blocks_manifest_and_permission_comparison(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -339,6 +395,209 @@ class FileComparisonTests(unittest.TestCase):
 
 
 class PermissionComparisonTests(unittest.TestCase):
+    def test_cross_tenant_report_flags_missing_mapped_owner_on_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_url = 'https://source.example.test/sites/a'
+            target_url = 'https://target.example.test/sites/b'
+            pairs = [('old owners', 'new owners', 'Full Control', 'Contrôle total'),
+                     ('old visitors', 'new visitors', 'Read', 'Lecture'),
+                     ('old members', 'new members', 'Edit', 'Modification')]
+            fields = ['WebUrl', 'ObjectScope', 'ObjectServerRelativeUrl', 'PrincipalType',
+                      'PrincipalLoginName', 'PrincipalName', 'PermissionLevels',
+                      'PrincipalMemberLookupStatus', 'PrincipalMemberCount', 'PrincipalMemberLoginNames']
+            source, target = root / 'source.csv', root / 'target.csv'
+            for path, site, is_source in ((source, source_url, True), (target, target_url, False)):
+                site_path = '/sites/a' if is_source else '/sites/b'
+                with path.open('w', encoding='utf-8', newline='') as handle:
+                    writer = csv.DictWriter(handle, fieldnames=fields)
+                    writer.writeheader()
+                    for scope in ('Web', 'File'):
+                        for index, (old, new, old_role, new_role) in enumerate(pairs):
+                            if not is_source and scope == 'File' and index == 0:
+                                continue
+                            principal = old if is_source else new
+                            writer.writerow({'WebUrl': site, 'ObjectScope': scope,
+                                'ObjectServerRelativeUrl': site_path + ('/Documents/fixture.txt' if scope == 'File' else ''),
+                                'PrincipalType': 'SharePointGroup', 'PrincipalLoginName': principal,
+                                'PrincipalName': principal, 'PermissionLevels': old_role if is_source else new_role,
+                                'PrincipalMemberLookupStatus': 'OK', 'PrincipalMemberCount': '0', 'PrincipalMemberLoginNames': ''})
+                EVIDENCE.write_manifest(path, 'Source' if is_source else 'Target', 'Permission', site)
+            identities = root / 'identities.csv'
+            with identities.open('w', encoding='utf-8', newline='') as handle:
+                columns = ['SourceWebUrl', 'SourcePrincipalType', 'SourcePrincipalLoginName', 'TargetWebUrl',
+                           'TargetPrincipalType', 'TargetPrincipalLoginName', 'Status']
+                writer = csv.DictWriter(handle, fieldnames=columns)
+                writer.writeheader()
+                for old, new, _, _ in pairs:
+                    writer.writerow({'SourceWebUrl': source_url, 'SourcePrincipalType': 'SharePointGroup',
+                                     'SourcePrincipalLoginName': old, 'TargetWebUrl': target_url,
+                                     'TargetPrincipalType': 'SharePointGroup', 'TargetPrincipalLoginName': new,
+                                     'Status': 'Confirmed'})
+            paths = root / 'paths.txt'
+            paths.write_text(source_url + ' ' + target_url + '\n', encoding='utf-8')
+            output = root / 'output'
+            run = subprocess.run([sys.executable, str(COMPARE_DIR / 'compare_sp_source_target_permissions.py'),
+                '--source-csv', str(source), '--target-csv', str(target), '--output-directory', str(output),
+                '--source-root-path', '/sites/a', '--target-root-path', '/sites/b', '--path-mapping-file', str(paths),
+                '--cross-tenant-identity-mapping', str(identities)], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            with (output / 'Summary.csv').open(encoding='utf-8-sig', newline='') as handle:
+                summary = next(csv.DictReader(handle))
+            self.assertEqual((summary['MatchedPermissions'], summary['MissingInSPO']), ('5', '1'))
+            self.assertEqual(summary['ValidationStatus'], 'ReviewNeeded')
+            self.assertEqual(summary['EntraIdentityValidationStatus'], 'NotEvaluatedCrossTenant')
+            with (output / 'MissingInSPO.csv').open(encoding='utf-8-sig', newline='') as handle:
+                missing = list(csv.DictReader(handle))
+            self.assertEqual([(entry['ObjectScope'], entry['PrincipalLoginName']) for entry in missing],
+                             [('File', 'old owners')])
+
+    def test_mapped_file_group_missing_full_control_is_reported(self):
+        def row(web, group, role):
+            return {'WebUrl': 'https://tenant.example.test' + web, 'ObjectScope': 'File',
+                    'ObjectServerRelativeUrl': web + '/Documents/fixture.txt',
+                    'PrincipalType': 'SharePointGroup', 'PrincipalLoginName': group,
+                    'PrincipalName': group, 'PermissionLevels': role}
+
+        pairs = [('source owners', 'target owners', 'Full Control', 'Contrôle total'),
+                 ('source visitors', 'target visitors', 'Read', 'Lecture'),
+                 ('source members', 'target members', 'Edit', 'Modification')]
+        source = [row('/sites/source', s, sr) for s, _, sr, _ in pairs]
+        target = [row('/sites/target', t, tr) for _, t, _, tr in pairs]
+        paths = [('/sites/source', '/sites/target')]
+        mappings = {}
+        for src, dst in zip(source, target):
+            mapped_web = PERMISSIONS.row_web_path(src, path_mappings=paths)
+            target_web = PERMISSIONS.row_web_path(dst)
+            mappings[(mapped_web, PERMISSIONS.normalize_principal_text(src['PrincipalLoginName']))] = (
+                PERMISSIONS.normalize_principal(dst, web_path=target_web))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            missing = PERMISSIONS.write_permission_comparison_report(
+                source, target[1:], root / 'missing', 'Synthetic', '/sites/source', '/sites/target',
+                path_mappings=paths, sharepoint_group_mappings=mappings)
+            self.assertEqual((missing['MatchedPermissions'], missing['MissingInSPO']), (2, 1))
+            with (root / 'missing' / 'MissingInSPO.csv').open(encoding='utf-8-sig', newline='') as handle:
+                missing_rows = list(csv.DictReader(handle))
+            self.assertEqual(len(missing_rows), 1)
+            self.assertEqual(missing_rows[0]['PrincipalLoginName'], 'source owners')
+            source_web = dict(source[0], ObjectScope='Web', ObjectServerRelativeUrl='/sites/source',
+                              AssociatedOwnerGroup='source owners', AssociatedVisitorGroup='source visitors',
+                              AssociatedMemberGroup='source members')
+            target_web = dict(target[0], ObjectScope='Web', ObjectServerRelativeUrl='/sites/target',
+                              AssociatedOwnerGroup='target owners', AssociatedVisitorGroup='target visitors',
+                              AssociatedMemberGroup='target members')
+            automatic, _ = PERMISSIONS.build_sharepoint_group_mappings(
+                source + [source_web], target[1:] + [target_web], path_mappings=paths)
+            automatic_missing = PERMISSIONS.write_permission_comparison_report(
+                source, target[1:], root / 'automatic-missing', 'Synthetic', '/sites/source', '/sites/target',
+                path_mappings=paths, sharepoint_group_mappings=automatic)
+            self.assertEqual((automatic_missing['MatchedPermissions'], automatic_missing['MissingInSPO']), (2, 1))
+            complete = PERMISSIONS.write_permission_comparison_report(
+                source, target, root / 'complete', 'Synthetic', '/sites/source', '/sites/target',
+                path_mappings=paths, sharepoint_group_mappings=mappings)
+            self.assertEqual((complete['MatchedPermissions'], complete['MissingInSPO']), (3, 0))
+            cross_source = [dict(item, CrossTenantComparisonPrincipal='mapped:' + pairs[i][1])
+                            for i, item in enumerate(source)]
+            cross_target = [dict(item, CrossTenantComparisonPrincipal='mapped:' + pairs[i][1])
+                            for i, item in enumerate(target)]
+            cross_missing = PERMISSIONS.write_permission_comparison_report(
+                cross_source, cross_target[1:], root / 'cross-missing', 'Synthetic',
+                '/sites/source', '/sites/target', path_mappings=paths, cross_tenant=True)
+            self.assertEqual((cross_missing['MatchedPermissions'], cross_missing['MissingInSPO']), (2, 1))
+            with cross_missing['Summary'].open(encoding='utf-8-sig', newline='') as handle:
+                self.assertEqual(next(csv.DictReader(handle))['EntraIdentityValidationStatus'], 'NotEvaluatedCrossTenant')
+
+    def test_cross_tenant_uses_explicit_scoped_identities_and_remains_review_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fields = ['WebUrl', 'ObjectScope', 'ObjectServerRelativeUrl', 'PrincipalType', 'PrincipalLoginName',
+                      'PrincipalName', 'PermissionLevels', 'PrincipalMemberLookupStatus', 'PrincipalMemberCount', 'PrincipalMemberLoginNames']
+            source, target = root / 'source.csv', root / 'target.csv'
+            for path, web, entries in (
+                (source, 'https://source.example.test/sites/a', [('User', 'old@source.example.test'), ('SharePointGroup', 'old-group')]),
+                (target, 'https://target.example.test/sites/b', [('User', 'new@target.example.test'), ('SharePointGroup', 'new-group')]),
+            ):
+                with path.open('w', encoding='utf-8', newline='') as handle:
+                    writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
+                    for kind, login in entries:
+                        writer.writerow({'WebUrl': web, 'ObjectScope': 'Web', 'ObjectServerRelativeUrl': '/' + web.split('/', 3)[3],
+                                         'PrincipalType': kind, 'PrincipalLoginName': login, 'PrincipalName': login,
+                                         'PermissionLevels': 'Read', 'PrincipalMemberLookupStatus': 'OK',
+                                         'PrincipalMemberCount': '0', 'PrincipalMemberLoginNames': ''})
+                EVIDENCE.write_manifest(path, 'Source' if path == source else 'Target', 'Permission', web)
+            mapping = root / 'identities.csv'
+            mapping.write_text('SourceWebUrl,SourcePrincipalType,SourcePrincipalLoginName,TargetWebUrl,TargetPrincipalType,TargetPrincipalLoginName,Status\n'
+                               'https://source.example.test/sites/a,User,old@source.example.test,https://target.example.test/sites/b,User,new@target.example.test,Confirmed\n'
+                               'https://source.example.test/sites/a,SharePointGroup,old-group,https://target.example.test/sites/b,SharePointGroup,new-group,Confirmed\n', encoding='utf-8')
+            paths = root / 'paths.txt'; paths.write_text('https://source.example.test/sites/a https://target.example.test/sites/b\n', encoding='utf-8')
+            output = root / 'output'
+            command = [sys.executable, str(COMPARE_DIR / 'compare_sp_source_target_permissions.py'), '--source-csv', str(source),
+                       '--target-csv', str(target), '--output-directory', str(output), '--source-root-path', '/sites/a',
+                       '--target-root-path', '/sites/b', '--path-mapping-file', str(paths),
+                       '--cross-tenant-identity-mapping', str(mapping)]
+            run = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            with (output / 'Summary.csv').open(encoding='utf-8-sig', newline='') as handle:
+                summary = next(csv.DictReader(handle))
+            self.assertEqual((summary['MatchedPermissions'], summary['MissingInSPO'], summary['ExtraInSPO']), ('2', '0', '0'))
+            self.assertEqual(summary['CrossTenantIdentityMode'], 'ExplicitMapping')
+            self.assertEqual(summary['EntraIdentityValidationStatus'], 'NotEvaluatedCrossTenant')
+            self.assertEqual(len(summary['CrossTenantMappingSha256']), 64)
+            self.assertEqual(len(summary['CrossTenantSiteMappingSha256']), 64)
+            self.assertEqual(summary['GroupMembershipUnknown'], '1')
+            self.assertEqual(summary['ValidationStatus'], 'ReviewNeeded')
+            with (output / 'GroupMembershipReview.csv').open(encoding='utf-8-sig', newline='') as handle:
+                group_review = next(csv.DictReader(handle))
+            self.assertEqual(group_review['RawMemberComparison'], 'NotComparedCrossTenant')
+            self.assertEqual(group_review['SourceOnlyRawLoginNames'], '')
+            self.assertEqual(group_review['TargetOnlyRawLoginNames'], '')
+            with (output / 'Matched.csv').open(encoding='utf-8-sig', newline='') as handle:
+                matched = list(csv.DictReader(handle))
+            self.assertEqual(matched[0]['PrincipalLoginName'], 'old-group')
+            paths.write_text('https://source.example.test/sites/a https://other.example.test/sites/b\n', encoding='utf-8')
+            wrong_host = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(wrong_host.returncode, 0)
+            self.assertIn('host-aware site mapping', wrong_host.stderr)
+            paths.write_text('https://source.example.test/sites/a https://target.example.test/sites/b\n', encoding='utf-8')
+            mapping.write_text(mapping.read_text(encoding='utf-8').splitlines()[0] + '\n', encoding='utf-8')
+            failed = subprocess.run(command[:-1] + [str(mapping)], capture_output=True, text=True)
+            self.assertNotEqual(failed.returncode, 0)
+
+    def test_group_membership_difference_changes_validation_status_and_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fields = ['WebUrl', 'ObjectScope', 'ObjectServerRelativeUrl', 'PrincipalType', 'PrincipalLoginName',
+                      'PrincipalName', 'PermissionLevels', 'PrincipalMemberLookupStatus', 'PrincipalMemberCount', 'PrincipalMemberLoginNames']
+            source, target = root / 'source.csv', root / 'target.csv'
+            for path, web, count, members in ((source, '/source', '2', 'a@example.test || b@example.test'),
+                                              (target, '/target', '1', 'a@example.test')):
+                with path.open('w', encoding='utf-8', newline='') as handle:
+                    writer = csv.DictWriter(handle, fieldnames=fields)
+                    writer.writeheader()
+                    writer.writerow({'WebUrl': 'https://example.test' + web, 'ObjectScope': 'Web', 'ObjectServerRelativeUrl': web,
+                                     'PrincipalType': 'SharePointGroup', 'PrincipalLoginName': 'demo-group', 'PrincipalName': 'demo-group',
+                                     'PermissionLevels': 'Read', 'PrincipalMemberLookupStatus': 'OK', 'PrincipalMemberCount': count,
+                                     'PrincipalMemberLoginNames': members})
+                EVIDENCE.write_manifest(path, 'Source' if path == source else 'Target', 'Permission', 'https://example.test' + web)
+            cache = root / 'entra.csv'
+            cache.write_text('UserPrincipalName,AccountEnabled\n', encoding='utf-8')
+            path_mapping = root / 'mapping.txt'
+            path_mapping.write_text('/source /target\n', encoding='utf-8')
+            output = root / 'output'
+            run = subprocess.run([sys.executable, str(COMPARE_DIR / 'compare_sp_source_target_permissions.py'),
+                                  '--source-csv', str(source), '--target-csv', str(target), '--output-directory', str(output),
+                                  '--source-root-path', '/source', '--target-root-path', '/target', '--path-mapping-file', str(path_mapping),
+                                  '--entra-users-csv', str(cache)], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            with (output / 'Summary.csv').open(encoding='utf-8-sig', newline='') as handle:
+                summary = next(csv.DictReader(handle))
+            self.assertEqual(summary['MatchedPermissions'], '1')
+            self.assertEqual(summary['GroupMembershipDifferentCount'], '1')
+            self.assertEqual(summary['ValidationStatus'], 'ReviewNeeded')
+            with (output / 'GroupMembershipReview.csv').open(encoding='utf-8-sig', newline='') as handle:
+                self.assertEqual(next(csv.DictReader(handle))['Status'], 'DifferentCount')
+
     def test_permission_differences_disabled_users_and_limited_access(self):
         def row(name, levels='Read', web='/source'):
             return {'ObjectScope': 'Web', 'ObjectServerRelativeUrl': web, 'WebUrl': 'https://workplacecloudhub.sharepoint.com' + web,
@@ -537,18 +796,20 @@ class HtmlReportTests(unittest.TestCase):
                 folder.mkdir(parents=True)
                 summary_name = 'Example-Summary.csv' if matched == '8' else 'Summary.csv'
                 with (folder / summary_name).open('w', encoding='utf-8', newline='') as handle:
-                    writer = csv.DictWriter(handle, fieldnames=['SourceCsv', 'TargetCsv', 'SourceUniqueKeys', 'TargetUniqueKeys', 'MatchedPermissions', 'MissingInSPO', 'ExtraInSPO'])
+                    writer = csv.DictWriter(handle, fieldnames=['SourceCsv', 'TargetCsv', 'SourceUniqueKeys', 'TargetUniqueKeys', 'MatchedPermissions', 'MissingInSPO', 'ExtraInSPO', 'GroupMembershipDifferentCount', 'GroupMembershipUnknown'])
                     writer.writeheader()
                     writer.writerow({'SourceCsv': 'SP2019-PermissionInventory-Example-20261002-080000.csv',
                                      'TargetCsv': 'SPO-PermissionInventory-Example-20261002-090000.csv',
                                      'SourceUniqueKeys': '10', 'TargetUniqueKeys': '9', 'MatchedPermissions': matched,
-                                     'MissingInSPO': '2', 'ExtraInSPO': '1'})
+                                     'MissingInSPO': '2', 'ExtraInSPO': '1', 'GroupMembershipDifferentCount': '2', 'GroupMembershipUnknown': '1'})
             output = GLOBAL_PERMISSIONS.build(root / 'Migrations', root / 'out')
             self.assertTrue(output.is_file())
             with output.with_suffix('.csv').open(encoding='utf-8-sig', newline='') as handle:
                 row = next(csv.DictReader(handle, delimiter=';'))
             self.assertEqual(row['SuccessPercent'], '80.00%')
             self.assertEqual(row['MatchedPermissions'], '8')
+            self.assertEqual(row['GroupMembershipDifferentCount'], '2')
+            self.assertEqual(row['GroupMembershipUnknown'], '1')
             page = output.read_text(encoding='utf-8')
             self.assertIn('Global permissions comparison report', page)
             self.assertLess(page.index('Open Excel report'), page.index('<p class="intro">'))
@@ -583,6 +844,24 @@ class HtmlReportTests(unittest.TestCase):
                 data = json.loads(EVIDENCE.write_manifest(path, "Source", "Permission", "fixture").read_text())
                 self.assertEqual(data["Rows"], 1)
                 self.assertEqual(EVIDENCE.read_scan_time(path)[1], "Manifest")
+
+    def test_comparison_rejects_wrong_manifest_side_kind_or_row_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target = Path(directory) / 'source.csv', Path(directory) / 'target.csv'
+            for path in (source, target):
+                path.write_text('Name,Value\nitem,1\n', encoding='utf-8')
+            EVIDENCE.write_manifest(source, 'Source', 'File', 'https://source/sites/example')
+            receipt = EVIDENCE.write_manifest(target, 'Target', 'File', 'https://target/sites/example')
+            valid = json.loads(receipt.read_text(encoding='utf-8'))
+            self.assertEqual(EVIDENCE.describe_pair(source, target, inventory_kind='File')['ScanEvidenceStatus'], 'Verified')
+            for key, incorrect in [('Side', 'Source'), ('Kind', 'Permission'), ('Rows', 2), ('SchemaVersion', 2)]:
+                with self.subTest(key=key):
+                    changed = dict(valid, **{key: incorrect})
+                    receipt.write_text(json.dumps(changed), encoding='utf-8')
+                    with self.assertRaisesRegex(ValueError, 'side, kind, row count or schema'):
+                        EVIDENCE.describe_pair(source, target, inventory_kind='File')
+            receipt.unlink()
+            self.assertEqual(EVIDENCE.describe_pair(source, target, inventory_kind='File')['ScanEvidenceStatus'], 'Unverified')
 
     def test_global_evidence_uses_receipts_and_marks_newer_scans(self):
         from datetime import datetime, timedelta, timezone

@@ -2,7 +2,7 @@
 .SYNOPSIS
     WPF dialog for validated creation of a local SharePoint migration.
 .VERSION
-    1.0.2
+    1.0.4
 #>
 
 function Show-SmartM365NewMigrationWizard {
@@ -53,6 +53,10 @@ function Show-SmartM365NewMigrationWizard {
             <TextBox x:Name="txtSourceUrl" Height="29" Margin="0,4,0,9"/>
             <TextBlock Text="Web application URL for SP2016/SP2019 (blank = URL host)" Foreground="#1F2937"/>
             <TextBox x:Name="txtSourceApp" Height="29" Margin="0,4,0,9"/>
+            <TextBlock Text="Source SPO admin URL (optional)" Foreground="#1F2937"/>
+            <TextBox x:Name="txtSourceAdmin" Height="29" Margin="0,4,0,9"/>
+            <TextBlock Text="Source SPO authentication profile: absolute path (optional)" Foreground="#1F2937"/>
+            <TextBox x:Name="txtSourceAuthProfile" Height="29" Margin="0,4,0,9"/>
             <TextBlock Text="Permission root path (blank = common mapping path)" Foreground="#1F2937"/>
             <TextBox x:Name="txtSourceRoot" Height="29" Margin="0,4,0,0"/>
           </StackPanel>
@@ -70,6 +74,8 @@ function Show-SmartM365NewMigrationWizard {
             <TextBox x:Name="txtTargetUrl" Height="29" Margin="0,4,0,9"/>
             <TextBlock Text="Tenant admin URL for SPO" Foreground="#1F2937"/>
             <TextBox x:Name="txtTargetAdmin" Height="29" Margin="0,4,0,9"/>
+            <TextBlock Text="Target SPO authentication profile: absolute path (optional)" Foreground="#1F2937"/>
+            <TextBox x:Name="txtTargetAuthProfile" Height="29" Margin="0,4,0,9"/>
             <TextBlock Text="Web application URL for SP2016/SP2019 (blank = URL host)" Foreground="#1F2937"/>
             <TextBox x:Name="txtTargetApp" Height="29" Margin="0,4,0,9"/>
             <TextBlock Text="Permission root path (blank = common mapping path)" Foreground="#1F2937"/>
@@ -87,13 +93,20 @@ function Show-SmartM365NewMigrationWizard {
         </Border>
         <Border Background="White" BorderBrush="#DDE7F0" BorderThickness="1" CornerRadius="8" Padding="14">
           <StackPanel>
-            <TextBlock Text="VALIDATION AUTHENTICATION" Foreground="#0078D4" FontWeight="SemiBold" Margin="0,0,0,8"/>
-            <ComboBox x:Name="cmbWizardAuth" Height="29">
+            <TextBlock Text="SPO AUTHENTICATION" Foreground="#0078D4" FontWeight="SemiBold" Margin="0,0,0,8"/>
+            <TextBlock Text="Source SPO sign-in" Foreground="#1F2937"/>
+            <ComboBox x:Name="cmbSourceAuth" Height="29" Margin="0,4,0,9">
               <ComboBoxItem Content="Interactive" IsSelected="True"/>
               <ComboBoxItem Content="Device login"/>
               <ComboBoxItem Content="Certificate"/>
             </ComboBox>
-            <TextBlock Text="On-premises URLs use the current Windows account. SPO checks may open a sign-in window."
+            <TextBlock Text="Target SPO sign-in" Foreground="#1F2937"/>
+            <ComboBox x:Name="cmbTargetAuth" Height="29" Margin="0,4,0,0">
+              <ComboBoxItem Content="Interactive" IsSelected="True"/>
+              <ComboBoxItem Content="Device login"/>
+              <ComboBoxItem Content="Certificate"/>
+            </ComboBox>
+            <TextBlock Text="These modes apply to validation and scans unless overridden. On-premises URLs use the current Windows account."
                        Foreground="#5F6B7A" TextWrapping="Wrap" Margin="0,7,0,0"/>
           </StackPanel>
         </Border>
@@ -121,9 +134,9 @@ function Show-SmartM365NewMigrationWizard {
     $dialog.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([System.Uri]::new($iconPath))
     if ($ValidateOnly) {
         foreach ($name in @('form', 'lblStatus', 'btnCreate', 'btnCancel', 'txtName',
-                'cmbSourceType', 'txtSourceUrl', 'txtSourceApp', 'txtSourceRoot',
+                'cmbSourceType', 'txtSourceUrl', 'txtSourceApp', 'txtSourceRoot', 'txtSourceAdmin', 'txtSourceAuthProfile',
                 'cmbTargetType', 'txtTargetUrl', 'txtTargetApp', 'txtTargetAdmin',
-                'txtTargetRoot', 'txtAdditionalMappings', 'cmbWizardAuth')) {
+                'txtTargetRoot', 'txtTargetAuthProfile', 'txtAdditionalMappings', 'cmbSourceAuth', 'cmbTargetAuth')) {
             if ($null -eq $dialog.FindName($name)) { throw "Wizard control not found: $name" }
         }
         return $true
@@ -140,32 +153,42 @@ function Show-SmartM365NewMigrationWizard {
         SourceType = $dialog.FindName('cmbSourceType')
         SourceUrl = $dialog.FindName('txtSourceUrl')
         SourceApp = $dialog.FindName('txtSourceApp')
+        SourceAdmin = $dialog.FindName('txtSourceAdmin')
+        SourceAuthProfile = $dialog.FindName('txtSourceAuthProfile')
         SourceRoot = $dialog.FindName('txtSourceRoot')
         TargetType = $dialog.FindName('cmbTargetType')
         TargetUrl = $dialog.FindName('txtTargetUrl')
         TargetApp = $dialog.FindName('txtTargetApp')
         TargetAdmin = $dialog.FindName('txtTargetAdmin')
+        TargetAuthProfile = $dialog.FindName('txtTargetAuthProfile')
         TargetRoot = $dialog.FindName('txtTargetRoot')
         Additional = $dialog.FindName('txtAdditionalMappings')
-        Auth = $dialog.FindName('cmbWizardAuth')
+        SourceAuth = $dialog.FindName('cmbSourceAuth')
+        TargetAuth = $dialog.FindName('cmbTargetAuth')
         Process = $null
         RequestPath = $null
         ResultPath = $null
         CreatedName = $null
         Timer = $null
     }
-    $state.Auth.SelectedIndex = switch ($AuthMode) {
+    $initialAuthIndex = switch ($AuthMode) {
         'DeviceLogin' { 1 }
         'Certificate' { 2 }
         default { 0 }
     }
+    $state.SourceAuth.SelectedIndex = $initialAuthIndex
+    $state.TargetAuth.SelectedIndex = $initialAuthIndex
     $updateTypeFields = {
         $sourceIsSPO = [string]$state.SourceType.SelectedItem.Content -eq 'SPO'
         $targetIsSPO = [string]$state.TargetType.SelectedItem.Content -eq 'SPO'
         $state.SourceApp.IsEnabled = -not $sourceIsSPO
+        $state.SourceAdmin.IsEnabled = $sourceIsSPO
+        $state.SourceAuthProfile.IsEnabled = $sourceIsSPO
         $state.TargetApp.IsEnabled = -not $targetIsSPO
         $state.TargetAdmin.IsEnabled = $targetIsSPO
-        $state.Auth.IsEnabled = $sourceIsSPO -or $targetIsSPO
+        $state.TargetAuthProfile.IsEnabled = $targetIsSPO
+        $state.SourceAuth.IsEnabled = $sourceIsSPO
+        $state.TargetAuth.IsEnabled = $targetIsSPO
     }.GetNewClosure()
     $state.SourceType.Add_SelectionChanged($updateTypeFields)
     $state.TargetType.Add_SelectionChanged($updateTypeFields)
@@ -229,18 +252,25 @@ function Show-SmartM365NewMigrationWizard {
                 }
                 $rows.Add([pscustomobject]@{ SourceUrl = $parts[0]; TargetUrl = $parts[1] })
             }
-            $mode = [string]$state.Auth.SelectedItem.Content
-            if ($mode -eq 'Device login') { $mode = 'DeviceLogin' }
+            $sourceMode = [string]$state.SourceAuth.SelectedItem.Content
+            $targetMode = [string]$state.TargetAuth.SelectedItem.Content
+            if ($sourceMode -eq 'Device login') { $sourceMode = 'DeviceLogin' }
+            if ($targetMode -eq 'Device login') { $targetMode = 'DeviceLogin' }
             $request = [ordered]@{
                 Name = $name
                 SourceType = [string]$state.SourceType.SelectedItem.Content
                 TargetType = [string]$state.TargetType.SelectedItem.Content
                 SourceWebApplicationUrl = $state.SourceApp.Text.Trim()
+                SourceAdminUrl = if ($state.SourceAdmin.IsEnabled) { $state.SourceAdmin.Text.Trim() } else { '' }
+                SourceAuthConfigPath = if ($state.SourceAuthProfile.IsEnabled) { $state.SourceAuthProfile.Text.Trim() } else { '' }
                 TargetWebApplicationUrl = $state.TargetApp.Text.Trim()
                 TargetAdminUrl = $state.TargetAdmin.Text.Trim()
+                TargetAuthConfigPath = if ($state.TargetAuthProfile.IsEnabled) { $state.TargetAuthProfile.Text.Trim() } else { '' }
                 SourcePermissionRootPath = $state.SourceRoot.Text.Trim()
                 TargetPermissionRootPath = $state.TargetRoot.Text.Trim()
-                AuthMode = $mode
+                AuthMode = $targetMode
+                SourceAuthMode = $sourceMode
+                TargetAuthMode = $targetMode
                 Mappings = $rows.ToArray()
             }
             $helper = Join-Path $ProjectRoot 'Scripts\SmartM365-SharePointMigration-NewMigration.ps1'

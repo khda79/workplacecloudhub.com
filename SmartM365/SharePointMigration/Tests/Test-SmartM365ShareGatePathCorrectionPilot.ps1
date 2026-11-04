@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline evidence and no-copy guards for the three-file ShareGate path correction pilot.
 .VERSION
-    1.0.0
+    1.0.5
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -11,6 +11,8 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $PSScriptRoot).ProviderPath
+$oldModulePath = $env:PSModulePath
+$oldIdentityTestCopy = $env:SMARTM365_IDENTITY_TEST_COPY
 $scratch = Join-Path $root ('.path-correction-test-' + [guid]::NewGuid().ToString('N'))
 if (-not $scratch.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe scratch path.' }
 try {
@@ -86,9 +88,80 @@ try {
     if (@(Get-ChildItem -LiteralPath $diagnostics -Directory -Filter 'PathCorrection-*').Count) {
         throw 'A rejected real run created a correction output folder.'
     }
+    # A same-tenant SPO source and destination may share a host only when the
+    # site collections are distinct. This is a synthetic DryRun, not a copy.
+    $sameProject = Join-Path $scratch 'Migrations\SameTenant'
+    $sameDiag = Join-Path $sameProject 'ShareGate\Diagnostics'
+    $sameAnalysis = Join-Path $sameDiag 'Analysis'
+    $sameQualification = Join-Path $sameDiag 'PathQualification-Synthetic'
+    New-Item -ItemType Directory -Path $sameAnalysis,$sameQualification -Force | Out-Null
+    $sameSource='https://tenant.sharepoint.com/sites/source/'
+    $sameTarget='https://tenant.sharepoint.com/sites/target/'
+    $sameRows=@($rows|ForEach-Object { $copy=$_.PSObject.Copy(); $copy.SourceUrl=$sameSource; $copy.DestinationUrl=$sameTarget; $copy })
+    $sameClassified=Join-Path $sameAnalysis 'ClassifiedRows.csv'
+    $sameRows|Export-Csv -LiteralPath $sameClassified -NoTypeInformation -Encoding UTF8
+    $sameHash=(Get-FileHash -LiteralPath $sameClassified -Algorithm SHA256).Hash
+    $sameResult=Get-Content -LiteralPath (Join-Path $qualification 'PathQualification-Result.json.txt') -Raw|ConvertFrom-Json
+    $sameResult.SourceUrl=$sameSource;$sameResult.DestinationUrl=$sameTarget;$sameResult.AnalysisSHA256=$sameHash
+    $sameResult.SourceRead=$sameSource+'Photos/Album/image-11.jpg'
+    $sameResult.DestinationBefore=$sameTarget+'Photos/Album/image-11.jpg';$sameResult.DestinationAfter=$sameResult.DestinationBefore
+    $sameResult|ConvertTo-Json -Depth 4|Set-Content -LiteralPath (Join-Path $sameQualification 'PathQualification-Result.json.txt') -Encoding UTF8
+    Copy-Item -LiteralPath (Join-Path $qualification 'ShareGate-Report.csv') -Destination (Join-Path $sameQualification 'ShareGate-Report.csv')
+    Copy-Item -LiteralPath (Join-Path $qualification 'PathQualification.log') -Destination (Join-Path $sameQualification 'PathQualification.log')
+    $sameBase=@{ProjectRoot=$sameProject;AnalysisDirectory=$sameAnalysis;QualificationDirectory=$sameQualification;SessionId='261003-1';SourceItemIdsCsv='22,33,44';FarmTimeZoneId=$testZone.Id}
+    $sameDry=@(& $scriptPath @sameBase -DryRun)
+    if (@($sameDry|Where-Object {$_ -match 'Mode=DryRun;.*itemCount=3; writes=none;'}).Count -ne 1) { throw 'Distinct same-tenant sites were not accepted.' }
+    $sameSummary=@($sameDry|Where-Object {$_ -match 'Mode=DryRun;.*itemCount=3; writes=none;'})[0]
+    $sameQualificationHash=[regex]::Match($sameSummary,'QualificationSHA256=([0-9A-F]{64})').Groups[1].Value
+    $samePlanHash=[regex]::Match($sameSummary,'PlanSHA256=([0-9A-F]{64})').Groups[1].Value
+    try { & $scriptPath @sameBase -ExpectedAnalysisHash $sameHash -ExpectedQualificationHash $sameQualificationHash -ExpectedPlanHash $samePlanHash -Run -ConfirmPathCorrection | Out-Null; throw 'Expected SPO source correction guard.' }
+    catch { if ($_.Exception.Message -notmatch 'SPO source correction requires a running source identity bridge') { throw } }
+    try { & $scriptPath @sameBase -ExpectedAnalysisHash $sameHash -ExpectedQualificationHash $sameQualificationHash -ExpectedPlanHash $samePlanHash -Run -ConfirmPathCorrection -SpoIdentityPipe ('SmartM365SpoIdentity-'+[guid]::NewGuid().ToString('N')) | Out-Null; throw 'Expected old qualification rejection.' }
+    catch { if ($_.Exception.Message -notmatch 'requires a qualification that verified its source identity') { throw } }
+    $qualificationScript=Join-Path $root '..\Scripts\Diagnostics\SmartM365-SharePointMigration-ShareGatePathQualification.ps1'
+    $qualificationArgs=@{ProjectRoot=$sameProject;AnalysisDirectory=$sameAnalysis;SessionId='261003-1';SourceItemId=11;FarmTimeZoneId=$testZone.Id}
+    $null=@(& $qualificationScript @qualificationArgs -DryRun)
+    try { & $qualificationScript @qualificationArgs -ExpectedAnalysisHash $sameHash -Run -ConfirmQualification | Out-Null; throw 'Expected SPO source qualification guard.' }
+    catch { if ($_.Exception.Message -notmatch 'SPO source qualification requires a running source identity bridge') { throw } }
+    # Exercise the actual qualification path with a synthetic ShareGate module.
+    # A missing bridge must stop before the mocked Copy-Content can be called.
+    $mockModule=Join-Path $scratch 'Modules\ShareGate'
+    New-Item -ItemType Directory -Path $mockModule -Force|Out-Null
+    @'
+@{RootModule='ShareGate.psm1';ModuleVersion='99.0.0';GUID='e44d42b3-81f4-4f75-b786-bd2b16ebf805';FunctionsToExport='*'}
+'@ | Set-Content -LiteralPath (Join-Path $mockModule 'ShareGate.psd1') -Encoding UTF8
+    @'
+function Connect-Site { [CmdletBinding()]param([string]$Url,[switch]$Browser,[switch]$ModernAuth) [pscustomobject]@{Address=$Url} }
+function Get-List { [CmdletBinding()]param($Site,[string]$Name) [pscustomobject]@{Title=$Name;Site=$Site} }
+function Get-Folder { [CmdletBinding()]param($List,[string]$Path) [pscustomobject]@{Path=$Path} }
+function Get-File { [CmdletBinding()]param($List,[string]$Path) if($Path -eq 'image-11.jpg'){throw 'not found'};[pscustomobject]@{Address=($List.Site.Address+'/'+$List.Title+'/'+$Path)} }
+function New-CopySettings { [CmdletBinding()]param([string]$OnContentItemExists) [pscustomobject]@{Mode=$OnContentItemExists} }
+function Copy-Content { [CmdletBinding()]param($SourceList,$DestinationList,$SourceItemId,$DestinationFolder,$CopySettings,$TaskName) Set-Content -LiteralPath $env:SMARTM365_IDENTITY_TEST_COPY -Value 'called'; throw 'Unexpected copy.' }
+function Export-Report { [CmdletBinding()]param($CopyResult,[string]$Path) }
+Export-ModuleMember -Function *
+'@ | Set-Content -LiteralPath (Join-Path $mockModule 'ShareGate.psm1') -Encoding UTF8
+    $env:PSModulePath=(Join-Path $scratch 'Modules')+[IO.Path]::PathSeparator+$oldModulePath
+    $env:SMARTM365_IDENTITY_TEST_COPY=Join-Path $scratch 'copy-called.txt'
+    function global:Read-Host { param($Prompt) 'QUALIFY ONE ITEM 11 v1.0.7' }
+    try { & $qualificationScript @qualificationArgs -ExpectedAnalysisHash $sameHash -Run -ConfirmQualification -SpoIdentityPipe ('SmartM365SpoIdentity-'+[guid]::NewGuid().ToString('N')) | Out-Null; throw 'Expected unavailable bridge failure.' }
+    catch { if ($_.Exception.Message -notmatch 'SPO source identity bridge is unavailable') { throw } }
+    if(Test-Path -LiteralPath $env:SMARTM365_IDENTITY_TEST_COPY){throw 'Qualification copied despite unavailable identity verification.'}
+    Remove-Module ShareGate -ErrorAction SilentlyContinue
+    $env:PSModulePath=$oldModulePath
+    $sameRows|ForEach-Object {$_.DestinationUrl='https://tenant.sharepoint.com/sites/source/subweb/'}
+    $sameRows|Export-Csv -LiteralPath $sameClassified -NoTypeInformation -Encoding UTF8
+    $sameResult.DestinationUrl='https://tenant.sharepoint.com/sites/source/subweb/'
+    $sameResult.DestinationBefore=$sameResult.DestinationUrl+'Photos/Album/image-11.jpg';$sameResult.DestinationAfter=$sameResult.DestinationBefore
+    $sameResult.AnalysisSHA256=(Get-FileHash -LiteralPath $sameClassified -Algorithm SHA256).Hash
+    $sameResult|ConvertTo-Json -Depth 4|Set-Content -LiteralPath (Join-Path $sameQualification 'PathQualification-Result.json.txt') -Encoding UTF8
+    $blocked=$false
+    try { & $scriptPath @sameBase -DryRun|Out-Null } catch { $blocked=$true }
+    if(-not $blocked){throw 'Two webs of the same site collection were incorrectly accepted.'}
     Write-Output 'ShareGate path correction offline DryRun and no-copy guards passed.'
 }
 finally {
+    $env:PSModulePath = $oldModulePath
+    $env:SMARTM365_IDENTITY_TEST_COPY = $oldIdentityTestCopy
     Remove-Item Function:\Read-Host -ErrorAction SilentlyContinue
     if ((Test-Path -LiteralPath $scratch) -and $scratch.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $scratch -Recurse -Force

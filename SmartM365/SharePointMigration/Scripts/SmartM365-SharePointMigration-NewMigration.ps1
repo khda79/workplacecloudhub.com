@@ -2,10 +2,10 @@
 .SYNOPSIS
     Verifies SharePoint URLs and creates one local migration from the template.
 .DESCRIPTION
-    The migration directory is created only after every configured web and the
-    SharePoint Online admin endpoint have passed authenticated read checks.
+    The migration directory is created only after every configured web and any
+    supplied SharePoint Online admin endpoint pass authenticated read checks.
 .VERSION
-    1.0.1
+    1.0.4
 #>
 [CmdletBinding()]
 param(
@@ -101,8 +101,13 @@ function Test-OnPremWeb {
 }
 
 function Get-SPOAuthParameters {
-    param([string]$Mode)
+    param([string]$Mode, [string]$ProfilePath)
     $authPath = Join-Path $projectRoot 'Config\SPOAuth.local.psd1'
+    if (-not [string]::IsNullOrWhiteSpace($ProfilePath)) {
+        if (-not [IO.Path]::IsPathRooted($ProfilePath)) { throw 'New migration authentication profile paths must be absolute.' }
+        if (-not (Test-Path -LiteralPath $ProfilePath -PathType Leaf)) { throw "Authentication profile not found: $ProfilePath" }
+        $authPath = $ProfilePath
+    }
     $config = if (Test-Path -LiteralPath $authPath -PathType Leaf) {
         Import-PowerShellDataFile -LiteralPath $authPath
     } else { @{} }
@@ -145,14 +150,14 @@ function Test-SPOWeb {
 }
 
 function Test-SPOAdmin {
-    param([string]$Url, [hashtable]$AuthParameters)
+    param([string]$Url, [hashtable]$AuthParameters, [string]$Label = 'Target admin URL')
     try {
         $connection = Connect-PnPOnline -Url $Url @AuthParameters
         $tenant = Get-PnPTenant -Connection $connection -ErrorAction Stop
         if ($null -eq $tenant) { throw 'The tenant admin endpoint returned no tenant data.' }
     }
     catch {
-        throw (Get-ValidationFailure -Label 'Target admin URL' -Url $Url -Exception $_.Exception)
+        throw (Get-ValidationFailure -Label $Label -Url $Url -Exception $_.Exception)
     }
 }
 
@@ -194,6 +199,11 @@ function Assert-MigrationRequest {
     if ($Request.AuthMode -notin @('Interactive', 'DeviceLogin', 'Certificate')) {
         throw 'Invalid SharePoint Online authentication mode.'
     }
+    foreach ($sideMode in @($Request.SourceAuthMode, $Request.TargetAuthMode)) {
+        if ($sideMode -and $sideMode -notin @('Interactive', 'DeviceLogin', 'Certificate')) {
+            throw 'Invalid side-specific SharePoint Online authentication mode.'
+        }
+    }
     if ($null -eq $Request.Mappings -or @($Request.Mappings).Count -eq 0) {
         throw 'At least one source-to-target mapping is required.'
     }
@@ -223,9 +233,14 @@ function Invoke-NewMigration {
                else { ([uri]$mappings[0].TargetUrl).GetLeftPart([System.UriPartial]::Authority) }
         Assert-WebUrl -Value $raw -Label 'Target web application URL' -Type $targetType
     } else { '' }
-    $adminUrl = if ($targetType -eq 'SPO') {
+    $adminUrl = if ($targetType -eq 'SPO' -and -not [string]::IsNullOrWhiteSpace([string]$Request.TargetAdminUrl)) {
         $url = Assert-WebUrl -Value ([string]$Request.TargetAdminUrl) -Label 'Target admin URL' -Type 'SPO'
         if (([uri]$url).AbsolutePath -ne '/') { throw 'Target admin URL must be the admin host root.' }
+        $url
+    } else { '' }
+    $sourceAdminUrl = if ($sourceType -eq 'SPO' -and $Request.SourceAdminUrl) {
+        $url = Assert-WebUrl -Value ([string]$Request.SourceAdminUrl) -Label 'Source admin URL' -Type 'SPO'
+        if (([uri]$url).AbsolutePath -ne '/') { throw 'Source admin URL must be the admin host root.' }
         $url
     } else { '' }
     if (($sourceApp -and ([uri]$sourceApp).AbsolutePath -ne '/') -or
@@ -254,23 +269,27 @@ function Invoke-NewMigration {
         }
     }
 
-    $auth = $null
+    $sourceAuth = $null; $targetAuth = $null
     if ($sourceType -eq 'SPO' -or $targetType -eq 'SPO') {
         Import-Module PnP.PowerShell -ErrorAction Stop
-        $auth = Get-SPOAuthParameters -Mode ([string]$Request.AuthMode)
+        $sourceMode = if ($Request.SourceAuthMode) { [string]$Request.SourceAuthMode } else { [string]$Request.AuthMode }
+        $targetMode = if ($Request.TargetAuthMode) { [string]$Request.TargetAuthMode } else { [string]$Request.AuthMode }
+        if ($sourceType -eq 'SPO') { $sourceAuth = Get-SPOAuthParameters -Mode $sourceMode -ProfilePath ([string]$Request.SourceAuthConfigPath) }
+        if ($targetType -eq 'SPO') { $targetAuth = Get-SPOAuthParameters -Mode $targetMode -ProfilePath ([string]$Request.TargetAuthConfigPath) }
     }
     $checked = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($row in $mappings) {
-        if ($checked.Add("$sourceType|$($row.SourceUrl)")) {
-            if ($sourceType -eq 'SPO') { Test-SPOWeb -Url $row.SourceUrl -Label 'Source web' -AuthParameters $auth }
+        if ($checked.Add("Source|$sourceType|$($row.SourceUrl)")) {
+            if ($sourceType -eq 'SPO') { Test-SPOWeb -Url $row.SourceUrl -Label 'Source web' -AuthParameters $sourceAuth }
             else { Test-OnPremWeb -Url $row.SourceUrl -Label 'Source web' }
         }
-        if ($checked.Add("$targetType|$($row.TargetUrl)")) {
-            if ($targetType -eq 'SPO') { Test-SPOWeb -Url $row.TargetUrl -Label 'Target web' -AuthParameters $auth }
+        if ($checked.Add("Target|$targetType|$($row.TargetUrl)")) {
+            if ($targetType -eq 'SPO') { Test-SPOWeb -Url $row.TargetUrl -Label 'Target web' -AuthParameters $targetAuth }
             else { Test-OnPremWeb -Url $row.TargetUrl -Label 'Target web' }
         }
     }
-    if ($adminUrl) { Test-SPOAdmin -Url $adminUrl -AuthParameters $auth }
+    if ($adminUrl) { Test-SPOAdmin -Url $adminUrl -AuthParameters $targetAuth }
+    if ($sourceAdminUrl) { Test-SPOAdmin -Url $sourceAdminUrl -AuthParameters $sourceAuth -Label 'Source admin URL' }
 
     if (Test-Path -LiteralPath $destination) { throw "Migration folder appeared during validation: $destination" }
     $template = Join-Path $projectRoot 'Migrations_Template'
@@ -283,11 +302,16 @@ function Invoke-NewMigration {
         $config.Source.Type = $sourceType
         $config.Source.WebApplicationUrl = $sourceApp
         $config.Source.SiteUrl = if ($sourceType -eq 'SPO') { $mappings[0].SourceUrl } else { '' }
+        $config.Source.AuthConfigPath = [string]$Request.SourceAuthConfigPath
+        $config.Source.TenantAdminUrl = $sourceAdminUrl
+        $config.Source.AuthMode = if ($sourceType -eq 'SPO') { $sourceMode } else { '' }
         $config.Source.PermissionRootPath = $sourceRoot
         $config.Target.Type = $targetType
         $config.Target.WebApplicationUrl = $targetApp
         $config.Target.SiteUrl = if ($targetType -eq 'SPO') { $mappings[0].TargetUrl } else { '' }
         $config.Target.TenantAdminUrl = $adminUrl
+        $config.Target.AuthConfigPath = [string]$Request.TargetAuthConfigPath
+        $config.Target.AuthMode = if ($targetType -eq 'SPO') { $targetMode } else { '' }
         $config.Target.PermissionRootPath = $targetRoot
         $config.Target.PrefixToRemove = ''
         $utf8 = [System.Text.UTF8Encoding]::new($false)
@@ -311,7 +335,7 @@ function Invoke-NewMigration {
             Remove-Item -LiteralPath $stageFull -Recurse -Force
         }
     }
-    return [pscustomobject]@{ Success = $true; MigrationName = [string]$Request.Name; Folder = $destination; ValidatedUrls = ($checked.Count + [int][bool]$adminUrl) }
+    return [pscustomobject]@{ Success = $true; MigrationName = [string]$Request.Name; Folder = $destination; ValidatedUrls = ($checked.Count + [int][bool]$adminUrl + [int][bool]$sourceAdminUrl) }
 }
 
 if ($MyInvocation.InvocationName -ne '.') {

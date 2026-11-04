@@ -1,4 +1,4 @@
-__version__ = "1.0.1"
+__version__ = "1.0.3"
 import argparse
 import builtins
 from collections import defaultdict
@@ -16,7 +16,7 @@ import sys
 # The embedded Portable Python omits the script directory from sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_html import metric_card, render_report
-from scan_evidence import describe_pair, manifest_path
+from scan_evidence import describe_pair, manifest_path, read_scan_time
 from comparison_artifacts import artifact_name, find_artifact
 from comparison_history_chart import render_history_section
 
@@ -1184,7 +1184,7 @@ def update_extra_folder_candidates(candidates, source_folder_keys, row, file_key
             normalized_folder_key,
             {
                 "Action": "Delete SPO folder after extra files are deleted, only if the folder is empty",
-                "Reason": "SPO folder path is inferred from extra files and does not exist in the SP2019 source file paths",
+                "Reason": "SPO folder path is inferred from extra files and does not exist in the source file paths",
                 "TargetWebUrl": row.get("WebUrl", ""),
                 "TargetLibraryTitle": row.get("LibraryTitle", ""),
                 "TargetFolderServerRelativeUrl": actual_folder_url,
@@ -1476,6 +1476,8 @@ def main():
 
     source_csv = Path(args.source_csv)
     target_csv = Path(args.target_csv)
+    read_scan_time(source_csv, "Source", "File")
+    read_scan_time(target_csv, "Target", "File")
     output_directory = Path(args.output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
     compare_modified_dates = args.modified_date_tolerance_minutes >= 0
@@ -1911,7 +1913,7 @@ def main():
     report_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     html_summary_path = output_directory / artifact_name(f"{args.comparison_name}-summary-{report_timestamp}.html", args.artifact_prefix)
 
-    scan_description = describe_pair(source_csv, target_csv, args.max_scan_age_difference_hours, args.max_scan_age_hours)
+    scan_description = describe_pair(source_csv, target_csv, args.max_scan_age_difference_hours, args.max_scan_age_hours, "File")
     target_empty_verified = verified_empty_target_scan(target_csv, target_total_rows) if not target_seen else False
     comparable = bool(source_index) and (bool(target_seen) or target_empty_verified)
     summary = {

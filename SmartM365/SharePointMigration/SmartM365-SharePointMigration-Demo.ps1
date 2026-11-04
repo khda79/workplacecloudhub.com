@@ -3,7 +3,7 @@
 .SYNOPSIS
 Fictional migration portfolio, all dashboard panels, batch UI, wizard and reports.
 .VERSION
-1.0.4
+1.0.6
 #>
 function script:Switch-SharePointDemoPanel {
     param([string]$Name)
@@ -88,12 +88,12 @@ function script:Initialize-SmartM365DemoProfile {
         . ([scriptblock]::Create((Get-SmartM365DemoFunctionText $source @('New-SmartM365BatchView')) -join [Environment]::NewLine))
         $batch=New-SmartM365BatchView;$c.panelBatches.Content=$batch;$s.Data.BatchView=$batch
         $batchNames=@('batchAll','batchNames','batchScope','batchSourceRoot','batchSourcePrerequisites','batchSourceCheck','batchSourceCopy')
-        foreach($kind in @('Source','Target','Comparison')){foreach($suffix in @('Mode','Auth','Preview','Run','Status','Latest','Counts','Logs','Summary')){$batchNames+='batch'+$kind+$suffix}}
+        foreach($kind in @('Source','SpoSource','Target','Comparison')){foreach($suffix in @('Mode','Auth','Preview','Run','Status','Latest','Counts','Logs','Summary')){$batchNames+='batch'+$kind+$suffix}}
         foreach($name in $batchNames){$control=$batch.FindName($name);if($control){$c[$name]=$control}}
     }
     $c.batchNames.ItemsSource=$s.Data.Migrations;$c.batchScope.Text=([string]$s.Data.Migrations.Count+' fictional migrations in scope')
     $c.batchSourceRoot.Text='Demo/Toolkit';$c.batchSourcePrerequisites.Text='DEMO - Prerequisites simulated. No farm or server is contacted.'
-    foreach($kind in @('Source','Target','Comparison')){$c['batch'+$kind+'Status'].Text='DEMO - Ready';$c['batch'+$kind+'Latest'].Text='2026-10-18 09:30 (sample)';$c['batch'+$kind+'Counts'].Text='Successful actions: 6 | Failed actions: 0 (simulated)'}
+    foreach($kind in @('Source','SpoSource','Target','Comparison')){$c['batch'+$kind+'Status'].Text='DEMO - Ready';$c['batch'+$kind+'Latest'].Text='2026-10-18 09:30 (sample)';$c['batch'+$kind+'Counts'].Text='Successful actions: 6 | Failed actions: 0 (simulated)'}
     Switch-SharePointDemoPanel tabSummary
 }
 function script:Connect-SmartM365DemoProfileEvents {
@@ -115,7 +115,7 @@ function script:Invoke-SmartM365DemoProfileAction {
     $s=$script:SmartM365Demo;$c=$s.Controls
     if($Name -like 'tab*'){Switch-SharePointDemoPanel $Name;return $true}
     if($Name -match '^batch'){
-        foreach($kind in @('Source','Target','Comparison')){if($Name -like ('batch'+$kind+'*')){$c['batch'+$kind+'Status'].Text='DEMO - Batch completed in memory; no process or connection was started.'}}
+        foreach($kind in @('Source','SpoSource','Target','Comparison')){if($Name -like ('batch'+$kind+'*')){$c['batch'+$kind+'Status'].Text='DEMO - Batch completed in memory; no process or connection was started.'}}
         Write-SmartM365DemoActivity ($Name+' simulated. Fictional batch selection and outcomes only.');return $true
     }
     switch($Name){
@@ -176,11 +176,11 @@ function script:Save-SharePointDemoReport {
 function script:Export-SmartM365DemoProfileOutputs {
     $s=$script:SmartM365Demo;$paths=[Collections.Generic.List[string]]::new()
     $files=@([pscustomobject]@{Library='Documents';Source=1200;Target=1188;Matched=1180;Missing=20;Extra=8;ChangedVersion=5;TargetOlder=3;Success='98.33%'})
-    $permissions=@([pscustomobject]@{Scope='Documents';SourcePermissions=500;TargetPermissions=495;Matched=490;Missing=10;Extra=5;Success='98.0%'})
+    $permissions=@([pscustomobject]@{Scope='Documents';SourcePermissions=500;TargetPermissions=495;Matched=490;Missing=10;Extra=5;GroupMembershipDifferentCount=2;GroupMembershipUnknown=1;Success='98.0%'})
     $definitions=@(
         @('Complexity','Complexity-DEMO.html','Contoso-HR source migration complexity','Source complexity',[ordered]@{Score=$s.Data.Complexity.Score;Criteria=13;Coverage=('{0}%' -f $s.Data.Complexity.CoveragePercent);Level=$s.Data.Complexity.Level},@($s.Rows.gridWorkflowComplexity|Select-Object Criterion,Value,Points,Weighted,Detail)),
         @('Files','Files-Comparison-DEMO.html','Contoso-HR file comparison','File comparison',[ordered]@{Matched=1180;Missing=20;Extra=8;'Changed version'=5;'Target older'=3;'Success rate'='98.33%'},$files),
-        @('Permissions','Permissions-Comparison-DEMO.html','Contoso-HR permissions comparison','Permission comparison',[ordered]@{Matched=490;Missing=10;Extra=5;'Success rate'='98.0%'},$permissions),
+        @('Permissions','Permissions-Comparison-DEMO.html','Contoso-HR permissions comparison','Permission comparison',[ordered]@{Matched=490;Missing=10;Extra=5;'Group count differs'=2;'Group membership unknown'=1;'Success rate'='98.0%'},$permissions),
         @('FileHistory','File-History-DEMO.html','Contoso-HR file scan history','File history',[ordered]@{Previous=1150;Current=1200;Added=60;Removed=10;Changed=25},$files),
         @('PermissionHistory','Permission-History-DEMO.html','Contoso-HR permissions history','Permission history',[ordered]@{Previous=480;Current=500;Added=25;Removed=5;Changed=12},$permissions),
         @('GlobalFiles','Global-Files-DEMO.html','Contoso migration portfolio - files','Global file comparison',[ordered]@{Migrations=3;Source=3600;Matched=3514;Missing=86;Extra=24},@($s.Rows.gridSummary|Select-Object Migration,Source,Destination,FilesComparison,PermissionsComparison)),

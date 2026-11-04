@@ -10,7 +10,7 @@
     as possible so both inventories can be compared.
 
 .VERSION
-    1.1.10
+    1.1.11
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'WebUrlsFile')]
@@ -1012,7 +1012,7 @@ function Export-WebPermissionInventory {
     }
 
     try {
-        $lists = Invoke-SPORead -Label 'lists' -Operation { Get-PnPList -Includes Title,Hidden,BaseTemplate,BaseType,Id,RootFolder,HasUniqueRoleAssignments -ErrorAction Stop -Connection $script:SPOPermissionConnection }
+        $lists = Invoke-SPORead -Label 'lists' -Operation { Get-PnPList -Includes Title,Hidden,BaseTemplate,BaseType,Id,HasUniqueRoleAssignments -ErrorAction Stop -Connection $script:SPOPermissionConnection }
     }
     catch {
         Write-ConsoleWarning -Message ("Failed to enumerate lists for web '{0}': {1}" -f $web.Url, $_.Exception.Message)
@@ -1025,22 +1025,23 @@ function Export-WebPermissionInventory {
         $listUrl = $web.Url
 
         try {
-            $rootFolder = Invoke-SPORead -Label "RootFolder collection" -Operation { Get-PnPProperty -ClientObject $list -Property RootFolder -Connection $script:SPOPermissionConnection -ErrorAction Stop }
             $listTitle = $list.Title
-            $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
 
             if (-not $IncludeHiddenLists -and $list.Hidden) {
                 Write-ConsoleMessage -Message ("  Skipping list/library '{0}' ({1}): hidden; use -IncludeHiddenLists to include it." -f $listTitle, $listUrl)
                 continue
             }
 
-            if (-not $IncludeSystemLists -and (Test-SystemList -List $list)) {
-                Write-ConsoleMessage -Message ("  Skipping list/library '{0}' ({1}): system; use -IncludeSystemLists to include it." -f $listTitle, $listUrl)
+            if ($DocumentLibrariesOnly -and [string]$list.BaseType -ne 'DocumentLibrary') {
+                Write-ConsoleMessage -Message ("  Skipping list '{0}' ({1}): not a document library; -DocumentLibrariesOnly is enabled." -f $listTitle, $listUrl)
                 continue
             }
 
-            if ($DocumentLibrariesOnly -and [string]$list.BaseType -ne 'DocumentLibrary') {
-                Write-ConsoleMessage -Message ("  Skipping list '{0}' ({1}): not a document library; -DocumentLibrariesOnly is enabled." -f $listTitle, $listUrl)
+            $rootFolder = Invoke-SPORead -Label "RootFolder collection" -Operation { Get-PnPProperty -ClientObject $list -Property RootFolder -Connection $script:SPOPermissionConnection -ErrorAction Stop }
+            $listUrl = ConvertTo-AbsoluteSharePointUrl -WebUrl $web.Url -ServerRelativeUrl $rootFolder.ServerRelativeUrl
+
+            if (-not $IncludeSystemLists -and (Test-SystemList -List $list)) {
+                Write-ConsoleMessage -Message ("  Skipping list/library '{0}' ({1}): system; use -IncludeSystemLists to include it." -f $listTitle, $listUrl)
                 continue
             }
 

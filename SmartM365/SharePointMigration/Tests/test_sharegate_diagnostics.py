@@ -1,6 +1,6 @@
 """Offline contract checks for ShareGate CSV diagnostics."""
 
-__version__ = "1.0.7"
+__version__ = "1.0.10"
 
 import csv
 import hashlib
@@ -115,6 +115,40 @@ class ShareGateDiagnosticsTests(unittest.TestCase):
         summary = json.loads((self.output / "Summary.json.txt").read_text(encoding="utf-8"))
         self.assertEqual(next(value for value in summary["Patterns"] if value["RuleId"] == "FEATURE")["State"], "Accepted")
 
+    def test_missing_field_value_is_reviewed_and_prior_unknown_state_survives(self):
+        rules_path = self.config / "sharegate-diagnostics.rules.json.template"
+        rules = json.loads(rules_path.read_text(encoding="utf-8"))
+        actual = json.loads((SCRIPT.parents[2] / "Config" / "sharegate-diagnostics.rules.json.template").read_text(encoding="utf-8"))
+        rules["Rules"].append(next(r for r in actual["Rules"] if r["Id"] == "SG-FIELD-VALUE-NOT-IMPORTED"))
+        rules_path.write_text(json.dumps(rules), encoding="utf-8")
+        rows, headers = DIAG.read_csv(self.report)
+        rows[1]["Warnings"] = "Field ExampleField cannot be found. Field value will not be imported"
+        with self.report.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=headers); writer.writeheader(); writer.writerows(rows)
+        DIAG.analyze([self.report], self.output, self.project)
+        summary = json.loads((self.output / "Summary.json.txt").read_text(encoding="utf-8"))
+        pattern = next(v for v in summary["Patterns"] if v["RuleId"] == "SG-FIELD-VALUE-NOT-IMPORTED")
+        self.assertEqual(pattern["State"], "To fix")
+        old_key = hashlib.sha256(("UNKNOWN|" + pattern["Pattern"].casefold()).encode("utf-8")).hexdigest()
+        DIAG.set_state(self.project, old_key, "Accepted")
+        DIAG.analyze([self.report], self.output, self.project)
+        summary = json.loads((self.output / "Summary.json.txt").read_text(encoding="utf-8"))
+        pattern = next(v for v in summary["Patterns"] if v["RuleId"] == "SG-FIELD-VALUE-NOT-IMPORTED")
+        self.assertEqual(pattern["State"], "Accepted")
+        DIAG.set_state(self.project, pattern["PatternKey"], "To fix")
+        DIAG.analyze([self.report], self.output, self.project)
+        summary = json.loads((self.output / "Summary.json.txt").read_text(encoding="utf-8"))
+        self.assertEqual(next(v for v in summary["Patterns"] if v["RuleId"] == "SG-FIELD-VALUE-NOT-IMPORTED")["State"], "To fix")
+
+        rows[1]["Warnings"] = "Warning for version 1.0: Field ExampleField cannot be found. Field value will not be imported"
+        with self.report.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=headers); writer.writeheader(); writer.writerows(rows)
+        legacy_key = hashlib.sha256(b"UNKNOWN|warning for").hexdigest()
+        DIAG.set_state(self.project, legacy_key, "Fixed")
+        DIAG.analyze([self.report], self.output, self.project)
+        summary = json.loads((self.output / "Summary.json.txt").read_text(encoding="utf-8"))
+        self.assertEqual(next(v for v in summary["Patterns"] if v["RuleId"] == "SG-FIELD-VALUE-NOT-IMPORTED")["State"], "Fixed")
+
     def test_duplicate_rows_item_versions_and_persistent_state(self):
         DIAG.analyze([self.report, self.report], self.output, self.project)
         summary = json.loads((self.output / "Summary.json.txt").read_text(encoding="utf-8"))
@@ -142,6 +176,18 @@ class ShareGateDiagnosticsTests(unittest.TestCase):
         }])
         self.assertEqual(updated["IssueLineState"], {"Accepted": 2, "To fix": 1})
         self.assertEqual(updated["ResidualLineRate"], 50.0)
+
+    def test_skipped_item_remains_visible_as_unverified(self):
+        rows, headers = DIAG.read_csv(self.report)
+        rows[3]["Status"] = "Skipped"
+        with self.report.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=headers); writer.writeheader(); writer.writerows(rows)
+        DIAG.analyze([self.report], self.output, self.project)
+        summary = json.loads((self.output / "Summary.json.txt").read_text(encoding="utf-8"))
+        self.assertEqual(summary["LineStatus"]["Skipped"], 1)
+        report = (self.output / "MigrationDiagnostics-Report.html").read_text(encoding="utf-8")
+        self.assertIn("Skipped lines", report)
+        self.assertIn("Skipped items are not proof of matching content or permissions", report)
 
     def test_snapshot_must_match_original_report(self):
         snapshot = self.root / "snapshot.xlsx"
@@ -249,6 +295,49 @@ class ShareGateDiagnosticsTests(unittest.TestCase):
         ambiguous = {"SourceUrl": "https://same.example/source", "DestinationUrl": "https://same.example/target",
                      "Message": "401 Unauthorized. WebUri : 'https://same.example/source/_vti_bin/client.svc'", "Details": ""}
         self.assertEqual(DIAG.failing_endpoint(ambiguous)[0], "Undetermined")
+
+    def test_same_tenant_access_trace_requires_distinct_explicit_collections(self):
+        source = "https://tenant.sharepoint.com/sites/source"
+        target = "https://tenant.sharepoint.com/sites/target"
+        def side(url, source_url=source, target_url=target):
+            row = {"SourceUrl": source_url, "DestinationUrl": target_url,
+                   "Message": f"401 Unauthorized. WebUri : '{url}'", "Details": ""}
+            return DIAG.failing_endpoint(row)[0]
+        self.assertEqual(side(source + "/_vti_bin/client.svc/ProcessQuery"), "Source")
+        self.assertEqual(side(target + "/_api/web"), "Destination")
+        self.assertEqual(side("https://tenant.sharepoint.com/sites/source2/_api"), "Undetermined")
+        self.assertEqual(side("https://tenant.sharepoint.com/_vti_bin/client.svc"), "Undetermined")
+        self.assertEqual(side("https://tenant.sharepoint.com/sites/source%2ftarget/_api"), "Undetermined")
+        self.assertEqual(side("https://tenant.sharepoint.com/sites/source/../target/_api"), "Undetermined")
+        self.assertEqual(side("https://tenant.sharepoint.com/sites/source/%2e%2e/target/_api"), "Undetermined")
+        self.assertEqual(side("https://tenant.sharepoint.com/sites/source/%252e%252e/target/_api"), "Undetermined")
+        self.assertEqual(side("https://tenant.sharepoint.com:444/sites/source/_api"), "Undetermined")
+        self.assertEqual(side("https://evil.example/sites/source/_api"), "Undetermined")
+        self.assertEqual(side(source + "/_api", target_url=source + "/subweb"), "Undetermined")
+        both = {"SourceUrl": source, "DestinationUrl": target,
+                "Message": f"WebUri : '{source}/_api' WebUri : '{target}/_api'", "Details": ""}
+        self.assertEqual(DIAG.failing_endpoint(both)[0], "Undetermined")
+
+    def test_same_tenant_access_trace_classification_end_to_end(self):
+        source = "https://tenant.sharepoint.com/sites/source"
+        target = "https://tenant.sharepoint.com/sites/target"
+        report = self.root / "same-tenant-access.csv"
+        fields = ["Session ID", "ID", "Date", "Status", "Type", "Title", "Source site address",
+                  "Source list title", "Source ID", "Destination site address", "Errors"]
+        traces = [f"401 Unauthorized. WebUri : '{source}/_vti_bin/client.svc'",
+                  f"401 Unauthorized. WebUri : '{target}/_api/web'",
+                  "401 Unauthorized. WebUri : 'https://tenant.sharepoint.com/_vti_bin/client.svc'"]
+        with report.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(fields)
+            for idx, trace in enumerate(traces, 1):
+                writer.writerow(["s1", str(idx), "2026-09-30T22:01:26Z", "Error", "File",
+                                 str(idx), source, "Documents", str(idx), target, trace])
+        DIAG.analyze([report], self.output, self.project)
+        with (self.output / "ClassifiedRows.csv").open(encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+        self.assertEqual([row["AccessSide"] for row in rows], ["Source", "Destination", "Undetermined"])
+        self.assertEqual([row["RuleId"] for row in rows], ["SG-ACCESS-SOURCE", "SG-ACCESS-TARGET", "SG-ACCESS-UNKNOWN"])
 
     def test_local_sharegate_dates_require_explicit_exporter_zone(self):
         report = self.root / "local-dates.csv"

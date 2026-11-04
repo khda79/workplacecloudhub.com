@@ -2,7 +2,7 @@
 .SYNOPSIS
     Batch launcher UI and command helpers for the migration dashboard.
 .VERSION
-    1.0.3
+    1.0.4
 .DESCRIPTION
     Function-only library. Uses existing batch launchers and small batch summaries;
     never reads inventories or connects to a tenant to populate the dashboard.
@@ -11,15 +11,15 @@
 . (Join-Path $PSScriptRoot '..\SmartM365-SharePointMigration-Storage.ps1')
 
 function Get-SmartM365BatchDefinition {
-    param([ValidateSet('Source','Target','Comparison')][string]$Kind)
-    $folder = @{ Source='source-scan-batches'; Target='target-scan-batches'; Comparison='comparison-batches' }[$Kind]
-    $suffix = @{ Source='SourceScanBatch'; Target='TargetScanBatch'; Comparison='ComparisonBatch' }[$Kind]
+    param([ValidateSet('Source','SpoSource','Target','Comparison')][string]$Kind)
+    $folder = @{ Source='source-scan-batches'; SpoSource='spo-source-scan-batches'; Target='target-scan-batches'; Comparison='comparison-batches' }[$Kind]
+    $suffix = @{ Source='SourceScanBatch'; SpoSource='TargetScanBatch'; Target='TargetScanBatch'; Comparison='ComparisonBatch' }[$Kind]
     [pscustomobject]@{ Launcher="Start-SmartM365-SharePointMigration-$suffix.cmd"; LogFolder=$folder }
 }
 
 function Get-SmartM365BatchCommand {
     param(
-        [ValidateSet('Source','Target','Comparison')][string]$Kind,
+        [ValidateSet('Source','SpoSource','Target','Comparison')][string]$Kind,
         [string]$Root,
         [ValidateSet('FilesOnly','PermissionsOnly','Both')][string]$Mode='Both',
         [ValidateSet('Interactive','Certificate')][string]$AuthMode='Interactive',
@@ -35,7 +35,8 @@ function Get-SmartM365BatchCommand {
     $modeParameter = if ($Kind -eq 'Comparison') { 'ComparisonMode' } else { 'InventoryMode' }
     $parts = @('"' + $launcher + '"', "-$modeParameter $Mode")
     if ($Kind -ne 'Source') { $parts += "-AuthMode $AuthMode" }
-    if ($Kind -eq 'Target') { $parts += '-MaxParallel 2' }
+    if ($Kind -in @('Target','SpoSource')) { $parts += '-MaxParallel 2' }
+    if ($Kind -eq 'SpoSource') { $parts += '-Side Source' }
     if ($Names.Count) { $parts += '-MigrationNames "' + ($Names -join ',') + '"' }
     if ($BatchId) { $parts += "-BatchId $BatchId" }
     if ($PlanOnly) { $parts += '-PlanOnly' }
@@ -55,7 +56,7 @@ function Read-SmartM365BatchTail {
 }
 
 function Get-SmartM365BatchResult {
-    param([string]$Root, [ValidateSet('Source','Target','Comparison')][string]$Kind, [string]$BatchId='')
+    param([string]$Root, [ValidateSet('Source','SpoSource','Target','Comparison')][string]$Kind, [string]$BatchId='')
     $parent = Get-SmartM365MigrationLogsRoot -ProjectRoot $Root -ChildPath (Get-SmartM365BatchDefinition $Kind).LogFolder
     $directory = $null
     if ($BatchId) { $path=Join-Path $parent $BatchId; if (Test-Path -LiteralPath $path -PathType Container) { $directory=Get-Item -LiteralPath $path } }
@@ -77,10 +78,11 @@ function Get-SmartM365BatchResult {
 }
 
 function New-SmartM365BatchView {
-    $cards = foreach ($kind in @('Source','Target','Comparison')) {
-        $title = @{ Source='SOURCE SCANS'; Target='DESTINATION SCANS'; Comparison='COMPARISONS' }[$kind]
-        $description = @{ Source='Files, then permissions. One scan at a time. Run on a source SharePoint farm server.'; Target='Files, then permissions. Up to two scans at once in either authentication mode.'; Comparison='Files, then permissions. One comparison at a time, using existing scan inventories.' }[$kind]
-        $column = @{ Source=0; Target=1; Comparison=2 }[$kind]
+    $cards = foreach ($kind in @('Source','SpoSource','Target','Comparison')) {
+        $title = @{ Source='SHAREPOINT SERVER SOURCE SCANS'; SpoSource='SPO SOURCE SCANS'; Target='DESTINATION SCANS'; Comparison='COMPARISONS' }[$kind]
+        $description = @{ Source='Files, then permissions. One scan at a time. Run on a source SharePoint farm server.'; SpoSource='Files, then permissions for SPO sources. Up to two scans at once.'; Target='Files, then permissions. Up to two scans at once in either authentication mode.'; Comparison='Files, then permissions. One comparison at a time, using existing scan inventories.' }[$kind]
+        $column = @{ Source=0; SpoSource=1; Target=0; Comparison=1 }[$kind]
+        $row = @{ Source=0; SpoSource=0; Target=1; Comparison=1 }[$kind]
         $extra = if ($kind -eq 'Source') {
 @'
 <TextBlock Text="Source toolkit path (use the shared path when copying the command)" TextWrapping="Wrap" Margin="0,14,0,5"/>
@@ -92,11 +94,11 @@ function New-SmartM365BatchView {
 @"
 <TextBlock Text="Authentication" Margin="0,14,0,5"/>
 <ComboBox x:Name="batch${kind}Auth" Height="30" SelectedIndex="0"><ComboBoxItem Content="Interactive"/><ComboBoxItem Content="Certificate"/></ComboBox>
-<TextBlock Text="$(if ($kind -eq 'Target') {'Interactive sign-in opens separate scan consoles. The limit of two applies to this batch.'} else {'Requires both source and destination scans. Permission comparisons may request Entra sign-in.'})" TextWrapping="Wrap" Foreground="#5F6B7A" Margin="0,10,0,0"/>
+<TextBlock Text="$(if ($kind -in @('Target','SpoSource')) {'Interactive sign-in opens separate scan consoles. The limit of two applies to this batch.'} else {'Requires both source and destination scans. Permission comparisons may request Entra sign-in.'})" TextWrapping="Wrap" Foreground="#5F6B7A" Margin="0,10,0,0"/>
 "@
         }
 @"
-<Border Grid.Column="$column" Style="{DynamicResource StepCard}" Margin="$(if ($column -lt 2) {'0,0,12,0'} else {'0'})" VerticalAlignment="Stretch">
+<Border Grid.Row="$row" Grid.Column="$column" Style="{DynamicResource StepCard}" Margin="$(if ($column -eq 0) {'0,0,12,12'} else {'0,0,0,12'})" VerticalAlignment="Stretch">
  <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
  <StackPanel>
   <TextBlock Text="$title" Style="{DynamicResource SectionLabel}"/>
@@ -128,7 +130,7 @@ function New-SmartM365BatchView {
   <ListBox x:Name="batchNames" SelectionMode="Multiple" Visibility="Collapsed" MaxHeight="130" Margin="0,10,0,0"/>
   <TextBlock x:Name="batchScope" Margin="0,8,0,0" Foreground="#0078D4"/>
  </StackPanel></Border>
- <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>$($cards -join "`n")</Grid>
+ <Grid Margin="0,8,0,0"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>$($cards -join "`n")</Grid>
  <TextBlock Text="Logs and summary.csv contain one result per action. Closing the dashboard does not stop a running batch. Parallel limits apply per batch; avoid starting another destination batch on another machine at the same time." TextWrapping="Wrap" Foreground="#5F6B7A" Margin="0,14,0,0"/>
 </StackPanel>
 "@
@@ -167,7 +169,7 @@ function Update-SmartM365BatchControls {
     $v.FindName('batchNames').Visibility=if($all){'Collapsed'}else{'Visible'}
     $count=if($all){$v.FindName('batchNames').Items.Count}else{$v.FindName('batchNames').SelectedItems.Count}
     $v.FindName('batchScope').Text="$count migration(s) in scope. Files and permissions run as separate actions."
-    foreach ($kind in @('Source','Target','Comparison')) {
+    foreach ($kind in @('Source','SpoSource','Target','Comparison')) {
         $busy=$script:BatchGui.Active.ContainsKey($kind)
         $v.FindName("batch${kind}Preview").IsEnabled=($count -gt 0 -and -not $busy)
         $v.FindName("batch${kind}Run").IsEnabled=($count -gt 0 -and -not $busy -and ($kind -ne 'Source' -or $script:BatchGui.SourceReady))
@@ -282,7 +284,7 @@ function Refresh-SmartM365BatchGui {
     }
     if($Force -or ((Get-Date)-$script:BatchGui.LastRefresh).TotalSeconds -ge 5){
         $script:BatchGui.LastRefresh=Get-Date
-        foreach($kind in @('Source','Target','Comparison')){
+        foreach($kind in @('Source','SpoSource','Target','Comparison')){
             try{
                 $root=if($kind -eq 'Source'){$v.FindName('batchSourceRoot').Text.Trim()}else{$script:BatchGui.Root}
                 $active=$script:BatchGui.Active[$kind]
@@ -305,7 +307,7 @@ function Initialize-SmartM365BatchGui {
     $Panel.Content=$view
     $script:BatchGui=@{View=$view;Root=$Root;HelperRoot=$PSScriptRoot;Active=@{};Results=@{};SourceReady=$false;Probe=$null;LastRefresh=[datetime]::MinValue}
     $view.FindName('batchSourceRoot').Text=$SourceRoot
-    foreach($kind in @('Source','Target','Comparison')){
+    foreach($kind in @('Source','SpoSource','Target','Comparison')){
         foreach($suffix in @('Mode','Run','Preview','Logs','Summary','Status','Latest','Counts')){if(-not $view.FindName("batch${kind}${suffix}")){throw "Missing batch control: $kind$suffix"}}
         $view.FindName("batch${kind}Run").IsEnabled=$false
         $view.FindName("batch${kind}Summary").IsEnabled=$false
@@ -317,7 +319,7 @@ function Initialize-SmartM365BatchGui {
     $view.FindName('batchSourceRoot').Add_TextChanged({$script:BatchGui.SourceReady=$false;$script:BatchGui.View.FindName('batchSourcePrerequisites').Text='Toolkit path changed. Check prerequisites again on the source farm server.';Update-SmartM365BatchControls})
     $view.FindName('batchSourceCheck').Add_Click({Start-SmartM365SourceProbe})
     $view.FindName('batchSourceCopy').Add_Click({try{$selection=Get-SmartM365BatchSelection Source;$command=Get-SmartM365BatchCommand @selection;[Windows.Clipboard]::SetText($command.Command);$script:BatchGui.View.FindName('batchSourceStatus').Text='Command copied. Run it on the source farm server.'}catch{$script:BatchGui.View.FindName('batchSourceStatus').Text=$_.Exception.Message}})
-    foreach($kind in @('Source','Target','Comparison')){
+    foreach($kind in @('Source','SpoSource','Target','Comparison')){
         foreach($suffix in @('Preview','Run','Logs','Summary')){$view.FindName("batch${kind}${suffix}").Tag=$kind}
         $view.FindName("batch${kind}Preview").Add_Click({param($sender,$eventArgs) Start-SmartM365BatchFromGui ([string]$sender.Tag) -PlanOnly})
         $view.FindName("batch${kind}Run").Add_Click({param($sender,$eventArgs) Start-SmartM365BatchFromGui ([string]$sender.Tag)})

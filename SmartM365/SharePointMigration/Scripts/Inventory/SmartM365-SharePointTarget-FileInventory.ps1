@@ -39,7 +39,7 @@
     .\SmartM365-SharePointTarget-FileInventory.ps1 -TenantAdminUrl "https://yourtenant-admin.sharepoint.com" -UseEnvironmentVariables
 
 .VERSION
-    1.0.11
+    1.0.12
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'Tenant')]
@@ -99,6 +99,8 @@ param(
     [switch]$IncludeSystemLibraries,
 
     [switch]$IncludeOneDriveSites,
+
+    [switch]$IncludeVersionCounts,
 
     [int]$PageSize = 2000
 )
@@ -573,7 +575,7 @@ function Get-DocumentLibraries {
         [switch]$WriteSummary
     )
 
-    $lists = Invoke-SPORead -Label 'lists' -Operation { Get-PnPList -Includes BaseType,Hidden,Title,ItemCount,RootFolder,IsSystemList -Connection $Connection -ErrorAction Stop }
+    $lists = Invoke-SPORead -Label 'lists' -Operation { Get-PnPList -Includes BaseType,Hidden,Title,ItemCount,IsSystemList -Connection $Connection -ErrorAction Stop }
     $totalDocumentLibraries = 0
     $selectedDocumentLibraries = 0
     $hiddenSkipped = 0
@@ -589,9 +591,12 @@ function Get-DocumentLibraries {
 
         if (-not $IncludeHidden -and $list.Hidden) {
             $hiddenSkipped++
-            Write-Info -Color DarkCyan -Message ("  Skipping library '{0}' ({1}): hidden; use -IncludeHiddenLibraries to include it." -f $list.Title, $list.RootFolder.ServerRelativeUrl)
+            Write-Info -Color DarkCyan -Message ("  Skipping library '{0}': hidden; use -IncludeHiddenLibraries to include it." -f $list.Title)
             continue
         }
+
+        # Resolve only in-scope candidates. An inaccessible included library must fail the scan.
+        $null = Invoke-SPORead -Label 'library root folder' -Operation { Get-PnPProperty -ClientObject $list -Property RootFolder -Connection $Connection -ErrorAction Stop }
 
         if (-not $IncludeSystem -and (Test-SystemLibrary -List $list)) {
             $systemSkipped++
@@ -674,7 +679,8 @@ function Get-FileInventoryFromLibrary {
         [string]$SiteCollectionUrl,
         $Web,
         $Library,
-        [int]$BatchSize
+        [int]$BatchSize,
+        [switch]$IncludeVersionCounts
     )
 
     $lastItemId = 0
@@ -715,6 +721,16 @@ function Get-FileInventoryFromLibrary {
                 [long]$fileSizeBytes = $values['File_x0020_Size']
             }
 
+            $versionCount = $null
+            if ($IncludeVersionCounts) {
+                try {
+                    $versionCount = @(Get-PnPFileVersion -Url $serverRelativeUrl -Connection $Connection -ErrorAction Stop).Count
+                }
+                catch {
+                    throw "VersionHistoryReadFailed: Could not enumerate previous versions for '$serverRelativeUrl': $($_.Exception.Message)"
+                }
+            }
+
             $filesReturned++
 
             [pscustomobject]@{
@@ -737,7 +753,7 @@ function Get-FileInventoryFromLibrary {
                 ModifiedBy        = if ($values.ContainsKey('Editor')) { Convert-PnPFieldUserValueToString -Value $values['Editor'] } else { $null }
                 ContentType       = if (($item.PSObject.Properties.Name -contains 'ContentType') -and $item.ContentType) { $item.ContentType.Name } elseif ($values.ContainsKey('ContentType')) { $values['ContentType'] } else { $null }
                 Version           = if ($values.ContainsKey('_UIVersionString')) { $values['_UIVersionString'] } else { $null }
-                VersionsCount     = $null
+                VersionsCount     = $versionCount
                 CheckedOutBy      = if ($values.ContainsKey('CheckoutUser')) { Convert-PnPFieldUserValueToString -Value $values['CheckoutUser'] } else { $null }
             }
                 }
@@ -749,6 +765,7 @@ function Get-FileInventoryFromLibrary {
             break
         }
         catch {
+            if ($_.Exception.Message -match '^VersionHistoryReadFailed:') { throw }
             if ($useSimplePagingFallback) { throw }
             $messages = [System.Collections.Generic.List[string]]::new()
             $exception = $_.Exception
@@ -885,7 +902,7 @@ function Export-WebInventory {
         try {
             Write-Info -Color Yellow -Message ("  Library: {0} ({1} items)" -f $library.Title, $library.ItemCount)
 
-            $rows = Get-FileInventoryFromLibrary -Connection $connection -SiteCollectionUrl $SiteCollectionUrl -Web $web -Library $library -BatchSize $BatchSize
+            $rows = Get-FileInventoryFromLibrary -Connection $connection -SiteCollectionUrl $SiteCollectionUrl -Web $web -Library $library -BatchSize $BatchSize -IncludeVersionCounts:$IncludeVersionCounts
             foreach ($row in $rows) { Add-FileInventoryMetric -Row $row }
             if ($Append) {
                 $rows | Export-Csv -Delimiter ';' -Path $CsvPath -NoTypeInformation -Encoding UTF8 -Append
@@ -1207,7 +1224,7 @@ try {
         'Web' { $WebUrl }
         'WebUrlsFile' { $WebUrlsFile }
     }
-    Write-Info -Color Cyan -Message ("File inventory options: IncludeHiddenLibraries={0}; IncludeSystemLibraries={1}; IncludeOneDriveSites={2}; PageSize={3}; AuthMode={4}; ForceAuthentication={5}; PersistLogin={6}; ParameterSet={7}; Input={8}" -f [bool]$IncludeHiddenLibraries, [bool]$IncludeSystemLibraries, [bool]$IncludeOneDriveSites, $PageSize, $authMode, [bool]$ForceAuthentication, [bool]$PersistLogin, $PSCmdlet.ParameterSetName, $inputScope)
+    Write-Info -Color Cyan -Message ("File inventory options: IncludeHiddenLibraries={0}; IncludeSystemLibraries={1}; IncludeOneDriveSites={2}; PageSize={3}; AuthMode={4}; ForceAuthentication={5}; PersistLogin={6}; ParameterSet={7}; Input={8}; IncludeVersionCounts={9}" -f [bool]$IncludeHiddenLibraries, [bool]$IncludeSystemLibraries, [bool]$IncludeOneDriveSites, $PageSize, $authMode, [bool]$ForceAuthentication, [bool]$PersistLogin, $PSCmdlet.ParameterSetName, $inputScope, [bool]$IncludeVersionCounts)
 }
 catch {
     Write-Warning ("Could not start transcript log '{0}': {1}" -f $LogPath, $_.Exception.Message)

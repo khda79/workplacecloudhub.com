@@ -2,7 +2,7 @@
 .SYNOPSIS
     Three-file ShareGate path correction pilot after a reviewed one-file qualification.
 .VERSION
-    1.0.0
+    1.0.7
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -11,6 +11,9 @@ param(
     [Parameter(Mandatory)][string]$AnalysisDirectory,
     [Parameter(Mandatory)][string]$QualificationDirectory,
     [Parameter(Mandatory)][string]$SessionId,
+    [ValidateSet('Default','Browser','ModernAuth')][string]$SourceAuthMode = 'Default',
+    [ValidateSet('Default','Browser','ModernAuth')][string]$DestinationAuthMode = 'Browser',
+    [ValidatePattern('^SmartM365SpoIdentity-[0-9a-f]{32}$')][string]$SpoIdentityPipe,
     [Parameter(Mandatory)][string]$SourceItemIdsCsv,
     [ValidateNotNullOrEmpty()][string]$FarmTimeZoneId = 'W. Europe Standard Time',
     [ValidateRange(1,60)][int]$EstimatedMinutesPerItem = 2,
@@ -25,8 +28,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$version = '1.0.0'
+$version = '1.0.7'
 . (Join-Path $PSScriptRoot '..\Launchers\SmartM365-SharePointMigration-ConsoleLifecycle.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-ShareGateAuth.ps1')
+. (Join-Path $PSScriptRoot 'SmartM365-SharePointMigration-SpoIdentityBridgeClient.ps1')
 $script:ConsoleLifecycleContext = Start-SmartM365MigrationConsoleLifecycle -ScriptPath $PSCommandPath
 $script:ConsoleLifecycleFailure = $null
 $script:ConsoleLifecycleStatus = 'SUCCESS'
@@ -108,11 +113,10 @@ try {
     $qualifiedDestination = ConvertTo-SmartM365ShareGateRelativePath -Path ([string]$qualified.DestinationFilePath) -Side QualifiedDestination
     $sourceUri = [uri]$qualified.SourceUrl
     $destinationUri = [uri]$qualified.DestinationUrl
-    if ($sourceUri.Scheme -ne 'https' -or $destinationUri.Scheme -ne 'https' -or
-        $sourceUri.Host -eq $destinationUri.Host -or
-        $destinationUri.Host -notmatch '(?i)\.sharepoint\.(com|cn|de)$') {
-        throw 'Qualification endpoints must be distinct HTTPS source and SharePoint Online hosts.'
+    if ($sourceUri.Scheme -ne 'https' -or $destinationUri.Scheme -ne 'https') {
+        throw 'Qualification endpoints must use HTTPS.'
     }
+    Assert-SmartM365ShareGateDistinctSites -SourceUrl $qualified.SourceUrl -DestinationUrl $qualified.DestinationUrl
     if ((ConvertTo-SmartM365ShareGateRelativePath -Path ([string]$qualified.ExportedDestinationPath) -Side QualifiedExport) -ne $qualifiedDestination) {
         throw 'Qualification export path differs from its expected destination path.'
     }
@@ -172,6 +176,7 @@ try {
     if ($plan.Count -ne 3 -or @($plan | ForEach-Object ItemKey | Sort-Object -Unique).Count -ne 3) {
         throw 'Path correction plan must contain exactly three distinct items.'
     }
+    foreach ($entry in $plan) { Assert-SmartM365ShareGateDistinctSites -SourceUrl $entry.SourceUrl -DestinationUrl $entry.DestinationUrl }
     $canonical = @($analysisHash,$qualificationHash) + @($plan | ForEach-Object {
         @($_.ItemKey,$_.SourceItemId,$_.SourceUrl,$_.SourceList,$_.SourceFilePath,
           $_.DestinationUrl,$_.DestinationList,$_.DestinationFilePath,$_.DestinationFolder) -join "`t"
@@ -193,6 +198,7 @@ try {
         return $estimatedEnd
     }
     $estimatedEnd = Assert-PathCorrectionSchedule -Remaining 3 -Phase 'three-item path correction preparation'
+    Write-Output ('{0} SourceAuth={1}; DestinationAuth={2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $SourceAuthMode, $DestinationAuthMode)
     Write-Output ('{0} Mode={1}; Session={2}; itemCount=3; writes={3}; AnalysisSHA256={4}; QualificationSHA256={5}; PlanSHA256={6}' -f
         (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$(if ($Run) { 'Run' } else { 'DryRun' }),$SessionId,
         $(if ($Run) { 'at most three SPO destination item copies after confirmation' } else { 'none' }),
@@ -209,6 +215,17 @@ try {
     Write-Output ('{0} Required confirmation for a future Run: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$phrase)
     if (-not $Run) { return }
 
+    if ((Test-SmartM365SpoSourceHost -Url $plan[0].SourceUrl) -and -not $SpoIdentityPipe) {
+        throw 'SPO source correction requires a running source identity bridge. DryRun remains available.'
+    }
+    if (Test-SmartM365SpoSourceHost -Url $plan[0].SourceUrl) {
+        $verifiedPattern = 'Source identity verified; ID=' + [regex]::Escape([string]$qualified.SourceItemId) + '; LibraryId='
+        if ([version]$qualified.ScriptVersion -lt [version]'1.0.6' -or $qualificationLog -notmatch $verifiedPattern) {
+            throw 'SPO source correction requires a qualification that verified its source identity with version 1.0.6 or later.'
+        }
+        Assert-SmartM365ShareGateCleanSpoReport -Rows $qualificationRows -SourceItemId ([string]$qualified.SourceItemId) -ExpectedDestinationPath $qualifiedDestination -Aliases $aliases
+    }
+
     $entered = Read-Host ('Type exactly "{0}" to authorize three SPO destination item copies' -f $phrase)
     if ($entered -cne $phrase) { throw 'Path correction confirmation was not entered exactly. No copy was started.' }
     $null = Assert-PathCorrectionSchedule -Remaining 3 -Phase 'three-item path correction startup'
@@ -217,14 +234,14 @@ try {
         throw 'Reviewed evidence changed after confirmation. No copy was started.'
     }
 
-    $module = @(Get-Module -ListAvailable -Name ShareGate | Sort-Object Version -Descending | Select-Object -First 1)
+    $module = @(Get-SmartM365ShareGateModule)
     if ($module.Count -ne 1) { throw 'ShareGate module is not installed in Windows PowerShell 5.1.' }
     Import-Module -Name $module[0].Path -ErrorAction Stop
     if ([string]$module[0].Version -ne $shareGateVersion) { throw 'Installed ShareGate version differs from the qualified version.' }
     foreach ($name in @('Connect-Site','Get-List','Get-Folder','Get-File','Copy-Content','New-CopySettings','Export-Report')) {
-        if (-not (Get-Command -Name $name -Module ShareGate -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
+        if (-not (Get-Command -Name ('ShareGate\' + $name) -ErrorAction SilentlyContinue)) { throw "Required ShareGate cmdlet is missing: $name" }
     }
-    $copyCommand = Get-Command -Name Copy-Content -Module ShareGate
+    $copyCommand = Get-Command -Name 'ShareGate\Copy-Content'
     $requiredParameters = @('SourceList','DestinationList','SourceItemId','DestinationFolder','CopySettings','TaskName')
     if (-not @($copyCommand.ParameterSets | Where-Object {
         $names = @($_.Parameters | ForEach-Object Name)
@@ -303,10 +320,10 @@ try {
             return $files[0]
         }
         Save-CorrectionState
-        Write-CorrectionLog ('Actor={0}\{1}; Machine={2}; ShareGate={3}; SourceAuth=CurrentWindowsIdentity; DestinationAuth=Browser; CopySettings=Overwrite; PlanSHA256={4}' -f
-            $env:USERDOMAIN,$env:USERNAME,$env:COMPUTERNAME,$shareGateVersion,$planHash)
-        $sourceSite = ShareGate\Connect-Site -Url $plan[0].SourceUrl -ErrorAction Stop
-        $destinationSite = ShareGate\Connect-Site -Url $plan[0].DestinationUrl -Browser -ErrorAction Stop
+        Write-CorrectionLog ('Actor={0}\{1}; Machine={2}; ShareGate={3}; SourceAuth={4}; DestinationAuth={5}; CopySettings=Overwrite; PlanSHA256={6}' -f
+            $env:USERDOMAIN,$env:USERNAME,$env:COMPUTERNAME,$shareGateVersion,$SourceAuthMode,$DestinationAuthMode,$planHash)
+        $sourceSite = Connect-SmartM365ShareGateEndpoint -Url $plan[0].SourceUrl -Mode $SourceAuthMode
+        $destinationSite = Connect-SmartM365ShareGateEndpoint -Url $plan[0].DestinationUrl -Mode $DestinationAuthMode
         $sourceList = Get-ExactCorrectionList -Site $sourceSite -Name $plan[0].SourceList
         $destinationList = Get-ExactCorrectionList -Site $destinationSite -Name $plan[0].DestinationList
         for ($index = 0; $index -lt 3; $index++) {
@@ -328,6 +345,10 @@ try {
                 $rootBefore = Get-OneCorrectionFile -List $destinationList -Path $item.FileName -AllowMissing
                 $result.RootBefore = if ($rootBefore) { [string]$rootBefore.Address } else { 'Absent' }
                 $null = Assert-SmartM365OutsideFarmMaintenance -FarmTimeZone $farmZone -Phase ("item $($index + 1)/3 copy")
+                if (Test-SmartM365SpoSourceHost -Url $item.SourceUrl) {
+                    $identity = Get-SmartM365BridgedSpoSourceIdentity -PipeName $SpoIdentityPipe -SiteUrl $item.SourceUrl -ListName $item.SourceList -SourceFilePath $item.SourceFilePath -ExpectedItemId $item.SourceItemId
+                    Write-CorrectionLog ('Source identity verified; ID={0}; LibraryId={1}; VerifiedUtc={2}' -f $identity.SourceItemId,$identity.LibraryId,$identity.VerifiedUtc)
+                }
                 Write-CorrectionLog ('Starting item {0}/3; ID={1}; folder={2}; task={3}' -f
                     ($index + 1),$item.SourceItemId,$item.DestinationFolder,$taskName)
                 $copyStarted = $true

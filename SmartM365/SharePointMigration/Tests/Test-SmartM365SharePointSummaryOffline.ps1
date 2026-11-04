@@ -2,7 +2,7 @@
 .SYNOPSIS
     Verify portfolio summary states without connecting to SharePoint.
 .VERSION
-    1.0.9
+    1.0.10
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -225,6 +225,13 @@ try {
         $row.StatusTooltip -notmatch 'Permissions: Review needed') {
         throw 'Permission findings were not included in the combined status.'
     }
+    $permissionSummary | Add-Member -NotePropertyName GroupMembershipDifferentCount -NotePropertyValue 2
+    $permissionSummary | Add-Member -NotePropertyName GroupMembershipUnknown -NotePropertyValue 1
+    $permissionSummary | Export-Csv -LiteralPath $permissionSummaryPath -Delimiter ',' -NoTypeInformation -Encoding utf8
+    $row = Get-SmartM365PortfolioRow @params
+    if ($row.PermissionComparisonTooltip -notmatch '2 with different counts, 1 unknown') { throw 'Group membership review counts were not surfaced.' }
+    $permissionSummary.GroupMembershipDifferentCount = 0
+    $permissionSummary.GroupMembershipUnknown = 0
     $permissionBadge = Get-ComparisonBadgeText -Folder (Get-Item -LiteralPath $permissionFolder) -MigrationName 'Fixture' -Kind Permissions
     if ($permissionBadge -notlike "* today* · $($row.PermissionComparisonPercent)") {
         throw 'Permission comparison badge did not show the date and rate from the displayed report.'

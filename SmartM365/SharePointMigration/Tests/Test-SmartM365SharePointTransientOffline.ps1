@@ -2,7 +2,7 @@
 .SYNOPSIS
     Offline ShareGate transient batch and pilot review validation.
 .VERSION
-    1.0.3
+    1.0.4
 #>
 #Requires -Version 5.1
 Set-StrictMode -Version Latest
@@ -168,7 +168,7 @@ try {
 @{ RootModule='ShareGate.psm1'; ModuleVersion='99.0.0'; GUID='379ab298-4145-414c-89fb-94c2e44abf55'; FunctionsToExport=@('Connect-Site','Get-List','Get-File','Get-ListItem','New-CopySettings','Copy-Content','Export-Report') }
 '@ | Set-Content -LiteralPath (Join-Path $fakeModuleRoot 'ShareGate.psd1') -Encoding UTF8
     @'
-function Connect-Site { param([string]$Url,[switch]$Browser) [pscustomobject]@{Url=$Url} }
+function Connect-Site { param([string]$Url,[switch]$Browser,[switch]$ModernAuth) if ($Url -like 'https://source.example/*' -and -not $Browser) { throw 'Source Browser required' }; if ($Url -like 'https://destination.example/*' -and -not $ModernAuth) { throw 'Destination ModernAuth required' }; [pscustomobject]@{Url=$Url} }
 function Get-List { param($Site,[string]$Name) [pscustomobject]@{Title=$Name; SiteUrl=$Site.Url; RootFolder=('/sites/comm/' + $Name)} }
 function Get-File {
     param($List,[string]$Path)
@@ -198,7 +198,7 @@ Export-ModuleMember -Function Connect-Site,Get-List,Get-File,Get-ListItem,New-Co
     catch { if ($_.Exception.Message -notmatch 'remains disabled') { throw } }
     if (@(Get-ChildItem -LiteralPath $diag -Directory -Filter 'Transient-*').Count) {
         throw 'Blocked real run created a batch output.'
-    }    $reviewOutput = & $reviewScript -ProjectRoot $project -AnalysisDirectory $analysis -PilotDirectory $pilot -SessionId '260930-6' -Run 2>&1 | Out-String
+    }    $reviewOutput = & $reviewScript -ProjectRoot $project -AnalysisDirectory $analysis -PilotDirectory $pilot -SessionId '260930-6' -SourceAuthMode Browser -DestinationAuthMode ModernAuth -Run 2>&1 | Out-String
     $reviewRun = @(Get-ChildItem -LiteralPath $diag -Directory -Filter 'PilotReview-*' | Select-Object -First 1)
     if ($reviewRun.Count -ne 1) { throw "Read-only review did not create output: $reviewOutput" }
     $reviewItems = @(Import-Csv -LiteralPath (Join-Path $reviewRun[0].FullName 'PilotReview-Items.csv'))

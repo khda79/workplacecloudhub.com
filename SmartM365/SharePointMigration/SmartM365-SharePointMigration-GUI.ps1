@@ -15,7 +15,7 @@
     the directory containing this GUI when launched from the shared toolkit.
 
 .VERSION
-    1.0.79
+    1.0.80
 #>
 
 #Requires -Version 7.4
@@ -38,7 +38,7 @@ if ($Demo) {
 }
 
 $script:AppName    = 'Smart SharePoint Migration'
-$script:AppVersion = '1.0.79'
+$script:AppVersion = '1.0.80'
 $script:ScriptRoot = $PSScriptRoot
 $script:FarmToolkitRoot = if ($FarmToolkitRoot) { $FarmToolkitRoot } else { $PSScriptRoot }
 $script:SummaryLastGoodRows = @{}
