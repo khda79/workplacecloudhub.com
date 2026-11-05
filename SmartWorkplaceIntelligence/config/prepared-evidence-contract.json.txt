@@ -857,6 +857,7 @@
     {
       "table": "Historical Windows Readiness",
       "file": "HistoricalWindowsReadiness.csv",
+      "stagingIncludesTenantKey": true,
       "uniqueKey": ["ObservationKey"],
       "allowEmpty": true,
       "columns": [
