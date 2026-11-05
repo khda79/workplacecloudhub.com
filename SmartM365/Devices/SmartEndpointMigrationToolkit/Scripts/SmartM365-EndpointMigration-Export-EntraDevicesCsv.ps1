@@ -16,6 +16,9 @@ Destination CSV path. Defaults to the shared cache for unscoped exports, or Devi
 .PARAMETER ComputerListPath
 Computers.txt path. When provided, only those Entra devices are queried.
 
+.PARAMETER DeviceIdListPath
+Optional CSV (ComputerName,DeviceId) used with -ComputerListPath: a requested computer that its name does not find is looked up by its Entra device ID, so a device whose cloud name differs is still found. Rows found this way have LookupMatchedBy=DeviceId.
+
 .PARAMETER PageSize
 Graph page size. Defaults to 999.
 
@@ -44,6 +47,7 @@ Author: https://github.com/khda79/workplacecloudhub.com
 param(
     [string]$OutputPath,
     [string]$ComputerListPath,
+    [string]$DeviceIdListPath,
     [int]$PageSize = 999,
     [string]$TenantId,
     [switch]$NoConnect,
@@ -250,8 +254,23 @@ function Invoke-GraphPagedRequest {
     return @($items.ToArray())
 }
 
+function Get-DeviceIdLookupMap {
+    # ComputerName,DeviceId CSV: Entra device IDs looked up when a requested name finds nothing.
+    param([string]$Path)
+
+    $map = @{}
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $map }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Device ID list not found: $Path" }
+    foreach ($entry in @(Import-Csv -LiteralPath $Path)) {
+        $name = ConvertTo-ComputerName -DeviceName ([string]$entry.ComputerName)
+        $id = [guid]::Empty
+        if (-not [string]::IsNullOrWhiteSpace($name) -and [guid]::TryParse([string]$entry.DeviceId, [ref]$id) -and $id -ne [guid]::Empty) { $map[$name] = $id.ToString() }
+    }
+    return $map
+}
+
 function New-EntraDeviceExportRow {
-    param([Parameter(Mandatory=$true)]$Device)
+    param([Parameter(Mandatory=$true)]$Device,[string]$ComputerName)
 
     $displayName = [string](Get-GraphProperty -InputObject $Device -Name "displayName")
     $registrationDateTime = [string](Get-GraphProperty -InputObject $Device -Name "registrationDateTime")
@@ -260,8 +279,10 @@ function New-EntraDeviceExportRow {
     $registeredState = if ($trustType -ieq "ServerAd" -and $alternativeSecurityIdCount -eq 0) { "Pending" } else { "Registered" }
     $pendingReason = if ($registeredState -eq "Pending") { "ServerAd trustType with empty AlternativeSecurityIds" } else { "" }
 
+    if ([string]::IsNullOrWhiteSpace($ComputerName)) { $ComputerName = ConvertTo-ComputerName -DeviceName $displayName }
+
     [PSCustomObject]@{
-        ComputerName                = ConvertTo-ComputerName -DeviceName $displayName
+        ComputerName                = $ComputerName
         DisplayName                 = $displayName
         EntraInventoryPresent       = $true
         EntraRegisteredState        = $registeredState
@@ -390,12 +411,32 @@ if ($requestedComputers.Count -gt 0) {
         if (-not $deviceByComputer.ContainsKey($computerName)) { $deviceByComputer[$computerName] = $device }
     }
 
+    # A device whose Entra display name differs from the computer name is found by its device ID.
+    $deviceIdLookup = Get-DeviceIdLookupMap -Path $DeviceIdListPath
+    $matchedByDeviceId = @{}
+    $deviceIdQueries = 0
+    foreach ($computer in $requestedComputers) {
+        if ($deviceByComputer.ContainsKey($computer.ComputerName) -or -not $deviceIdLookup.ContainsKey($computer.ComputerName)) { continue }
+        $deviceIdQueries++
+        $filter = "deviceId eq {0}" -f (ConvertTo-ODataStringLiteral -Value $deviceIdLookup[$computer.ComputerName])
+        $uri = "https://graph.microsoft.com/v1.0/devices?`$select=$select&`$filter=$([System.Uri]::EscapeDataString($filter))&`$top=$PageSize"
+        $found = @(Invoke-GraphPagedRequest -Uri $uri -Quiet)
+        if ($found.Count -eq 1) {
+            $deviceByComputer[$computer.ComputerName] = $found[0]
+            $matchedByDeviceId[$computer.ComputerName] = $true
+        }
+    }
+    if ($deviceIdQueries -gt 0) { Write-Host ("Device ID lookups: {0} computer(s) not found by name; {1} found by device ID." -f $deviceIdQueries,$matchedByDeviceId.Count) -ForegroundColor DarkCyan }
+
     $export = foreach ($computer in $requestedComputers) {
         if ($deviceByComputer.ContainsKey($computer.ComputerName)) {
-            New-EntraDeviceExportRow -Device $deviceByComputer[$computer.ComputerName]
+            $matchedBy = if ($matchedByDeviceId.ContainsKey($computer.ComputerName)) { 'DeviceId' } else { 'Name' }
+            New-EntraDeviceExportRow -Device $deviceByComputer[$computer.ComputerName] -ComputerName $computer.ComputerName |
+                Add-Member -NotePropertyName LookupMatchedBy -NotePropertyValue $matchedBy -Force -PassThru
         }
         else {
-            New-MissingEntraDeviceExportRow -RequestedComputerName $computer.RequestedComputerName -ComputerName $computer.ComputerName
+            New-MissingEntraDeviceExportRow -RequestedComputerName $computer.RequestedComputerName -ComputerName $computer.ComputerName |
+                Add-Member -NotePropertyName LookupMatchedBy -NotePropertyValue '' -Force -PassThru
         }
     }
 }

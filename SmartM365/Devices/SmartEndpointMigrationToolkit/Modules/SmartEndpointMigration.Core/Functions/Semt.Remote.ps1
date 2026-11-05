@@ -111,7 +111,7 @@ function Invoke-SemtSystemTaskEndpoint {
     <# ScheduledTask uses remote COM; WinRM uses the same scheduler locally on the target.
        Never stop or delete a task after a lost connection or an unconfirmed start.
        Transient RPC failures while following or cleaning the task (call failed, server
-       unavailable, timeouts, disconnected object) are retried with back-off and a new connection.
+       unavailable, timeouts, disconnected object, network path lost) are retried with back-off and a new connection.
        The task is reported unconfirmed only when they last RpcFailureWindowMinutes in a row
        (0 = the first failure is final). Registration and start are never retried. #>
     [CmdletBinding()]
@@ -139,7 +139,8 @@ function Invoke-SemtSystemTaskEndpoint {
     $operation = {
         param($r)
         $ErrorActionPreference = 'Stop'
-        $transientCodes = @('800706BA','800706BB','800706BE','800706BF','80010108','800705B4','80070079','8007274C')
+        # RPC failures and network loss (bad network path, name deleted, network name not found).
+        $transientCodes = @('800706BA','800706BB','800706BE','800706BF','80010108','800705B4','80070079','8007274C','80070035','80070033','80070040','80070043','800704CF')
         $windowMinutes = 30
         if ($r.ContainsKey('RpcFailureWindowMinutes') -and $null -ne $r.RpcFailureWindowMinutes) { $windowMinutes = [int]$r.RpcFailureWindowMinutes }
         $rpc = @{ Folder = $null; Failures = 0; Total = 0; FirstUtc = $null }
@@ -348,6 +349,8 @@ function Invoke-SemtPsExecEndpoint {
     $psexecArguments += @($Arguments | ForEach-Object { ConvertTo-SemtPsExecArgument -Value $_ })
     Write-SemtLogLine -Path $LogPath -Message ("PsExec command: {0} {1}" -f $PsExecPath,($psexecArguments -join ' '))
     $process = Start-Process -FilePath $PsExecPath -ArgumentList $psexecArguments -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    # Windows PowerShell 5.1: without an open handle, ExitCode stays empty after WaitForExit(timeout).
+    $null = $process.Handle
     $started = Get-Date
     [void](Update-SemtWorkerLease -LeasePath $LeasePath -Properties @{ PsExecProcessId = [int]$process.Id; PsExecProcessStartUtc = (Get-SemtProcessStartUtc -ProcessId $process.Id) })
     $timedOut = $false

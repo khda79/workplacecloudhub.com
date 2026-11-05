@@ -1691,6 +1691,8 @@ function Invoke-SemtGpUpdateWithTimeout {
     $stopDetail = ''
     try {
         $process = Start-Process -FilePath 'gpupdate.exe' -ArgumentList @('/target:computer','/force') -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        # Windows PowerShell 5.1: without an open handle, ExitCode stays empty after WaitForExit(timeout).
+        $null = $process.Handle
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             $timedOut = $true
             try { $process.Kill() } catch { $stopDetail = $_.Exception.Message }

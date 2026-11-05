@@ -232,7 +232,8 @@ function Invoke-SemtInventoryExport {
         [AllowNull()][string]$Domain,
         [AllowNull()][string]$TenantId,
         [ValidateRange(1, 999)][int]$PageSize = 999,
-        [AllowNull()][string]$SharedInventoryPath
+        [AllowNull()][string]$SharedInventoryPath,
+        [AllowNull()][string]$DeviceIdListPath
     )
 
     try {
@@ -250,6 +251,7 @@ function Invoke-SemtInventoryExport {
         if ($Kind -ne 'AD') {
             $arguments += @('-PageSize',[string]$PageSize)
             if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $arguments += @('-TenantId',$TenantId) }
+            if (-not [string]::IsNullOrWhiteSpace($DeviceIdListPath) -and -not [string]::IsNullOrWhiteSpace($ComputerListPath)) { $arguments += @('-DeviceIdListPath',$DeviceIdListPath) }
         }
         $powershell = Resolve-SemtWindowsPowerShellPath
         $output = & $powershell @arguments 2>&1

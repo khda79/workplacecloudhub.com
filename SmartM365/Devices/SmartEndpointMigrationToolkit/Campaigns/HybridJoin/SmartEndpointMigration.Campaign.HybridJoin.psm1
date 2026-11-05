@@ -313,11 +313,25 @@ function Invoke-HybridJoinPostCycle {
     $scopePath = Join-Path -Path $Context.RunContext.InventoryRoot -ChildPath ('Cycle{0}_CloudRefreshScope.txt' -f $Context.CycleNumber)
     Write-SemtTextLinesAtomic -Path $scopePath -Lines @($cloudRows | ForEach-Object { [string]$_.ComputerName } | Select-Object -Unique)
     $scoped = @($cloudRows | ForEach-Object { [string]$_.ComputerName })
+    # Local Entra device IDs: a device whose cloud name differs from the computer name is still found.
+    $deviceIdLines = New-Object System.Collections.Generic.List[string]
+    $deviceIdLines.Add('ComputerName,DeviceId')
+    foreach ($row in $cloudRows) {
+        $localId = [guid]::Empty
+        if ([guid]::TryParse([string](Get-SemtPropertyValue -InputObject $row -Name 'Dsreg_DeviceId' -Default ''), [ref]$localId) -and $localId -ne [guid]::Empty) {
+            $deviceIdLines.Add(('{0},{1}' -f [string]$row.ComputerName,$localId))
+        }
+    }
+    $deviceIdPath = ''
+    if ($deviceIdLines.Count -gt 1) {
+        $deviceIdPath = Join-Path -Path $Context.RunContext.InventoryRoot -ChildPath ('Cycle{0}_CloudRefreshDeviceIds.csv' -f $Context.CycleNumber)
+        Write-SemtTextLinesAtomic -Path $deviceIdPath -Lines @($deviceIdLines.ToArray())
+    }
     $keys = @{}
     foreach ($row in $cloudRows) { $keys[(Get-SemtComputerKey -ComputerName ([string]$row.ComputerName))] = $true }
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 
-    $intuneExport = Invoke-SemtInventoryExport -Kind Intune -ExportScriptPath $Context.ExportScripts.Intune -OutputPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesIntune_Cycle{0}PostCycle_{1}.csv" -f $Context.CycleNumber,$stamp)) -LogPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesIntune_Cycle{0}PostCycle_{1}.log" -f $Context.CycleNumber,$stamp)) -ComputerListPath $scopePath -TenantId (Get-SemtOption -Options $Context.Options -Name 'IntuneTenantId') -PageSize (Get-SemtOption -Options $Context.Options -Name 'IntuneInventoryPageSize') -SharedInventoryPath $Context.Inventory['Intune'].SharedPath
+    $intuneExport = Invoke-SemtInventoryExport -Kind Intune -ExportScriptPath $Context.ExportScripts.Intune -OutputPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesIntune_Cycle{0}PostCycle_{1}.csv" -f $Context.CycleNumber,$stamp)) -LogPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesIntune_Cycle{0}PostCycle_{1}.log" -f $Context.CycleNumber,$stamp)) -ComputerListPath $scopePath -TenantId (Get-SemtOption -Options $Context.Options -Name 'IntuneTenantId') -PageSize (Get-SemtOption -Options $Context.Options -Name 'IntuneInventoryPageSize') -SharedInventoryPath $Context.Inventory['Intune'].SharedPath -DeviceIdListPath $deviceIdPath
     $intuneRows = @()
     if ($intuneExport.Success) { $intuneRows = @(Import-Csv -LiteralPath $intuneExport.CsvPath) }
     foreach ($row in $cloudRows) {
@@ -346,7 +360,7 @@ function Invoke-HybridJoinPostCycle {
     else { & $log ('Cycle {0}: post-cycle Intune confirmation failed: {1}' -f $Context.CycleNumber,$intuneExport.Error) 'Yellow' }
 
     if ((Get-SemtCancellationState).Requested) { return }
-    $entraExport = Invoke-SemtInventoryExport -Kind Entra -ExportScriptPath $Context.ExportScripts.Entra -OutputPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesEntra_Cycle{0}PostCycle_{1}.csv" -f $Context.CycleNumber,$stamp)) -LogPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesEntra_Cycle{0}PostCycle_{1}.log" -f $Context.CycleNumber,$stamp)) -ComputerListPath $scopePath -TenantId (Get-SemtOption -Options $Context.Options -Name 'IntuneTenantId') -PageSize (Get-SemtOption -Options $Context.Options -Name 'IntuneInventoryPageSize') -SharedInventoryPath $Context.Inventory['Entra'].SharedPath
+    $entraExport = Invoke-SemtInventoryExport -Kind Entra -ExportScriptPath $Context.ExportScripts.Entra -OutputPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesEntra_Cycle{0}PostCycle_{1}.csv" -f $Context.CycleNumber,$stamp)) -LogPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesEntra_Cycle{0}PostCycle_{1}.log" -f $Context.CycleNumber,$stamp)) -ComputerListPath $scopePath -TenantId (Get-SemtOption -Options $Context.Options -Name 'IntuneTenantId') -PageSize (Get-SemtOption -Options $Context.Options -Name 'IntuneInventoryPageSize') -SharedInventoryPath $Context.Inventory['Entra'].SharedPath -DeviceIdListPath $deviceIdPath
     foreach ($row in $cloudRows) {
         Set-SemtResultField -Result $row -Name 'PostCycleEntraInventoryChecked' -Value $true
         Set-SemtResultField -Result $row -Name 'PostCycleEntraInventoryCsv' -Value $entraExport.CsvPath

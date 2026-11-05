@@ -116,6 +116,14 @@ try {
     . $w11Branch
     Assert-Test 'Windows 11 retains a real policy blocker after gpupdate timeout' ($policy.HasLegacyBlocker -and $policyGpUpdateTimedOut)
     Assert-Test 'Windows 11 does not replace upgrade result with gpupdate timeout' ($w11 -notmatch "status = 'GPUPDATE_TIMEOUT'" -and $w11 -match 'PolicyGpUpdateTimedOut')
+
+    # Real process: Windows PowerShell 5.1 loses ExitCode after WaitForExit(timeout) unless a handle is open.
+    Remove-Item -LiteralPath Function:\Start-Process
+    . ([scriptblock]::Create((Import-Function $hj 'Invoke-ProcessWithTimeout')))
+    $real = Invoke-ProcessWithTimeout -FilePath (Join-Path $env:WINDIR 'System32\cmd.exe') -Arguments @('/c','exit','3') -TimeoutSeconds 60 -OutputFile (Join-Path $temp 'real-exit.txt')
+    Assert-Test 'Hybrid Join process helper returns the real exit code (EXECUTED cmd.exe /c exit 3)' (-not $real.TimedOut -and [string]$real.ExitCode -eq '3')
+    $handleLine = [regex]::Escape('$null = $process.Handle')
+    Assert-Test 'Windows 11 gpupdate helper opens the process handle before waiting' ((Import-Function $w11 'Invoke-SemtGpUpdateWithTimeout') -match $handleLine)
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Host "Summary: Passed=$passed; Failed=$failed"
 if ($failed) { exit 1 }

@@ -126,7 +126,8 @@ and monitor a local scheduled task; both run the endpoint as SYSTEM. The script 
 protected per-attempt folder under Program Files. After confirmed task completion, SEMT checks
 the task identity and payload hash, then deletes the task and the temporary script and folder.
 Retry-after-reboot files remain in their separate protected folder. Transient Task Scheduler RPC
-failures while the task is followed or deleted (for example 0x800706BE) are retried with
+failures and network loss while the task is followed or deleted (for example 0x800706BE or
+0x80070035, network path not found) are retried with
 back-off and logged with a counter; when the connection comes back, the real endpoint result is
 used and the task is cleaned up. Only failures lasting `RemoteTaskRpcFailureWindowMinutes`
 (default 30) in a row give `REMOTE_EXECUTION_UNCONFIRMED`. If the connection or wait
@@ -158,6 +159,11 @@ launcher passes `-IntuneAbsentDeviceId` because fresh Entra and Intune inventori
 record for the name or for this device ID. The local Intune enrollment is backed up (reg export
 under `Output`) and removed, then the normal device join repair runs. If the removal does not
 complete, the status is `INTUNE_TRACE_REMOVE_FAILED` and nothing else is changed.
+
+After each cycle, Hybrid Join confirms results with Intune and Entra exports scoped to the computers
+that could have changed. A computer that its name does not find is looked up again by its local Entra
+device ID (`Inventory\Cycle<n>_CloudRefreshDeviceIds.csv`), so a device whose cloud name differs is
+still confirmed; such rows have `LookupMatchedBy=DeviceId` in the exported CSV.
 
 Missing, stale or ambiguous evidence remains `Unknown` and is not reported as an absent
 license. Refresh the users and licenses inventory from the GUI when needed; an assigned SKU

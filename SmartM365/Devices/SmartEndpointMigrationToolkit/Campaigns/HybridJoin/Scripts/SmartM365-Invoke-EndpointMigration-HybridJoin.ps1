@@ -3006,6 +3006,8 @@ function Invoke-ProcessWithTimeout {
 
     try {
         $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $tempStdOut -RedirectStandardError $tempStdErr
+        # Windows PowerShell 5.1: without an open handle, ExitCode stays empty after WaitForExit(timeout).
+        $null = $process.Handle
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             $timedOut = $true
             try { $process.Kill() } catch { $stopDetail = $_.Exception.Message }

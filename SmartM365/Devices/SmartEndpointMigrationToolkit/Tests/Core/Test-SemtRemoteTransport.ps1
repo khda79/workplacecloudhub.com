@@ -177,8 +177,9 @@ if ($scenario.Error -or $scenario.Output.Count -ne 1 -or -not $scenario.Output[0
 if (@($scenario.Warnings | Where-Object { $_ -like 'SEMT_RPC_TRANSIENT*' }).Count -ne 3 -or $scenario.Warnings[2] -notmatch 'ConsecutiveFailures=3; TotalFailures=3' -or $scenario.Warnings[0] -notmatch 'Code=0x800706BE' -or @($scenario.Warnings | Where-Object { $_ -like 'SEMT_RPC_RECOVERED*' }).Count -ne 1) { throw 'RPC failures were not reported with a counter' }
 if ($scenario.Output[0].RpcTransientFailures -ne 3 -or $service.Connects -lt 4) { throw 'RPC recovery did not reconnect to the Task Scheduler' }
 $passed++
-foreach ($code in @(-2147023174,-2147023169,-2147023436,-2147024775,-2147417848)) {
-    # 0x800706BA server unavailable, 0x800706BF call failed DNE, 0x800705B4 timeout, 0x80070079 semaphore timeout, 0x80010108 disconnected
+foreach ($code in @(-2147023174,-2147023169,-2147023436,-2147024775,-2147417848,-2147024843,-2147024832)) {
+    # 0x800706BA server unavailable, 0x800706BF call failed DNE, 0x800705B4 timeout, 0x80070079 semaphore timeout, 0x80010108 disconnected,
+    # 0x80070035 network path not found and 0x80070040 network name deleted (target briefly off the network)
     $service=[SemtFakeService]::new(); $service.Folder.GetTaskFailures=2; $service.Folder.FailHResult=$code
     $scenario=Invoke-SemtRpcScenario -Service $service
     if ($scenario.Error -or -not $scenario.Output[0].Cleaned -or -not $service.Folder.Deleted) { throw ('Transient code 0x{0:X8} was not retried: {1}' -f $code,$scenario.Error) }
