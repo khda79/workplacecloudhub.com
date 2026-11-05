@@ -138,8 +138,16 @@ Write-Host 'PASS: audit result still stops Loop retries for an unlicensed device
     $already=[pscustomobject]@{Status='AUDIT_SUCCESS_ALREADY_INTUNE'; NextAction='ASSIGN_INTUNE_LICENSE_THEN_RETRY'; UserLicensePreflightState='NoAssignedLicense'; UserLicensePreflightDetail='No user SKU'; InteractiveUserSid=''; Dsreg_TenantId=''}
     Invoke-HybridJoinPostCycle -Context $context -Rows @($already)
     if ($already.Status -ne 'AUDIT_SUCCESS_ALREADY_INTUNE' -or $already.NextAction -ne 'ASSIGN_INTUNE_LICENSE_THEN_RETRY') { throw 'Unlicensed already-enrolled audit was incorrectly reclassified.' }
+    # A local Intune trace with an unhealthy join stays a review item; it is never reclassified as enrolled.
+    $trace=[pscustomobject]@{Status='INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY'; NextAction='REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN'; UserLicensePreflightState='Unknown'; InteractiveUserSid=''; Dsreg_TenantId=''}
+    Invoke-HybridJoinPostCycle -Context ([pscustomobject]@{PackageRoot=$context.PackageRoot; DryRun=$true; Log={param($text,$color)}; CycleNumber=1}) -Rows @($trace)
+    if ($trace.Status -ne 'INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY' -or $trace.NextAction -ne 'REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN' -or (Get-HybridJoinNextAction -Status 'INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY') -ne 'REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN') { throw 'Local Intune trace with unhealthy join was not kept for review.' }
 }
 Write-Host 'PASS: unlicensed audit preserves the device diagnostic and skips post-cycle Graph confirmation'
+Write-Host 'PASS: local Intune trace with unhealthy join stays a review item'
+$hjEndpointText = [IO.File]::ReadAllText((Join-Path $root 'Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1'))
+if ($hjEndpointText -match '\$status = "INTUNE_ENROLLED"' -or $hjEndpointText -notmatch '"INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY" \{ return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" \}' -or $hjEndpointText -notmatch '\$status = "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY"') { throw 'Endpoint still reports a local Intune trace with unhealthy join as INTUNE_ENROLLED.' }
+Write-Host 'PASS: endpoint reports a local Intune trace with unhealthy join for review, not as enrolled'
 
 # Exercise the target attempt contract, not just the technician-side classifier.
 $endpoint = Join-Path $root 'Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1'

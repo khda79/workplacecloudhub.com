@@ -163,7 +163,7 @@ function script:Invoke-SmartM365DemoProfileAction {
 
 function script:Export-SmartM365DemoProfileOutputs {
     $campaign = Get-SemtDemoCampaign
-    $statuses = if ($campaign -eq 'Windows11Upgrade') { @('ALREADY_WINDOWS11','SETUP_UPGRADE_STARTED','WINDOWS11_HARDWARE_NOT_CAPABLE','DRYRUN_ADMIN_SHARE_UNREACHABLE') } else { @('INTUNE_ENROLLED','ENTRA_PENDING_RESOLVED_POST_CYCLE','SKIPPED_ALREADY_INTUNE_IN_INVENTORY','DRYRUN_ADMIN_SHARE_UNREACHABLE') }
+    $statuses = if ($campaign -eq 'Windows11Upgrade') { @('ALREADY_WINDOWS11','SETUP_UPGRADE_STARTED','WINDOWS11_HARDWARE_NOT_CAPABLE','DRYRUN_ADMIN_SHARE_UNREACHABLE') } else { @('ENROLLED_DETECTED_POST_CYCLE','ENTRA_PENDING_RESOLVED_POST_CYCLE','SKIPPED_ALREADY_INTUNE_IN_INVENTORY','DRYRUN_ADMIN_SHARE_UNREACHABLE') }
     $rows = @(1..12 | ForEach-Object { [pscustomobject]@{ Computer = ('CTSO-LAP-{0:0000}' -f $_); Status = $statuses[($_ - 1) % 4]; NextAction = 'Review sample result'; CorrelationId = ('00000000-0000-4000-8000-{0:000000000000}' -f $_); Mode = 'DEMO' } })
     $body = '<p>Campaign: ' + [Net.WebUtility]::HtmlEncode($script:SemtDemoCampaigns[$campaign]) + ' | Wave: WAVE-CONTOSO-DEMO | Run: 20261018-093000-DEMO</p><table><tr><th>Computer</th><th>Status</th><th>Next action</th><th>Correlation</th></tr>'
     foreach ($row in $rows) { $body += '<tr><td>' + $row.Computer + '</td><td>' + $row.Status + '</td><td>' + $row.NextAction + '</td><td>' + $row.CorrelationId + '</td></tr>' }

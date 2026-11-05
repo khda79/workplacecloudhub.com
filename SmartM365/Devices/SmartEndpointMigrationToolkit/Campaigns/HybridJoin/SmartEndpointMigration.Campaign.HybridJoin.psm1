@@ -8,6 +8,8 @@
     - an Entra hybrid object in Pending state passes -EntraHybridPending to the endpoint;
     - after each cycle, Intune and Entra inventories scoped to changed computers confirm
       enrollment (ENROLLED_DETECTED_POST_CYCLE) or a resolved pending object;
+    - a local Intune trace with an unhealthy device join (INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY) is
+      reported for manual review, never as enrolled;
     - technician run guard with status back-off (history schema 2) and adaptive cycle delay.
     The module requires SmartEndpointMigration.Core to be imported first.
 
@@ -43,6 +45,7 @@ function Get-HybridJoinNextAction {
         'SKIPPED_ALREADY_INTUNE_IN_INVENTORY' { return 'NO_ACTION_ALREADY_INTUNE' }
         'ENROLLED_DETECTED_POST_CYCLE' { return 'NO_ACTION_ALREADY_INTUNE' }
         'ENTRA_PENDING_RESOLVED_POST_CYCLE' { return 'RECHECK_INTUNE_ENROLLMENT' }
+        'INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY' { return 'REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN' }
         'ENDPOINT_RUN_ACTIVE' { return 'WAIT_ACTIVE_ENDPOINT_RUN' }
         'SKIPPED_BY_STATUS_BACKOFF' { return 'WAIT_STATUS_BACKOFF' }
         'RUN_GUARD_ACTIVE' { return 'WAIT_RUN_GUARD' }

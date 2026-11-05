@@ -3051,6 +3051,7 @@ function Get-NextActionForStatus {
         "INTUNE_ENROLLMENT_TRIGGERED" { return "RECHECK_AFTER_AUTOENROLL" }
         "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" { return "RECHECK_LATER_INTUNE_ENROLLMENT" }
         "INTUNE_USER_LICENSE_REJECTED" { return "ASSIGN_USER_INTUNE_LICENSE" }
+        "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY" { return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" }
         "INTUNE_ENROLLMENT_TOOL_NOT_FOUND" { return "CHECK_DEVICEENROLLER" }
         "INTUNE_ENROLLMENT_RETRY_EXHAUSTED" { return "RECHECK_OR_INVESTIGATE_INTUNE_ENROLLMENT" }
         "INTUNE_AUTOENROLL_POLICY_NOT_CONFIGURED" { return "CHECK_GPO_AUTOENROLL" }
@@ -4449,12 +4450,16 @@ try {
     }
     else {
         if ($intuneEnrolled) {
-            $status = "INTUNE_ENROLLED"
-            $dsregStatusErrorMessage = "MDM/Intune enrolled (ProviderID='MS DM Server'). dsregcmd repair actions skipped."
+            # A local Intune enrollment trace with an unhealthy device join is not a confirmed
+            # enrollment (the device key may be broken, the Entra object pending). No dsregcmd
+            # repair is attempted, to protect a possible real enrollment: the device is reported
+            # for manual review instead.
+            $status = "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY"
+            $dsregStatusErrorMessage = ("Local MDM/Intune enrollment trace (ProviderID='MS DM Server') but the device join is unhealthy: AzureAdJoined={0}; DeviceAuthStatus={1}; KeySignTest={2}. dsregcmd repair skipped; review the Entra device object, the Intune record and the local enrollments." -f $dsregAzureAdJoined,$dsregDeviceAuthStatus,$dsregKeySignTest)
             $ExitCode = 3
 
-            Write-Host "MDM/Intune detected. Skipping dsregcmd repair actions." -ForegroundColor Green
-            Write-RunLog "Intune enrollment detected and device is not already healthy. Skipping dsregcmd repair operations."
+            Write-Host "Local Intune enrollment trace with an unhealthy device join. Skipping dsregcmd repair actions; manual review required." -ForegroundColor Yellow
+            Write-RunLog $dsregStatusErrorMessage
         }
         else {
         # Missing device hint (AAD Connect timing / device object missing)

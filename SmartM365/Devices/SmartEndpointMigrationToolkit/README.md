@@ -145,6 +145,12 @@ the console user and that user has no assigned SKU, SEMT records `NoAssignedLice
 the endpoint in audit-only mode even if repair was requested. The device diagnostic remains in
 the report, while repair and enrollment are blocked until licensing is resolved. The computer
 stays in the Wave and is not retried during the same Loop Run.
+When the device join is unhealthy (device key or device authentication failure) but a local
+Intune enrollment trace exists, Hybrid Join does not run any dsregcmd repair and reports
+`INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY` (NextAction `REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN`) for a manual
+review of the Entra object, the Intune record and the local enrollments. It is never counted as
+enrolled.
+
 Missing, stale or ambiguous evidence remains `Unknown` and is not reported as an absent
 license. Refresh the users and licenses inventory from the GUI when needed; an assigned SKU
 alone does not confirm that its Intune service plan is enabled.
