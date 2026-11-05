@@ -242,7 +242,7 @@ try {
             }
             }
             else {
-                $transport = Invoke-SemtSystemTaskEndpoint -Mode $remoteMode -ConnectionTarget $target -CorrelationId $correlationId -RemoteScriptPath ([string]$copied.RemoteScriptPath) -RemoteSharePath ([string]$copied.RemoteSharePath) -ExpectedSha256 $endpointSha -Arguments $arguments -LogPath $logPath -TimeoutMinutes ([int]$contract.PsExec.TimeoutMinutes) -LeasePath $leasePath
+                $transport = Invoke-SemtSystemTaskEndpoint -Mode $remoteMode -ConnectionTarget $target -CorrelationId $correlationId -RemoteScriptPath ([string]$copied.RemoteScriptPath) -RemoteSharePath ([string]$copied.RemoteSharePath) -ExpectedSha256 $endpointSha -Arguments $arguments -LogPath $logPath -TimeoutMinutes ([int]$contract.PsExec.TimeoutMinutes) -LeasePath $leasePath -RpcFailureWindowMinutes ([int](Get-SemtPropertyValue -InputObject $contract.PsExec -Name 'RpcFailureWindowMinutes' -Default 30)) -RemoteDataShare $remoteDataShare
                 $attemptResult = Read-SemtRemoteAttemptResult -RemoteDataShare $remoteDataShare -CorrelationId $correlationId
                 if ($attemptResult.Completed) {
                     Set-ResultFromAttempt -Attempt $attemptResult.Result

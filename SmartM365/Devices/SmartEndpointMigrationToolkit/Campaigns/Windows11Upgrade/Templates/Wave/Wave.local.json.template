@@ -22,6 +22,7 @@
                     "GlobalWorkerLeaseTimeoutMinutes":  "__INHERIT__",
                     "WorkerHeartbeatStaleMinutes":  "__INHERIT__",
                     "PsExecTimeoutMinutes":  "__INHERIT__",
+                    "RemoteTaskRpcFailureWindowMinutes":  "__INHERIT__",
                     "CancellationDrainTimeoutMinutes":  "__INHERIT__",
                     "DnsPreflightBlocksCycle":  "__INHERIT__",
                     "DnsPreflightSampleSize":  "__INHERIT__",

@@ -36,19 +36,43 @@ class SemtFakeFolder {
     [bool]$Collide = $false
     [bool]$ChangeAction = $false
     [string]$ReplacementPrincipal = ''
+    # Synthetic RPC failures: COMException with the HRESULT seen on real targets.
+    [int]$GetTaskFailures = 0
+    [bool]$AlwaysFail = $false
+    [int]$FailHResult = -2147023170
+    [int]$GetTaskCalls = 0
+    [bool]$Gone = $false
+    [int]$DeleteFailures = 0
+    [bool]$DeleteAppliesBeforeFailure = $false
     [object] RegisterTaskDefinition([string]$name,[object]$definition,[int]$flags,[object]$user,[object]$password,[int]$logon,[object]$sddl) {
         if ($this.Collide) { throw 'task already exists' }
         $this.Flags = $flags
         $this.Task = [SemtFakeTask]::new(); $this.Task.Definition = $definition
         return $this.Task
     }
-    [object] GetTask([string]$name) { if ($this.ChangeAction) { $this.Task.Definition.Actions.Action.Arguments = 'changed' }; if ($this.ReplacementPrincipal) { $this.Task.Definition.Principal.UserId = $this.ReplacementPrincipal }; return $this.Task }
-    [void] DeleteTask([string]$name,[int]$flags) { $this.Deleted = $true }
+    [object] GetTask([string]$name) {
+        $this.GetTaskCalls++
+        if ($this.Gone) { throw [System.Runtime.InteropServices.COMException]::new('The system cannot find the file specified. (Exception from HRESULT: 0x80070002)', -2147024894) }
+        if ($this.AlwaysFail -or $this.GetTaskFailures -gt 0) {
+            $this.GetTaskFailures--
+            throw [System.Runtime.InteropServices.COMException]::new(('Synthetic RPC failure. (Exception from HRESULT: 0x{0:X8})' -f $this.FailHResult), $this.FailHResult)
+        }
+        if ($this.ChangeAction) { $this.Task.Definition.Actions.Action.Arguments = 'changed' }; if ($this.ReplacementPrincipal) { $this.Task.Definition.Principal.UserId = $this.ReplacementPrincipal }; return $this.Task
+    }
+    [void] DeleteTask([string]$name,[int]$flags) {
+        if ($this.DeleteFailures -gt 0) {
+            $this.DeleteFailures--
+            if ($this.DeleteAppliesBeforeFailure) { $this.Deleted = $true; $this.Gone = $true }
+            throw [System.Runtime.InteropServices.COMException]::new('Synthetic RPC failure. (Exception from HRESULT: 0x800706BE)', -2147023170)
+        }
+        $this.Deleted = $true
+    }
 }
 class SemtFakeService {
     [SemtFakeFolder]$Folder = [SemtFakeFolder]::new()
-    [void] Connect() { }
-    [void] Connect([string]$target) { }
+    [int]$Connects = 0
+    [void] Connect() { $this.Connects++ }
+    [void] Connect([string]$target) { $this.Connects++ }
     [object] GetFolder([string]$path) { return $this.Folder }
     [object] NewTask([int]$flags) { return [SemtFakeDefinition]::new() }
 }
@@ -62,7 +86,10 @@ $assignment=$fn.Find({param($n) $n -is [Management.Automation.Language.Assignmen
 $expression=$assignment.Right.Extent.Text
 $operation=[scriptblock]::Create($expression.Substring(1,$expression.Length-2))
 function New-Object { param([string]$ComObject) if ($ComObject -ne 'Schedule.Service') { throw 'Unexpected COM object' }; return $script:fake }
-function Start-Sleep { param([int]$Seconds) }
+# Synthetic clock: every sleep of the operation advances it, so RPC failure windows elapse instantly.
+$script:FakeNow=[datetime]'2026-01-01T10:00:00'
+function Start-Sleep { param([int]$Seconds) $script:FakeNow=$script:FakeNow.AddSeconds($Seconds) }
+function Get-Date { return $script:FakeNow }
 $passed=0
 foreach ($mode in @('ScheduledTask','WinRM')) {
     $script:fake=[SemtFakeService]::new()
@@ -120,8 +147,68 @@ try {
     if ($script:fake.Folder.Deleted) { throw 'Task deleted despite changed endpoint' }
     $passed++
 } finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath $dir -Force -ErrorAction SilentlyContinue }
+
+# Transient RPC failures while following or cleaning the task.
+function Invoke-SemtRpcScenario {
+    param([Parameter(Mandatory=$true)]$Service,[int]$Window = 15)
+    $script:fake=$Service
+    $dir=Join-Path ([IO.Path]::GetTempPath()) ('SEMT-transport-test-' + [guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($dir)
+    $file=Join-Path $dir 'endpoint.ps1'; [IO.File]::WriteAllText($file,'synthetic')
+    $hash=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+    $startedAt=$script:FakeNow
+    $outcome=[ordered]@{ Output=$null; Warnings=@(); Error=''; DirectoryKept=$false; ElapsedMinutes=0 }
+    try {
+        $records=@(& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Script=$file;ShareScript=$file;Sha256=$hash;Mode='ScheduledTask';RpcFailureWindowMinutes=$Window} 3>&1)
+        $outcome.Warnings=@($records | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { [string]$_.Message })
+        $outcome.Output=@($records | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] })
+    }
+    catch { $outcome.Error=$_.Exception.Message }
+    finally {
+        $outcome.DirectoryKept=(Test-Path -LiteralPath $dir)
+        $outcome.ElapsedMinutes=($script:FakeNow - $startedAt).TotalMinutes
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    return [pscustomobject]$outcome
+}
+$service=[SemtFakeService]::new(); $service.Folder.GetTaskFailures=3
+$scenario=Invoke-SemtRpcScenario -Service $service
+if ($scenario.Error -or $scenario.Output.Count -ne 1 -or -not $scenario.Output[0].Cleaned -or -not $service.Folder.Deleted -or $scenario.DirectoryKept) { throw "Intermittent RPC failure was not recovered: $($scenario.Error)" }
+if (@($scenario.Warnings | Where-Object { $_ -like 'SEMT_RPC_TRANSIENT*' }).Count -ne 3 -or $scenario.Warnings[2] -notmatch 'ConsecutiveFailures=3; TotalFailures=3' -or $scenario.Warnings[0] -notmatch 'Code=0x800706BE' -or @($scenario.Warnings | Where-Object { $_ -like 'SEMT_RPC_RECOVERED*' }).Count -ne 1) { throw 'RPC failures were not reported with a counter' }
+if ($scenario.Output[0].RpcTransientFailures -ne 3 -or $service.Connects -lt 4) { throw 'RPC recovery did not reconnect to the Task Scheduler' }
+$passed++
+foreach ($code in @(-2147023174,-2147023169,-2147023436,-2147024775,-2147417848)) {
+    # 0x800706BA server unavailable, 0x800706BF call failed DNE, 0x800705B4 timeout, 0x80070079 semaphore timeout, 0x80010108 disconnected
+    $service=[SemtFakeService]::new(); $service.Folder.GetTaskFailures=2; $service.Folder.FailHResult=$code
+    $scenario=Invoke-SemtRpcScenario -Service $service
+    if ($scenario.Error -or -not $scenario.Output[0].Cleaned -or -not $service.Folder.Deleted) { throw ('Transient code 0x{0:X8} was not retried: {1}' -f $code,$scenario.Error) }
+    $passed++
+}
+$service=[SemtFakeService]::new(); $service.Folder.AlwaysFail=$true
+$scenario=Invoke-SemtRpcScenario -Service $service -Window 15
+if ($scenario.Error -notmatch '^SEMT_RPC_UNAVAILABLE: Step=GetTaskState; Code=0x800706BE' -or $scenario.Error -notmatch 'WindowMinutes=15' -or $service.Folder.Deleted -or -not $scenario.DirectoryKept) { throw "Continuous RPC failure was not reported unavailable, or cleanup ran: $($scenario.Error)" }
+if ($scenario.ElapsedMinutes -lt 15 -or $scenario.ElapsedMinutes -gt 17) { throw "Failure window not honoured: $($scenario.ElapsedMinutes) minute(s)" }
+if ($service.Folder.GetTaskCalls -lt 5 -or $service.Folder.GetTaskCalls -gt 40) { throw "Unexpected retry count: $($service.Folder.GetTaskCalls)" }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.AlwaysFail=$true
+$scenario=Invoke-SemtRpcScenario -Service $service -Window 0
+if ($scenario.Error -notmatch '^SEMT_RPC_UNAVAILABLE: .*ConsecutiveFailures=1;' -or $service.Folder.GetTaskCalls -ne 1) { throw 'Window 0 did not make the first RPC failure final' }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.GetTaskFailures=1; $service.Folder.FailHResult=-2147024891
+$scenario=Invoke-SemtRpcScenario -Service $service
+if (-not $scenario.Error -or $scenario.Error -like '*SEMT_RPC_UNAVAILABLE*' -or $scenario.Error -notmatch '0x80070005' -or $service.Folder.GetTaskCalls -ne 1 -or $service.Folder.Deleted) { throw 'A non-transient error (access denied) was retried' }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.DeleteFailures=1
+$scenario=Invoke-SemtRpcScenario -Service $service
+if ($scenario.Error -or -not $scenario.Output[0].Cleaned -or -not $service.Folder.Deleted -or $scenario.DirectoryKept) { throw "Transient RPC failure on DeleteTask was not retried: $($scenario.Error)" }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.DeleteFailures=1; $service.Folder.DeleteAppliesBeforeFailure=$true
+$scenario=Invoke-SemtRpcScenario -Service $service
+if ($scenario.Error -or -not $scenario.Output[0].Cleaned -or $scenario.DirectoryKept) { throw "A delete applied before a lost reply was not accepted: $($scenario.Error)" }
+$passed++
 Remove-Item Function:\New-Object
 Remove-Item Function:\Start-Sleep
+Remove-Item Function:\Get-Date
 Import-Module (Join-Path $root 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
 $catalog=Import-SemtOptionCatalog -PackageRoot $root
 foreach ($campaign in @('HybridJoin','Windows11Upgrade')) {
@@ -152,6 +239,41 @@ try {
         if (-not $result.Completed -or $captured.Mode -ne $mode -or $captured.Arguments -notmatch '"C:\\Program Files\\test.ps1"' -or $captured.Arguments -notmatch '"has space"') { throw "$mode dispatch failed" }
         $passed++
     }
+    # Worker side: RPC warnings of the job reach the worker log with a counter, the attempt result
+    # is re-read on recovery, and a failure window that elapsed is reported as RpcUnavailable.
+    $shareRoot=Join-Path ([IO.Path]::GetTempPath()) ('SEMT-transport-share-' + [guid]::NewGuid().ToString('N'))
+    $resultFile=Join-Path $shareRoot 'State\Results\11111111111111111111111111111111.json.txt'
+    [void][IO.Directory]::CreateDirectory((Split-Path $resultFile -Parent))
+    & $module {
+        param($messages)
+        $script:FakeWarnings=@($messages | ForEach-Object { [System.Management.Automation.WarningRecord]::new([string]$_) })
+        $script:FakeReceive={ [pscustomobject]@{Cleaned=$true; ExitCode='3'; RpcTransientFailures=2} }
+        function script:Start-Job { param($ArgumentList,$ScriptBlock); $script:CapturedRequest=$ArgumentList[0]; return [pscustomobject]@{State='Completed'; ChildJobs=@([pscustomobject]@{Warning=$script:FakeWarnings})} }
+        function script:Receive-Job { param($Job); & $script:FakeReceive }
+    } @('SEMT_RPC_TRANSIENT: Step=GetTaskState; Code=0x800706BE; ConsecutiveFailures=1','SEMT_RPC_TRANSIENT: Step=GetTaskState; Code=0x800706BE; ConsecutiveFailures=2','SEMT_RPC_RECOVERED: Step=GetTaskState; ConsecutiveFailures=2; TotalFailures=2')
+    try {
+        [IO.File]::WriteAllText($resultFile,'{"CorrelationId":"11111111111111111111111111111111","State":"Completed","Status":"INTUNE_ENROLLMENT_PENDING_CONFIRMATION","ExitCode":"3"}')
+        $recoveredTransport=Invoke-SemtSystemTaskEndpoint -Mode ScheduledTask -ConnectionTarget 'synthetic.invalid' -CorrelationId '11111111111111111111111111111111' -RemoteScriptPath 'C:\Program Files\test.ps1' -RemoteSharePath '\\synthetic.invalid\C$\test.ps1' -ExpectedSha256 'test' -Arguments @() -LogPath $log -RpcFailureWindowMinutes 20 -RemoteDataShare $shareRoot
+        $captured=& $module { $script:CapturedRequest }
+        $logText=[IO.File]::ReadAllText($log)
+        if (-not $recoveredTransport.Completed -or $recoveredTransport.RpcTransientFailures -ne 2 -or $recoveredTransport.RpcUnavailable -or $captured.RpcFailureWindowMinutes -ne 20) { throw 'Recovered RPC transport was not reported completed' }
+        if ($logText -notmatch 'RPC failure #1 \(retrying' -or $logText -notmatch 'RPC failure #2 \(retrying' -or $logText -notmatch 'recovered after 2 RPC failure' -or $logText -notmatch 'Attempt result after RPC recovery: Attempt result State=Completed') { throw 'RPC failures or recovery were not logged' }
+        $recoveredAttempt=Read-SemtRemoteAttemptResult -RemoteDataShare $shareRoot -CorrelationId '11111111111111111111111111111111'
+        $passed++
+        & $module {
+            $script:FakeWarnings=@()
+            $script:FakeReceive={ throw 'SEMT_RPC_UNAVAILABLE: Step=GetTaskState; Code=0x800706BE; ConsecutiveFailures=12; TotalFailures=12; FailingForMinutes=15.2; WindowMinutes=15; Error=synthetic' }
+        }
+        [IO.File]::WriteAllText($resultFile,'{"CorrelationId":"11111111111111111111111111111111","State":"Running"}')
+        $lostTransport=Invoke-SemtSystemTaskEndpoint -Mode ScheduledTask -ConnectionTarget 'synthetic.invalid' -CorrelationId '11111111111111111111111111111111' -RemoteScriptPath 'C:\Program Files\test.ps1' -RemoteSharePath '\\synthetic.invalid\C$\test.ps1' -ExpectedSha256 'test' -Arguments @() -LogPath $log -RpcFailureWindowMinutes 15 -RemoteDataShare $shareRoot
+        if ($lostTransport.Completed -or -not $lostTransport.RpcUnavailable -or $lostTransport.Detail -notmatch 'RemoteTaskRpcFailureWindowMinutes' -or $lostTransport.Detail -notmatch 'was kept') { throw 'Elapsed RPC window was not reported unavailable' }
+        $lostAttempt=Read-SemtRemoteAttemptResult -RemoteDataShare $shareRoot -CorrelationId '11111111111111111111111111111111'
+        $passed++
+    } finally { Remove-Item -LiteralPath $shareRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    & $module {
+        function script:Start-Job { param($ArgumentList,$ScriptBlock); $script:CapturedRequest=$ArgumentList[0]; return [pscustomobject]@{State='Completed'} }
+        function script:Receive-Job { param($Job); return [pscustomobject]@{Cleaned=$true; ExitCode='0'} }
+    }
     & $module {
         $script:FakeClock = 0
         function script:Wait-Job { param($Job,$Timeout); return $null }
@@ -179,6 +301,27 @@ foreach ($exitCode in @('-1073741790','3221225506')) {
     if ($script:observedStatus -ne 'REMOTE_EXECUTION_ACCESS_DENIED' -or $script:observedNextAction -ne 'CHECK_TARGET_EXECUTION_ACCESS' -or $result.ExitCode -ne $exitCode) { throw "Incorrect status for exit $exitCode" }
     $passed++
 }
+# Intermittent RPC then success: the real endpoint result is kept.
+function Set-ResultFromAttempt { param($Attempt); $script:appliedAttempt=$Attempt; $result.LauncherStatus='ENDPOINT_COMPLETED' }
+$script:observedStatus=''; $script:appliedAttempt=$null
+$attemptResult=$recoveredAttempt; $transport=$recoveredTransport
+$result=[ordered]@{ExitCode='';JobErrorMessage='';LauncherStatus='UNKNOWN'}
+& $classify
+if (-not $attemptResult.Completed -or $null -eq $script:appliedAttempt -or $script:appliedAttempt.Status -ne 'INTUNE_ENROLLMENT_PENDING_CONFIRMATION' -or $result.LauncherStatus -ne 'ENDPOINT_COMPLETED' -or $script:observedStatus -or $result.JobErrorMessage) { throw 'Endpoint result was not kept after RPC recovery' }
+$passed++
+# Continuous RPC failure beyond the window while the endpoint still runs: unconfirmed.
+$script:observedStatus=''; $script:appliedAttempt=$null
+$attemptResult=$lostAttempt; $transport=$lostTransport
+$result=[ordered]@{ExitCode='';JobErrorMessage='';LauncherStatus='UNKNOWN'}
+& $classify
+if ($attemptResult.State -ne 'Running' -or $null -ne $script:appliedAttempt -or $script:observedStatus -ne 'REMOTE_EXECUTION_UNCONFIRMED' -or $script:observedNextAction -ne 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH') { throw 'Continuous RPC failure was not classified unconfirmed' }
+$passed++
+$catalogDefinition=$catalog.ByName['RemoteTaskRpcFailureWindowMinutes']
+if ($null -eq $catalogDefinition -or [int]$catalogDefinition.Default -ne 30 -or [int]$catalogDefinition.Minimum -ne 0 -or [string]$catalogDefinition.Target -ne 'Technician') { throw 'RemoteTaskRpcFailureWindowMinutes catalog entry differs' }
+$launcherText=[IO.File]::ReadAllText((Join-Path $root 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'))
+$workerText=[IO.File]::ReadAllText($worker)
+if ($launcherText -notmatch "RpcFailureWindowMinutes = \(Opt 'RemoteTaskRpcFailureWindowMinutes'\)" -or $workerText -notmatch "-RpcFailureWindowMinutes \(\[int\]\(Get-SemtPropertyValue -InputObject \`$contract.PsExec -Name 'RpcFailureWindowMinutes'" -or $workerText -notmatch '-RemoteDataShare \$remoteDataShare') { throw 'RPC failure window is not passed from the launcher to the transport' }
+$passed++
 Write-Host "Summary: Passed=$passed; Failed=0"
 
 # SIG # Begin signature block

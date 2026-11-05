@@ -45,6 +45,7 @@ Defaults were taken from the real behaviour of the two previous toolkits, then r
 | `DelayBetweenCyclesMinutes` | HJ 5, W11 10 | Same as before for each product. |
 | `NightPauseEnabled` | HJ on, W11 off | Hybrid Join paused at night before; Windows 11 never did (upgrades are often scheduled at night). |
 | `PsExecTimeoutMinutes` | HJ 120, W11 360 | Same as before; Windows 11 needs longer for the media copy and setup. |
+| `RemoteTaskRpcFailureWindowMinutes` | 30 | ScheduledTask and WinRM: transient Task Scheduler RPC failures (0x800706BA, 0x800706BB, 0x800706BE, 0x800706BF, 0x80010108, timeouts 0x800705B4, 0x80070079, 0x8007274C) while following or deleting the task are retried with back-off (5 s doubling up to 60 s) and a new connection; each failure is logged in the worker log with its counter. When the connection comes back, the attempt result is re-read and the task is cleaned up as usual. `REMOTE_EXECUTION_UNCONFIRMED` is reported only after failures lasting this long in a row; the task is then kept. Task registration and start are never retried. 30 minutes covers the 2026-11-05 case, where the endpoint ended 17 minutes after the first RPC failure; `PsExecTimeoutMinutes` still bounds the whole wait. 0 restores the previous behaviour (first failure is final). |
 | `TechnicianRunGuardHours` | HJ 12, W11 3 | Same as before for each product; Windows 11 also keeps its endpoint run guard (`Windows11Upgrade.EndpointRunGuardHours` 3). |
 | `Windows11Upgrade.DirectSetupUpgrade` | false | Direct setup never implies a reboot: with `AllowReboot` off the endpoint receives no `-AllowReboot` (the previous CMD wrapper forced it, see [CRITICAL-FIXES-LEGACY.md](CRITICAL-FIXES-LEGACY.md)). |
 | `Windows11Upgrade.ReuseLegacySetupMedia` | true | Existing media of the previous toolkit is reused or moved before any large copy. |
@@ -53,7 +54,7 @@ Defaults were taken from the real behaviour of the two previous toolkits, then r
 | `GlobalWorkerLimit` | 15 | Shared by both Campaigns on the technician computer; 0 disables the shared cap. |
 ## Option reference
 
-Generated from catalog SHA256 `188F600B518EEAD6F9977C09D1856E0B12BC771CA60B6AE9A7B002FB616A7754`.
+Generated from catalog SHA256 `6E1175524CD681B0121C338CCFA44AD4B75CD5A799B07A4A6834C42CEAB52006`.
 
 ### Common options
 
@@ -75,6 +76,7 @@ Generated from catalog SHA256 `188F600B518EEAD6F9977C09D1856E0B12BC771CA60B6AE9A
 | `GlobalWorkerLeaseTimeoutMinutes` | Integer | 0 minutes | 0..1440 | `SEMT_GLOBAL_WORKER_LEASE_TIMEOUT_MINUTES` | Parallelism | no |
 | `WorkerHeartbeatStaleMinutes` | Integer | 10 minutes | 2..240 | `SEMT_WORKER_HEARTBEAT_STALE_MINUTES` | Parallelism | no |
 | `PsExecTimeoutMinutes` | Integer | HJ: 120; W11: 360 minutes | 0..1440 | `SEMT_PSEXEC_TIMEOUT_MINUTES` | Parallelism | yes |
+| `RemoteTaskRpcFailureWindowMinutes` | Integer | 30 minutes | 0..1440 | `SEMT_REMOTE_TASK_RPC_FAILURE_WINDOW_MINUTES` | Parallelism | no |
 | `CancellationDrainTimeoutMinutes` | Integer | 15 minutes | 0..1440 | `SEMT_CANCELLATION_DRAIN_TIMEOUT_MINUTES` | Parallelism | no |
 | `DnsPreflightBlocksCycle` | Boolean | True |  | `SEMT_DNS_PREFLIGHT_BLOCKS_CYCLE` | Network | yes |
 | `DnsPreflightSampleSize` | Integer | 5 computers | 1..50 | `SEMT_DNS_PREFLIGHT_SAMPLE_SIZE` | Network | no |

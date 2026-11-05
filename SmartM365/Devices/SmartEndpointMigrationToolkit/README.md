@@ -125,7 +125,11 @@ and the engine can be called directly:
 and monitor a local scheduled task; both run the endpoint as SYSTEM. The script is copied to a
 protected per-attempt folder under Program Files. After confirmed task completion, SEMT checks
 the task identity and payload hash, then deletes the task and the temporary script and folder.
-Retry-after-reboot files remain in their separate protected folder. If the connection or wait
+Retry-after-reboot files remain in their separate protected folder. Transient Task Scheduler RPC
+failures while the task is followed or deleted (for example 0x800706BE) are retried with
+back-off and logged with a counter; when the connection comes back, the real endpoint result is
+used and the task is cleaned up. Only failures lasting `RemoteTaskRpcFailureWindowMinutes`
+(default 30) in a row give `REMOTE_EXECUTION_UNCONFIRMED`. If the connection or wait
 expires, the target can still be running; cleanup is unconfirmed and must be checked before a
 retry. No automatic fallback to another transport is performed. A blocked execution can persist
 across transports; the selected mode never changes the endpoint security policy.

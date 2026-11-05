@@ -109,7 +109,11 @@ function Remove-SemtTemporaryPayload {
 
 function Invoke-SemtSystemTaskEndpoint {
     <# ScheduledTask uses remote COM; WinRM uses the same scheduler locally on the target.
-       Never stop or delete a task after a lost connection or an unconfirmed start. #>
+       Never stop or delete a task after a lost connection or an unconfirmed start.
+       Transient RPC failures while following or cleaning the task (call failed, server
+       unavailable, timeouts, disconnected object) are retried with back-off and a new connection.
+       The task is reported unconfirmed only when they last RpcFailureWindowMinutes in a row
+       (0 = the first failure is final). Registration and start are never retried. #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)][ValidateSet('ScheduledTask','WinRM')][string]$Mode,
@@ -121,21 +125,73 @@ function Invoke-SemtSystemTaskEndpoint {
         [Parameter(Mandatory=$true)][AllowEmptyCollection()][string[]]$Arguments,
         [Parameter(Mandatory=$true)][string]$LogPath,
         [int]$TimeoutMinutes = 120,
-        [AllowNull()][string]$LeasePath
+        [AllowNull()][string]$LeasePath,
+        [ValidateRange(0,1440)][int]$RpcFailureWindowMinutes = 30,
+        [AllowNull()][string]$RemoteDataShare
     )
     $taskName = 'WCH-SEMT-' + $CorrelationId
     $actionArguments = (@('-NoProfile','-ExecutionPolicy','RemoteSigned','-File',$RemoteScriptPath) + $Arguments | ForEach-Object { ConvertTo-SemtWindowsCommandLineArgument -Value ([string]$_) }) -join ' '
     $request = @{
         Target = $ConnectionTarget; Name = $taskName; Arguments = $actionArguments
         Script = $RemoteScriptPath; ShareScript = $RemoteSharePath; Sha256 = $ExpectedSha256
-        Mode = $Mode
+        Mode = $Mode; RpcFailureWindowMinutes = $RpcFailureWindowMinutes
     }
     $operation = {
         param($r)
         $ErrorActionPreference = 'Stop'
+        $transientCodes = @('800706BA','800706BB','800706BE','800706BF','80010108','800705B4','80070079','8007274C')
+        $windowMinutes = 30
+        if ($r.ContainsKey('RpcFailureWindowMinutes') -and $null -ne $r.RpcFailureWindowMinutes) { $windowMinutes = [int]$r.RpcFailureWindowMinutes }
+        $rpc = @{ Folder = $null; Failures = 0; Total = 0; FirstUtc = $null }
+        $connect = {
+            $connected = New-Object -ComObject 'Schedule.Service'
+            if ($r.Mode -eq 'WinRM') { $connected.Connect() } else { $connected.Connect($r.Target) }
+            $rpc.Folder = $connected.GetFolder('\')
+        }
+        $getCode = {
+            param($exception)
+            for ($current = $exception; $null -ne $current; $current = $current.InnerException) {
+                $code = '{0:X8}' -f $current.HResult
+                if ($transientCodes -contains $code) { return $code }
+                if ([string]$current.Message -match '(?i)0x(?<Code>[0-9A-F]{8})' -and $transientCodes -contains $Matches.Code.ToUpperInvariant()) { return $Matches.Code.ToUpperInvariant() }
+            }
+            return ''
+        }
+        $invokeRpc = {
+            param([string]$Step,[scriptblock]$Call)
+            while ($true) {
+                try {
+                    if ($null -eq $rpc.Folder) { & $connect }
+                    $value = & $Call
+                    if ($rpc.Failures -gt 0) {
+                        Write-Warning ('SEMT_RPC_RECOVERED: Step={0}; ConsecutiveFailures={1}; TotalFailures={2}; FailingForMinutes={3:N1}' -f $Step,$rpc.Failures,$rpc.Total,((Get-Date).ToUniversalTime() - $rpc.FirstUtc).TotalMinutes)
+                        $rpc.Failures = 0
+                        $rpc.FirstUtc = $null
+                    }
+                    return $value
+                }
+                catch {
+                    $code = & $getCode $_.Exception
+                    if (-not $code) { throw }
+                    $now = (Get-Date).ToUniversalTime()
+                    if ($rpc.Failures -eq 0) { $rpc.FirstUtc = $now }
+                    $rpc.Failures = $rpc.Failures + 1
+                    $rpc.Total = $rpc.Total + 1
+                    $failingMinutes = ($now - $rpc.FirstUtc).TotalMinutes
+                    if ($failingMinutes -ge $windowMinutes) {
+                        throw ('SEMT_RPC_UNAVAILABLE: Step={0}; Code=0x{1}; ConsecutiveFailures={2}; TotalFailures={3}; FailingForMinutes={4:N1}; WindowMinutes={5}; Error={6}' -f $Step,$code,$rpc.Failures,$rpc.Total,$failingMinutes,$windowMinutes,$_.Exception.Message)
+                    }
+                    $delay = [int][math]::Min(60, 5 * [math]::Pow(2, [math]::Min(4, $rpc.Failures - 1)))
+                    Write-Warning ('SEMT_RPC_TRANSIENT: Step={0}; Code=0x{1}; ConsecutiveFailures={2}; TotalFailures={3}; FailingForMinutes={4:N1}; WindowMinutes={5}; RetryInSeconds={6}; Error={7}' -f $Step,$code,$rpc.Failures,$rpc.Total,$failingMinutes,$windowMinutes,$delay,$_.Exception.Message)
+                    Start-Sleep -Seconds $delay
+                    $rpc.Folder = $null
+                }
+            }
+        }
         $service = New-Object -ComObject 'Schedule.Service'
         if ($r.Mode -eq 'WinRM') { $service.Connect() } else { $service.Connect($r.Target) }
         $folder = $service.GetFolder('\')
+        $rpc.Folder = $folder
         $definition = $service.NewTask(0)
         $definition.RegistrationInfo.Description = 'SEMT temporary SYSTEM execution ' + $r.Name
         $definition.Principal.UserId = 'SYSTEM'
@@ -153,23 +209,31 @@ function Invoke-SemtSystemTaskEndpoint {
         [void]$task.Run($null)
         do {
             Start-Sleep -Seconds 3
-            $task = $folder.GetTask($r.Name)
-            $state = [int]$task.State
-            $lastRun = [datetime]$task.LastRunTime
-        } while (($state -ne 1 -and $state -ne 3) -or $lastRun.Year -lt 2000)
-        $exitCode = [string]$task.LastTaskResult
+            $poll = & $invokeRpc 'GetTaskState' { $polled = $rpc.Folder.GetTask($r.Name); [pscustomobject]@{ State = [int]$polled.State; LastRun = [datetime]$polled.LastRunTime } }
+        } while (($poll.State -ne 1 -and $poll.State -ne 3) -or $poll.LastRun.Year -lt 2000)
         # Re-read the definition and refuse cleanup if the identity has changed.
-        $actual = $task.Definition
+        $actual = & $invokeRpc 'ReadTaskDefinition' {
+            $read = $rpc.Folder.GetTask($r.Name)
+            $readDefinition = $read.Definition
+            $count = [int]$readDefinition.Actions.Count
+            $first = if ($count -ge 1) { $readDefinition.Actions.Item(1) } else { $null }
+            [pscustomobject]@{
+                ExitCode = [string]$read.LastTaskResult; ActionCount = $count
+                ActionPath = $(if ($first) { [string]$first.Path } else { '' }); ActionArguments = $(if ($first) { [string]$first.Arguments } else { '' })
+                LogonType = [int]$readDefinition.Principal.LogonType; UserId = [string]$readDefinition.Principal.UserId
+            }
+        }
+        $exitCode = $actual.ExitCode
         $principalSid = ''
         try {
-            $principal = [string]$actual.Principal.UserId
+            $principal = $actual.UserId
             if ($principal -match '^S-\d-') {
                 $principalSid = ([System.Security.Principal.SecurityIdentifier]::new($principal)).Value
             } else {
                 $principalSid = ([System.Security.Principal.NTAccount]::new($principal)).Translate([System.Security.Principal.SecurityIdentifier]).Value
             }
         } catch { $principalSid = '' }
-        if ($actual.Actions.Count -ne 1 -or $actual.Actions.Item(1).Path -ine '%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe' -or $actual.Actions.Item(1).Arguments -cne $r.Arguments -or $actual.Principal.LogonType -ne 5 -or $principalSid -ne 'S-1-5-18') {
+        if ($actual.ActionCount -ne 1 -or $actual.ActionPath -ine '%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe' -or $actual.ActionArguments -cne $r.Arguments -or $actual.LogonType -ne 5 -or $principalSid -ne 'S-1-5-18') {
             throw 'Task identity changed; cleanup refused.'
         }
         $scriptPath = if ($r.Mode -eq 'WinRM') { $r.Script } else { $r.ShareScript }
@@ -180,10 +244,21 @@ function Invoke-SemtSystemTaskEndpoint {
         if ((Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne $r.Sha256) { throw 'Endpoint hash changed; cleanup refused.' }
         $contents = @(Get-ChildItem -LiteralPath $parent -Force -ErrorAction Stop)
         if ($contents.Count -ne 1 -or $contents[0].FullName -ine $scriptItem.FullName) { throw 'Temporary folder contains unexpected items; cleanup refused.' }
-        $folder.DeleteTask($r.Name,0)
+        [void](& $invokeRpc 'DeleteTask' {
+            if ($rpc.Failures -gt 0) {
+                # A delete retried after a lost reply may already have been applied.
+                try { [void]$rpc.Folder.GetTask($r.Name) }
+                catch {
+                    for ($missing = $_.Exception; $null -ne $missing; $missing = $missing.InnerException) { if (('{0:X8}' -f $missing.HResult) -eq '80070002') { return 'AlreadyDeleted' } }
+                    throw
+                }
+            }
+            $rpc.Folder.DeleteTask($r.Name,0)
+            'Deleted'
+        })
         Remove-Item -LiteralPath $scriptPath -Force -ErrorAction Stop
         Remove-Item -LiteralPath $parent -Force -ErrorAction Stop
-        [pscustomobject]@{ ExitCode = $exitCode; Cleaned = $true }
+        [pscustomobject]@{ ExitCode = $exitCode; Cleaned = $true; RpcTransientFailures = $rpc.Total }
     }
     $job = Start-Job -ArgumentList $request,$operation.ToString() -ScriptBlock {
         param($r,$source)
@@ -193,24 +268,54 @@ function Invoke-SemtSystemTaskEndpoint {
     }
     $started = Get-Date
     $timedOut = $false
+    # The job reports each transient RPC failure and each recovery as a warning record; they are
+    # copied into the worker log as they arrive, and the attempt result is re-read on recovery.
+    $relay = @{ Seen = 0; Transient = 0 }
+    $relayWarnings = {
+        $records = @()
+        if ($null -ne $job -and $job.PSObject.Properties['ChildJobs']) {
+            foreach ($child in @($job.ChildJobs)) { if ($null -ne $child -and $child.PSObject.Properties['Warning'] -and $null -ne $child.Warning) { $records += @($child.Warning) } }
+        }
+        for ($index = $relay.Seen; $index -lt $records.Count; $index++) {
+            $message = [string]$records[$index].Message
+            if ($message -like 'SEMT_RPC_TRANSIENT*') {
+                $relay.Transient = $relay.Transient + 1
+                Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} task RPC failure #{1} (retrying, task {2} kept): {3}" -f $Mode,$relay.Transient,$taskName,$message)
+            }
+            elseif ($message -like 'SEMT_RPC_RECOVERED*') {
+                Write-SemtLogLine -Path $LogPath -Message ("{0} task connection recovered after {1} RPC failure(s): {2}" -f $Mode,$relay.Transient,$message)
+                if (-not [string]::IsNullOrWhiteSpace($RemoteDataShare)) {
+                    $recovered = Read-SemtRemoteAttemptResult -RemoteDataShare $RemoteDataShare -CorrelationId $CorrelationId
+                    Write-SemtLogLine -Path $LogPath -Message ("Attempt result after RPC recovery: {0}" -f $recovered.Detail)
+                }
+            }
+            else { Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} task warning: {1}" -f $Mode,$message) }
+        }
+        $relay.Seen = $records.Count
+    }
     try {
         while (-not (Wait-Job -Job $job -Timeout 5)) {
             [void](Update-SemtWorkerLease -LeasePath $LeasePath)
+            & $relayWarnings
             if ($TimeoutMinutes -gt 0 -and ((Get-Date) - $started).TotalMinutes -ge $TimeoutMinutes) { $timedOut = $true; break }
         }
+        & $relayWarnings
         if ($timedOut) {
-            Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} timed out; remote execution and cleanup are unconfirmed. Task={1}" -f $Mode,$taskName)
-            return [pscustomobject]@{ Completed=$false; TimedOut=$true; ExitCode=''; Detail='Remote task may still be running; verify before retrying.' }
+            Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} timed out; remote execution and cleanup are unconfirmed. Task={1}; RpcFailures={2}" -f $Mode,$taskName,$relay.Transient)
+            return [pscustomobject]@{ Completed=$false; TimedOut=$true; ExitCode=''; Detail='Remote task may still be running; verify before retrying.'; RpcTransientFailures=$relay.Transient; RpcUnavailable=$false }
         }
-        $output = @(Receive-Job -Job $job -ErrorAction Stop)
+        $output = @(Receive-Job -Job $job -ErrorAction Stop -WarningAction SilentlyContinue)
         if ($job.State -ne 'Completed' -or $output.Count -ne 1 -or -not $output[0].Cleaned) { throw 'Task execution or cleanup was not confirmed.' }
-        Write-SemtLogLine -Path $LogPath -Message ("{0} task finished and temporary payload was removed. Task={1}; ExitCode={2}" -f $Mode,$taskName,$output[0].ExitCode)
-        return [pscustomobject]@{ Completed=$true; TimedOut=$false; ExitCode=[string]$output[0].ExitCode; Detail='Task and temporary endpoint script removed.' }
+        Write-SemtLogLine -Path $LogPath -Message ("{0} task finished and temporary payload was removed. Task={1}; ExitCode={2}; RpcFailures={3}" -f $Mode,$taskName,$output[0].ExitCode,$relay.Transient)
+        return [pscustomobject]@{ Completed=$true; TimedOut=$false; ExitCode=[string]$output[0].ExitCode; Detail='Task and temporary endpoint script removed.'; RpcTransientFailures=$relay.Transient; RpcUnavailable=$false }
     }
     catch {
         $detail = $_.Exception.Message
+        try { & $relayWarnings } catch { }
+        $unavailable = $detail -like '*SEMT_RPC_UNAVAILABLE*'
+        if ($unavailable) { $detail = ('RPC failures lasted {0} minute(s) or more in a row (window RemoteTaskRpcFailureWindowMinutes); task {1} was kept. {2}' -f $RpcFailureWindowMinutes,$taskName,$detail) }
         Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} task state or cleanup unconfirmed: {1}" -f $Mode,$detail)
-        return [pscustomobject]@{ Completed=$false; TimedOut=$false; ExitCode=''; Detail=$detail }
+        return [pscustomobject]@{ Completed=$false; TimedOut=$false; ExitCode=''; Detail=$detail; RpcTransientFailures=$relay.Transient; RpcUnavailable=$unavailable }
     }
     finally { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
 }
