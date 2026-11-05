@@ -80,6 +80,80 @@ function Get-WorkerEndpointArguments {
     return $resolved
 }
 
+function Invoke-WorkerPrerequisitesEndpoint {
+    # Copies and runs the Prerequisites endpoint with the same transport and its own correlation ID.
+    param([Parameter(Mandatory = $true)]$Auto)
+    $relative = [string]$Auto.RelativePath
+    $check = Test-SemtComponentIntegrity -PackageRoot $packageRoot -RelativePaths @($relative) -Mode ([string]$contract.Flags.ComponentIntegrityMode)
+    $sha = $check.Files[0].Sha256
+    if ($check.Blocking -or $sha -ne [string]$Auto.ExpectedSha256) {
+        return [pscustomobject]@{ State = 'IntegrityMismatch'; Detail = ('Prerequisites endpoint verification failed before copy. Launcher={0}; Worker={1}; {2}' -f $Auto.ExpectedSha256,$sha,$check.Summary) }
+    }
+    $local = Join-Path -Path $packageRoot -ChildPath $relative
+    $prerequisitesCorrelation = [guid]::NewGuid().ToString('N')
+    $dataRoot = [string]$Auto.RemoteDataRoot
+    $programRoot = Join-Path (Join-Path ([string]$Auto.RemoteProgramRoot) 'Attempts') $prerequisitesCorrelation
+    try { $payload = Copy-SemtRemotePayload -ConnectionTarget $target -LocalScriptPath $local -ExpectedSha256 $sha -RemoteDataRoot $dataRoot -RemoteProductRoot (Split-Path -Path $dataRoot -Parent) -RemoteProgramRoot $programRoot -LogPath $logPath }
+    catch { return [pscustomobject]@{ State = 'CopyFailed'; Detail = ('Prerequisites endpoint copy failed: {0}' -f $_.Exception.Message) } }
+    $prerequisitesArguments = @($Auto.Arguments | ForEach-Object { [string]$_ }) + @('-CorrelationId',$prerequisitesCorrelation)
+    # The Prerequisites endpoint only reads and registers tasks: 30 minutes is a generous bound.
+    $timeout = [int]$contract.PsExec.TimeoutMinutes
+    if ($timeout -le 0 -or $timeout -gt 30) { $timeout = 30 }
+    Write-SemtLogLine -Path $logPath -Message ("Automatic prerequisites: running the Prerequisites endpoint {0}. CorrelationId={1}; Arguments={2}" -f $Auto.ExpectedVersion,$prerequisitesCorrelation,($prerequisitesArguments -join ' '))
+    $transportDetail = ''
+    if ($remoteMode -eq 'PsExec') {
+        $run = Invoke-SemtPsExecEndpoint -PsExecPath ([string]$contract.PsExec.Path) -ConnectionTarget $target -RemoteScriptPath ([string]$payload.RemoteScriptPath) -Arguments $prerequisitesArguments -LogPath ('{0}.prerequisites' -f $logPath) -TimeoutMinutes $timeout -UseElevatedToken $false -LeasePath $leasePath
+        $transportDetail = ('PsExec exit code {0}' -f $run.ExitCode)
+        $done = Read-SemtRemoteAttemptResult -RemoteDataShare ([string]$payload.RemoteDataShare) -CorrelationId $prerequisitesCorrelation
+        if ($done.Completed -and -not $run.TimedOut) {
+            try { Remove-SemtTemporaryPayload -Path ([string]$payload.RemoteSharePath) -ExpectedSha256 $sha }
+            catch { Write-SemtLogLine -Path $logPath -Level WARN -Message ('Temporary Prerequisites payload cleanup failed: {0}' -f $_.Exception.Message) }
+        }
+    }
+    else {
+        $run = Invoke-SemtSystemTaskEndpoint -Mode $remoteMode -ConnectionTarget $target -CorrelationId $prerequisitesCorrelation -RemoteScriptPath ([string]$payload.RemoteScriptPath) -RemoteSharePath ([string]$payload.RemoteSharePath) -ExpectedSha256 $sha -Arguments $prerequisitesArguments -LogPath $logPath -TimeoutMinutes $timeout -LeasePath $leasePath -RpcFailureWindowMinutes ([int](Get-SemtPropertyValue -InputObject $contract.PsExec -Name 'RpcFailureWindowMinutes' -Default 30)) -RemoteDataShare ([string]$payload.RemoteDataShare)
+        $transportDetail = ('{0} completed={1}; exit code {2}' -f $remoteMode,$run.Completed,$run.ExitCode)
+        $done = Read-SemtRemoteAttemptResult -RemoteDataShare ([string]$payload.RemoteDataShare) -CorrelationId $prerequisitesCorrelation
+    }
+    if (-not $done.Completed) { return [pscustomobject]@{ State = 'Unconfirmed'; Detail = ('Prerequisites endpoint result not found ({0}). {1}' -f $transportDetail,$done.Detail) } }
+    $status = [string](Get-SemtPropertyValue -InputObject $done.Result -Name 'Status' -Default '')
+    $detail = [string](Get-SemtPropertyValue -InputObject $done.Result -Name 'Detail' -Default '')
+    # SKIPPED_* (virtual machine) and TARGET_* (computer busy) are refusals, not failures.
+    $state = if ($status -eq 'PREREQUISITES_READY') { 'Created' } elseif ($status -match '^(SKIPPED_|TARGET_)') { 'Skipped' } else { 'Failed' }
+    return [pscustomobject]@{ State = $state; Detail = ('Prerequisites endpoint {0}: {1} {2}' -f $prerequisitesCorrelation,$status,$detail) }
+}
+
+function Invoke-WorkerAutoPrerequisites {
+    <#
+    HybridJoin and Windows11Upgrade only: read-only check of the scheduled tasks the campaign needs.
+    When one is missing or outdated (or an obsolete one remains), the Prerequisites endpoint runs
+    first, unless the attempt is audit only (reported, nothing created). The campaign endpoint
+    always runs afterwards and reports any task that is still missing.
+    #>
+    param([AllowEmptyCollection()][string[]]$EndpointArguments)
+    $auto = Get-SemtPropertyValue -InputObject $contract -Name 'Prerequisites' -Default $null
+    if ($null -eq $auto -or -not [bool](Get-SemtPropertyValue -InputObject $auto -Name 'Enabled' -Default $false) -or $campaign -notin @('HybridJoin','Windows11Upgrade')) { return }
+    $remote = Get-SemtRemotePrerequisiteTaskState -ConnectionTarget $target -Campaign $campaign -Mode $remoteMode
+    Write-SemtLogLine -Path $logPath -Message ("Automatic prerequisites check: {0}; {1}" -f $remote.Decision,$remote.Detail)
+    $state = $remote.Decision
+    $detail = $remote.Detail
+    if ($remote.Decision -eq 'NeedsRun') {
+        if (@($EndpointArguments) -contains '-AuditOnly') {
+            $state = 'MissingAuditOnly'
+            $detail = ('Audit only: the Prerequisites endpoint was not run. {0}' -f $remote.Detail)
+        }
+        else {
+            $run = Invoke-WorkerPrerequisitesEndpoint -Auto $auto
+            $state = $run.State
+            $detail = ('{0} Before: {1}' -f $run.Detail,$remote.Detail)
+        }
+    }
+    $level = if ($state -in @('Ready','Created','MissingAuditOnly')) { 'INFO' } else { 'WARN' }
+    Write-SemtLogLine -Path $logPath -Level $level -Message ("Automatic prerequisites: State={0}; {1}" -f $state,$detail)
+    $result['PrerequisitesAutoState'] = $state
+    $result['PrerequisitesAutoDetail'] = $detail
+}
+
 function Get-WorkerNextAction {
     param([string]$Status)
     $campaignAction = & $campaignProfile.Hooks.NextAction $Status
@@ -159,6 +233,15 @@ try {
         if ([string]::IsNullOrWhiteSpace($remoteProgramRoot)) { throw 'SEMT_CONTRACT_INVALID: Endpoint.RemoteProgramRoot is missing; the endpoint is never started from ProgramData.' }
         if ($correlationId -notmatch '^[a-fA-F0-9]{32}$') { throw 'SEMT_CONTRACT_INVALID: invalid correlation ID.' }
         $remoteProgramRoot = Join-Path (Join-Path $remoteProgramRoot 'Attempts') $correlationId
+        if ($access.AdminShareReachable) {
+            try { Invoke-WorkerAutoPrerequisites -EndpointArguments @(Get-WorkerEndpointArguments -Arguments @($contract.Endpoint.Arguments | ForEach-Object { [string]$_ }) -LicensePreflight $licensePreflight) }
+            catch {
+                $result['PrerequisitesAutoState'] = 'Error'
+                $result['PrerequisitesAutoDetail'] = $_.Exception.Message
+                Write-SemtLogLine -Path $logPath -Level WARN -Message ("Automatic prerequisites failed; the campaign endpoint still runs: {0}" -f $_.Exception.Message)
+            }
+            [void](Update-SemtWorkerLease -LeasePath $leasePath)
+        }
         $copied = $null
         $copyError = ''
         for ($attempt = 1; $attempt -le 3; $attempt++) {

@@ -152,8 +152,9 @@ alone does not confirm that its Intune service plan is enabled.
 ## Prerequisites Campaign (scheduled tasks)
 
 The `HybridJoin` and `Windows11Upgrade` endpoint scripts never create, change or delete a
-scheduled task definition. Every task they use is created by the `Prerequisites` Campaign, run
-beforehand on the same computers:
+scheduled task definition. Every task they use is created by the `Prerequisites` endpoint, either
+run as its own Campaign beforehand or started automatically by the worker when a task is missing
+(see "Automatic prerequisites" below):
 
 | Task | Used by | Created |
 | --- | --- | --- |
@@ -176,6 +177,28 @@ the user context the tool returns `0x80070005`). Its own exit code is logged. Wh
 still not confirmed and an MDM `UserLicense` / `0x80180018` fault was logged after the trigger, the
 status is `INTUNE_USER_LICENSE_REJECTED` (NextAction `ASSIGN_USER_INTUNE_LICENSE`). The Prerequisites
 Campaign removes the obsolete `SEMT-HJ-UserMdmAutoEnroll` task (reported only with `AuditOnly`).
+
+### Automatic prerequisites (`AutoPrerequisites`, default on)
+
+Before a `HybridJoin` or `Windows11Upgrade` endpoint runs, the worker reads the target scheduled
+tasks from the technician computer (remote Task Scheduler; read only, nothing started). It runs the
+Prerequisites endpoint for this Campaign only (`-HybridJoinTasks` or `-Windows11UpgradeTasks`), with
+the same transport and its own correlation ID, when a task above is missing, has another action or
+no trigger, or when the obsolete `SEMT-HJ-UserMdmAutoEnroll` task remains. Then the Campaign
+endpoint runs as usual. The report shows `PrerequisitesAutoState`:
+
+| State | Meaning |
+| --- | --- |
+| `Ready` | All tasks present; the Prerequisites endpoint was not run. |
+| `Created` | The Prerequisites endpoint ran first and returned `PREREQUISITES_READY`. |
+| `MissingAuditOnly` | A task is missing or outdated; with `AuditOnly` (or a user license audit) nothing is created. |
+| `CheckFailed` | The tasks could not be read (access, RPC); the Prerequisites endpoint was not run. |
+| `Skipped` | The Prerequisites endpoint declined (virtual machine skipped, target busy or Windows Setup active). |
+| `Failed`, `Unconfirmed`, `CopyFailed`, `IntegrityMismatch`, `Error` | The Prerequisites run did not confirm the tasks; details in `PrerequisitesAutoDetail` and the worker log. |
+
+In every case the Campaign endpoint still runs and reports any task that is still missing. A dry
+run checks nothing. This does not depend on `Prerequisites.Enabled`, which only controls the
+standalone Campaign; set `AutoPrerequisites` to false to keep the previous behaviour.
 
 The Campaign is **disabled by default**. Set `"Prerequisites.Enabled": true` in
 `Config\SmartEndpointMigrationToolkit.local.json.txt` (or `SEMT_PREREQUISITES_ENABLED=1`, or

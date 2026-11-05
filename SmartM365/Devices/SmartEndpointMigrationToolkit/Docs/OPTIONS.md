@@ -27,6 +27,12 @@ global configuration, `SEMT_PREREQUISITES_ENABLED` and an explicit `-Option` dec
 GUI choice cannot enable it, and Wave templates do not carry it. While it is false the engine
 refuses the Campaign before writing anything (`SEMT_CAMPAIGN_DISABLED`) and the GUI does not list it.
 
+`AutoPrerequisites` (default true): HybridJoin and Windows11Upgrade workers read the target
+scheduled tasks first (read only) and run the Prerequisites endpoint for that Campaign when a task
+is missing or outdated, then the Campaign. In audit only it is reported (`MissingAuditOnly`) and
+nothing is created. It does not depend on `Prerequisites.Enabled`; false keeps the previous
+behaviour (tasks created only by the Prerequisites Campaign).
+
 Every Run records `EffectiveOptions.json.txt` (value and source of each option) and the report shows
 the same table. The GUI keeps its last choices per Campaign in `Config\GuiState.<Campaign>.local.json.txt`.
 
@@ -77,6 +83,7 @@ Generated from catalog SHA256 `6E1175524CD681B0121C338CCFA44AD4B75CD5A799B07A4A6
 | `WorkerHeartbeatStaleMinutes` | Integer | 10 minutes | 2..240 | `SEMT_WORKER_HEARTBEAT_STALE_MINUTES` | Parallelism | no |
 | `PsExecTimeoutMinutes` | Integer | HJ: 120; W11: 360 minutes | 0..1440 | `SEMT_PSEXEC_TIMEOUT_MINUTES` | Parallelism | yes |
 | `RemoteTaskRpcFailureWindowMinutes` | Integer | 30 minutes | 0..1440 | `SEMT_REMOTE_TASK_RPC_FAILURE_WINDOW_MINUTES` | Parallelism | no |
+| `AutoPrerequisites` | Boolean | True |  | `SEMT_AUTO_PREREQUISITES` | Actions | yes |
 | `CancellationDrainTimeoutMinutes` | Integer | 15 minutes | 0..1440 | `SEMT_CANCELLATION_DRAIN_TIMEOUT_MINUTES` | Parallelism | no |
 | `DnsPreflightBlocksCycle` | Boolean | True |  | `SEMT_DNS_PREFLIGHT_BLOCKS_CYCLE` | Network | yes |
 | `DnsPreflightSampleSize` | Integer | 5 computers | 1..50 | `SEMT_DNS_PREFLIGHT_SAMPLE_SIZE` | Network | no |

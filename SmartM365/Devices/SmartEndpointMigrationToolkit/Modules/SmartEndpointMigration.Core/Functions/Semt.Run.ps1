@@ -494,6 +494,7 @@ function New-SemtWorkerContract {
         [Parameter(Mandatory = $true)][hashtable]$Flags,
         [hashtable]$Gate = @{},
         [hashtable]$CampaignData = @{},
+        [hashtable]$Prerequisites = @{},
         [string]$CorrelationId
     )
 
@@ -518,6 +519,7 @@ function New-SemtWorkerContract {
         Flags = $Flags
         Gate = $Gate
         CampaignData = $CampaignData
+        Prerequisites = $Prerequisites
     }
     $safe = Get-SemtSafeName -Value ($Computer.Split('.')[0]) -MaxLength 40
     $path = Join-Path -Path $RunContext.ContractRoot -ChildPath ('C{0}_{1}_{2}.json.txt' -f $CycleNumber,$safe,$contract.ContractId.Substring(0, 8))

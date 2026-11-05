@@ -35,7 +35,7 @@ $script:Windows11ExtensionFields = @(
     'RetryAfterRebootAction','RetryAfterRebootDetail','RetryAfterRebootAttempt','RetryAfterRebootMaxAttempts','RetryAfterRebootTaskName',
     'UserRebootNotificationSent','UserRebootNotificationLang','UserRebootNotificationMessage'
 )
-$script:Windows11EngineFields = @('RetryAfterUtc','FailureCategory','ConsecutiveFailureCount')
+$script:Windows11EngineFields = @('RetryAfterUtc','FailureCategory','ConsecutiveFailureCount','PrerequisitesAutoState','PrerequisitesAutoDetail')
 $script:Windows11StartedNoResultHours = 4
 
 function Get-Windows11NextAction {
@@ -336,7 +336,7 @@ function Get-SemtWindows11UpgradeProfile {
 
     $coreColumns = @('Timestamp','CycleNumber','ComputerName','ConnectionTarget','RemoteExecutionMode','Status','NextAction','LauncherStatus','RemoteStatus','RemoteNextAction','ExitCode','Detail','RetryAfterUtc','FailureCategory','ConsecutiveFailureCount','DnsResolved','DnsAddressList','PingReachable','SmbPort445Reachable','AdminShareReachable','AdminShareFailureType','RemotePayloadCopyAttempts','LocalScriptVersion','LocalScriptSha256','RemoteScriptSha256','PsExecExitCode','TargetGuardStatus')
     $tail = @('RemoteLogsPath','PsExecLogPath','JobErrorMessage','CorrelationId','RunId','WaveName','Campaign','WorkerContractVersion')
-    $columns = @($coreColumns) + @($script:Windows11ExtensionFields) + @(Get-SemtInventoryFieldNames -Kind AD) + @(Get-SemtInventoryFieldNames -Kind Intune) + $tail
+    $columns = @($coreColumns) + @($script:Windows11ExtensionFields) + @(Get-SemtInventoryFieldNames -Kind AD) + @(Get-SemtInventoryFieldNames -Kind Intune) + @('PrerequisitesAutoState','PrerequisitesAutoDetail') + $tail
     return [pscustomobject]@{
         Campaign = 'Windows11Upgrade'
         Title = 'Windows 11 upgrade'

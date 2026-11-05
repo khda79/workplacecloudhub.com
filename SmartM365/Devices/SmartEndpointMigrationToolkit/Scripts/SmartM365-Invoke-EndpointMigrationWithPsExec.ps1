@@ -163,6 +163,10 @@ function Opt([string]$Name) { return (Get-SemtOption -Options $script:Options -N
 
 #region Integrity, identity and manifest
 
+# Automatic prerequisites: HybridJoin and Windows11Upgrade workers check the target scheduled tasks
+# and run the Prerequisites endpoint first when one is missing or outdated (option AutoPrerequisites).
+$autoPrerequisitesRelativePath = 'Campaigns\Prerequisites\Scripts\SmartM365-Invoke-EndpointMigration-Prerequisites.ps1'
+$useAutoPrerequisites = [bool](($Campaign -in @('HybridJoin','Windows11Upgrade')) -and (Opt 'AutoPrerequisites'))
 $componentPaths = @(
     'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1',
     'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psm1'
@@ -174,6 +178,7 @@ $componentPaths = @(
     'Config\SmartEndpointMigrationToolkit.options.json.txt',
     $script:CampaignProfile.EndpointScriptRelativePath
 )
+if ($useAutoPrerequisites) { $componentPaths += $autoPrerequisitesRelativePath }
 $script:Integrity = Test-SemtComponentIntegrity -PackageRoot $script:PackageRoot -RelativePaths $componentPaths -Mode (Opt 'ComponentIntegrityMode')
 $script:Technician = Get-SemtTechnicianIdentity
 $endpointLocalPath = Join-Path $script:PackageRoot $script:CampaignProfile.EndpointScriptRelativePath
@@ -181,6 +186,23 @@ $script:EndpointSha256 = Get-SemtFileSha256 -Path $endpointLocalPath
 $script:EndpointVersion = Get-SemtScriptVersion -Path $endpointLocalPath
 $script:TargetDataRoot = Get-SemtTargetCampaignRoot -Campaign $Campaign
 $script:TargetProgramRoot = Get-SemtTargetProgramRoot -Campaign $Campaign
+$script:AutoPrerequisites = @{ Enabled = $false }
+if ($useAutoPrerequisites) {
+    $prerequisitesLocalPath = Join-Path $script:PackageRoot $autoPrerequisitesRelativePath
+    $prerequisitesDataRoot = Get-SemtTargetCampaignRoot -Campaign 'Prerequisites'
+    $prerequisitesArguments = @($(if ($Campaign -eq 'HybridJoin') { '-HybridJoinTasks' } else { '-Windows11UpgradeTasks' }))
+    if (Opt 'SkipVirtualMachines') { $prerequisitesArguments += '-SkipVirtualMachines' }
+    $prerequisitesArguments += @('-DataRoot',$prerequisitesDataRoot)
+    $script:AutoPrerequisites = @{
+        Enabled = $true
+        RelativePath = $autoPrerequisitesRelativePath
+        ExpectedSha256 = (Get-SemtFileSha256 -Path $prerequisitesLocalPath)
+        ExpectedVersion = (Get-SemtScriptVersion -Path $prerequisitesLocalPath)
+        RemoteDataRoot = $prerequisitesDataRoot
+        RemoteProgramRoot = (Get-SemtTargetProgramRoot -Campaign 'Prerequisites')
+        Arguments = @($prerequisitesArguments)
+    }
+}
 
 Write-SemtJsonFileAtomic -Path $script:RunContext.EffectiveOptionsPath -InputObject ([pscustomobject]@{
     SchemaVersion = 1
@@ -433,6 +455,7 @@ $baseEndpointArguments = @(ConvertTo-SemtEndpointArguments -Catalog $catalog -Ca
 if ($Campaign -eq 'Windows11Upgrade') { $baseEndpointArguments += @('-SetupCacheRoot',(Join-Path $script:TargetDataRoot 'SetupMedia')) }
 $useRunGuard = [bool]((Opt 'UseTechnicianRunGuard') -and -not (Opt 'IgnoreEndpointRunGuard') -and -not (Opt 'DryRun') -and (Opt 'TechnicianRunGuardHours') -gt 0)
 Write-Host ("Technician run guard: Effective={0}; Hours={1}; History={2}" -f $useRunGuard,(Opt 'TechnicianRunGuardHours'),(Get-SemtRunGuardHistoryPath -Campaign $Campaign)) -ForegroundColor DarkCyan
+if ($Campaign -in @('HybridJoin','Windows11Upgrade')) { Write-Host ("Automatic prerequisites: Effective={0}; Prerequisites endpoint version={1} (runs only when a required task is missing or outdated; reported only in audit)" -f [bool]$script:AutoPrerequisites.Enabled,$(if ($script:AutoPrerequisites.Enabled) { $script:AutoPrerequisites.ExpectedVersion } else { '-' })) -ForegroundColor DarkCyan }
 $cycle = 0
 $stopReason = 'Finished'
 $lastCycleRows = @()
@@ -565,7 +588,7 @@ try {
                     -PsExec @{ Path = $script:ResolvedPsExec; Sha256 = $script:PsExecEvidence.SHA256; TimeoutMinutes = (Opt 'PsExecTimeoutMinutes'); RpcFailureWindowMinutes = (Opt 'RemoteTaskRpcFailureWindowMinutes'); UseElevatedToken = [bool]$script:CampaignProfile.PsExecUseElevatedToken; CommunicationLostWaitMinutes = $(if ($waitOption) { Opt $waitOption } else { 0 }); CommunicationLostPollMinutes = $(if ($pollOption) { Opt $pollOption } else { 10 }) } `
                     -Evidence @{ Enabled = [bool](Opt 'CentralLogCollection'); Mode = (Opt 'CentralLogCollectionMode'); KeepHistory = [bool](Opt 'KeepCentralLogHistory'); LogRoot = $script:RunContext.PsExecLogRoot; CentralLogRoot = $script:RunContext.CentralLogRoot } `
                     -Flags @{ DryRun = [bool](Opt 'DryRun'); ComponentIntegrityMode = (Opt 'ComponentIntegrityMode'); RemoteExecutionMode = (Opt 'RemoteExecutionMode') } `
-                    -Gate @{ LeasePath = $leasePath }
+                    -Gate @{ LeasePath = $leasePath } -Prerequisites $script:AutoPrerequisites
                 $jobName = 'SEMT_{0}_C{1}_{2}' -f $Campaign,$cycle,$computer
                 $start = Start-WorkerJobWithRetry -JobName $jobName -WorkerPath $workerPath -ContractPath $contract.Path -Computer $computer
                 if (-not $start.Succeeded) {

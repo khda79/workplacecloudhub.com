@@ -10,7 +10,11 @@
     Hybrid Join consumer functions: missing user-context tasks are reported; deviceenroller runs
     from SYSTEM with its real exit code; a UserLicense fault after the trigger is found; the
     next-logon task is only enabled (when up to date) or disabled.
-    No scheduled task, registry, network or endpoint run on the computer.
+    Automatic prerequisites: the launcher expectations match the endpoint definitions; outdated,
+    missing, obsolete and unreadable tasks are classified; the worker runs the Prerequisites
+    endpoint only when needed and never in audit (remote check and run stubbed).
+    No scheduled task, registry or endpoint run on the computer; the only network use is one DNS
+    lookup of a .invalid name.
     Prints one PASS/FAIL line per assertion and "Summary: Passed=N; Failed=M". Exits 1 on failure.
     Runs on Windows PowerShell 5.1 and PowerShell 7.
 .VERSION
@@ -258,6 +262,118 @@ try {
 
     $hjText = [IO.File]::ReadAllText($hjEndpoint)
     Test-Step 'Hybrid Join: no user-context deviceenroller task and no native task fallback remain' { $hjText -notmatch 'SEMT-HJ-UserMdmAutoEnroll|Start-UserContextIntuneAutoEnrollment|Get-NativeMdmAutoEnrollmentTask' -and $hjText -match '"INTUNE_USER_LICENSE_REJECTED" \{ return "ASSIGN_USER_INTUNE_LICENSE" \}' }
+    #endregion
+    #region Automatic prerequisites (launcher check and worker decision)
+    Import-Module (Join-Path $packageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -Force -ErrorAction Stop
+    function Get-DefinitionsFor {
+        param([string]$Campaign)
+        $HybridJoinTasks = ($Campaign -eq 'HybridJoin'); $Windows11UpgradeTasks = ($Campaign -eq 'Windows11Upgrade')
+        return @(Get-PrerequisiteTaskDefinitions | Where-Object { $_.Campaign -eq $Campaign })
+    }
+    function ConvertTo-ReadFromDefinition {
+        param($Definition)
+        return [pscustomobject]@{
+            Exists = $true; Error = ''
+            Actions = @($Definition.Actions | ForEach-Object { '{0}|{1}' -f [Environment]::ExpandEnvironmentVariables([string]$_.Execute),[string]$_.Arguments })
+            TriggerCount = $(if ($Definition.Trigger -eq 'None') { 0 } else { 1 })
+        }
+    }
+    foreach ($campaignName in @('HybridJoin','Windows11Upgrade')) {
+        $definitions = @(Get-DefinitionsFor -Campaign $campaignName)
+        $required = @(Get-SemtPrerequisiteTaskExpectations -Campaign $campaignName | Where-Object { $_.Kind -eq 'Required' })
+        Test-Step ('Automatic prerequisites: {0} expectations list the same tasks as the Prerequisites endpoint' -f $campaignName) {
+            $left = @($definitions | ForEach-Object { $_.TaskPath + $_.TaskName } | Sort-Object)
+            $right = @($required | ForEach-Object { $_.TaskPath + $_.TaskName } | Sort-Object)
+            $left.Count -gt 0 -and (($left -join ';') -eq ($right -join ';'))
+        }
+        Test-Step ('Automatic prerequisites: {0} tasks created by the Prerequisites endpoint are seen as present' -f $campaignName) {
+            $states = @($required | ForEach-Object {
+                $expectation = $_
+                $definition = @($definitions | Where-Object { $_.TaskPath -eq $expectation.TaskPath -and $_.TaskName -eq $expectation.TaskName })[0]
+                Test-SemtPrerequisiteTaskReadState -Expectation $expectation -Read (ConvertTo-ReadFromDefinition -Definition $definition)
+            })
+            @($states | Where-Object { $_ -ne 'Present' }).Count -eq 0
+        }
+    }
+    $prereqText = [IO.File]::ReadAllText($prereqEndpoint)
+    $obsolete = @(Get-SemtPrerequisiteTaskExpectations -Campaign 'HybridJoin' | Where-Object { $_.Kind -eq 'Obsolete' })
+    Test-Step 'Automatic prerequisites: the obsolete task is the one the Prerequisites endpoint removes' {
+        $obsolete.Count -eq 1 -and $prereqText.Contains(("Remove-PrerequisiteObsoleteTask -Campaign 'HybridJoin' -TaskPath `$script:SemtHybridJoinTaskPath -TaskName '{0}'" -f $obsolete[0].TaskName))
+    }
+
+    $hjExpectations = @(Get-SemtPrerequisiteTaskExpectations -Campaign 'HybridJoin')
+    $refreshPrt = @($hjExpectations | Where-Object { $_.TaskName -eq 'SEMT-HJ-UserRefreshPrt' })[0]
+    $logon = @($hjExpectations | Where-Object { $_.TaskName -eq 'SEMT-HJ-RunUserAutoEnrollAtLogon' })[0]
+    $retry = @($hjExpectations | Where-Object { $_.TaskName -eq 'SmartM365-SEMT-HybridJoin-RetryAfterReboot' })[0]
+    Test-Step 'Automatic prerequisites: older RefreshPrt task started through cmd.exe is outdated' {
+        (Test-SemtPrerequisiteTaskReadState -Expectation $refreshPrt -Read ([pscustomobject]@{ Exists = $true; Error = ''; TriggerCount = 0; Actions = @('C:\WINDOWS\System32\cmd.exe|/d /c %windir%\System32\dsregcmd.exe /refreshprt') })) -eq 'Outdated'
+    }
+    Test-Step 'Automatic prerequisites: logon task without the SYSTEM deviceenroller action is outdated' {
+        (Test-SemtPrerequisiteTaskReadState -Expectation $logon -Read ([pscustomobject]@{ Exists = $true; Error = ''; TriggerCount = 1; Actions = @('C:\WINDOWS\System32\schtasks.exe|/Run /TN "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserDsregStatus"','C:\WINDOWS\System32\schtasks.exe|/Run /TN "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserMdmAutoEnroll"') })) -eq 'Outdated'
+    }
+    Test-Step 'Automatic prerequisites: retry task without trigger is outdated; missing task is missing; read error is unknown' {
+        $retryRead = [pscustomobject]@{ Exists = $true; Error = ''; TriggerCount = 0; Actions = @('C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe|-NoProfile -ExecutionPolicy RemoteSigned -File "C:\Program Files\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\RetryAfterReboot\RetryAfterRebootRunner.ps1"') }
+        $outdated = Test-SemtPrerequisiteTaskReadState -Expectation $retry -Read $retryRead
+        $retryRead.TriggerCount = 1
+        $present = Test-SemtPrerequisiteTaskReadState -Expectation $retry -Read $retryRead
+        $missing = Test-SemtPrerequisiteTaskReadState -Expectation $retry -Read ([pscustomobject]@{ Exists = $false; Error = ''; TriggerCount = 0; Actions = @() })
+        $unknown = Test-SemtPrerequisiteTaskReadState -Expectation $retry -Read ([pscustomobject]@{ Exists = $false; Error = 'Access is denied.'; TriggerCount = 0; Actions = @() })
+        $outdated -eq 'Outdated' -and $present -eq 'Present' -and $missing -eq 'Missing' -and $unknown -eq 'Unknown' -and (Test-SemtPrerequisiteTaskReadState -Expectation $retry -Read $null) -eq 'Unknown'
+    }
+    Test-Step 'Automatic prerequisites: obsolete task present or absent' {
+        (Test-SemtPrerequisiteTaskReadState -Expectation $obsolete[0] -Read ([pscustomobject]@{ Exists = $true; Error = ''; TriggerCount = 0; Actions = @('x|y') })) -eq 'Obsolete' -and (Test-SemtPrerequisiteTaskReadState -Expectation $obsolete[0] -Read ([pscustomobject]@{ Exists = $false; Error = ''; TriggerCount = 0; Actions = @() })) -eq 'Absent'
+    }
+    Test-Step 'Automatic prerequisites: decision is NeedsRun when proven missing, CheckFailed when only unreadable, Ready otherwise' {
+        $row = { param($name,$state) [pscustomobject]@{ TaskName = $name; State = $state } }
+        (Get-SemtPrerequisiteTaskSummary -Tasks @((& $row 'A' 'Present'),(& $row 'B' 'Unknown'),(& $row 'C' 'Missing'))).Decision -eq 'NeedsRun' -and
+        (Get-SemtPrerequisiteTaskSummary -Tasks @((& $row 'A' 'Present'),(& $row 'B' 'Obsolete'))).Decision -eq 'NeedsRun' -and
+        (Get-SemtPrerequisiteTaskSummary -Tasks @((& $row 'A' 'Present'),(& $row 'B' 'Unknown'))).Decision -eq 'CheckFailed' -and
+        (Get-SemtPrerequisiteTaskSummary -Tasks @((& $row 'A' 'Present'),(& $row 'B' 'Absent'))).Decision -eq 'Ready'
+    }
+    Test-Step 'Automatic prerequisites: an unreachable target gives CheckFailed (nothing run)' {
+        $unreachable = Get-SemtRemotePrerequisiteTaskState -ConnectionTarget 'semt-qualif-unreachable.invalid' -Campaign 'Windows11Upgrade' -TimeoutSeconds 60
+        $unreachable.Decision -eq 'CheckFailed' -and @($unreachable.Tasks | Where-Object { $_.State -ne 'Unknown' }).Count -eq 0
+    }
+
+    # Worker decision with the remote check and the Prerequisites run stubbed.
+    $workerPath = Join-Path $packageRoot 'Scripts\SmartM365-EndpointMigration-PsExecWorker.ps1'
+    . ([scriptblock]::Create((Get-FunctionText -Path $workerPath -Name @('Invoke-WorkerAutoPrerequisites'))))
+    $script:RemoteDecision = 'Ready'
+    $script:PrerequisitesRuns = 0
+    function Get-SemtRemotePrerequisiteTaskState { param($ConnectionTarget,$Campaign,$Mode) [pscustomobject]@{ Decision = $script:RemoteDecision; Detail = 'synthetic'; Tasks = @() } }
+    function Invoke-WorkerPrerequisitesEndpoint { param($Auto) $script:PrerequisitesRuns++; [pscustomobject]@{ State = 'Created'; Detail = 'synthetic run.' } }
+    function Write-SemtLogLine { param($Path,$Message,$Level) }
+    function Invoke-WorkerDecision {
+        param([string]$Decision,[string[]]$Arguments,[bool]$Enabled = $true,[string]$CampaignName = 'HybridJoin')
+        $script:RemoteDecision = $Decision
+        $script:PrerequisitesRuns = 0
+        $contract = [pscustomobject]@{ Prerequisites = [pscustomobject]@{ Enabled = $Enabled } }
+        $campaign = $CampaignName; $target = 'pc'; $remoteMode = 'ScheduledTask'; $logPath = ''
+        $result = [ordered]@{}
+        Invoke-WorkerAutoPrerequisites -EndpointArguments $Arguments
+        return [pscustomobject]@{ State = [string]$result['PrerequisitesAutoState']; Runs = $script:PrerequisitesRuns; Has = $result.Contains('PrerequisitesAutoState') }
+    }
+    Test-Step 'Worker: tasks ready => the Prerequisites endpoint is not run' { $r = Invoke-WorkerDecision -Decision 'Ready' -Arguments @('-DataRoot','x'); $r.State -eq 'Ready' -and $r.Runs -eq 0 }
+    Test-Step 'Worker: tasks missing => the Prerequisites endpoint runs first' { $r = Invoke-WorkerDecision -Decision 'NeedsRun' -Arguments @('-DataRoot','x'); $r.State -eq 'Created' -and $r.Runs -eq 1 }
+    Test-Step 'Worker: tasks missing in audit only => reported, nothing run' { $r = Invoke-WorkerDecision -Decision 'NeedsRun' -Arguments @('-AuditOnly','-DataRoot','x'); $r.State -eq 'MissingAuditOnly' -and $r.Runs -eq 0 }
+    Test-Step 'Worker: unreadable tasks => CheckFailed, nothing run' { $r = Invoke-WorkerDecision -Decision 'CheckFailed' -Arguments @(); $r.State -eq 'CheckFailed' -and $r.Runs -eq 0 }
+    Test-Step 'Worker: option off or Prerequisites campaign => no check' { (-not (Invoke-WorkerDecision -Decision 'NeedsRun' -Arguments @() -Enabled $false).Has) -and (-not (Invoke-WorkerDecision -Decision 'NeedsRun' -Arguments @() -CampaignName 'Prerequisites').Has) }
+
+    $workerText = [IO.File]::ReadAllText($workerPath)
+    Test-Step 'Worker: automatic prerequisites run after the dry-run branch and before the campaign payload copy' {
+        $dry = $workerText.IndexOf("if ([bool]`$contract.Flags.DryRun) {")
+        $auto = $workerText.IndexOf('try { Invoke-WorkerAutoPrerequisites')
+        $copy = $workerText.IndexOf('$copied = Copy-SemtRemotePayload')
+        $dry -gt 0 -and $auto -gt $dry -and $copy -gt $auto
+    }
+    $launcherText = [IO.File]::ReadAllText((Join-Path $packageRoot 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'))
+    $catalogText = [IO.File]::ReadAllText((Join-Path $packageRoot 'Config\SmartEndpointMigrationToolkit.options.json.txt'))
+    Test-Step 'Launcher: AutoPrerequisites option (default on) adds the Prerequisites endpoint to the integrity check and the worker contract' {
+        $catalogText -match '"Name": "AutoPrerequisites", "Scope": "Common", "Type": "Boolean", "Default": true' -and
+        $launcherText.Contains('if ($useAutoPrerequisites) { $componentPaths += $autoPrerequisitesRelativePath }') -and
+        $launcherText.Contains('-Prerequisites $script:AutoPrerequisites') -and
+        $launcherText.Contains("`$prerequisitesArguments = @(`$(if (`$Campaign -eq 'HybridJoin') { '-HybridJoinTasks' } else { '-Windows11UpgradeTasks' }))")
+    }
     #endregion
 }
 catch {

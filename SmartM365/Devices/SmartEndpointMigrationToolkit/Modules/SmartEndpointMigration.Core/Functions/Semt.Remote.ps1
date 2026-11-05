@@ -398,6 +398,160 @@ function Invoke-SemtPsExecEndpoint {
     }
 }
 
+#region Automatic prerequisites
+
+function Get-SemtPrerequisiteTaskExpectations {
+    <#
+    Read-only summary of the scheduled tasks that the Prerequisites endpoint creates for a campaign
+    (see Get-PrerequisiteTaskDefinitions in the Prerequisites endpoint; Test-SemtPrerequisites keeps
+    both lists consistent). Each action is compared as 'Path|Arguments' against ActionPatterns, in
+    order. Obsolete tasks must be absent: the Prerequisites endpoint removes them.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade')][string]$Campaign)
+
+    $hybridJoinPath = '\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\'
+    $expectations = New-Object System.Collections.Generic.List[object]
+    if ($Campaign -eq 'HybridJoin') {
+        $expectations.Add([pscustomobject]@{ Kind = 'Required'; TaskPath = $hybridJoinPath; TaskName = 'SEMT-HJ-UserDsregStatus'; MinimumTriggers = 0; ActionPatterns = @('(?i)^(.*\\)?cmd\.exe\|.*\\dsregcmd\.exe /status > .*SEMT-HJ-UserDsregStatus_%USERNAME%\.txt 2>&1$') })
+        $expectations.Add([pscustomobject]@{ Kind = 'Required'; TaskPath = $hybridJoinPath; TaskName = 'SEMT-HJ-UserRefreshPrt'; MinimumTriggers = 0; ActionPatterns = @('(?i)^(.*\\)?dsregcmd\.exe\|/refreshprt$') })
+        $expectations.Add([pscustomobject]@{ Kind = 'Required'; TaskPath = $hybridJoinPath; TaskName = 'SEMT-HJ-RunUserAutoEnrollAtLogon'; MinimumTriggers = 1; ActionPatterns = @('(?i)^(.*\\)?schtasks\.exe\|/Run /TN "\\WCH\\SmartM365\\SmartEndpointMigrationToolkit\\HybridJoin\\SEMT-HJ-UserDsregStatus"$','(?i)^(.*\\)?deviceenroller\.exe\|/c /AutoEnrollMDM$') })
+        $expectations.Add([pscustomobject]@{ Kind = 'Obsolete'; TaskPath = $hybridJoinPath; TaskName = 'SEMT-HJ-UserMdmAutoEnroll'; MinimumTriggers = 0; ActionPatterns = @() })
+    }
+    $runner = [regex]::Escape(('\WCH\SmartM365\SmartEndpointMigrationToolkit\{0}\RetryAfterReboot\RetryAfterRebootRunner.ps1' -f $Campaign))
+    $expectations.Add([pscustomobject]@{ Kind = 'Required'; TaskPath = '\'; TaskName = ('SmartM365-SEMT-{0}-RetryAfterReboot' -f $Campaign); MinimumTriggers = 1; ActionPatterns = @(('(?i)^(.*\\)?powershell\.exe\|-NoProfile -ExecutionPolicy RemoteSigned -File ".*{0}"$' -f $runner)) })
+    return @($expectations.ToArray())
+}
+
+function Test-SemtPrerequisiteTaskReadState {
+    <#
+    Compares one task read from the target with its expectation. Returns Present, Missing,
+    Outdated, Obsolete (an obsolete task still exists), Absent (an obsolete task is gone) or
+    Unknown (the task could not be read).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Expectation,[AllowNull()]$Read)
+
+    $readError = [string](Get-SemtPropertyValue -InputObject $Read -Name 'Error' -Default '')
+    if ($null -eq $Read -or -not [string]::IsNullOrWhiteSpace($readError)) { return 'Unknown' }
+    $exists = [bool](Get-SemtPropertyValue -InputObject $Read -Name 'Exists' -Default $false)
+    if ($Expectation.Kind -eq 'Obsolete') { if ($exists) { return 'Obsolete' } else { return 'Absent' } }
+    if (-not $exists) { return 'Missing' }
+    $actions = @(Get-SemtPropertyValue -InputObject $Read -Name 'Actions' -Default @() | ForEach-Object { [string]$_ })
+    $patterns = @($Expectation.ActionPatterns)
+    if ($actions.Count -ne $patterns.Count) { return 'Outdated' }
+    for ($index = 0; $index -lt $patterns.Count; $index++) {
+        if ($actions[$index] -notmatch $patterns[$index]) { return 'Outdated' }
+    }
+    if ([int](Get-SemtPropertyValue -InputObject $Read -Name 'TriggerCount' -Default 0) -lt [int]$Expectation.MinimumTriggers) { return 'Outdated' }
+    return 'Present'
+}
+
+function Get-SemtPrerequisiteTaskSummary {
+    <#
+    Decision from the per-task states: NeedsRun when a task is proven missing, outdated or
+    obsolete; CheckFailed when nothing is proven missing but a task could not be read; Ready
+    otherwise.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Tasks)
+
+    $states = @($Tasks | ForEach-Object { [string]$_.State })
+    $decision = 'Ready'
+    if (@($states | Where-Object { $_ -in @('Missing','Outdated','Obsolete') }).Count -gt 0) { $decision = 'NeedsRun' }
+    elseif (@($states | Where-Object { $_ -eq 'Unknown' }).Count -gt 0) { $decision = 'CheckFailed' }
+    $detail = (@($Tasks | ForEach-Object { '{0}={1}' -f $_.TaskName,$_.State }) -join '; ')
+    return [pscustomobject]@{ Decision = $decision; Detail = $detail; Tasks = @($Tasks) }
+}
+
+function Get-SemtRemotePrerequisiteTaskState {
+    <#
+    Read-only check, from the technician computer, of the scheduled tasks that a campaign needs on
+    the target. ScheduledTask and PsExec modes read the remote Task Scheduler (RPC); WinRM reads it
+    on the target. Nothing is created, changed, started or deleted.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ConnectionTarget,
+        [Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade')][string]$Campaign,
+        [ValidateSet('ScheduledTask','WinRM','PsExec')][string]$Mode = 'ScheduledTask',
+        [ValidateRange(10, 1800)][int]$TimeoutSeconds = 120
+    )
+
+    $expectations = @(Get-SemtPrerequisiteTaskExpectations -Campaign $Campaign)
+    $request = @{
+        Target = $ConnectionTarget
+        Mode = $(if ($Mode -eq 'WinRM') { 'WinRM' } else { 'ScheduledTask' })
+        Tasks = @($expectations | ForEach-Object { @{ TaskPath = [string]$_.TaskPath; TaskName = [string]$_.TaskName } })
+    }
+    $operation = {
+        param($r)
+        $ErrorActionPreference = 'Stop'
+        $service = New-Object -ComObject 'Schedule.Service'
+        if ($r.Mode -eq 'WinRM') { $service.Connect() } else { $service.Connect($r.Target) }
+        foreach ($item in @($r.Tasks)) {
+            $row = [ordered]@{ TaskPath = [string]$item.TaskPath; TaskName = [string]$item.TaskName; Exists = $false; Actions = @(); TriggerCount = 0; Error = '' }
+            try {
+                $folderPath = if ([string]$item.TaskPath -eq '\') { '\' } else { ([string]$item.TaskPath).TrimEnd('\') }
+                $task = $service.GetFolder($folderPath).GetTask([string]$item.TaskName)
+                $definition = $task.Definition
+                $actions = @()
+                for ($index = 1; $index -le [int]$definition.Actions.Count; $index++) {
+                    $action = $definition.Actions.Item($index)
+                    if ([int]$action.Type -eq 0) { $actions += ('{0}|{1}' -f ([string]$action.Path).Trim(),([string]$action.Arguments).Trim()) }
+                    else { $actions += ('ActionType{0}|' -f [int]$action.Type) }
+                }
+                $row.Exists = $true
+                $row.Actions = $actions
+                $row.TriggerCount = [int]$definition.Triggers.Count
+            }
+            catch {
+                $notFound = $false
+                for ($current = $_.Exception; $null -ne $current; $current = $current.InnerException) {
+                    if (('{0:X8}' -f $current.HResult) -in @('80070002','80070003')) { $notFound = $true }
+                }
+                if (-not $notFound) { $row.Error = [string]$_.Exception.Message }
+            }
+            [pscustomobject]$row
+        }
+    }
+    $job = Start-Job -ArgumentList $request,$operation.ToString() -ScriptBlock {
+        param($r,$source)
+        $block = [scriptblock]::Create($source)
+        if ($r.Mode -eq 'WinRM') { Invoke-Command -ComputerName $r.Target -ScriptBlock $block -ArgumentList $r -ErrorAction Stop }
+        else { & $block $r }
+    }
+    $reads = @()
+    $failure = ''
+    try {
+        if (-not (Wait-Job -Job $job -Timeout $TimeoutSeconds)) { $failure = ('Task Scheduler read timed out after {0} second(s).' -f $TimeoutSeconds) }
+        else {
+            try { $reads = @(Receive-Job -Job $job -ErrorAction Stop) }
+            catch { $failure = ('Task Scheduler read failed: {0}' -f $_.Exception.Message) }
+            if (-not $failure -and $job.State -ne 'Completed') { $failure = ('Task Scheduler read job ended in state {0}.' -f $job.State) }
+        }
+    }
+    finally { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
+
+    $tasks = foreach ($expectation in $expectations) {
+        $read = $null
+        if (-not $failure) { $read = @($reads | Where-Object { [string]$_.TaskPath -eq [string]$expectation.TaskPath -and [string]$_.TaskName -eq [string]$expectation.TaskName }) | Select-Object -First 1 }
+        $state = Test-SemtPrerequisiteTaskReadState -Expectation $expectation -Read $read
+        $errorText = if ($failure) { $failure } else { [string](Get-SemtPropertyValue -InputObject $read -Name 'Error' -Default '') }
+        [pscustomobject]@{ TaskPath = $expectation.TaskPath; TaskName = $expectation.TaskName; Kind = $expectation.Kind; State = $state; Error = $errorText }
+    }
+    $summary = Get-SemtPrerequisiteTaskSummary -Tasks @($tasks)
+    $detail = $summary.Detail
+    if ($failure) { $detail = '{0} {1}' -f $failure,$detail }
+    else {
+        $firstError = @($tasks | Where-Object { $_.State -eq 'Unknown' -and $_.Error }) | Select-Object -First 1
+        if ($firstError) { $detail = '{0} (read error on {1}: {2})' -f $detail,$firstError.TaskName,$firstError.Error }
+    }
+    return [pscustomobject]@{ Decision = $summary.Decision; Detail = $detail; Tasks = @($tasks) }
+}
+
+#endregion
+
 function ConvertFrom-SemtFinalStatusLine {
     [CmdletBinding()]
     param([AllowEmptyCollection()][string[]]$Lines)

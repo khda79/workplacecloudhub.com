@@ -30,7 +30,8 @@ $script:HybridJoinEngineFields = @(
     'StatusBeforePostCycle','BackoffStatus','BackoffUntilUtc','BackoffCount',
     'IntuneConfirmationState','IntuneConfirmationDetail','UserLicensePreflightState','UserLicensePreflightDetail','UserLicenseAuditOnly','UserLicenseState','UserLicenseDetail','UserLicenseUpn','UserLicenseInventoryUtc','MdmUserScopeState','PostCycleIntuneInventoryChecked','PostCycleIntuneInventoryPresent','PostCycleIntuneEnrollmentDetected','PostCycleIntuneInventoryCsv','PostCycleIntuneInventoryError',
     'PostCycleEntraInventoryChecked','PostCycleEntraInventoryPresent','PostCycleEntraRegisteredState','PostCycleEntraAlternativeSecurityIdCount','PostCycleEntraPendingResolved','PostCycleEntraInventoryCsv','PostCycleEntraInventoryError',
-    'PostCycleADInventoryChecked','PostCycleADInventoryPresent','PostCycleADInventoryCsv','PostCycleADInventoryError'
+    'PostCycleADInventoryChecked','PostCycleADInventoryPresent','PostCycleADInventoryCsv','PostCycleADInventoryError',
+    'PrerequisitesAutoState','PrerequisitesAutoDetail'
 )
 
 function Get-HybridJoinNextAction {
