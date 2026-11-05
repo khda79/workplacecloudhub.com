@@ -56,6 +56,15 @@ Runs diagnostics and writes logs/CSV without leave, removal, auto-enrollment tri
 .PARAMETER EntraHybridPending
 Indicates that the admin-side Entra inventory found this device as a pending hybrid object (TrustType=ServerAd with empty AlternativeSecurityIds).
 
+.PARAMETER RepairUnhealthyJoinWithIntuneTrace
+Allows the repair of a device reported INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY on an earlier run: when the local trace is at least IntuneTraceRepairDelayHours old and IntuneAbsentDeviceId equals the local device ID, the local Intune enrollment is backed up and removed, then the normal device join repair runs.
+
+.PARAMETER IntuneAbsentDeviceId
+Entra device ID that the technician inventories proved absent from Intune (no Intune record by name or by this device ID). Passed by the launcher only when RepairUnhealthyJoinWithIntuneTrace is enabled.
+
+.PARAMETER IntuneTraceRepairDelayHours
+Minimum age in hours of the local INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY trace before a repair. Defaults to 24.
+
 .PARAMETER StaleCleanupDelaySeconds
 Seconds to wait after successful stale local Intune enrollment cleanup before attempting auto-enrollment in the same run. Defaults to 60.
 
@@ -105,6 +114,9 @@ param(
     [switch]$AuditOnly,
     [switch]$CollectMdmDiagnostics,
     [switch]$EntraHybridPending,
+    [switch]$RepairUnhealthyJoinWithIntuneTrace,
+    [string]$IntuneAbsentDeviceId,
+    [ValidateRange(1,720)][int]$IntuneTraceRepairDelayHours = 24,
     [int]$StaleCleanupDelaySeconds = 60,
     [int]$RebootDelaySeconds = 180,
     [int]$IntuneRetrySleepMinutes = 5,
@@ -157,6 +169,10 @@ try {
             if ($AuditOnly) { $argList += "-AuditOnly" }
             if ($CollectMdmDiagnostics) { $argList += "-CollectMdmDiagnostics" }
             if ($EntraHybridPending) { $argList += "-EntraHybridPending" }
+            if ($RepairUnhealthyJoinWithIntuneTrace) { $argList += "-RepairUnhealthyJoinWithIntuneTrace" }
+            if (-not [string]::IsNullOrWhiteSpace($IntuneAbsentDeviceId)) { $argList += "-IntuneAbsentDeviceId"; $argList += $IntuneAbsentDeviceId }
+            $argList += "-IntuneTraceRepairDelayHours"
+            $argList += $IntuneTraceRepairDelayHours
             $argList += "-StaleCleanupDelaySeconds"
             $argList += $StaleCleanupDelaySeconds
             $argList += "-RebootDelaySeconds"
@@ -209,6 +225,7 @@ $script:RetryAfterRebootStatePath = Join-Path $script:RetryAfterRebootProgramDir
 $script:RetryAfterRebootRunnerPath = Join-Path $script:RetryAfterRebootProgramDir "RetryAfterRebootRunner.ps1"
 $script:RetryAfterRebootScriptPath = Join-Path $script:RetryAfterRebootProgramDir "SmartM365-Invoke-EndpointMigration-HybridJoin.ps1"
 $script:RebootSafetyStatePath = Join-Path $StateDir "RebootSafety.json.txt"
+$script:IntuneTraceStatePath = Join-Path $StateDir "IntuneTraceRepair.json.txt"
 $script:EndpointInstanceStatePath = Join-Path $StateDir "EndpointInstance.json.txt"
 $script:EndpointInstanceMutexName = "Global\SmartM365_SEMT_HybridJoin_Endpoint"
 $script:EndpointInstanceMutex = $null
@@ -1200,7 +1217,7 @@ if ($semtSetupActivity.Active) {
 try { Update-EndpointInstanceState -Force } catch { Write-RunLog ("Endpoint instance metadata write failed; mutex protection remains active. Error={0}" -f $_.Exception.Message) }
 
 Write-Host "Smart Endpoint Migration Toolkit - Hybrid Join endpoint version $ScriptVersion"
-Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. CorrelationId=$CorrelationId. DataRoot=$DataRoot. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). SkipVirtualMachines=$([bool]$SkipVirtualMachines). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). IgnoreRunGuard=$([bool]$IgnoreRunGuard). RetryAfterRebootTaskRun=$([bool]$RetryAfterRebootTaskRun)."
+Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. CorrelationId=$CorrelationId. DataRoot=$DataRoot. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). SkipVirtualMachines=$([bool]$SkipVirtualMachines). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). RepairUnhealthyJoinWithIntuneTrace=$([bool]$RepairUnhealthyJoinWithIntuneTrace). IntuneAbsentDeviceId=$IntuneAbsentDeviceId. IntuneTraceRepairDelayHours=$IntuneTraceRepairDelayHours. IgnoreRunGuard=$([bool]$IgnoreRunGuard). RetryAfterRebootTaskRun=$([bool]$RetryAfterRebootTaskRun)."
 Invoke-OldEvidenceCleanup -Paths @($LogsDir, $OutputDir, $TranscriptDir) -RetentionDays $CleanupRetentionDays
 
 function Get-ComputerSystemSummary {
@@ -1960,6 +1977,102 @@ function Test-DsregDeviceHealthy {
 
     return $false
 }
+
+#region Intune trace with unhealthy device join
+# INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY leaves a local trace (State\IntuneTraceRepair.json.txt). A later
+# run repairs the device only when the trace is old enough, the device ID is unchanged, the
+# technician proved this device ID absent from Intune and RepairUnhealthyJoinWithIntuneTrace is set.
+
+function Read-IntuneTraceRepairState {
+    try { return (Read-SemtTargetJson -Path $script:IntuneTraceStatePath) }
+    catch {
+        Write-RunLog ("Intune trace review state could not be read; a new trace is recorded. Error={0}" -f $_.Exception.Message)
+        return $null
+    }
+}
+
+function Update-IntuneTraceRepairState {
+    # Records or refreshes the trace. The first-seen date is kept only for the same device ID and
+    # the same local Intune enrollment IDs; any change starts a new delay.
+    param(
+        [string]$DeviceId,
+        [string]$IntuneEnrollmentIds,
+        [string]$AzureAdJoined,
+        [string]$DeviceAuthStatus,
+        [string]$KeySignTest
+    )
+
+    $now = (Get-Date).ToUniversalTime()
+    $previous = Read-IntuneTraceRepairState
+    $firstSeen = $null
+    $seenCount = 0
+    if ($null -ne $previous -and -not [string]::IsNullOrWhiteSpace($DeviceId) -and
+        [string]$previous.DeviceId -ieq $DeviceId -and [string]$previous.IntuneEnrollmentIds -ieq $IntuneEnrollmentIds) {
+        $parsed = [datetime]::MinValue
+        $styles = [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
+        if ([datetime]::TryParse([string]$previous.FirstSeenUtc, [System.Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$parsed) -and $parsed -le $now) {
+            $firstSeen = $parsed
+            $previousCount = 0
+            if ($previous.PSObject.Properties['SeenCount'] -and [int]::TryParse([string]$previous.SeenCount, [ref]$previousCount)) { $seenCount = $previousCount }
+        }
+    }
+    $isNew = ($null -eq $firstSeen)
+    if ($isNew) { $firstSeen = $now; $seenCount = 0 }
+    $seenCount++
+    Write-AtomicJsonFile -Path $script:IntuneTraceStatePath -Data ([ordered]@{
+        Version = 1
+        Status = 'INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY'
+        FirstSeenUtc = $firstSeen.ToString('o')
+        LastSeenUtc = $now.ToString('o')
+        SeenCount = $seenCount
+        DeviceId = $DeviceId
+        IntuneEnrollmentIds = $IntuneEnrollmentIds
+        AzureAdJoined = $AzureAdJoined
+        DeviceAuthStatus = $DeviceAuthStatus
+        KeySignTest = $KeySignTest
+        LastRunId = $RunId
+        LastCorrelationId = $CorrelationId
+    })
+    return [pscustomobject]@{
+        IsNew = $isNew
+        FirstSeenUtc = $firstSeen
+        AgeHours = [math]::Round(($now - $firstSeen).TotalHours, 2)
+        SeenCount = $seenCount
+    }
+}
+
+function Clear-IntuneTraceRepairState {
+    param([string]$Reason)
+    if (-not (Test-Path -LiteralPath $script:IntuneTraceStatePath -PathType Leaf)) { return }
+    try {
+        Remove-Item -LiteralPath $script:IntuneTraceStatePath -Force -ErrorAction Stop
+        Write-RunLog ("Intune trace review state removed: {0}" -f $Reason)
+    }
+    catch { Write-RunLog ("Intune trace review state could not be removed: {0}" -f $_.Exception.Message) }
+}
+
+function Get-IntuneTraceRepairDecision {
+    # Every condition must hold; the reasons say what is still missing.
+    param(
+        [Parameter(Mandatory = $true)]$Trace,
+        [string]$LocalDeviceId,
+        [string]$CloudAbsentDeviceId,
+        [bool]$Enabled,
+        [int]$DelayHours
+    )
+
+    $reasons = New-Object System.Collections.Generic.List[string]
+    if (-not $Enabled) { $reasons.Add('option HybridJoin.RepairUnhealthyJoinWithIntuneTrace is off') }
+    if ($Trace.IsNew) { $reasons.Add('trace recorded on this run') }
+    elseif ([double]$Trace.AgeHours -lt $DelayHours) { $reasons.Add(('trace age {0} h is below {1} h' -f $Trace.AgeHours,$DelayHours)) }
+    $local = [guid]::Empty
+    $cloud = [guid]::Empty
+    if (-not [guid]::TryParse([string]$LocalDeviceId, [ref]$local) -or $local -eq [guid]::Empty) { $reasons.Add('local device ID unavailable') }
+    elseif (-not [guid]::TryParse([string]$CloudAbsentDeviceId, [ref]$cloud) -or $cloud -ne $local) { $reasons.Add('no technician proof that this device ID is absent from Intune') }
+    return [pscustomobject]@{ Proceed = ($reasons.Count -eq 0); Reason = $(if ($reasons.Count -eq 0) { 'all conditions met' } else { $reasons -join '; ' }) }
+}
+
+#endregion
 
 function Parse-DsregUserStatus {
     param([Parameter(Mandatory=$false)][string[]]$Lines)
@@ -3052,6 +3165,7 @@ function Get-NextActionForStatus {
         "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" { return "RECHECK_LATER_INTUNE_ENROLLMENT" }
         "INTUNE_USER_LICENSE_REJECTED" { return "ASSIGN_USER_INTUNE_LICENSE" }
         "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY" { return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" }
+        "INTUNE_TRACE_REMOVE_FAILED" { return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" }
         "INTUNE_ENROLLMENT_TOOL_NOT_FOUND" { return "CHECK_DEVICEENROLLER" }
         "INTUNE_ENROLLMENT_RETRY_EXHAUSTED" { return "RECHECK_OR_INVESTIGATE_INTUNE_ENROLLMENT" }
         "INTUNE_AUTOENROLL_POLICY_NOT_CONFIGURED" { return "CHECK_GPO_AUTOENROLL" }
@@ -3424,7 +3538,8 @@ function New-RetryAfterRebootArgumentList {
         "AllowRemoveStaleIntuneEnrollment",
         "SkipVirtualMachines",
         "AuditOnly",
-        "EntraHybridPending"
+        "EntraHybridPending",
+        "RepairUnhealthyJoinWithIntuneTrace"
     )) {
         $value = Get-Variable -Name $switchName -ValueOnly -ErrorAction SilentlyContinue
         if ($value) { [void]$arguments.Add("-$switchName") }
@@ -3437,6 +3552,7 @@ function New-RetryAfterRebootArgumentList {
         IntuneRetryMaxRetries = $IntuneRetryMaxRetries
         RetryAfterRebootDelaySeconds = $RetryAfterRebootDelaySeconds
         RetryAfterRebootMaxAttempts = $RetryAfterRebootMaxAttempts
+        IntuneTraceRepairDelayHours = $IntuneTraceRepairDelayHours
         DataRoot = $DataRoot
         CorrelationId = ($CorrelationId -replace '-R\d{14}$','')
     }
@@ -4372,6 +4488,7 @@ try {
     }
 
     $deviceJoinHealthy = Test-DsregDeviceHealthy -AzureAdJoined $dsregAzureAdJoined -DeviceAuthStatus $dsregDeviceAuthStatus -KeySignTest $dsregKeySignTest
+    if ($deviceJoinHealthy -and -not $AuditOnly) { Clear-IntuneTraceRepairState -Reason 'device join healthy' }
 
     if ($AuditOnly) {
         if ($deviceJoinHealthy -and $intuneEnrolled) {
@@ -4449,13 +4566,64 @@ try {
         Write-RunLog ("Device join health is OK. AzureAdJoined={0}; DeviceAuthStatus={1}; KeySignTest={2}" -f $dsregAzureAdJoined,$dsregDeviceAuthStatus,$dsregKeySignTest)
     }
     else {
+        # Local trace for a later run; repair is attempted only when every condition holds.
+        $intuneTraceRemoveFailed = $false
+        $intuneTraceDetail = ''
         if ($intuneEnrolled) {
+            $intuneTrace = $null
+            try { $intuneTrace = Update-IntuneTraceRepairState -DeviceId $dsregDeviceId -IntuneEnrollmentIds $intuneEnrollmentIds -AzureAdJoined $dsregAzureAdJoined -DeviceAuthStatus $dsregDeviceAuthStatus -KeySignTest $dsregKeySignTest }
+            catch { Write-RunLog ("Intune trace review state could not be written; no repair. Error={0}" -f $_.Exception.Message) }
+            if ($null -ne $intuneTrace) {
+                $traceDecision = Get-IntuneTraceRepairDecision -Trace $intuneTrace -LocalDeviceId $dsregDeviceId -CloudAbsentDeviceId $IntuneAbsentDeviceId -Enabled ([bool]$RepairUnhealthyJoinWithIntuneTrace) -DelayHours $IntuneTraceRepairDelayHours
+                $intuneTraceDetail = (" Trace first seen {0} UTC ({1} h, {2} run(s)); repair: {3}." -f $intuneTrace.FirstSeenUtc.ToString('yyyy-MM-dd HH:mm'),$intuneTrace.AgeHours,$intuneTrace.SeenCount,$traceDecision.Reason)
+                Write-RunLog ("Intune trace with unhealthy device join. DeviceId={0}; IntuneIds={1}; IntuneAbsentDeviceId={2};{3}" -f $dsregDeviceId,$intuneEnrollmentIds,$IntuneAbsentDeviceId,$intuneTraceDetail)
+                if ($traceDecision.Proceed) {
+                    $staleIntuneRemovalAttempted = $true
+                    Write-Host "Intune trace confirmed absent from Intune for this device ID. Removing the local Intune enrollment, then repairing the device join..." -ForegroundColor Yellow
+                    $removeTraceResult = Remove-NonIntuneMdmEnrollment `
+                        -EnrollmentIds $intuneEnrollmentIds `
+                        -OutputDirPath $OutputDir `
+                        -ComputerNameValue $ComputerName `
+                        -RunIdValue $RunId `
+                        -RemovalLabel "Intune trace with unhealthy join"
+                    $staleIntuneRemovalSuccess = $removeTraceResult.Success
+                    $staleIntuneRemovalBackupDir = $removeTraceResult.BackupDir
+                    $staleIntuneRemovalDetail = $removeTraceResult.Detail
+                    Write-RunLog ("Intune trace removal result: Success={0}; BackupDir={1}; RemovedItems={2}; Detail={3}" -f $removeTraceResult.Success,$removeTraceResult.BackupDir,$removeTraceResult.RemovedItems,$removeTraceResult.Detail)
+
+                    $mdmEnrollmentState = Get-MdmEnrollmentState
+                    $anyMdmEnrollmentDetected = $mdmEnrollmentState.AnyMdmEnrollmentDetected
+                    $nonIntuneMdmEnrollmentDetected = $mdmEnrollmentState.NonIntuneMdmEnrollmentDetected
+                    $mdmEnrollmentCount = $mdmEnrollmentState.EnrollmentCount
+                    $mdmProviderIds = $mdmEnrollmentState.ProviderIds
+                    $intuneEnrollmentIds = $mdmEnrollmentState.IntuneEnrollmentIds
+                    $nonIntuneEnrollmentIds = $mdmEnrollmentState.NonIntuneEnrollmentIds
+                    $unconfirmedIntuneEnrollmentIds = $mdmEnrollmentState.UnconfirmedIntuneEnrollmentIds
+                    $mdmEnrollmentDetails = $mdmEnrollmentState.EnrollmentDetails
+                    $ignoredEnrollmentDetails = $mdmEnrollmentState.IgnoredEnrollmentDetails
+                    $intuneEnrolled = $mdmEnrollmentState.IntuneEnrollmentDetected
+
+                    if ($removeTraceResult.Success -and -not $intuneEnrolled) {
+                        Clear-IntuneTraceRepairState -Reason ("local Intune trace removed (backup {0}); device join repair follows" -f $removeTraceResult.BackupDir)
+                    }
+                    else { $intuneTraceRemoveFailed = $true }
+                }
+            }
+        }
+        if ($intuneTraceRemoveFailed) {
+            $status = "INTUNE_TRACE_REMOVE_FAILED"
+            $dsregStatusErrorMessage = ("The local Intune trace could not be fully removed; no device join repair. BackupDir={0}; Detail={1}" -f $staleIntuneRemovalBackupDir,$staleIntuneRemovalDetail)
+            $ExitCode = 3
+            Write-Host "Local Intune trace removal did not complete. Skipping dsregcmd repair actions; manual review required." -ForegroundColor Yellow
+            Write-RunLog $dsregStatusErrorMessage
+        }
+        elseif ($intuneEnrolled) {
             # A local Intune enrollment trace with an unhealthy device join is not a confirmed
             # enrollment (the device key may be broken, the Entra object pending). No dsregcmd
             # repair is attempted, to protect a possible real enrollment: the device is reported
             # for manual review instead.
             $status = "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY"
-            $dsregStatusErrorMessage = ("Local MDM/Intune enrollment trace (ProviderID='MS DM Server') but the device join is unhealthy: AzureAdJoined={0}; DeviceAuthStatus={1}; KeySignTest={2}. dsregcmd repair skipped; review the Entra device object, the Intune record and the local enrollments." -f $dsregAzureAdJoined,$dsregDeviceAuthStatus,$dsregKeySignTest)
+            $dsregStatusErrorMessage = ("Local MDM/Intune enrollment trace (ProviderID='MS DM Server') but the device join is unhealthy: AzureAdJoined={0}; DeviceAuthStatus={1}; KeySignTest={2}. dsregcmd repair skipped; review the Entra device object, the Intune record and the local enrollments.{3}" -f $dsregAzureAdJoined,$dsregDeviceAuthStatus,$dsregKeySignTest,$intuneTraceDetail)
             $ExitCode = 3
 
             Write-Host "Local Intune enrollment trace with an unhealthy device join. Skipping dsregcmd repair actions; manual review required." -ForegroundColor Yellow

@@ -111,6 +111,8 @@ Generated from catalog SHA256 `6E1175524CD681B0121C338CCFA44AD4B75CD5A799B07A4A6
 | `HybridJoin.AllowDsregLeave` | Boolean | True |  | `SEMT_HYBRIDJOIN_ALLOW_DSREG_LEAVE` | Actions | yes |
 | `HybridJoin.AllowRemoveStaleIntuneEnrollment` | Boolean | False |  | `SEMT_HYBRIDJOIN_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT` | Actions | no |
 | `HybridJoin.AllowRemoveNonIntuneMdmEnrollment` | Boolean | False |  | `SEMT_HYBRIDJOIN_ALLOW_REMOVE_NON_INTUNE_MDM_ENROLLMENT` | Actions | yes |
+| `HybridJoin.RepairUnhealthyJoinWithIntuneTrace` | Boolean | False |  | `SEMT_HYBRIDJOIN_REPAIR_UNHEALTHY_JOIN_WITH_INTUNE_TRACE` | Actions | yes |
+| `HybridJoin.IntuneTraceRepairDelayHours` | Integer | 24 hours | 1..720 | `SEMT_HYBRIDJOIN_INTUNE_TRACE_REPAIR_DELAY_HOURS` | Actions | no |
 | `HybridJoin.AllowRebootWhenNoInteractiveUser` | Boolean | True |  | `SEMT_HYBRIDJOIN_ALLOW_REBOOT_WHEN_NO_INTERACTIVE_USER` | Actions | yes |
 | `HybridJoin.AllowRebootAfterDsregLeave` | Boolean | False |  | `SEMT_HYBRIDJOIN_ALLOW_REBOOT_AFTER_DSREG_LEAVE` | Actions | yes |
 | `HybridJoin.StaleCleanupDelaySeconds` | Integer | 60 seconds | 0..3600 | `SEMT_HYBRIDJOIN_STALE_CLEANUP_DELAY_SECONDS` | Actions | yes |
@@ -120,6 +122,14 @@ Generated from catalog SHA256 `6E1175524CD681B0121C338CCFA44AD4B75CD5A799B07A4A6
 | `HybridJoin.CommunicationLostEvidenceWaitMinutes` | Integer | 65 minutes | 0..600 | `SEMT_HYBRIDJOIN_COMMUNICATION_LOST_EVIDENCE_WAIT_MINUTES` | Evidence | no |
 | `HybridJoin.CommunicationLostEvidencePollMinutes` | Integer | 10 minutes | 1..120 | `SEMT_HYBRIDJOIN_COMMUNICATION_LOST_EVIDENCE_POLL_MINUTES` | Evidence | no |
 | `HybridJoin.PostCycleCloudInventoryRefresh` | Boolean | True |  | `SEMT_HYBRIDJOIN_POST_CYCLE_CLOUD_INVENTORY_REFRESH` | Inventory | yes |
+
+`HybridJoin.RepairUnhealthyJoinWithIntuneTrace` (default false): a device reported
+`INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY` keeps a local trace (`State\IntuneTraceRepair.json.txt`). On a
+later run it is repaired only when the trace is at least `HybridJoin.IntuneTraceRepairDelayHours`
+old for the same device ID and Intune enrollment IDs, and the launcher proved this device ID absent
+from Intune (fresh Entra and Intune inventories, no Intune record by name or by device ID). The
+local Intune enrollment is then backed up and removed, and the normal device join repair runs
+(a failed device key still needs `HybridJoin.AllowDsregLeave`).
 
 ### Windows11Upgrade options
 

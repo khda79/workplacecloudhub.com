@@ -9,7 +9,9 @@
     - after each cycle, Intune and Entra inventories scoped to changed computers confirm
       enrollment (ENROLLED_DETECTED_POST_CYCLE) or a resolved pending object;
     - a local Intune trace with an unhealthy device join (INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY) is
-      reported for manual review, never as enrolled;
+      reported for manual review, never as enrolled; with RepairUnhealthyJoinWithIntuneTrace, the
+      launcher passes -IntuneAbsentDeviceId when fresh inventories prove the device ID absent from
+      Intune, and the endpoint repairs once its local trace is old enough;
     - technician run guard with status back-off (history schema 2) and adaptive cycle delay.
     The module requires SmartEndpointMigration.Core to be imported first.
 
@@ -46,6 +48,7 @@ function Get-HybridJoinNextAction {
         'ENROLLED_DETECTED_POST_CYCLE' { return 'NO_ACTION_ALREADY_INTUNE' }
         'ENTRA_PENDING_RESOLVED_POST_CYCLE' { return 'RECHECK_INTUNE_ENROLLMENT' }
         'INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY' { return 'REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN' }
+        'INTUNE_TRACE_REMOVE_FAILED' { return 'REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN' }
         'ENDPOINT_RUN_ACTIVE' { return 'WAIT_ACTIVE_ENDPOINT_RUN' }
         'SKIPPED_BY_STATUS_BACKOFF' { return 'WAIT_STATUS_BACKOFF' }
         'RUN_GUARD_ACTIVE' { return 'WAIT_RUN_GUARD' }
@@ -206,14 +209,44 @@ function Invoke-HybridJoinPreCycle {
     return @()
 }
 
-function Get-HybridJoinPerComputerArguments {
+function Get-HybridJoinIntuneAbsenceProof {
+    <#
+    Entra device ID of a computer proven absent from Intune, or '' when the proof is incomplete:
+    fresh Entra and Intune inventories, an Entra object for the name with a device ID, no Intune
+    record for the name and no Intune record with that device ID.
+    #>
     param([Parameter(Mandatory = $true)]$Context,[Parameter(Mandatory = $true)][string]$Computer)
 
     $entra = $Context.Inventory['Entra']
+    $intune = $Context.Inventory['Intune']
+    if ($null -eq $entra -or $null -eq $intune -or $null -eq $entra.Map -or $null -eq $intune.Map) { return '' }
+    $freshSources = @('Shared','RunScopedRefresh')
+    if ([string]$entra.Source -notin $freshSources -or [string]$intune.Source -notin $freshSources) { return '' }
+    $key = Get-SemtComputerKey -ComputerName $Computer
+    if (-not $entra.Map.ContainsKey($key) -or $intune.Map.ContainsKey($key)) { return '' }
+    $deviceId = [guid]::Empty
+    if (-not [guid]::TryParse([string](Get-SemtPropertyValue -InputObject $entra.Map[$key] -Name 'DeviceId' -Default ''), [ref]$deviceId) -or $deviceId -eq [guid]::Empty) { return '' }
+    foreach ($row in @($intune.Map.Values)) {
+        $candidate = [guid]::Empty
+        if ([guid]::TryParse([string](Get-SemtPropertyValue -InputObject $row -Name 'AzureADDeviceId' -Default ''), [ref]$candidate) -and $candidate -eq $deviceId) { return '' }
+    }
+    return $deviceId.ToString()
+}
+
+function Get-HybridJoinPerComputerArguments {
+    param([Parameter(Mandatory = $true)]$Context,[Parameter(Mandatory = $true)][string]$Computer)
+
+    $arguments = New-Object System.Collections.Generic.List[string]
+    $entra = $Context.Inventory['Entra']
     if ($null -eq $entra -or $null -eq $entra.Map) { return @() }
     $key = Get-SemtComputerKey -ComputerName $Computer
-    if ($entra.Map.ContainsKey($key) -and [string](Get-SemtPropertyValue -InputObject $entra.Map[$key] -Name 'EntraRegisteredState' -Default '') -eq 'Pending') { return @('-EntraHybridPending') }
-    return @()
+    if ($entra.Map.ContainsKey($key) -and [string](Get-SemtPropertyValue -InputObject $entra.Map[$key] -Name 'EntraRegisteredState' -Default '') -eq 'Pending') { $arguments.Add('-EntraHybridPending') }
+    $repairOption = 'HybridJoin.RepairUnhealthyJoinWithIntuneTrace'
+    if ($null -ne $Context.Options -and $Context.Options.Contains($repairOption) -and [bool](Get-SemtOption -Options $Context.Options -Name $repairOption)) {
+        $absentDeviceId = Get-HybridJoinIntuneAbsenceProof -Context $Context -Computer $Computer
+        if ($absentDeviceId) { $arguments.Add('-IntuneAbsentDeviceId'); $arguments.Add($absentDeviceId) }
+    }
+    return @($arguments.ToArray())
 }
 
 function Invoke-HybridJoinPostCycle {
@@ -363,7 +396,7 @@ function Get-SemtHybridJoinProfile {
         EvidenceRules = @(
             [pscustomobject]@{ Folder = 'Output'; Filter = '*'; Recurse = $true; CurrentAttemptOnly = $true; MaxFiles = 40; MaxBytes = 5MB; TargetFolder = 'Output' },
             [pscustomobject]@{ Folder = 'Output'; Filter = 'MDMDiag_*.zip'; Recurse = $false; CurrentAttemptOnly = $true; MaxFiles = 1; MaxBytes = 100MB; TargetFolder = 'Output' },
-            [pscustomobject]@{ Folder = 'State'; Filter = '*.json.txt'; Recurse = $false; CurrentAttemptOnly = $false; Names = @('EndpointInstance.json.txt','RebootSafety.json.txt','RetryAfterReboot.json.txt'); MaxFiles = 5; MaxBytes = 1MB; TargetFolder = 'State' }
+            [pscustomobject]@{ Folder = 'State'; Filter = '*.json.txt'; Recurse = $false; CurrentAttemptOnly = $false; Names = @('EndpointInstance.json.txt','RebootSafety.json.txt','RetryAfterReboot.json.txt','IntuneTraceRepair.json.txt'); MaxFiles = 5; MaxBytes = 1MB; TargetFolder = 'State' }
         )
         RemoteLogsPathTemplate = '\\{0}\C$\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\Logs'
         CommunicationLostWaitOption = 'HybridJoin.CommunicationLostEvidenceWaitMinutes'

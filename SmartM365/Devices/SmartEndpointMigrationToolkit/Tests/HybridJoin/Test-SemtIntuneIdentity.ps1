@@ -165,6 +165,62 @@ $script:dsregDeviceId='11111111-1111-1111-1111-111111111111'; $script:dsregTenan
 $attempt=Write-SemtHybridJoinAttemptResult -State Completed -Status SUCCESS
 if ($attempt.Dsreg_DeviceId -ne $script:dsregDeviceId -or $attempt.Dsreg_TenantId -ne $script:dsregTenantId -or $attempt.InteractiveUserSid -ne $script:interactiveUserSid -or $attempt.MdmEnrollmentRecentEvidence -ne 'event') { throw 'Attempt identity evidence was not projected.' }
 Write-Host 'PASS: endpoint attempt carries identity and MDM evidence'
+# Unhealthy join with a local Intune trace: the launcher proves absence from Intune by device ID.
+& $module {
+    $id = '55555555-5555-5555-5555-555555555555'
+    $options = [ordered]@{ 'HybridJoin.RepairUnhealthyJoinWithIntuneTrace' = [pscustomobject]@{ Value = $true } }
+    $newContext = {
+        param($intuneRows,$intuneSource)
+        $intuneMap = @{}
+        foreach ($r in @($intuneRows)) { $intuneMap[(Get-SemtComputerKey -ComputerName $r.DeviceName)] = $r }
+        [pscustomobject]@{ Options = $options; Inventory = @{
+            Entra = [pscustomobject]@{ Source = 'Shared'; Map = @{ (Get-SemtComputerKey -ComputerName 'PC-TRACE') = [pscustomobject]@{ DeviceId = $id; EntraRegisteredState = 'Registered' } } }
+            Intune = [pscustomobject]@{ Source = $intuneSource; Map = $intuneMap } } }
+    }
+    $absent = & $newContext @([pscustomobject]@{ DeviceName = 'OTHER'; AzureADDeviceId = '66666666-6666-6666-6666-666666666666' }) 'RunScopedRefresh'
+    $arguments = @(Get-HybridJoinPerComputerArguments -Context $absent -Computer 'PC-TRACE')
+    if (($arguments -join ' ') -ne "-IntuneAbsentDeviceId $id") { throw "Absence proof not passed: $($arguments -join ' ')" }
+    if (Get-HybridJoinIntuneAbsenceProof -Context (& $newContext @([pscustomobject]@{ DeviceName = 'RENAMED'; AzureADDeviceId = $id }) 'Shared') -Computer 'PC-TRACE') { throw 'An Intune record with the device ID was ignored.' }
+    if (Get-HybridJoinIntuneAbsenceProof -Context (& $newContext @([pscustomobject]@{ DeviceName = 'PC-TRACE'; AzureADDeviceId = '' }) 'Shared') -Computer 'PC-TRACE') { throw 'An Intune record with the same name was ignored.' }
+    if (Get-HybridJoinIntuneAbsenceProof -Context (& $newContext @() 'SharedNotFresh') -Computer 'PC-TRACE') { throw 'A stale Intune inventory was accepted as proof.' }
+    $options['HybridJoin.RepairUnhealthyJoinWithIntuneTrace'].Value = $false
+    if (@(Get-HybridJoinPerComputerArguments -Context $absent -Computer 'PC-TRACE').Count -ne 0) { throw 'Absence proof passed while the option is off.' }
+    if ((Get-HybridJoinNextAction -Status 'INTUNE_TRACE_REMOVE_FAILED') -ne 'REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN') { throw 'INTUNE_TRACE_REMOVE_FAILED is not a review item.' }
+    Write-Host 'PASS: Intune absence proof requires fresh inventories and no record by name or device ID'
+}
+
+# Endpoint trace: kept between runs, repair only when every condition holds.
+foreach ($name in @('Write-AtomicJsonFile','ConvertTo-SemtTargetJsonDateText','Read-SemtTargetJson','Read-IntuneTraceRepairState','Update-IntuneTraceRepairState','Clear-IntuneTraceRepairState','Get-IntuneTraceRepairDecision')) {
+    $definition=$ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name },$true)
+    if (-not $definition) { throw "Endpoint function missing: $name" }
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+function Write-RunLog { param($Message) }
+$traceRoot = Join-Path ([IO.Path]::GetTempPath()) ('semt-trace-' + [guid]::NewGuid().ToString('N'))
+try {
+    $script:IntuneTraceStatePath = Join-Path $traceRoot 'IntuneTraceRepair.json.txt'
+    $deviceId = '77777777-7777-7777-7777-777777777777'
+    $first = Update-IntuneTraceRepairState -DeviceId $deviceId -IntuneEnrollmentIds 'ID-A' -AzureAdJoined 'YES' -DeviceAuthStatus '' -KeySignTest 'FAILED'
+    $decision = Get-IntuneTraceRepairDecision -Trace $first -LocalDeviceId $deviceId -CloudAbsentDeviceId $deviceId -Enabled $true -DelayHours 24
+    if (-not $first.IsNew -or $decision.Proceed -or $decision.Reason -notmatch 'recorded on this run') { throw 'A new trace allowed an immediate repair.' }
+    $saved = Get-Content -LiteralPath $script:IntuneTraceStatePath -Raw | ConvertFrom-Json
+    $saved.FirstSeenUtc = (Get-Date).ToUniversalTime().AddHours(-25).ToString('o')
+    $saved | ConvertTo-Json | Set-Content -LiteralPath $script:IntuneTraceStatePath -Encoding UTF8
+    $old = Update-IntuneTraceRepairState -DeviceId $deviceId -IntuneEnrollmentIds 'ID-A' -AzureAdJoined 'YES' -DeviceAuthStatus '' -KeySignTest 'FAILED'
+    if ($old.IsNew -or $old.AgeHours -lt 24.9 -or $old.SeenCount -ne 2) { throw "Trace age or count not kept: $($old.AgeHours) h, $($old.SeenCount)" }
+    if (-not (Get-IntuneTraceRepairDecision -Trace $old -LocalDeviceId $deviceId -CloudAbsentDeviceId $deviceId -Enabled $true -DelayHours 24).Proceed) { throw 'An old trace with proof was not repaired.' }
+    if ((Get-IntuneTraceRepairDecision -Trace $old -LocalDeviceId $deviceId -CloudAbsentDeviceId $deviceId -Enabled $false -DelayHours 24).Proceed) { throw 'Repair ran with the option off.' }
+    if ((Get-IntuneTraceRepairDecision -Trace $old -LocalDeviceId $deviceId -CloudAbsentDeviceId '' -Enabled $true -DelayHours 24).Proceed) { throw 'Repair ran without the cloud proof.' }
+    if ((Get-IntuneTraceRepairDecision -Trace $old -LocalDeviceId $deviceId -CloudAbsentDeviceId '88888888-8888-8888-8888-888888888888' -Enabled $true -DelayHours 24).Proceed) { throw 'Repair ran with a proof for another device ID.' }
+    if ((Get-IntuneTraceRepairDecision -Trace $old -LocalDeviceId $deviceId -CloudAbsentDeviceId $deviceId -Enabled $true -DelayHours 48).Proceed) { throw 'Repair ran before the delay.' }
+    if (-not (Update-IntuneTraceRepairState -DeviceId $deviceId -IntuneEnrollmentIds 'ID-B' -AzureAdJoined 'YES' -DeviceAuthStatus '' -KeySignTest 'FAILED').IsNew) { throw 'Changed enrollment IDs kept the old delay.' }
+    Clear-IntuneTraceRepairState -Reason 'test'
+    if (Test-Path -LiteralPath $script:IntuneTraceStatePath) { throw 'Trace was not removed.' }
+}
+finally { Remove-Item -LiteralPath $traceRoot -Recurse -Force -ErrorAction SilentlyContinue }
+$hjEndpointText = [IO.File]::ReadAllText($endpoint)
+if ($hjEndpointText -notmatch 'if \(\$intuneTraceRemoveFailed\) \{' -or $hjEndpointText -notmatch 'elseif \(\$intuneEnrolled\) \{' -or $hjEndpointText -notmatch 'if \(\$traceDecision\.Proceed\) \{' -or $hjEndpointText -notmatch "Clear-IntuneTraceRepairState -Reason 'device join healthy'") { throw 'Endpoint trace and repair gate are not wired.' }
+Write-Host 'PASS: endpoint keeps the Intune trace and repairs only after the delay with a matching cloud proof'
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

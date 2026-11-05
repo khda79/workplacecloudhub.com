@@ -149,7 +149,15 @@ When the device join is unhealthy (device key or device authentication failure) 
 Intune enrollment trace exists, Hybrid Join does not run any dsregcmd repair and reports
 `INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY` (NextAction `REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN`) for a manual
 review of the Entra object, the Intune record and the local enrollments. It is never counted as
-enrolled.
+enrolled. The endpoint keeps a local trace of it (`State\IntuneTraceRepair.json.txt`: first seen,
+device ID, Intune enrollment IDs, device key and authentication state), removed once the join is
+healthy. With `HybridJoin.RepairUnhealthyJoinWithIntuneTrace` (default false), a later run repairs
+the device when all of these hold: the trace is at least `HybridJoin.IntuneTraceRepairDelayHours`
+(24) old with the same device ID and enrollment IDs, the device join is still unhealthy, and the
+launcher passes `-IntuneAbsentDeviceId` because fresh Entra and Intune inventories show no Intune
+record for the name or for this device ID. The local Intune enrollment is backed up (reg export
+under `Output`) and removed, then the normal device join repair runs. If the removal does not
+complete, the status is `INTUNE_TRACE_REMOVE_FAILED` and nothing else is changed.
 
 Missing, stale or ambiguous evidence remains `Unknown` and is not reported as an absent
 license. Refresh the users and licenses inventory from the GUI when needed; an assigned SKU
