@@ -264,7 +264,7 @@ try {
     Test-Step 'Hybrid Join: no user-context deviceenroller task and no native task fallback remain' { $hjText -notmatch 'SEMT-HJ-UserMdmAutoEnroll|Start-UserContextIntuneAutoEnrollment|Get-NativeMdmAutoEnrollmentTask' -and $hjText -match '"INTUNE_USER_LICENSE_REJECTED" \{ return "ASSIGN_USER_INTUNE_LICENSE" \}' }
     #endregion
     #region Automatic prerequisites (launcher check and worker decision)
-    Import-Module (Join-Path $packageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -Force -ErrorAction Stop
+    Import-Module (Join-Path $packageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force -ErrorAction Stop
     function Get-DefinitionsFor {
         param([string]$Campaign)
         $HybridJoinTasks = ($Campaign -eq 'HybridJoin'); $Windows11UpgradeTasks = ($Campaign -eq 'Windows11Upgrade')
