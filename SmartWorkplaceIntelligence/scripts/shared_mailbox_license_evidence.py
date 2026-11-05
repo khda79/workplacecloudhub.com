@@ -1,4 +1,4 @@
-"""Version 0.1.0: read-only Plan 2 migration evidence from one prepared batch.
+"""Version 0.2.0: read-only Plan 2 migration evidence from one prepared batch.
 
 The output is an estimate, not an assignment or purchase instruction. The
 prepared pointer, manifest and every input are verified before and after read.
@@ -185,7 +185,23 @@ def collect(root, tenant):
     manifest_hash = digest(manifest_path)
     if manifest_hash != str(pointer.get('ManifestSHA256', '')).upper():
         raise ValueError('Prepared manifest does not match pointer')
+    result = collect_manifest(manifest_path, tenant)
+    if result['BatchId'] != batch:
+        raise ValueError('Prepared batch identity mismatch')
+    if digest(pointer_path) != pointer_hash or digest(manifest_path) != manifest_hash:
+        raise ValueError('Prepared pointer or manifest changed during calculation')
+    return result
+
+
+def collect_manifest(manifest_path, tenant):
+    """Qualify an in-progress batch from its frozen draft manifest, without a pointer."""
+    manifest_path = Path(manifest_path)
+    folder = manifest_path.parent
+    manifest_hash = digest(manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding='utf-8-sig'))
+    batch = manifest.get('BatchId', '')
+    if not KEY_PATTERN.fullmatch(batch):
+        raise ValueError('Invalid prepared batch identity')
     if manifest.get('BatchId') != batch or manifest.get('TenantKey') != tenant:
         raise ValueError('Prepared batch identity mismatch')
     provenance = manifest.get('Provenance', {})
@@ -235,18 +251,21 @@ def collect(root, tenant):
     for name, expected in metadata.items():
         if digest(folder / name) != expected:
             raise ValueError('Prepared file changed during calculation: ' + name)
-    if digest(pointer_path) != pointer_hash or digest(manifest_path) != manifest_hash:
-        raise ValueError('Prepared pointer or manifest changed during calculation')
+    if digest(manifest_path) != manifest_hash:
+        raise ValueError('Prepared manifest changed during calculation')
     return dict(BatchId=batch, BatchCreatedUtc=manifest.get('CreatedUtc', ''), ExceptionSnapshotDate=audit.get('Snapshot Date', ''), Counts=result)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--root', required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument('--root')
+    source.add_argument('--batch-manifest')
     parser.add_argument('--tenant', required=True)
     args = parser.parse_args()
     try:
-        print(json.dumps(collect(args.root, args.tenant), separators=(',', ':')))
+        result = collect(args.root, args.tenant) if args.root else collect_manifest(args.batch_manifest, args.tenant)
+        print(json.dumps(result, separators=(',', ':')))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print('Shared mailbox evidence not qualified: ' + str(exc), file=sys.stderr)
         return 1

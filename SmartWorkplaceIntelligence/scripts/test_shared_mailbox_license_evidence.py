@@ -6,7 +6,7 @@ import json
 import tempfile
 from copy import deepcopy
 from pathlib import Path
-from shared_mailbox_license_evidence import evaluate, collect, FILES
+from shared_mailbox_license_evidence import evaluate, collect, collect_manifest, FILES
 
 
 class SharedMailboxEvidenceTests(unittest.TestCase):
@@ -90,9 +90,12 @@ class SharedMailboxEvidenceTests(unittest.TestCase):
             pointer={'SchemaVersion':1,'BatchId':batch,'TenantKey':'test','ManifestSHA256':hashlib.sha256(manifest_path.read_bytes()).hexdigest()}
             (root/'current.json.txt').write_text(json.dumps(pointer),encoding='utf-8')
             self.assertEqual(collect(root,'test')['Counts']['AssignedCoverage'],1)
+            self.assertEqual(collect_manifest(manifest_path, 'test'), collect(root, 'test'))
             with self.assertRaises(ValueError): collect(root,'other')
+            with self.assertRaises(ValueError): collect_manifest(manifest_path,'other')
             with (folder/FILES[0]).open('a',encoding='utf-8') as stream: stream.write('tamper')
             with self.assertRaises(ValueError): collect(root,'test')
+            with self.assertRaises(ValueError): collect_manifest(manifest_path,'test')
 
 
 if __name__ == '__main__':

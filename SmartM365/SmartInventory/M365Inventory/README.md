@@ -31,6 +31,7 @@ assignment.
 | Tenant SKUs | `M365_Licenses_Tenant.csv` | Tenant subscription and capacity inventory. |
 | Licensing groups | `M365_Licenses_Groups.csv` | Groups discovered as license assignment sources. |
 | License report | `M365_Licenses_ReportSummary.csv`, `M365_Licenses_ReportCandidates.csv`, `M365_Licenses_ReportAssignmentIssues.csv`, `M365_Licenses_ReportGaps.csv`, `M365_Licenses_ReportSources.csv` | Recovery, E3-to-F3 review, assignment issues, gaps and source states of one snapshot; optional outputs of the licensing source receipt. |
+| Snapshot integrity | `M365_Licenses_ReportSnapshotIntegrity.csv` | Receipt-bound SHA-256 of the exact snapshot JSON, with tenant, snapshot and licensing run identities. |
 | License SKU decisions | `M365_Licenses_ReportSkuCandidates.csv`, `M365_Licenses_ReportSkuCapacity.csv` | Per-SKU candidates (disabled accounts, Copilot without licensed activity) and per-SKU capacity of the same snapshot; optional outputs of the licensing source receipt. |
 | License views by AD scope | `M365_Licenses_ReportByDomain.csv`, `M365_Licenses_ReportByCountry.csv` | Distinct F1/F3/E3/E5/Copilot users, licensed users and recovery candidates per AD domain and per AD country of the same snapshot (1.60); optional outputs of the licensing source receipt. |
 
@@ -151,6 +152,9 @@ separately. The prepared batch and exception snapshot dates are printed because
 they can differ from the license-stock snapshot. If Python or a qualified batch
 is unavailable or older than seven days, migration evidence is `N/D`. The
 prepared-batch reader never runs Prepare and never modifies a Power BI project.
+Full runs also publish the snapshot-integrity CSV with the report outputs. It
+does not change the existing report CSV headers. Older snapshots without this
+receipt-bound proof do not qualify newly introduced snapshot-only metrics.
 
 For an isolated test, use `-SendLicenseSummaryEmailOnly -LicenseSummaryTestTo <one-address>`
 with the intended tenant. This labels the mail `[TEST]`, rechecks

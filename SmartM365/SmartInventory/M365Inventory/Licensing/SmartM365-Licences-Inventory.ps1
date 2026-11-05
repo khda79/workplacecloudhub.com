@@ -9,7 +9,8 @@
   A user whose license details return 404 is excluded only when GET /users/{id} confirms the deletion; the count is
   bounded (LicenseDeletedUsersMaxCount, default 100, and LicenseDeletedUsersMaxPercent, default 1) and recorded
   as the receipt qualification UsersDeletedDuringCollection. Any other user error still stops publication.
-  The email, including SendLicenseSummaryEmailOnly, renders that published report after checking it against the receipt; it never recomputes.
+  The normal email renders the published report; the single-recipient test preview recalculates selected indicators in memory.
+  A receipted integrity CSV binds the report snapshot bytes to the licensing run for downstream consumers.
   ForceAdCsvAnalysis (full runs only) uses a fresh, structurally valid AD CSV for the report when only its collector receipt is rejected.
   ForceLicenseSummaryEmail sends the report again even when it was already sent in the current Europe/Paris period.
   The report also lists target-suite users awaiting license capacity and other assignment errors from qualified existing CSVs.
@@ -30,7 +31,7 @@
   readable headers, AD domain and country columns, colored reasons and dates, print setup and a tenant or domain file name.
   The script parses under Windows PowerShell 5.1 again (1.65), so SmartInventory.cmd can resolve and start it.
 .VERSION
-1.74
+1.75
 .REQUIREMENTS
     PowerShell 7+.
     Modules: SmartM365.Core; Microsoft.Graph.Authentication; Microsoft.Graph.Identity.DirectoryManagement; Microsoft.Graph.Users; Microsoft.Graph.Groups; ImportExcel for the report attachment.
@@ -38,7 +39,7 @@
     Conditional: Sites.Selected write is required only when SharePoint upload is enabled.
 .NOTES
   Author: https://github.com/khda79/workplacecloudhub.com
-     Version : 1.74
+     Version : 1.75
   PowerShell: PowerShell 7+
   Minimum application permissions: Directory.Read.All, User.Read.All, Group.Read.All
   Requires: Microsoft.Graph.Authentication
@@ -2333,7 +2334,8 @@ function New-LicensesRecoveryWorkbook {
 function Publish-LicensesReportCsv {
   param(
     [Parameter(Mandatory)][string]$Folder,
-    [Parameter(Mandatory)]$Snapshot
+    [Parameter(Mandatory)]$Snapshot,
+    [string]$SnapshotSha256 = ''
   )
   $summaryColumns = @('SnapshotId','TenantKey','GeneratedAtUtc','LicenseCollectedAtUtc','Product','Category','EnabledUnits','ConsumedUnits','AvailableUnits','Subscribed','AssignedUsers','AssignmentCapacityWait','AssignmentOtherErrors','AssignmentEvidenceStatus','RecoveryCandidates','RecoveryUnknown','DisabledUsers','DisabledUnknown','NoM365Activity','NoM365ActivityUnknown','MultipleTargetSuites','MultipleTargetSuitesUnknown','MultipleAssignedSkus','MultipleAssignedSkusUnknown','NoAdOrEntraActivity','NoAdOrEntraActivityUnknown','NoMailboxActivity','NoMailboxActivityUnknown','NoLocalAppsUse','NoLocalAppsUseUnknown','CandidatesPrimaryIntunePc','CandidatesPrimaryIntunePcUnknown','SharedMailboxesLicensed','SharedUnder50Gb','SharedRemovalCandidates','SharedUnknown','E3ToF3ReviewAssigned','E3ToF3ReviewCandidates','E3ToF3ReviewUnknown','E3ToF3ReviewExcluded','E3ToF3ReviewRecoveryExcluded','EvidenceStatus','WorkbookQualification')
   $candidateColumns = @('SnapshotId','TenantKey','CandidateType','Product','UserId','TenantUserKey','IdentityJoinStatus','UserPrincipalName','DisplayName','Reason','LastAdActivityDate','LastM365ActivityDate','PrimaryOnIntuneWindowsPc','TargetSuites','MailboxSizeGB','OneDriveUsedGB','OneDriveUsedBytes','ArchiveStatus','LitigationHoldEnabled','RetentionHoldEnabled','WindowsAppsUse180d','MacAppsUse180d')
@@ -2449,6 +2451,17 @@ function Publish-LicensesReportCsv {
     @{ Name='M365_Licenses_ReportGaps.csv'; Columns=$gapColumns; Rows=$gaps },
     @{ Name='M365_Licenses_ReportSources.csv'; Columns=$sourceColumns; Rows=$sources }
   )) { $specs.Add($spec) }
+  # The JSON snapshot is promoted as an artifact and is not itself in the CSV
+  # receipt. Bind its exact bytes to the current run using a receipted CSV.
+  if ($SnapshotSha256) {
+    if ($SnapshotSha256 -notmatch '^[A-Fa-f0-9]{64}$' -or -not $Snapshot.ReceiptRun -or
+        -not [string]$Snapshot.ReceiptRun.RunId) { throw 'Invalid license snapshot integrity evidence.' }
+    $integrity = [pscustomobject][ordered]@{
+      SnapshotId=$Snapshot.SnapshotId; TenantKey=$Snapshot.TenantKey
+      ReceiptRunId=[string]$Snapshot.ReceiptRun.RunId; SnapshotSHA256=$SnapshotSha256.ToUpperInvariant()
+    }
+    $specs.Add(@{ Name='M365_Licenses_ReportSnapshotIntegrity.csv'; Columns=@('SnapshotId','TenantKey','ReceiptRunId','SnapshotSHA256'); Rows=@($integrity) })
+  }
   # New files rather than new columns: existing report CSV schemas are exact consumer contracts.
   $adScope = if ($Snapshot -is [System.Collections.IDictionary]) { if ($Snapshot.Contains('AdScope')) { $Snapshot['AdScope'] } else { $null } }
              elseif ($Snapshot.PSObject.Properties['AdScope']) { $Snapshot.AdScope } else { $null }
@@ -2852,7 +2865,7 @@ function Publish-LicensesReportSnapshot {
     if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $expectedHash) { throw 'Published license report snapshot hash differs.' }
   }
   finally { if (Test-Path -LiteralPath $pending -PathType Leaf) { Remove-Item -LiteralPath $pending -Force -ErrorAction SilentlyContinue } }
-  $csvPaths = @(Publish-LicensesReportCsv -Folder $Folder -Snapshot $snapshot)
+  $csvPaths = @(Publish-LicensesReportCsv -Folder $Folder -Snapshot $snapshot -SnapshotSha256 $(if ($ReceiptRun) { $expectedHash } else { '' }))
   return [pscustomobject]@{ Id=$snapshotId; Path=$path; Data=$snapshot; CsvPaths=$csvPaths }
 }
 
@@ -4981,7 +4994,7 @@ function Publish-LicensesWeeklyHistory {
 # ==========================================================
 # Main
 # ==========================================================
-$ScriptVersion = "1.74"
+$ScriptVersion = "1.75"
 $TaskName      = "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) v$ScriptVersion ..."
 $OutputPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LicensesCsvLogFolderPath' -DefaultValue $OutputPath
 $LatestCsvFolderPath = Get-ScriptLocalConfigValue -Config $ScriptLocalConfig -Name 'LatestCsvFolderPath' -DefaultValue ''
@@ -5787,8 +5800,8 @@ if ($smartM365RunGuard.ExitCode -ne 0) { exit $smartM365RunGuard.ExitCode }
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZlo6Lk7bk5S0n
-# n/N2bcSQ6IPKM8kVt0D3MfHVGA29f6CCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDvi7+Gg/F1eYWf
+# LZ0r1GRSb/ng6enx92jRcRZmsLCS76CCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -5925,31 +5938,31 @@ if ($smartM365RunGuard.ExitCode -ne 0) { exit $smartM365RunGuard.ExitCode }
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgJMBwLSRlZIUt
-# fwe0/wuESu+p0KsD86OD5ZW+V/E1KB0wDQYJKoZIhvcNAQEBBQAEggGAgVMsw4MD
-# aQBALDtw+766+HZ4VCI1NR7dyOsyBm4uPYZby3p8nzMoPonGDPRuV0taJ7rXkzaC
-# IJJY100O1K7xxcsyGtWgj0G/YoTq4JoxgEl46xfo85P1VZU3ebrXCVcPCPwR3q8c
-# 3F5/7EHfRZScCvYMEjAqJLmZ1JvLJXc0J0qUw2tjgEAlNJ7mvp8Ute03YZ9xLjcI
-# /RP/bvD0M9mCl4VIa4zfUmkLUxDH9XsT0tWDJC9tk5M7eLxs82JVpIFE0Dhb8uZ/
-# 3+BStiwzdNACP9GC05K8zfeL72JVam5vlxFPLgZhA9U8jt/hCP339nI9UkLyIkL1
-# E1Yu4kufxMA+2kBP4A+hY9oDQw1q6FexzTmaUxc2Ju3z5hOXvvF0uk9wNuo2LACy
-# ii8iZTj6CFSpnoF/XyFLy7wkMXCLGN6/I7y/12K6ggyRTDsvz5bRtCPAJcSXcqtM
-# Am7kvPcavIh9YbySI2zYy8SMkfQL1dMdO3T2kPt5nbK7W5DYfRDep+zdoYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg57eYLJMF3WSA
+# Csw+/To9LaYkxr9xA3eGY+Vm2kmS5BIwDQYJKoZIhvcNAQEBBQAEggGAomLypL4j
+# SUCN9/Q7TOVek9rr7TSR6HjLCoRcA9WmdT5dCPMgnrjqOoQ+v5oyzATQH2rW8Lsn
+# gWE14XD21HIKzeVyoUncymfoT5XWie7Bw0o6DSlkvUbKh7MQ+Inmmza6Iatscq31
+# yIuUNOqAlOb2effU6OJv7WiJOuO5Xp4G0v2P4SV2R7C7jSkFwNYH9Ra9Cw8+ABLs
+# snGddAb/tk6YGka/NK9Ivjl/N0cf5yMexZJaApKB3THV9kyfL5I1vKIh0PV1au/1
+# gavRtgSP6pz6NKfdNZ1ifipaWPF7f1N9ic58b8tcrmAZg7JV/zKdPzvhW2ZjTjFd
+# SS6gS2orPBbDtn+W3XfJ42aip0LyHvhp5qI9cqqPUZ6D+Js/uwPVA3S7U8HvJr3e
+# PBKzXmg7oII29laFYOJr69QPOmKZ1k5zyVewouE/xAyAD+MypTBsjuVBYNl0edrx
+# uL5rT0JZpQpLwqxZ/l1Z2/Spq6lJCX9oztx5wEnmN8BzcBVlVto2wzEwoYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTA0MTYxNDA4WjA/BgkqhkiG9w0BCQQxMgQwtD+ETxI+HjkorvqEnB1VIDPj
-# gvT0PBHGWMnwA0ILXQ8FwN7/DB0LUTUnvCC3v6QNMA0GCSqGSIb3DQEBAQUABIIC
-# AKFl/JzVkO7xDEtSNQT9aehqQykFxvfwItYMC5NXAEz4lPLEsp1msMJ45xvR8de/
-# 7tKmr9z2kB74RhcZWy9YVphBBoKWGu2yTnP+8U1Wy6GslMf1Yf8QEO3vaCJFFB+q
-# 8MZYanveGEWQJz/xIuVqH18hmGEpfWRvruQ9l2I3Mt4vgmruMzJYQSSFuWwHrw+9
-# 6Uvv4XaQ19YR416WjA5b1C66VkmWN0pIVzqHyJOvX9HbG3pATGb3D4wXavQ7V12G
-# Yy0gGFoupg+WhpeMRYXsxAC/o1o4Nbp1KIZcWZwSl3hLvzhJJde7RO0pX4KcCzFk
-# 6AVD3gmQChaALXmtYPDrRhQGhOGPZdrCMck+1aoPEi1sFWrS7qgtKb/vVso3H3go
-# NzeBVb9PFR0UnSPzPqC51ARIkkEF0uLBe0AOn3lqm2U6JR9XSog1aFHbv2nYztXA
-# ZaN7OEc9n7rxw/8yu6Cx1Gz0ygSeHutzCU2wCNRk7hoHHOKqkYEdIw9QMNCk2RsV
-# DDnDfpDMQj8R0Mk5ABMoDPl0MJ88w1Z6e3ZgGL7JIBan77GyjjBKyWXm+B7BAlYl
-# GUfwFr345Zdfu7Yx3V3a3tfG9aVniawP/g4jueKySuGh1HEOZ/mzkcTbOI50Tz1+
-# FcqSNLYChj3yynHKwLALy17io/veVrSRQ1IYkNJJ0PRY
+# MjYxMTA1MTU0NzIxWjA/BgkqhkiG9w0BCQQxMgQwBtKSgjDqtpFuhGqp0inkg7dl
+# cTreY4JqSSiTHJd4QVY9XkiO7lc9fktWeSNjvG3XMA0GCSqGSIb3DQEBAQUABIIC
+# AH5satJrkV/Ak0S7/9hO4KvKqr2wGX4+i7nV7mQwgNAHSOidsRggtAd7U33qo/4K
+# vOA9YUdKj5J/yLw/9gDuaXt5Bf2EYbHc8ReDnqtb1Kl/hI2shxf4oNVQ5e/5dbgV
+# zJpebHZ/kWTexijK8vo7fBbeNZ6bbntMEBkNe8Z5QVpBDQ8m/eQ+1mb1oj2GhpqB
+# uiVy8aFFzmjpBARl+zb66AvQFJ+fvxVEPLLteIsAOaWr5CX6QA/aFsj54BPZIU/2
+# gbBODMpRTDgc45DkWw9NRyHUubSr0ZxDGfZlacmQh2XbeyYZwDMQsQ43/GzlJmv9
+# 1YkWvrh4p50ATsvmPEDWbO89JejeD8xsQnaRqrZtBF/H8KrTrnnwZ3MrxcwB1ZDI
+# HnM58IiZnIHxeGI5rEMjHwA0Pj1GZGZGYXtGk4si4PT+8C6UToNPUklHMEUiR/mS
+# tSyzQVIPQ/T0Bt0dxNJG0F80Zq4JP+u2lQ76QuJwmEz5CZD7b1gPip8xMxbOR9DL
+# jiM2UAxaO0bTva6Fpwcr2nhgYhbS69miB6jG4YjJQ6YWm0QRvn+z7vuclHSGzQzD
+# WEfJnHBQDennojHX9N40JpofGpsLJZblJ2NYrTv6HgNzlLj79zlLEDfZ5/q54T+E
+# 2gyoxOTN+migH+2n2J+t4r6VtB9EEn3TYpcKL9G2UEoh
 # SIG # End signature block

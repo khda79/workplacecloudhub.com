@@ -41,6 +41,8 @@ foreach ($definition in $definitions) { Invoke-Expression $definition.Extent.Tex
 
 # The production module: a missing export fails here exactly as it would in the collector.
 $coreModule = Import-Module $coreManifest -MinimumVersion '1.0.95' -Force -PassThru
+# The intentional failed-run fixture must not invoke Core's external alert transports.
+& $coreModule { function script:WriteLog { param([string]$Message,[string]$Level) } }
 
 $script:checks = 0
 function Check {
@@ -176,6 +178,10 @@ try {
   $snapshot = Get-Content -LiteralPath (Join-Path $dataLast 'M365_Licenses_ReportSnapshot.json.txt') -Raw | ConvertFrom-Json
   Check ($snapshot.SchemaVersion -eq 2 -and $snapshot.LogicVersion -eq '1.44' -and $snapshot.SnapshotId -eq $first.Report.SnapshotId) 'Snapshot schema and logic versions are unchanged.'
   Check ($snapshot.ReceiptRun.RunId -eq $first.Receipt.RunId -and $first.Report.ReceiptRunId -eq $first.Receipt.RunId -and $snapshot.ReceiptRun.Producer -eq 'SmartM365-Licences-Inventory.ps1') 'Snapshot carries the real licensing receipt run.'
+  $integrityName='M365_Licenses_ReportSnapshotIntegrity.csv'
+  $integrity=@(Import-Csv -LiteralPath (Join-Path $dataLast $integrityName))
+  Check ($integrity.Count -eq 1 -and $integrity[0].SnapshotId -eq $snapshot.SnapshotId -and $integrity[0].ReceiptRunId -eq $first.Receipt.RunId -and $integrity[0].SnapshotSHA256 -eq (Get-FileHash -LiteralPath (Join-Path $dataLast 'M365_Licenses_ReportSnapshot.json.txt')).Hash) 'Snapshot integrity binds the exact JSON bytes and run.'
+  Check (@($first.Receipt.Files | Where-Object File -eq $integrityName).Count -eq 1 -and @($first.Receipt.OptionalFiles | Where-Object { $_.File -eq $integrityName -and $_.Published }).Count -eq 1) 'Snapshot integrity is recorded as a published receipt output.'
   Check ($null -eq $first.RunState.PSObject.Properties['Notes']) 'A published report adds no run note.'
   foreach ($name in $decisionNames) {
     $record = @($first.Receipt.Files | Where-Object File -eq $name)
@@ -248,7 +254,7 @@ try {
   $script:FailUpload = $false
   $script:Uploads.Clear()
   $uploaded = Invoke-LicensingRun
-  Check ($uploaded.Report.UploadSatisfied -and $script:Uploads.Count -eq 10 -and $script:Uploads[0] -eq 'M365_Licenses_ReportSnapshot.json.txt' -and $script:Uploads[6] -eq 'M365_Licenses_ReportByDomain.csv' -and $script:Uploads[7] -eq 'M365_Licenses_ReportByCountry.csv' -and $script:Uploads[9] -eq 'M365_Licenses_ReportSkuCapacity.csv') 'Snapshot, five report CSVs, two AD scope CSVs and two SKU decision CSVs are uploaded after registration.'
+  Check ($uploaded.Report.UploadSatisfied -and $script:Uploads.Count -eq 11 -and $script:Uploads[0] -eq 'M365_Licenses_ReportSnapshot.json.txt' -and $script:Uploads[6] -eq 'M365_Licenses_ReportSnapshotIntegrity.csv' -and $script:Uploads[7] -eq 'M365_Licenses_ReportByDomain.csv' -and $script:Uploads[8] -eq 'M365_Licenses_ReportByCountry.csv' -and $script:Uploads[10] -eq 'M365_Licenses_ReportSkuCapacity.csv') 'Snapshot, integrity evidence, report CSVs, AD scope and SKU decisions upload after registration.'
   Remove-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
 
   # 5b. SKU decision failure: the report stays published, the decision files are not recorded.
@@ -329,7 +335,7 @@ try {
   Check ($staged.RunState.Status -eq 'Completed' -and -not $staged.RunState.UnqualifiedPublication -and $staged.RunState.StagedPublication) 'The staged licensing run state is not qualified.'
   Check ($staged.Report.UploadDeferred -and $script:Uploads.Count -eq 0) 'The staged report upload was not deferred to the promotion.'
   $uploadedStaged = Invoke-LicensesReportUpload -Result $staged.Report -ReportPaths $staged.Report.ReportPaths -SkuPaths $staged.Report.SkuPaths
-  Check ($uploadedStaged.UploadSatisfied -and $script:Uploads.Count -eq 10 -and $script:Uploads[0] -eq 'M365_Licenses_ReportSnapshot.json.txt') 'The promoted report was not uploaded by canonical name.'
+  Check ($uploadedStaged.UploadSatisfied -and $script:Uploads.Count -eq 11 -and $script:Uploads[0] -eq 'M365_Licenses_ReportSnapshot.json.txt') 'The promoted report was not uploaded by canonical name.'
   Check (@($staged.Report.ReportPaths + $staged.Report.SkuPaths | Where-Object { $_ -like '*.staging*' }).Count -eq 0) 'A staging path reached the report upload.'
   Remove-Variable -Name EnableSharePointUpload -Scope Global -ErrorAction SilentlyContinue
   $read = Read-LicensesPublishedReport -Folder $dataLast -TenantKey 'prod'
@@ -349,8 +355,8 @@ finally {
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBSUmso+J7EiF68
-# F0/6k74UIf9M27SWFG+lsVzvwHfxDaCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDxzfIZ/IrzNv0a
+# L5OtNfbwfokm/JZQpbmxGrCVs1EVHqCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -487,31 +493,31 @@ finally {
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgVjlk7+Ni/eLi
-# joLaFAd92j5sJe4l6JT7JQGYcMPXKLswDQYJKoZIhvcNAQEBBQAEggGAG5qFELWl
-# ArPLs3hZIJ2jXQjtauIGRQ891qY9Clol+grE7Hbs0UQ/XdZeRE1NRQRpJigFp+08
-# GPAwC+Je5I3N1KohO9Wq7nOpK1gmy6dxBouOFLGBgm0l2adfyvkHvRuG8N6OkKov
-# qDoqLPblTLk9Bg4iL3HLmFqyAKRZ9P0OuYGze5/4K2ViGiw05VJkz+A1zOcoh7Kr
-# Y8eSw6oodVdW4Vr4wup5J7oPbPi/fC5t0NmQ/R92phKZT2sePTbBTrAqOApA8hng
-# UO6v7eaYNXQ//Gsi3ZOAPSQ98OsvwWvbrcKpeJFnprKglT082V5N388svr2vjwdK
-# BIJLIok8g67Y9X/uX7dbEz4oF7lO4JViwgBvHyCyekjRuzo4fW2HBzfP6VCDze7X
-# E8jhxBJHBvZZ7e/kMwb3mCBd4Nr3w25k1zho24sXNdxAjcANOZGG9Pj5rrQ9tHJg
-# Ln4ne6+s/BXdYSM75mm2JEz812/W5IJOoXmSQAS7XBO4Til1ck252VCwoYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg8R/UQKbvWW/c
+# EJlwX7DIdzXAYXXXD9iJAl1GShZscTswDQYJKoZIhvcNAQEBBQAEggGAYPG9hh7B
+# 93n/m1t73CkbQ35EtrcnUIASI5Zmday5ksVjePFus8wLGzM/dFX7IYZZRx2TwTnv
+# oZipmOdiCIh4ibSHxykR3p1raouFDl9nGHV657dWYeP8Er77GpUVwpSBTFLGyh1k
+# /yBxxCOETazJSWlMJ32KibZZC8lQxkG0K8903G7FFfn+YnQyx3to05jswgCSpx//
+# qxKzr0gA4K35ucM2qbnQlVHeOiv4IuxvL9TDZcwJdDk0iKRvFs0OzC0iGXTHCI80
+# Lh4K/p/3pnO5zwfaOJkWWEv51fdcVNSfYaRaHNFkNJMasZEVIUCg2uUcnNqFC8eL
+# C+w82USpV9pswU7OuJs1e+HgefxL1bmEkDFIkZl+O7dCnEZzYXHRFj3jl/wDKpLn
+# xoRdz2LvMDOHj3+TFHPxoRxJz27gUeiRH3vwCshrIaLhNEzJAM+hSYgkptNn7sVU
+# +i25XpYHGWoWQRiv03/RTqIki+0NGnq5IZBEbo1fIiVuAhvOt1qiR/vCoYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTA0MTYxNDE3WjA/BgkqhkiG9w0BCQQxMgQwFfpr8+38EeXlRZ/J8QrYa/98
-# aWVrDcCCP+W12+z56ZiBidQ9d/cMSB1bY7n4zsJ2MA0GCSqGSIb3DQEBAQUABIIC
-# AHR/BwRdKyKeQCnUy2AcHrPYP7oyUxL8/vJvbAxd96/MuWaVYTHUpHGYbgwgehER
-# T8Ff58MaDFzKJfXaso6XZwAS+rvrS6+5msOJu2V41dEjNeLpU2vBPMRCNEssjhKI
-# /9JZhc2G1L2IKHcFBZR2rJ+wMDaF39OEQ/KDE2inTKkqZSssGvOODT8o/p0tUqgt
-# quZ7mJsRhAxGcuncoRKWwq0c1ayeVxpGwkcC0oVvKIv4esurR0N8lyX02I5jQIP1
-# ZbvJ7f+zHCT3Rh7UarIOzw+u3NfrpEH2TbjXeFePqCPDge6ewEYHEhfEbBmiDkbo
-# VkNMlxpz6ipBC62pjZ22QILdjO4ERF/W0uPTo/72xO+8IeOHBLosztyi2NY2JpEu
-# d5Xprqw5W+q/10UNFukYvlAYDORtPKViJLHkjgnrQJrpfE7GqBBrW+lno12GDLgQ
-# wMo9ByyxkJGXbyTWTm+MWlCNF4amHkYJGJt0OmSQT3UjQKfqMxnzgvxCz4GtPOmb
-# TD74XLx7i1+nGx3mdhyQrgagJrxnbSFjeRCH682wbhv9jV0RwaDSsFVVBtPAphQD
-# eBd+NezBQL64uwhODqQzeuMBSBKf2tcDIcZy+9OrLv5eRW9oGmDUYXECbB1vrUio
-# EiOwrCuwIQ52RWFp+0fW6QOq6A7+LmxNV9449JXjGPbe
+# MjYxMTA1MTU0ODE0WjA/BgkqhkiG9w0BCQQxMgQwekPL/xl/p5mrdSkQobHNjhiX
+# mkmH1IYWVvrLfUIL25a5GwWgODjTU9S2s12YSGOCMA0GCSqGSIb3DQEBAQUABIIC
+# AGFkLng3ZDChhzfKQABM3wDl4LZWztISjkR6GbmARS44zvSXbsKWDqchFjvVIyxF
+# tffQFthEAKDi0020XrqFXs+f5BjZJ0S399fdxhSbngfknA9L1828qN+xHoDMKhdq
+# zTH5S6AIh9ewCJ/z/Yd8LOfGUJuUTN8vjHVK7p2fLJBLhsm/dbzSS/7gS2n9++5K
+# AOmyZIag5ISbqzluzA5apLajAK8d55lRhcQQkUhrrCnresZi3L00gPKmWWRYM2SY
+# lCdnVHhbkc6d3I+/Hy1xU41mhSCWSW1+TdcZwrlwvuUBbfcX7hrRQxo66hECudfv
+# fcKWJ5TKNQKeLzllcqPi9rlgpUUfJTlyuQJZ74bhh9PYIA6gnlbmL2WaR2NDdhZ0
+# ePvUlIDMIX7AhnRhEULdiB9ePp3oS+DsoYvi1GSdi45BxSVHC6z9u3u+cYfayaRp
+# H80Qx5D28Z+lgR1LnQWpHG3dZINMBKuBQN8IjO8QDIGn1ZD+4rQMDNvgaKSFrrw7
+# UICzdO29Rg1aavG3gEA/VNFvXMDE2hUozlermVTNSJaews/CEg5ZUhq8z3UWrCmo
+# IcSrhpYn2Ux1P6oyrQ7U7UffFPDqVVi9+13nvdrXNGsJW5PmIcdPCenB7RYXykvQ
+# lH6skkL+KS4MndvgnuTWnWyxAUgu3oI264lJ30eUtueF
 # SIG # End signature block

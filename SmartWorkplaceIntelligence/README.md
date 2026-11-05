@@ -306,6 +306,15 @@ receipt `RunId`, and snapshot `ReceiptRun.RunId` equal to the receipt `RunId`.
 The result is recorded in the batch manifest as `LicenseReportQualification`
 (state, reason, snapshot ID, receipt run ID, one entry per file).
 
+`M365_Licenses_ReportSnapshotIntegrity.csv` is an optional receipt-bound proof
+of the snapshot JSON bytes. Its qualified state is separate from the original
+report's qualification, so older batches remain usable without implying that
+their snapshot-only indicators are qualified. The current-batch shared mailbox
+license calculation is stored in `SharedMailboxLicenseEvidence` in the prepared
+manifest; missing or unqualified inputs produce `N/D`, not zero. Its computation
+uses the same batch before the pointer is published and never depends on the
+previous batch's computed results.
+
 - `Qualified`: the license tables are loaded.
 - `Not qualified`: a lineage defect (for example a report produced outside the
   receipt run or a file hash that differs). The batch is still published and the
