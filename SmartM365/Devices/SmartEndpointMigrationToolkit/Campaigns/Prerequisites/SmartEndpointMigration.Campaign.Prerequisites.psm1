@@ -5,9 +5,10 @@
 .DESCRIPTION
     The Prerequisites Campaign creates on targets the scheduled tasks that the HybridJoin and
     Windows11Upgrade endpoint scripts only start, enable or disable:
-    - HybridJoin: three on-demand user-context tasks (dsregcmd /status, dsregcmd /refreshprt,
-      deviceenroller /AutoEnrollMDM), the next-logon task (created disabled) and the SYSTEM
-      retry-after-reboot task (created disabled);
+    - HybridJoin: two on-demand user-context tasks (dsregcmd /status, dsregcmd /refreshprt), the
+      next-logon task (created disabled; deviceenroller /AutoEnrollMDM runs there from SYSTEM) and
+      the SYSTEM retry-after-reboot task (created disabled). The obsolete user-context
+      deviceenroller task is removed;
     - Windows11Upgrade: the SYSTEM retry-after-reboot task (created disabled).
     The Campaign is disabled by default (option Prerequisites.Enabled). It reads no inventory.
     Computers whose tasks are ready leave Computers.txt.

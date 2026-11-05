@@ -22,8 +22,7 @@ by default C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin
 - If AzureAdJoined=YES and DeviceAuthStatus contains SUCCESS, or older dsreg output has KeySignTest=PASSED without DeviceAuthStatus, verify Intune enrollment.
 - If Hybrid Join is healthy but Intune is not enrolled => verify MDM auto-enrollment GPO/registry policy and HTTPS connectivity, then trigger auto-enrollment using the configured credential type.
 - If the launcher reports that the Entra hybrid object is pending, and the local device join is healthy => trigger Automatic-Device-Join and perform a bounded retry without dsregcmd /leave.
-- If auto-enrollment policy uses User Credential => trigger a user-context task first, then the native EnterpriseMgmt task if available.
-- If auto-enrollment policy uses Device Credential => run deviceenroller.exe /c /AutoEnrollMDM from SYSTEM.
+- Auto-enrollment (User or Device Credential) => run deviceenroller.exe /c /AutoEnrollMDM from SYSTEM, as the native EnterpriseMgmt task does (run from a user context it returns 0x80070005).
 - If user-context status is available and AzureAdPrt remains not YES after refreshprt => Exit 3.
 - If Hybrid Join is not healthy and Intune is enrolled => Skip dsregcmd repair actions => Exit 3.
 - If AllowDsregLeave AND DeviceAuthStatus starts with FAILED => run /leave, trigger Automatic-Device-Join,
@@ -1333,12 +1332,12 @@ $GpUpdateTimeoutSeconds = 180
 $UserTaskFolderPath = "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin"
 $UserStatusTaskName = "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserDsregStatus"
 $UserRefreshPrtTaskName = "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserRefreshPrt"
-$UserIntuneAutoEnrollTaskName = "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserMdmAutoEnroll"
+$IntuneAutoEnrollTimeoutSeconds = 300
 $UserNextLogonAutoEnrollTaskName = "\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-RunUserAutoEnrollAtLogon"
 
 Write-RunLog ("Retry policy: SleepMinutes={0}; MaxRetries={1}; Mode=LocalWait" -f $RetrySleepMinutes, $RetryMaxRetries)
 Write-RunLog ("Intune retry policy: SleepMinutes={0}; MaxRetries={1}; Mode=LocalWait" -f $IntuneRetrySleepMinutes, $IntuneRetryMaxRetries)
-Write-RunLog ("User task policy: Folder={0}; StatusTask={1}; RefreshPrtTask={2}; IntuneAutoEnrollTask={3}; NextLogonTask={4}; WaitSeconds={5}; RefreshWaitSeconds={6}" -f $UserTaskFolderPath, $UserStatusTaskName, $UserRefreshPrtTaskName, $UserIntuneAutoEnrollTaskName, $UserNextLogonAutoEnrollTaskName, $UserTaskWaitSeconds, $UserPrtRetryWaitSeconds)
+Write-RunLog ("User task policy: Folder={0}; StatusTask={1}; RefreshPrtTask={2}; NextLogonTask={3}; WaitSeconds={4}; RefreshWaitSeconds={5}; IntuneAutoEnroll=SYSTEM deviceenroller (TimeoutSeconds={6})" -f $UserTaskFolderPath, $UserStatusTaskName, $UserRefreshPrtTaskName, $UserNextLogonAutoEnrollTaskName, $UserTaskWaitSeconds, $UserPrtRetryWaitSeconds, $IntuneAutoEnrollTimeoutSeconds)
 Write-RunLog "DNS policy: FlushDNS=True"
 Write-RunLog ("GPUpdate policy: Force=True; TimeoutSeconds={0}; PostWaitSeconds={1}" -f $GpUpdateTimeoutSeconds,$GpUpdateWaitSeconds)
 Write-RunLog ("Non-Intune MDM removal policy: AllowRemoveNonIntuneMdmEnrollment={0}" -f [bool]$AllowRemoveNonIntuneMdmEnrollment)
@@ -2104,11 +2103,11 @@ function Get-HybridJoinTaskState {
 function Test-UserContextHelperTasks {
     <#
     The user-context helper tasks are created by the Prerequisites campaign; this script only
-    checks that they exist. A missing task is logged and its step is skipped (auto-enrollment then
-    falls back to the native EnterpriseMgmt task).
+    checks that they exist. A missing task is logged and its step is skipped. Auto-enrollment does
+    not use a user-context task: deviceenroller runs from SYSTEM.
     #>
     $results = @()
-    foreach ($taskName in @($UserStatusTaskName,$UserRefreshPrtTaskName,$UserIntuneAutoEnrollTaskName)) {
+    foreach ($taskName in @($UserStatusTaskName,$UserRefreshPrtTaskName)) {
         $state = Get-HybridJoinTaskState -TaskName $taskName
         $results += [PSCustomObject]@{ TaskName=$taskName; Present=($state.Exists -eq $true); Detail=$state.Detail }
     }
@@ -2125,7 +2124,6 @@ function Test-UserContextHelperTasks {
         Success = ($missing.Count -eq 0)
         StatusTaskPresent = [bool](@($results | Where-Object { $_.TaskName -eq $UserStatusTaskName -and $_.Present }).Count)
         RefreshPrtTaskPresent = [bool](@($results | Where-Object { $_.TaskName -eq $UserRefreshPrtTaskName -and $_.Present }).Count)
-        AutoEnrollTaskPresent = [bool](@($results | Where-Object { $_.TaskName -eq $UserIntuneAutoEnrollTaskName -and $_.Present }).Count)
         Results = $results
         Detail = $detail
     }
@@ -2151,6 +2149,14 @@ function Start-AutoDeviceJoinTask {
 }
 
 function Start-IntuneAutoEnrollment {
+    <#
+    Runs deviceenroller.exe /c /AutoEnrollMDM from this SYSTEM context, as the native
+    EnterpriseMgmt task does, for both credential types. With User Credential, Windows uses the
+    signed-in user's token; run from a user context the tool returns 0x80070005. The exit code is
+    the tool's own result: the enrollment itself is confirmed through the MDM registry.
+    #>
+    param([Parameter(Mandatory=$false)][string]$Mode = "SystemDeviceCredential")
+
     $deviceEnrollerPath = Join-Path $env:WINDIR "System32\deviceenroller.exe"
     if (-not (Test-Path $deviceEnrollerPath)) {
         return [PSCustomObject]@{
@@ -2158,29 +2164,30 @@ function Start-IntuneAutoEnrollment {
             ToolFound=$false
             ExitCode=""
             Detail="deviceenroller.exe not found."
+            Mode=$Mode
+            TaskName=""
+            OutputFile=""
         }
     }
 
+    $outputFile = Join-Path $OutputDir ("{0}_deviceenroller_{1}.txt" -f $ComputerName,$RunId)
     try {
-        Write-RunLog "Running deviceenroller.exe /c /AutoEnrollMDM."
-        $enrollOutput = & $deviceEnrollerPath /c /AutoEnrollMDM 2>&1
-        $enrollExitCode = $LASTEXITCODE
-        $detail = (($enrollOutput | Out-String).Trim())
-
-        if ($enrollExitCode -eq 0) {
-            return [PSCustomObject]@{
-                Success=$true
-                ToolFound=$true
-                ExitCode=$enrollExitCode
-                Detail=$detail
-            }
+        Write-RunLog ("Running deviceenroller.exe /c /AutoEnrollMDM from SYSTEM. Mode={0}; TimeoutSeconds={1}" -f $Mode,$IntuneAutoEnrollTimeoutSeconds)
+        $result = Invoke-ProcessWithTimeout -FilePath $deviceEnrollerPath -Arguments @('/c','/AutoEnrollMDM') -TimeoutSeconds $IntuneAutoEnrollTimeoutSeconds -OutputFile $outputFile
+        if ($result.TimedOut) {
+            $detail = "deviceenroller.exe did not exit within {0} seconds; termination requested. {1}" -f $IntuneAutoEnrollTimeoutSeconds,$result.StopDetail
         }
-
+        else {
+            $detail = "deviceenroller.exe exit code {0} (0x{1:X8}). {2}" -f $result.ExitCode,([int64]$result.ExitCode -band 4294967295),$result.Output
+        }
         return [PSCustomObject]@{
-            Success=$false
+            Success=((-not $result.TimedOut) -and [string]$result.ExitCode -eq "0")
             ToolFound=$true
-            ExitCode=$enrollExitCode
-            Detail=$detail
+            ExitCode=$result.ExitCode
+            Detail=$detail.Trim()
+            Mode=$Mode
+            TaskName=""
+            OutputFile=$outputFile
         }
     }
     catch {
@@ -2189,91 +2196,44 @@ function Start-IntuneAutoEnrollment {
             ToolFound=$true
             ExitCode=""
             Detail=$_.Exception.Message
+            Mode=$Mode
+            TaskName=""
+            OutputFile=""
         }
     }
 }
 
-function Get-NativeMdmAutoEnrollmentTask {
-    try {
-        $tasks = Get-ScheduledTask -ErrorAction Stop |
-            Where-Object {
-                $_.TaskPath -like "\Microsoft\Windows\EnterpriseMgmt\*" -and
-                (
-                    $_.TaskName -like "*automatically enrolling in MDM*" -or
-                    $_.TaskName -like "*Schedule created by enrollment client*"
-                )
-            } |
-            Select-Object -First 1
+function Get-RecentMdmUserLicenseFailure {
+    <#
+    Returns the first MDM enrollment server fault UserLicense (event 52) or license error 0x80180018
+    (events 71/76) logged since the auto-enrollment trigger of this run, or $null. The native
+    EnterpriseMgmt task may make the attempt: the fault belongs to this device and its user, not
+    necessarily to the deviceenroller call of this run.
+    #>
+    param([Parameter(Mandatory=$true)][datetime]$Since)
 
-        if (-not $tasks) { return $null }
-
-        return [PSCustomObject]@{
-            TaskName=$tasks.TaskName
-            TaskPath=$tasks.TaskPath
-            FullName=("{0}{1}" -f $tasks.TaskPath,$tasks.TaskName)
+    foreach ($logName in @("Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Enrollment","Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Admin")) {
+        try {
+            $licenseEvent = Get-WinEvent -FilterHashtable @{ LogName=$logName; Id=@(52,71,76); StartTime=$Since } -ErrorAction Stop |
+                Where-Object { $_.Message -match '(?i)\(UserLicense\)|0x80180018' } |
+                Sort-Object TimeCreated |
+                Select-Object -First 1
+            if ($licenseEvent) {
+                return [PSCustomObject]@{
+                    LogName=$logName
+                    Id=$licenseEvent.Id
+                    RecordId=$licenseEvent.RecordId
+                    TimeCreated=$licenseEvent.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss")
+                }
+            }
+        }
+        catch {
+            if ([string]$_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') {
+                Write-RunLog ("Unable to read {0} for UserLicense faults: {1}" -f $logName,$_.Exception.Message)
+            }
         }
     }
-    catch {
-        Write-RunLog ("Failed to enumerate native EnterpriseMgmt auto-enrollment tasks: {0}" -f $_.Exception.Message)
-        return $null
-    }
-}
-
-function Start-UserContextIntuneAutoEnrollment {
-    param(
-        [Parameter(Mandatory=$true)][string]$PreferredTaskName,
-        [Parameter(Mandatory=$true)][int]$WaitSeconds,
-        [Parameter(Mandatory=$false)][string]$ExpectedUserName
-    )
-
-    $startedAt = Get-Date
-    $preferredState = Get-HybridJoinTaskState -TaskName $PreferredTaskName
-    if ($preferredState.Exists -eq $true) {
-        $customResult = Invoke-OnDemandScheduledTask -TaskName $PreferredTaskName
-    }
-    else {
-        # Created by the Prerequisites campaign only: when it is missing, the native task is used.
-        $customResult = [PSCustomObject]@{ Success=$false; ExitCode=""; Detail=("Task missing; run the Prerequisites campaign to create it. {0}" -f $preferredState.Detail); ResolvedTaskName=$PreferredTaskName }
-    }
-    if ($customResult.Success) {
-        # The task starts deviceenroller.exe directly (no cmd.exe, no output file): the result is
-        # checked through the enrollment state, the MDM registry and the DeviceManagement logs.
-        return [PSCustomObject]@{
-            Success=$true
-            ToolFound=$true
-            ExitCode=$customResult.ExitCode
-            Detail=("Triggered user-context Intune auto-enrollment task '{0}' resolved as '{1}'. {2}" -f $PreferredTaskName,$customResult.ResolvedTaskName,$customResult.Detail)
-            Mode="UserTask"
-            TaskName=$customResult.ResolvedTaskName
-            OutputFile=""
-        }
-    }
-
-    Write-RunLog ("Preferred user-context Intune auto-enrollment task did not run successfully. TaskName={0}; ResolvedTaskName={1}; ExitCode={2}; Detail={3}" -f $PreferredTaskName,$customResult.ResolvedTaskName,$customResult.ExitCode,$customResult.Detail)
-
-    $nativeTask = Get-NativeMdmAutoEnrollmentTask
-    if ($nativeTask) {
-        $nativeResult = Invoke-OnDemandScheduledTask -TaskName $nativeTask.FullName
-        return [PSCustomObject]@{
-            Success=$nativeResult.Success
-            ToolFound=$true
-            ExitCode=$nativeResult.ExitCode
-            Detail=("Triggered native EnterpriseMgmt auto-enrollment task '{0}'. {1}" -f $nativeTask.FullName,$nativeResult.Detail)
-            Mode="NativeEnterpriseMgmtTask"
-            TaskName=$nativeTask.FullName
-            OutputFile=""
-        }
-    }
-
-    return [PSCustomObject]@{
-        Success=$false
-        ToolFound=$false
-        ExitCode=$customResult.ExitCode
-        Detail=("No usable user-context Intune auto-enrollment task found. Preferred task '{0}' failed or is missing, and no native EnterpriseMgmt auto-enrollment task was found. Preferred task detail: {1}" -f $PreferredTaskName,$customResult.Detail)
-        Mode="UserTaskMissing"
-        TaskName=$PreferredTaskName
-        OutputFile=""
-    }
+    return $null
 }
 
 function Get-AutoEnrollmentPolicyState {
@@ -3012,17 +2972,21 @@ function Enable-UserAutoEnrollAtLogonTask {
     <#
     The next-logon task is created disabled by the Prerequisites campaign. It is enabled only when
     auto-enrollment waits for an interactive user logon, and disabled again once Intune enrollment
-    is confirmed. Its two actions start the user-context status and auto-enrollment tasks.
+    is confirmed. Its actions start the user-context status task and run deviceenroller from SYSTEM.
     #>
     $taskName = $UserNextLogonAutoEnrollTaskName
     try {
         $helperTaskResult = Test-UserContextHelperTasks
-        if (-not ($helperTaskResult.StatusTaskPresent -and $helperTaskResult.AutoEnrollTaskPresent)) {
-            throw ("SEMT_PREREQUISITE_TASK_MISSING: the user-context tasks started at next logon are missing. {0}" -f $helperTaskResult.Detail)
+        if (-not $helperTaskResult.StatusTaskPresent) {
+            throw ("SEMT_PREREQUISITE_TASK_MISSING: the user-context task started at next logon is missing. {0}" -f $helperTaskResult.Detail)
         }
         $state = Get-HybridJoinTaskState -TaskName $taskName
         if ($state.Exists -ne $true) {
             throw ("SEMT_PREREQUISITE_TASK_MISSING: {0} ({1}). Run the Prerequisites campaign on this computer." -f $taskName,$state.Detail)
+        }
+        # Older Prerequisites versions started a user-context deviceenroller task, which fails.
+        if (-not @($state.Actions | Where-Object { [string]$_ -like '*\deviceenroller.exe|/c /AutoEnrollMDM' }).Count) {
+            throw ("SEMT_PREREQUISITE_TASK_OUTDATED: {0} does not run deviceenroller.exe from SYSTEM. Run the Prerequisites campaign on this computer." -f $taskName)
         }
         if (-not $state.Enabled) { Set-SemtScheduledTaskEnabled -TaskPath $state.TaskPath -TaskName $state.TaskName -Enabled $true }
         Write-RunLog ("Next-logon auto-enrollment task enabled. TaskName={0}; WasEnabled={1}" -f $taskName,$state.Enabled)
@@ -3086,6 +3050,8 @@ function Get-NextActionForStatus {
         "AUDIT_HYBRID_JOIN_UNHEALTHY" { return "FIX_HYBRID_JOIN" }
         "INTUNE_ENROLLMENT_TRIGGERED" { return "RECHECK_AFTER_AUTOENROLL" }
         "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" { return "RECHECK_LATER_INTUNE_ENROLLMENT" }
+        "INTUNE_USER_LICENSE_REJECTED" { return "ASSIGN_USER_INTUNE_LICENSE" }
+        "INTUNE_ENROLLMENT_TOOL_NOT_FOUND" { return "CHECK_DEVICEENROLLER" }
         "INTUNE_ENROLLMENT_RETRY_EXHAUSTED" { return "RECHECK_OR_INVESTIGATE_INTUNE_ENROLLMENT" }
         "INTUNE_AUTOENROLL_POLICY_NOT_CONFIGURED" { return "CHECK_GPO_AUTOENROLL" }
         "INTUNE_ENROLLMENT_CONNECTIVITY_FAILED" { return "CHECK_CONNECTIVITY" }
@@ -3093,7 +3059,6 @@ function Get-NextActionForStatus {
         "REBOOT_TRIGGERED_WAITING_FOR_USER_LOGON" { return "WAIT_USER_LOGON" }
         "WAITING_FOR_INTERACTIVE_USER_LOGON" { return "WAIT_USER_LOGON" }
         "INTUNE_USER_AUTOENROLL_LOCAL_INTERACTIVE_USER" { return "LOGON_WITH_DOMAIN_OR_AAD_USER" }
-        "INTUNE_USER_AUTOENROLL_TASK_NOT_FOUND" { return "FIX_GPO_USER_AUTOENROLL_TASK" }
         "USER_NOT_AZUREAD" { return "CHECK_USER_AAD_OR_LOGON_CONTEXT" }
         "USER_PRT_NOT_AVAILABLE" { return "CHECK_USER_PRT" }
         "USER_PRT_REFRESH_FAILED" { return "FIX_USER_PRT_OR_RELOGIN" }
@@ -4855,8 +4820,9 @@ try {
                 Write-RunLog $dsregStatusErrorMessage
             }
             elseif ($policyState.UseAADCredentialType -eq "2") {
-                $enrollStart = Start-IntuneAutoEnrollment
-                $intuneAutoEnrollMode = "SystemDeviceCredential"
+                $intuneAutoEnrollTriggeredAt = Get-Date
+                $enrollStart = Start-IntuneAutoEnrollment -Mode "SystemDeviceCredential"
+                $intuneAutoEnrollMode = $enrollStart.Mode
             }
             elseif (-not $interactiveUserDetected) {
                 $enrollStart = [PSCustomObject]@{
@@ -4883,7 +4849,8 @@ try {
                 $intuneAutoEnrollMode = $enrollStart.Mode
             }
             else {
-                $enrollStart = Start-UserContextIntuneAutoEnrollment -PreferredTaskName $UserIntuneAutoEnrollTaskName -WaitSeconds $UserTaskWaitSeconds -ExpectedUserName $interactiveUserName
+                $intuneAutoEnrollTriggeredAt = Get-Date
+                $enrollStart = Start-IntuneAutoEnrollment -Mode "SystemUserCredential"
                 $intuneAutoEnrollMode = $enrollStart.Mode
             }
 
@@ -4896,10 +4863,9 @@ try {
                 Write-RunLog ("Intune auto-enrollment trigger result: Mode={0}; TaskName={1}; Success={2}; ToolFound={3}; ExitCode={4}; Detail={5}" -f $intuneAutoEnrollMode,$intuneAutoEnrollTaskName,$enrollStart.Success,$enrollStart.ToolFound,$enrollStart.ExitCode,$enrollStart.Detail)
 
                 if (-not $enrollStart.ToolFound) {
-                    if ($policyState.UseAADCredentialType -eq "2") { $status = "INTUNE_ENROLLMENT_TOOL_NOT_FOUND" }
+                    if ($intuneAutoEnrollMode -in @("SystemDeviceCredential","SystemUserCredential")) { $status = "INTUNE_ENROLLMENT_TOOL_NOT_FOUND" }
                     elseif (-not $interactiveUserDetected) { $status = "INTUNE_USER_AUTOENROLL_NO_INTERACTIVE_USER" }
-                    elseif ($intuneAutoEnrollMode -eq "LocalInteractiveUser") { $status = "INTUNE_USER_AUTOENROLL_LOCAL_INTERACTIVE_USER" }
-                    else { $status = "INTUNE_USER_AUTOENROLL_TASK_NOT_FOUND" }
+                    else { $status = "INTUNE_USER_AUTOENROLL_LOCAL_INTERACTIVE_USER" }
                     $dsregStatusErrorMessage = $enrollStart.Detail
                     $ExitCode = 3
 
@@ -4956,9 +4922,12 @@ try {
                     }
                 }
                 else {
+                    # A failed deviceenroller call still waits: the native EnterpriseMgmt task retries
+                    # enrollment on its own schedule.
+                    $intuneAutoEnrollTriggerText = if ($enrollStart.Success) { "Intune auto-enrollment was triggered successfully" } else { "deviceenroller did not report success ({0})" -f $enrollStart.Detail }
                     Write-ProvisionalRunState `
                         -StatusValue "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" `
-                        -DetailValue ("Intune auto-enrollment was triggered successfully. Waiting up to {0} minute(s) for confirmed local Intune enrollment before final status." -f ($IntuneRetrySleepMinutes * $IntuneRetryMaxRetries))
+                        -DetailValue ("{0}. Waiting up to {1} minute(s) for confirmed local Intune enrollment before final status." -f $intuneAutoEnrollTriggerText,($IntuneRetrySleepMinutes * $IntuneRetryMaxRetries))
 
                     $r3 = Invoke-BoundedRetryUntilIntuneEnrollment `
                         -SleepMinutes $IntuneRetrySleepMinutes `
@@ -4973,8 +4942,15 @@ try {
                         Write-RunLog ("Intune enrollment detected after auto-enrollment retry loop after {0} attempt(s)." -f $r3.Attempts)
                     }
                     else {
-                        $status = "INTUNE_ENROLLMENT_PENDING_CONFIRMATION"
-                        $dsregStatusErrorMessage = ("Intune auto-enrollment was triggered successfully, but confirmed local Intune enrollment was not detected after {0} retries with {1} minutes sleep. Recheck later; Intune cloud and local MDM confirmation can lag after deviceenroller." -f $IntuneRetryMaxRetries, $IntuneRetrySleepMinutes)
+                        $licenseFailure = Get-RecentMdmUserLicenseFailure -Since $intuneAutoEnrollTriggeredAt
+                        if ($licenseFailure) {
+                            $status = "INTUNE_USER_LICENSE_REJECTED"
+                            $dsregStatusErrorMessage = ("Intune rejected the enrollment with a user license fault (UserLicense/0x80180018) after the auto-enrollment trigger: {0} event {1}, record {2}, time {3}. Assign an Intune license to the signed-in user and check the MDM user scope, then rerun the repair. Trigger: {4}." -f $licenseFailure.LogName,$licenseFailure.Id,$licenseFailure.RecordId,$licenseFailure.TimeCreated,$intuneAutoEnrollTriggerText)
+                        }
+                        else {
+                            $status = "INTUNE_ENROLLMENT_PENDING_CONFIRMATION"
+                            $dsregStatusErrorMessage = ("{0}, but confirmed local Intune enrollment was not detected after {1} retries with {2} minutes sleep. Recheck later; Intune cloud and local MDM confirmation can lag after deviceenroller." -f $intuneAutoEnrollTriggerText,$IntuneRetryMaxRetries,$IntuneRetrySleepMinutes)
+                        }
                         $ExitCode = 3
                         Write-RunLog $dsregStatusErrorMessage
 

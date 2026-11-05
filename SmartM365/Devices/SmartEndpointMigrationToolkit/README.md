@@ -157,8 +157,8 @@ beforehand on the same computers:
 
 | Task | Used by | Created |
 | --- | --- | --- |
-| `\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserDsregStatus`, `SEMT-HJ-UserRefreshPrt`, `SEMT-HJ-UserMdmAutoEnroll` | HybridJoin (started on demand in the interactive user context) | enabled, no trigger, group INTERACTIVE. Only `dsregcmd /status` goes through `cmd.exe` (its output is read back); `dsregcmd.exe /refreshprt` and `deviceenroller.exe /c /AutoEnrollMDM` are started directly, without output file: their result is checked through the status, the MDM registry and the DeviceManagement logs |
-| `\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-RunUserAutoEnrollAtLogon` | HybridJoin (enabled only while auto-enrollment waits for a user logon, disabled once Intune enrollment is confirmed) | **disabled**, SYSTEM, at logon |
+| `\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-UserDsregStatus`, `SEMT-HJ-UserRefreshPrt` | HybridJoin (started on demand in the interactive user context) | enabled, no trigger, group INTERACTIVE. Only `dsregcmd /status` goes through `cmd.exe` (its output is read back); `dsregcmd.exe /refreshprt` is started directly, without output file: its result is checked through the user status |
+| `\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\SEMT-HJ-RunUserAutoEnrollAtLogon` | HybridJoin (enabled only while auto-enrollment waits for a user logon, disabled once Intune enrollment is confirmed) | **disabled**, SYSTEM, at logon: starts `SEMT-HJ-UserDsregStatus` and runs `deviceenroller.exe /c /AutoEnrollMDM` |
 | `\SmartM365-SEMT-HybridJoin-RetryAfterReboot`, `\SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot` | the Campaign of the same name (enabled when it schedules a retry after a restart, disabled afterwards) | **disabled**, SYSTEM, at startup |
 
 The retry-after-reboot task has a fixed command: it runs
@@ -166,10 +166,16 @@ The retry-after-reboot task has a fixed command: it runs
 which reads the script path and arguments from `RetryAfterReboot.json.txt` next to it. The
 Campaign writes the runner and its state, checks that the pre-created task runs exactly this
 command as SYSTEM, and only then enables it. When a task is missing, the endpoint logs it and
-carries on without it: Hybrid Join skips the user PRT status and refreshprt and uses the native
-Windows EnterpriseMgmt auto-enrollment task; a retry after reboot is not scheduled
+carries on without it: Hybrid Join skips the user PRT status and refreshprt; a retry after reboot is not scheduled
 (`RetryAfterRebootAction=ScheduleFailed`, `SEMT_PREREQUISITE_TASK_MISSING`), so no reboot is
 triggered for it.
+
+Hybrid Join runs `deviceenroller.exe /c /AutoEnrollMDM` itself, from SYSTEM, as the native
+EnterpriseMgmt task does (for User Credential, Windows uses the signed-in user's token; started in
+the user context the tool returns `0x80070005`). Its own exit code is logged. When enrollment is
+still not confirmed and an MDM `UserLicense` / `0x80180018` fault was logged after the trigger, the
+status is `INTUNE_USER_LICENSE_REJECTED` (NextAction `ASSIGN_USER_INTUNE_LICENSE`). The Prerequisites
+Campaign removes the obsolete `SEMT-HJ-UserMdmAutoEnroll` task (reported only with `AuditOnly`).
 
 The Campaign is **disabled by default**. Set `"Prerequisites.Enabled": true` in
 `Config\SmartEndpointMigrationToolkit.local.json.txt` (or `SEMT_PREREQUISITES_ENABLED=1`, or

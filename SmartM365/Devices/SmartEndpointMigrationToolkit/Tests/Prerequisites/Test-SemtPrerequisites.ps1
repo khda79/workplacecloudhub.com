@@ -6,8 +6,10 @@
     HybridJoin and Windows11Upgrade tasks (enabled state at creation), repeat runs, audit, a task
     with another definition (updated, enabled state kept), registration failure and unreadable
     Task Scheduler. Task state parsing is checked with a localized SYSTEM account name.
-    Hybrid Join consumer functions: missing user-context tasks fall back to the native
-    EnterpriseMgmt task; the next-logon task is only enabled or disabled.
+    The obsolete user-context deviceenroller task is reported in audit and removed otherwise.
+    Hybrid Join consumer functions: missing user-context tasks are reported; deviceenroller runs
+    from SYSTEM with its real exit code; a UserLicense fault after the trigger is found; the
+    next-logon task is only enabled (when up to date) or disabled.
     No scheduled task, registry, network or endpoint run on the computer.
     Prints one PASS/FAIL line per assertion and "Summary: Passed=N; Failed=M". Exits 1 on failure.
     Runs on Windows PowerShell 5.1 and PowerShell 7.
@@ -66,7 +68,7 @@ function Get-RegionText {
 
 try {
     . ([scriptblock]::Create((Get-RegionText -Path $prereqEndpoint -Region 'SEMT prerequisite tasks v1')))
-    . ([scriptblock]::Create((Get-FunctionText -Path $prereqEndpoint -Name @('Get-PrerequisiteTaskDefinitions','Test-PrerequisiteTaskMatch','Invoke-PrerequisiteTask'))))
+    . ([scriptblock]::Create((Get-FunctionText -Path $prereqEndpoint -Name @('Get-PrerequisiteTaskDefinitions','Test-PrerequisiteTaskMatch','Invoke-PrerequisiteTask','Remove-PrerequisiteObsoleteTask'))))
 
     #region Task state parsing (Get-ScheduledTask stubbed)
     $localizedSystem = (New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')).Translate([System.Security.Principal.NTAccount]).Value
@@ -94,6 +96,7 @@ try {
     $script:Registered = New-Object System.Collections.Generic.List[string]
     $script:FailRegister = @()
     $script:Unreadable = @()
+    $script:Unregistered = New-Object System.Collections.Generic.List[string]
     function Write-PrerequisitesLog { param([string]$Message, [string]$Level = 'INFO') }
     function Get-SemtScheduledTaskState {
         param([string]$TaskPath, [string]$TaskName)
@@ -116,6 +119,7 @@ try {
             Detail = ('Enabled={0}' -f $Enabled)
         }
     }
+    function Unregister-PrerequisiteTask { param([string]$TaskPath, [string]$TaskName) $script:Unregistered.Add($TaskPath + $TaskName); [void]$script:Store.Remove($TaskPath + $TaskName) }
     function Invoke-Scenario {
         param([switch]$Audit, [switch]$HybridJoin, [switch]$Windows11)
         $script:AuditOnly = [bool]$Audit; $AuditOnly = [bool]$Audit
@@ -124,21 +128,25 @@ try {
         $script:Counters = [ordered]@{ TasksExpected = 0; TasksPresent = 0; TasksCreated = 0; TasksUpdated = 0; TasksMissing = 0; TasksFailed = 0 }
         $script:TaskRows = New-Object System.Collections.Generic.List[object]
         $script:Registered.Clear()
+        $script:Unregistered.Clear()
         foreach ($definition in @(Get-PrerequisiteTaskDefinitions)) { Invoke-PrerequisiteTask -Definition $definition }
+        if ($HybridJoinTasks) { Remove-PrerequisiteObsoleteTask -Campaign 'HybridJoin' -TaskPath '\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\' -TaskName 'SEMT-HJ-UserMdmAutoEnroll' }
         return [pscustomobject]@{ Counters = $script:Counters; Rows = @($script:TaskRows.ToArray()); Registered = @($script:Registered.ToArray()) }
     }
     $hjFolder = '\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\'
-    $userTasks = @('SEMT-HJ-UserDsregStatus','SEMT-HJ-UserRefreshPrt','SEMT-HJ-UserMdmAutoEnroll' | ForEach-Object { $hjFolder + $_ })
+    $userTasks = @('SEMT-HJ-UserDsregStatus','SEMT-HJ-UserRefreshPrt' | ForEach-Object { $hjFolder + $_ })
+    $obsoleteAutoEnrollTask = $hjFolder + 'SEMT-HJ-UserMdmAutoEnroll'
     $logonTask = $hjFolder + 'SEMT-HJ-RunUserAutoEnrollAtLogon'
     $hjRetry = '\SmartM365-SEMT-HybridJoin-RetryAfterReboot'
     $w11Retry = '\SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot'
+    $deviceEnrollerAction = '{0}|/c /AutoEnrollMDM' -f (Join-Path $env:WINDIR 'System32\deviceenroller.exe')
 
     $audit = Invoke-Scenario -Audit -HybridJoin -Windows11
-    Test-Step 'audit, no task: six tasks reported missing, nothing registered' { $audit.Counters.TasksExpected -eq 6 -and $audit.Counters.TasksMissing -eq 6 -and $audit.Registered.Count -eq 0 -and @($audit.Rows | Where-Object { $_.Result -ne 'Missing' }).Count -eq 0 }
+    Test-Step 'audit, no task: five tasks reported missing, nothing registered' { $audit.Counters.TasksExpected -eq 5 -and $audit.Counters.TasksMissing -eq 5 -and $audit.Registered.Count -eq 0 -and @($audit.Rows | Where-Object { $_.Result -ne 'Missing' }).Count -eq 0 }
 
     $first = Invoke-Scenario -HybridJoin -Windows11
-    Test-Step 'repair, no task: the six tasks are created' { $first.Counters.TasksCreated -eq 6 -and $first.Counters.TasksFailed -eq 0 -and $first.Registered.Count -eq 6 }
-    Test-Step 'on-demand user-context tasks are created enabled (no trigger), group INTERACTIVE' { @($userTasks | Where-Object { $script:Store[$_].Enabled -and $script:Store[$_].TriggerCount -eq 0 -and $script:Store[$_].GroupSid -eq 'S-1-5-4' }).Count -eq 3 }
+    Test-Step 'repair, no task: the five tasks are created' { $first.Counters.TasksCreated -eq 5 -and $first.Counters.TasksFailed -eq 0 -and $first.Registered.Count -eq 5 }
+    Test-Step 'on-demand user-context tasks are created enabled (no trigger), group INTERACTIVE; no user-context deviceenroller task' { @($userTasks | Where-Object { $script:Store[$_].Enabled -and $script:Store[$_].TriggerCount -eq 0 -and $script:Store[$_].GroupSid -eq 'S-1-5-4' }).Count -eq 2 -and -not $script:Store.ContainsKey($obsoleteAutoEnrollTask) }
     Test-Step 'next-logon and both retry-after-reboot tasks are created disabled, as SYSTEM' { @(@($logonTask,$hjRetry,$w11Retry) | Where-Object { -not $script:Store[$_].Enabled -and $script:Store[$_].UserSid -eq 'S-1-5-18' -and $script:Store[$_].TriggerCount -eq 1 }).Count -eq 3 }
     Test-Step 'retry-after-reboot tasks run the fixed runner command of the shared region' {
         $ok = $true
@@ -148,17 +156,21 @@ try {
         }
         $ok
     }
-    Test-Step 'dsreg status keeps its cmd.exe redirection; refreshprt and AutoEnrollMDM start the executable directly; next-logon command unchanged' {
-        @($script:Store[$userTasks[0]].Actions)[0] -eq 'cmd.exe|/d /c %windir%\System32\dsregcmd.exe /status > %windir%\Temp\SEMT-HJ-UserDsregStatus_%USERNAME%.txt 2>&1' -and @($script:Store[$userTasks[1]].Actions)[0] -eq ('{0}|/refreshprt' -f (Join-Path $env:WINDIR 'System32\dsregcmd.exe')) -and @($script:Store[$userTasks[2]].Actions)[0] -eq ('{0}|/c /AutoEnrollMDM' -f (Join-Path $env:WINDIR 'System32\deviceenroller.exe')) -and @($script:Store[$logonTask].Actions)[1] -eq ('{0}|/Run /TN "{1}"' -f (Join-Path $env:WINDIR 'System32\schtasks.exe'),$userTasks[2])
+    Test-Step 'dsreg status keeps its cmd.exe redirection; refreshprt starts the executable directly; the next-logon task runs deviceenroller from SYSTEM' {
+        @($script:Store[$userTasks[0]].Actions)[0] -eq 'cmd.exe|/d /c %windir%\System32\dsregcmd.exe /status > %windir%\Temp\SEMT-HJ-UserDsregStatus_%USERNAME%.txt 2>&1' -and @($script:Store[$userTasks[1]].Actions)[0] -eq ('{0}|/refreshprt' -f (Join-Path $env:WINDIR 'System32\dsregcmd.exe')) -and @($script:Store[$logonTask].Actions)[0] -eq ('{0}|/Run /TN "{1}"' -f (Join-Path $env:WINDIR 'System32\schtasks.exe'),$userTasks[0]) -and @($script:Store[$logonTask].Actions)[1] -eq $deviceEnrollerAction
     }
-    $script:Store[$userTasks[2]].Actions = @('cmd.exe|/d /c %windir%\System32\deviceenroller.exe /c /AutoEnrollMDM > %windir%\Temp\SEMT-HJ-UserMdmAutoEnroll_%USERNAME%.txt 2>&1')
+    $script:Store[$logonTask].Enabled = $true
+    $script:Store[$logonTask].Actions = @(@($script:Store[$logonTask].Actions)[0], ('{0}|/Run /TN "{1}"' -f (Join-Path $env:WINDIR 'System32\schtasks.exe'),$obsoleteAutoEnrollTask))
+    $script:Store[$obsoleteAutoEnrollTask] = [pscustomobject]@{ TaskPath = $hjFolder; TaskName = 'SEMT-HJ-UserMdmAutoEnroll'; Exists = $true; Enabled = $true; Actions = @($deviceEnrollerAction); TriggerCount = 0; UserSid = ''; GroupSid = 'S-1-5-4'; Detail = 'Enabled=True' }
+    $auditLegacy = Invoke-Scenario -Audit -HybridJoin -Windows11
+    Test-Step 'audit: the obsolete user-context deviceenroller task is reported, not removed' { $script:Store.ContainsKey($obsoleteAutoEnrollTask) -and $script:Unregistered.Count -eq 0 -and @($auditLegacy.Rows | Where-Object { $_.TaskName -eq $obsoleteAutoEnrollTask -and $_.Result -eq 'Obsolete' }).Count -eq 1 -and $auditLegacy.Counters.TasksExpected -eq 5 }
     $legacy = Invoke-Scenario -HybridJoin -Windows11
-    Test-Step 'an older cmd.exe auto-enrollment task is updated to the direct command' { $legacy.Counters.TasksUpdated -eq 1 -and $legacy.Registered -contains $userTasks[2] -and @($script:Store[$userTasks[2]].Actions)[0] -like '*deviceenroller.exe|/c /AutoEnrollMDM' }
+    Test-Step 'an older next-logon task is updated to deviceenroller from SYSTEM and keeps its enabled state' { $legacy.Counters.TasksUpdated -eq 1 -and $legacy.Registered -contains $logonTask -and @($script:Store[$logonTask].Actions)[1] -eq $deviceEnrollerAction -and $script:Store[$logonTask].Enabled }
+    Test-Step 'the obsolete user-context deviceenroller task is removed, outside the expected count' { -not $script:Store.ContainsKey($obsoleteAutoEnrollTask) -and $script:Unregistered -contains $obsoleteAutoEnrollTask -and @($legacy.Rows | Where-Object { $_.TaskName -eq $obsoleteAutoEnrollTask -and $_.Result -eq 'Removed' }).Count -eq 1 -and $legacy.Counters.TasksExpected -eq 5 -and $legacy.Counters.TasksFailed -eq 0 }
 
     $second = Invoke-Scenario -HybridJoin -Windows11
-    Test-Step 'repeat run: every task Present, nothing registered again' { $second.Counters.TasksPresent -eq 6 -and $second.Registered.Count -eq 0 }
+    Test-Step 'repeat run: every task Present, nothing registered again' { $second.Counters.TasksPresent -eq 5 -and $second.Registered.Count -eq 0 }
 
-    $script:Store[$logonTask].Enabled = $true
     $script:Store[$w11Retry] = [pscustomobject]@{ TaskPath = '\'; TaskName = 'SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot'; Exists = $true; Enabled = $true; Actions = @('powershell.exe|-NoProfile -ExecutionPolicy RemoteSigned -File "C:\Program Files\old\RetryAfterRebootRunner.ps1"'); TriggerCount = 1; UserSid = 'S-1-5-18'; GroupSid = ''; Detail = 'Enabled=True' }
     $third = Invoke-Scenario -HybridJoin -Windows11
     Test-Step 'a task with another definition is updated and keeps its enabled state' { $third.Counters.TasksUpdated -eq 1 -and $third.Registered -contains $w11Retry -and $script:Store[$w11Retry].Enabled -and @($third.Rows | Where-Object { $_.TaskName -eq $w11Retry -and $_.Before -eq 'Different' -and $_.Result -eq 'Updated' }).Count -eq 1 }
@@ -168,7 +180,7 @@ try {
     $script:FailRegister = @($hjRetry)
     $script:Unreadable = @($w11Retry)
     $fourth = Invoke-Scenario -HybridJoin -Windows11
-    Test-Step 'a registration failure and an unreadable Task Scheduler are counted as failures; other tasks are still created' { $fourth.Counters.TasksFailed -eq 2 -and $fourth.Counters.TasksCreated -eq 4 -and $fourth.Registered -notcontains $w11Retry -and @($fourth.Rows | Where-Object { $_.TaskName -eq $hjRetry -and $_.Result -eq 'Failed' -and $_.Detail -match 'Access is denied' }).Count -eq 1 }
+    Test-Step 'a registration failure and an unreadable Task Scheduler are counted as failures; other tasks are still created' { $fourth.Counters.TasksFailed -eq 2 -and $fourth.Counters.TasksCreated -eq 3 -and $fourth.Registered -notcontains $w11Retry -and @($fourth.Rows | Where-Object { $_.TaskName -eq $hjRetry -and $_.Result -eq 'Failed' -and $_.Detail -match 'Access is denied' }).Count -eq 1 }
     $script:FailRegister = @()
     $script:Unreadable = @()
 
@@ -183,42 +195,69 @@ try {
     }
     #endregion
 
-    #region Hybrid Join consumers (missing tasks)
-    foreach ($name in @('Get-SemtScheduledTaskState','Register-PrerequisiteTask')) { Remove-Item -Path ('Function:\' + $name) -ErrorAction SilentlyContinue }
-    . ([scriptblock]::Create((Get-FunctionText -Path $hjEndpoint -Name @('Get-HybridJoinTaskState','Test-UserContextHelperTasks','Start-UserContextIntuneAutoEnrollment','Enable-UserAutoEnrollAtLogonTask','Disable-UserAutoEnrollAtLogonTask'))))
-    $UserStatusTaskName = $userTasks[0]; $UserRefreshPrtTaskName = $userTasks[1]; $UserIntuneAutoEnrollTaskName = $userTasks[2]; $UserNextLogonAutoEnrollTaskName = $logonTask
+    #region Hybrid Join consumers (missing tasks, SYSTEM deviceenroller, license fault)
+    foreach ($name in @('Get-SemtScheduledTaskState','Register-PrerequisiteTask','Unregister-PrerequisiteTask')) { Remove-Item -Path ('Function:\' + $name) -ErrorAction SilentlyContinue }
+    . ([scriptblock]::Create((Get-FunctionText -Path $hjEndpoint -Name @('Get-HybridJoinTaskState','Test-UserContextHelperTasks','Start-IntuneAutoEnrollment','Get-RecentMdmUserLicenseFailure','Enable-UserAutoEnrollAtLogonTask','Disable-UserAutoEnrollAtLogonTask'))))
+    $UserStatusTaskName = $userTasks[0]; $UserRefreshPrtTaskName = $userTasks[1]; $UserNextLogonAutoEnrollTaskName = $logonTask
+    $OutputDir = $env:TEMP; $ComputerName = 'SEMT-QUALIF-PC'; $RunId = 'test'; $IntuneAutoEnrollTimeoutSeconds = 300
     $script:HjStore = @{}
-    $script:Runs = New-Object System.Collections.Generic.List[string]
+    $script:HjActions = @{}
     $script:EnabledCalls = New-Object System.Collections.Generic.List[string]
+    $script:Processes = New-Object System.Collections.Generic.List[string]
+    $script:ProcessExitCode = 0
     function Write-RunLog { param([string]$Message) }
     function Get-SemtScheduledTaskState {
         param([string]$TaskPath, [string]$TaskName)
         $key = $TaskPath + $TaskName
-        if ($script:HjStore.ContainsKey($key)) { return [pscustomobject]@{ TaskPath = $TaskPath; TaskName = $TaskName; Exists = $true; Enabled = [bool]$script:HjStore[$key]; Detail = 'present' } }
-        return [pscustomobject]@{ TaskPath = $TaskPath; TaskName = $TaskName; Exists = $false; Enabled = $false; Detail = 'Task not found.' }
+        if ($script:HjStore.ContainsKey($key)) { return [pscustomobject]@{ TaskPath = $TaskPath; TaskName = $TaskName; Exists = $true; Enabled = [bool]$script:HjStore[$key]; Actions = @($script:HjActions[$key]); Detail = 'present' } }
+        return [pscustomobject]@{ TaskPath = $TaskPath; TaskName = $TaskName; Exists = $false; Enabled = $false; Actions = @(); Detail = 'Task not found.' }
     }
     function Set-SemtScheduledTaskEnabled { param([string]$TaskPath, [string]$TaskName, [bool]$Enabled) $script:EnabledCalls.Add(('{0}{1}={2}' -f $TaskPath,$TaskName,$Enabled)); $script:HjStore[$TaskPath + $TaskName] = $Enabled }
-    function Invoke-OnDemandScheduledTask { param([string]$TaskName) $script:Runs.Add($TaskName); return [pscustomobject]@{ Success = $true; ExitCode = 0; Detail = ''; ResolvedTaskName = $TaskName } }
-    function Get-NativeMdmAutoEnrollmentTask { return [pscustomobject]@{ TaskName = 'Schedule created by enrollment client'; TaskPath = '\Microsoft\Windows\EnterpriseMgmt\x\'; FullName = '\Microsoft\Windows\EnterpriseMgmt\x\Schedule created by enrollment client' } }
-    function Get-LatestUserTaskOutputFile { param($Filter, $Since, $ExpectedFileName) return $null }
+    function Invoke-ProcessWithTimeout { param($FilePath, $Arguments, $TimeoutSeconds, $OutputFile) $script:Processes.Add(('{0} {1}' -f $FilePath,($Arguments -join ' '))); return [pscustomobject]@{ ExitCode = $script:ProcessExitCode; TimedOut = $false; Output = ''; OutputFile = $OutputFile; StopDetail = '' } }
 
     $missingHelpers = Test-UserContextHelperTasks
     Test-Step 'Hybrid Join: missing user-context tasks are reported, never created' { -not $missingHelpers.Success -and -not $missingHelpers.StatusTaskPresent -and $script:EnabledCalls.Count -eq 0 }
-    $native = Start-UserContextIntuneAutoEnrollment -PreferredTaskName $UserIntuneAutoEnrollTaskName -WaitSeconds 0 -ExpectedUserName 'user1'
-    Test-Step 'Hybrid Join: missing user auto-enrollment task falls back to the native EnterpriseMgmt task without running the missing task' { $native.Mode -eq 'NativeEnterpriseMgmtTask' -and $native.Success -and $script:Runs -notcontains $UserIntuneAutoEnrollTaskName -and $script:Runs.Count -eq 1 }
     $logonMissing = Enable-UserAutoEnrollAtLogonTask
     Test-Step 'Hybrid Join: next-logon task not enabled when the Prerequisites tasks are missing' { -not $logonMissing.Success -and $logonMissing.Detail -match 'SEMT_PREREQUISITE_TASK_MISSING' -and $script:EnabledCalls.Count -eq 0 }
 
+    $script:ProcessExitCode = -2147024891
+    $denied = Start-IntuneAutoEnrollment -Mode 'SystemUserCredential'
+    Test-Step 'Hybrid Join: deviceenroller runs from SYSTEM (no scheduled task); a non-zero exit code is a failure, shown in hexadecimal' { $script:Processes.Count -eq 1 -and $script:Processes[0] -like '*\deviceenroller.exe /c /AutoEnrollMDM' -and -not $denied.Success -and $denied.ToolFound -and $denied.Mode -eq 'SystemUserCredential' -and $denied.Detail -match '0x80070005' }
+    $script:ProcessExitCode = 0
+    $ok = Start-IntuneAutoEnrollment -Mode 'SystemDeviceCredential'
+    Test-Step 'Hybrid Join: deviceenroller exit code 0 is a success' { $ok.Success -and $ok.Mode -eq 'SystemDeviceCredential' -and [string]$ok.ExitCode -eq '0' }
+
+    $script:LicenseEvents = @()
+    function Get-WinEvent {
+        param($FilterHashtable, $ErrorAction)
+        $events = @($script:LicenseEvents | Where-Object { $_.Log -eq $FilterHashtable.LogName -and $_.TimeCreated -ge $FilterHashtable.StartTime -and $FilterHashtable.Id -contains $_.Id })
+        if ($events.Count -eq 0) { $exception = New-Object System.Exception 'No events were found'; throw (New-Object System.Management.Automation.ErrorRecord $exception,'NoMatchingEventsFound,Microsoft.PowerShell.Commands.GetWinEventCommand','ObjectNotFound',$null) }
+        return $events
+    }
+    $enrollmentLog = 'Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Enrollment'
+    $trigger = Get-Date '2026-11-05 10:15:53'
+    $script:LicenseEvents = @([pscustomobject]@{ Log = $enrollmentLog; Id = 52; RecordId = 26558; TimeCreated = (Get-Date '2026-11-05 10:21:07'); Message = 'MDM Enroll: Server Returned Fault/Code/Subcode/Value=(UserLicense) Fault/Reason/Text=(Failed to issue token: UserValidation).' })
+    $license = Get-RecentMdmUserLicenseFailure -Since $trigger
+    Test-Step 'Hybrid Join: a UserLicense fault logged after the trigger is reported with its record' { $license -and $license.Id -eq 52 -and $license.RecordId -eq 26558 -and $license.LogName -eq $enrollmentLog }
+    Test-Step 'Hybrid Join: a UserLicense fault older than the trigger is ignored; no event is not an error' { $null -eq (Get-RecentMdmUserLicenseFailure -Since (Get-Date '2026-11-05 10:30')) }
+    $script:LicenseEvents = @([pscustomobject]@{ Log = $enrollmentLog; Id = 52; RecordId = 1; TimeCreated = (Get-Date '2026-11-05 10:21:07'); Message = 'MDM Enroll: Server Returned Fault/Code/Subcode/Value=(DeviceCapReached)' })
+    Test-Step 'Hybrid Join: another server fault is not a license fault' { $null -eq (Get-RecentMdmUserLicenseFailure -Since $trigger) }
+    Remove-Item -Path Function:\Get-WinEvent
+
     foreach ($task in $userTasks) { $script:HjStore[$task] = $true }
     $script:HjStore[$logonTask] = $false
-    $script:Runs.Clear()
-    $userTask = Start-UserContextIntuneAutoEnrollment -PreferredTaskName $UserIntuneAutoEnrollTaskName -WaitSeconds 0 -ExpectedUserName 'user1'
-    Test-Step 'Hybrid Join: present user auto-enrollment task is started; no output file is read' { $userTask.Mode -eq 'UserTask' -and $script:Runs -contains $UserIntuneAutoEnrollTaskName -and $userTask.OutputFile -eq '' }
+    $script:HjActions[$logonTask] = @(('{0}|/Run /TN "{1}"' -f (Join-Path $env:WINDIR 'System32\schtasks.exe'),$userTasks[0]), ('{0}|/Run /TN "{1}"' -f (Join-Path $env:WINDIR 'System32\schtasks.exe'),$obsoleteAutoEnrollTask))
+    $logonOutdated = Enable-UserAutoEnrollAtLogonTask
+    Test-Step 'Hybrid Join: an outdated next-logon task (user-context deviceenroller) is not enabled' { -not $logonOutdated.Success -and $logonOutdated.Detail -match 'SEMT_PREREQUISITE_TASK_OUTDATED' -and $script:EnabledCalls.Count -eq 0 }
+    $script:HjActions[$logonTask] = @(('{0}|/Run /TN "{1}"' -f (Join-Path $env:WINDIR 'System32\schtasks.exe'),$userTasks[0]), $deviceEnrollerAction)
     $logonEnabled = Enable-UserAutoEnrollAtLogonTask
     Test-Step 'Hybrid Join: next-logon task is enabled (definition untouched)' { $logonEnabled.Success -and $script:EnabledCalls.Count -eq 1 -and $script:EnabledCalls[0] -eq ($logonTask + '=True') }
     Disable-UserAutoEnrollAtLogonTask -Reason 'SUCCESS'
     Disable-UserAutoEnrollAtLogonTask -Reason 'SUCCESS'
     Test-Step 'Hybrid Join: next-logon task is disabled once, after enrollment' { $script:EnabledCalls.Count -eq 2 -and $script:EnabledCalls[1] -eq ($logonTask + '=False') }
+
+    $hjText = [IO.File]::ReadAllText($hjEndpoint)
+    Test-Step 'Hybrid Join: no user-context deviceenroller task and no native task fallback remain' { $hjText -notmatch 'SEMT-HJ-UserMdmAutoEnroll|Start-UserContextIntuneAutoEnrollment|Get-NativeMdmAutoEnrollmentTask' -and $hjText -match '"INTUNE_USER_LICENSE_REJECTED" \{ return "ASSIGN_USER_INTUNE_LICENSE" \}' }
     #endregion
 }
 catch {

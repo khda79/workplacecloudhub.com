@@ -553,8 +553,8 @@ $script:HostLines.Clear()
         }
         $ok
     }
-    Test-Step 'Hybrid Join: missing user-context tasks fall back to the native task; the next-logon task is only enabled or disabled' {
-        $hjEndpointText -match 'function Test-UserContextHelperTasks' -and $hjEndpointText -match '\$nextLogonTask = Enable-UserAutoEnrollAtLogonTask' -and $hjEndpointText -match 'Disable-UserAutoEnrollAtLogonTask -Reason \$status' -and $hjEndpointText -match 'when it is missing, the native task is used'
+    Test-Step 'Hybrid Join: missing user-context tasks are reported; deviceenroller runs from SYSTEM; the next-logon task is only enabled or disabled' {
+        $hjEndpointText -match 'function Test-UserContextHelperTasks' -and $hjEndpointText -match '\$nextLogonTask = Enable-UserAutoEnrollAtLogonTask' -and $hjEndpointText -match 'Disable-UserAutoEnrollAtLogonTask -Reason \$status' -and $hjEndpointText -match 'Start-IntuneAutoEnrollment -Mode "SystemUserCredential"'
     }
     Test-Step 'Hybrid Join: with AllowRebootAfterDsregLeave, the retry task is checked before dsregcmd /leave (no leave without the resume)' {
         $check = $hjEndpointText.IndexOf('$leaveRetryTask = Get-SemtRetryAfterRebootTaskReadiness -Campaign $script:SemtCampaign')

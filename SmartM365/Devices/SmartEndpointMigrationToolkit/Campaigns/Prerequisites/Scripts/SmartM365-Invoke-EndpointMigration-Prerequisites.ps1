@@ -11,9 +11,11 @@
     The HybridJoin and Windows11Upgrade endpoint scripts never create a scheduled task: they only
     start, enable or disable the tasks created here.
     -HybridJoinTasks, in \WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\:
-      SEMT-HJ-UserDsregStatus, SEMT-HJ-UserRefreshPrt, SEMT-HJ-UserMdmAutoEnroll (on demand, group
-      INTERACTIVE), SEMT-HJ-RunUserAutoEnrollAtLogon (SYSTEM, at logon, created disabled), and
+      SEMT-HJ-UserDsregStatus, SEMT-HJ-UserRefreshPrt (on demand, group INTERACTIVE),
+      SEMT-HJ-RunUserAutoEnrollAtLogon (SYSTEM, at logon, created disabled), and
       \SmartM365-SEMT-HybridJoin-RetryAfterReboot (SYSTEM, at startup, created disabled).
+      The obsolete SEMT-HJ-UserMdmAutoEnroll task (deviceenroller in the user context, which
+      returns 0x80070005) is removed; -AuditOnly only reports it.
     -Windows11UpgradeTasks: \SmartM365-SEMT-Windows11Upgrade-RetryAfterReboot (SYSTEM, at startup,
       created disabled).
     A task that already has the expected definition is left unchanged. A task with another
@@ -831,21 +833,21 @@ function Test-PrerequisitesVirtualMachine {
 
 function Get-PrerequisiteTaskDefinitions {
     <#
-    Expected definitions. Except for SEMT-HJ-UserRefreshPrt and SEMT-HJ-UserMdmAutoEnroll (now
-    started without cmd.exe), they are the definitions that the HybridJoin and Windows11Upgrade
-    endpoints created before this campaign existed, so tasks already present are kept as they are.
-    Older copies of those two tasks are updated.
+    Expected definitions. Except for SEMT-HJ-UserRefreshPrt (now started without cmd.exe) and
+    SEMT-HJ-RunUserAutoEnrollAtLogon (now runs deviceenroller from SYSTEM), they are the
+    definitions that the HybridJoin and Windows11Upgrade endpoints created before this campaign
+    existed, so tasks already present are kept as they are. Older copies of those two tasks are
+    updated.
     #>
     $definitions = New-Object System.Collections.Generic.List[object]
     $schtasks = Join-Path $env:WINDIR 'System32\schtasks.exe'
     if ($HybridJoinTasks) {
-        # Only the dsregcmd /status output is read back (through cmd.exe redirection). refreshprt and
-        # AutoEnrollMDM start the executable directly: their result is checked by the HybridJoin
-        # endpoint through the status, the MDM registry and the DeviceManagement logs.
+        # Only the dsregcmd /status output is read back (through cmd.exe redirection). refreshprt
+        # starts the executable directly: its result is checked by the HybridJoin endpoint through
+        # the user status.
         $userTasks = @(
             @{ Name = 'SEMT-HJ-UserDsregStatus'; Description = 'capture dsregcmd /status in the active interactive user context.'; Execute = 'cmd.exe'; Arguments = '/d /c %windir%\System32\dsregcmd.exe /status > %windir%\Temp\SEMT-HJ-UserDsregStatus_%USERNAME%.txt 2>&1' },
-            @{ Name = 'SEMT-HJ-UserRefreshPrt'; Description = 'run dsregcmd /refreshprt in the active interactive user context.'; Execute = (Join-Path $env:WINDIR 'System32\dsregcmd.exe'); Arguments = '/refreshprt' },
-            @{ Name = 'SEMT-HJ-UserMdmAutoEnroll'; Description = 'run deviceenroller /AutoEnrollMDM in the active interactive user context.'; Execute = (Join-Path $env:WINDIR 'System32\deviceenroller.exe'); Arguments = '/c /AutoEnrollMDM' }
+            @{ Name = 'SEMT-HJ-UserRefreshPrt'; Description = 'run dsregcmd /refreshprt in the active interactive user context.'; Execute = (Join-Path $env:WINDIR 'System32\dsregcmd.exe'); Arguments = '/refreshprt' }
         )
         foreach ($userTask in $userTasks) {
             $definitions.Add([pscustomobject]@{
@@ -857,11 +859,11 @@ function Get-PrerequisiteTaskDefinitions {
         }
         $definitions.Add([pscustomobject]@{
             Campaign = 'HybridJoin'; TaskPath = $script:SemtHybridJoinTaskPath; TaskName = 'SEMT-HJ-RunUserAutoEnrollAtLogon'
-            Description = 'Smart Endpoint Migration Toolkit - Hybrid Join - trigger user-context auto-enrollment helper tasks at next user logon. Enabled by the HybridJoin endpoint only when needed.'
+            Description = 'Smart Endpoint Migration Toolkit - Hybrid Join - at next user logon, capture the user dsreg status and run deviceenroller /AutoEnrollMDM from SYSTEM. Enabled by the HybridJoin endpoint only when needed.'
             Principal = 'System'; Trigger = 'Logon'; EnabledWhenCreated = $false; ExecutionTimeLimit = 'PT10M'
             Actions = @(
                 [pscustomobject]@{ Execute = $schtasks; Arguments = ('/Run /TN "{0}SEMT-HJ-UserDsregStatus"' -f $script:SemtHybridJoinTaskPath) },
-                [pscustomobject]@{ Execute = $schtasks; Arguments = ('/Run /TN "{0}SEMT-HJ-UserMdmAutoEnroll"' -f $script:SemtHybridJoinTaskPath) }
+                [pscustomobject]@{ Execute = (Join-Path $env:WINDIR 'System32\deviceenroller.exe'); Arguments = '/c /AutoEnrollMDM' }
             )
         })
     }
@@ -997,6 +999,40 @@ function Invoke-PrerequisiteTask {
     $script:TaskRows.Add([pscustomobject]@{ ComputerName = $script:ComputerName; Campaign = $Definition.Campaign; TaskName = $fullName; Before = $beforeText; Result = $result; Enabled = [string]$enabledAfter; EnabledWhenCreated = [string]$Definition.EnabledWhenCreated; AuditOnly = [string][bool]$AuditOnly; Detail = $detail })
 }
 
+function Unregister-PrerequisiteTask {
+    param([Parameter(Mandatory = $true)][string]$TaskPath,[Parameter(Mandatory = $true)][string]$TaskName)
+
+    $service = New-Object -ComObject Schedule.Service
+    $service.Connect()
+    $service.GetFolder('\' + $TaskPath.Trim('\')).DeleteTask($TaskName, 0)
+}
+
+function Remove-PrerequisiteObsoleteTask {
+    <#
+    Removes a task that earlier versions of this campaign created and no campaign starts any more.
+    Not counted in the expected tasks: a failure is logged and does not fail the campaign.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Campaign,[Parameter(Mandatory = $true)][string]$TaskPath,[Parameter(Mandatory = $true)][string]$TaskName)
+
+    $fullName = '{0}{1}' -f $TaskPath,$TaskName
+    $before = Get-SemtScheduledTaskState -TaskPath $TaskPath -TaskName $TaskName
+    if ($before.Exists -ne $true) { return }
+    $result = 'Obsolete'
+    $detail = $before.Detail
+    if (-not $AuditOnly) {
+        try {
+            Unregister-PrerequisiteTask -TaskPath $TaskPath -TaskName $TaskName
+            $result = 'Removed'
+        }
+        catch {
+            $result = 'RemoveFailed'
+            $detail = $_.Exception.Message -replace '[\r\n]+',' '
+        }
+    }
+    Write-PrerequisitesLog ('Obsolete task {0}: Campaign={1}; Result={2}; Detail={3}' -f $fullName,$Campaign,$result,$detail) $(if ($result -eq 'Removed') { 'INFO' } else { 'WARN' })
+    $script:TaskRows.Add([pscustomobject]@{ ComputerName = $script:ComputerName; Campaign = $Campaign; TaskName = $fullName; Before = 'Obsolete'; Result = $result; Enabled = [string]$before.Enabled; EnabledWhenCreated = ''; AuditOnly = [string][bool]$AuditOnly; Detail = $detail })
+}
+
 function Remove-PrerequisitesOldEvidence {
     $cutoff = (Get-Date).AddDays(-$script:LogRetentionDays)
     foreach ($folder in @($script:LogDir,$script:OutputDir)) {
@@ -1034,6 +1070,7 @@ if (-not $HybridJoinTasks -and -not $Windows11UpgradeTasks) {
 
 try {
     foreach ($definition in @(Get-PrerequisiteTaskDefinitions)) { Invoke-PrerequisiteTask -Definition $definition }
+    if ($HybridJoinTasks) { Remove-PrerequisiteObsoleteTask -Campaign 'HybridJoin' -TaskPath $script:SemtHybridJoinTaskPath -TaskName 'SEMT-HJ-UserMdmAutoEnroll' }
     try { $script:TaskRows | Export-Csv -LiteralPath $script:CsvPath -NoTypeInformation -Encoding UTF8 }
     catch { Write-PrerequisitesLog ('Result CSV write failed: {0}' -f $_.Exception.Message) 'WARN' }
 }
