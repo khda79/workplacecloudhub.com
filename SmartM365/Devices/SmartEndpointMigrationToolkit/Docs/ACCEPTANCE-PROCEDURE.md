@@ -37,6 +37,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Windows11Upgrade
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Windows11Upgrade\Test-SemtWindows11MediaAdoption.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Windows11Upgrade\Test-SemtWindows11IntuneGate.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Windows11Upgrade\Test-SemtWindows11RobocopyExitCode.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Windows11Upgrade\Test-SemtWindows11InteractiveUserDetection.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtPowerShellDates.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtPowerShellDates.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtProgramFolder.ps1

@@ -4870,18 +4870,111 @@ function Invoke-SetupUpgrade {
     return $process.ExitCode
 }
 
+function Get-WtsSessionUserList {
+    # Lists the users of the Remote Desktop Services sessions (console and RDP, active or
+    # disconnected) as "DOMAIN\User|SessionId|State". Unlike quser.exe, the output does not
+    # depend on the display language. Throws when the sessions cannot be enumerated.
+    if ($null -eq ('SmartM365WtsSessionQuery' -as [type])) {
+        $wtsSource = @'
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class SmartM365WtsSessionQuery
+{
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WTS_SESSION_INFO
+    {
+        public int SessionId;
+        public IntPtr pWinStationName;
+        public int State;
+    }
+
+    [DllImport("wtsapi32.dll", SetLastError = true)]
+    private static extern bool WTSEnumerateSessionsW(IntPtr hServer, int reserved, int version, out IntPtr ppSessionInfo, out int pCount);
+
+    [DllImport("wtsapi32.dll", SetLastError = true)]
+    private static extern bool WTSQuerySessionInformationW(IntPtr hServer, int sessionId, int wtsInfoClass, out IntPtr ppBuffer, out int pBytesReturned);
+
+    [DllImport("wtsapi32.dll")]
+    private static extern void WTSFreeMemory(IntPtr pMemory);
+
+    private const int WTSUserName = 5;
+    private const int WTSDomainName = 7;
+
+    private static string QueryString(int sessionId, int infoClass)
+    {
+        IntPtr buffer;
+        int bytes;
+        if (!WTSQuerySessionInformationW(IntPtr.Zero, sessionId, infoClass, out buffer, out bytes))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        try
+        {
+            if (buffer == IntPtr.Zero) { return ""; }
+            string value = Marshal.PtrToStringUni(buffer);
+            return value == null ? "" : value;
+        }
+        finally
+        {
+            WTSFreeMemory(buffer);
+        }
+    }
+
+    public static string[] GetSessionUsers()
+    {
+        IntPtr list;
+        int count;
+        if (!WTSEnumerateSessionsW(IntPtr.Zero, 0, 1, out list, out count))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        List<string> result = new List<string>();
+        try
+        {
+            int size = Marshal.SizeOf(typeof(WTS_SESSION_INFO));
+            for (int i = 0; i < count; i++)
+            {
+                WTS_SESSION_INFO info = (WTS_SESSION_INFO)Marshal.PtrToStructure(new IntPtr(list.ToInt64() + (long)i * size), typeof(WTS_SESSION_INFO));
+                string user = QueryString(info.SessionId, WTSUserName);
+                if (string.IsNullOrEmpty(user)) { continue; }
+                string domain = QueryString(info.SessionId, WTSDomainName);
+                string account = string.IsNullOrEmpty(domain) ? user : domain + "\\" + user;
+                result.Add(account + "|" + info.SessionId + "|" + info.State);
+            }
+        }
+        finally
+        {
+            WTSFreeMemory(list);
+        }
+        return result.ToArray();
+    }
+}
+'@
+        Add-Type -TypeDefinition $wtsSource -ErrorAction Stop
+    }
+    return @([SmartM365WtsSessionQuery]::GetSessionUsers())
+}
+
 function Get-InteractiveUserSessionSummary {
     $excludedDomains = @('NT AUTHORITY','WINDOW MANAGER','FONT DRIVER HOST')
     $excludedNames = @('SYSTEM','LOCAL SERVICE','NETWORK SERVICE')
+    $wtsStateNames = @{ '0' = 'Active'; '1' = 'Connected'; '2' = 'ConnectQuery'; '3' = 'Shadow'; '4' = 'Disconnected'; '5' = 'Idle'; '6' = 'Listen'; '7' = 'Reset'; '8' = 'Down'; '9' = 'Init' }
 
     try {
         $sessions = @(Get-CimInstance -ClassName Win32_LogonSession -Filter 'LogonType = 2 OR LogonType = 10 OR LogonType = 11' -ErrorAction Stop)
         $users = New-Object System.Collections.ArrayList
+        $unresolvedSessionCount = 0
 
         foreach ($session in $sessions) {
             $accounts = @(Get-CimAssociatedInstance -InputObject $session -Association Win32_LoggedOnUser -ErrorAction Stop)
             if ($accounts.Count -eq 0) {
-                throw 'An interactive logon session could not be resolved to an account.'
+                # Windows can keep the logon session object of a user who already signed out.
+                # The Remote Desktop Services session list below decides whether a user is there.
+                $unresolvedSessionCount++
+                continue
             }
             foreach ($account in $accounts) {
                 $domain = ([string]$account.Domain).Trim()
@@ -4897,12 +4990,54 @@ function Get-InteractiveUserSessionSummary {
             }
         }
 
+        # Cross-check with the Remote Desktop Services sessions. A user seen by either source
+        # counts as connected. When a logon session has no account and the session list cannot
+        # be read, the detection fails so that no reboot is scheduled.
+        $wtsSessionDetails = New-Object System.Collections.ArrayList
+        $wtsError = ''
+        try {
+            foreach ($entry in @(Get-WtsSessionUserList)) {
+                $fields = @(([string]$entry) -split '\|')
+                $account = ([string]$fields[0]).Trim()
+                if ([string]::IsNullOrWhiteSpace($account)) { continue }
+                $accountDomain = ''
+                $accountName = $account
+                if ($account.Contains('\')) {
+                    $accountDomain = $account.Substring(0, $account.IndexOf('\'))
+                    $accountName = $account.Substring($account.IndexOf('\') + 1)
+                }
+                if ($excludedDomains -contains $accountDomain.ToUpperInvariant()) { continue }
+                if ($excludedNames -contains $accountName.ToUpperInvariant()) { continue }
+                if ($accountName -match '^(DWM|UMFD)-\d+$') { continue }
+                if ($accountName.EndsWith('$')) { continue }
+
+                $stateCode = if ($fields.Count -ge 3) { ([string]$fields[2]).Trim() } else { '' }
+                $stateName = if ($wtsStateNames.ContainsKey($stateCode)) { $wtsStateNames[$stateCode] } else { $stateCode }
+                $sessionId = if ($fields.Count -ge 2) { ([string]$fields[1]).Trim() } else { '' }
+                [void]$wtsSessionDetails.Add(("{0} (session {1}, {2})" -f $account,$sessionId,$stateName))
+                $alreadyListed = $false
+                foreach ($listed in @($users.ToArray())) {
+                    if ([string]::Equals([string]$listed, $account, [System.StringComparison]::OrdinalIgnoreCase)) { $alreadyListed = $true; break }
+                }
+                if (-not $alreadyListed) { [void]$users.Add($account) }
+            }
+        }
+        catch {
+            $wtsError = $_.Exception.Message
+            if ([string]::IsNullOrWhiteSpace($wtsError)) { $wtsError = 'unknown error' }
+        }
+
+        $wtsText = if ([string]::IsNullOrWhiteSpace($wtsError)) { (@($wtsSessionDetails.ToArray()) -join '; ') } else { ("unavailable: {0}" -f $wtsError) }
+        if ($unresolvedSessionCount -gt 0 -and -not [string]::IsNullOrWhiteSpace($wtsError)) {
+            throw ("{0} interactive logon session(s) could not be resolved to an account, and the Remote Desktop Services session list could not be read: {1}" -f $unresolvedSessionCount,$wtsError)
+        }
+
         $userList = (@($users.ToArray()) -join '; ')
         return [pscustomobject]@{
             DetectionSucceeded = $true
             InteractiveUserCount = $users.Count
             InteractiveUsers = $userList
-            Detail = ("InteractiveUserCount={0}; InteractiveUsers={1}" -f $users.Count,$userList)
+            Detail = ("InteractiveUserCount={0}; InteractiveUsers={1}; UnresolvedLogonSessions={2}; RdsSessions={3}" -f $users.Count,$userList,$unresolvedSessionCount,$wtsText)
         }
     }
     catch {
