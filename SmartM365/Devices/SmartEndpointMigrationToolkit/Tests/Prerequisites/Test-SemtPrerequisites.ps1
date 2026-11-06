@@ -368,7 +368,7 @@ try {
     }
     Test-Step 'Worker: unconfirmed automatic prerequisites => the Campaign endpoint is not copied nor started' {
         $flag = $workerText.IndexOf("`$prerequisitesUnconfirmed = ([string]`$result['PrerequisitesAutoState'] -eq 'Unconfirmed')")
-        $loop = $workerText.IndexOf('for ($attempt = 1; $attempt -le 3 -and -not $prerequisitesUnconfirmed; $attempt++) {')
+        $loop = $workerText.IndexOf('for ($attempt = 1; $attempt -le 3 -and -not $prerequisitesUnconfirmed -and -not $prerequisitesNotStarted; $attempt++) {')
         $status = $workerText.IndexOf("Set-WorkerStatus -Status 'REMOTE_PREREQUISITES_UNCONFIRMED'")
         $next = $workerText.IndexOf("-NextAction 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH'", [math]::Max(0,$status))
         $copiedBranch = $workerText.IndexOf('elseif ($null -eq $copied) {')
@@ -379,6 +379,20 @@ try {
     Test-Step 'Worker: the unconfirmed status is a remote failure (not target busy) with the HybridJoin default cooldown' {
         (Get-HybridJoinCentralLogBucket -Result ([pscustomobject]@{ Status = 'REMOTE_PREREQUISITES_UNCONFIRMED' })) -eq 'RemoteCollectionFailed' -and
         (Get-HybridJoinCooldownHours -Status 'REMOTE_PREREQUISITES_UNCONFIRMED') -eq (Get-HybridJoinCooldownHours -Status 'REMOTE_EXECUTION_UNCONFIRMED')
+    }
+    Test-Step 'Worker: a Prerequisites task that did not start => the Campaign endpoint is not copied nor started' {
+        $return = $workerText.IndexOf("State = 'NotStarted'")
+        $flag = $workerText.IndexOf("`$prerequisitesNotStarted = ([string]`$result['PrerequisitesAutoState'] -eq 'NotStarted')")
+        $loop = $workerText.IndexOf('-and -not $prerequisitesNotStarted; $attempt++) {')
+        $branch = $workerText.IndexOf('elseif ($prerequisitesNotStarted) {')
+        $status = $workerText.IndexOf("Set-WorkerStatus -Status 'REMOTE_TASK_NOT_STARTED'", [math]::Max(0,$branch))
+        $copiedBranch = $workerText.IndexOf('elseif ($null -eq $copied) {')
+        $return -gt 0 -and $flag -gt $return -and $loop -gt $flag -and $branch -gt $loop -and $status -gt $branch -and $copiedBranch -gt $status
+    }
+    Test-Step 'Worker: a task that did not start is retried with the short HybridJoin backoff' {
+        (Get-HybridJoinCentralLogBucket -Result ([pscustomobject]@{ Status = 'REMOTE_TASK_NOT_STARTED' })) -eq 'RemoteCollectionFailed' -and
+        (Get-HybridJoinCooldownHours -Status 'REMOTE_TASK_NOT_STARTED' -BackoffCount 1) -eq 0.25 -and
+        (Get-HybridJoinCooldownHours -Status 'REMOTE_TASK_NOT_STARTED' -BackoffCount 9) -eq 6
     }
     $launcherText = [IO.File]::ReadAllText((Join-Path $packageRoot 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'))
     $catalogText = [IO.File]::ReadAllText((Join-Path $packageRoot 'Config\SmartEndpointMigrationToolkit.options.json.txt'))

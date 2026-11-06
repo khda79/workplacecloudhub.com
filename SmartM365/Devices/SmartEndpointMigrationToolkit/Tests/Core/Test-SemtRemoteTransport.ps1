@@ -36,6 +36,11 @@ class SemtFakeFolder {
     [bool]$Collide = $false
     [bool]$ChangeAction = $false
     [string]$ReplacementPrincipal = ''
+    # State of the task right after registration (2 = Queued: accepted, no process).
+    [int]$InitialState = 3
+    [int]$RegisterCalls = 0
+    # Number of state reads that still see the task running before it finishes (State 3).
+    [int]$RunningPolls = 0
     # Synthetic RPC failures: COMException with the HRESULT seen on real targets.
     [int]$GetTaskFailures = 0
     [bool]$AlwaysFail = $false
@@ -48,8 +53,9 @@ class SemtFakeFolder {
     [bool]$DeleteAppliesBeforeFailure = $false
     [object] RegisterTaskDefinition([string]$name,[object]$definition,[int]$flags,[object]$user,[object]$password,[int]$logon,[object]$sddl) {
         if ($this.Collide) { throw 'task already exists' }
+        $this.RegisterCalls++
         $this.Flags = $flags
-        $this.Task = [SemtFakeTask]::new(); $this.Task.Definition = $definition
+        $this.Task = [SemtFakeTask]::new(); $this.Task.Definition = $definition; $this.Task.State = $this.InitialState
         return $this.Task
     }
     [object] GetTask([string]$name) {
@@ -60,6 +66,7 @@ class SemtFakeFolder {
             throw [System.Runtime.InteropServices.COMException]::new(('Synthetic RPC failure. (Exception from HRESULT: 0x{0:X8})' -f $this.FailHResult), $this.FailHResult)
         }
         if ($this.EmptyReplies -gt 0) { $this.EmptyReplies--; return [pscustomobject]@{ State = $null; LastRunTime = $null } }
+        if ($this.RunningPolls -gt 0) { $this.RunningPolls--; if ($this.RunningPolls -gt 0) { $this.Task.State = 4 } else { $this.Task.State = 3 } }
         if ($this.ChangeAction) { $this.Task.Definition.Actions.Action.Arguments = 'changed' }; if ($this.ReplacementPrincipal) { $this.Task.Definition.Principal.UserId = $this.ReplacementPrincipal }; return $this.Task
     }
     [void] DeleteTask([string]$name,[int]$flags) {
@@ -282,6 +289,52 @@ $script:fake=New-SemtCleanupFake; $script:fake.Folder.Task.Definition.Registrati
 $reply=& $cleanupOperation $cleanupRequest
 if ($reply.Outcome -ne 'Failed' -or $script:fake.Folder.Deleted -or -not $script:fake.Folder.Task.Enabled) { throw 'A task with another identity was touched' }
 $passed++
+# Queued (State 2) with a LastRunTime and no process, as seen in the field: LastRunTime alone never keeps it.
+$script:fake=New-SemtCleanupFake; $script:fake.Folder.Task.State=2; $script:fake.Folder.Task.LastRunTime=[datetime]::Now.AddMinutes(-20)
+$reply=& $cleanupOperation $cleanupRequest
+if ($reply.Outcome -ne 'Deleted' -or -not $script:fake.Folder.Deleted -or -not $script:fake.Folder.DisabledBeforeDelete -or $reply.Detail -notmatch 'Queued') { throw "A queued task without process was not disabled then deleted: $($reply.Outcome)" }
+$passed++
+$script:fake=New-SemtCleanupFake; $script:fake.Folder.Task.State=2; $script:fake.Folder.Task.LastRunTime=[datetime]::Now.AddMinutes(-20); $script:fake.Folder.StartsWhenDisabled=$true
+$reply=& $cleanupOperation $cleanupRequest
+if ($reply.Outcome -ne 'Started' -or $script:fake.Folder.Deleted) { throw 'A queued task that started while being disabled was deleted' }
+$passed++
+# Start limit in the transport job: a task still Queued is handed back as NotStarted, untouched.
+$service=[SemtFakeService]::new(); $service.Folder.InitialState=2
+$script:fake=$service
+$records=@(& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Mode='ScheduledTask';StartTimeoutMinutes=11} 3>&1)
+$notStarted=@($records | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] })
+$stateWarnings=@($records | Where-Object { $_ -is [System.Management.Automation.WarningRecord] -and $_.Message -like 'SEMT_TASK_STATE: State=2;*' })
+if ($notStarted.Count -ne 1 -or -not $notStarted[0].NotStarted -or $notStarted[0].State -ne 2 -or $notStarted[0].WaitedMinutes -lt 11 -or $notStarted[0].WaitedMinutes -gt 12 -or $service.Folder.Deleted) { throw 'A queued task was not handed back as not started, untouched' }
+if ($stateWarnings.Count -ne 2) { throw "Task state was not reported every 5 minutes ($($stateWarnings.Count))" }
+$passed++
+# Seen running before the limit: followed to the end (20 minutes here) and cleaned as usual.
+$service=[SemtFakeService]::new(); $service.Folder.InitialState=4; $service.Folder.RunningPolls=400
+$dir=Join-Path ([IO.Path]::GetTempPath()) ('SEMT-transport-test-' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($dir)
+$file=Join-Path $dir 'endpoint.ps1'; [IO.File]::WriteAllText($file,'synthetic')
+$hash=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+try {
+    $script:fake=$service
+    $records=@(& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Script=$file;ShareScript=$file;Sha256=$hash;Mode='ScheduledTask';StartTimeoutMinutes=1} 3>&1)
+    $runOutput=@($records | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] })
+    if ($runOutput.Count -ne 1 -or $runOutput[0].PSObject.Properties['NotStarted'] -or -not $runOutput[0].Cleaned -or -not $service.Folder.Deleted -or @($records | Where-Object { $_ -is [System.Management.Automation.WarningRecord] }).Count -ne 0) { throw 'A task seen running was cut by the start limit' }
+    $passed++
+} finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
+# FollowOnly: the task registered by the first job is followed without a new registration or Run.
+$service=[SemtFakeService]::new()
+$service.Folder.Task=[SemtFakeTask]::new(); $service.Folder.Task.Definition=[SemtFakeDefinition]::new()
+$service.Folder.Task.Definition.Principal.UserId='SYSTEM'; $service.Folder.Task.Definition.Principal.LogonType=5
+$service.Folder.Task.Definition.Actions.Action.Path='%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe'; $service.Folder.Task.Definition.Actions.Action.Arguments='test'
+$script:fake=$service
+$dir=Join-Path ([IO.Path]::GetTempPath()) ('SEMT-transport-test-' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($dir)
+$file=Join-Path $dir 'endpoint.ps1'; [IO.File]::WriteAllText($file,'synthetic')
+$hash=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+try {
+    $followed=& $operation @{Target='synthetic.invalid';Name='WCH-SEMT-11111111111111111111111111111111';Arguments='test';Script=$file;ShareScript=$file;Sha256=$hash;Mode='ScheduledTask';FollowOnly=$true;StartTimeoutMinutes=0}
+    if (-not $followed.Cleaned -or $service.Folder.RegisterCalls -ne 0 -or -not $service.Folder.Deleted) { throw 'FollowOnly registered the task again or did not clean it' }
+    $passed++
+} finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
 Remove-Item Function:\New-Object
 Remove-Item Function:\Start-Sleep
 Remove-Item Function:\Get-Date
@@ -391,6 +444,62 @@ try {
         $deleted=Remove-SemtUnstartedSystemTask -Mode ScheduledTask -ConnectionTarget 'synthetic.invalid' -CorrelationId $cleanupCorrelation -RemoteDataShare $cleanupShare -TimeoutSeconds 10
         if ($deleted.Outcome -ne 'Deleted' -or (& $module { $script:CleanupJobs }) -ne 1 -or $deleted.TaskName -ne ('WCH-SEMT-' + $cleanupCorrelation)) { throw 'Another campaign lease blocked the cleanup of a never-started task' }
         $passed++
+        # The endpoint writes its start marker right after the deletion: Started, payload kept.
+        $lateResult=Join-Path $cleanupShare ('State\Results\{0}.json.txt' -f $cleanupCorrelation)
+        $payloadDir=Join-Path $toolkitRoot ('Attempts\' + $cleanupCorrelation)
+        [void][IO.Directory]::CreateDirectory($payloadDir)
+        $payloadFile=Join-Path $payloadDir 'endpoint.ps1'; [IO.File]::WriteAllText($payloadFile,'synthetic')
+        $payloadHash=(Get-FileHash -LiteralPath $payloadFile -Algorithm SHA256).Hash
+        & $module {
+            param($path,$correlation)
+            $script:LateResultPath=$path; $script:LateCorrelation=$correlation
+            function script:Receive-Job { param($Job); [IO.File]::WriteAllText($script:LateResultPath,('{"CorrelationId":"' + $script:LateCorrelation + '","State":"Running"}')); return [pscustomobject]@{Outcome='Deleted'; Detail='Task never started (Queued with LastRunTime=x and no process); disabled then deleted.'} }
+        } $lateResult $cleanupCorrelation
+        $late=Remove-SemtUnstartedSystemTask -Mode ScheduledTask -ConnectionTarget 'synthetic.invalid' -CorrelationId $cleanupCorrelation -RemoteDataShare $cleanupShare -RemoteSharePath $payloadFile -ExpectedSha256 $payloadHash -TimeoutSeconds 10
+        if ($late.Outcome -ne 'Started' -or $late.Detail -notmatch 'last moment' -or -not (Test-Path -LiteralPath $payloadFile)) { throw 'A start right after the deletion was not reported, or the payload was removed' }
+        $passed++
+        Remove-Item -LiteralPath $lateResult -Force
+        # HybridJoin endpoint instance started from this attempt's script: Started, no Task Scheduler call.
+        $attemptScript='C:\Program Files\WCH\SmartM365\SmartEndpointMigrationToolkit\Attempts\' + $cleanupCorrelation + '\endpoint.ps1'
+        [IO.File]::WriteAllText((Join-Path $cleanupShare 'State\EndpointInstance.json.txt'),(@{ RunId='R1'; ProcessId=1234; Status='RUNNING'; ScriptPath=$attemptScript } | ConvertTo-Json))
+        & $module { $script:CleanupJobs = 0 }
+        $instance=Remove-SemtUnstartedSystemTask -Mode ScheduledTask -ConnectionTarget 'synthetic.invalid' -CorrelationId $cleanupCorrelation -RemoteDataShare $cleanupShare -RemoteScriptPath $attemptScript -TimeoutSeconds 10
+        if ($instance.Outcome -ne 'Started' -or $instance.Detail -notmatch 'endpoint instance' -or (& $module { $script:CleanupJobs }) -ne 0) { throw 'The endpoint instance of the attempt did not keep the task untouched' }
+        $passed++
+        # An instance started from another attempt's script is not a trace of this attempt.
+        & $module { function script:Receive-Job { param($Job); return [pscustomobject]@{Outcome='Deleted'; Detail='Task never started (State=3, never run); disabled then deleted.'} } }
+        $otherInstance=Remove-SemtUnstartedSystemTask -Mode ScheduledTask -ConnectionTarget 'synthetic.invalid' -CorrelationId $cleanupCorrelation -RemoteDataShare $cleanupShare -RemoteScriptPath ($attemptScript + '.other') -TimeoutSeconds 10
+        if ($otherInstance.Outcome -ne 'Deleted') { throw "Another attempt's endpoint instance kept the task: $($otherInstance.Detail)" }
+        $passed++
+        Remove-Item -LiteralPath (Join-Path $cleanupShare 'State\EndpointInstance.json.txt') -Force
+        # Transport: start limit reached, nothing ran => NotStarted with the cleanup outcome.
+        & $module {
+            $script:Requests=@(); $script:Replies=@()
+            function script:Start-Job { param($ArgumentList,$ScriptBlock); $script:Requests += ,$ArgumentList[0]; return [pscustomobject]@{State='Completed'} }
+            function script:Wait-Job { param($Job,$Timeout); return $Job }
+            function script:Receive-Job { param($Job); $next=$script:Replies[0]; $script:Replies=@($script:Replies | Select-Object -Skip 1); return $next }
+            $script:Replies=@(
+                [pscustomobject]@{NotStarted=$true; State=2; LastRunTime='2026-11-06T17:57:31.0000000'; WaitedMinutes=15.0; Cleaned=$false; ExitCode=''; RpcTransientFailures=0},
+                [pscustomobject]@{Outcome='Deleted'; Detail='Task never started (Queued with LastRunTime=2026-11-06T17:57:31 and no process); disabled then deleted.'})
+        }
+        $notStartedTransport=Invoke-SemtSystemTaskEndpoint -Mode ScheduledTask -ConnectionTarget 'synthetic.invalid' -CorrelationId $cleanupCorrelation -RemoteScriptPath $attemptScript -RemoteSharePath (Join-Path $cleanupShare 'missing\endpoint.ps1') -ExpectedSha256 'test' -Arguments @() -LogPath $log -RemoteDataShare $cleanupShare -StartTimeoutMinutes 15
+        $requests=& $module { $script:Requests }
+        $logText=[IO.File]::ReadAllText($log)
+        if (-not $notStartedTransport.NotStarted -or $notStartedTransport.Completed -or $notStartedTransport.StartCleanup -ne 'Deleted' -or $notStartedTransport.Detail -notmatch 'did not start within 15' -or $requests.Count -ne 2 -or $requests[0].StartTimeoutMinutes -ne 15 -or $requests[0].FollowOnly) { throw 'A task that did not start was not reported NotStarted with its cleanup' }
+        if ($logText -notmatch 'not started after 15 minute' -or $logText -notmatch 'Task start cleanup Deleted') { throw 'The start limit and its cleanup were not logged' }
+        $passed++
+        # Transport: the task started while the cleanup ran => followed to the end, never deleted.
+        & $module {
+            $script:Requests=@()
+            $script:Replies=@(
+                [pscustomobject]@{NotStarted=$true; State=2; LastRunTime='2026-11-06T17:57:31.0000000'; WaitedMinutes=15.0; Cleaned=$false; ExitCode=''; RpcTransientFailures=0},
+                [pscustomobject]@{Outcome='Started'; Detail='Task started while being disabled (State=4).'},
+                [pscustomobject]@{Cleaned=$true; ExitCode='0'; RpcTransientFailures=0})
+        }
+        $followedTransport=Invoke-SemtSystemTaskEndpoint -Mode ScheduledTask -ConnectionTarget 'synthetic.invalid' -CorrelationId $cleanupCorrelation -RemoteScriptPath $attemptScript -RemoteSharePath (Join-Path $cleanupShare 'missing\endpoint.ps1') -ExpectedSha256 'test' -Arguments @() -LogPath $log -RemoteDataShare $cleanupShare -StartTimeoutMinutes 15
+        $requests=& $module { $script:Requests }
+        if (-not $followedTransport.Completed -or $followedTransport.PSObject.Properties['NotStarted'] -or $requests.Count -ne 3 -or -not $requests[2].FollowOnly -or $requests[2].StartTimeoutMinutes -ne 0 -or $requests[2].Name -ne $requests[0].Name) { throw 'A task that started during the cleanup was not followed to the end' }
+        $passed++
     } finally { Remove-Item -LiteralPath $toolkitRoot -Recurse -Force -ErrorAction SilentlyContinue }
     & $module { function script:Wait-Job { param($Job,$Timeout); return $null } }
 } finally { Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue }
@@ -426,6 +535,17 @@ $result=[ordered]@{ExitCode='';JobErrorMessage='';LauncherStatus='UNKNOWN'}
 & $classify
 if ($attemptResult.State -ne 'Running' -or $null -ne $script:appliedAttempt -or $script:observedStatus -ne 'REMOTE_EXECUTION_UNCONFIRMED' -or $script:observedNextAction -ne 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH') { throw 'Continuous RPC failure was not classified unconfirmed' }
 $passed++
+# A task that did not start within the limit: distinct status, retried later.
+$script:observedStatus=''; $script:appliedAttempt=$null
+$attemptResult=[pscustomobject]@{Completed=$false;State='';Detail='No result for this attempt on the target.'}
+$transport=$notStartedTransport
+$result=[ordered]@{ExitCode='';JobErrorMessage='';LauncherStatus='UNKNOWN'}
+& $classify
+if ($script:observedStatus -ne 'REMOTE_TASK_NOT_STARTED' -or $script:observedNextAction -ne 'RETRY_LATER_TASK_NOT_STARTED') { throw "A task that did not start was classified $($script:observedStatus)" }
+$passed++
+$startDefinition=$catalog.ByName['RemoteTaskStartTimeoutMinutes']
+if ($null -eq $startDefinition -or [int]$startDefinition.Default -ne 15 -or [int]$startDefinition.Minimum -ne 0 -or [string]$startDefinition.Target -ne 'Technician') { throw 'RemoteTaskStartTimeoutMinutes catalog entry differs' }
+$passed++
 $catalogDefinition=$catalog.ByName['RemoteTaskRpcFailureWindowMinutes']
 if ($null -eq $catalogDefinition -or [int]$catalogDefinition.Default -ne 30 -or [int]$catalogDefinition.Minimum -ne 0 -or [string]$catalogDefinition.Target -ne 'Technician') { throw 'RemoteTaskRpcFailureWindowMinutes catalog entry differs' }
 $launcherText=[IO.File]::ReadAllText((Join-Path $root 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'))
@@ -444,6 +564,9 @@ $cleanupAt=$prerequisitesText.IndexOf('Remove-SemtUnstartedSystemTask',[Math]::M
 $returnAt=$prerequisitesText.IndexOf("State = 'Unconfirmed'",[Math]::Max(0,$cleanupAt))
 if ($unconfirmedAt -lt 0 -or $guardAt -lt 0 -or $psexecLogAt -lt 0 -or $psexecLogAt -gt $elseAt -or $cleanupAt -lt 0 -or $returnAt -lt 0 -or $prerequisitesText.Substring($returnAt,200) -notmatch '\$cleanupDetail') { throw 'Unconfirmed Prerequisites run does not clean its task before returning' }
 if ($prerequisitesText -notmatch [regex]::Escape('Task cleanup not applicable (PsExec)')) { throw 'PsExec unconfirmed run does not log that the cleanup does not apply' }
+$passed++
+$startPattern="-StartTimeoutMinutes \(\[int\]\(Get-SemtPropertyValue -InputObject \`$contract.PsExec -Name 'StartTimeoutMinutes' -Default 0\)\)"
+if ($launcherText -notmatch "StartTimeoutMinutes = \(Opt 'RemoteTaskStartTimeoutMinutes'\)" -or ([regex]::Matches($workerText,$startPattern)).Count -ne 2) { throw 'The start limit is not passed from the launcher to both transports of the worker' }
 $passed++
 Write-Host "Summary: Passed=$passed; Failed=0"
 

@@ -15,7 +15,7 @@
     The target receives only the autonomous endpoint script.
 
 .VERSION
-    1.0.1
+    1.0.2
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -28,7 +28,7 @@ param([Parameter(Mandatory = $true)][string]$ContractPath)
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:WorkerVersion = '1.0.1'
+$script:WorkerVersion = '1.0.2'
 
 $packageRoot = Split-Path -Path $PSScriptRoot -Parent
 Import-Module (Join-Path -Path $packageRoot -ChildPath 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force -ErrorAction Stop
@@ -111,9 +111,13 @@ function Invoke-WorkerPrerequisitesEndpoint {
         }
     }
     else {
-        $run = Invoke-SemtSystemTaskEndpoint -Mode $remoteMode -ConnectionTarget $target -CorrelationId $prerequisitesCorrelation -RemoteScriptPath ([string]$payload.RemoteScriptPath) -RemoteSharePath ([string]$payload.RemoteSharePath) -ExpectedSha256 $sha -Arguments $prerequisitesArguments -LogPath $logPath -TimeoutMinutes $timeout -LeasePath $leasePath -RpcFailureWindowMinutes ([int](Get-SemtPropertyValue -InputObject $contract.PsExec -Name 'RpcFailureWindowMinutes' -Default 30)) -RemoteDataShare ([string]$payload.RemoteDataShare)
+        $run = Invoke-SemtSystemTaskEndpoint -Mode $remoteMode -ConnectionTarget $target -CorrelationId $prerequisitesCorrelation -RemoteScriptPath ([string]$payload.RemoteScriptPath) -RemoteSharePath ([string]$payload.RemoteSharePath) -ExpectedSha256 $sha -Arguments $prerequisitesArguments -LogPath $logPath -TimeoutMinutes $timeout -LeasePath $leasePath -RpcFailureWindowMinutes ([int](Get-SemtPropertyValue -InputObject $contract.PsExec -Name 'RpcFailureWindowMinutes' -Default 30)) -RemoteDataShare ([string]$payload.RemoteDataShare) -StartTimeoutMinutes ([int](Get-SemtPropertyValue -InputObject $contract.PsExec -Name 'StartTimeoutMinutes' -Default 0))
         $transportDetail = ('{0} completed={1}; exit code {2}' -f $remoteMode,$run.Completed,$run.ExitCode)
         $done = Read-SemtRemoteAttemptResult -RemoteDataShare ([string]$payload.RemoteDataShare) -CorrelationId $prerequisitesCorrelation
+        if (-not $done.Completed -and $run.PSObject.Properties['NotStarted'] -and [bool]$run.NotStarted) {
+            # The start limit already ran the cleanup (Remove-SemtUnstartedSystemTask) for this task.
+            return [pscustomobject]@{ State = 'NotStarted'; Detail = ('Prerequisites endpoint task did not start. {0}' -f $run.Detail) }
+        }
     }
     if (-not $done.Completed) {
         $cleanupDetail = 'Task cleanup not applicable (PsExec): no scheduled task was registered.'
@@ -122,7 +126,7 @@ function Invoke-WorkerPrerequisitesEndpoint {
         }
         else {
             # A task that never started is removed so that it cannot start later and hold the target.
-            $cleanup = Remove-SemtUnstartedSystemTask -Mode $remoteMode -ConnectionTarget $target -CorrelationId $prerequisitesCorrelation -RemoteDataShare ([string]$payload.RemoteDataShare) -RemoteSharePath ([string]$payload.RemoteSharePath) -ExpectedSha256 $sha
+            $cleanup = Remove-SemtUnstartedSystemTask -Mode $remoteMode -ConnectionTarget $target -CorrelationId $prerequisitesCorrelation -RemoteDataShare ([string]$payload.RemoteDataShare) -RemoteSharePath ([string]$payload.RemoteSharePath) -ExpectedSha256 $sha -RemoteScriptPath ([string]$payload.RemoteScriptPath)
             $cleanupDetail = ('Task cleanup {0}: {1}' -f $cleanup.Outcome,$cleanup.Detail)
             Write-SemtLogLine -Path $logPath -Level $(if ($cleanup.Outcome -in @('Deleted','Absent')) { 'INFO' } else { 'WARN' }) -Message ('Automatic prerequisites unconfirmed. {0}' -f $cleanupDetail)
         }
@@ -182,6 +186,7 @@ function Get-WorkerNextAction {
         '^PSEXEC_EXIT' { return 'CHECK_CURRENT_RUN_REMOTE_LOG' }
         '^REMOTE_RESULT_INCOMPLETE$' { return 'CHECK_TARGET_ENDPOINT_LOG' }
         '^REMOTE_LOG_COLLECTION_FAILED$' { return 'CHECK_TARGET_ENDPOINT_LOG' }
+        '^REMOTE_TASK_NOT_STARTED$' { return 'RETRY_LATER_TASK_NOT_STARTED' }
         '^COMPONENT_INTEGRITY_MISMATCH$' { return 'REINSTALL_SIGNED_PACKAGE' }
         '^ERROR$' { return 'CHECK_CONNECTIVITY_OR_ADMIN_ACCESS' }
         default { return 'REVIEW_LOGS' }
@@ -259,9 +264,12 @@ try {
         # wait. Its task was deleted only if it never started (see Remove-SemtUnstartedSystemTask);
         # in every case this attempt stops here and the next cycle or Run tries again.
         $prerequisitesUnconfirmed = ([string]$result['PrerequisitesAutoState'] -eq 'Unconfirmed')
+        # A Prerequisites task that did not start within RemoteTaskStartTimeoutMinutes: the target
+        # does not launch SEMT tasks now, so the Campaign endpoint task would not start either.
+        $prerequisitesNotStarted = ([string]$result['PrerequisitesAutoState'] -eq 'NotStarted')
         $copied = $null
         $copyError = ''
-        for ($attempt = 1; $attempt -le 3 -and -not $prerequisitesUnconfirmed; $attempt++) {
+        for ($attempt = 1; $attempt -le 3 -and -not $prerequisitesUnconfirmed -and -not $prerequisitesNotStarted; $attempt++) {
             $result.RemotePayloadCopyAttempts = [string]$attempt
             if ($attempt -gt 1) {
                 Start-Sleep -Seconds ([math]::Min(30, 10 * ($attempt - 1)))
@@ -283,6 +291,10 @@ try {
         if ($prerequisitesUnconfirmed) {
             Set-WorkerStatus -Status 'REMOTE_PREREQUISITES_UNCONFIRMED' -Detail ('The automatic Prerequisites run is unconfirmed and may still start on the target; the {0} endpoint was not started. {1}' -f $campaign,[string]$result['PrerequisitesAutoDetail']) -NextAction 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH'
             Write-SemtLogLine -Path $logPath -Level WARN -Message ('Campaign endpoint not started: the automatic Prerequisites run is unconfirmed.')
+        }
+        elseif ($prerequisitesNotStarted) {
+            Set-WorkerStatus -Status 'REMOTE_TASK_NOT_STARTED' -Detail ('The automatic Prerequisites task did not start on the target; the {0} endpoint was not started. {1}' -f $campaign,[string]$result['PrerequisitesAutoDetail']) -NextAction 'RETRY_LATER_TASK_NOT_STARTED'
+            Write-SemtLogLine -Path $logPath -Level WARN -Message ('Campaign endpoint not started: the automatic Prerequisites task did not start.')
         }
         elseif ($null -eq $copied) {
             if (-not $access.AdminShareReachable) { Set-WorkerStatus -Status 'ADMIN_SHARE_UNREACHABLE' -Detail $copyError }
@@ -346,11 +358,13 @@ try {
             }
             }
             else {
-                $transport = Invoke-SemtSystemTaskEndpoint -Mode $remoteMode -ConnectionTarget $target -CorrelationId $correlationId -RemoteScriptPath ([string]$copied.RemoteScriptPath) -RemoteSharePath ([string]$copied.RemoteSharePath) -ExpectedSha256 $endpointSha -Arguments $arguments -LogPath $logPath -TimeoutMinutes ([int]$contract.PsExec.TimeoutMinutes) -LeasePath $leasePath -RpcFailureWindowMinutes ([int](Get-SemtPropertyValue -InputObject $contract.PsExec -Name 'RpcFailureWindowMinutes' -Default 30)) -RemoteDataShare $remoteDataShare
+                $transport = Invoke-SemtSystemTaskEndpoint -Mode $remoteMode -ConnectionTarget $target -CorrelationId $correlationId -RemoteScriptPath ([string]$copied.RemoteScriptPath) -RemoteSharePath ([string]$copied.RemoteSharePath) -ExpectedSha256 $endpointSha -Arguments $arguments -LogPath $logPath -TimeoutMinutes ([int]$contract.PsExec.TimeoutMinutes) -LeasePath $leasePath -RpcFailureWindowMinutes ([int](Get-SemtPropertyValue -InputObject $contract.PsExec -Name 'RpcFailureWindowMinutes' -Default 30)) -RemoteDataShare $remoteDataShare -StartTimeoutMinutes ([int](Get-SemtPropertyValue -InputObject $contract.PsExec -Name 'StartTimeoutMinutes' -Default 0))
                 $attemptResult = Read-SemtRemoteAttemptResult -RemoteDataShare $remoteDataShare -CorrelationId $correlationId
                 if ($attemptResult.Completed) {
                     Set-ResultFromAttempt -Attempt $attemptResult.Result
                     if (-not $transport.Completed) { $result.JobErrorMessage = ('Remote cleanup unconfirmed: {0}' -f $transport.Detail) }
+                } elseif ($transport.PSObject.Properties['NotStarted'] -and [bool]$transport.NotStarted) {
+                    Set-WorkerStatus -Status 'REMOTE_TASK_NOT_STARTED' -Detail ("{0}: {1}" -f $remoteMode,$transport.Detail) -NextAction 'RETRY_LATER_TASK_NOT_STARTED'
                 } elseif ($transport.Completed -and $transport.ExitCode -in @('-1073741790','3221225506')) {
                     Set-WorkerStatus -Status 'REMOTE_EXECUTION_ACCESS_DENIED' -Detail ("{0} task returned 0xC0000022 (access denied), with no completed result for this attempt." -f $remoteMode) -NextAction 'CHECK_TARGET_EXECUTION_ACCESS'
                     $result.ExitCode = $transport.ExitCode

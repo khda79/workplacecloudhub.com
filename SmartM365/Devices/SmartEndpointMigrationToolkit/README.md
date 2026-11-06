@@ -139,7 +139,21 @@ back-off and logged with a counter; when the connection comes back, the real end
 used and the task is cleaned up. Only failures lasting `RemoteTaskRpcFailureWindowMinutes`
 (default 30) in a row give `REMOTE_EXECUTION_UNCONFIRMED`. If the connection or wait
 expires, the target can still be running; cleanup is unconfirmed and must be checked before a
-retry. No automatic fallback to another transport is performed. A blocked execution can persist
+retry.
+
+A task that Task Scheduler accepts but never launches (for example `Queued`, with a
+`LastRunTime` but no process, as seen when endpoint protection or the target state holds the launch)
+would otherwise hold a worker until the remote execution wait limit. Until the task is seen running,
+its state is logged every 5 minutes. After `RemoteTaskStartTimeoutMinutes` (default 15, 0 = off) the
+task is removed only when nothing ran: it is not running, it has not finished a run, and the target
+holds no trace of the attempt (attempt result, target operation lease with its correlation ID,
+HybridJoin endpoint instance started from its script). `LastRunTime` alone never counts, because a
+Queued task carries one. The task is disabled, read again, deleted, and the traces are read once more;
+the temporary script is removed only when none appeared. The PC is then reported
+`REMOTE_TASK_NOT_STARTED` (NextAction `RETRY_LATER_TASK_NOT_STARTED`) and retried with the short
+backoff. A task that started in the meantime is followed to the end as usual. A process created
+after the last read keeps running (deleting a task never stops its process): it writes its result
+and its lease, and the next cycle sees it. No automatic fallback to another transport is performed. A blocked execution can persist
 across transports; the selected mode never changes the endpoint security policy.
 Select the transport in the GUI Options, or pass `-Option @{ RemoteExecutionMode = 'WinRM' }`
 (or `'PsExec'`) to the command-line engine.
@@ -239,9 +253,11 @@ missing. With `Unconfirmed` (no result before the 30-minute bound, or the task s
 Prerequisites task may still start later on the target and hold its operation lock, so the Campaign
 endpoint would stop at `TARGET_OPERATION_ACTIVE` after a long wait: the worker does not start it and
 reports `REMOTE_PREREQUISITES_UNCONFIRMED` (NextAction `VERIFY_REMOTE_STATE_BEFORE_RELAUNCH`). With
-`ScheduledTask` or `WinRM`, the temporary Prerequisites task is deleted only when it never started (no
-attempt result, no target lease for its correlation ID, never run): it is disabled, read again, then
-deleted. A task that started is kept and left to finish. The detail and the worker log give the
+`ScheduledTask` or `WinRM`, the temporary Prerequisites task is deleted only when nothing ran (same
+rule as the start limit above, including a Queued task with a `LastRunTime`): it is disabled, read
+again, then deleted. A task that started is kept and left to finish. When the Prerequisites task
+does not start within `RemoteTaskStartTimeoutMinutes`, the Campaign endpoint is not started either
+and the PC is reported `REMOTE_TASK_NOT_STARTED`. The detail and the worker log give the
 cleanup outcome (`Deleted`, `Started`, `Absent` or `Failed`). With `PsExec` no task exists and the log
 says that the cleanup does not apply. The next cycle or Run tries again. A dry
 run checks nothing. This does not depend on `Prerequisites.Enabled`, which only controls the

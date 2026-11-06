@@ -113,7 +113,11 @@ function Invoke-SemtSystemTaskEndpoint {
        Transient RPC failures while following or cleaning the task (call failed, server
        unavailable, timeouts, disconnected object, network path lost) are retried with back-off and a new connection.
        The task is reported unconfirmed only when they last RpcFailureWindowMinutes in a row
-       (0 = the first failure is final). Registration and start are never retried. #>
+       (0 = the first failure is final). Registration and start are never retried.
+       StartTimeoutMinutes (0 = off): a task not seen running within this time (for example
+       Queued, State 2, with no process) is removed by Remove-SemtUnstartedSystemTask only when
+       nothing ran; the result then has NotStarted. If it started meanwhile, it is followed as usual.
+       While the task has not started, its state is logged every 5 minutes. #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)][ValidateSet('ScheduledTask','WinRM')][string]$Mode,
@@ -127,7 +131,8 @@ function Invoke-SemtSystemTaskEndpoint {
         [int]$TimeoutMinutes = 120,
         [AllowNull()][string]$LeasePath,
         [ValidateRange(0,1440)][int]$RpcFailureWindowMinutes = 30,
-        [AllowNull()][string]$RemoteDataShare
+        [AllowNull()][string]$RemoteDataShare,
+        [ValidateRange(0,1440)][int]$StartTimeoutMinutes = 0
     )
     $taskName = 'WCH-SEMT-' + $CorrelationId
     $actionArguments = (@('-NoProfile','-ExecutionPolicy','RemoteSigned','-File',$RemoteScriptPath) + $Arguments | ForEach-Object { ConvertTo-SemtWindowsCommandLineArgument -Value ([string]$_) }) -join ' '
@@ -135,6 +140,7 @@ function Invoke-SemtSystemTaskEndpoint {
         Target = $ConnectionTarget; Name = $taskName; Arguments = $actionArguments
         Script = $RemoteScriptPath; ShareScript = $RemoteSharePath; Sha256 = $ExpectedSha256
         Mode = $Mode; RpcFailureWindowMinutes = $RpcFailureWindowMinutes
+        StartTimeoutMinutes = $StartTimeoutMinutes; FollowOnly = $false
     }
     $operation = {
         param($r)
@@ -191,10 +197,15 @@ function Invoke-SemtSystemTaskEndpoint {
                 }
             }
         }
+        $startLimit = 0
+        if ($r.ContainsKey('StartTimeoutMinutes') -and $null -ne $r.StartTimeoutMinutes) { $startLimit = [int]$r.StartTimeoutMinutes }
+        $followOnly = ($r.ContainsKey('FollowOnly') -and [bool]$r.FollowOnly)
         $service = New-Object -ComObject 'Schedule.Service'
         if ($r.Mode -eq 'WinRM') { $service.Connect() } else { $service.Connect($r.Target) }
         $folder = $service.GetFolder('\')
         $rpc.Folder = $folder
+        # FollowOnly: the task was registered and started by an earlier job of this attempt.
+        if (-not $followOnly) {
         $definition = $service.NewTask(0)
         $definition.RegistrationInfo.Description = 'SEMT temporary SYSTEM execution ' + $r.Name
         $definition.Principal.UserId = 'SYSTEM'
@@ -210,6 +221,10 @@ function Invoke-SemtSystemTaskEndpoint {
         # TASK_CREATE (2): a collision fails instead of replacing an existing task.
         $task = $folder.RegisterTaskDefinition($r.Name,$definition,2,'SYSTEM',$null,5,$null)
         [void]$task.Run($null)
+        }
+        $waitStarted = Get-Date
+        $nextStateLog = 5
+        $seenRunning = $false
         do {
             Start-Sleep -Seconds 3
             $poll = & $invokeRpc 'GetTaskState' {
@@ -218,6 +233,17 @@ function Invoke-SemtSystemTaskEndpoint {
                 $polledLastRun = if ($null -ne $polled) { $polled.LastRunTime } else { $null }
                 if ($null -eq $polledState -or $null -eq $polledLastRun) { throw ('SEMT_TASK_REPLY_INCOMPLETE: State={0}; LastRunTime={1}' -f $polledState,$polledLastRun) }
                 [pscustomobject]@{ State = [int]$polledState; LastRun = [datetime]$polledLastRun }
+            }
+            # TASK_STATE_RUNNING = 4. Until the task is seen running, its state is reported every
+            # 5 minutes and, after the start limit, the job hands the decision back to the worker.
+            if ($poll.State -eq 4) { $seenRunning = $true }
+            $waited = ((Get-Date) - $waitStarted).TotalMinutes
+            if (-not $seenRunning -and $waited -ge $nextStateLog) {
+                Write-Warning ('SEMT_TASK_STATE: State={0}; LastRunTime={1:o}; WaitingMinutes={2:N0}' -f $poll.State,$poll.LastRun,$waited)
+                $nextStateLog = $nextStateLog + 5
+            }
+            if ($startLimit -gt 0 -and -not $seenRunning -and $poll.State -ne 4 -and $waited -ge $startLimit -and (($poll.State -ne 1 -and $poll.State -ne 3) -or $poll.LastRun.Year -lt 2000)) {
+                return [pscustomobject]@{ NotStarted = $true; State = $poll.State; LastRunTime = $poll.LastRun.ToString('o'); WaitedMinutes = [math]::Round($waited,1); Cleaned = $false; ExitCode = ''; RpcTransientFailures = $rpc.Total }
             }
         } while (($poll.State -ne 1 -and $poll.State -ne 3) -or $poll.LastRun.Year -lt 2000)
         # Re-read the definition and refuse cleanup if the identity has changed.
@@ -269,12 +295,16 @@ function Invoke-SemtSystemTaskEndpoint {
         Remove-Item -LiteralPath $parent -Force -ErrorAction Stop
         [pscustomobject]@{ ExitCode = $exitCode; Cleaned = $true; RpcTransientFailures = $rpc.Total }
     }
-    $job = Start-Job -ArgumentList $request,$operation.ToString() -ScriptBlock {
-        param($r,$source)
-        $block = [scriptblock]::Create($source)
-        if ($r.Mode -eq 'WinRM') { Invoke-Command -ComputerName $r.Target -ScriptBlock $block -ArgumentList $r -ErrorAction Stop }
-        else { & $block $r }
+    $startJob = {
+        param($jobRequest)
+        Start-Job -ArgumentList $jobRequest,$operation.ToString() -ScriptBlock {
+            param($r,$source)
+            $block = [scriptblock]::Create($source)
+            if ($r.Mode -eq 'WinRM') { Invoke-Command -ComputerName $r.Target -ScriptBlock $block -ArgumentList $r -ErrorAction Stop }
+            else { & $block $r }
+        }
     }
+    $job = & $startJob $request
     $started = Get-Date
     $timedOut = $false
     # The job reports each transient RPC failure and each recovery as a warning record; they are
@@ -298,25 +328,46 @@ function Invoke-SemtSystemTaskEndpoint {
                     Write-SemtLogLine -Path $LogPath -Message ("Attempt result after RPC recovery: {0}" -f $recovered.Detail)
                 }
             }
+            elseif ($message -like 'SEMT_TASK_STATE*') { Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} task {1} not started yet: {2}" -f $Mode,$taskName,$message) }
             else { Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} task warning: {1}" -f $Mode,$message) }
         }
         $relay.Seen = $records.Count
     }
     try {
-        while (-not (Wait-Job -Job $job -Timeout 5)) {
-            [void](Update-SemtWorkerLease -LeasePath $LeasePath)
+        while ($true) {
+            while (-not (Wait-Job -Job $job -Timeout 5)) {
+                [void](Update-SemtWorkerLease -LeasePath $LeasePath)
+                & $relayWarnings
+                if ($TimeoutMinutes -gt 0 -and ((Get-Date) - $started).TotalMinutes -ge $TimeoutMinutes) { $timedOut = $true; break }
+            }
             & $relayWarnings
-            if ($TimeoutMinutes -gt 0 -and ((Get-Date) - $started).TotalMinutes -ge $TimeoutMinutes) { $timedOut = $true; break }
+            if ($timedOut) {
+                Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} timed out; remote execution and cleanup are unconfirmed. Task={1}; RpcFailures={2}" -f $Mode,$taskName,$relay.Transient)
+                return [pscustomobject]@{ Completed=$false; TimedOut=$true; ExitCode=''; Detail='Remote task may still be running; verify before retrying.'; RpcTransientFailures=$relay.Transient; RpcUnavailable=$false }
+            }
+            $output = @(Receive-Job -Job $job -ErrorAction Stop -WarningAction SilentlyContinue)
+            if ($job.State -eq 'Completed' -and $output.Count -eq 1 -and $output[0].PSObject.Properties['NotStarted'] -and [bool]$output[0].NotStarted) {
+                Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} task {1} not started after {2} minute(s) (State={3}; LastRunTime={4}; limit RemoteTaskStartTimeoutMinutes={5}). Checking whether anything ran before removing it." -f $Mode,$taskName,$output[0].WaitedMinutes,$output[0].State,$output[0].LastRunTime,$StartTimeoutMinutes)
+                $cleanup = Remove-SemtUnstartedSystemTask -Mode $Mode -ConnectionTarget $ConnectionTarget -CorrelationId $CorrelationId -RemoteDataShare $RemoteDataShare -RemoteSharePath $RemoteSharePath -ExpectedSha256 $ExpectedSha256 -RemoteScriptPath $RemoteScriptPath
+                Write-SemtLogLine -Path $LogPath -Level $(if ($cleanup.Outcome -eq 'Deleted') { 'INFO' } else { 'WARN' }) -Message ("Task start cleanup {0}: {1}" -f $cleanup.Outcome,$cleanup.Detail)
+                if ($cleanup.Outcome -ne 'Started') {
+                    $detail = ('Task {0} did not start within {1} minute(s) (State={2}; LastRunTime={3}). Task cleanup {4}: {5}' -f $taskName,$StartTimeoutMinutes,$output[0].State,$output[0].LastRunTime,$cleanup.Outcome,$cleanup.Detail)
+                    return [pscustomobject]@{ Completed=$false; TimedOut=$false; NotStarted=$true; StartCleanup=$cleanup.Outcome; ExitCode=''; Detail=$detail; RpcTransientFailures=$relay.Transient; RpcUnavailable=$false }
+                }
+                # It started in the meantime: follow it to the end like any started task.
+                Write-SemtLogLine -Path $LogPath -Message ("{0} task {1} started meanwhile; following it." -f $Mode,$taskName)
+                Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+                $follow = $request.Clone()
+                $follow.FollowOnly = $true
+                $follow.StartTimeoutMinutes = 0
+                $relay.Seen = 0
+                $job = & $startJob $follow
+                continue
+            }
+            if ($job.State -ne 'Completed' -or $output.Count -ne 1 -or -not $output[0].Cleaned) { throw 'Task execution or cleanup was not confirmed.' }
+            Write-SemtLogLine -Path $LogPath -Message ("{0} task finished and temporary payload was removed. Task={1}; ExitCode={2}; RpcFailures={3}" -f $Mode,$taskName,$output[0].ExitCode,$relay.Transient)
+            return [pscustomobject]@{ Completed=$true; TimedOut=$false; ExitCode=[string]$output[0].ExitCode; Detail='Task and temporary endpoint script removed.'; RpcTransientFailures=$relay.Transient; RpcUnavailable=$false }
         }
-        & $relayWarnings
-        if ($timedOut) {
-            Write-SemtLogLine -Path $LogPath -Level WARN -Message ("{0} timed out; remote execution and cleanup are unconfirmed. Task={1}; RpcFailures={2}" -f $Mode,$taskName,$relay.Transient)
-            return [pscustomobject]@{ Completed=$false; TimedOut=$true; ExitCode=''; Detail='Remote task may still be running; verify before retrying.'; RpcTransientFailures=$relay.Transient; RpcUnavailable=$false }
-        }
-        $output = @(Receive-Job -Job $job -ErrorAction Stop -WarningAction SilentlyContinue)
-        if ($job.State -ne 'Completed' -or $output.Count -ne 1 -or -not $output[0].Cleaned) { throw 'Task execution or cleanup was not confirmed.' }
-        Write-SemtLogLine -Path $LogPath -Message ("{0} task finished and temporary payload was removed. Task={1}; ExitCode={2}; RpcFailures={3}" -f $Mode,$taskName,$output[0].ExitCode,$relay.Transient)
-        return [pscustomobject]@{ Completed=$true; TimedOut=$false; ExitCode=[string]$output[0].ExitCode; Detail='Task and temporary endpoint script removed.'; RpcTransientFailures=$relay.Transient; RpcUnavailable=$false }
     }
     catch {
         $detail = $_.Exception.Message
@@ -330,11 +381,15 @@ function Invoke-SemtSystemTaskEndpoint {
 }
 
 function Remove-SemtUnstartedSystemTask {
-    <# Deletes the temporary SEMT task of an unconfirmed attempt only when it never started: no
-       attempt result, no target operation lease with this correlation ID, task never run and not
-       running. The task is disabled first and read again, so it cannot start between the check
-       and the deletion. A task that started is kept (Outcome=Started). Never throws.
-       Outcome: Deleted, Started, Absent or Failed. #>
+    <# Deletes the temporary SEMT task of an attempt only when nothing ran: the task is not running
+       (State 4), it has not finished a run (Ready with a LastRunTime), and the target holds no
+       SEMT trace of the attempt (attempt result, target operation lease with this correlation ID,
+       HybridJoin endpoint instance started from this attempt's script). A Queued task (State 2)
+       may carry a LastRunTime although no process was created: LastRunTime alone never counts.
+       The task is disabled, read again (a new launch or a running state keeps it), deleted, and
+       the traces are read once more; the payload is removed only when none appeared. A process
+       created after the last read keeps running (deleting a task never stops its process).
+       Never throws. Outcome: Deleted, Started, Absent or Failed. #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)][ValidateSet('ScheduledTask','WinRM')][string]$Mode,
@@ -343,21 +398,34 @@ function Remove-SemtUnstartedSystemTask {
         [AllowNull()][string]$RemoteDataShare,
         [AllowNull()][string]$RemoteSharePath,
         [AllowNull()][string]$ExpectedSha256,
+        [AllowNull()][string]$RemoteScriptPath,
         [ValidateRange(10,600)][int]$TimeoutSeconds = 120
     )
     $taskName = 'WCH-SEMT-' + $CorrelationId
     $outcome = { param([string]$Value,[string]$Detail) [pscustomobject]@{ Outcome = $Value; TaskName = $taskName; Detail = $Detail } }
-    try {
-        if (-not [string]::IsNullOrWhiteSpace($RemoteDataShare)) {
-            $attempt = Read-SemtRemoteAttemptResult -RemoteDataShare $RemoteDataShare -CorrelationId $CorrelationId
-            if ($attempt.Exists -and $attempt.State -ne 'Foreign') { return (& $outcome 'Started' ('The attempt wrote a result ({0}); task {1} kept.' -f $attempt.Detail,$taskName)) }
-            $leasePath = Join-Path -Path (Split-Path -Path $RemoteDataShare -Parent) -ChildPath 'State\TargetOperation.json.txt'
-            if (Test-Path -LiteralPath $leasePath -PathType Leaf) {
-                $lease = $null
-                try { $lease = Read-SemtJsonFile -Path $leasePath -Required } catch { return (& $outcome 'Failed' ('Target operation lease unreadable; task {0} kept. {1}' -f $taskName,$_.Exception.Message)) }
-                if ([string](Get-SemtPropertyValue -InputObject $lease -Name 'CorrelationId' -Default '') -eq $CorrelationId) { return (& $outcome 'Started' ('The attempt holds the target operation lease; task {0} kept.' -f $taskName)) }
+    # Returns a description of the first SEMT trace of this attempt on the target, '' when none.
+    # An unreadable lease or instance file counts as a trace: the task is then kept.
+    $readTrace = {
+        if ([string]::IsNullOrWhiteSpace($RemoteDataShare)) { return '' }
+        $attempt = Read-SemtRemoteAttemptResult -RemoteDataShare $RemoteDataShare -CorrelationId $CorrelationId
+        if ($attempt.Exists -and $attempt.State -ne 'Foreign') { return ('the attempt wrote a result ({0})' -f $attempt.Detail) }
+        $leasePath = Join-Path -Path (Split-Path -Path $RemoteDataShare -Parent) -ChildPath 'State\TargetOperation.json.txt'
+        if (Test-Path -LiteralPath $leasePath -PathType Leaf) {
+            try { $lease = Read-SemtJsonFile -Path $leasePath -Required } catch { return ('the target operation lease is unreadable: {0}' -f $_.Exception.Message) }
+            if ([string](Get-SemtPropertyValue -InputObject $lease -Name 'CorrelationId' -Default '') -eq $CorrelationId) { return 'the attempt holds the target operation lease' }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($RemoteScriptPath)) {
+            $instancePath = Join-Path -Path $RemoteDataShare -ChildPath 'State\EndpointInstance.json.txt'
+            if (Test-Path -LiteralPath $instancePath -PathType Leaf) {
+                try { $instance = Read-SemtJsonFile -Path $instancePath -Required } catch { return ('the endpoint instance file is unreadable: {0}' -f $_.Exception.Message) }
+                if ([string](Get-SemtPropertyValue -InputObject $instance -Name 'ScriptPath' -Default '') -ieq $RemoteScriptPath) { return 'an endpoint instance runs from this attempt script' }
             }
         }
+        return ''
+    }
+    try {
+        $trace = & $readTrace
+        if ($trace) { return (& $outcome 'Started' ('Before cleanup, {0}; task {1} kept.' -f $trace,$taskName)) }
         $request = @{ Target = $ConnectionTarget; Name = $taskName; Mode = $Mode; Description = 'SEMT temporary SYSTEM execution ' + $taskName }
         $operation = {
             param($r)
@@ -379,14 +447,17 @@ function Remove-SemtUnstartedSystemTask {
             $first = & $read
             if ($null -eq $first) { return [pscustomobject]@{ Outcome = 'Absent'; Detail = 'Task not found on the target.' } }
             if ($first.Description -cne $r.Description) { return [pscustomobject]@{ Outcome = 'Failed'; Detail = 'Task identity differs; deletion refused.' } }
-            # TASK_STATE_RUNNING = 4; a LastRunTime after 2000 means the task already started once.
-            if ($first.State -eq 4 -or $first.LastRun.Year -ge 2000) { return [pscustomobject]@{ Outcome = 'Started'; Detail = ('Task started (State={0}; LastRunTime={1:o}).' -f $first.State,$first.LastRun) } }
+            # TASK_STATE_RUNNING = 4. A task that is not Queued (2) and has a LastRunTime after 2000
+            # finished a run. A Queued task may carry a LastRunTime without any process.
+            if ($first.State -eq 4) { return [pscustomobject]@{ Outcome = 'Started'; Detail = ('Task running (State=4; LastRunTime={0:o}).' -f $first.LastRun) } }
+            if ($first.State -ne 2 -and $first.LastRun.Year -ge 2000) { return [pscustomobject]@{ Outcome = 'Started'; Detail = ('Task ran (State={0}; LastRunTime={1:o}).' -f $first.State,$first.LastRun) } }
             $first.Task.Enabled = $false
             $second = & $read
             if ($null -eq $second) { return [pscustomobject]@{ Outcome = 'Absent'; Detail = 'Task disappeared while being disabled.' } }
-            if ($second.State -eq 4 -or $second.LastRun.Year -ge 2000) { return [pscustomobject]@{ Outcome = 'Started'; Detail = ('Task started while being disabled (State={0}; LastRunTime={1:o}); it keeps running.' -f $second.State,$second.LastRun) } }
+            if ($second.State -eq 4 -or $second.LastRun -ne $first.LastRun) { return [pscustomobject]@{ Outcome = 'Started'; Detail = ('Task started while being disabled (State={0}; LastRunTime={1:o}); it keeps running.' -f $second.State,$second.LastRun) } }
             $folder.DeleteTask($r.Name,0)
-            [pscustomobject]@{ Outcome = 'Deleted'; Detail = ('Task never started (State={0}); disabled then deleted.' -f $first.State) }
+            $before = if ($first.State -eq 2) { ('Queued with LastRunTime={0:o} and no process' -f $first.LastRun) } else { ('State={0}, never run' -f $first.State) }
+            [pscustomobject]@{ Outcome = 'Deleted'; Detail = ('Task never started ({0}); disabled then deleted.' -f $before) }
         }
         $job = Start-Job -ArgumentList $request,$operation.ToString() -ScriptBlock {
             param($r,$source)
@@ -401,9 +472,17 @@ function Remove-SemtUnstartedSystemTask {
         }
         finally { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
         $result = & $outcome ([string]$reply[0].Outcome) ('{0} Task={1}' -f [string]$reply[0].Detail,$taskName)
-        if ($result.Outcome -eq 'Deleted' -and -not [string]::IsNullOrWhiteSpace($RemoteSharePath) -and -not [string]::IsNullOrWhiteSpace($ExpectedSha256)) {
-            try { Remove-SemtTemporaryPayload -Path $RemoteSharePath -ExpectedSha256 $ExpectedSha256; $result.Detail = $result.Detail + '; temporary payload removed.' }
-            catch { $result.Detail = ('{0}; temporary payload kept: {1}' -f $result.Detail,$_.Exception.Message) }
+        if ($result.Outcome -eq 'Deleted') {
+            $late = & $readTrace
+            if ($late) {
+                # The endpoint started after the last read: it keeps running and reports normally.
+                $result.Outcome = 'Started'
+                $result.Detail = ('{0}; started at the last moment ({1}); temporary payload kept.' -f $result.Detail,$late)
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace($RemoteSharePath) -and -not [string]::IsNullOrWhiteSpace($ExpectedSha256)) {
+                try { Remove-SemtTemporaryPayload -Path $RemoteSharePath -ExpectedSha256 $ExpectedSha256; $result.Detail = $result.Detail + '; temporary payload removed.' }
+                catch { $result.Detail = ('{0}; temporary payload kept: {1}' -f $result.Detail,$_.Exception.Message) }
+            }
         }
         return $result
     }

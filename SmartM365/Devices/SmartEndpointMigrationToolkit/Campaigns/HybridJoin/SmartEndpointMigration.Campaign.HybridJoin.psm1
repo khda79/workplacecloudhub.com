@@ -113,7 +113,7 @@ function Get-HybridJoinCooldownHours {
 
     $normalized = ([string]$Status).ToUpperInvariant()
     if ($normalized -match '^(CANCELLED_|DRYRUN_|AUDIT_|SKIPPED_VIRTUAL_MACHINE)') { return 0.0 }
-    if ($normalized -match '^(ADMIN_SHARE|DNS_|PSEXEC_|REMOTE_.*FAILED|REMOTE_RESULT|CENTRAL_.*FAILED|JOB_ERROR|ERROR|TARGET_|LEGACY_)') {
+    if ($normalized -match '^(ADMIN_SHARE|DNS_|PSEXEC_|REMOTE_.*FAILED|REMOTE_RESULT|REMOTE_TASK_NOT_STARTED|CENTRAL_.*FAILED|JOB_ERROR|ERROR|TARGET_|LEGACY_)') {
         $exponent = [math]::Min(5, [math]::Max(0, [math]::Max($BackoffCount, $CycleNumber) - 1))
         return ([math]::Min(360, 15 * [math]::Pow(2, $exponent)) / 60.0)
     }
