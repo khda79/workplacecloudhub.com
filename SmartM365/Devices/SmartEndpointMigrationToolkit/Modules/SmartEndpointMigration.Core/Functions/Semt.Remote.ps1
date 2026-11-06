@@ -329,6 +329,87 @@ function Invoke-SemtSystemTaskEndpoint {
     finally { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
 }
 
+function Remove-SemtUnstartedSystemTask {
+    <# Deletes the temporary SEMT task of an unconfirmed attempt only when it never started: no
+       attempt result, no target operation lease with this correlation ID, task never run and not
+       running. The task is disabled first and read again, so it cannot start between the check
+       and the deletion. A task that started is kept (Outcome=Started). Never throws.
+       Outcome: Deleted, Started, Absent or Failed. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][ValidateSet('ScheduledTask','WinRM')][string]$Mode,
+        [Parameter(Mandatory=$true)][string]$ConnectionTarget,
+        [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{32}$')][string]$CorrelationId,
+        [AllowNull()][string]$RemoteDataShare,
+        [AllowNull()][string]$RemoteSharePath,
+        [AllowNull()][string]$ExpectedSha256,
+        [ValidateRange(10,600)][int]$TimeoutSeconds = 120
+    )
+    $taskName = 'WCH-SEMT-' + $CorrelationId
+    $outcome = { param([string]$Value,[string]$Detail) [pscustomobject]@{ Outcome = $Value; TaskName = $taskName; Detail = $Detail } }
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($RemoteDataShare)) {
+            $attempt = Read-SemtRemoteAttemptResult -RemoteDataShare $RemoteDataShare -CorrelationId $CorrelationId
+            if ($attempt.Exists -and $attempt.State -ne 'Foreign') { return (& $outcome 'Started' ('The attempt wrote a result ({0}); task {1} kept.' -f $attempt.Detail,$taskName)) }
+            $leasePath = Join-Path -Path (Split-Path -Path $RemoteDataShare -Parent) -ChildPath 'State\TargetOperation.json.txt'
+            if (Test-Path -LiteralPath $leasePath -PathType Leaf) {
+                $lease = $null
+                try { $lease = Read-SemtJsonFile -Path $leasePath -Required } catch { return (& $outcome 'Failed' ('Target operation lease unreadable; task {0} kept. {1}' -f $taskName,$_.Exception.Message)) }
+                if ([string](Get-SemtPropertyValue -InputObject $lease -Name 'CorrelationId' -Default '') -eq $CorrelationId) { return (& $outcome 'Started' ('The attempt holds the target operation lease; task {0} kept.' -f $taskName)) }
+            }
+        }
+        $request = @{ Target = $ConnectionTarget; Name = $taskName; Mode = $Mode; Description = 'SEMT temporary SYSTEM execution ' + $taskName }
+        $operation = {
+            param($r)
+            $ErrorActionPreference = 'Stop'
+            $service = New-Object -ComObject 'Schedule.Service'
+            if ($r.Mode -eq 'WinRM') { $service.Connect() } else { $service.Connect($r.Target) }
+            $folder = $service.GetFolder('\')
+            $read = {
+                try { $task = $folder.GetTask($r.Name) }
+                catch {
+                    for ($e = $_.Exception; $null -ne $e; $e = $e.InnerException) { if (('{0:X8}' -f $e.HResult) -eq '80070002') { return $null } }
+                    throw
+                }
+                $state = $task.State
+                $lastRun = $task.LastRunTime
+                if ($null -eq $state -or $null -eq $lastRun) { throw ('SEMT_TASK_REPLY_INCOMPLETE: State={0}; LastRunTime={1}' -f $state,$lastRun) }
+                [pscustomobject]@{ Task = $task; State = [int]$state; LastRun = [datetime]$lastRun; Description = [string]$task.Definition.RegistrationInfo.Description }
+            }
+            $first = & $read
+            if ($null -eq $first) { return [pscustomobject]@{ Outcome = 'Absent'; Detail = 'Task not found on the target.' } }
+            if ($first.Description -cne $r.Description) { return [pscustomobject]@{ Outcome = 'Failed'; Detail = 'Task identity differs; deletion refused.' } }
+            # TASK_STATE_RUNNING = 4; a LastRunTime after 2000 means the task already started once.
+            if ($first.State -eq 4 -or $first.LastRun.Year -ge 2000) { return [pscustomobject]@{ Outcome = 'Started'; Detail = ('Task started (State={0}; LastRunTime={1:o}).' -f $first.State,$first.LastRun) } }
+            $first.Task.Enabled = $false
+            $second = & $read
+            if ($null -eq $second) { return [pscustomobject]@{ Outcome = 'Absent'; Detail = 'Task disappeared while being disabled.' } }
+            if ($second.State -eq 4 -or $second.LastRun.Year -ge 2000) { return [pscustomobject]@{ Outcome = 'Started'; Detail = ('Task started while being disabled (State={0}; LastRunTime={1:o}); it keeps running.' -f $second.State,$second.LastRun) } }
+            $folder.DeleteTask($r.Name,0)
+            [pscustomobject]@{ Outcome = 'Deleted'; Detail = ('Task never started (State={0}); disabled then deleted.' -f $first.State) }
+        }
+        $job = Start-Job -ArgumentList $request,$operation.ToString() -ScriptBlock {
+            param($r,$source)
+            $block = [scriptblock]::Create($source)
+            if ($r.Mode -eq 'WinRM') { Invoke-Command -ComputerName $r.Target -ScriptBlock $block -ArgumentList $r -ErrorAction Stop }
+            else { & $block $r }
+        }
+        try {
+            if (-not (Wait-Job -Job $job -Timeout $TimeoutSeconds)) { return (& $outcome 'Failed' ('No reply from the target Task Scheduler within {0} s; task {1} kept.' -f $TimeoutSeconds,$taskName)) }
+            $reply = @(Receive-Job -Job $job -ErrorAction Stop)
+            if ($reply.Count -ne 1) { return (& $outcome 'Failed' ('Unexpected Task Scheduler reply; task {0} kept.' -f $taskName)) }
+        }
+        finally { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
+        $result = & $outcome ([string]$reply[0].Outcome) ('{0} Task={1}' -f [string]$reply[0].Detail,$taskName)
+        if ($result.Outcome -eq 'Deleted' -and -not [string]::IsNullOrWhiteSpace($RemoteSharePath) -and -not [string]::IsNullOrWhiteSpace($ExpectedSha256)) {
+            try { Remove-SemtTemporaryPayload -Path $RemoteSharePath -ExpectedSha256 $ExpectedSha256; $result.Detail = $result.Detail + '; temporary payload removed.' }
+            catch { $result.Detail = ('{0}; temporary payload kept: {1}' -f $result.Detail,$_.Exception.Message) }
+        }
+        return $result
+    }
+    catch { return (& $outcome 'Failed' ('Cleanup of task {0} failed; task kept. {1}' -f $taskName,$_.Exception.Message)) }
+}
+
 function Invoke-SemtPsExecEndpoint {
     <#
     Starts PsExec, records the PsExec PID in the worker reservation, refreshes the reservation

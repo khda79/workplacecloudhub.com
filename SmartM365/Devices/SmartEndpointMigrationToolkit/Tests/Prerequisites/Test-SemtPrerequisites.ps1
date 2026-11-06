@@ -366,6 +366,20 @@ try {
         $copy = $workerText.IndexOf('$copied = Copy-SemtRemotePayload')
         $dry -gt 0 -and $auto -gt $dry -and $copy -gt $auto
     }
+    Test-Step 'Worker: unconfirmed automatic prerequisites => the Campaign endpoint is not copied nor started' {
+        $flag = $workerText.IndexOf("`$prerequisitesUnconfirmed = ([string]`$result['PrerequisitesAutoState'] -eq 'Unconfirmed')")
+        $loop = $workerText.IndexOf('for ($attempt = 1; $attempt -le 3 -and -not $prerequisitesUnconfirmed; $attempt++) {')
+        $status = $workerText.IndexOf("Set-WorkerStatus -Status 'REMOTE_PREREQUISITES_UNCONFIRMED'")
+        $next = $workerText.IndexOf("-NextAction 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH'", [math]::Max(0,$status))
+        $copiedBranch = $workerText.IndexOf('elseif ($null -eq $copied) {')
+        $auto = $workerText.IndexOf('try { Invoke-WorkerAutoPrerequisites')
+        $flag -gt $auto -and $loop -gt $flag -and $status -gt $loop -and $next -gt $status -and $copiedBranch -gt $status
+    }
+    . ([scriptblock]::Create((Get-FunctionText -Path (Join-Path $packageRoot 'Campaigns\HybridJoin\SmartEndpointMigration.Campaign.HybridJoin.psm1') -Name @('Get-HybridJoinCentralLogBucket','Get-HybridJoinCooldownHours'))))
+    Test-Step 'Worker: the unconfirmed status is a remote failure (not target busy) with the HybridJoin default cooldown' {
+        (Get-HybridJoinCentralLogBucket -Result ([pscustomobject]@{ Status = 'REMOTE_PREREQUISITES_UNCONFIRMED' })) -eq 'RemoteCollectionFailed' -and
+        (Get-HybridJoinCooldownHours -Status 'REMOTE_PREREQUISITES_UNCONFIRMED') -eq (Get-HybridJoinCooldownHours -Status 'REMOTE_EXECUTION_UNCONFIRMED')
+    }
     $launcherText = [IO.File]::ReadAllText((Join-Path $packageRoot 'Scripts\SmartM365-Invoke-EndpointMigrationWithPsExec.ps1'))
     $catalogText = [IO.File]::ReadAllText((Join-Path $packageRoot 'Config\SmartEndpointMigrationToolkit.options.json.txt'))
     Test-Step 'Launcher: AutoPrerequisites option (default on) adds the Prerequisites endpoint to the integrity check and the worker contract' {

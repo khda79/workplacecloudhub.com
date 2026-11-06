@@ -15,7 +15,7 @@
     The target receives only the autonomous endpoint script.
 
 .VERSION
-    1.0.0
+    1.0.1
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -28,7 +28,7 @@ param([Parameter(Mandatory = $true)][string]$ContractPath)
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:WorkerVersion = '1.0.0'
+$script:WorkerVersion = '1.0.1'
 
 $packageRoot = Split-Path -Path $PSScriptRoot -Parent
 Import-Module (Join-Path -Path $packageRoot -ChildPath 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force -ErrorAction Stop
@@ -115,7 +115,19 @@ function Invoke-WorkerPrerequisitesEndpoint {
         $transportDetail = ('{0} completed={1}; exit code {2}' -f $remoteMode,$run.Completed,$run.ExitCode)
         $done = Read-SemtRemoteAttemptResult -RemoteDataShare ([string]$payload.RemoteDataShare) -CorrelationId $prerequisitesCorrelation
     }
-    if (-not $done.Completed) { return [pscustomobject]@{ State = 'Unconfirmed'; Detail = ('Prerequisites endpoint result not found ({0}). {1}' -f $transportDetail,$done.Detail) } }
+    if (-not $done.Completed) {
+        $cleanupDetail = 'Task cleanup not applicable (PsExec): no scheduled task was registered.'
+        if ($remoteMode -eq 'PsExec') {
+            Write-SemtLogLine -Path $logPath -Level WARN -Message ('Automatic prerequisites unconfirmed. {0}' -f $cleanupDetail)
+        }
+        else {
+            # A task that never started is removed so that it cannot start later and hold the target.
+            $cleanup = Remove-SemtUnstartedSystemTask -Mode $remoteMode -ConnectionTarget $target -CorrelationId $prerequisitesCorrelation -RemoteDataShare ([string]$payload.RemoteDataShare) -RemoteSharePath ([string]$payload.RemoteSharePath) -ExpectedSha256 $sha
+            $cleanupDetail = ('Task cleanup {0}: {1}' -f $cleanup.Outcome,$cleanup.Detail)
+            Write-SemtLogLine -Path $logPath -Level $(if ($cleanup.Outcome -in @('Deleted','Absent')) { 'INFO' } else { 'WARN' }) -Message ('Automatic prerequisites unconfirmed. {0}' -f $cleanupDetail)
+        }
+        return [pscustomobject]@{ State = 'Unconfirmed'; Detail = ('Prerequisites endpoint result not found ({0}). {1} {2}' -f $transportDetail,$done.Detail,$cleanupDetail) }
+    }
     $status = [string](Get-SemtPropertyValue -InputObject $done.Result -Name 'Status' -Default '')
     $detail = [string](Get-SemtPropertyValue -InputObject $done.Result -Name 'Detail' -Default '')
     # SKIPPED_* (virtual machine) and TARGET_* (computer busy) are refusals, not failures.
@@ -242,9 +254,14 @@ try {
             }
             [void](Update-SemtWorkerLease -LeasePath $leasePath)
         }
+        # An unconfirmed Prerequisites run may still start later on the target and hold its operation
+        # lock: the Campaign endpoint started now would then stop at TARGET_OPERATION_ACTIVE after a long
+        # wait. Its task was deleted only if it never started (see Remove-SemtUnstartedSystemTask);
+        # in every case this attempt stops here and the next cycle or Run tries again.
+        $prerequisitesUnconfirmed = ([string]$result['PrerequisitesAutoState'] -eq 'Unconfirmed')
         $copied = $null
         $copyError = ''
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
+        for ($attempt = 1; $attempt -le 3 -and -not $prerequisitesUnconfirmed; $attempt++) {
             $result.RemotePayloadCopyAttempts = [string]$attempt
             if ($attempt -gt 1) {
                 Start-Sleep -Seconds ([math]::Min(30, 10 * ($attempt - 1)))
@@ -263,7 +280,11 @@ try {
                 Write-SemtLogLine -Path $logPath -Level WARN -Message ("Payload copy attempt {0}/3 failed: {1}" -f $attempt,$copyError)
             }
         }
-        if ($null -eq $copied) {
+        if ($prerequisitesUnconfirmed) {
+            Set-WorkerStatus -Status 'REMOTE_PREREQUISITES_UNCONFIRMED' -Detail ('The automatic Prerequisites run is unconfirmed and may still start on the target; the {0} endpoint was not started. {1}' -f $campaign,[string]$result['PrerequisitesAutoDetail']) -NextAction 'VERIFY_REMOTE_STATE_BEFORE_RELAUNCH'
+            Write-SemtLogLine -Path $logPath -Level WARN -Message ('Campaign endpoint not started: the automatic Prerequisites run is unconfirmed.')
+        }
+        elseif ($null -eq $copied) {
             if (-not $access.AdminShareReachable) { Set-WorkerStatus -Status 'ADMIN_SHARE_UNREACHABLE' -Detail $copyError }
             else { Set-WorkerStatus -Status 'REMOTE_PAYLOAD_COPY_FAILED' -Detail $copyError }
         }

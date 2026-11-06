@@ -234,7 +234,16 @@ endpoint runs as usual. The report shows `PrerequisitesAutoState`:
 | `Skipped` | The Prerequisites endpoint declined (virtual machine skipped, target busy or Windows Setup active). |
 | `Failed`, `Unconfirmed`, `CopyFailed`, `IntegrityMismatch`, `Error` | The Prerequisites run did not confirm the tasks; details in `PrerequisitesAutoDetail` and the worker log. |
 
-In every case the Campaign endpoint still runs and reports any task that is still missing. A dry
+In every case but `Unconfirmed` the Campaign endpoint still runs and reports any task that is still
+missing. With `Unconfirmed` (no result before the 30-minute bound, or the task state was lost) the
+Prerequisites task may still start later on the target and hold its operation lock, so the Campaign
+endpoint would stop at `TARGET_OPERATION_ACTIVE` after a long wait: the worker does not start it and
+reports `REMOTE_PREREQUISITES_UNCONFIRMED` (NextAction `VERIFY_REMOTE_STATE_BEFORE_RELAUNCH`). With
+`ScheduledTask` or `WinRM`, the temporary Prerequisites task is deleted only when it never started (no
+attempt result, no target lease for its correlation ID, never run): it is disabled, read again, then
+deleted. A task that started is kept and left to finish. The detail and the worker log give the
+cleanup outcome (`Deleted`, `Started`, `Absent` or `Failed`). With `PsExec` no task exists and the log
+says that the cleanup does not apply. The next cycle or Run tries again. A dry
 run checks nothing. This does not depend on `Prerequisites.Enabled`, which only controls the
 standalone Campaign; set `AutoPrerequisites` to false to keep the previous behaviour.
 
