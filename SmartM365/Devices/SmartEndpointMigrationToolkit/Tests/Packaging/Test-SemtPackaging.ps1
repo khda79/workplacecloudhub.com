@@ -161,7 +161,7 @@ try {
     Test-Step 'extracted package: Prerequisites engine -ValidateOnly succeeds once enabled (endpoint verified by the manifest)' { $script:ChildExitCode -eq 0 -and ($validatePrereq -join "`n") -match 'ValidateOnly: options, rules and component integrity are valid' -and ($validatePrereq -join "`n") -match 'SmartM365-Invoke-EndpointMigration-Prerequisites\.ps1' }
     Test-Step 'Single PC Run is created under Runs\<Campaign>\_SinglePC of the extracted package' { @(Get-ChildItem -LiteralPath (Join-Path $pkg 'Runs\HybridJoin\_SinglePC') -Directory -ErrorAction SilentlyContinue).Count -ge 1 }
     $gui = Invoke-Child -Arguments @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $pkg 'Scripts\SmartM365-EndpointMigration-GUI.ps1'),'-ValidateOnly')
-    Test-Step 'extracted package: GUI -ValidateOnly succeeds' { $script:ChildExitCode -eq 0 -and @($gui | Where-Object { $_ -match '^ValidateOnly: GUI 1\.0\.0 loaded' }).Count -eq 2 }
+    Test-Step 'extracted package: GUI -ValidateOnly succeeds' { $script:ChildExitCode -eq 0 -and @($gui | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.0 loaded' }).Count -eq 2 }
 
     $workerPath = Join-Path $pkg 'Scripts\SmartM365-EndpointMigration-PsExecWorker.ps1'
     Add-Content -LiteralPath $workerPath -Value '# tampered' -Encoding ASCII
