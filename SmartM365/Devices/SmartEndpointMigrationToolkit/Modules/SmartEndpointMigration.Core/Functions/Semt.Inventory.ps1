@@ -173,8 +173,8 @@ function Get-SemtInventoryMap {
         if ($row.PSObject.Properties.Name -contains $presenceColumn -and -not (Test-SemtBooleanLikeTrue -Value $row.$presenceColumn)) { continue }
         if (-not $map.ContainsKey($key)) { $map[$key] = $row; continue }
         if ($Kind -eq 'Intune') {
-            $currentSync = ConvertTo-SemtUtcDateTime -Value (Get-SemtPropertyValue -InputObject $map[$key] -Name 'LastSyncDateTime' -Default '')
-            $candidateSync = ConvertTo-SemtUtcDateTime -Value (Get-SemtPropertyValue -InputObject $row -Name 'LastSyncDateTime' -Default '')
+            $currentSync = ConvertFrom-SemtInventoryDateText -Value (Get-SemtPropertyValue -InputObject $map[$key] -Name 'LastSyncDateTime' -Default '')
+            $candidateSync = ConvertFrom-SemtInventoryDateText -Value (Get-SemtPropertyValue -InputObject $row -Name 'LastSyncDateTime' -Default '')
             if ($null -ne $candidateSync -and ($null -eq $currentSync -or $candidateSync -gt $currentSync)) { $map[$key] = $row }
         }
     }

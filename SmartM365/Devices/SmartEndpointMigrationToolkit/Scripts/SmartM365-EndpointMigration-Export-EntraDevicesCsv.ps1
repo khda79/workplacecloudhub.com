@@ -36,7 +36,7 @@ Do not install Microsoft.Graph.Authentication automatically if it is missing.
 Regenerates the shared cache even when it is less than 2 hours old.
 
 .VERSION
-1.0.0
+1.1.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -57,7 +57,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.0.0"
+$ScriptVersion = "1.1.0"
 $EntraInventoryFreshnessHours = 24
 
 function Write-Host {
@@ -172,13 +172,19 @@ function Get-GraphProperty {
     )
 
     if ($null -eq $InputObject) { return $null }
+    $value = $null
     if ($InputObject -is [System.Collections.IDictionary]) {
-        if ($InputObject.Contains($Name)) { return $InputObject[$Name] }
-        return $null
+        if ($InputObject.Contains($Name)) { $value = $InputObject[$Name] }
     }
-    $property = $InputObject.PSObject.Properties[$Name]
-    if ($property) { return $property.Value }
-    return $null
+    else {
+        $property = $InputObject.PSObject.Properties[$Name]
+        if ($property) { $value = $property.Value }
+    }
+    # Dates as ISO 8601 UTC: Export-Csv or a [string] cast would write them in a culture format
+    # (dd/MM/yyyy or MM/dd/yyyy) that readers cannot tell apart.
+    if ($value -is [datetime]) { return ([datetime]$value).ToUniversalTime().ToString('o', [System.Globalization.CultureInfo]::InvariantCulture) }
+    if ($value -is [datetimeoffset]) { return ([datetimeoffset]$value).UtcDateTime.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture) }
+    return $value
 }
 
 function ConvertTo-ComputerName {

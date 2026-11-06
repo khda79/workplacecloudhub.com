@@ -51,7 +51,7 @@ Regenerates the shared cache even when a recent delegated full inventory already
 .\SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1 -TenantId "contoso.onmicrosoft.com" -OutputPath .\DevicesIntune.csv
 
 .VERSION
-1.0.0
+1.1.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -74,7 +74,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$ScriptVersion = "1.0.0"
+$ScriptVersion = "1.1.0"
 $IntuneInventoryFreshnessHours = 24
 
 function Write-Host {
@@ -245,19 +245,20 @@ function Get-GraphProperty {
         return $null
     }
 
+    $value = $null
     if ($InputObject -is [System.Collections.IDictionary]) {
-        if ($InputObject.Contains($Name)) {
-            return $InputObject[$Name]
-        }
-        return $null
+        if ($InputObject.Contains($Name)) { $value = $InputObject[$Name] }
+    }
+    else {
+        $property = $InputObject.PSObject.Properties[$Name]
+        if ($property) { $value = $property.Value }
     }
 
-    $property = $InputObject.PSObject.Properties[$Name]
-    if ($property) {
-        return $property.Value
-    }
-
-    return $null
+    # Dates as ISO 8601 UTC: Export-Csv would write them in the Windows culture (fr-FR: dd/MM/yyyy),
+    # which another culture, or an invariant reader, takes for MM/dd/yyyy.
+    if ($value -is [datetime]) { return ([datetime]$value).ToUniversalTime().ToString('o', [System.Globalization.CultureInfo]::InvariantCulture) }
+    if ($value -is [datetimeoffset]) { return ([datetimeoffset]$value).UtcDateTime.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture) }
+    return $value
 }
 
 function Get-DeviceIdLookupMap {

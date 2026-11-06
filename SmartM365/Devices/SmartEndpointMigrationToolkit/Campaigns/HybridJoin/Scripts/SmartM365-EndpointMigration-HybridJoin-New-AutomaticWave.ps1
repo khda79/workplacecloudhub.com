@@ -43,7 +43,7 @@ the inventory files have not changed since, and it is less than 24 hours old. Ot
 is computed again.
 
 .VERSION
-1.1.0
+1.2.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -72,7 +72,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AutomaticWaveVersion = '1.1.0'
+$script:AutomaticWaveVersion = '1.2.0'
 $script:IntuneConfirmedMaxSyncAgeDays = 30
 $script:AutomaticWaveCampaign = 'HybridJoin'
 $script:AutomaticWaveProgressCallback = $ProgressCallback
@@ -368,6 +368,10 @@ function Get-AdAutomaticWaveRecord {
     $colObjectGuid = Resolve-InventoryColumn -Rows $rows -Names @('ObjectGUID')
     $classificationCache = @{}
     $invariant = [System.Globalization.CultureInfo]::InvariantCulture
+    # Inventory dates: ISO 8601 (yyyy-MM-dd...) is read invariantly; any other text was written by
+    # Export-Csv in the Windows culture of the exporting PC (fr-FR: dd/MM/yyyy), so that culture is
+    # tried before the invariant MM/dd/yyyy.
+    $culture = [System.Globalization.CultureInfo]::CurrentCulture
     $dateStyles = [System.Globalization.DateTimeStyles]::AllowWhiteSpaces -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
 
     foreach ($row in $rows) {
@@ -387,10 +391,11 @@ function Get-AdAutomaticWaveRecord {
         if ($colEnabled) { $text = [string]$row.$colEnabled; if (-not [string]::IsNullOrWhiteSpace($text) -and $text.Trim() -match '^(?i:false|0|no|disabled)$') { $enabled = $false } }
         $lastSeen = [datetime]::MinValue
         if ($colLastSeen) {
-            $text = [string]$row.$colLastSeen
+            $text = ([string]$row.$colLastSeen).Trim()
             if (-not [string]::IsNullOrWhiteSpace($text)) {
                 $parsed = [datetime]::MinValue
-                if ([datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed) -or [datetime]::TryParse($text, [ref]$parsed)) { $lastSeen = $parsed.ToUniversalTime() }
+                $isoDate = $text.Length -ge 10 -and $text[4] -eq '-' -and $text[7] -eq '-'
+                if (($isoDate -and [datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed)) -or (-not $isoDate -and ([datetime]::TryParse($text, $culture, $dateStyles, [ref]$parsed) -or [datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed)))) { $lastSeen = $parsed.ToUniversalTime() }
             }
         }
         if (-not $classificationCache.ContainsKey($operatingSystem)) { $classificationCache[$operatingSystem] = Get-WindowsClientClassification -OperatingSystem $operatingSystem }
@@ -423,6 +428,10 @@ function Get-IntuneAutomaticWaveRecord {
     $colAadDeviceId = Resolve-InventoryColumn -Rows $rows -Names @('AzureADDeviceId')
     $colIntuneTenant = Resolve-InventoryColumn -Rows $rows -Names @('InventoryTenantId')
     $invariant = [System.Globalization.CultureInfo]::InvariantCulture
+    # Inventory dates: ISO 8601 (yyyy-MM-dd...) is read invariantly; any other text was written by
+    # Export-Csv in the Windows culture of the exporting PC (fr-FR: dd/MM/yyyy), so that culture is
+    # tried before the invariant MM/dd/yyyy.
+    $culture = [System.Globalization.CultureInfo]::CurrentCulture
     $dateStyles = [System.Globalization.DateTimeStyles]::AllowWhiteSpaces -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
 
     foreach ($row in $rows) {
@@ -435,10 +444,11 @@ function Get-IntuneAutomaticWaveRecord {
         if ($colPresent) { $text = [string]$row.$colPresent; if (-not [string]::IsNullOrWhiteSpace($text) -and $text.Trim() -match '^(?i:false|0|no|disabled)$') { $present = $false } }
         $lastSync = [datetime]::MinValue
         if ($colLastSync) {
-            $text = [string]$row.$colLastSync
+            $text = ([string]$row.$colLastSync).Trim()
             if (-not [string]::IsNullOrWhiteSpace($text)) {
                 $parsed = [datetime]::MinValue
-                if ([datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed) -or [datetime]::TryParse($text, [ref]$parsed)) { $lastSync = $parsed.ToUniversalTime() }
+                $isoDate = $text.Length -ge 10 -and $text[4] -eq '-' -and $text[7] -eq '-'
+                if (($isoDate -and [datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed)) -or (-not $isoDate -and ([datetime]::TryParse($text, $culture, $dateStyles, [ref]$parsed) -or [datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed)))) { $lastSync = $parsed.ToUniversalTime() }
             }
         }
         [pscustomobject]@{
@@ -917,10 +927,10 @@ if (-not $NoEvidence) {
     if ($entraAvailable) { Copy-Item -LiteralPath $EntraInventoryCsv -Destination (Join-Path $evidencePath 'DevicesEntra.csv') -Force }
     Export-AutomaticWaveCsv -Path (Join-Path $evidencePath 'AutomaticWaveSelection.csv') -Columns @(
         'ComputerKey','ComputerName','SelectionReason','ADOperatingSystem','ADOSVersion','ADEnabled','ADDomain',
-        'ADLastLogonTimestampUtc','EntraInventoryAvailable','EntraRegisteredState','EntraTrustType','EntraDeviceId','IntuneDeviceIdCheck'
+        'ADLastLogonTimestampUtc','EntraInventoryAvailable','EntraRegisteredState','EntraTrustType','EntraDeviceId','ADObjectGuid','IntuneDeviceIdCheck'
     ) -Rows $selected.ToArray()
     Export-AutomaticWaveCsv -Path (Join-Path $evidencePath 'AutomaticWaveExclusions.csv') -Columns @(
-        'ComputerKey','ComputerName','ExclusionReason','ADFQDNs','ADOperatingSystem','ADEnabled','IntuneMatches','EntraServerAdMatches'
+        'ComputerKey','ComputerName','ExclusionReason','ADFQDNs','ADOperatingSystem','ADEnabled','IntuneMatches','EntraServerAdMatches','ADObjectGuid','IntuneDeviceIdCheck'
     ) -Rows $excluded.ToArray()
     Export-AutomaticWaveCsv -Path (Join-Path $evidencePath 'AutomaticWaveFilterExclusions.csv') -Columns @(
         'ComputerKey','ComputerName','FilterType','FilterValue','FilterReason','ADLastLogonTimestampUtc'

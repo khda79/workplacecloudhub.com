@@ -141,6 +141,33 @@ function ConvertTo-SemtUtcDateTime {
     return $null
 }
 
+function ConvertFrom-SemtInventoryDateText {
+    <#
+    Date of an inventory CSV cell. ISO 8601 text (yyyy-MM-dd...) is read invariantly. Any other text
+    was written by Export-Csv in the Windows culture of the exporting PC (fr-FR: dd/MM/yyyy), so that
+    culture is tried before the invariant MM/dd/yyyy. Text without a zone is taken as UTC.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [datetime]) { return ([datetime]$Value).ToUniversalTime() }
+    $text = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+    $styles = [Globalization.DateTimeStyles]::AllowWhiteSpaces -bor [Globalization.DateTimeStyles]::AssumeUniversal
+    $invariant = [Globalization.CultureInfo]::InvariantCulture
+    $parsed = [datetime]::MinValue
+    $isoDate = $text.Length -ge 10 -and $text[4] -eq '-' -and $text[7] -eq '-'
+    if ($isoDate) {
+        if ([datetime]::TryParse($text, $invariant, $styles, [ref]$parsed)) { return $parsed.ToUniversalTime() }
+        return $null
+    }
+    if ([datetime]::TryParse($text, [Globalization.CultureInfo]::CurrentCulture, $styles, [ref]$parsed) -or [datetime]::TryParse($text, $invariant, $styles, [ref]$parsed)) {
+        return $parsed.ToUniversalTime()
+    }
+    return $null
+}
+
 function Get-SemtLongPath {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Path)

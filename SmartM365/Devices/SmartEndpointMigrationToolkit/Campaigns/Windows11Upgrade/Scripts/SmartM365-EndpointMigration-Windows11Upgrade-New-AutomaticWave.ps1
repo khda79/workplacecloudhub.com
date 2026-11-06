@@ -42,7 +42,7 @@ the inventory files have not changed since, and it is less than 24 hours old. Ot
 is computed again.
 
 .VERSION
-1.0.0
+1.1.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -75,7 +75,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AutomaticWaveVersion = '1.0.0'
+$script:AutomaticWaveVersion = '1.1.0'
 $script:AutomaticWaveCampaign = 'Windows11Upgrade'
 $script:AutomaticWaveProgressCallback = $ProgressCallback
 
@@ -385,6 +385,10 @@ function Get-AdAutomaticWaveRecord {
     $classificationCache = @{}
     $staleCutoffUtc = [datetime]::UtcNow.AddDays(-90)
     $invariant = [System.Globalization.CultureInfo]::InvariantCulture
+    # Inventory dates: ISO 8601 (yyyy-MM-dd...) is read invariantly; any other text was written by
+    # Export-Csv in the Windows culture of the exporting PC (fr-FR: dd/MM/yyyy), so that culture is
+    # tried before the invariant MM/dd/yyyy.
+    $culture = [System.Globalization.CultureInfo]::CurrentCulture
     $dateStyles = [System.Globalization.DateTimeStyles]::AllowWhiteSpaces -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
 
     foreach ($row in $rows) {
@@ -407,10 +411,11 @@ function Get-AdAutomaticWaveRecord {
         $classification = $classificationCache[$classificationKey]
         $lastSeen = [datetime]::MinValue
         if ($colLastSeen) {
-            $text = [string]$row.$colLastSeen
+            $text = ([string]$row.$colLastSeen).Trim()
             if (-not [string]::IsNullOrWhiteSpace($text)) {
                 $parsed = [datetime]::MinValue
-                if ([datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed) -or [datetime]::TryParse($text, [ref]$parsed)) { $lastSeen = $parsed.ToUniversalTime() }
+                $isoDate = $text.Length -ge 10 -and $text[4] -eq '-' -and $text[7] -eq '-'
+                if (($isoDate -and [datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed)) -or (-not $isoDate -and ([datetime]::TryParse($text, $culture, $dateStyles, [ref]$parsed) -or [datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed)))) { $lastSeen = $parsed.ToUniversalTime() }
             }
         }
 
@@ -447,6 +452,10 @@ function Get-IntuneAutomaticWaveRecord {
     $classificationCache = @{}
     $staleCutoffUtc = [datetime]::UtcNow.AddDays(-30)
     $invariant = [System.Globalization.CultureInfo]::InvariantCulture
+    # Inventory dates: ISO 8601 (yyyy-MM-dd...) is read invariantly; any other text was written by
+    # Export-Csv in the Windows culture of the exporting PC (fr-FR: dd/MM/yyyy), so that culture is
+    # tried before the invariant MM/dd/yyyy.
+    $culture = [System.Globalization.CultureInfo]::CurrentCulture
     $dateStyles = [System.Globalization.DateTimeStyles]::AllowWhiteSpaces -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
 
     foreach ($row in $rows) {
@@ -469,10 +478,11 @@ function Get-IntuneAutomaticWaveRecord {
         $classification = $classificationCache[$classificationKey]
         $lastSync = [datetime]::MinValue
         if ($colLastSync) {
-            $text = [string]$row.$colLastSync
+            $text = ([string]$row.$colLastSync).Trim()
             if (-not [string]::IsNullOrWhiteSpace($text)) {
                 $parsed = [datetime]::MinValue
-                if ([datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed) -or [datetime]::TryParse($text, [ref]$parsed)) { $lastSync = $parsed.ToUniversalTime() }
+                $isoDate = $text.Length -ge 10 -and $text[4] -eq '-' -and $text[7] -eq '-'
+                if (($isoDate -and [datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed)) -or (-not $isoDate -and ([datetime]::TryParse($text, $culture, $dateStyles, [ref]$parsed) -or [datetime]::TryParse($text, $invariant, $dateStyles, [ref]$parsed)))) { $lastSync = $parsed.ToUniversalTime() }
             }
         }
 

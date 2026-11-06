@@ -55,6 +55,27 @@ try {
     $utcText = '2026-10-24T21:00:28.1234567Z'
     $offsetText = '2026-10-24T23:00:28.1234567+02:00'
     $expected = [datetime]::new(2026, 10, 24, 21, 0, 28, [System.DateTimeKind]::Utc).AddTicks(1234567)
+    # Inventory CSV dates: ISO is invariant; other text is the culture of the exporting PC (Export-Csv).
+    $inventoryChecks = & {
+        $saved = [Threading.Thread]::CurrentThread.CurrentCulture
+        try {
+            [Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo('fr-FR')
+            # Each check in parentheses: the comma binds tighter than -eq.
+            @(
+                ((ConvertFrom-SemtInventoryDateText -Value '04/11/2026 11:19:11') -eq [datetime]::new(2026, 11, 4, 11, 19, 11, [DateTimeKind]::Utc)),
+                ((ConvertFrom-SemtInventoryDateText -Value '27/10/2026 09:21:40') -eq [datetime]::new(2026, 10, 27, 9, 21, 40, [DateTimeKind]::Utc)),
+                ((ConvertFrom-SemtInventoryDateText -Value '2026-04-11T11:19:11.0000000Z') -eq [datetime]::new(2026, 4, 11, 11, 19, 11, [DateTimeKind]::Utc)),
+                ((ConvertFrom-SemtInventoryDateText -Value '2026-06-08 08:53:32') -eq [datetime]::new(2026, 6, 8, 8, 53, 32, [DateTimeKind]::Utc)),
+                ($null -eq (ConvertFrom-SemtInventoryDateText -Value '')),
+                ($null -eq (ConvertFrom-SemtInventoryDateText -Value 'not a date'))
+            )
+        }
+        finally { [Threading.Thread]::CurrentThread.CurrentCulture = $saved }
+    }
+    Test-Step 'inventory date in fr-FR culture: 04/11/2026 is 4 November, not 11 April' { $inventoryChecks[0] }
+    Test-Step 'inventory date in fr-FR culture: 27/10/2026 is read' { $inventoryChecks[1] }
+    Test-Step 'inventory ISO dates are read invariantly whatever the culture' { $inventoryChecks[2] -and $inventoryChecks[3] }
+    Test-Step 'empty or non-date inventory text gives no date' { $inventoryChecks[4] -and $inventoryChecks[5] }
     $jsonPath = Join-Path $tempRoot 'dates.json.txt'
     Set-Content -LiteralPath $jsonPath -Value ('{ "Utc": "' + $utcText + '", "Offset": "' + $offsetText + '", "List": [ "' + $utcText + '", { "Nested": "' + $offsetText + '" } ], "Text": "not a date" }') -Encoding UTF8
 
