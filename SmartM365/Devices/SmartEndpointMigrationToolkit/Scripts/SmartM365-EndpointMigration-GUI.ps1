@@ -345,7 +345,16 @@ function Get-AutomaticWaveLastStage {
 function Get-AutomaticWaveResultText {
     param([Parameter(Mandatory = $true)]$Summary)
     $filtered = Get-SemtPropertyValue -InputObject $Summary -Name 'FilterExcludedDevices' -Default (Get-SemtPropertyValue -InputObject $Summary -Name 'NameFilterExcludedDevices' -Default 0)
-    return ('Selected: {0}{3}Safety exclusions: {1}{3}Filtered out: {2}' -f (Get-SemtPropertyValue -InputObject $Summary -Name 'SelectedDevices' -Default 0),(Get-SemtPropertyValue -InputObject $Summary -Name 'ExcludedDevices' -Default 0),$filtered,[Environment]::NewLine)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add(('Selected: {0}' -f (Get-SemtPropertyValue -InputObject $Summary -Name 'SelectedDevices' -Default 0)))
+    $lines.Add(('Safety exclusions: {0}' -f (Get-SemtPropertyValue -InputObject $Summary -Name 'ExcludedDevices' -Default 0)))
+    # Count per safety exclusion reason when the engine reports it: a JSON object read back from the
+    # summary file, or a dictionary in process.
+    $reasonCounts = Get-SemtPropertyValue -InputObject $Summary -Name 'ExclusionReasonCounts' -Default $null
+    if ($reasonCounts -is [System.Collections.IDictionary]) { foreach ($reason in @($reasonCounts.Keys)) { $lines.Add(('  - {0}: {1}' -f $reason,$reasonCounts[$reason])) } }
+    elseif ($null -ne $reasonCounts) { foreach ($property in @($reasonCounts.PSObject.Properties)) { $lines.Add(('  - {0}: {1}' -f $property.Name,$property.Value)) } }
+    $lines.Add(('Filtered out: {0}' -f $filtered))
+    return ($lines.ToArray() -join [Environment]::NewLine)
 }
 
 function Get-AutomaticFilterSignature {

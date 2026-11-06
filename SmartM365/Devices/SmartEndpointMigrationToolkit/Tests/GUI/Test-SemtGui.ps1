@@ -248,6 +248,9 @@ try {
     Test-Step 'Preview succeeds in the hidden process and writes its summary' { $ok.ExitCode -eq 0 -and $ok.Summary.Count -eq 1 }
     Test-Step 'engine stages reach the log for the waiting window' { (Get-AutomaticWaveLastStage -Text $ok.Log) -match '^Automatic Wave preview ready\.' -and $ok.Log -match ' STAGE Loading inventory records\.\.\.' }
     Test-Step 'end message counts read the HybridJoin and Windows 11 summaries' { (Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 3; ExcludedDevices = 2; FilterExcludedDevices = 1 })) -match 'Selected: 3' -and (Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 4; ExcludedDevices = 0; NameFilterExcludedDevices = 7 })) -match 'Filtered out: 7' }
+    $reasonSummary = '{"SelectedDevices":5,"ExcludedDevices":4,"FilterExcludedDevices":0,"ExclusionReasonCounts":{"AD_DISABLED":1,"INTUNE_ENROLLED_CONFIRMED_BY_DEVICE_ID":3}}' | ConvertFrom-Json
+    $reasonText = Get-AutomaticWaveResultText -Summary $reasonSummary
+    Test-Step 'end message lists the count per safety exclusion reason' { $reasonText -match '(?m)^  - INTUNE_ENROLLED_CONFIRMED_BY_DEVICE_ID: 3\r?$' -and $reasonText -match '(?m)^  - AD_DISABLED: 1\r?$' -and $reasonText -match '(?s)Safety exclusions: 4.*AD_DISABLED.*Filtered out: 0' }
     Remove-Item -LiteralPath $inventoryRoot -Recurse -Force
     $catalog = Import-SemtOptionCatalog -PackageRoot $packageRoot
     $values = @{ ThrottleLimit = 4; 'Windows11Upgrade.SetupSourcePath' = ''; DryRun = $true }

@@ -158,6 +158,36 @@ try {
     Assert-True ($strictSelectedNames -contains 'STRICT-W11') 'explicit Windows 11 client remains eligible'
     Assert-True (-not ($strictSelectedNames -contains 'STRICT-GENERIC-SERVER' -or $strictSelectedNames -contains 'STRICT-BLANK-SERVER')) 'version-only server-like rows are never selected'
 
+    # Intune enrollment proven by the Entra device ID (not by name) is excluded; anything weaker stays selected.
+    $tenantA = '11111111-1111-1111-1111-111111111111'; $tenantB = '22222222-2222-2222-2222-222222222222'
+    $idAdPath = Join-Path $dataRoot 'DevicesAD-IntuneId.csv'; $idIntunePath = Join-Path $dataRoot 'DevicesIntune-IntuneId.csv'; $idEntraPath = Join-Path $dataRoot 'DevicesEntra-IntuneId.csv'
+    $idCases = [ordered]@{ 'ID-CONFIRMED'='a0000000-0000-0000-0000-000000000001'; 'ID-NAMEONLY'='a0000000-0000-0000-0000-000000000002'; 'ID-STALESYNC'='a0000000-0000-0000-0000-000000000003'; 'ID-PENDING'='a0000000-0000-0000-0000-000000000004'; 'ID-OTHERTENANT'='a0000000-0000-0000-0000-000000000005'; 'ID-NOTENANT'='a0000000-0000-0000-0000-000000000006'; 'ID-AMBIGUOUS'='a0000000-0000-0000-0000-000000000007' }
+    @($idCases.Keys | ForEach-Object { [pscustomobject]@{ ComputerName=$_; Name=$_; ADInventoryPresent=$true; Enabled=$true; OperatingSystem='Windows 10 Enterprise'; OperatingSystemVersion='10.0 (19045)' } }) | Export-Csv -LiteralPath $idAdPath -NoTypeInformation -Encoding UTF8
+    @($idCases.Keys | ForEach-Object { [pscustomobject]@{ ComputerName=$_; DisplayName=$_; EntraInventoryPresent=$true; EntraRegisteredState=$(if ($_ -eq 'ID-PENDING') { 'Pending' } else { 'Registered' }); TrustType='ServerAd'; AlternativeSecurityIdCount=$(if ($_ -eq 'ID-PENDING') { 0 } else { 1 }); AccountEnabled=$true; DeviceId=$idCases[$_]; EntraObjectId=('obj-' + $_); InventoryTenantId=$tenantA } }) | Export-Csv -LiteralPath $idEntraPath -NoTypeInformation -Encoding UTF8
+    @($idCases.Keys | ForEach-Object {
+        $aadId = if ($_ -eq 'ID-NAMEONLY') { 'b0000000-0000-0000-0000-000000000099' } else { $idCases[$_] }
+        $sync = if ($_ -eq 'ID-STALESYNC') { $now.AddDays(-40) } else { $now.AddHours(-2) }
+        $tenant = switch ($_) { 'ID-OTHERTENANT' { $tenantB } 'ID-NOTENANT' { '' } default { $tenantA } }
+        [pscustomobject]@{ ComputerName=$_; DeviceName=$_; IntuneInventoryPresent=$true; IntuneManagedDeviceId=('managed-' + $_); AzureADDeviceId=$aadId; LastSyncDateTime=$sync.ToString('o'); InventoryTenantId=$tenant }
+        # A second Intune record (another name) carries the same Entra device ID: ambiguous.
+        if ($_ -eq 'ID-AMBIGUOUS') { [pscustomobject]@{ ComputerName='OTHER-NAME'; DeviceName='OTHER-NAME'; IntuneInventoryPresent=$true; IntuneManagedDeviceId='managed-other'; AzureADDeviceId=$aadId; LastSyncDateTime=$sync.ToString('o'); InventoryTenantId=$tenant } }
+    }) | Export-Csv -LiteralPath $idIntunePath -NoTypeInformation -Encoding UTF8
+    $idPreview = & $engine -AdInventoryCsv $idAdPath -IntuneInventoryCsv $idIntunePath -EntraInventoryCsv $idEntraPath -WaveName 'WAVE-AUTO-HJ-INTUNE-ID' -NoEvidence
+    $idSelected = @($idPreview.SelectedDevices | Select-Object -ExpandProperty ComputerName)
+    Assert-Equal $idPreview.Summary.IntuneConfirmedExcluded 2 'Intune enrollment proven by device ID is excluded (same tenant or no tenant column)'
+    Assert-True (-not ($idSelected -contains 'ID-CONFIRMED' -or $idSelected -contains 'ID-NOTENANT')) 'confirmed Intune devices are not selected'
+    foreach ($candidate in @('ID-NAMEONLY','ID-STALESYNC','ID-PENDING','ID-OTHERTENANT','ID-AMBIGUOUS')) { Assert-True ($idSelected -contains $candidate) ("$candidate remains a candidate for local verification") }
+    $idChecks = @{}; foreach ($row in @($idPreview.SelectedDevices)) { $idChecks[[string]$row.ComputerName] = [string]$row.IntuneDeviceIdCheck }
+    Assert-Equal $idChecks['ID-AMBIGUOUS'] 'AmbiguousIntuneDeviceId' 'a device ID shared by two Intune records is logged as ambiguous'
+    Assert-Equal $idChecks['ID-NAMEONLY'] 'NameOnly' 'a name-only match is logged'
+    Assert-Equal $idChecks['ID-STALESYNC'] 'StaleSync' 'an old Intune sync is logged'
+    Assert-Equal $idChecks['ID-PENDING'] 'EntraNotRegistered' 'a pending Entra object is logged'
+    Assert-Equal $idChecks['ID-OTHERTENANT'] 'OtherTenant' 'another tenant is logged'
+    Assert-Equal $idPreview.Summary.IntuneDeviceIdAmbiguousSelected 1 'ambiguous Intune device IDs are counted'
+    Assert-Equal ([int]$idPreview.Summary.ExclusionReasonCounts['INTUNE_ENROLLED_CONFIRMED_BY_DEVICE_ID']) 2 'count per exclusion reason includes the device-ID rule'
+    Assert-Equal ([int]$preview.Summary.ExclusionReasonCounts['AD_DISABLED']) 1 'count per exclusion reason matches the safety exclusions'
+    Assert-True ([string]$idPreview.Summary.SelectionSignature -match 'ExcludeIntuneConfirmedByDeviceId=True') 'selection signature records the device-ID rule (an older preview is not reused)'
+
     # Name and stale filters.
     $filtered = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-FILTERED' -ComputerNamePrefix 'FR-' -ComputerNameContains '-PC' -NoEvidence
     Assert-Equal $filtered.Summary.SelectedDevices 4 'prefix and contains filters are combined with AND'
