@@ -43,6 +43,8 @@ class SemtFakeFolder {
     [int]$GetTaskCalls = 0
     [bool]$Gone = $false
     [int]$DeleteFailures = 0
+    # Replies without State/LastRunTime, as seen right after a dropped RPC connection.
+    [int]$EmptyReplies = 0
     [bool]$DeleteAppliesBeforeFailure = $false
     [object] RegisterTaskDefinition([string]$name,[object]$definition,[int]$flags,[object]$user,[object]$password,[int]$logon,[object]$sddl) {
         if ($this.Collide) { throw 'task already exists' }
@@ -57,6 +59,7 @@ class SemtFakeFolder {
             $this.GetTaskFailures--
             throw [System.Runtime.InteropServices.COMException]::new(('Synthetic RPC failure. (Exception from HRESULT: 0x{0:X8})' -f $this.FailHResult), $this.FailHResult)
         }
+        if ($this.EmptyReplies -gt 0) { $this.EmptyReplies--; return [pscustomobject]@{ State = $null; LastRunTime = $null } }
         if ($this.ChangeAction) { $this.Task.Definition.Actions.Action.Arguments = 'changed' }; if ($this.ReplacementPrincipal) { $this.Task.Definition.Principal.UserId = $this.ReplacementPrincipal }; return $this.Task
     }
     [void] DeleteTask([string]$name,[int]$flags) {
@@ -185,6 +188,14 @@ foreach ($code in @(-2147023174,-2147023169,-2147023436,-2147024775,-2147417848,
     if ($scenario.Error -or -not $scenario.Output[0].Cleaned -or -not $service.Folder.Deleted) { throw ('Transient code 0x{0:X8} was not retried: {1}' -f $code,$scenario.Error) }
     $passed++
 }
+$service=[SemtFakeService]::new(); $service.Folder.EmptyReplies=2
+$scenario=Invoke-SemtRpcScenario -Service $service
+if ($scenario.Error -or -not $scenario.Output[0].Cleaned -or -not $service.Folder.Deleted -or @($scenario.Warnings | Where-Object { $_ -like 'SEMT_RPC_TRANSIENT: Step=GetTaskState; Code=0xINCOMPLETE*' }).Count -ne 2) { throw "An empty task reply was not retried: $($scenario.Error)" }
+$passed++
+$service=[SemtFakeService]::new(); $service.Folder.EmptyReplies=100000
+$scenario=Invoke-SemtRpcScenario -Service $service -Window 15
+if ($scenario.Error -notmatch '^SEMT_RPC_UNAVAILABLE: Step=GetTaskState; Code=0xINCOMPLETE' -or $service.Folder.Deleted -or -not $scenario.DirectoryKept) { throw "Endless empty task replies were not bounded by the window: $($scenario.Error)" }
+$passed++
 $service=[SemtFakeService]::new(); $service.Folder.AlwaysFail=$true
 $scenario=Invoke-SemtRpcScenario -Service $service -Window 15
 if ($scenario.Error -notmatch '^SEMT_RPC_UNAVAILABLE: Step=GetTaskState; Code=0x800706BE' -or $scenario.Error -notmatch 'WindowMinutes=15' -or $service.Folder.Deleted -or -not $scenario.DirectoryKept) { throw "Continuous RPC failure was not reported unavailable, or cleanup ran: $($scenario.Error)" }

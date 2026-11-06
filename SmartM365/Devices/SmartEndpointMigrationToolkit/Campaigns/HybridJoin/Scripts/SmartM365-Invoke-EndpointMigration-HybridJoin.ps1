@@ -47,6 +47,13 @@ Allows removal of confirmed non-Intune MDM enrollment registry keys and Enterpri
 .PARAMETER AllowRemoveStaleIntuneEnrollment
 Retained for backward compatibility. Ambiguous local Intune traces are not removed automatically; manual review is required.
 
+.PARAMETER RemoveBlockingIntuneEnrollmentStub
+Allows the backup and removal of an incomplete local Intune enrollment stub when deviceenroller.exe itself
+reports 0x8018000A (already enrolled) and no confirmed Intune enrollment exists. A stub is an Intune
+discovery entry with EnrollmentType 6, an empty ProviderID, a fooUser@ placeholder UPN and no OMA-DM
+account or EnterpriseMgmt tasks. After removal, deviceenroller.exe runs again. Without this switch the
+status is INTUNE_ENROLLMENT_STUB_BLOCKING and nothing is removed.
+
 .PARAMETER SkipVirtualMachines
 Skips detected virtual machines before DNS, domain, gpupdate, or repair actions.
 
@@ -110,6 +117,7 @@ param(
     [switch]$AllowRebootAfterDsregLeave,
     [switch]$AllowRemoveNonIntuneMdmEnrollment,
     [switch]$AllowRemoveStaleIntuneEnrollment,
+    [switch]$RemoveBlockingIntuneEnrollmentStub,
     [switch]$SkipVirtualMachines,
     [switch]$AuditOnly,
     [switch]$CollectMdmDiagnostics,
@@ -165,6 +173,7 @@ try {
             if ($AllowRebootAfterDsregLeave) { $argList += "-AllowRebootAfterDsregLeave" }
             if ($AllowRemoveNonIntuneMdmEnrollment) { $argList += "-AllowRemoveNonIntuneMdmEnrollment" }
             if ($AllowRemoveStaleIntuneEnrollment) { $argList += "-AllowRemoveStaleIntuneEnrollment" }
+            if ($RemoveBlockingIntuneEnrollmentStub) { $argList += "-RemoveBlockingIntuneEnrollmentStub" }
             if ($SkipVirtualMachines) { $argList += "-SkipVirtualMachines" }
             if ($AuditOnly) { $argList += "-AuditOnly" }
             if ($CollectMdmDiagnostics) { $argList += "-CollectMdmDiagnostics" }
@@ -1217,7 +1226,7 @@ if ($semtSetupActivity.Active) {
 try { Update-EndpointInstanceState -Force } catch { Write-RunLog ("Endpoint instance metadata write failed; mutex protection remains active. Error={0}" -f $_.Exception.Message) }
 
 Write-Host "Smart Endpoint Migration Toolkit - Hybrid Join endpoint version $ScriptVersion"
-Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. CorrelationId=$CorrelationId. DataRoot=$DataRoot. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). SkipVirtualMachines=$([bool]$SkipVirtualMachines). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). RepairUnhealthyJoinWithIntuneTrace=$([bool]$RepairUnhealthyJoinWithIntuneTrace). IntuneAbsentDeviceId=$IntuneAbsentDeviceId. IntuneTraceRepairDelayHours=$IntuneTraceRepairDelayHours. IgnoreRunGuard=$([bool]$IgnoreRunGuard). RetryAfterRebootTaskRun=$([bool]$RetryAfterRebootTaskRun)."
+Write-RunLog "Script start. Version=$ScriptVersion. RunId=$RunId. CorrelationId=$CorrelationId. DataRoot=$DataRoot. AllowDsregLeave=$([bool]$AllowDsregLeave). AllowRemoveNonIntuneMdmEnrollment=$([bool]$AllowRemoveNonIntuneMdmEnrollment). AllowRemoveStaleIntuneEnrollment=$([bool]$AllowRemoveStaleIntuneEnrollment). RemoveBlockingIntuneEnrollmentStub=$([bool]$RemoveBlockingIntuneEnrollmentStub). SkipVirtualMachines=$([bool]$SkipVirtualMachines). AuditOnly=$([bool]$AuditOnly). EntraHybridPending=$([bool]$EntraHybridPending). RepairUnhealthyJoinWithIntuneTrace=$([bool]$RepairUnhealthyJoinWithIntuneTrace). IntuneAbsentDeviceId=$IntuneAbsentDeviceId. IntuneTraceRepairDelayHours=$IntuneTraceRepairDelayHours. IgnoreRunGuard=$([bool]$IgnoreRunGuard). RetryAfterRebootTaskRun=$([bool]$RetryAfterRebootTaskRun)."
 Invoke-OldEvidenceCleanup -Paths @($LogsDir, $OutputDir, $TranscriptDir) -RetentionDays $CleanupRetentionDays
 
 function Get-ComputerSystemSummary {
@@ -1450,6 +1459,26 @@ function Get-MdmEnrollmentClassification {
     }
 }
 
+# An incomplete Intune enrollment left by an interrupted auto-enrollment: Intune discovery URL,
+# EnrollmentType 6, empty ProviderID, placeholder fooUser@ UPN, and no OMA-DM account or
+# EnterpriseMgmt tasks. deviceenroller.exe then answers 0x8018000A (already enrolled).
+function Test-IntuneEnrollmentStubEntry {
+    param(
+        [AllowNull()][string]$ProviderID,
+        [AllowNull()][string]$DiscoveryServiceFullURL,
+        [AllowNull()][string]$EnrollmentType,
+        [AllowNull()][string]$UPN,
+        [AllowNull()][string]$Evidence
+    )
+    if (-not [string]::IsNullOrWhiteSpace($ProviderID)) { return $false }
+    if ([string]$DiscoveryServiceFullURL -notmatch '(?i)^https://enrollment\.manage\.microsoft\.com/') { return $false }
+    if ([string]$EnrollmentType -ne '6') { return $false }
+    if ([string]$UPN -notmatch '(?i)^fooUser@[^@\s]+$') { return $false }
+    $evidenceItems = @([string]$Evidence -split ',' | ForEach-Object { $_.Trim() })
+    if ($evidenceItems -contains 'OMADMAccount' -or $evidenceItems -contains 'EnterpriseMgmtTasks') { return $false }
+    return $true
+}
+
 function Get-MdmEnrollmentState {
     try {
         $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
@@ -1466,6 +1495,7 @@ function Get-MdmEnrollmentState {
                 IntuneEnrollmentIds = ""
                 NonIntuneEnrollmentIds = ""
                 UnconfirmedIntuneEnrollmentIds = ""
+                UnconfirmedIntuneStubIds = ""
                 ProviderIds = ""
                 EnrollmentDetails = ""
                 IgnoredEnrollmentDetails = ""
@@ -1561,6 +1591,7 @@ function Get-MdmEnrollmentState {
             IntuneEnrollmentIds = (($intuneEntries | ForEach-Object { $_.EnrollmentId }) -join ";")
             NonIntuneEnrollmentIds = (($nonIntuneEntries | ForEach-Object { $_.EnrollmentId }) -join ";")
             UnconfirmedIntuneEnrollmentIds = (($unconfirmedIntuneEntries | ForEach-Object { $_.EnrollmentId }) -join ";")
+            UnconfirmedIntuneStubIds = (($unconfirmedIntuneEntries | Where-Object { Test-IntuneEnrollmentStubEntry -ProviderID $_.ProviderID -DiscoveryServiceFullURL $_.DiscoveryServiceFullURL -EnrollmentType $_.EnrollmentType -UPN $_.UPN -Evidence $_.Evidence } | ForEach-Object { $_.EnrollmentId }) -join ";")
             ProviderIds = ($providerIds -join ";")
             EnrollmentDetails = ($details -join " | ")
             IgnoredEnrollmentDetails = ($ignoredDetails -join " | ")
@@ -3168,6 +3199,8 @@ function Get-NextActionForStatus {
         "INTUNE_USER_LICENSE_REJECTED" { return "ASSIGN_USER_INTUNE_LICENSE" }
         "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY" { return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" }
         "INTUNE_TRACE_REMOVE_FAILED" { return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" }
+        "INTUNE_ENROLLMENT_STUB_BLOCKING" { return "ENABLE_INTUNE_STUB_REMOVAL_OR_REVIEW" }
+        "INTUNE_ENROLLMENT_STUB_REMOVE_FAILED" { return "REVIEW_INTUNE_ENROLLMENT_STUB" }
         "INTUNE_ENROLLMENT_TOOL_NOT_FOUND" { return "CHECK_DEVICEENROLLER" }
         "INTUNE_ENROLLMENT_RETRY_EXHAUSTED" { return "RECHECK_OR_INVESTIGATE_INTUNE_ENROLLMENT" }
         "INTUNE_AUTOENROLL_POLICY_NOT_CONFIGURED" { return "CHECK_GPO_AUTOENROLL" }
@@ -3538,6 +3571,7 @@ function New-RetryAfterRebootArgumentList {
         "AllowRebootAfterDsregLeave",
         "AllowRemoveNonIntuneMdmEnrollment",
         "AllowRemoveStaleIntuneEnrollment",
+        "RemoveBlockingIntuneEnrollmentStub",
         "SkipVirtualMachines",
         "AuditOnly",
         "EntraHybridPending",
@@ -3750,6 +3784,8 @@ $managementBridgeProviderIds = ""
 $managementBridgeDetails = ""
 $staleIntuneEnrollmentDetected = $false
 $staleIntuneEnrollmentIds = ""
+$intuneStubStatus = ""
+$intuneStubDetail = ""
 $nonIntuneMdmRemovalAttempted = $false
 $nonIntuneMdmRemovalSuccess = ""
 $nonIntuneMdmRemovalBackupDir = ""
@@ -4850,7 +4886,11 @@ try {
     # If Hybrid Join is healthy but Intune enrollment is missing, try to restore MDM enrollment.
     if ($status -eq "SUCCESS" -and $intuneEnrolled -eq $false) {
         $staleCleanupCompleted = $false
-        if ($staleIntuneEnrollmentDetected) {
+        $stubRemovalCanProceed = $RemoveBlockingIntuneEnrollmentStub -and -not [string]::IsNullOrWhiteSpace([string]$mdmEnrollmentState.UnconfirmedIntuneStubIds)
+        if ($staleIntuneEnrollmentDetected -and $stubRemovalCanProceed) {
+            Write-RunLog ("Unconfirmed Intune trace matches the incomplete enrollment stub signature; deviceenroller will confirm the block before any removal. StubIds={0}" -f $mdmEnrollmentState.UnconfirmedIntuneStubIds)
+        }
+        elseif ($staleIntuneEnrollmentDetected) {
             # Discovery URL plus 0x8018000A does not prove a stale registration. Never
             # delete these traces based solely on this ambiguous evidence, even when the
             # historical cleanup switch is enabled.
@@ -5037,6 +5077,48 @@ try {
 
                 Write-RunLog ("Intune auto-enrollment trigger result: Mode={0}; TaskName={1}; Success={2}; ToolFound={3}; ExitCode={4}; Detail={5}" -f $intuneAutoEnrollMode,$intuneAutoEnrollTaskName,$enrollStart.Success,$enrollStart.ToolFound,$enrollStart.ExitCode,$enrollStart.Detail)
 
+                # deviceenroller 0x8018000A (already enrolled) with only an incomplete local stub: the stub
+                # blocks every new enrollment, so waiting is useless. Remove it only on opt-in.
+                if ($enrollStart.ToolFound -and $intuneAutoEnrollMode -in @("SystemDeviceCredential","SystemUserCredential") -and [string]$enrollStart.ExitCode -eq "-2145910774") {
+                    $stubState = Get-MdmEnrollmentState
+                    $stubIds = [string]$stubState.UnconfirmedIntuneStubIds
+                    if (-not $stubState.IntuneEnrollmentDetected -and -not [string]::IsNullOrWhiteSpace($stubIds)) {
+                        Write-RunLog ("deviceenroller reported 0x8018000A and the only Intune traces are incomplete enrollment stubs. StubIds={0}; RemoveBlockingIntuneEnrollmentStub={1}" -f $stubIds,[bool]$RemoveBlockingIntuneEnrollmentStub)
+                        if (-not $RemoveBlockingIntuneEnrollmentStub -or $AuditOnly) {
+                            $intuneStubStatus = "INTUNE_ENROLLMENT_STUB_BLOCKING"
+                            $intuneStubDetail = ("deviceenroller.exe returned 0x8018000A (already enrolled), but no confirmed Intune enrollment exists: an incomplete local enrollment stub blocks it (EnrollmentType 6, empty ProviderID, fooUser@ UPN). StubIds={0}. Enable HybridJoin.RemoveBlockingIntuneEnrollmentStub to back it up and remove it, or remove it manually." -f $stubIds)
+                        }
+                        else {
+                            $stubRemoval = Remove-NonIntuneMdmEnrollment `
+                                -EnrollmentIds $stubIds `
+                                -OutputDirPath $OutputDir `
+                                -ComputerNameValue $ComputerName `
+                                -RunIdValue $RunId `
+                                -RemovalLabel "Blocking Intune enrollment stub"
+                            Write-RunLog ("Intune enrollment stub removal result: Success={0}; BackupDir={1}; RemovedItems={2}; Detail={3}" -f $stubRemoval.Success,$stubRemoval.BackupDir,$stubRemoval.RemovedItems,$stubRemoval.Detail)
+                            $afterStubState = Get-MdmEnrollmentState
+                            $remainingStubs = @($stubIds -split ';' | Where-Object { $_ -and (([string]$afterStubState.UnconfirmedIntuneStubIds) -split ';') -contains $_ })
+                            if (-not $stubRemoval.Success -or $remainingStubs.Count -gt 0) {
+                                $intuneStubStatus = "INTUNE_ENROLLMENT_STUB_REMOVE_FAILED"
+                                $intuneStubDetail = ("Removal of the blocking Intune enrollment stub did not complete. StubIds={0}; Remaining={1}; BackupDir={2}; Detail={3}" -f $stubIds,($remainingStubs -join ';'),$stubRemoval.BackupDir,$stubRemoval.Detail)
+                            }
+                            else {
+                                if ($StaleCleanupDelaySeconds -gt 0) {
+                                    Write-RunLog ("Waiting {0} second(s) after stub removal before deviceenroller runs again." -f $StaleCleanupDelaySeconds)
+                                    Start-Sleep -Seconds $StaleCleanupDelaySeconds
+                                }
+                                $intuneAutoEnrollTriggeredAt = Get-Date
+                                $enrollStart = Start-IntuneAutoEnrollment -Mode $intuneAutoEnrollMode
+                                $intuneAutoEnrollTaskName = $enrollStart.TaskName
+                                $intuneAutoEnrollExitCode = $enrollStart.ExitCode
+                                $intuneAutoEnrollDetail = ("Blocking enrollment stub removed (backup {0}); {1}" -f $stubRemoval.BackupDir,$enrollStart.Detail)
+                                $intuneAutoEnrollOutputFile = $enrollStart.OutputFile
+                                Write-RunLog ("Intune auto-enrollment trigger result after stub removal: Mode={0}; Success={1}; ToolFound={2}; ExitCode={3}; Detail={4}" -f $intuneAutoEnrollMode,$enrollStart.Success,$enrollStart.ToolFound,$enrollStart.ExitCode,$enrollStart.Detail)
+                            }
+                        }
+                    }
+                }
+
                 if (-not $enrollStart.ToolFound) {
                     if ($intuneAutoEnrollMode -in @("SystemDeviceCredential","SystemUserCredential")) { $status = "INTUNE_ENROLLMENT_TOOL_NOT_FOUND" }
                     elseif (-not $interactiveUserDetected) { $status = "INTUNE_USER_AUTOENROLL_NO_INTERACTIVE_USER" }
@@ -5095,6 +5177,12 @@ try {
                             }
                         }
                     }
+                }
+                elseif (-not [string]::IsNullOrWhiteSpace($intuneStubStatus)) {
+                    $status = $intuneStubStatus
+                    $dsregStatusErrorMessage = $intuneStubDetail
+                    $ExitCode = 3
+                    Write-RunLog $dsregStatusErrorMessage
                 }
                 else {
                     # A failed deviceenroller call still waits: the native EnterpriseMgmt task retries
@@ -5210,7 +5298,9 @@ try {
 
     # Enrollment events describe observations in a time window, not necessarily the
     # current attempt. Preserve timestamp and record id and do not infer a causal user.
-    foreach ($file in @(($intuneEnrollmentDiagnosticsInitialFiles + ';' + $intuneEnrollmentDiagnosticsFiles) -split ';' | Where-Object { $_ -like '*DeviceManagement_Enrollment.csv' })) {
+    # The Enrollment channel is missing on some Windows builds: the Admin channel is read as well.
+    foreach ($file in @(($intuneEnrollmentDiagnosticsInitialFiles + ';' + $intuneEnrollmentDiagnosticsFiles) -split ';' | Where-Object { $_ -like '*DeviceManagement_Enrollment.csv' -or $_ -like '*DeviceManagement_Admin.csv' })) {
+        if (-not [string]::IsNullOrWhiteSpace($mdmEnrollmentRecentEvidence)) { break }
         try {
             $observations = @(Import-Csv -LiteralPath $file | Where-Object { $_.Id -in @('52','76') -and $_.Message -match '(?i)UserLicense|0x80180018|0x8018000A' } | Select-Object -First 1)
             foreach ($event in $observations) {

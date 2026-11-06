@@ -110,6 +110,7 @@ Generated from catalog SHA256 `6E1175524CD681B0121C338CCFA44AD4B75CD5A799B07A4A6
 | `HybridJoin.CollectMdmDiagnostics` | Boolean | False |  | `SEMT_HYBRIDJOIN_COLLECT_MDM_DIAGNOSTICS` | Evidence | yes |
 | `HybridJoin.AllowDsregLeave` | Boolean | True |  | `SEMT_HYBRIDJOIN_ALLOW_DSREG_LEAVE` | Actions | yes |
 | `HybridJoin.AllowRemoveStaleIntuneEnrollment` | Boolean | False |  | `SEMT_HYBRIDJOIN_ALLOW_REMOVE_STALE_INTUNE_ENROLLMENT` | Actions | no |
+| `HybridJoin.RemoveBlockingIntuneEnrollmentStub` | Boolean | False |  | `SEMT_HYBRIDJOIN_REMOVE_BLOCKING_INTUNE_ENROLLMENT_STUB` | Actions | yes |
 | `HybridJoin.AllowRemoveNonIntuneMdmEnrollment` | Boolean | False |  | `SEMT_HYBRIDJOIN_ALLOW_REMOVE_NON_INTUNE_MDM_ENROLLMENT` | Actions | yes |
 | `HybridJoin.RepairUnhealthyJoinWithIntuneTrace` | Boolean | False |  | `SEMT_HYBRIDJOIN_REPAIR_UNHEALTHY_JOIN_WITH_INTUNE_TRACE` | Actions | yes |
 | `HybridJoin.IntuneTraceRepairDelayHours` | Integer | 24 hours | 1..720 | `SEMT_HYBRIDJOIN_INTUNE_TRACE_REPAIR_DELAY_HOURS` | Actions | no |
@@ -130,6 +131,14 @@ old for the same device ID and Intune enrollment IDs, and the launcher proved th
 from Intune (fresh Entra and Intune inventories, no Intune record by name or by device ID). The
 local Intune enrollment is then backed up and removed, and the normal device join repair runs
 (a failed device key still needs `HybridJoin.AllowDsregLeave`).
+
+`HybridJoin.RemoveBlockingIntuneEnrollmentStub` (default false): when `deviceenroller.exe` returns
+`0x8018000A` (already enrolled) while no confirmed Intune enrollment exists and the only Intune traces
+are incomplete stubs (Intune discovery URL, `EnrollmentType` 6, empty `ProviderID`, `fooUser@` UPN,
+no OMA-DM account or EnterpriseMgmt tasks), the stub is backed up (reg export under `Output`) and
+removed, then `deviceenroller.exe` runs again after `HybridJoin.StaleCleanupDelaySeconds`. Off, the
+status is `INTUNE_ENROLLMENT_STUB_BLOCKING` (NextAction `ENABLE_INTUNE_STUB_REMOVAL_OR_REVIEW`)
+without the confirmation wait; an incomplete removal is `INTUNE_ENROLLMENT_STUB_REMOVE_FAILED`.
 
 ### Windows11Upgrade options
 

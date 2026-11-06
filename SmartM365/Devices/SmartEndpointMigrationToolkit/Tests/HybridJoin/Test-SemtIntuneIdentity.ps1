@@ -222,6 +222,20 @@ $hjEndpointText = [IO.File]::ReadAllText($endpoint)
 if ($hjEndpointText -notmatch 'if \(\$intuneTraceRemoveFailed\) \{' -or $hjEndpointText -notmatch 'elseif \(\$intuneEnrolled\) \{' -or $hjEndpointText -notmatch 'if \(\$traceDecision\.Proceed\) \{' -or $hjEndpointText -notmatch "Clear-IntuneTraceRepairState -Reason 'device join healthy'") { throw 'Endpoint trace and repair gate are not wired.' }
 Write-Host 'PASS: endpoint keeps the Intune trace and repairs only after the delay with a matching cloud proof'
 
+# Incomplete Intune enrollment stub (deviceenroller 0x8018000A): strict signature, opt-in removal.
+$stubDefinition=$ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-IntuneEnrollmentStubEntry' },$true)
+if (-not $stubDefinition) { throw 'Endpoint function missing: Test-IntuneEnrollmentStubEntry' }
+. ([scriptblock]::Create($stubDefinition.Extent.Text))
+$stub=@{ ProviderID=''; DiscoveryServiceFullURL='https://enrollment.manage.microsoft.com/enrollmentserver/discovery.svc'; EnrollmentType='6'; UPN='fooUser@contoso.onmicrosoft.com'; Evidence='StatusKey' }
+if (-not (Test-IntuneEnrollmentStubEntry @stub)) { throw 'The fooUser stub signature was not recognised.' }
+foreach ($change in @(@{ ProviderID='MS DM Server' }, @{ EnrollmentType='0' }, @{ UPN='user@contoso.onmicrosoft.com' }, @{ Evidence='StatusKey,OMADMAccount' }, @{ Evidence='EnterpriseMgmtTasks' }, @{ DiscoveryServiceFullURL='https://mdm.example.test/discovery.svc' })) {
+    $candidate=$stub.Clone(); foreach ($key in $change.Keys) { $candidate[$key]=$change[$key] }
+    if (Test-IntuneEnrollmentStubEntry @candidate) { throw "A real or foreign enrollment was taken for a stub: $($change.Keys -join ',')" }
+}
+if ($hjEndpointText -notmatch '\[string\]\$enrollStart\.ExitCode -eq "-2145910774"' -or $hjEndpointText -notmatch 'if \(-not \$RemoveBlockingIntuneEnrollmentStub -or \$AuditOnly\)' -or $hjEndpointText -notmatch 'elseif \(-not \[string\]::IsNullOrWhiteSpace\(\$intuneStubStatus\)\)' -or $hjEndpointText -notmatch '"INTUNE_ENROLLMENT_STUB_BLOCKING" \{ return "ENABLE_INTUNE_STUB_REMOVAL_OR_REVIEW" \}' -or $hjEndpointText -notmatch '"RemoveBlockingIntuneEnrollmentStub",') { throw 'Intune enrollment stub handling is not wired.' }
+if ($hjEndpointText -notmatch "\*DeviceManagement_Admin\.csv") { throw 'Enrollment evidence summary does not read the Admin channel.' }
+Write-Host 'PASS: an Intune enrollment stub is recognised strictly and removed only on opt-in'
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG

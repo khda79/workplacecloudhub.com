@@ -45,6 +45,7 @@
                     "HybridJoin.CollectMdmDiagnostics":  "__INHERIT__",
                     "HybridJoin.AllowDsregLeave":  "__INHERIT__",
                     "HybridJoin.AllowRemoveStaleIntuneEnrollment":  "__INHERIT__",
+                    "HybridJoin.RemoveBlockingIntuneEnrollmentStub":  "__INHERIT__",
                     "HybridJoin.AllowRemoveNonIntuneMdmEnrollment":  "__INHERIT__",
                     "HybridJoin.RepairUnhealthyJoinWithIntuneTrace":  "__INHERIT__",
                     "HybridJoin.IntuneTraceRepairDelayHours":  "__INHERIT__",

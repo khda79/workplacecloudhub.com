@@ -152,6 +152,8 @@ function Invoke-SemtSystemTaskEndpoint {
         $getCode = {
             param($exception)
             for ($current = $exception; $null -ne $current; $current = $current.InnerException) {
+                # An empty task reply after a dropped RPC connection: retried like a transient failure.
+                if ([string]$current.Message -like 'SEMT_TASK_REPLY_INCOMPLETE*') { return 'INCOMPLETE' }
                 $code = '{0:X8}' -f $current.HResult
                 if ($transientCodes -contains $code) { return $code }
                 if ([string]$current.Message -match '(?i)0x(?<Code>[0-9A-F]{8})' -and $transientCodes -contains $Matches.Code.ToUpperInvariant()) { return $Matches.Code.ToUpperInvariant() }
@@ -210,7 +212,13 @@ function Invoke-SemtSystemTaskEndpoint {
         [void]$task.Run($null)
         do {
             Start-Sleep -Seconds 3
-            $poll = & $invokeRpc 'GetTaskState' { $polled = $rpc.Folder.GetTask($r.Name); [pscustomobject]@{ State = [int]$polled.State; LastRun = [datetime]$polled.LastRunTime } }
+            $poll = & $invokeRpc 'GetTaskState' {
+                $polled = $rpc.Folder.GetTask($r.Name)
+                $polledState = if ($null -ne $polled) { $polled.State } else { $null }
+                $polledLastRun = if ($null -ne $polled) { $polled.LastRunTime } else { $null }
+                if ($null -eq $polledState -or $null -eq $polledLastRun) { throw ('SEMT_TASK_REPLY_INCOMPLETE: State={0}; LastRunTime={1}' -f $polledState,$polledLastRun) }
+                [pscustomobject]@{ State = [int]$polledState; LastRun = [datetime]$polledLastRun }
+            }
         } while (($poll.State -ne 1 -and $poll.State -ne 3) -or $poll.LastRun.Year -lt 2000)
         # Re-read the definition and refuse cleanup if the identity has changed.
         $actual = & $invokeRpc 'ReadTaskDefinition' {
