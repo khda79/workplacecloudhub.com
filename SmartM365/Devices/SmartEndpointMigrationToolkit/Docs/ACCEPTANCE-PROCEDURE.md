@@ -52,15 +52,20 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtProgramFolde
 
 ## 3. GUI et démo
 
-- [ ] `Start-SmartEndpointMigrationToolkit-Demo.cmd` : 6 onglets, les deux Campaigns, options
-      réelles, actions simulées, aucune exécution.
-- [ ] `Start-SmartEndpointMigrationToolkit-GUI.cmd` : splash, en-tête, version 1.0.0, contrôle
+- [ ] `Start-SmartEndpointMigrationToolkit-Demo.cmd` : 3 onglets (Waves, Runs, Options) et les
+      3 fenêtres Single PC, New Wave, Automatic Wave, les deux Campaigns, options réelles, actions
+      simulées, aucune exécution.
+- [ ] `Start-SmartEndpointMigrationToolkit-GUI.cmd` : splash, en-tête, version 1.1.0, contrôle
       de mise à jour silencieux.
 - [ ] Changer de Campaign : options, Waves et Runs propres à chaque Campaign ; les choix sont
       retrouvés à la réouverture.
+- [ ] Boutons **Single PC**, **New Wave**, **Automatic Wave** sous la Campaign : chacun ouvre sa
+      fenêtre (modale, titre avec la Campaign) ; la fermer conserve la saisie ; Automatic Wave
+      masqué pour Prerequisites.
 - [ ] **New Wave** : création sans lancement ; refus d'un nom existant ou invalide.
-- [ ] **Automatic Wave** : Preview n'écrit que des preuves ; Create grisé tant que les filtres
-      diffèrent de la prévisualisation ; Create ne lance rien.
+- [ ] **Automatic Wave** : Preview facultative et n'écrit que des preuves ; Create Wave toujours
+      actif (réutilise la Preview des mêmes filtres, sinon calcule la sélection avec les mêmes
+      exclusions de sécurité et écrit AutomaticWaveSelection.csv) ; Create ne lance rien.
 
 ## 4. Hybrid Join (laboratoire)
 

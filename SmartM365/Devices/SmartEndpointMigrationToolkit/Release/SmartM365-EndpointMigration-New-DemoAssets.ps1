@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Starts the GUI demonstration (fictional Contoso data, nothing launched or queried), renders
-    every view for both Campaigns to PNG, exports the fictional Run reports, and writes
+    every view and dedicated window for both Campaigns to PNG, exports the fictional Run reports, and writes
     DemoAssets\<date>\ with index.html, SHA256SUMS.txt and manifest.json.txt (capture date,
     package and GUI versions, GUI SHA256, file sizes, image sizes and SHA256). The top-level
     DemoAssets\index.html and manifest.json.txt point to the new set; older sets are kept.
@@ -17,7 +17,7 @@
     powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Release\SmartM365-EndpointMigration-New-DemoAssets.ps1
 
 .VERSION
-    1.0.0
+    1.1.0
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -100,6 +100,10 @@ foreach ($campaign in $campaigns) {
         $owner.SelectedItem = $tab
         $safe = $header -replace '[^A-Za-z0-9]+', '-'
         Save-ViewPng -Window $state.Window -Path (Join-Path $setRoot ('GUI\SEMT-{0}-{1}.png' -f $campaign.Name,$safe.Trim('-')))
+    }
+    # Dedicated windows of the buttons Single PC, New Wave and Automatic Wave.
+    foreach ($entry in @($state.Data.SemtWindows.GetEnumerator())) {
+        Save-ViewPng -Window $entry.Value -Path (Join-Path $setRoot ('GUI\SEMT-{0}-Window-{1}.png' -f $campaign.Name,$entry.Key))
     }
     foreach ($output in @(Export-SmartM365DemoProfileOutputs)) {
         Copy-Item -LiteralPath $output -Destination (Join-Path $setRoot 'Exports') -Force

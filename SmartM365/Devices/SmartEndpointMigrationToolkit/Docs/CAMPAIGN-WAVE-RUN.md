@@ -70,7 +70,7 @@ PowerShell 5.1 with the engine. `Update-WaveCmdWrappers.cmd` regenerates them fo
    `Runs\<Campaign>\_InventoryRefresh\<timestamp>\InventoryRefresh-AD.log` and `-Graph.log`. Closing the window
    while the refresh runs only hides it; the button shows it again. The shared AD inventory
    always covers every domain of the forest (an export with `-Domain` cannot replace it); the
-   **AD domain** list of the Automatic Wave view chooses one domain for the Wave. Computers of
+   **AD domain** list of the Automatic Wave window chooses one domain for the Wave. Computers of
    other domains are filter exclusions `AD_DOMAIN_NOT_MATCHED`; devices without an AD record
    (Intune only) are `AD_DOMAIN_UNKNOWN`.
    **Refresh old inventories only** exports only the inventories that are missing, older than
@@ -79,12 +79,15 @@ PowerShell 5.1 with the engine. `Update-WaveCmdWrappers.cmd` regenerates them fo
    **Preview** and in the **Create** confirmation, the GUI warns when an inventory read by the
    selection is old (Windows 11: the inventories of the chosen Source) and lets the operator
    continue or cancel.
-2. **Preview** runs the Automatic Wave engine without `-Create`: it writes evidence under
+2. **Preview** (optional) runs the Automatic Wave engine without `-Create`: it writes evidence under
    `Runs\<Campaign>\_AutomaticWave\` (selected, excluded with reason code, summary) and creates
    nothing.
-3. **Create** is enabled only while the filters are those of the last preview. It runs the engine
-   with `-Create -PreviewEvidencePath <preview evidence>` and creates the Wave (`Source=Automatic`,
-   the filters in its description and the evidence path). It never launches the Wave. The engine
+3. **Create Wave** is always available, with or without a Preview. When the last Preview has the
+   same filters, the GUI runs the engine with `-Create -PreviewEvidencePath <preview evidence>`;
+   otherwise it runs `-Create` alone and the engine computes the selection at Create with the same
+   rules and safety exclusions, and writes the same evidence (`AutomaticWaveSelection.csv`,
+   exclusions, summary). The Wave is created (`Source=Automatic`, the filters in its description
+   and the evidence path) and never launched. The engine
    reuses the previewed selection (a few seconds) when the preview has the same filters, the
    inventory files have not changed since (path, size and last write time recorded in the preview
    summary) and it is less than 24 hours old; otherwise it computes the selection again and the

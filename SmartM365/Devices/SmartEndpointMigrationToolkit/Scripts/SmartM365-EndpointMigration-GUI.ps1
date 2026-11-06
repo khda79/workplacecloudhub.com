@@ -5,14 +5,14 @@
 .DESCRIPTION
     Hybrid Join, Intune Enrollment and Windows 11 Upgrade campaigns from one launcher, plus the
     Prerequisites campaign (scheduled tasks), listed only when Prerequisites.Enabled is true:
-    Campaign selector, Waves, New Wave, Automatic Wave (Preview distinct from Create),
-    Single PC, Launch Wave, Launch All Waves (selected Campaign only, staggered), Runs and
-    reports, controlled stop. Options are generated from the option catalog; the choices
+    Campaign selector, Waves, Launch Wave, Launch All Waves (selected Campaign only, staggered),
+    Runs and reports, controlled stop; the buttons Single PC, New Wave and Automatic Wave open
+    dedicated windows (Automatic Wave: optional Preview, Create works with or without it). Options are generated from the option catalog; the choices
     of the operator are captured for each Run and isolated per Campaign.
     Requires Windows PowerShell 5.1 started with -STA.
 
 .VERSION
-    1.0.0
+    1.1.0
 
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
@@ -38,7 +38,7 @@ $ErrorActionPreference = 'Stop'
 if ([string]$PSVersionTable['PSEdition'] -eq 'Core' -or [Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentState]::STA) {
     throw ('SEMT_UNSUPPORTED_GUI_HOST: the GUI runs in Windows PowerShell 5.1 started with -STA (current: {0} {1}, {2}). Use Start-SmartEndpointMigrationToolkit-GUI.cmd.' -f [string]$PSVersionTable['PSEdition'],[string]$PSVersionTable['PSVersion'],[Threading.Thread]::CurrentThread.ApartmentState)
 }
-$script:GuiVersion = '1.0.0'
+$script:GuiVersion = '1.1.0'
 $script:PackageRoot = Split-Path -Path $PSScriptRoot -Parent
 Import-Module (Join-Path $script:PackageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
 $script:CampaignTitles = [ordered]@{ HybridJoin = 'Hybrid Join and Intune enrollment'; Windows11Upgrade = 'Windows 11 upgrade' }
@@ -405,6 +405,28 @@ function Split-GuiList {
     return @(([string]$Text -split '[;,\r\n]+') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
+function Get-GuiChildWindowMarkup {
+    <#
+    Markup of a dedicated window (Single PC, New Wave, Automatic Wave): the placeholder
+    <!--SEMT_SHARED_RESOURCES--> receives the resources (styles, brushes) of the main window.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Markup,[Parameter(Mandatory = $true)][string]$MainMarkup)
+    $resources = [regex]::Match($MainMarkup, '(?s)<Window\.Resources>(?<Body>.*?)</Window\.Resources>')
+    if (-not $resources.Success) { throw 'The main window markup has no Window.Resources.' }
+    if ($Markup.IndexOf('<!--SEMT_SHARED_RESOURCES-->') -lt 0) { throw 'The window markup has no <!--SEMT_SHARED_RESOURCES--> placeholder.' }
+    return $Markup.Replace('<!--SEMT_SHARED_RESOURCES-->', $resources.Groups['Body'].Value)
+}
+
+function Test-AutomaticPreviewReusable {
+    <#
+    Create Wave never needs a Preview. It passes the Preview evidence to the engine only when the
+    Preview was made with the same filters (same signature); the engine then reuses it if the
+    inventories did not change, otherwise it computes the selection again with the same rules.
+    #>
+    param([AllowEmptyString()][string]$Signature,[AllowEmptyString()][string]$PreviewSignature,[AllowEmptyString()][string]$PreviewEvidence)
+    return (-not [string]::IsNullOrWhiteSpace($PreviewSignature) -and $Signature -eq $PreviewSignature -and -not [string]::IsNullOrWhiteSpace($PreviewEvidence))
+}
+
 #endregion
 
 if (-not $ValidateOnly) {
@@ -426,7 +448,7 @@ if (-not $ValidateOnly -and (Get-Command -Name Start-SmartM365GuiSplash -ErrorAc
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Smart Endpoint Migration Toolkit v1.0.0"
+        Title="Smart Endpoint Migration Toolkit v1.1.0"
         Width="1240" Height="860" MinWidth="1080" MinHeight="740"
         WindowStartupLocation="CenterScreen"
         Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
@@ -531,7 +553,7 @@ $xaml = @'
                     <Border Background="#E7F3FF" BorderBrush="#B5DCFF" BorderThickness="1" CornerRadius="8" Padding="10,3" HorizontalAlignment="Left" Margin="0,0,0,12">
                         <TextBlock Text="SMARTM365 DEVICES" Foreground="#005A9E" FontWeight="SemiBold"/>
                     </Border>
-                    <TextBlock x:Name="ProductVersionText" Text="v1.0.0" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                    <TextBlock x:Name="ProductVersionText" Text="v1.1.0" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
                     <TextBlock Text="Smart Endpoint Migration Toolkit" Foreground="{StaticResource TextBrush}" FontSize="28" FontWeight="SemiBold"/>
                     <TextBlock Text="Hybrid Join, Intune Enrollment &amp; Windows 11 Upgrade" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
                 </StackPanel>
@@ -546,6 +568,10 @@ $xaml = @'
 
         <Border Grid.Row="1" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="14" Margin="0,0,0,12">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="300"/>
                     <ColumnDefinition Width="*"/>
@@ -567,6 +593,11 @@ $xaml = @'
                     <Button x:Name="StopAllButton" Content="Stop running Waves" Background="#FFF4E5" Foreground="#9A3412" BorderBrush="#FDBA74" MinWidth="150"/>
                     <Button x:Name="LaunchAllButton" Content="Launch All Waves" Style="{StaticResource PrimaryButtonStyle}" MinWidth="150"/>
                 </StackPanel>
+                <WrapPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,10,0,0">
+                    <Button x:Name="OpenSinglePcButton" Content="Single PC" MinWidth="130" ToolTip="Launch one computer of the selected Campaign (dedicated window)."/>
+                    <Button x:Name="OpenNewWaveButton" Content="New Wave" MinWidth="130" ToolTip="Create a Wave of the selected Campaign from a list of computers (dedicated window)."/>
+                    <Button x:Name="OpenAutomaticWaveButton" Content="Automatic Wave" MinWidth="130" ToolTip="Create a Wave of the selected Campaign from the shared inventories (dedicated window)."/>
+                </WrapPanel>
             </Grid>
         </Border>
 
@@ -657,128 +688,6 @@ $xaml = @'
                 </Grid>
             </TabItem>
 
-            <TabItem x:Name="SinglePcTab" Header="Single PC">
-                <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="0,12,0,0">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Margin="0,0,14,0">
-                            <TextBlock Text="Single PC" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
-                            <TextBlock Text="Computer name (short name or FQDN)"/>
-                            <TextBox x:Name="SingleComputerText"/>
-                            <TextBlock Text="Run mode"/>
-                            <ComboBox x:Name="SingleModeCombo"/>
-                            <TextBlock Text="A Single PC Run uses a one-computer Wave created inside its Run folder and the same engine, options and protections as a Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                            <Button x:Name="LaunchSingleButton" Content="Launch Single PC" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" MinWidth="170"/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" Margin="14,0,0,0">
-                            <TextBlock Text="Single PC Runs" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
-                            <TextBox x:Name="SingleRunFolderText" IsReadOnly="True"/>
-                            <Button x:Name="OpenSingleRunFolderButton" Content="Open folder" HorizontalAlignment="Left"/>
-                        </StackPanel>
-                    </Grid>
-                </Border>
-            </TabItem>
-
-            <TabItem x:Name="NewWaveTab" Header="New Wave">
-                <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18" Margin="0,12,0,0">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Margin="0,0,14,0">
-                            <TextBlock Text="New Wave" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
-                            <TextBlock Text="Wave name (letters, digits, dot, dash, underscore)"/>
-                            <TextBox x:Name="NewWaveNameText"/>
-                            <TextBlock Text="Computers (one per line, optional)"/>
-                            <TextBox x:Name="NewWaveComputersText" AcceptsReturn="True" Height="220" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
-                            <TextBlock Text="Create only prepares the Wave folder, Computers.txt, Wave.local.json.txt and the Loop/Once launchers. It never launches the Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                            <Button x:Name="CreateWaveButton" Content="Create Wave" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" MinWidth="140"/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" Margin="14,0,0,0">
-                            <TextBlock Text="Created Wave" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
-                            <TextBox x:Name="NewWavePathText" IsReadOnly="True"/>
-                            <Button x:Name="OpenNewWaveComputersButton" Content="Open Computers.txt" HorizontalAlignment="Left"/>
-                        </StackPanel>
-                    </Grid>
-                </Border>
-            </TabItem>
-
-            <TabItem x:Name="AutomaticWaveTab" Header="Automatic Wave">
-                <Grid Margin="0,12,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="0.95*"/>
-                        <ColumnDefinition Width="1.05*"/>
-                    </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="16" Margin="0,0,8,0">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel>
-                                <TextBlock Text="Selection" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,10"/>
-                                <TextBlock x:Name="AutomaticInventoryStatusText" Text="-" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                                <WrapPanel>
-                                    <Button x:Name="AutomaticRefreshInventoryButton" Content="Refresh shared inventories"/>
-                                    <Button x:Name="AutomaticRefreshStaleInventoryButton" Content="Refresh old inventories only"/>
-                                </WrapPanel>
-                                <TextBlock Text="Wave name" Margin="0,8,0,0"/>
-                                <TextBox x:Name="AutomaticWaveNameText"/>
-                                <TextBlock Text="Computer name prefixes (separated by ;)"/>
-                                <TextBox x:Name="AutomaticNamePrefixText"/>
-                                <TextBlock Text="Computer name contains (separated by ;)"/>
-                                <TextBox x:Name="AutomaticNameContainsText"/>
-                                <TextBlock Text="Computer name does not contain (separated by ;)"/>
-                                <TextBox x:Name="AutomaticNameNotContainsText"/>
-                                <TextBlock Text="AD domain (from the shared AD inventory)"/>
-                                <ComboBox x:Name="AutomaticAdDomainCombo"/>
-                                <StackPanel x:Name="AutomaticSourcePanel">
-                                    <TextBlock Text="Inventory source"/>
-                                    <ComboBox x:Name="AutomaticSourceCombo"/>
-                                    <CheckBox x:Name="AutomaticExcludeIntuneCheck" Content="Exclude devices present in Intune"/>
-                                </StackPanel>
-                                <CheckBox x:Name="AutomaticExcludeStaleAdCheck" Content="Exclude computers without a recent AD logon"/>
-                                <TextBlock Text="Maximum AD logon age (days)" Margin="0,6,0,0"/>
-                                <Grid Margin="0,4,0,10" Width="160" HorizontalAlignment="Left">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="32"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="32"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Button x:Name="AutomaticLastLogonDaysDownButton" Grid.Column="0" Content="-" Style="{StaticResource StepperButtonStyle}"/>
-                                    <TextBox x:Name="AutomaticLastLogonDaysText" Grid.Column="1" Text="45" Style="{StaticResource NumericTextBoxStyle}"/>
-                                    <Button x:Name="AutomaticLastLogonDaysUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
-                                </Grid>
-                                <WrapPanel>
-                                    <Button x:Name="AutomaticPreviewButton" Content="Preview" MinWidth="110"/>
-                                    <Button x:Name="AutomaticCreateButton" Content="Create Wave" Style="{StaticResource PrimaryButtonStyle}" MinWidth="130"/>
-                                </WrapPanel>
-                                <TextBlock Text="Preview never creates anything. Create is available only for the previewed filters and never launches the Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
-                            </StackPanel>
-                        </ScrollViewer>
-                    </Border>
-                    <Border Grid.Column="1" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="16" Margin="8,0,0,0">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                            <TextBlock Text="Preview" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
-                            <TextBox Grid.Row="1" x:Name="AutomaticSummaryText" Margin="0,12,0,0" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
-                            <Grid Grid.Row="2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBox x:Name="AutomaticEvidencePathText" IsReadOnly="True" Margin="0,8,8,0"/>
-                                <Button Grid.Column="1" x:Name="AutomaticOpenEvidenceButton" Content="Evidence"/>
-                            </Grid>
-                        </Grid>
-                    </Border>
-                </Grid>
-            </TabItem>
-
             <TabItem x:Name="RunsTab" Header="Runs">
                 <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="16" Margin="0,12,0,0">
                     <Grid>
@@ -840,6 +749,166 @@ $xaml = @'
 </Window>
 '@
 
+# Dedicated windows of the main window buttons "Single PC", "New Wave" and "Automatic Wave".
+# <!--SEMT_SHARED_RESOURCES--> is replaced with the resources of the main window when loaded.
+$singlePcXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Single PC" Width="900" Height="420" MinWidth="700" MinHeight="360"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <Window.Resources>
+        <!--SEMT_SHARED_RESOURCES-->
+    </Window.Resources>
+    <Grid Margin="18">
+        <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Margin="0,0,14,0">
+                    <TextBlock Text="Single PC" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
+                    <TextBlock Text="Computer name (short name or FQDN)"/>
+                    <TextBox x:Name="SingleComputerText"/>
+                    <TextBlock Text="Run mode"/>
+                    <ComboBox x:Name="SingleModeCombo"/>
+                    <TextBlock Text="A Single PC Run uses a one-computer Wave created inside its Run folder and the same engine, options and protections as a Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <Button x:Name="LaunchSingleButton" Content="Launch Single PC" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" MinWidth="170"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="14,0,0,0">
+                    <TextBlock Text="Single PC Runs" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
+                    <TextBox x:Name="SingleRunFolderText" IsReadOnly="True"/>
+                    <Button x:Name="OpenSingleRunFolderButton" Content="Open folder" HorizontalAlignment="Left"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
+'@
+
+$newWaveXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="New Wave" Width="900" Height="560" MinWidth="700" MinHeight="480"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <Window.Resources>
+        <!--SEMT_SHARED_RESOURCES-->
+    </Window.Resources>
+    <Grid Margin="18">
+        <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Margin="0,0,14,0">
+                    <TextBlock Text="New Wave" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
+                    <TextBlock Text="Wave name (letters, digits, dot, dash, underscore)"/>
+                    <TextBox x:Name="NewWaveNameText"/>
+                    <TextBlock Text="Computers (one per line, optional)"/>
+                    <TextBox x:Name="NewWaveComputersText" AcceptsReturn="True" Height="220" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+                    <TextBlock Text="Create only prepares the Wave folder, Computers.txt, Wave.local.json.txt and the Loop/Once launchers. It never launches the Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <Button x:Name="CreateWaveButton" Content="Create Wave" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" MinWidth="140"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="14,0,0,0">
+                    <TextBlock Text="Created Wave" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
+                    <TextBox x:Name="NewWavePathText" IsReadOnly="True"/>
+                    <Button x:Name="OpenNewWaveComputersButton" Content="Open Computers.txt" HorizontalAlignment="Left"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
+'@
+
+$automaticWaveXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Automatic Wave" Width="1180" Height="780" MinWidth="900" MinHeight="560"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <Window.Resources>
+        <!--SEMT_SHARED_RESOURCES-->
+    </Window.Resources>
+    <Grid Margin="18">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="0.95*"/>
+                <ColumnDefinition Width="1.05*"/>
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="16" Margin="0,0,8,0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="Selection" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,10"/>
+                        <TextBlock x:Name="AutomaticInventoryStatusText" Text="-" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <WrapPanel>
+                            <Button x:Name="AutomaticRefreshInventoryButton" Content="Refresh shared inventories"/>
+                            <Button x:Name="AutomaticRefreshStaleInventoryButton" Content="Refresh old inventories only"/>
+                        </WrapPanel>
+                        <TextBlock Text="Wave name" Margin="0,8,0,0"/>
+                        <TextBox x:Name="AutomaticWaveNameText"/>
+                        <TextBlock Text="Computer name prefixes (separated by ;)"/>
+                        <TextBox x:Name="AutomaticNamePrefixText"/>
+                        <TextBlock Text="Computer name contains (separated by ;)"/>
+                        <TextBox x:Name="AutomaticNameContainsText"/>
+                        <TextBlock Text="Computer name does not contain (separated by ;)"/>
+                        <TextBox x:Name="AutomaticNameNotContainsText"/>
+                        <TextBlock Text="AD domain (from the shared AD inventory)"/>
+                        <ComboBox x:Name="AutomaticAdDomainCombo"/>
+                        <StackPanel x:Name="AutomaticSourcePanel">
+                            <TextBlock Text="Inventory source"/>
+                            <ComboBox x:Name="AutomaticSourceCombo"/>
+                            <CheckBox x:Name="AutomaticExcludeIntuneCheck" Content="Exclude devices present in Intune"/>
+                        </StackPanel>
+                        <CheckBox x:Name="AutomaticExcludeStaleAdCheck" Content="Exclude computers without a recent AD logon"/>
+                        <TextBlock Text="Maximum AD logon age (days)" Margin="0,6,0,0"/>
+                        <Grid Margin="0,4,0,10" Width="160" HorizontalAlignment="Left">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="32"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="32"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="AutomaticLastLogonDaysDownButton" Grid.Column="0" Content="-" Style="{StaticResource StepperButtonStyle}"/>
+                            <TextBox x:Name="AutomaticLastLogonDaysText" Grid.Column="1" Text="45" Style="{StaticResource NumericTextBoxStyle}"/>
+                            <Button x:Name="AutomaticLastLogonDaysUpButton" Grid.Column="2" Content="+" Style="{StaticResource StepperButtonStyle}"/>
+                        </Grid>
+                        <WrapPanel>
+                            <Button x:Name="AutomaticPreviewButton" Content="Preview" MinWidth="110"/>
+                            <Button x:Name="AutomaticCreateButton" Content="Create Wave" Style="{StaticResource PrimaryButtonStyle}" MinWidth="130"/>
+                        </WrapPanel>
+                        <TextBlock Text="Preview never creates anything. Create Wave works with or without a Preview: it reuses the Preview of the same filters, otherwise it computes the selection with the same rules and safety exclusions. It never launches the Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+            <Border Grid.Column="1" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="16" Margin="8,0,0,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="Preview" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
+                    <TextBox Grid.Row="1" x:Name="AutomaticSummaryText" Margin="0,12,0,0" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="AutomaticEvidencePathText" IsReadOnly="True" Margin="0,8,8,0"/>
+                        <Button Grid.Column="1" x:Name="AutomaticOpenEvidenceButton" Content="Evidence"/>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
+'@
+
 $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]::new($xaml))
 $window = [Windows.Markup.XamlReader]::Load($reader)
 $controls = @{}
@@ -871,7 +940,47 @@ if (Test-Path -LiteralPath $logoPath -PathType Leaf) {
     catch { }
 }
 
+# Dedicated windows of "Single PC", "New Wave" and "Automatic Wave": loaded once, hidden when closed
+# (entered values and the last Preview are kept), shown modal so that the Campaign cannot change
+# while one of them is open. Their controls join $controls under their usual names.
+$script:GuiChildWindows = [ordered]@{}
+$script:GuiChildTitles = [ordered]@{ SinglePc = 'Single PC'; NewWave = 'New Wave'; AutomaticWave = 'Automatic Wave' }
+foreach ($entry in @(@('SinglePc',$singlePcXaml),@('NewWave',$newWaveXaml),@('AutomaticWave',$automaticWaveXaml))) {
+    $childMarkup = Get-GuiChildWindowMarkup -Markup $entry[1] -MainMarkup $xaml
+    $child = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new($childMarkup)))
+    $child.Tag = $entry[0]
+    if ($window.Icon) { $child.Icon = $window.Icon }
+    $child.Width = [Math]::Min($child.Width, $workArea.Width)
+    $child.Height = [Math]::Min($child.Height, $workArea.Height)
+    $child.MinWidth = [Math]::Min($child.MinWidth, $workArea.Width)
+    $child.MinHeight = [Math]::Min($child.MinHeight, $workArea.Height)
+    foreach ($match in [regex]::Matches($entry[1], 'x:Name="(?<Name>[A-Za-z][A-Za-z0-9_]*)"')) {
+        $name = $match.Groups['Name'].Value
+        if ($controls.ContainsKey($name)) { throw ('Duplicate control name in the GUI windows: {0}' -f $name) }
+        $control = $child.FindName($name)
+        if ($control) { $controls[$name] = $control }
+    }
+    $child.Add_Closing({ param($eventSource,$cancelEventArgs) if (-not $script:GuiClosing) { $cancelEventArgs.Cancel = $true; $eventSource.Hide() } })
+    $script:GuiChildWindows[$entry[0]] = $child
+}
+
 #region UI helpers
+
+function Get-GuiDialogOwner {
+    # Message boxes and the waiting window belong to the dedicated window in use, else to the main window.
+    foreach ($child in $script:GuiChildWindows.Values) { if ($child.IsVisible) { return $child } }
+    return $window
+}
+
+function Show-GuiChildWindow {
+    param([Parameter(Mandatory = $true)][ValidateSet('SinglePc','NewWave','AutomaticWave')][string]$Name)
+    $child = $script:GuiChildWindows[$Name]
+    if ($child.IsVisible) { [void]$child.Activate(); return }
+    if ($null -eq $child.Owner -and $window.IsLoaded) { $child.Owner = $window }
+    $child.Title = '{0} - {1}' -f $script:GuiChildTitles[$Name],$script:CampaignTitles[$script:CurrentCampaign]
+    Add-Status -Message ('{0} window opened for {1}.' -f $script:GuiChildTitles[$Name],$script:CampaignTitles[$script:CurrentCampaign])
+    [void]$child.ShowDialog()
+}
 
 function Add-Status {
     param([string]$Message,[string]$Title = 'Ready')
@@ -883,17 +992,17 @@ function Add-Status {
 
 function Show-GuiError {
     param([string]$Message)
-    [System.Windows.MessageBox]::Show($window, $Message, 'Smart Endpoint Migration Toolkit', 'OK', 'Error') | Out-Null
+    [System.Windows.MessageBox]::Show((Get-GuiDialogOwner), $Message, 'Smart Endpoint Migration Toolkit', 'OK', 'Error') | Out-Null
 }
 
 function Show-GuiQuestion {
     param([string]$Message,[string]$Title = 'Confirm')
-    return ([System.Windows.MessageBox]::Show($window, $Message, $Title, 'YesNo', 'Question') -eq [System.Windows.MessageBoxResult]::Yes)
+    return ([System.Windows.MessageBox]::Show((Get-GuiDialogOwner), $Message, $Title, 'YesNo', 'Question') -eq [System.Windows.MessageBoxResult]::Yes)
 }
 
 function Show-GuiWarningQuestion {
     param([string]$Message,[string]$Title = 'Warning')
-    return ([System.Windows.MessageBox]::Show($window, $Message, $Title, 'YesNo', 'Warning') -eq [System.Windows.MessageBoxResult]::Yes)
+    return ([System.Windows.MessageBox]::Show((Get-GuiDialogOwner), $Message, $Title, 'YesNo', 'Warning') -eq [System.Windows.MessageBoxResult]::Yes)
 }
 
 function Open-ShellPath {
@@ -1230,15 +1339,13 @@ function Get-AutomaticInventoryWarning {
 }
 
 function Update-AutomaticView {
-    # Prerequisites has no Automatic Wave (no inventory): the tab is hidden for this Campaign.
+    # Prerequisites has no Automatic Wave (no inventory): its button is hidden for this Campaign.
     if ($script:CurrentCampaign -eq 'Prerequisites') {
-        if ($controls.MainTabs.SelectedItem -eq $controls.AutomaticWaveTab) { $controls.MainTabs.SelectedItem = $controls.WavesTab }
-        $controls.AutomaticWaveTab.Visibility = 'Collapsed'
+        $controls.OpenAutomaticWaveButton.Visibility = 'Collapsed'
         $script:AutomaticPreviewSignature = ''
-        $controls.AutomaticCreateButton.IsEnabled = $false
         return
     }
-    $controls.AutomaticWaveTab.Visibility = 'Visible'
+    $controls.OpenAutomaticWaveButton.Visibility = 'Visible'
     $isWindows11 = ($script:CurrentCampaign -eq 'Windows11Upgrade')
     $controls.AutomaticSourcePanel.Visibility = if ($isWindows11) { 'Visible' } else { 'Collapsed' }
     $parts = foreach ($check in @(Get-AutomaticInventoryChecks -Campaign $script:CurrentCampaign)) {
@@ -1263,7 +1370,6 @@ function Update-AutomaticView {
         $controls.AutomaticWaveNameText.Text = 'WAVE-AUTO-{0}-{1}' -f $prefix,(Get-Date -Format 'yyyyMMdd-HHmmss')
     }
     $script:AutomaticPreviewSignature = ''
-    $controls.AutomaticCreateButton.IsEnabled = $false
 }
 
 function Switch-Campaign {
@@ -1331,11 +1437,18 @@ function Invoke-AutomaticWave {
     }
     if (-not (Test-SemtWaveName -Name $filters.WaveName)) { throw ("'{0}' is not a valid Wave name." -f $filters.WaveName) }
     $signature = Get-AutomaticFilterSignature -Campaign $campaign -Filters $filters
-    if ($Create -and $signature -ne $script:AutomaticPreviewSignature) { throw 'The filters changed since the last preview. Run Preview again before Create.' }
+    # Create never needs a Preview: a Preview of the same filters is reused, otherwise the engine
+    # computes the selection with the same rules, safety exclusions and evidence.
+    $reusePreview = ($Create -and (Test-AutomaticPreviewReusable -Signature $signature -PreviewSignature $script:AutomaticPreviewSignature -PreviewEvidence $script:AutomaticPreviewEvidence))
     # Old inventories: warn before Preview, and again in the Create confirmation (Preview may be old).
     $inventoryWarning = Get-AutomaticInventoryWarning -Checks @(Get-AutomaticInventoryChecks -Campaign $campaign -Source $filters.Source)
     if ($Create) {
-        $question = "Create Wave '{0}' from the previewed selection?{1}{1}The Wave is created but NOT launched." -f $filters.WaveName,[Environment]::NewLine
+        $question = if ($reusePreview) {
+            "Create Wave '{0}' from the previewed selection?{1}{1}The Wave is created but NOT launched." -f $filters.WaveName,[Environment]::NewLine
+        }
+        else {
+            "Create Wave '{0}' now?{1}{1}No Preview matches these filters: the selection is computed now with the same rules and safety exclusions, and its evidence (AutomaticWaveSelection.csv) is kept.{1}{1}The Wave is created but NOT launched." -f $filters.WaveName,[Environment]::NewLine
+        }
         $confirmed = if ($inventoryWarning) { Show-GuiWarningQuestion -Message ('{0}{1}{1}{2}' -f $inventoryWarning,[Environment]::NewLine,$question) -Title 'Create Wave - old inventories' } else { Show-GuiQuestion -Message $question -Title 'Create Wave' }
         if (-not $confirmed) { return }
     }
@@ -1344,7 +1457,7 @@ function Invoke-AutomaticWave {
     }
     $evidence = Join-Path (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) ("{0}\_AutomaticWave\{1}" -f $campaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
     New-SemtDirectory -Path $evidence
-    $commandText = Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot $evidence -Create:$Create -PreviewEvidencePath $(if ($Create) { $script:AutomaticPreviewEvidence } else { '' })
+    $commandText = Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot $evidence -Create:$Create -PreviewEvidencePath $(if ($reusePreview) { $script:AutomaticPreviewEvidence } else { '' })
     $logFile = Join-Path $evidence 'GuiAutomaticWave.log'
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-AutomaticWaveProcessText -CommandText $commandText -LogPath $logFile)))
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -1355,7 +1468,7 @@ function Invoke-AutomaticWave {
     $controls.AutomaticEvidencePathText.Text = $evidence
     $controls.AutomaticSummaryText.Text = if ($Create) { 'Creating the Wave...' } else { 'Previewing the selection...' }
     Add-Status -Title 'Automatic Wave' -Message $controls.AutomaticSummaryText.Text
-    $wait = Show-AutomaticWaveWait -Create:$Create -WaveName $filters.WaveName
+    $wait = Show-AutomaticWaveWait -Create:$Create -ReusePreview:$reusePreview -WaveName $filters.WaveName
     $state = [pscustomobject]@{ Create = [bool]$Create; Evidence = $evidence; LogFile = $logFile; Signature = $signature; WaveName = $filters.WaveName; Wait = $wait; Started = Get-Date }
     $script:AutomaticTimer = New-Object System.Windows.Threading.DispatcherTimer
     $script:AutomaticTimer.Interval = [TimeSpan]::FromSeconds(1)
@@ -1372,6 +1485,7 @@ function Invoke-AutomaticWave {
         $info.Wait.Window.Tag = 'Done'
         $info.Wait.Window.Close()
         $controls.AutomaticPreviewButton.IsEnabled = $true
+        $controls.AutomaticCreateButton.IsEnabled = $true
         $summaryFile = Get-ChildItem -LiteralPath $info.Evidence -Filter 'AutomaticWaveSummary.json.txt' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         $logText = Read-InventoryRefreshLog -Path $info.LogFile -Current ''
         if ($script:AutomaticProcess.ExitCode -ne 0 -or -not $summaryFile) {
@@ -1388,14 +1502,13 @@ function Invoke-AutomaticWave {
             Add-Status -Title 'Wave created' -Message ("Wave '{0}' created from the automatic selection. It was not launched." -f $info.WaveName)
             Update-WaveList -SelectName $info.WaveName
             Update-AutomaticView
-            [void][System.Windows.MessageBox]::Show($window, ("Wave '{0}' was created.{1}{1}{2}{1}{1}The Wave was NOT launched." -f $info.WaveName,[Environment]::NewLine,$counts), 'Create Wave', 'OK', 'Information')
+            [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), ("Wave '{0}' was created.{1}{1}{2}{1}{1}The Wave was NOT launched." -f $info.WaveName,[Environment]::NewLine,$counts), 'Create Wave', 'OK', 'Information')
         }
         else {
             $script:AutomaticPreviewSignature = $info.Signature
             $script:AutomaticPreviewEvidence = [string](Get-SemtPropertyValue -InputObject $summary -Name 'EvidencePath')
-            $controls.AutomaticCreateButton.IsEnabled = $true
             Add-Status -Title 'Preview ready' -Message 'Review the selection, then Create the Wave or change the filters.'
-            [void][System.Windows.MessageBox]::Show($window, ("Preview ready.{0}{0}{1}{0}{0}Review the selection and its evidence, then click Create Wave, or change the filters and run Preview again." -f [Environment]::NewLine,$counts), 'Preview', 'OK', 'Information')
+            [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), ("Preview ready.{0}{0}{1}{0}{0}Review the selection and its evidence, then click Create Wave, or change the filters and run Preview again." -f [Environment]::NewLine,$counts), 'Preview', 'OK', 'Information')
         }
     })
     $script:AutomaticTimer.Start()
@@ -1420,13 +1533,16 @@ function Show-AutomaticWaveWait {
     Non-modal waiting window shown while the Automatic Wave engine runs; it cannot be closed by the
     operator and is closed when the engine ends.
     #>
-    param([switch]$Create,[string]$WaveName)
+    param([switch]$Create,[switch]$ReusePreview,[string]$WaveName)
 
     $wait = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new($automaticWaitXaml)))
-    $wait.Owner = $window
+    $wait.Owner = Get-GuiDialogOwner
     $wait.FindName('AutomaticWaitTitleText').Text = if ($Create) { "Creating Wave '{0}'..." -f $WaveName } else { 'Previewing the selection...' }
-    $wait.FindName('AutomaticWaitHintText').Text = if ($Create) {
+    $wait.FindName('AutomaticWaitHintText').Text = if ($Create -and $ReusePreview) {
         'Please wait: the Wave is created from the previewed selection (the selection is computed again only if an inventory changed since the preview). Nothing is launched.'
+    }
+    elseif ($Create) {
+        'Please wait: the inventories are read, the selection rules and safety exclusions applied, then the Wave is created. Nothing is launched.'
     }
     else {
         'Please wait: the inventories are read and the selection rules applied. Nothing is launched.'
@@ -1590,6 +1706,9 @@ function Start-InventoryRefresh {
 
 #region Events
 
+$controls.OpenSinglePcButton.Add_Click({ try { Show-GuiChildWindow -Name SinglePc } catch { Show-GuiError $_.Exception.Message } })
+$controls.OpenNewWaveButton.Add_Click({ try { Show-GuiChildWindow -Name NewWave } catch { Show-GuiError $_.Exception.Message } })
+$controls.OpenAutomaticWaveButton.Add_Click({ try { Show-GuiChildWindow -Name AutomaticWave } catch { Show-GuiError $_.Exception.Message } })
 $controls.HeaderLogoLink.Add_MouseLeftButtonUp({ try { Start-Process 'https://workplacecloudhub.com' | Out-Null } catch { } })
 $controls.CampaignCombo.Add_SelectionChanged({ try { Switch-Campaign } catch { Show-GuiError $_.Exception.Message } })
 $controls.WaveCombo.Add_SelectionChanged({
@@ -1680,11 +1799,11 @@ $controls.CreateWaveButton.Add_Click({
     catch { Show-GuiError $_.Exception.Message }
 })
 $controls.OpenNewWaveComputersButton.Add_Click({ Open-TextFile $controls.NewWavePathText.Text })
-foreach ($name in @('AutomaticWaveNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticNameNotContainsText','AutomaticLastLogonDaysText')) { $controls[$name].Add_TextChanged({ if ($script:AutomaticPreviewSignature) { $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false } }) }
-foreach ($name in @('AutomaticExcludeStaleAdCheck','AutomaticExcludeIntuneCheck')) { $controls[$name].Add_Click({ $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false }) }
-foreach ($name in @('AutomaticSourceCombo','AutomaticAdDomainCombo')) { $controls[$name].Add_SelectionChanged({ $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false }) }
-$controls.AutomaticPreviewButton.Add_Click({ try { Invoke-AutomaticWave } catch { Show-GuiError $_.Exception.Message; $controls.AutomaticPreviewButton.IsEnabled = $true } })
-$controls.AutomaticCreateButton.Add_Click({ try { Invoke-AutomaticWave -Create } catch { Show-GuiError $_.Exception.Message; $controls.AutomaticPreviewButton.IsEnabled = $true } })
+foreach ($name in @('AutomaticWaveNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticNameNotContainsText','AutomaticLastLogonDaysText')) { $controls[$name].Add_TextChanged({ $script:AutomaticPreviewSignature = '' }) }
+foreach ($name in @('AutomaticExcludeStaleAdCheck','AutomaticExcludeIntuneCheck')) { $controls[$name].Add_Click({ $script:AutomaticPreviewSignature = '' }) }
+foreach ($name in @('AutomaticSourceCombo','AutomaticAdDomainCombo')) { $controls[$name].Add_SelectionChanged({ $script:AutomaticPreviewSignature = '' }) }
+$controls.AutomaticPreviewButton.Add_Click({ try { Invoke-AutomaticWave } catch { Show-GuiError $_.Exception.Message; $controls.AutomaticPreviewButton.IsEnabled = $true; $controls.AutomaticCreateButton.IsEnabled = $true } })
+$controls.AutomaticCreateButton.Add_Click({ try { Invoke-AutomaticWave -Create } catch { Show-GuiError $_.Exception.Message; $controls.AutomaticPreviewButton.IsEnabled = $true; $controls.AutomaticCreateButton.IsEnabled = $true } })
 $controls.AutomaticOpenEvidenceButton.Add_Click({ Open-ShellPath $controls.AutomaticEvidencePathText.Text })
 $controls.AutomaticRefreshInventoryButton.Add_Click({
     try {
@@ -1700,7 +1819,7 @@ $controls.AutomaticRefreshStaleInventoryButton.Add_Click({
     try {
         if ($script:InventoryRefresh -and -not $script:InventoryRefresh.Finished) { $script:InventoryRefresh.Window.Show(); [void]$script:InventoryRefresh.Window.Activate(); return }
         $old = @(Get-AutomaticInventoryChecks -Campaign $script:CurrentCampaign | Where-Object { -not $_.Usable })
-        if ($old.Count -eq 0) { [void][System.Windows.MessageBox]::Show($window, 'All the shared inventories of this Campaign are up to date. Nothing to refresh.', 'Refresh old inventories', 'OK', 'Information'); return }
+        if ($old.Count -eq 0) { [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), 'All the shared inventories of this Campaign are up to date. Nothing to refresh.', 'Refresh old inventories', 'OK', 'Information'); return }
         $list = (@($old | ForEach-Object { if ($null -ne $_.AgeHours) { '- {0}: {1} hours old (limit {2} hours)' -f $_.Kind,$_.AgeHours,$_.MaxAgeHours } else { '- {0}: {1}' -f $_.Kind,$_.Reason } }) -join [Environment]::NewLine)
         if (-not (Show-GuiQuestion -Message ('Refresh only these shared inventories?{0}{1}{0}{0}The up-to-date inventories are kept. Microsoft Graph opens one interactive sign-in when Intune or Entra is refreshed.' -f [Environment]::NewLine,$list) -Title 'Refresh old inventories')) { return }
         if ($script:InventoryRefresh) { $script:InventoryRefresh.Window.Close() }
@@ -1765,7 +1884,7 @@ if ($ValidateOnly) {
         $controls.CampaignCombo.SelectedIndex = $index
         if ($script:Editors.Count -eq 0) { throw ('Options were not generated for {0}.' -f $script:CurrentCampaign) }
         [void](Get-SemtGuiOptionValues -Editors $script:Editors)
-        Write-Output ('ValidateOnly: GUI {0} loaded; campaign={1}; options={2}; waves={3}.' -f $script:GuiVersion,$script:CurrentCampaign,$script:Editors.Count,$script:Waves.Count)
+        Write-Output ('ValidateOnly: GUI {0} loaded; campaign={1}; options={2}; waves={3}; windows={4}; automaticWaveButton={5}.' -f $script:GuiVersion,$script:CurrentCampaign,$script:Editors.Count,$script:Waves.Count,(@($script:GuiChildWindows.Keys) -join ','),$controls.OpenAutomaticWaveButton.Visibility)
     }
     return
 }

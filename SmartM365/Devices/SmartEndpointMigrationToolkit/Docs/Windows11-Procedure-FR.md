@@ -45,12 +45,13 @@ DirectSetup et *Allow controlled reboots* désactivé, aucun redémarrage n'est 
 
 ## 3. Préparer la Wave
 
-- **Automatic Wave** : rafraîchir les inventaires partagés AD et Intune, choisir la source
+- **Automatic Wave** (bouton sous la Campaign, ouvre sa fenêtre) : rafraîchir les inventaires partagés AD et Intune, choisir la source
   (`Both`, `AD`, `Intune`), le domaine AD (l'inventaire partagé couvre toute la forêt ;
   *(All domains)* par défaut), les préfixes, l'ancienneté de logon AD et, si besoin,
-  *Exclude devices present in Intune*, cliquer **Preview**, contrôler la sélection et les
-  exclusions, puis **Create Wave**.
-- **New Wave** : coller les noms de postes, **Create Wave**.
+  *Exclude devices present in Intune*, éventuellement cliquer **Preview** pour contrôler la
+  sélection et les exclusions, puis **Create Wave** (sans Preview, la sélection est calculée au
+  Create avec les mêmes exclusions de sécurité).
+- **New Wave** (bouton, ouvre sa fenêtre) : coller les noms de postes, **Create Wave**.
 - Les postes déjà en Windows 11 dans AD ou Intune sont ignorés à chaque cycle et archivés dans
   `Computers.AlreadyWindows11.txt` ; le matériel confirmé incompatible part dans
   `Computers.HardwareNotCapable.txt`.

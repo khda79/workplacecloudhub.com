@@ -94,9 +94,13 @@ Start-SmartEndpointMigrationToolkit-Demo.cmd
 ```
 
 GUI tabs: **Waves** (select, Launch Wave, launchers; on the right, the Wave **Options** tab, which edits
-Wave.local.json.txt with inheritance, then **Activity**), **Single PC**, **New Wave**,
-**Automatic Wave** (Preview, then Create: Create never launches), **Runs** (reports, controlled
-stop, forced local stop) and **Options** (generated from the option catalog, saved per Campaign).
+Wave.local.json.txt with inheritance, then **Activity**), **Runs** (reports, controlled stop, forced
+local stop) and **Options** (generated from the option catalog, saved per Campaign). Under the
+Campaign selector, the buttons **Single PC**, **New Wave** and **Automatic Wave** open dedicated
+windows for the selected Campaign (modal; closing one keeps what was entered). Automatic Wave:
+Preview is optional and **Create Wave** is always available: it reuses the Preview of the same
+filters, otherwise it computes the selection at Create with the same rules and safety exclusions;
+Create never launches. The Prerequisites Campaign has no Automatic Wave (button hidden).
 **Launch All Waves** launches the launchable Waves of the selected Campaign only, one every
 5 seconds, after one confirmation.
 

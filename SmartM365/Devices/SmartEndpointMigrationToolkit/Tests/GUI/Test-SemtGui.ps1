@@ -9,7 +9,7 @@
     copied to a temp folder so no GUI state file is written into the source tree.
     Prints one PASS/FAIL line per assertion and "Summary: Passed=N; Failed=M". Exits 1 on failure.
 .VERSION
-    1.0.0
+    1.1.0
 .NOTES
     Author: https://github.com/khda79/workplacecloudhub.com
 #>
@@ -61,20 +61,49 @@ try {
     $assignment = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$xaml' }, $true)
     $xaml = [string]$assignment.Right.Expression.Value
     Test-Step 'window markup is a literal here-string (demo framework contract)' { $assignment.Right.Expression -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $xaml -notmatch '\$\(|\$script:' }
-    foreach ($name in @('CampaignCombo','WaveCombo','WaveModeCombo','LaunchWaveButton','LaunchAllButton','StopAllButton','SingleComputerText','LaunchSingleButton','NewWaveNameText','CreateWaveButton','AutomaticPreviewButton','AutomaticCreateButton','AutomaticRefreshInventoryButton','RunsGrid','OpenRunReportButton','StopSelectedRunButton','ForceStopSelectedRunButton','OptionsHost','ResetOptionsButton','HeaderLogoImage')) {
-        Write-TestResult -Condition ($xaml -match ('x:Name="{0}"' -f $name)) -Message ("control present: {0}" -f $name)
+    # Dedicated windows of the buttons Single PC, New Wave and Automatic Wave (literal here-strings too).
+    $childXaml = [ordered]@{}
+    foreach ($variable in @('singlePcXaml','newWaveXaml','automaticWaveXaml')) {
+        $childAssignment = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq ('$' + $variable) }, $true)
+        Test-Step ("{0} is a literal here-string with the shared resources placeholder" -f $variable) { $null -ne $childAssignment -and $childAssignment.Right.Expression -is [System.Management.Automation.Language.StringConstantExpressionAst] -and ([string]$childAssignment.Right.Expression.Value) -match '<!--SEMT_SHARED_RESOURCES-->' }
+        $childXaml[$variable] = [string]$childAssignment.Right.Expression.Value
     }
+    $allXaml = $xaml + ($childXaml.Values -join [Environment]::NewLine)
+    foreach ($name in @('CampaignCombo','WaveCombo','WaveModeCombo','LaunchWaveButton','LaunchAllButton','StopAllButton','OpenSinglePcButton','OpenNewWaveButton','OpenAutomaticWaveButton','RunsGrid','OpenRunReportButton','StopSelectedRunButton','ForceStopSelectedRunButton','OptionsHost','ResetOptionsButton','HeaderLogoImage')) {
+        Write-TestResult -Condition ($xaml -match ('x:Name="{0}"' -f $name)) -Message ("main window control present: {0}" -f $name)
+    }
+    foreach ($pair in @(@('singlePcXaml',@('SingleComputerText','SingleModeCombo','LaunchSingleButton','SingleRunFolderText','OpenSingleRunFolderButton')),@('newWaveXaml',@('NewWaveNameText','NewWaveComputersText','CreateWaveButton','NewWavePathText','OpenNewWaveComputersButton')),@('automaticWaveXaml',@('AutomaticWaveNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticNameNotContainsText','AutomaticAdDomainCombo','AutomaticSourceCombo','AutomaticExcludeIntuneCheck','AutomaticExcludeStaleAdCheck','AutomaticLastLogonDaysText','AutomaticPreviewButton','AutomaticCreateButton','AutomaticRefreshInventoryButton','AutomaticRefreshStaleInventoryButton','AutomaticSummaryText','AutomaticEvidencePathText','AutomaticOpenEvidenceButton')))) {
+        foreach ($name in $pair[1]) { Write-TestResult -Condition ($childXaml[$pair[0]] -match ('x:Name="{0}"' -f $name) -and $xaml -notmatch ('x:Name="{0}"' -f $name)) -Message ("{0} control present only in its window: {1}" -f $pair[0],$name) }
+    }
+    Test-Step 'the three buttons sit in the action card, under the Campaign selector' { $xaml -match '(?s)x:Name="CampaignCombo".*?x:Name="LaunchAllButton".*?<WrapPanel Grid\.Row="1" Grid\.ColumnSpan="3"[^>]*>\s*<Button x:Name="OpenSinglePcButton" Content="Single PC".*?<Button x:Name="OpenNewWaveButton" Content="New Wave".*?<Button x:Name="OpenAutomaticWaveButton" Content="Automatic Wave".*?</WrapPanel>.*?x:Name="MainTabs"' }
+    Test-Step 'the tabs Single PC, New Wave and Automatic Wave are removed (Waves, Runs, Options remain)' { $mainTabs = @([regex]::Matches($xaml, '(?m)^            <TabItem x:Name="(?<Name>[A-Za-z]+)" Header="(?<Header>[^"]+)"') | ForEach-Object { $_.Groups['Header'].Value }); ($mainTabs -join ',') -eq 'Waves,Runs,Options' -and $xaml -notmatch 'SinglePcTab|NewWaveTab|AutomaticWaveTab' }
+    Test-Step 'no control name is used twice across the GUI windows' { $names = @([regex]::Matches($allXaml, 'x:Name="(?<Name>[A-Za-z][A-Za-z0-9_]*)"') | ForEach-Object { $_.Groups['Name'].Value } | Where-Object { $_ -ne 'TabBorder' }); @($names | Group-Object | Where-Object { $_.Count -gt 1 }).Count -eq 0 }
     Test-Step 'main window uses the full height of the screen work area and fits on small screens' { $sizeText = [IO.File]::ReadAllText($guiPath); $sizeText -match '\$window\.Height = \$workArea\.Height' -and $sizeText -match '\$window\.MinHeight = \[Math\]::Min\(\$window\.MinHeight, \$workArea\.Height\)' -and $sizeText -match '\$window\.Top = \$workArea\.Top' }
-    Test-Step 'no Batch/LOT wording in the interface' { $xaml -notmatch '\b(LOT|LOTs|Lot|Batch|batch)\b' }
-    Test-Step 'Preview and Create are separate controls; Create states it never launches' { $xaml -match 'AutomaticPreviewButton' -and $xaml -match 'never launches the Wave' }
+    Test-Step 'no Batch/LOT wording in the interface' { $allXaml -notmatch '\b(LOT|LOTs|Lot|Batch|batch)\b' }
+    Test-Step 'Preview and Create are separate controls; Create states it never launches' { $childXaml['automaticWaveXaml'] -match 'AutomaticPreviewButton' -and $childXaml['automaticWaveXaml'] -match 'never launches the Wave' }
     Test-Step 'Launch All is labelled as limited to the selected Campaign in its confirmation' { [IO.File]::ReadAllText($guiPath) -match 'Launch All Waves of this Campaign only' }
     Test-Step 'stop states remote endpoints are reported separately' { [IO.File]::ReadAllText($guiPath) -match 'Remote endpoints may continue and must be verified' }
     $guiText = [IO.File]::ReadAllText($guiPath)
-    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile','Get-InventoryRefreshCommandText','Get-AdInventoryDomains','Get-InventoryRefreshPlan','Get-AutomaticWaveProcessText','Get-AutomaticWaveLastStage','Get-AutomaticWaveResultText')) {
+    foreach ($functionName in @('ConvertTo-PowerShellLiteral','Get-AutomaticWaveCommandText','Get-AutomaticFilterSignature','Split-GuiList','Get-GuiRunCommand','Assert-CmdLiteralValue','ConvertTo-CmdArgument','Get-GuiStatePath','New-GuiSelectionFile','Get-InventoryRefreshCommandText','Get-AdInventoryDomains','Get-InventoryRefreshPlan','Get-AutomaticWaveProcessText','Get-AutomaticWaveLastStage','Get-AutomaticWaveResultText','Get-GuiChildWindowMarkup','Test-AutomaticPreviewReusable')) {
         $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
         . ([scriptblock]::Create($definition.Extent.Text))
     }
     $script:PackageRoot = $packageRoot
+    Test-Step 'dedicated windows receive the styles and brushes of the main window' {
+        $merged = Get-GuiChildWindowMarkup -Markup $childXaml['automaticWaveXaml'] -MainMarkup $xaml
+        $merged -notmatch 'SEMT_SHARED_RESOURCES' -and $merged -match 'x:Key="PrimaryButtonStyle"' -and $merged -match 'x:Key="StepperButtonStyle"' -and $merged -match 'x:Key="BorderBrush"'
+    }
+    Test-Step 'dedicated windows are modal, hidden when closed, and the Campaign is in their title' { $guiText -match '\[void\]\$child\.ShowDialog\(\)' -and $guiText -match '\$cancelEventArgs\.Cancel = \$true; \$eventSource\.Hide\(\)' -and $guiText -match '\$child\.Title = ''\{0\} - \{1\}'' -f \$script:GuiChildTitles\[\$Name\],\$script:CampaignTitles\[\$script:CurrentCampaign\]' }
+    Test-Step 'each button opens its own window' { $guiText -match 'OpenSinglePcButton\.Add_Click\(\{ try \{ Show-GuiChildWindow -Name SinglePc \}' -and $guiText -match 'OpenNewWaveButton\.Add_Click\(\{ try \{ Show-GuiChildWindow -Name NewWave \}' -and $guiText -match 'OpenAutomaticWaveButton\.Add_Click\(\{ try \{ Show-GuiChildWindow -Name AutomaticWave \}' }
+    Test-Step 'Prerequisites hides the Automatic Wave button (no inventory, no Automatic Wave)' { $guiText -match '(?s)if \(\$script:CurrentCampaign -eq ''Prerequisites''\) \{\s*\$controls\.OpenAutomaticWaveButton\.Visibility = ''Collapsed''' -and $guiText -match '\$controls\.OpenAutomaticWaveButton\.Visibility = ''Visible''' }
+    Test-Step 'Create Wave is never greyed out waiting for a Preview (only while the engine runs)' {
+        $disabled = @([regex]::Matches($guiText, 'AutomaticCreateButton\.IsEnabled = \$false')).Count
+        $disabled -eq 1 -and $guiText -match '\$controls\.AutomaticPreviewButton\.IsEnabled = \$false\r?\n\s*\$controls\.AutomaticCreateButton\.IsEnabled = \$false' -and $guiText -notmatch 'Run Preview again before Create' -and $childXaml['automaticWaveXaml'] -notmatch 'AutomaticCreateButton"[^>]*IsEnabled="False"'
+    }
+    Test-Step 'a Preview is reused only with the same filters and its evidence' {
+        (Test-AutomaticPreviewReusable -Signature 'A' -PreviewSignature 'A' -PreviewEvidence 'C:\E') -and -not (Test-AutomaticPreviewReusable -Signature 'A' -PreviewSignature 'B' -PreviewEvidence 'C:\E') -and -not (Test-AutomaticPreviewReusable -Signature 'A' -PreviewSignature '' -PreviewEvidence '') -and -not (Test-AutomaticPreviewReusable -Signature 'A' -PreviewSignature 'A' -PreviewEvidence '')
+    }
+    Test-Step 'Create without a matching Preview states that the selection is computed now with the same safety exclusions' { $guiText -match 'No Preview matches these filters: the selection is computed now with the same rules and safety exclusions' -and $guiText -match 'Show-AutomaticWaveWait -Create:\$Create -ReusePreview:\$reusePreview' }
     Import-Module (Join-Path $packageRoot 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
     # Wave options tab (replaces the "Wave options" button): Options first, then Activity; editors read and
     # write Wave.local.json.txt with inheritance. A fictional Wave in a temporary folder; nothing is launched.
@@ -204,7 +233,7 @@ try {
     $w11Intune = @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade -Kinds Intune,Entra)
     Test-Step 'old inventories only: AD alone runs no Graph sign-in; one Graph inventory runs its own exporter' { ($adOnly.Name -join ',') -eq 'AD' -and ($entraOnly.Name -join ',') -eq 'Graph' -and $entraOnly[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-EntraDevicesCsv.ps1' -and $intuneOnly[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' }
     Test-Step 'old inventories only: Intune and Entra share one sign-in; Windows 11 ignores Entra' { $graphBoth.Count -eq 1 -and $graphBoth[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and $w11Intune.Count -eq 1 -and $w11Intune[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' -and @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade -Kinds Entra).Count -eq 0 }
-    Test-Step 'Automatic Wave view offers "Refresh old inventories only"' { $xaml -match 'x:Name="AutomaticRefreshStaleInventoryButton" Content="Refresh old inventories only"' -and $guiText -match 'Start-InventoryRefresh -Kinds @\(\$old' }
+    Test-Step 'Automatic Wave view offers "Refresh old inventories only"' { $allXaml -match 'x:Name="AutomaticRefreshStaleInventoryButton" Content="Refresh old inventories only"' -and $guiText -match 'Start-InventoryRefresh -Kinds @\(\$old' }
     foreach ($functionName in @('Get-AutomaticInventoryWarning')) {
         $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
         . ([scriptblock]::Create($definition.Extent.Text))
@@ -230,21 +259,21 @@ try {
     Test-Step 'AD domain list is read from the AD inventory (distinct, lower case, sorted, quoted commas)' { (@(Get-AdInventoryDomains -Path $domainCsv) -join ',') -eq 'be.example,fr.example' }
     Set-Content -LiteralPath $domainCsv -Value 'ComputerName,Enabled' -Encoding ASCII
     Test-Step 'AD domain list is empty without the ADDomain column or the file' { @(Get-AdInventoryDomains -Path $domainCsv).Count -eq 0 -and @(Get-AdInventoryDomains -Path (Join-Path $tempRoot 'missing.csv')).Count -eq 0 }
-    Test-Step 'Automatic Wave view offers the AD domain choice' { $xaml -match 'x:Name="AutomaticAdDomainCombo"' -and $guiText -match "AllAdDomainsLabel = '\(All domains\)'" }
+    Test-Step 'Automatic Wave view offers the AD domain choice' { $allXaml -match 'x:Name="AutomaticAdDomainCombo"' -and $guiText -match "AllAdDomainsLabel = '\(All domains\)'" }
     # Preview/Create: the real engine in a hidden process, as started by the GUI (fictional inventories).
     $waitWindow = [string]$ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$automaticWaitXaml' }, $true).Right.Expression.Value
     Test-Step 'Preview and Create show a waiting window with progress and the engine stage' { $waitWindow -match 'IsIndeterminate="True"' -and $waitWindow -match 'x:Name="AutomaticWaitStageText"' -and $guiText -match 'Show-AutomaticWaveWait -Create:\$Create' }
-    Test-Step 'a successful Preview keeps its evidence; Create passes it to the engine' { $guiText -match "AutomaticPreviewEvidence = \[string\]\(Get-SemtPropertyValue -InputObject \`$summary -Name 'EvidencePath'\)" -and $guiText -match '-PreviewEvidencePath \$\(if \(\$Create\) \{ \$script:AutomaticPreviewEvidence \}' }
+    Test-Step 'a successful Preview keeps its evidence; Create passes it to the engine only when it matches the filters' { $guiText -match "AutomaticPreviewEvidence = \[string\]\(Get-SemtPropertyValue -InputObject \`$summary -Name 'EvidencePath'\)" -and $guiText -match '-PreviewEvidencePath \$\(if \(\$reusePreview\) \{ \$script:AutomaticPreviewEvidence \}' -and $guiText -match '\$reusePreview = \(\$Create -and \(Test-AutomaticPreviewReusable -Signature \$signature -PreviewSignature \$script:AutomaticPreviewSignature -PreviewEvidence \$script:AutomaticPreviewEvidence\)\)' }
     Test-Step 'Preview and Create end with a message (counts; Create states the Wave is not launched)' { $guiText -match "'Preview', 'OK', 'Information'" -and $guiText -match "The Wave was NOT launched\." -and $guiText -match "'Create Wave', 'OK', 'Information'" }
     $powershell51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $runPreview = {
-        param([string]$Name)
+        param([string]$Name,[switch]$Create)
         $evidenceRoot = Join-Path $tempRoot ("AutoEvidence-{0}" -f $Name)
         New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
         $logPath = Join-Path $evidenceRoot 'GuiAutomaticWave.log'
-        $command = Get-AutomaticWaveCommandText -Campaign HybridJoin -Filters @{ WaveName = 'WAVE-AUTO-HJ-GUI'; Prefixes = @(); Contains = @(); ExcludeStaleAd = $false; LastLogonDays = 45; Source = 'Both'; ExcludeIntunePresent = $false; AdDomain = '' } -EvidenceRoot $evidenceRoot
+        $command = Get-AutomaticWaveCommandText -Campaign HybridJoin -Filters @{ WaveName = 'WAVE-AUTO-HJ-GUI'; Prefixes = @(); Contains = @(); ExcludeStaleAd = $false; LastLogonDays = 45; Source = 'Both'; ExcludeIntunePresent = $false; AdDomain = '' } -EvidenceRoot $evidenceRoot -Create:$Create
         $process = Start-Process -FilePath $powershell51 -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-AutomaticWaveProcessText -CommandText $command -LogPath $logPath)))) -WindowStyle Hidden -PassThru -Wait
-        [pscustomobject]@{ ExitCode = $process.ExitCode; Log = $(if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath -Raw } else { '' }); Summary = @(Get-ChildItem -LiteralPath $evidenceRoot -Filter 'AutomaticWaveSummary.json.txt' -File -Recurse) }
+        [pscustomobject]@{ ExitCode = $process.ExitCode; Log = $(if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath -Raw } else { '' }); Summary = @(Get-ChildItem -LiteralPath $evidenceRoot -Filter 'AutomaticWaveSummary.json.txt' -File -Recurse); Selection = @(Get-ChildItem -LiteralPath $evidenceRoot -Filter 'AutomaticWaveSelection.csv' -File -Recurse) }
     }
     $missing = & $runPreview 'Missing'
     Test-Step 'Preview without inventory fails with exit code 1 and the error in the log' { $missing.ExitCode -eq 1 -and $missing.Log -match '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ERROR Required automatic Wave inventory not found' -and $missing.Summary.Count -eq 0 }
@@ -254,6 +283,15 @@ try {
     [pscustomobject]@{ ComputerName = 'OTHER'; DeviceName = 'OTHER'; IntuneInventoryPresent = $true; IntuneManagedDeviceId = 'x'; LastSyncDateTime = (Get-Date).ToUniversalTime().ToString('o') } | Export-Csv -LiteralPath (Join-Path $inventoryRoot 'DevicesIntune.csv') -NoTypeInformation -Encoding UTF8
     $ok = & $runPreview 'Ok'
     Test-Step 'Preview succeeds in the hidden process and writes its summary' { $ok.ExitCode -eq 0 -and $ok.Summary.Count -eq 1 }
+    # Create without a Preview: the GUI passes no -PreviewEvidencePath; the engine computes the selection,
+    # keeps its evidence and creates the Wave (not launched). The Wave is removed afterwards.
+    $direct = & $runPreview 'CreateWithoutPreview' -Create
+    $directWave = Join-Path $packageRoot 'Waves\HybridJoin\WAVE-AUTO-HJ-GUI'
+    $directComputers = if (Test-Path -LiteralPath (Join-Path $directWave 'Computers.txt')) { @(Get-Content -LiteralPath (Join-Path $directWave 'Computers.txt') | Where-Object { $_ -and $_ -notmatch '^\s*#' }) } else { @() }
+    $directOk = ($direct.ExitCode -eq 0 -and $direct.Summary.Count -eq 1 -and $direct.Selection.Count -eq 1 -and @(Import-Csv -LiteralPath $direct.Selection[0].FullName | Where-Object { $_.ComputerName -like 'GUI-PC01*' }).Count -eq 1 -and @($directComputers | Where-Object { $_ -match '^GUI-PC01' }).Count -eq 1)
+    Write-TestResult -Condition $directOk -Message 'Create without a Preview computes the selection, writes AutomaticWaveSelection.csv and creates the Wave' -Detail ('exit={0}; summary={1}; selection={2}; computers={3}; log={4}' -f $direct.ExitCode,$direct.Summary.Count,$direct.Selection.Count,($directComputers -join '|'),((@($direct.Log -split '?
+' | Where-Object { $_.Trim() }) | Select-Object -Last 3) -join ' / '))
+    Remove-Item -LiteralPath $directWave -Recurse -Force -ErrorAction SilentlyContinue
     Test-Step 'engine stages reach the log for the waiting window' { (Get-AutomaticWaveLastStage -Text $ok.Log) -match '^Automatic Wave preview ready\.' -and $ok.Log -match ' STAGE Loading inventory records\.\.\.' }
     Test-Step 'end message counts read the HybridJoin and Windows 11 summaries' { (Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 3; ExcludedDevices = 2; FilterExcludedDevices = 1 })) -match 'Selected: 3' -and (Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 4; ExcludedDevices = 0; NameFilterExcludedDevices = 7 })) -match 'Filtered out: 7' }
     $reasonSummary = '{"SelectedDevices":5,"ExcludedDevices":4,"FilterExcludedDevices":0,"ExclusionReasonCounts":{"AD_DISABLED":1,"INTUNE_ENROLLED_CONFIRMED_BY_DEVICE_ID":3}}' | ConvertFrom-Json
@@ -280,13 +318,34 @@ try {
     #region Windows PowerShell 5.1 STA
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $validate = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -ValidateOnly 2>&1 | ForEach-Object { [string]$_ })
-    Test-Step 'GUI -ValidateOnly loads under Windows PowerShell 5.1 STA for both Campaigns' { $LASTEXITCODE -eq 0 -and @($validate | Where-Object { $_ -match '^ValidateOnly: GUI 1\.0\.0 loaded; campaign=(HybridJoin|Windows11Upgrade); options=\d+' }).Count -eq 2 }
+    Test-Step 'GUI -ValidateOnly loads under Windows PowerShell 5.1 STA for both Campaigns' { $LASTEXITCODE -eq 0 -and @($validate | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.0 loaded; campaign=(HybridJoin|Windows11Upgrade); options=\d+' }).Count -eq 2 }
+    Test-Step 'GUI -ValidateOnly loads the three dedicated windows; Automatic Wave is offered for HybridJoin and Windows 11' { @($validate | Where-Object { $_ -match 'campaign=(HybridJoin|Windows11Upgrade); .*; windows=SinglePc,NewWave,AutomaticWave; automaticWaveButton=Visible\.$' }).Count -eq 2 }
     Test-Step 'GUI hides the Prerequisites Campaign while Prerequisites.Enabled is false (default)' { @($validate | Where-Object { $_ -match 'campaign=Prerequisites' }).Count -eq 0 }
     $globalConfig = Join-Path $packageRoot 'Config\SmartEndpointMigrationToolkit.local.json.txt'
     [IO.File]::WriteAllText($globalConfig, '{ "SchemaVersion": 1, "Options": { "Prerequisites.Enabled": true } }')
     try { $validateEnabled = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $guiPath -ValidateOnly 2>&1 | ForEach-Object { [string]$_ }) }
     finally { Remove-Item -LiteralPath $globalConfig -Force -ErrorAction SilentlyContinue }
-    Test-Step 'GUI lists the Prerequisites Campaign when Prerequisites.Enabled is true in the global configuration' { $LASTEXITCODE -eq 0 -and @($validateEnabled | Where-Object { $_ -match '^ValidateOnly: GUI 1\.0\.0 loaded; campaign=(HybridJoin|Windows11Upgrade|Prerequisites); options=\d+' }).Count -eq 3 -and @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; options=\d+' }).Count -eq 1 }
+    Test-Step 'GUI lists the Prerequisites Campaign when Prerequisites.Enabled is true in the global configuration' { $LASTEXITCODE -eq 0 -and @($validateEnabled | Where-Object { $_ -match '^ValidateOnly: GUI 1\.1\.0 loaded; campaign=(HybridJoin|Windows11Upgrade|Prerequisites); options=\d+' }).Count -eq 3 -and @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; options=\d+' }).Count -eq 1 }
+    Test-Step 'Prerequisites hides the Automatic Wave button and keeps Single PC and New Wave' { @($validateEnabled | Where-Object { $_ -match 'campaign=Prerequisites; .*; windows=SinglePc,NewWave,AutomaticWave; automaticWaveButton=Collapsed\.$' }).Count -eq 1 }
+    # The three dedicated windows load under Windows PowerShell 5.1 STA with the resources of the main window.
+    $windowsScript = Join-Path $tempRoot 'windows-check.ps1'
+    @'
+param($Gui)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName PresentationFramework
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Gui, [ref]$null, [ref]$null)
+function Get-Literal([string]$Name) { [string]$ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq ('$' + $Name) }, $true).Right.Expression.Value }
+. ([scriptblock]::Create($ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-GuiChildWindowMarkup' }, $true).Extent.Text))
+$main = Get-Literal 'xaml'
+foreach ($pair in @(@('singlePcXaml','LaunchSingleButton'),@('newWaveXaml','CreateWaveButton'),@('automaticWaveXaml','AutomaticCreateButton'))) {
+    $child = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new((Get-GuiChildWindowMarkup -Markup (Get-Literal $pair[0]) -MainMarkup $main))))
+    $button = $child.FindName($pair[1])
+    'WINDOW={0};BUTTON={1};ENABLED={2};STYLED={3}' -f $pair[0],($null -ne $button),$button.IsEnabled,($null -ne $button.Style)
+}
+'@ | Set-Content -LiteralPath $windowsScript -Encoding ASCII
+    $windowsCheck = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $windowsScript -Gui $guiPath 2>&1 | ForEach-Object { [string]$_ })
+    Test-Step 'Single PC, New Wave and Automatic Wave windows load under Windows PowerShell 5.1 STA (styled main buttons)' { @($windowsCheck | Where-Object { $_ -match '^WINDOW=(singlePcXaml|newWaveXaml|automaticWaveXaml);BUTTON=True;ENABLED=True;STYLED=True$' }).Count -eq 3 }
+    Test-Step 'Create Wave of the Automatic Wave window is enabled when the window opens (no Preview needed)' { @($windowsCheck | Where-Object { $_ -match '^WINDOW=automaticWaveXaml;BUTTON=True;ENABLED=True' }).Count -eq 1 }
     $popupScript = Join-Path $tempRoot 'popup-check.ps1'
     @'
 param($Gui)
@@ -309,17 +368,20 @@ $state = . $Gui -Demo -ValidateOnly
 'OPTIONS1=' + $state.Data.Editors.Count
 $state.Controls.CampaignCombo.SelectedIndex = 1
 'CAMPAIGN=' + $state.Data.Campaign + ';OPTIONS2=' + $state.Data.Editors.Count
-foreach ($name in 'LaunchWaveButton','LaunchAllButton','LaunchSingleButton','CreateWaveButton','AutomaticPreviewButton','AutomaticCreateButton','StopAllButton','ForceStopSelectedRunButton','OpenRunReportButton','ResetOptionsButton','RefreshButton') {
+'WINDOWS=' + (@($state.Data.SemtWindows.Keys) -join ',')
+foreach ($name in 'OpenSinglePcButton','OpenNewWaveButton','OpenAutomaticWaveButton','LaunchWaveButton','LaunchAllButton','LaunchSingleButton','CreateWaveButton','AutomaticPreviewButton','AutomaticCreateButton','StopAllButton','ForceStopSelectedRunButton','OpenRunReportButton','ResetOptionsButton','RefreshButton') {
     $state.Controls[$name].RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
 }
 'FAILED=' + @($state.Activity | Where-Object { $_ -match 'Demo action failed' }).Count
 'OUTPUT=' + $state.LastOutput
+'OPENED=' + @($state.Activity | Where-Object { $_ -match '(Single PC|New Wave|Automatic Wave) window opened' }).Count
 'NOLAUNCH=' + (@($state.Activity | Where-Object { $_ -match 'No launcher, PsExec, worker' }).Count -gt 0)
 $state.Window.Close()
 '@ | Set-Content -LiteralPath $demoScript -Encoding ASCII
     $demo = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $demoScript -Gui $guiPath 2>&1 | ForEach-Object { [string]$_ })
     $demoText = $demo -join "`n"
-    Test-Step 'demo loads every view' { $demoText -match 'VIEWS=Waves,Single PC,New Wave,Automatic Wave,Runs,Options' }
+    Test-Step 'demo loads every view' { $demoText -match 'VIEWS=Waves,Runs,Options' }
+    Test-Step 'demo loads the three dedicated windows and their buttons open them' { $demoText -match 'WINDOWS=SinglePc,NewWave,AutomaticWave' -and $demoText -match 'OPENED=3' }
     Test-Step 'demo shows the real catalog options for both Campaigns' { $demoText -match 'OPTIONS1=\d{2}' -and $demoText -match 'CAMPAIGN=Windows11Upgrade;OPTIONS2=\d{2}' }
     Test-Step 'every demo action completes without error' { $demoText -match 'FAILED=0' }
     Test-Step 'demo report is generated in the demo temp folder only' { $demoText -match 'OUTPUT=.*SmartM365-Demo.*Run-Report-DEMO\.html' }
