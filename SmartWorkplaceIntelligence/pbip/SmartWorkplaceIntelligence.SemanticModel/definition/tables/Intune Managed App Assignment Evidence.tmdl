@@ -178,3 +178,4 @@ table 'Intune Managed App Assignment Evidence'
 				    WithApplicationKey)
 				in
 				    Readers[Finish](BusinessRows)
+

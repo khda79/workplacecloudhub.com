@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "bc94e621307ff8f4e60e",
   "position": {
-    "x": 32,
-    "y": 416,
+    "x": 792,
+    "y": 320,
     "z": 11000,
-    "height": 112,
-    "width": 608,
+    "height": 128,
+    "width": 744,
     "tabOrder": 11000
   },
   "visual": {
@@ -23,12 +23,12 @@
                       "Entity": "Exchange Mailbox Reconciliation"
                     }
                   },
-                  "Property": "Exchange Scenario E3 Need"
+                  "Property": "EXO E3 Required"
                 }
               },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Scenario E3 Need",
-              "nativeQueryRef": "Users in scenario",
-              "displayName": "Users in scenario"
+              "queryRef": "Exchange Mailbox Reconciliation.EXO E3 Required",
+              "nativeQueryRef": "Required",
+              "displayName": "Required"
             },
             {
               "field": {
@@ -38,12 +38,12 @@
                       "Entity": "Exchange Mailbox Reconciliation"
                     }
                   },
-                  "Property": "Exchange Scenario E3 Covered"
+                  "Property": "EXO E3 Assigned coverage"
                 }
               },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Scenario E3 Covered",
-              "nativeQueryRef": "Assigned suite (observed)",
-              "displayName": "Assigned suite (observed)"
+              "queryRef": "Exchange Mailbox Reconciliation.EXO E3 Assigned coverage",
+              "nativeQueryRef": "Assigned coverage",
+              "displayName": "Assigned coverage"
             },
             {
               "field": {
@@ -53,12 +53,27 @@
                       "Entity": "Exchange Mailbox Reconciliation"
                     }
                   },
-                  "Property": "Exchange Scenario E3 Available"
+                  "Property": "EXO E3 To complete"
                 }
               },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Scenario E3 Available",
-              "nativeQueryRef": "Unassigned tenant stock",
-              "displayName": "Unassigned tenant stock"
+              "queryRef": "Exchange Mailbox Reconciliation.EXO E3 To complete",
+              "nativeQueryRef": "To complete",
+              "displayName": "To complete"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Exchange Mailbox Reconciliation"
+                    }
+                  },
+                  "Property": "EXO E3 Available stock label"
+                }
+              },
+              "queryRef": "Exchange Mailbox Reconciliation.EXO E3 Available stock label",
+              "nativeQueryRef": "Available stock",
+              "displayName": "Available stock"
             }
           ]
         }
@@ -66,6 +81,50 @@
     },
     "objects": {
       "value": [
+        {
+          "selector": {
+            "metadata": "Exchange Mailbox Reconciliation.EXO E3 To complete"
+          },
+          "properties": {
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Exchange Mailbox Reconciliation"
+                        }
+                      },
+                      "Property": "EXO E3 To complete color"
+                    }
+                  }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Mailbox Reconciliation.EXO E3 Available stock label"
+          },
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "16D"
+                }
+              }
+            }
+          }
+        },
         {
           "properties": {
             "show": {
@@ -266,7 +325,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "3L"
+                  "Value": "4L"
                 }
               }
             },
@@ -371,6 +430,22 @@
             }
           }
         }
+      ],
+      "spacing": [
+        {
+          "selector": {
+            "id": "default"
+          },
+          "properties": {
+            "verticalSpacing": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -380,7 +455,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Microsoft 365 E3 | estimate; mailbox and licensing scope limitations are in the assumptions banner.'"
+                  "Value": "'To complete: remaining assignments before stock. Red: stock insufficient. Green: stock sufficient. Grey: unknown demand or stock. Tenant stock is not reserved.'"
                 }
               }
             }
@@ -400,7 +475,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Microsoft 365 E3 · estimate'"
+                  "Value": "'Microsoft 365 E3 · EXO estimate'"
                 }
               }
             },

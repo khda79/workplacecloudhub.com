@@ -23,12 +23,12 @@
                       "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Personal mobile KPI value"
+                  "Property": "Mobile devices"
                 }
               },
-              "queryRef": "Global Device Inventory.Personal mobile KPI value",
-              "nativeQueryRef": "Personal mobile devices",
-              "displayName": "Personal mobile devices"
+              "queryRef": "Global Device Inventory.Mobile devices",
+              "nativeQueryRef": "Mobile devices",
+              "displayName": "Mobile devices"
             }
           ]
         },
@@ -418,7 +418,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Personal mobile devices. See tooltip for population and qualification.'"
+                  "Value": "'Mobile devices. Corporate plus Personal Android/iOS/iPadOS devices, regardless of account enabled state. Unknown ownership excluded; devices remain in inventory.'"
                 }
               }
             }
@@ -524,7 +524,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Counts observed Android/iOS/iPadOS devices by qualified Corporate or Personal ownership, regardless of enabled state. Devices with unknown ownership are excluded from these two counts and retained in inventory.'"
+                  "Value": "'Corporate plus Personal Android/iOS/iPadOS devices, regardless of account enabled state. Unknown ownership excluded; devices remain in inventory.'"
                 }
               }
             }

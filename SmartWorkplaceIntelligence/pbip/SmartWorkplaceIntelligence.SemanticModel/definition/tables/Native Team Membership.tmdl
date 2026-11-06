@@ -174,3 +174,4 @@ table 'Native Team Membership'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactTeamMember.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantTeamMemberKey", dataType="String"], [name="TenantTeamKey", dataType="String"], [name="TeamId", dataType="String"], [name="TenantUserKey", dataType="String"], [name="UserId", dataType="String"], [name="UserPrincipalName", dataType="String"], [name="UserType", dataType="String"], [name="Role", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
+

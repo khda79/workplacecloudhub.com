@@ -12,6 +12,5 @@
   "visualGroup": {
     "displayName": "Migration queue",
     "groupMode": "ScaleMode"
-  },
-  "isHidden": true
+  }
 }

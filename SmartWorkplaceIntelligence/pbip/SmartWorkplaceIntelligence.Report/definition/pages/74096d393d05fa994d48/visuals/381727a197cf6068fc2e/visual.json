@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "381727a197cf6068fc2e",
   "position": {
-    "x": 353.77777777777777,
+    "x": 1274.6666666666667,
     "y": 128,
     "z": 9000,
-    "height": 128,
-    "width": 152.88888888888889,
+    "height": 96,
+    "width": 302.66666666666669,
     "tabOrder": 12000
   },
   "visual": {
@@ -20,15 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Noncompliant Devices"
+                  "Property": "Noncompliant enabled corporate PCs"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Noncompliant Devices",
+              "queryRef": "Global Device Inventory.Noncompliant enabled corporate PCs",
               "nativeQueryRef": "Noncompliant Intune devices",
-              "displayName": "Noncompliant Intune devices"
+              "displayName": "Noncompliant enabled PCs"
             }
           ]
         },
@@ -67,7 +67,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "24D"
                 }
               }
             },
@@ -216,7 +216,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },

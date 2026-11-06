@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "cf75de48613eeadd11fa",
   "position": {
-    "x": 1680,
-    "y": 128,
+    "x": 984,
+    "y": 8,
     "z": 23000,
-    "height": 104,
-    "width": 208,
+    "height": 80,
+    "width": 304,
     "tabOrder": 26000
   },
   "visual": {
@@ -23,11 +23,12 @@
                       "Entity": "Mailbox Exploration Inventory"
                     }
                   },
-                  "Property": "Mailbox Key"
+                  "Property": "Mailbox Search"
                 }
               },
-              "queryRef": "Mailbox Exploration Inventory.Mailbox Key",
-              "nativeQueryRef": "Mailbox Key",
+              "queryRef": "Mailbox Exploration Inventory.Mailbox Search",
+              "nativeQueryRef": "Mailbox (name / UPN / SMTP)",
+              "displayName": "Mailbox (name / UPN / SMTP)",
               "active": true
             }
           ]
@@ -61,7 +62,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailbox'"
+                  "Value": "'Mailbox (name / UPN / SMTP)'"
                 }
               }
             },

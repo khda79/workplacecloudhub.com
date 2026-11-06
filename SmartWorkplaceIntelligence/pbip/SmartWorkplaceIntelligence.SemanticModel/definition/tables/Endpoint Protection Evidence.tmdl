@@ -247,3 +247,4 @@ table 'Endpoint Protection Evidence'
 				in Typed)
 				in
 				    Readers[Finish](BusinessRows)
+

@@ -44,21 +44,6 @@
               "queryRef": "User Inventory Evidence.Workforce Console Evidence Coverage (%)",
               "nativeQueryRef": "Workforce Console Evidence Coverage (%)",
               "displayName": "Console evidence coverage (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "User Inventory Evidence"
-                    }
-                  },
-                  "Property": "Missing Activity Evidence"
-                }
-              },
-              "queryRef": "User Inventory Evidence.Missing Activity Evidence",
-              "nativeQueryRef": "Missing Activity Evidence",
-              "displayName": "Overall activity evidence missing"
             }
           ]
         }
@@ -311,6 +296,27 @@
               "expr": {
                 "Literal": {
                   "Value": "0L"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "2L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }

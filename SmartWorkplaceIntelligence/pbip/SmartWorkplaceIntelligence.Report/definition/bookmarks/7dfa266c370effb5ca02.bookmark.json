@@ -19,7 +19,11 @@
       "dfeac4b7b5b968d8412d",
       "f8d64d8064405709db6e",
       "c365ea9a20d172113547",
-      "63bbe1ccc9e734c15e6a"
+      "63bbe1ccc9e734c15e6a",
+      "b60ba3d2e774452d8e20",
+      "e789d2c435ba46f29501",
+      "e263927d6c2945189518",
+      "4f912587f4b8428e9b20"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -77,6 +81,19 @@
           },
           "63bbe1ccc9e734c15e6a": {
             "singleVisual": {}
+          },
+          "4f912587f4b8428e9b20": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "e789d2c435ba46f29501": {
+            "singleVisual": {}
+          },
+          "b60ba3d2e774452d8e20": {
+            "singleVisual": {}
           }
         },
         "visualContainerGroups": {
@@ -99,6 +116,9 @@
             "isHidden": true
           },
           "f8d64d8064405709db6e": {
+            "isHidden": true
+          },
+          "e263927d6c2945189518": {
             "isHidden": true
           }
         }

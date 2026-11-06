@@ -38,12 +38,12 @@
                       "Entity": "User Inventory Evidence"
                     }
                   },
-                  "Property": "Unclassified Workforce Accounts"
+                  "Property": "Workforce Accounts Requiring Persona Review"
                 }
               },
-              "queryRef": "User Inventory Evidence.Unclassified Workforce Accounts",
-              "nativeQueryRef": "Unclassified accounts",
-              "displayName": "Unclassified accounts"
+              "queryRef": "User Inventory Evidence.Workforce Accounts Requiring Persona Review",
+              "nativeQueryRef": "Accounts requiring review",
+              "displayName": "Accounts requiring review"
             },
             {
               "field": {
@@ -53,12 +53,12 @@
                       "Entity": "User Inventory Evidence"
                     }
                   },
-                  "Property": "Workforce Accounts Requiring Persona Review"
+                  "Property": "Unclassified Workforce Accounts"
                 }
               },
-              "queryRef": "User Inventory Evidence.Workforce Accounts Requiring Persona Review",
-              "nativeQueryRef": "Accounts requiring review",
-              "displayName": "Accounts requiring review"
+              "queryRef": "User Inventory Evidence.Unclassified Workforce Accounts",
+              "nativeQueryRef": "Unclassified accounts",
+              "displayName": "Unclassified accounts"
             }
           ]
         }
@@ -260,6 +260,13 @@
               "expr": {
                 "Literal": {
                   "Value": "3L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }

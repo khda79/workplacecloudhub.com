@@ -43,10 +43,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Remaining Observed Windows 10"
+                  "Property": "Enabled corporate PC · Remaining Observed Windows 10"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Remaining Observed Windows 10",
               "nativeQueryRef": "Windows 10 remaining",
               "displayName": "Windows 10 remaining"
             },
@@ -58,10 +58,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Remaining Managed Windows 10"
+                  "Property": "Enabled corporate PC · Remaining Managed Windows 10"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Remaining Managed Windows 10",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Remaining Managed Windows 10",
               "nativeQueryRef": "Intune-managed Windows 10",
               "displayName": "Intune-managed Windows 10"
             },
@@ -73,10 +73,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Migration AD Windows 10 Without Intune Match"
+                  "Property": "Enabled corporate PC · Migration AD Windows 10 Without Intune Match"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Migration AD Windows 10 Without Intune Match",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Migration AD Windows 10 Without Intune Match",
               "nativeQueryRef": "AD only - no Intune match",
               "displayName": "AD only - no Intune match"
             },
@@ -88,10 +88,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Hardware Incompatible Windows 10"
+                  "Property": "Enabled corporate PC · Hardware Incompatible Windows 10 Combined"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Hardware Incompatible Windows 10",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Hardware Incompatible Windows 10 Combined",
               "nativeQueryRef": "Hardware incompatible",
               "displayName": "Hardware incompatible"
             },
@@ -103,12 +103,12 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Migration Windows 10 Eligibility Unknown"
+                  "Property": "Enabled corporate PC · Migration Windows 10 Eligibility Unknown"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Migration Windows 10 Eligibility Unknown",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Migration Windows 10 Eligibility Unknown",
               "nativeQueryRef": "Eligibility unknown",
-              "displayName": "Eligibility unknown"
+              "displayName": "Windows 10 eligibility unknown"
             },
             {
               "field": {
@@ -118,10 +118,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Migration Windows 10 Eligibility Conflicting"
+                  "Property": "Enabled corporate PC · Migration Windows 10 Eligibility Conflicting"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Migration Windows 10 Eligibility Conflicting",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Migration Windows 10 Eligibility Conflicting",
               "nativeQueryRef": "Eligibility conflicting",
               "displayName": "Eligibility conflicting"
             }
@@ -346,7 +346,7 @@
             }
           },
           "selector": {
-            "metadata": "Windows Migration Evidence.Migration Windows 10 Eligibility Conflicting"
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Migration Windows 10 Eligibility Conflicting"
           }
         },
         {
@@ -388,7 +388,7 @@
             }
           },
           "selector": {
-            "metadata": "Windows Migration Evidence.Migration Windows 10 Eligibility Unknown"
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Migration Windows 10 Eligibility Unknown"
           }
         },
         {
@@ -430,7 +430,7 @@
             }
           },
           "selector": {
-            "metadata": "Windows Migration Evidence.Hardware Incompatible Windows 10"
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Hardware Incompatible Windows 10"
           }
         },
         {
@@ -472,7 +472,7 @@
             }
           },
           "selector": {
-            "metadata": "Windows Migration Evidence.Migration AD Windows 10 Without Intune Match"
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Migration AD Windows 10 Without Intune Match"
           }
         },
         {
@@ -514,7 +514,7 @@
             }
           },
           "selector": {
-            "metadata": "Windows Migration Evidence.Remaining Managed Windows 10"
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Remaining Managed Windows 10"
           }
         },
         {
@@ -556,7 +556,7 @@
             }
           },
           "selector": {
-            "metadata": "Windows Migration Evidence.Remaining Observed Windows 10"
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Remaining Observed Windows 10"
           }
         },
         {

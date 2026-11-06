@@ -3,7 +3,7 @@
   "name": "17a02b7035cb2c2be3ce",
   "position": {
     "x": 490,
-    "y": 350.28735632183907,
+    "y": 454.28735632183907,
     "z": 4000,
     "height": 59.597701149425291,
     "width": 450,
@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Security Control Evidence.Code Integrity Healthy (%)",
-              "nativeQueryRef": "Code Integrity Healthy (%)"
+              "nativeQueryRef": "Code Integrity Healthy (%)",
+              "displayName": "Code Integrity Healthy (%) · tenant control"
             }
           ]
         },

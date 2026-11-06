@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "Mailbox capacity & risks",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

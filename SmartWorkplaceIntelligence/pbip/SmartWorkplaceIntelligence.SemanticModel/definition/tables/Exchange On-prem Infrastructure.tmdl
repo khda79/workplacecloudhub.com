@@ -165,3 +165,6 @@ table 'Exchange On-prem Infrastructure'
 	partition 'Exchange On-prem Infrastructure' = m
 		mode: import
 		source = let Readers = CreatePreparedReaders() in Readers[GetExchangeOnPremInfrastructure]()
+
+	annotation PBI_ResultType = Exception
+

@@ -23,10 +23,10 @@
                       "Entity": "Mailbox Migration Inventory"
                     }
                   },
-                  "Property": "Country"
+                  "Property": "Report Country"
                 }
               },
-              "queryRef": "Mailbox Migration Inventory.Country",
+              "queryRef": "Mailbox Migration Inventory.Report Country",
               "nativeQueryRef": "Country",
               "active": true
             }

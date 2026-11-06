@@ -1377,3 +1377,4 @@ table 'Device Readiness Gap Evidence'
 				      #"Migration Firmware State"=K[OrState]([#"ISSUE-070 State"],[#"ISSUE-070B State"])],type record),
 				 Expanded=Table.ExpandRecordColumn(Added,"__context",{"Backlog Country","Backlog AD Domain","Country Match State","Domain Match State","Backlog Device Key","Migration Firmware State"})
 				in Expanded
+

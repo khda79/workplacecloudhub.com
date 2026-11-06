@@ -190,3 +190,4 @@ table 'License User Assignments'
 				        #"Loaded Batch ID"=row[#"Loaded Batch ID"]]),
 				    Output = if not Safe then error "License scope inputs require one common loaded batch" else if not SkuSafe then error "Ambiguous license SKU identity" else Table.FromRecords(Records,type table [TenantKey=text,#"User Key"=text,#"Assignment Key"=text,#"User ID"=nullable text,#"User Principal Name"=nullable text,#"SKU ID"=text,#"License Product"=text,#"Report Product"=nullable text,Country=text,#"AD Domain"=nullable text,#"Identity Qualification"=text,#"Loaded Batch ID"=text])
 				in Output
+

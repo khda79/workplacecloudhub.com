@@ -28,8 +28,7 @@
               },
               "queryRef": "Mailbox Exploration Inventory.All Mailboxes",
               "nativeQueryRef": "All Mailboxes",
-              "active": true,
-              "displayName": "All Mailboxes"
+              "displayName": "All mailboxes"
             },
             {
               "field": {
@@ -39,13 +38,12 @@
                       "Entity": "Mailbox Evidence"
                     }
                   },
-                  "Property": "Mailboxes"
+                  "Property": "Exchange Online Mailboxes"
                 }
               },
-              "queryRef": "Mailbox Evidence.Mailboxes",
-              "nativeQueryRef": "Mailboxes",
-              "active": false,
-              "displayName": "Mailboxes"
+              "queryRef": "Mailbox Evidence.Exchange Online Mailboxes",
+              "nativeQueryRef": "Exchange Online Mailboxes",
+              "displayName": "Online mailboxes"
             },
             {
               "field": {
@@ -55,13 +53,12 @@
                       "Entity": "Mailbox Evidence"
                     }
                   },
-                  "Property": "Large Mailboxes Without Archive"
+                  "Property": "Observed Exchange Online Adoption (%)"
                 }
               },
-              "queryRef": "Mailbox Evidence.Large Mailboxes Without Archive",
-              "nativeQueryRef": "Mailboxes >=45 GB Without Archive",
-              "active": false,
-              "displayName": "Mailboxes >=45 GB Without Archive"
+              "queryRef": "Mailbox Evidence.Observed Exchange Online Adoption (%)",
+              "nativeQueryRef": "Observed Exchange Online Adoption (%)",
+              "displayName": "Online (%)"
             },
             {
               "field": {
@@ -71,13 +68,57 @@
                       "Entity": "Mailbox Evidence"
                     }
                   },
-                  "Property": "Mailboxes With Extensive Delegation"
+                  "Property": "On-premises Mailboxes"
                 }
               },
-              "queryRef": "Mailbox Evidence.Mailboxes With Extensive Delegation",
-              "nativeQueryRef": "Extensive Delegation",
-              "active": false,
-              "displayName": "Extensive Delegation"
+              "queryRef": "Mailbox Evidence.On-premises Mailboxes",
+              "nativeQueryRef": "On-premises Mailboxes",
+              "displayName": "On-prem mailboxes"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "On-premises Mailboxes (2016)"
+                }
+              },
+              "queryRef": "Mailbox Evidence.On-premises Mailboxes (2016)",
+              "nativeQueryRef": "On-premises Mailboxes (2016)",
+              "displayName": "Exchange 2016"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "On-premises Mailboxes (2019/SE)"
+                }
+              },
+              "queryRef": "Mailbox Evidence.On-premises Mailboxes (2019/SE)",
+              "nativeQueryRef": "On-premises Mailboxes (2019/SE)",
+              "displayName": "Exchange 2019/SE"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Evidence"
+                    }
+                  },
+                  "Property": "Exchange version unknown mailboxes"
+                }
+              },
+              "queryRef": "Mailbox Evidence.Exchange version unknown mailboxes",
+              "nativeQueryRef": "Exchange version unknown mailboxes",
+              "displayName": "Version unknown"
             }
           ]
         },
@@ -117,7 +158,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "24D"
                 }
               }
             },
@@ -183,7 +224,7 @@
             "textWrap": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             }
@@ -298,7 +339,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "5L"
+                  "Value": "7L"
                 }
               }
             },

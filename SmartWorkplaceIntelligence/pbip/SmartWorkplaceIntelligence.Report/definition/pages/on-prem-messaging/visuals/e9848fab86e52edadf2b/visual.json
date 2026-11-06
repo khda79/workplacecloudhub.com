@@ -125,21 +125,6 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Exchange On-prem Infrastructure"
-                    }
-                  },
-                  "Property": "Exchange Legacy Server Display"
-                }
-              },
-              "queryRef": "Exchange On-prem Infrastructure.Exchange Legacy Server Display",
-              "nativeQueryRef": "Legacy Exchange <=2016",
-              "displayName": "Legacy Exchange <=2016"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
                       "Entity": "Exchange Mailbox Databases"
                     }
                   },
@@ -149,6 +134,21 @@
               "queryRef": "Exchange Mailbox Databases.Exchange Observed Databases",
               "nativeQueryRef": "Observed databases",
               "displayName": "Observed databases"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Exchange On-prem Infrastructure"
+                    }
+                  },
+                  "Property": "Exchange Legacy Server Display"
+                }
+              },
+              "queryRef": "Exchange On-prem Infrastructure.Exchange Legacy Server Display",
+              "nativeQueryRef": "Legacy Exchange <=2016",
+              "displayName": "Legacy Exchange <=2016"
             }
           ]
         }

@@ -3,7 +3,7 @@
   "name": "ef69d3bea9d7950c9022",
   "position": {
     "x": 776.8,
-    "y": 380,
+    "y": 484,
     "z": 7000,
     "height": 88,
     "width": 366.4,
@@ -28,7 +28,7 @@
               },
               "queryRef": "Security Control Evidence.Firewall Enabled (%)",
               "nativeQueryRef": "Firewall enabled (%)",
-              "displayName": "Firewall enabled (%)"
+              "displayName": "Firewall enabled (%) · tenant control"
             }
           ]
         },

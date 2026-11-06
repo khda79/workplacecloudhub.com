@@ -18,3 +18,4 @@ table 'Readiness Reading'
 	partition 'Readiness Reading' = m
 		mode: import
 		source = #table(type table [#"Reading" = text, #"Order" = Int64.Type],{{"Daily operations",0},{"Windows 11 migration",1}})
+

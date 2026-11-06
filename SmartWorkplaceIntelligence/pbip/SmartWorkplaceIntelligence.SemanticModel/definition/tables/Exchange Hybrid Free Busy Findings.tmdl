@@ -84,3 +84,4 @@ table 'Exchange Hybrid Free Busy Findings'
 				    BusinessRows = Readers[GetExchangeHybridFreeBusy]("Findings")
 				in
 				    Readers[Finish](BusinessRows)
+

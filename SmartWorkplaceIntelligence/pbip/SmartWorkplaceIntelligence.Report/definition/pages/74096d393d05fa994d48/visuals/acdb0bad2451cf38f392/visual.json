@@ -3,7 +3,7 @@
   "name": "acdb0bad2451cf38f392",
   "position": {
     "x": 1147.1999999999998,
-    "y": 380,
+    "y": 484,
     "z": 5000,
     "height": 88,
     "width": 366.4,
@@ -20,15 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Security Control Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Disk Encryption Healthy (%)"
+                  "Property": "Enabled corporate PC encryption (%)"
                 }
               },
-              "queryRef": "Security Control Evidence.Disk Encryption Healthy (%)",
+              "queryRef": "Global Device Inventory.Enabled corporate PC encryption (%)",
               "nativeQueryRef": "Disk encryption (%)",
-              "displayName": "Disk encryption (%)"
+              "displayName": "PC encryption observed (%)"
             }
           ]
         },

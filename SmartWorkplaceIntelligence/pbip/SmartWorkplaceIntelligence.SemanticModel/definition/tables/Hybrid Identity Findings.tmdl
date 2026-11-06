@@ -527,3 +527,4 @@ table 'Hybrid Identity Findings'
 				      #"Rule Observation"=[Rule ID]&" - "&(if [Observed Value]=null then "" else [Observed Value]),#"Severity Sort"=if SeverityOrder<0 then 9 else SeverityOrder],type record),
 				 Expanded=Table.ExpandRecordColumn(Added,"__context",{"Backlog Country","Backlog AD Domain","Country Match State","Domain Match State","Rule Observation","Severity Sort"})
 				in Expanded
+

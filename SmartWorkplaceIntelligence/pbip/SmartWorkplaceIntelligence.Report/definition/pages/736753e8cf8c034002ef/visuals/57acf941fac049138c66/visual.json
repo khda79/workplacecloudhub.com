@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "57acf941fac049138c66",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 0
+  },
+  "visualGroup": {
+    "displayName": "Don’t migrate to EXO",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

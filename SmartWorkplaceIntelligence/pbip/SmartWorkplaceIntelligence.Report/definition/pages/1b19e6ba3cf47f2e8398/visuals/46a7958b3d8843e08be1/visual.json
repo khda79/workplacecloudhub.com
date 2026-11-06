@@ -3,9 +3,9 @@
   "name": "46a7958b3d8843e08be1",
   "position": {
     "x": 32,
-    "y": 790,
+    "y": 819.64705882352939,
     "z": 2000,
-    "height": 210,
+    "height": 180.35294117647058,
     "width": 920,
     "tabOrder": 2000
   },
@@ -23,11 +23,12 @@
                       "Entity": "Mailbox Exploration Inventory"
                     }
                   },
-                  "Property": "Hosting Location"
+                  "Property": "AD Account Type"
                 }
               },
-              "queryRef": "Mailbox Exploration Inventory.Hosting Location",
-              "nativeQueryRef": "Hosting Location",
+              "queryRef": "Mailbox Exploration Inventory.AD Account Type",
+              "nativeQueryRef": "AD account type",
+              "displayName": "AD account type",
               "active": true
             }
           ]
@@ -47,6 +48,26 @@
               },
               "queryRef": "Mailbox Evidence.Mailboxes",
               "nativeQueryRef": "Mailboxes"
+            }
+          ]
+        },
+        "Columns": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Exploration Inventory"
+                    }
+                  },
+                  "Property": "Hosting Location"
+                }
+              },
+              "queryRef": "Mailbox Exploration Inventory.Hosting Location",
+              "nativeQueryRef": "Hosting location",
+              "displayName": "Hosting location",
+              "active": true
             }
           ]
         }
@@ -214,92 +235,6 @@
             }
           }
         }
-      ],
-      "columnFormatting": [
-        {
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
-          },
-          "selector": {
-            "metadata": "Mailbox Evidence.Mailboxes"
-          }
-        },
-        {
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Left'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
-          },
-          "selector": {
-            "metadata": "Mailbox Exploration Inventory.Hosting Location"
-          }
-        }
       ]
     },
     "visualContainerObjects": {
@@ -329,7 +264,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Hosting context'"
+                  "Value": "'Mailboxes by AD account type and hosting'"
                 }
               }
             },

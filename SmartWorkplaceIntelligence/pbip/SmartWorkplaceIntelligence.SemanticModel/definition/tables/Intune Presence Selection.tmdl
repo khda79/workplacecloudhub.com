@@ -11,3 +11,4 @@ table 'Intune Presence Selection'
 	partition 'Intune Presence Selection' = m
 		mode: import
 		source = #table(type table [#"Intune presence"=text],{{"In Intune"},{"Not found in Intune"},{"Unknown / ambiguous"}})
+

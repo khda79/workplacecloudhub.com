@@ -186,3 +186,4 @@ table 'Native Device Application'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactDeviceApplication.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDeviceApplicationKey", dataType="String"], [name="TenantApplicationKey", dataType="String"], [name="ManagedDeviceId", dataType="String"], [name="AppId", dataType="String"], [name="ApplicationLinkStatus", dataType="String"], [name="DeviceLinkStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
+

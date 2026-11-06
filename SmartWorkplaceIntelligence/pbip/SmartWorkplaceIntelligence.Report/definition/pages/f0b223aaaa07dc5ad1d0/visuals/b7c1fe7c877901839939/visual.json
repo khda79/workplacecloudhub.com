@@ -20,14 +20,14 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Exploration Inventory"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Enabled PCs not in Intune <30D"
+                  "Property": "Scoped Enabled PCs not in Intune <30D"
                 }
               },
-              "queryRef": "Device Exploration Inventory.Enabled PCs not in Intune <30D",
-              "nativeQueryRef": "Enabled AD PCs not in Intune",
+              "queryRef": "Global Device Inventory.Scoped Enabled PCs not in Intune <30D",
+              "nativeQueryRef": "Scoped Enabled PCs not in Intune <30D",
               "displayName": "Enabled PCs not in Intune <30D"
             }
           ]
@@ -762,5 +762,63 @@
         }
       ]
     }
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "dbce1d394d54472fa8c7",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Global Device Inventory"
+              }
+            },
+            "Property": "Device type (report)"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "x",
+              "Entity": "Global Device Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "x"
+                          }
+                        },
+                        "Property": "Device type (report)"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'PC'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      }
+    ]
   }
 }

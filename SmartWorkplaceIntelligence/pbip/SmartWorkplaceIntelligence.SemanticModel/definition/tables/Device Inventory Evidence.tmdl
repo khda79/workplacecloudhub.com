@@ -609,6 +609,570 @@ table 'Device Inventory Evidence'
 		isHidden
 		lineageTag: a00d0e50-28d9-4a89-9bfb-f567c2efc328
 
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Current Windows 11 Adoption (%)' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Current Windows 11 Adoption (%)],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: 0.0%
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 805a7cf8-8dea-48a3-8f56-7c74818a5d0f
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Windows 10 Devices Not Capable' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Windows 10 Devices Not Capable],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 88cef7fc-52cf-42c9-bb79-15edbcd89f43
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Current Endpoint Analytics Score' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Current Endpoint Analytics Score],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: 0.0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 3601ddec-eccf-43fa-a697-b9fb7fc83524
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Devices Low on Disk' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Devices Low on Disk],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,##0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: a1e45d06-ea0e-48a7-989e-a07949a2cde3
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Intune Devices Not Synced 30+ Days' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Intune Devices Not Synced 30+ Days],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 27a88114-a045-4bfc-957f-15c2de631d34
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Average Observed Tenure (Years)' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Average Observed Tenure (Years)],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: 0.0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: ce4023f4-3815-4846-b1db-abd804b54517
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Windows 10 Readiness Assessed (%)' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Windows 10 Readiness Assessed (%)],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: 0.0%
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 61bd4543-1f38-4df0-b3c4-b0c3a688233e
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Secure Boot Disabled Devices' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Secure Boot Disabled Devices],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,##0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: d68022b1-7881-4193-a0ce-597116a43fb6
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Windows 10 Devices Remaining' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Windows 10 Devices Remaining],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: c97bd9a9-5f39-40a4-a1fa-f8f9fedd7b03
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Older Windows 11 Release Devices' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Older Windows 11 Release Devices],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,##0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: d46d1acf-31ab-41ea-b9ea-98fa8f188eda
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Endpoint Analytics Below 50 Devices' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Endpoint Analytics Below 50 Devices],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,##0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: a3cb0eae-64e4-41e1-bc55-519bf58f4e3e
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Devices with Stop Errors' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Devices with Stop Errors],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,##0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 95ff44b3-fd1f-4bc0-a6db-b03a0dd84dfa
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Endpoint Analytics Managed Coverage (%)' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Endpoint Analytics Managed Coverage (%)],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: 0.0%
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 25492998-e6f8-4306-bb72-db74de6deb6d
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Current Startup Score' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Current Startup Score],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: 0.0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 8630295e-3bd9-4a96-94b3-5b9a6e1d45df
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Current App Reliability Score' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Current App Reliability Score],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: 0.0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 06ef4547-9915-42eb-a563-7f32c2ab8fbe
+
+	/// Canonical enabled corporate managed equipment total; includes qualified equipment whose native technical detail is not available.
+	measure 'Enabled corporate PC · Managed Devices' = [Managed enabled corporate PCs]
+		formatString: #,##0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 8cab5ef2-c0da-4750-a048-02c419e44454
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · AD-to-Intune Unmatched Devices' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([AD-to-Intune Unmatched Devices],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,##0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 1271068f-eedd-4c37-a8f4-3f78564c393e
+
+	/// Current confirmed Windows/macOS corporate enabled equipment; exact native device ID, tenant where available and batch. Respects global equipment selectors. Source measure retained for explicitly all-state/history evidence.
+	measure 'Enabled corporate PC · Windows 10 Eligibility Not Assessed' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Windows 10 Eligibility Not Assessed],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 7f5d15d0-0e5b-4d7b-a138-5c5f19d1c86e
+
+	/// Confirmed enabled corporate PCs with a matching native Intune inventory detail row. Category breakdowns retain native category filters; canonical equipment total also includes records without native detail.
+	measure 'Enabled corporate PC · Managed inventory details' =
+			VAR _eligibleKeys=(VAR _countries=VALUES('Country Selection'[Country])
+			VAR _domains=VALUES('Daily Domain'[Domain])
+			VAR _presence=VALUES('Intune Presence Selection'[Intune presence])
+			VAR _cf=ISFILTERED('Country Selection')
+			VAR _df=ISFILTERED('Daily Domain')
+			VAR _pf=ISFILTERED('Intune Presence Selection')
+			VAR _lf=ISFILTERED('Account License Selection')
+			VAR _sku=SELECTCOLUMNS(FILTER('Account License Selection',[Selection Kind]="Product"),"K",[Tenant SKU Key])
+			VAR _withLicense=CALCULATETABLE(VALUES('Native User License'[SourceUserId]),TREATAS(_sku,'Native User License'[TenantSkuKey]))
+			VAR _allLicensed=ALL('Native User License'[SourceUserId])
+			VAR _knownUsers=ALL('Native User Evidence'[SourceUserId])
+			VAR _none=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"None")
+			VAR _unknown=CONTAINS('Account License Selection','Account License Selection'[Selection Kind],"Unknown")
+			VAR _risk=ISFILTERED('Device Deployment Risk'[Enrollment Risk]) || ISFILTERED('Device Deployment Risk'[Windows 11 Deployment Risk])
+			VAR _riskKeys=VALUES('Device Deployment Risk'[Inventory Key])
+			VAR _rows=FILTER(CALCULATETABLE('Global Device Inventory',KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled")),
+			 (NOT ISFILTERED('Primary User Selection') || [Primary User (report)] IN VALUES('Primary User Selection'[Primary user])) &&
+			 (NOT _cf || [Country Name] IN _countries) && (NOT _df || [AD Domain] IN _domains) &&
+			 (NOT _pf || [Intune presence] IN _presence) &&
+			 (NOT _lf || [Primary User Source ID] IN _withLicense || (_none && NOT ISBLANK([Primary User Source ID]) && [Primary User Source ID] IN _knownUsers && NOT ([Primary User Source ID] IN _allLicensed)) || (_unknown && (ISBLANK([Primary User Source ID]) || NOT ([Primary User Source ID] IN _knownUsers)))) &&
+			 (NOT _risk || VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] VAR _ad=[AD Computer Key]
+			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
+			 RETURN _legacy IN _riskKeys))
+			 RETURN SELECTCOLUMNS(_rows,"Device",'Global Device Inventory'[Device Source ID],"Tenant",'Global Device Inventory'[TenantKey],"Batch",'Global Device Inventory'[Loaded Batch ID]))
+			RETURN CALCULATE([Managed Devices],KEEPFILTERS(TREATAS(_eligibleKeys,'Device Inventory Evidence'[Device Source ID],'Device Inventory Evidence'[TenantKey],'Device Inventory Evidence'[Loaded Batch ID])))
+		formatString: #,##0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: c910bcd1-0a5e-46d5-b127-fc29a537f1b3
+
 	column 'Device Source ID'
 		dataType: string
 		isHidden
@@ -1391,3 +1955,4 @@ table 'Device Inventory Evidence'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
+

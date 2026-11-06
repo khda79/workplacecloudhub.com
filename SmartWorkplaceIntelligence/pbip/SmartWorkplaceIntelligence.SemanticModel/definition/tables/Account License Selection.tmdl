@@ -24,3 +24,4 @@ table 'Account License Selection'
 				 SELECTCOLUMNS('Native License SKU',"License Product",COALESCE('Native License SKU'[SkuPartNumberLabel],'Native License SKU'[SkuPartNumber]),"Tenant SKU Key",'Native License SKU'[TenantSkuKey],"Selection Kind","Product"),
 				 ROW("License Product","No license observed","Tenant SKU Key","__none__","Selection Kind","None"),
 				 ROW("License Product","Unknown license evidence","Tenant SKU Key","__unknown__","Selection Kind","Unknown"))
+

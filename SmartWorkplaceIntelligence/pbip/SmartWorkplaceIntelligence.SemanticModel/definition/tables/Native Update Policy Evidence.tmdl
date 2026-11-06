@@ -152,3 +152,4 @@ table 'Native Update Policy Evidence'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
+

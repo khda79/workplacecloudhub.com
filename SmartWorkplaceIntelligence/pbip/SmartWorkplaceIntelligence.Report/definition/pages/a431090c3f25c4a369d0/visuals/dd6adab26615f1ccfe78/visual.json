@@ -3,7 +3,7 @@
   "name": "dd6adab26615f1ccfe78",
   "position": {
     "x": 32,
-    "y": 320,
+    "y": 424,
     "z": 3000,
     "height": 94.444444444444443,
     "width": 1856,
@@ -83,12 +83,12 @@
                       "Entity": "Intune Configuration Device Evidence"
                     }
                   },
-                  "Property": "Intune Configuration Unknown Observations"
+                  "Property": "Intune Configuration Observations"
                 }
               },
-              "queryRef": "Intune Configuration Device Evidence.Intune Configuration Unknown Observations",
-              "nativeQueryRef": "Unknown configuration",
-              "displayName": "Unknown configuration"
+              "queryRef": "Intune Configuration Device Evidence.Intune Configuration Observations",
+              "nativeQueryRef": "Configuration observations",
+              "displayName": "Configuration observations"
             },
             {
               "field": {
@@ -98,12 +98,12 @@
                       "Entity": "Intune Configuration Device Evidence"
                     }
                   },
-                  "Property": "Intune Configuration Observations"
+                  "Property": "Intune Configuration Unknown Observations"
                 }
               },
-              "queryRef": "Intune Configuration Device Evidence.Intune Configuration Observations",
-              "nativeQueryRef": "Configuration observations",
-              "displayName": "Configuration observations"
+              "queryRef": "Intune Configuration Device Evidence.Intune Configuration Unknown Observations",
+              "nativeQueryRef": "Unknown configuration",
+              "displayName": "Unknown configuration"
             }
           ]
         },
@@ -388,7 +388,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "7L"
+                  "Value": "6L"
                 }
               }
             },

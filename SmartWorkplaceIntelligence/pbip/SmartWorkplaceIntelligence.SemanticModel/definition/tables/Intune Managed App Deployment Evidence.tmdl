@@ -367,3 +367,4 @@ table 'Intune Managed App Deployment Evidence'
 				    WithDeviceKey)
 				in
 				    Readers[Finish](BusinessRows)
+

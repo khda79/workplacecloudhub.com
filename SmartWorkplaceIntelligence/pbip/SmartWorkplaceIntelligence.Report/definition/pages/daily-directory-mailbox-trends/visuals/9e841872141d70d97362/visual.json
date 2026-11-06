@@ -127,7 +127,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'On-premises mailboxes'"
+                  "Value": "'On-premises mailboxes · historical collected objects'"
                 }
               }
             },

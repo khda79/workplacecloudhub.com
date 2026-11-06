@@ -20,14 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Device Compliance Rate"
+                  "Property": "Enabled corporate PC compliance (%)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Device Compliance Rate",
-              "nativeQueryRef": "Device Compliance Rate"
+              "queryRef": "Global Device Inventory.Enabled corporate PC compliance (%)",
+              "nativeQueryRef": "Equipment Compliance Rate (%)",
+              "displayName": "PC compliance (%)"
             }
           ]
         },
@@ -708,5 +709,63 @@
         }
       ]
     }
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "fdb688da68eb44ab83c9",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Global Device Inventory"
+              }
+            },
+            "Property": "Device type (report)"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "x",
+              "Entity": "Global Device Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "x"
+                          }
+                        },
+                        "Property": "Device type (report)"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'PC'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      }
+    ]
   }
 }

@@ -69,3 +69,4 @@ table 'SPO Migration Operation'
 				        in Table.Distinct(Source, {"Operation Key"}))
 				in
 				    Readers[Finish](BusinessRows)
+

@@ -233,7 +233,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Control health by security control'"
+                  "Value": "'Reported tenant controls · original observation scope'"
                 }
               }
             },

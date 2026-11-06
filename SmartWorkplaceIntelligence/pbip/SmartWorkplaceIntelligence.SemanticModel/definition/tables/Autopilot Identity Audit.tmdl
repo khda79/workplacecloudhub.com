@@ -93,7 +93,7 @@ table 'Autopilot Identity Audit'
 	partition 'Autopilot Identity Audit' = calculated
 		mode: import
 		source = ```
-
+				
 				VAR _edges=ADDCOLUMNS('Autopilot Evidence',
 				"__EntraNativeKey",VAR _a=[AzureAdDeviceId] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN IF(NOT ISBLANK(_a) && _a<>"00000000-0000-0000-0000-000000000000",LOOKUPVALUE('Native Device Evidence'[TenantDeviceKey],'Native Device Evidence'[SourceDeviceId],_a,'Native Device Evidence'[TenantKey],_t,'Native Device Evidence'[Loaded Batch ID],_b)),
 				"__ManagedTargets",VAR _m=[ManagedDeviceId] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN IF(NOT ISBLANK(_m) && _m<>"00000000-0000-0000-0000-000000000000",COUNTROWS(FILTER('Device Identity Inventory',[Device Source ID]=_m && [TenantKey]=_t && [Loaded Batch ID]=_b)),0),
@@ -113,5 +113,6 @@ table 'Autopilot Identity Audit'
 				[__SourceKey]=[__TargetKey],"Same enrolled identity",
 				[__SourceHasManagement]>0,"Conflict: distinct managed or AD identities",
 				"Unique Autopilot equipment link"))
-
+				
 				```
+

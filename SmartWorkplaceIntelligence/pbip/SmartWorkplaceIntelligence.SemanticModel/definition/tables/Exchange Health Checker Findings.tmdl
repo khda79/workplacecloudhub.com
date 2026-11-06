@@ -101,3 +101,4 @@ table 'Exchange Health Checker Findings'
 				    Forced = Table.RowCount(BusinessRows)
 				in
 				    if Forced >= 0 then Readers[Finish](BusinessRows) else error "Health Checker findings unavailable"
+

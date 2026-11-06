@@ -20,60 +20,60 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Exchange Mailbox Reconciliation"
+                      "Entity": "Mailbox Migration Inventory"
                     }
                   },
-                  "Property": "Exchange Population Total"
+                  "Property": "Local Mailboxes With Database"
                 }
               },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Population Total",
-              "nativeQueryRef": "Total on-prem mailboxes",
-              "displayName": "Total on-prem mailboxes"
+              "queryRef": "Mailbox Migration Inventory.Local Mailboxes With Database",
+              "nativeQueryRef": "Local Mailboxes With Database",
+              "displayName": "On-prem mailboxes"
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Exchange Mailbox Reconciliation"
+                      "Entity": "Mailbox Migration Exception Summary"
                     }
                   },
-                  "Property": "Exchange Population Register Retained"
+                  "Property": "Mailbox Planning Retained"
                 }
               },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Population Register Retained",
-              "nativeQueryRef": "Register: remain on-prem",
-              "displayName": "Register: remain on-prem"
+              "queryRef": "Mailbox Migration Exception Summary.Mailbox Planning Retained",
+              "nativeQueryRef": "Mailbox Planning Retained",
+              "displayName": "Don’t migrate to EXO"
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Exchange Mailbox Reconciliation"
+                      "Entity": "Mailbox Migration Inventory"
                     }
                   },
-                  "Property": "Exchange Population Service Label"
+                  "Property": "To migrate to EXO provisional"
                 }
               },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Population Service Label",
-              "nativeQueryRef": "Service accounts: remain on-prem",
-              "displayName": "Service accounts: remain on-prem"
+              "queryRef": "Mailbox Migration Inventory.To migrate to EXO provisional",
+              "nativeQueryRef": "To migrate to EXO provisional",
+              "displayName": "To migrate to EXO · provisional"
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Exchange Mailbox Reconciliation"
+                      "Entity": "Mailbox Migration Exception Summary"
                     }
                   },
-                  "Property": "Exchange Population Potential Label"
+                  "Property": "Mailbox Planning Review"
                 }
               },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Population Potential Label",
-              "nativeQueryRef": "Potential EXO | before service review",
-              "displayName": "Potential EXO | before service review"
+              "queryRef": "Mailbox Migration Exception Summary.Mailbox Planning Review",
+              "nativeQueryRef": "Mailbox Planning Review",
+              "displayName": "Exception register rows to review"
             }
           ]
         }

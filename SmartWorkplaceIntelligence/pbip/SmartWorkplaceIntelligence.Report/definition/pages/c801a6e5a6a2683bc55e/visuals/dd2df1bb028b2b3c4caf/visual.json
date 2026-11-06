@@ -20,14 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Noncompliant Devices"
+                  "Property": "Noncompliant enabled corporate PCs"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Noncompliant Devices",
-              "nativeQueryRef": "Noncompliant Devices"
+              "queryRef": "Global Device Inventory.Noncompliant enabled corporate PCs",
+              "nativeQueryRef": "Noncompliant Devices",
+              "displayName": "Noncompliant enabled PCs"
             }
           ]
         },

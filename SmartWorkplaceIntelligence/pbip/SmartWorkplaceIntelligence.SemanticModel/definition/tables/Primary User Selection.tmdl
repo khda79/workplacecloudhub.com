@@ -10,3 +10,4 @@ table 'Primary User Selection'
 	partition 'Primary User Selection' = calculated
 		mode: import
 		source = DISTINCT(UNION(SELECTCOLUMNS('Global Device Inventory',"Primary user",[Primary User (report)]),SELECTCOLUMNS('Device Inventory Evidence',"Primary user",[Primary User (report)]),SELECTCOLUMNS('Device System Evidence',"Primary user",[Primary User (report)])))
+

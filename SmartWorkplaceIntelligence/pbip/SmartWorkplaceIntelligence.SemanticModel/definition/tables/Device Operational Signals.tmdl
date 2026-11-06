@@ -217,3 +217,4 @@ table 'Device Operational Signals'
 				        {20, "High", "Enabled AD Windows PCs not found in Intune", "Management coverage", "Verify native AD/Entra identity and enroll the workstation, or review its lifecycle. Unknown/ambiguous identities are excluded.", "Same-batch AD native identity + Intune inventory"}
 				    }
 				)
+

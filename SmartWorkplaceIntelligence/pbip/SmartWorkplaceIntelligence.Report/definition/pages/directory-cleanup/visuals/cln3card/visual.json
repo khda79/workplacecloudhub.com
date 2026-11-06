@@ -53,12 +53,12 @@
                       "Entity": "Mailbox Cleanup Evidence"
                     }
                   },
-                  "Property": "Mailbox Cleanup Review"
+                  "Property": "Mailbox Cleanup Active"
                 }
               },
-              "queryRef": "Mailbox Cleanup Evidence.Mailbox Cleanup Review",
-              "nativeQueryRef": "Mailbox Cleanup Review",
-              "displayName": "Mailboxes review"
+              "queryRef": "Mailbox Cleanup Evidence.Mailbox Cleanup Active",
+              "nativeQueryRef": "Mailbox Cleanup Active",
+              "displayName": "Mailboxes active"
             },
             {
               "field": {
@@ -68,12 +68,12 @@
                       "Entity": "Mailbox Cleanup Evidence"
                     }
                   },
-                  "Property": "Mailbox Cleanup Active"
+                  "Property": "Mailbox Cleanup Review"
                 }
               },
-              "queryRef": "Mailbox Cleanup Evidence.Mailbox Cleanup Active",
-              "nativeQueryRef": "Mailbox Cleanup Active",
-              "displayName": "Mailboxes active"
+              "queryRef": "Mailbox Cleanup Evidence.Mailbox Cleanup Review",
+              "nativeQueryRef": "Mailbox Cleanup Review",
+              "displayName": "Mailboxes review"
             }
           ]
         }
@@ -332,7 +332,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "7L"
+                  "Value": "4L"
                 }
               }
             },

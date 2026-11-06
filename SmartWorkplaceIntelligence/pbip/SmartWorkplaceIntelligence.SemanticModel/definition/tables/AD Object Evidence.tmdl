@@ -126,3 +126,4 @@ table 'AD Object Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("ADDirectoryObject.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantADObjectKey", dataType="String"], [name="ObjectGUID", dataType="String"], [name="ObjectSID", dataType="String"], [name="DomainName", dataType="String"], [name="DistinguishedName", dataType="String"], [name="ObjectClass", dataType="String"], [name="PrimaryGroupID", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
+

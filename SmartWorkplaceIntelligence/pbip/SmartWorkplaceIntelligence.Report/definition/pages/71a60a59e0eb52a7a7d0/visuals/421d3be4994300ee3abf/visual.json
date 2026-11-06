@@ -12,6 +12,5 @@
   "visualGroup": {
     "displayName": "Mailbox inventory",
     "groupMode": "ScaleMode"
-  },
-  "isHidden": true
+  }
 }

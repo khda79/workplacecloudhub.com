@@ -44,3 +44,4 @@ table 'Exchange Mailbox Server Reference'
 				    Display = Table.TransformColumns(Projected, {{"Server Name", each if _ = null or Text.Trim(_) = "" then "Not observed" else _, type text}})
 				in
 				    Readers[Finish](Display)
+

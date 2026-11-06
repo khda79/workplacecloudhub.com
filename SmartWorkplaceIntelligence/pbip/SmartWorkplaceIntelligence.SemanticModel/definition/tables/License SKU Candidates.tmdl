@@ -289,3 +289,4 @@ table 'License SKU Candidates'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Table
+

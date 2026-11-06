@@ -38,12 +38,12 @@
                       "Entity": "Content Storage Evidence"
                     }
                   },
-                  "Property": "Inactive Content Storage (TB)"
+                  "Property": "Content Storage Used (TB)"
                 }
               },
-              "queryRef": "Content Storage Evidence.Inactive Content Storage (TB)",
-              "nativeQueryRef": "Inactive Storage (TB)",
-              "displayName": "Inactive Storage (TB)"
+              "queryRef": "Content Storage Evidence.Content Storage Used (TB)",
+              "nativeQueryRef": "Storage Used (TB)",
+              "displayName": "Storage Used (TB)"
             },
             {
               "field": {
@@ -53,12 +53,12 @@
                       "Entity": "Content Storage Evidence"
                     }
                   },
-                  "Property": "Content Storage Used (TB)"
+                  "Property": "Inactive Content Storage (TB)"
                 }
               },
-              "queryRef": "Content Storage Evidence.Content Storage Used (TB)",
-              "nativeQueryRef": "Storage Used (TB)",
-              "displayName": "Storage Used (TB)"
+              "queryRef": "Content Storage Evidence.Inactive Content Storage (TB)",
+              "nativeQueryRef": "Inactive Storage (TB)",
+              "displayName": "Inactive Storage (TB)"
             }
           ]
         }

@@ -149,7 +149,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailbox quality - last qualified / fully measured'"
+                  "Value": "'Mailbox quality - last qualified / fully measured · historical collected objects'"
                 }
               }
             },

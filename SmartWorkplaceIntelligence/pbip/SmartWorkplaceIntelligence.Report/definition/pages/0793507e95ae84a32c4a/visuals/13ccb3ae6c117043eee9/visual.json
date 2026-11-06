@@ -68,13 +68,13 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Managed Devices"
+                  "Property": "Enabled corporate PC · Managed inventory details"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Managed Devices",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Managed inventory details",
               "nativeQueryRef": "Managed Devices",
               "active": true,
-              "displayName": "Devices"
+              "displayName": "Managed inventory details"
             },
             {
               "field": {
@@ -84,12 +84,13 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 10 Devices Remaining"
+                  "Property": "Enabled corporate PC · Windows 10 Devices Remaining"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 10 Devices Remaining",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Devices Remaining",
               "nativeQueryRef": "Windows 10 Devices Remaining",
-              "active": true
+              "active": true,
+              "displayName": "Windows 10 Devices Remaining"
             },
             {
               "field": {
@@ -99,12 +100,13 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Older Windows 11 Release Devices"
+                  "Property": "Enabled corporate PC · Older Windows 11 Release Devices"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Older Windows 11 Release Devices",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Older Windows 11 Release Devices",
               "nativeQueryRef": "Older Windows 11 Release Devices",
-              "active": true
+              "active": true,
+              "displayName": "Older Windows 11 Release Devices"
             }
           ]
         }
@@ -373,7 +375,7 @@
         },
         {
           "selector": {
-            "metadata": "Device Inventory Evidence.Managed Devices"
+            "metadata": "Device Inventory Evidence.Enabled corporate PC · Managed inventory details"
           },
           "properties": {
             "alignment": {
@@ -408,7 +410,7 @@
         },
         {
           "selector": {
-            "metadata": "Device Inventory Evidence.Windows 10 Devices Remaining"
+            "metadata": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Devices Remaining"
           },
           "properties": {
             "alignment": {
@@ -443,7 +445,7 @@
         },
         {
           "selector": {
-            "metadata": "Device Inventory Evidence.Older Windows 11 Release Devices"
+            "metadata": "Device Inventory Evidence.Enabled corporate PC · Older Windows 11 Release Devices"
           },
           "properties": {
             "alignment": {

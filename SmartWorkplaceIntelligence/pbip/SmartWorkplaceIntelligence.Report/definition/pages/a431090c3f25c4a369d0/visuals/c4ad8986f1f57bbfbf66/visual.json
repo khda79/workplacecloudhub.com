@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "c4ad8986f1f57bbfbf66",
   "position": {
-    "x": 1274.6666666666667,
-    "y": 128,
+    "x": 265,
+    "y": 232,
     "z": 61000,
-    "height": 104,
-    "width": 147.33333333333334,
-    "tabOrder": 61084
+    "height": 96,
+    "width": 225,
+    "tabOrder": 61063
   },
   "visual": {
     "visualType": "cardVisual",
@@ -20,15 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Security Control Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Secure Boot Healthy (%)"
+                  "Property": "Enabled corporate PC encryption (%)"
                 }
               },
-              "queryRef": "Security Control Evidence.Secure Boot Healthy (%)",
-              "nativeQueryRef": "Secure Boot Healthy (%)",
-              "displayName": "Secure Boot (Windows %)"
+              "queryRef": "Global Device Inventory.Enabled corporate PC encryption (%)",
+              "nativeQueryRef": "Disk Encryption Healthy (%)",
+              "displayName": "PC encryption observed (%)"
             }
           ]
         }
@@ -48,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "25D"
                 }
               }
             },
@@ -69,7 +69,7 @@
                                       "Entity": "Security Control Evidence"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Secure Boot Healthy (%)"
+                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
                                 }
                               },
                               "Right": {
@@ -96,7 +96,7 @@
                                       "Entity": "Security Control Evidence"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Secure Boot Healthy (%)"
+                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
                                 }
                               },
                               "Right": {
@@ -123,7 +123,7 @@
                                       "Entity": "Security Control Evidence"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Secure Boot Healthy (%)"
+                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
                                 }
                               },
                               "Right": {
@@ -183,7 +183,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },
@@ -268,7 +268,7 @@
                                       "Entity": "Security Control Evidence"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Secure Boot Healthy (%)"
+                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
                                 }
                               },
                               "Right": {
@@ -295,7 +295,7 @@
                                       "Entity": "Security Control Evidence"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Secure Boot Healthy (%)"
+                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
                                 }
                               },
                               "Right": {
@@ -322,7 +322,7 @@
                                       "Entity": "Security Control Evidence"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Secure Boot Healthy (%)"
+                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
                                 }
                               },
                               "Right": {
@@ -411,13 +411,6 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
-                }
-              }
-            },
-            "rowPadding": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
                 }
               }
             },

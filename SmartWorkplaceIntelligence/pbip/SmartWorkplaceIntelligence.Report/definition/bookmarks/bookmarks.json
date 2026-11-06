@@ -10,6 +10,7 @@
         "licenseTab2",
         "licenseTab3",
         "licenseTab4",
+        "licenseSharedMailbox",
         "licenseTab5",
         "99c1ec3b75a896c83013"
       ]
@@ -316,6 +317,7 @@
         "9ad22eac22b6a0ea9fde",
         "58a34cbf10dc26fe918b",
         "edb421af32a16f709feb",
+        "d7b6f3184b3c4ba88af0",
         "29bdace156abace1ab4a",
         "b1556089e3b7e7f7cc5c",
         "f7f7e9bf32c757e28e39",
@@ -348,6 +350,7 @@
         "f0b4977608a64a44044a",
         "8d3650f3d7bcada7d605",
         "1b8e5209d87b6e83c61c",
+        "f71efb42c836407b97ba",
         "70536ff200af8cb17993",
         "0565bba55db38c4ff954"
       ]
@@ -495,6 +498,7 @@
         "594bc8fed4a3cb1dffc2",
         "381c49cae8f3d3da2220",
         "d56c2c52d407a4a1e49a",
+        "3ee250d1e1a7440eacf6",
         "8ed348965d8c0192e49b"
       ]
     },
@@ -503,6 +507,7 @@
       "displayName": "Migration to Exchange Online/SE views",
       "children": [
         "15ce8f6c5e51acdacfda",
+        "cc510578e8964b27b57d",
         "8f22a8b2b8774be8e3a7",
         "edf2d94d88358acab49d",
         "63cda3314e52a37654f6",
@@ -534,6 +539,18 @@
         "cleanupusersbookmark",
         "cleanupcomputersbookmark",
         "cleanupmailboxesbookmark"
+      ]
+    },
+    {
+      "name": "c0de3900000000000001",
+      "displayName": "Migration to Intune views",
+      "children": [
+        "c0de3600000000000001",
+        "c0de3600000000000002",
+        "c0de3600000000000003",
+        "c0de3600000000000004",
+        "c0de3600000000000005",
+        "c0de3600000000000006"
       ]
     }
   ]

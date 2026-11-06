@@ -27,7 +27,8 @@
                 }
               },
               "queryRef": "Security Control Evidence.Code Integrity Healthy (%)",
-              "nativeQueryRef": "Code Integrity (%)"
+              "nativeQueryRef": "Code Integrity (%)",
+              "displayName": "Code Integrity Healthy (%) · tenant control"
             }
           ]
         },

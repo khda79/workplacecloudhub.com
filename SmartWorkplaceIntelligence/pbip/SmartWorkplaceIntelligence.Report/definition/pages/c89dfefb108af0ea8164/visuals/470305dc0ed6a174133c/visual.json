@@ -51,6 +51,20 @@
                       "Entity": "Content Storage Evidence"
                     }
                   },
+                  "Property": "OneDrive Accounts Without Activity Evidence"
+                }
+              },
+              "queryRef": "Content Storage Evidence.OneDrive Accounts Without Activity Evidence",
+              "nativeQueryRef": "OneDrive Without Activity"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Content Storage Evidence"
+                    }
+                  },
                   "Property": "Inactive Content Containers"
                 }
               },
@@ -70,62 +84,6 @@
               },
               "queryRef": "Content Storage Evidence.Orphaned SharePoint Sites",
               "nativeQueryRef": "Orphaned Sites"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Content Storage Evidence"
-                    }
-                  },
-                  "Property": "OneDrive Accounts Without Activity Evidence"
-                }
-              },
-              "queryRef": "Content Storage Evidence.OneDrive Accounts Without Activity Evidence",
-              "nativeQueryRef": "OneDrive Without Activity"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Content Storage Evidence"
-                    }
-                  },
-                  "Property": "Content Storage Used (TB)"
-                }
-              },
-              "queryRef": "Content Storage Evidence.Content Storage Used (TB)",
-              "nativeQueryRef": "Storage Used (TB)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Content Storage Evidence"
-                    }
-                  },
-                  "Property": "Containers at 80%+ Quota"
-                }
-              },
-              "queryRef": "Content Storage Evidence.Containers at 80%+ Quota",
-              "nativeQueryRef": "At 80%+ Quota"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Content Storage Evidence"
-                    }
-                  },
-                  "Property": "Inactive Content Storage (TB)"
-                }
-              },
-              "queryRef": "Content Storage Evidence.Inactive Content Storage (TB)",
-              "nativeQueryRef": "Inactive Storage (TB)"
             }
           ]
         }
@@ -384,7 +342,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "5L"
                 }
               }
             },

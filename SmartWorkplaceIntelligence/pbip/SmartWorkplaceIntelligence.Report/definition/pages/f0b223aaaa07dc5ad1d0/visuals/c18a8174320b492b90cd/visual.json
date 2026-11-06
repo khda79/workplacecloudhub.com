@@ -20,14 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Security Control Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Secure Boot Healthy (%)"
+                  "Property": "Enabled corporate Windows Secure Boot (%)"
                 }
               },
-              "queryRef": "Security Control Evidence.Secure Boot Healthy (%)",
-              "nativeQueryRef": "Secure Boot (%)"
+              "queryRef": "Global Device Inventory.Enabled corporate Windows Secure Boot (%)",
+              "nativeQueryRef": "Secure Boot (%)",
+              "displayName": "PC Secure Boot observed (%)"
             }
           ]
         },

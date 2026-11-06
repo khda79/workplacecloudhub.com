@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "Recovery candidates",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

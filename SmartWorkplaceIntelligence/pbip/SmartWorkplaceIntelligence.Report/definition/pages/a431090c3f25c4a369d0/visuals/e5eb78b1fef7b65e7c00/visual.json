@@ -3,9 +3,9 @@
   "name": "e5eb78b1fef7b65e7c00",
   "position": {
     "x": 32,
-    "y": 320,
+    "y": 504,
     "z": 0,
-    "height": 161.05263157894737,
+    "height": 142.10526315789474,
     "width": 912,
     "tabOrder": 3000
   },
@@ -23,41 +23,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Intune Devices Not Synced 30+ Days"
+                  "Property": "Enabled corporate PC · Intune Devices Not Synced 30+ Days"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Intune Devices Not Synced 30+ Days",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Intune Devices Not Synced 30+ Days",
               "nativeQueryRef": "Not synced for 30+ days",
               "displayName": "Not synced for 30+ days"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Devices Low on Disk"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Devices Low on Disk",
-              "nativeQueryRef": "Devices Low on Disk"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Exploration Inventory"
-                    }
-                  },
-                  "Property": "Exploration Enabled AD PCs Managed (%)"
-                }
-              },
-              "queryRef": "Device Exploration Inventory.Exploration Enabled AD PCs Managed (%)",
-              "nativeQueryRef": "Enabled AD PCs managed (%)",
-              "displayName": "Enabled AD PCs managed (%)"
             },
             {
               "field": {
@@ -96,12 +67,27 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Average Observed Tenure (Years)"
+                  "Property": "Enabled corporate PC · Average Observed Tenure (Years)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Average Observed Tenure (Years)",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Average Observed Tenure (Years)",
               "nativeQueryRef": "Observed tenure (years)",
               "displayName": "Observed tenure (years)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Enabled corporate PC · Devices Low on Disk"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Devices Low on Disk",
+              "nativeQueryRef": "Devices Low on Disk",
+              "displayName": "Devices Low on Disk"
             }
           ]
         }
@@ -360,7 +346,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "6L"
+                  "Value": "5L"
                 }
               }
             },

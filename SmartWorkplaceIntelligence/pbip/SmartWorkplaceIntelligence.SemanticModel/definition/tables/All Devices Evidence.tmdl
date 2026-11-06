@@ -20,7 +20,7 @@ table 'All Devices Evidence'
 
 	/// Confirmed enabled directory/management identities within the existing strong-identity union. AD presence uses explicit AD Enabled; Intune-only uses explicit Entra Enabled. Any known opposite Disabled state on a unique native SID/device-ID link excludes the identity. Unknown primary states are excluded; not evidence of physical activity. Returns blank if the four contributing imported tables do not expose one common batch.
 	measure 'All Enabled Devices' =
-
+			
 			VAR _batches =
 			    UNION(
 			        SELECTCOLUMNS(CALCULATETABLE(DISTINCT('All Devices Evidence'[Loaded Batch ID]), REMOVEFILTERS()), "__Batch", 'All Devices Evidence'[Loaded Batch ID]),
@@ -100,7 +100,7 @@ table 'All Devices Evidence'
 			VAR _knownKeys = DISTINCT(UNION(_adEnabled, _adDisabled, _intuneEnabled, _intuneDisabled))
 			VAR _conflictKeys = DISTINCT(UNION(_adConflicts, _adReverseConflicts, INTERSECT(_adEnabled, _adDisabled), INTERSECT(_intuneEnabled, _intuneDisabled), INTERSECT(_intuneEnabled, _intuneDisabledByAD)))
 			VAR _enabledKeys = DISTINCT(UNION(EXCEPT(EXCEPT(_adEnabled, _adDisabled), _adConflicts), EXCEPT(EXCEPT(_intuneEnabled, _intuneDisabled), _intuneDisabledByAD)))
-
+			
 			RETURN IF(_batchSafe, CALCULATE([All Devices], KEEPFILTERS(TREATAS(_enabledKeys, 'All Devices Evidence'[TenantKey], 'All Devices Evidence'[Device Key]))))
 		formatString: #,0
 		displayFolder: Executive overview
@@ -108,7 +108,7 @@ table 'All Devices Evidence'
 
 	/// Identities in the strong union without a qualified primary enabled/disabled state: AD Enabled for AD-prefixed identities, or Entra state for Intune-only. Excluded from All Enabled Devices. Returns blank across mixed/unknown batches.
 	measure 'Device State Unknown Identities' =
-
+			
 			VAR _batches =
 			    UNION(
 			        SELECTCOLUMNS(CALCULATETABLE(DISTINCT('All Devices Evidence'[Loaded Batch ID]), REMOVEFILTERS()), "__Batch", 'All Devices Evidence'[Loaded Batch ID]),
@@ -188,7 +188,7 @@ table 'All Devices Evidence'
 			VAR _knownKeys = DISTINCT(UNION(_adEnabled, _adDisabled, _intuneEnabled, _intuneDisabled))
 			VAR _conflictKeys = DISTINCT(UNION(_adConflicts, _adReverseConflicts, INTERSECT(_adEnabled, _adDisabled), INTERSECT(_intuneEnabled, _intuneDisabled), INTERSECT(_intuneEnabled, _intuneDisabledByAD)))
 			VAR _enabledKeys = DISTINCT(UNION(EXCEPT(EXCEPT(_adEnabled, _adDisabled), _adConflicts), EXCEPT(EXCEPT(_intuneEnabled, _intuneDisabled), _intuneDisabledByAD)))
-
+			
 			VAR _known = CALCULATE([All Devices], KEEPFILTERS(TREATAS(_knownKeys, 'All Devices Evidence'[TenantKey], 'All Devices Evidence'[Device Key])))
 			RETURN IF(_batchSafe, [All Devices] - _known)
 		formatString: #,0
@@ -198,7 +198,7 @@ table 'All Devices Evidence'
 
 	/// Existing union identities with explicit enabled/disabled conflicts across exact unique SID/device-ID links, or contradictory AD states. These identities are excluded from All Enabled Devices. Returns blank across mixed/unknown batches.
 	measure 'Device State Conflicting Identities' =
-
+			
 			VAR _batches =
 			    UNION(
 			        SELECTCOLUMNS(CALCULATETABLE(DISTINCT('All Devices Evidence'[Loaded Batch ID]), REMOVEFILTERS()), "__Batch", 'All Devices Evidence'[Loaded Batch ID]),
@@ -278,7 +278,7 @@ table 'All Devices Evidence'
 			VAR _knownKeys = DISTINCT(UNION(_adEnabled, _adDisabled, _intuneEnabled, _intuneDisabled))
 			VAR _conflictKeys = DISTINCT(UNION(_adConflicts, _adReverseConflicts, INTERSECT(_adEnabled, _adDisabled), INTERSECT(_intuneEnabled, _intuneDisabled), INTERSECT(_intuneEnabled, _intuneDisabledByAD)))
 			VAR _enabledKeys = DISTINCT(UNION(EXCEPT(EXCEPT(_adEnabled, _adDisabled), _adConflicts), EXCEPT(EXCEPT(_intuneEnabled, _intuneDisabled), _intuneDisabledByAD)))
-
+			
 			RETURN IF(_batchSafe, CALCULATE([All Devices], KEEPFILTERS(TREATAS(_conflictKeys, 'All Devices Evidence'[TenantKey], 'All Devices Evidence'[Device Key]))))
 		formatString: #,0
 		isHidden
@@ -533,3 +533,4 @@ table 'All Devices Evidence'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
+

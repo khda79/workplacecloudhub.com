@@ -15,3 +15,4 @@ table 'Mailbox License Selection'
 				 I=#"Mailbox License Membership",
 				 Output=Table.Distinct(Table.SelectColumns(I,{"License Product"}))
 				in Output
+

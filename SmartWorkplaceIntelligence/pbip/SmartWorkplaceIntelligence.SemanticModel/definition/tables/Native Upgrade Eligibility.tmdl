@@ -228,3 +228,4 @@ table 'Native Upgrade Eligibility'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactEndpointAnalyticsUpgradeEligibility.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantUpgradeEligibilityDeviceKey", dataType="String"], [name="MetricId", dataType="String"], [name="MetricDeviceId", dataType="String"], [name="DeviceId", dataType="String"], [name="DeviceIdSource", dataType="String"], [name="DeviceName", dataType="String"], [name="UpgradeEligibility", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
+

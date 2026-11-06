@@ -170,3 +170,4 @@ table 'Exchange Hybrid Free Busy Summary'
 				    BusinessRows = Readers[GetExchangeHybridFreeBusy]("Summary")
 				in
 				    Readers[Finish](BusinessRows)
+

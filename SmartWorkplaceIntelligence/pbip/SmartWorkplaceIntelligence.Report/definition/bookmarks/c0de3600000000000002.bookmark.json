@@ -1,0 +1,92 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/2.1.0/schema.json",
+  "name": "c0de3600000000000002",
+  "displayName": "Intune · Enrollment risks",
+  "options": {
+    "applyOnlyToTargetVisuals": true,
+    "targetVisualNames": [
+      "c0de3400000000000001",
+      "c0de3400000000000002",
+      "c0de3400000000000003",
+      "c0de3400000000000004",
+      "c0de3400000000000005",
+      "c0de3400000000000006",
+      "c0de3700000000000001",
+      "c0de3700000000000002",
+      "c0de3700000000000003",
+      "c0de3700000000000004",
+      "c0de3700000000000005",
+      "c0de3700000000000006"
+    ],
+    "suppressActiveSection": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.0",
+    "activeSection": "migration-to-intune",
+    "sections": {
+      "migration-to-intune": {
+        "visualContainers": {
+          "c0de3700000000000001": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c0de3700000000000002": {
+            "singleVisual": {}
+          },
+          "c0de3700000000000003": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c0de3700000000000004": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c0de3700000000000005": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          },
+          "c0de3700000000000006": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
+          }
+        },
+        "visualContainerGroups": {
+          "c0de3400000000000001": {
+            "isHidden": true
+          },
+          "c0de3400000000000002": {
+            "isHidden": false
+          },
+          "c0de3400000000000003": {
+            "isHidden": true
+          },
+          "c0de3400000000000004": {
+            "isHidden": true
+          },
+          "c0de3400000000000005": {
+            "isHidden": true
+          },
+          "c0de3400000000000006": {
+            "isHidden": true
+          }
+        }
+      }
+    }
+  }
+}

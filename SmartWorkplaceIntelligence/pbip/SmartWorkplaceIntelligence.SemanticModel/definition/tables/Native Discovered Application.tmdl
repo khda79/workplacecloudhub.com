@@ -240,3 +240,4 @@ table 'Native Discovered Application'
 				    WithProductKey)
 				in
 				    Readers[Finish](BusinessRows)
+

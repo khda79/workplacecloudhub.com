@@ -20,14 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Directory Summary"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Enabled AD PCs Managed by Intune (%)"
+                  "Property": "Scoped Enabled AD PCs Managed (%)"
                 }
               },
-              "queryRef": "Device Directory Summary.Enabled AD PCs Managed by Intune (%)",
-              "nativeQueryRef": "Enabled AD PCs Managed by Intune (%)"
+              "queryRef": "Global Device Inventory.Scoped Enabled AD PCs Managed (%)",
+              "nativeQueryRef": "Scoped Enabled AD PCs Managed (%)",
+              "displayName": "Enabled AD PCs managed (%)"
             }
           ]
         },
@@ -573,5 +574,63 @@
         }
       ]
     }
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "14b5be7bd4224eac9fca",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Global Device Inventory"
+              }
+            },
+            "Property": "Device type (report)"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "x",
+              "Entity": "Global Device Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "x"
+                          }
+                        },
+                        "Property": "Device type (report)"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'PC'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      }
+    ]
   }
 }

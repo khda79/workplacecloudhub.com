@@ -53,3 +53,4 @@ table 'SPO Migration Phase'
 				    BusinessRows = (let Source = Table.Combine({Table.SelectColumns(#"SPO Migration Plan", {"Phase"}), Table.SelectColumns(#"SPO Migration History", {"Phase"})}) in Table.Distinct(Source))
 				in
 				    Readers[Finish](BusinessRows)
+

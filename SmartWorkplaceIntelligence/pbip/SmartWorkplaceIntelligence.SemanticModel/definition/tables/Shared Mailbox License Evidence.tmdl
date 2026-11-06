@@ -1,0 +1,191 @@
+/// Tenant-wide qualified email snapshot metrics, disconnected because capacity is not allocated to countries.
+table 'Shared Mailbox License Evidence'
+	lineageTag: 61950760-e8da-4a99-bc59-bee123115ce0
+
+	/// Tenant-wide observation from the qualified licensing snapshot; blank means unavailable. Stock is not reserved.
+	measure 'Shared mailbox E3 to Plan 2 review' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "E3 to Plan 2 review", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: 17451809-4d16-40ae-9309-d66e35eec66f
+
+	/// Tenant-wide observation from the qualified licensing snapshot; blank means unavailable. Stock is not reserved.
+	measure 'Standalone Plan 2 available (qualified)' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Standalone Plan 2 available", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: d9286170-2e91-44bb-b901-c42f0cbdf255
+
+	/// Tenant-wide qualified prepared-batch count; blank means unavailable. Not allocated to geographic filters.
+	measure 'Shared mailbox migration Required' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Migration Required", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: 50e9052c-8ae7-44a3-8136-67733ffd5f9d
+
+	/// Tenant-wide qualified prepared-batch count; blank means unavailable. Not allocated to geographic filters.
+	measure 'Shared mailbox migration AssignedCoverage' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Migration AssignedCoverage", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: 50a15f8d-bcad-423a-8b97-1b31ba260a67
+
+	/// Tenant-wide qualified prepared-batch count; blank means unavailable. Not allocated to geographic filters.
+	measure 'Shared mailbox migration ToComplete' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Migration ToComplete", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: 5bbb7c5a-4e6a-40cf-ae75-ef5ee036c20c
+
+	/// Tenant-wide qualified prepared-batch count; blank means unavailable. Not allocated to geographic filters.
+	measure 'Shared mailbox migration CoverageReview' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Migration CoverageReview", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: efde69ec-e750-43e4-acf7-dadf2210d867
+
+	/// Tenant-wide qualified prepared-batch count; blank means unavailable. Not allocated to geographic filters.
+	measure 'Shared mailbox migration Excluded' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Migration Excluded", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: 7cb2c489-046c-46b4-b256-c47593fc5114
+
+	/// Tenant-wide qualified prepared-batch count; blank means unavailable. Not allocated to geographic filters.
+	measure 'Shared mailbox migration IdentityOrRegisterReview' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Migration IdentityOrRegisterReview", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: 44e6cba2-3a90-4dde-bb20-3cd9932643e3
+
+	/// Tenant-wide qualified prepared-batch count; blank means unavailable. Not allocated to geographic filters.
+	measure 'Shared mailbox migration SizeReview' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Migration SizeReview", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: baa29a40-7adf-4a8d-b9da-78064fc0d55f
+
+	/// Tenant-wide qualified prepared-batch count; blank means unavailable. Not allocated to geographic filters.
+	measure 'Shared mailbox migration Under50' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Migration Under50", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: fe76e6aa-df97-4483-b357-42959c6d7cd0
+
+	/// Tenant-wide qualified prepared-batch count; blank means unavailable. Not allocated to geographic filters.
+	measure 'Shared mailbox migration E3ToPlan2Review' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Migration E3ToPlan2Review", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: 615cc0fb-e0e1-49fb-b277-8dd6e3de3b5e
+
+	/// Tenant-wide qualified prepared-batch count; blank means unavailable. Not allocated to geographic filters.
+	measure 'Shared mailbox migration E3Under50Review' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Migration E3Under50Review", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: ffcd0e4d-2d7f-47a4-b7c5-fa991aa299a5
+
+	/// Tenant-wide qualified prepared-batch count; blank means unavailable. Not allocated to geographic filters.
+	measure 'Shared mailbox migration F3Under50Review' = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]),REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Migration F3Under50Review", 'Shared Mailbox License Evidence'[State] = "Qualified")
+		formatString: #,0
+		lineageTag: 0446cdaa-645a-4164-b26f-f640c4fda3c4
+
+	/// Tenant-wide count from a qualified source. N/D means unavailable.
+	measure 'Shared mailbox E3 to Plan 2 review label' = VAR _value = [Shared mailbox E3 to Plan 2 review] RETURN IF(ISBLANK(_value),"N/D",FORMAT(_value,"#,0"))
+		lineageTag: 6cfb21ad-a391-4cd8-b153-158311db1667
+
+	/// Tenant-wide count from a qualified source. N/D means unavailable.
+	measure 'Standalone Plan 2 available (qualified) label' = VAR _value = [Standalone Plan 2 available (qualified)] RETURN IF(ISBLANK(_value),"N/D",FORMAT(_value,"#,0"))
+		lineageTag: 7e588f40-dc73-45cc-877a-31e922292318
+
+	/// Tenant-wide count from a qualified source. N/D means unavailable.
+	measure 'Shared mailbox migration Required label' = VAR _value = [Shared mailbox migration Required] RETURN IF(ISBLANK(_value),"N/D",FORMAT(_value,"#,0"))
+		lineageTag: d3702cee-049a-4760-a285-d34f15260f5c
+
+	/// Tenant-wide count from a qualified source. N/D means unavailable.
+	measure 'Shared mailbox migration AssignedCoverage label' = VAR _value = [Shared mailbox migration AssignedCoverage] RETURN IF(ISBLANK(_value),"N/D",FORMAT(_value,"#,0"))
+		lineageTag: 1dad178e-65ea-432e-87a5-1ab900a9151a
+
+	/// Tenant-wide count from a qualified source. N/D means unavailable.
+	measure 'Shared mailbox migration ToComplete label' = VAR _value = [Shared mailbox migration ToComplete] RETURN IF(ISBLANK(_value),"N/D",FORMAT(_value,"#,0"))
+		lineageTag: 7e4c365f-25a3-4c17-a19f-2d074735a5ac
+
+	/// Tenant-wide count from a qualified source. N/D means unavailable.
+	measure 'Shared mailbox migration CoverageReview label' = VAR _value = [Shared mailbox migration CoverageReview] RETURN IF(ISBLANK(_value),"N/D",FORMAT(_value,"#,0"))
+		lineageTag: 02db3523-91e2-493d-a76e-61a9463e5ad6
+
+	/// Global available equivalent-suite stock, listed by SKU. Unreserved, not automatic entitlement or a purchase recommendation.
+	measure 'Equivalent Plan 2 SKU stock label' =
+			VAR _unknown = CALCULATE(MAX('Shared Mailbox License Evidence'[Value]), REMOVEFILTERS(), 'Shared Mailbox License Evidence'[Metric] = "Equivalent SKU stock unknown", 'Shared Mailbox License Evidence'[State] = "Qualified")
+			VAR _rows = FILTER(ALL('Shared Mailbox License Evidence'), LEFT('Shared Mailbox License Evidence'[Metric],29) = "Equivalent Plan 2 available: " && 'Shared Mailbox License Evidence'[State] = "Qualified")
+			VAR _text = CONCATENATEX(_rows, SUBSTITUTE('Shared Mailbox License Evidence'[Metric], "Equivalent Plan 2 available: ", "") & ": " & FORMAT('Shared Mailbox License Evidence'[Value], "#,0"), " | ", 'Shared Mailbox License Evidence'[Metric], ASC)
+			RETURN IF(ISBLANK(_unknown), "N/D", IF(ISBLANK(_text), "None observed", _text) & IF(_unknown > 0, " | unqualified SKUs: " & FORMAT(_unknown, "#,0"), ""))
+		lineageTag: 2cad610a-2712-4805-ac0f-9eb991f23002
+
+	/// Dates of separately qualified license and migration evidence.
+	measure 'Shared mailbox evidence provenance' =
+			VAR _license = CALCULATE(SELECTEDVALUE('Shared Mailbox License Evidence'[License Snapshot UTC]), REMOVEFILTERS())
+			VAR _batch = CALCULATE(SELECTEDVALUE('Shared Mailbox License Evidence'[Migration Batch UTC]), REMOVEFILTERS())
+			VAR _exceptions = CALCULATE(SELECTEDVALUE('Shared Mailbox License Evidence'[Exception Snapshot Date]), REMOVEFILTERS())
+			RETURN "License snapshot (UTC): " & COALESCE(_license,"N/D") & " | Migration batch (UTC): " & COALESCE(_batch,"N/D") & " | Exceptions: " & COALESCE(_exceptions,"N/D")
+		lineageTag: f9e9df2f-7afb-4817-9eb9-e7e2a53e7463
+
+	column Metric
+		dataType: string
+		lineageTag: 059ef808-da10-4233-9802-e691a23a5bcc
+		sourceColumn: Metric
+
+	column Value
+		dataType: double
+		isHidden
+		lineageTag: d06dfd8c-ea4f-40f4-8f4b-50e4760120ba
+		summarizeBy: sum
+		sourceColumn: Value
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column State
+		dataType: string
+		lineageTag: f0db4307-1f88-41ae-a721-e2e000f3e88f
+		sourceColumn: State
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 0cc5467e-1153-4f30-85a8-021697566a59
+		sourceColumn: Loaded Batch ID
+
+	column 'License Snapshot UTC'
+		dataType: string
+		isHidden
+		lineageTag: 14984fd3-f4e4-4e41-8f5a-3e267e106bcd
+		sourceColumn: License Snapshot UTC
+
+	column 'Migration Batch UTC'
+		dataType: string
+		isHidden
+		lineageTag: b2483d56-7c79-4bb6-9adf-ee605bc97b12
+		sourceColumn: Migration Batch UTC
+
+	column 'Exception Snapshot Date'
+		dataType: string
+		isHidden
+		lineageTag: b738c258-034c-486a-a54f-ee356699590f
+		sourceColumn: Exception Snapshot Date
+
+	partition 'Shared Mailbox License Evidence' = m
+		mode: import
+		source =
+				let
+				    Readers = CreatePreparedReaders(),
+				    Q = Readers[GetLicenseReportQualification](),
+				    Snap = Readers[GetLicenseReportSnapshot](),
+				    Proof = List.Select(Q[Files], each [File] = "M365_Licenses_ReportSnapshotIntegrity.csv" and [State] = "Qualified"),
+				    Valid = Q[State] = "Qualified" and List.Count(Proof) = 1 and Text.From(Q[SnapshotId]) = Text.From(Snap[SnapshotId]),
+				    E3s = List.Select(Snap[Products], each Record.FieldOrDefault(_, "Product", "") = "Microsoft 365 E3"),
+				    E3 = if List.Count(E3s) = 1 then E3s{0} else [],
+				    Rendering = Record.FieldOrDefault(Snap, "Rendering", []),
+				    Sources = Record.FieldOrDefault(Snap, "Sources", {}),
+				    Provisional = List.AnyTrue(List.Transform(Sources, each Record.FieldOrDefault(_, "Provisional", true) <> false)),
+				    Counts = Record.FieldOrDefault(E3, "Counts", []),
+				    RawReview = Record.FieldOrDefault(Counts, "SharedE3Plan2Review", null),
+				    Review = if Valid and not Provisional and Record.FieldOrDefault(E3, "UsageAvailable", false) = true and Record.FieldOrDefault(Rendering, "SharedSourceReady", false) = true and Value.Is(RawReview, type number) and RawReview >= 0 and Number.RoundDown(RawReview) = RawReview then RawReview else null,
+				    Standalone = Record.FieldOrDefault(Snap, "ExchangePlan2StandaloneStock", null),
+				    Stock = if Valid and Value.Is(Standalone, type record) then try if Standalone[Enabled] >= Standalone[Consumed] and Standalone[Consumed] >= 0 and Standalone[Available] = Standalone[Enabled] - Standalone[Consumed] then Standalone[Available] else null otherwise null else null,
+				    Manifest = Readers[GetPreparedBatchManifest](),
+				    Migration = Record.FieldOrDefault(Manifest, "SharedMailboxLicenseEvidence", []),
+				    MigValid = Record.FieldOrDefault(Migration, "State", "N/D") = "Qualified" and Record.FieldOrDefault(Migration, "BatchId", "") = Readers[BatchId],
+				    MigCounts = Record.FieldOrDefault(Migration, "Counts", []),
+				    CountOrNull = (x as any) as nullable number => if Value.Is(x, type number) and x >= 0 and Number.RoundDown(x) = x then x else null,
+				    Keys = {"Required","AssignedCoverage","ToComplete","CoverageReview","Excluded","IdentityOrRegisterReview","SizeReview","Under50","E3ToPlan2Review","E3Under50Review","F3Under50Review"},
+				    MigRows = List.Transform(Keys, (key) => [Metric="Migration " & key, Value=if MigValid then CountOrNull(Record.FieldOrDefault(MigCounts, key, null)) else null]),
+				    Equivalent = Record.FieldOrDefault(Snap, "ExchangePlan2EquivalentStock", null),
+				    EquivalentRows = if Valid and Value.Is(Equivalent, type record) then try List.Transform(Equivalent[Rows], each [Metric="Equivalent Plan 2 available: " & Text.From([SkuPartNumber]), Value=CountOrNull([Available])]) otherwise {} else {},
+				    Unknown = if Valid and Value.Is(Equivalent, type record) then try CountOrNull(Equivalent[UnknownSkuCount]) otherwise null else null,
+				    Rows = {[Metric="E3 to Plan 2 review", Value=Review], [Metric="Standalone Plan 2 available", Value=Stock], [Metric="Equivalent SKU stock unknown", Value=Unknown]} & MigRows & EquivalentRows,
+				    Output = Table.FromRecords(List.Transform(Rows, each Record.AddField(_, "State", if [Value] = null then "N/D" else "Qualified")), type table [Metric=text, Value=nullable number, State=text]),
+				    WithLicenseDate = Table.AddColumn(Output, "License Snapshot UTC", each try Text.From(Snap[LicenseCollectedAtUtc]) otherwise null, type text),
+				    WithBatchDate = Table.AddColumn(WithLicenseDate, "Migration Batch UTC", each try Text.From(Manifest[CreatedUtc]) otherwise null, type text),
+				    WithExceptionDate = Table.AddColumn(WithBatchDate, "Exception Snapshot Date", each try Text.From(Migration[ExceptionSnapshotDate]) otherwise null, type text),
+				    Result = Readers[Finish](WithExceptionDate)
+				in Result
+

@@ -24,3 +24,4 @@ table 'Readiness Condition'
 	partition 'Readiness Condition' = m
 		mode: import
 		source = #table(type table [#"Condition Code" = text, #"Condition" = text, #"Order" = Int64.Type],{{"032","Entra pending",0},{"018","RAM < 8 GB",1},{"054","Reboot >= 10 days",2},{"055","Reboot >= 30 days",3},{"Firmware","BIOS or Secure Boot NotSupported",4},{"Disabled","Secure Boot Disabled",5}})
+

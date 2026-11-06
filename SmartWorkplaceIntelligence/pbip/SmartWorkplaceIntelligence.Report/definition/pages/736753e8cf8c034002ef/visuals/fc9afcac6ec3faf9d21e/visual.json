@@ -19,7 +19,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Business mailbox migration KPIs · queue retains all local business and system mailboxes",
+                    "value": "On-premises mailboxes with database · EXO candidates exclude matched DONTMIGRATE exceptions",
                     "textStyle": {
                       "fontFamily": "Segoe UI",
                       "fontSize": "14px",

@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "b991beb5b1c9dd649e52",
   "position": {
-    "x": 964,
-    "y": 128,
+    "x": 32,
+    "y": 232,
     "z": 61000,
-    "height": 104,
-    "width": 147.33333333333334,
-    "tabOrder": 61061
+    "height": 96,
+    "width": 225,
+    "tabOrder": 61062
   },
   "visual": {
     "visualType": "cardVisual",
@@ -23,10 +23,10 @@
                       "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Equipment Compliance Rate (%)"
+                  "Property": "Enabled corporate PC compliance (%)"
                 }
               },
-              "queryRef": "Global Device Inventory.Equipment Compliance Rate (%)",
+              "queryRef": "Global Device Inventory.Enabled corporate PC compliance (%)",
               "nativeQueryRef": "Equipment Compliance Rate (%)",
               "displayName": "PC compliance (%)"
             }
@@ -48,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "25D"
                 }
               }
             },
@@ -183,7 +183,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },

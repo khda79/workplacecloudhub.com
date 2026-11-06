@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "da21788bd99494bafb0c",
   "position": {
-    "x": 1119.3333333333335,
-    "y": 128,
+    "x": 265,
+    "y": 232,
     "z": 61000,
-    "height": 104,
-    "width": 147.33333333333334,
-    "tabOrder": 61062
+    "height": 96,
+    "width": 225,
+    "tabOrder": 61063
   },
   "visual": {
     "visualType": "cardVisual",
@@ -20,15 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Security Control Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Disk Encryption Healthy (%)"
+                  "Property": "Enabled corporate PC encryption (%)"
                 }
               },
-              "queryRef": "Security Control Evidence.Disk Encryption Healthy (%)",
+              "queryRef": "Global Device Inventory.Enabled corporate PC encryption (%)",
               "nativeQueryRef": "Disk Encryption Healthy (%)",
-              "displayName": "Encryption (Windows %)"
+              "displayName": "PC encryption observed (%)"
             }
           ]
         }
@@ -48,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "25D"
                 }
               }
             },
@@ -183,7 +183,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },

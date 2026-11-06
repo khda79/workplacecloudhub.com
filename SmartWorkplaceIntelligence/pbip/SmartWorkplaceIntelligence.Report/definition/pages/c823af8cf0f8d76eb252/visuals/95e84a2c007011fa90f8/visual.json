@@ -20,15 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Device Compliance Rate"
+                  "Property": "Enabled corporate PC compliance (%)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Device Compliance Rate",
+              "queryRef": "Global Device Inventory.Enabled corporate PC compliance (%)",
               "nativeQueryRef": "Device Compliance Rate",
-              "displayName": "Device Compliance (%)"
+              "displayName": "PC compliance (%)"
             }
           ]
         },

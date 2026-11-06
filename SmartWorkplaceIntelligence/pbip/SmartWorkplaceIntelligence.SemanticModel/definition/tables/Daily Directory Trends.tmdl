@@ -395,6 +395,24 @@ table 'Daily Directory Trends'
 		displayFolder: Daily Trends\All account states
 		lineageTag: 89afeb4e-8129-4404-bd79-9fb18a0edfc8
 
+	/// Observed AD computer counts over the latest 90 days ending at the latest complete AD computer observation; no interpolation.
+	measure 'AD devices trend last 90 days' = VAR _latest = CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Source Day Status] = "Complete") VAR _day = MAX('Date'[Date]) RETURN IF(NOT ISBLANK(_latest) && _day >= _latest - 89 && _day <= _latest, [# Devices Trend])
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 55332b24-ee52-40b4-b28a-69b4bebb87e6
+
+	/// Observed Windows 10 AD computer accounts, enabled and disabled, on complete daily observations within the latest 90 days. Missing remains blank.
+	measure 'Windows 10 AD trend last 90 days' = VAR _latest = CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Source Day Status] = "Complete") VAR _day = MAX('Date'[Date]) RETURN IF(NOT ISBLANK(_latest) && _day >= _latest - 89 && _day <= _latest, [Windows 10 All AD Accounts Daily])
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: 84a5534f-800f-459f-950e-d4c87c410d14
+
+	/// Observed Windows 11 AD computer accounts, enabled and disabled, on complete daily observations within the latest 90 days. Missing remains blank.
+	measure 'Windows 11 AD trend last 90 days' = VAR _latest = CALCULATE(MAX('Daily Directory Trends'[Date]), REMOVEFILTERS('Date'), 'Daily Directory Trends'[Source Name] = "AD Computers", 'Daily Directory Trends'[Source Day Status] = "Complete") VAR _day = MAX('Date'[Date]) RETURN IF(NOT ISBLANK(_latest) && _day >= _latest - 89 && _day <= _latest, [Windows 11 All AD Accounts Daily])
+		formatString: #,0
+		displayFolder: Daily Trends
+		lineageTag: a494d918-c043-44d8-9131-5dcd3e0e7eca
+
 	column TenantKey
 		dataType: string
 		isHidden
@@ -572,3 +590,4 @@ table 'Daily Directory Trends'
 				    Typed)
 				in
 				    Readers[Finish](BusinessRows)
+

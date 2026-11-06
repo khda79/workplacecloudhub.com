@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "8131c2051c48a7d939a9",
   "position": {
-    "x": 187.33333333333334,
-    "y": 128,
+    "x": 32,
+    "y": 424,
     "z": 61000,
-    "height": 104,
-    "width": 147.33333333333334,
-    "tabOrder": 61077
+    "height": 75,
+    "width": 1856,
+    "tabOrder": 61056
   },
   "visual": {
     "visualType": "cardVisual",
@@ -28,7 +28,26 @@
               },
               "queryRef": "Global Device Inventory.Disabled Devices AD/Entra Display",
               "nativeQueryRef": "Disabled Devices AD/Entra Display",
-              "displayName": "Disabled AD/Entra"
+              "displayName": "Disabled AD/Entra (min.)"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "Disabled Devices AD/Entra Evidence"
+                }
+              },
+              "queryRef": "Global Device Inventory.Disabled Devices AD/Entra Evidence",
+              "nativeQueryRef": "Disabled Devices AD/Entra Evidence",
+              "displayName": "Evidence"
             }
           ]
         }
@@ -352,7 +371,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Evidence and active scope'"
+                  "Value": "'Confirmed minimum: at least this many devices are disabled in AD or Entra; some directory states are not observed.'"
                 }
               }
             }
@@ -459,5 +478,6 @@
         }
       ]
     }
-  }
+  },
+  "parentGroupName": "43f45f8154c24e2769b9"
 }

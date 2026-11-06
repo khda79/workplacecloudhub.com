@@ -28,7 +28,7 @@
               },
               "queryRef": "Security Control Evidence.Firewall Enabled (%)",
               "nativeQueryRef": "Firewall Enabled (%)",
-              "displayName": "Firewall (tenant)"
+              "displayName": "Firewall (tenant) · tenant control"
             }
           ]
         },

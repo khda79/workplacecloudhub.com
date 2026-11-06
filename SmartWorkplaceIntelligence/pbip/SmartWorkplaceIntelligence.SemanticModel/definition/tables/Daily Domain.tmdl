@@ -22,3 +22,4 @@ table 'Daily Domain'
 				VAR _known=SELECTCOLUMNS(_history,"Domain",[Domain])
 				VAR _new=FILTER(EXCEPT(_current,_known),NOT ISBLANK([Domain]) && [Domain]<>"")
 				RETURN UNION(_history,SELECTCOLUMNS(_new,"Domain Key","private:ad:" & LOWER([Domain]),"Domain",[Domain]))
+

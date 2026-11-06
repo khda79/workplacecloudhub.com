@@ -23,10 +23,10 @@
                       "Entity": "Mailbox Migration Inventory"
                     }
                   },
-                  "Property": "Country"
+                  "Property": "Report Country"
                 }
               },
-              "queryRef": "Mailbox Migration Inventory.Country",
+              "queryRef": "Mailbox Migration Inventory.Report Country",
               "nativeQueryRef": "Country",
               "active": true
             },
@@ -220,7 +220,7 @@
       "columnFormatting": [
         {
           "selector": {
-            "metadata": "Mailbox Migration Inventory.Country"
+            "metadata": "Mailbox Migration Inventory.Report Country"
           },
           "properties": {
             "alignment": {

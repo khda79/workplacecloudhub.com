@@ -113,3 +113,4 @@ table LocalDateTable_391e0fd3-2e65-424c-9946-867c32d26a61
 		source = Calendar(Date(Year(MIN('Windows Migration History'[Snapshot Date])), 1, 1), Date(Year(MAX('Windows Migration History'[Snapshot Date])), 12, 31))
 
 	annotation __PBI_LocalDateTable = true
+

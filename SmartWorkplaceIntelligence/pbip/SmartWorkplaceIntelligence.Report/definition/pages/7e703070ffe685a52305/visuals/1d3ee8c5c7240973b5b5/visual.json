@@ -37,20 +37,6 @@
                       "Entity": "Backup Mailbox Evidence"
                     }
                   },
-                  "Property": "Protected Mailboxes"
-                }
-              },
-              "queryRef": "Backup Mailbox Evidence.Protected Mailboxes",
-              "nativeQueryRef": "All Protected Mailboxes (incl. outside scope)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Backup Mailbox Evidence"
-                    }
-                  },
                   "Property": "Disabled Scope Members"
                 }
               },
@@ -93,39 +79,11 @@
                       "Entity": "Backup Mailbox Evidence"
                     }
                   },
-                  "Property": "Expected Mailboxes Protected (%)"
+                  "Property": "Protected Mailboxes"
                 }
               },
-              "queryRef": "Backup Mailbox Evidence.Expected Mailboxes Protected (%)",
-              "nativeQueryRef": "Expected Mailboxes Protected (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Backup Mailbox Evidence"
-                    }
-                  },
-                  "Property": "Backup Policy Scope Anomalies"
-                }
-              },
-              "queryRef": "Backup Mailbox Evidence.Backup Policy Scope Anomalies",
-              "nativeQueryRef": "Backup Policy Scope Anomalies"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Backup Mailbox Evidence"
-                    }
-                  },
-                  "Property": "Expected Mailboxes Not Protected"
-                }
-              },
-              "queryRef": "Backup Mailbox Evidence.Expected Mailboxes Not Protected",
-              "nativeQueryRef": "Expected Mailboxes Not Protected"
+              "queryRef": "Backup Mailbox Evidence.Protected Mailboxes",
+              "nativeQueryRef": "All Protected Mailboxes (incl. outside scope)"
             }
           ]
         }
@@ -384,7 +342,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "5L"
                 }
               }
             },

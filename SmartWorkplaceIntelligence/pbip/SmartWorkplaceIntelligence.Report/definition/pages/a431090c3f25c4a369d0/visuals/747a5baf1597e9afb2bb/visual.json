@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "747a5baf1597e9afb2bb",
   "position": {
-    "x": 342.66666666666669,
+    "x": 404.8,
     "y": 128,
     "z": 61000,
-    "height": 104,
-    "width": 147.33333333333334,
-    "tabOrder": 61078
+    "height": 96,
+    "width": 364.8,
+    "tabOrder": 61057
   },
   "visual": {
     "visualType": "cardVisual",
@@ -23,12 +23,12 @@
                       "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Equipment Managed Devices"
+                  "Property": "Scoped Enabled AD Windows PCs"
                 }
               },
-              "queryRef": "Global Device Inventory.Equipment Managed Devices",
-              "nativeQueryRef": "Equipment Managed Devices",
-              "displayName": "Managed PCs"
+              "queryRef": "Global Device Inventory.Scoped Enabled AD Windows PCs",
+              "nativeQueryRef": "Scoped Enabled AD Windows PCs",
+              "displayName": "Enabled AD Windows PCs"
             }
           ]
         }
@@ -48,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "25D"
                 }
               }
             },
@@ -96,7 +96,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },
@@ -237,13 +237,6 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
-                }
-              }
-            },
-            "rowPadding": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
                 }
               }
             },

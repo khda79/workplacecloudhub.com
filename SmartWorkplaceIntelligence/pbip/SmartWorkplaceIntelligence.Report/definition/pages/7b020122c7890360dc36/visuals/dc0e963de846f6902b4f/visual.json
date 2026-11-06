@@ -43,10 +43,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Remaining Observed Windows 10"
+                  "Property": "Enabled corporate PC · Remaining Observed Windows 10"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Remaining Observed Windows 10",
               "nativeQueryRef": "Windows 10 remaining",
               "displayName": "Windows 10 remaining"
             },
@@ -58,10 +58,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Remaining Managed Windows 10"
+                  "Property": "Enabled corporate PC · Remaining Managed Windows 10"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Remaining Managed Windows 10",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Remaining Managed Windows 10",
               "nativeQueryRef": "Intune-managed Windows 10",
               "displayName": "Intune-managed Windows 10"
             },
@@ -73,10 +73,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Migration AD Windows 10 Without Intune Match"
+                  "Property": "Enabled corporate PC · Migration AD Windows 10 Without Intune Match"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Migration AD Windows 10 Without Intune Match",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Migration AD Windows 10 Without Intune Match",
               "nativeQueryRef": "AD only - no Intune match",
               "displayName": "AD only - no Intune match"
             },
@@ -88,10 +88,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Hardware Incompatible Windows 10"
+                  "Property": "Enabled corporate PC · Hardware Incompatible Windows 10 Combined"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Hardware Incompatible Windows 10",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Hardware Incompatible Windows 10 Combined",
               "nativeQueryRef": "Hardware incompatible",
               "displayName": "Hardware incompatible"
             },
@@ -103,12 +103,12 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Migration Windows 10 Eligibility Unknown"
+                  "Property": "Enabled corporate PC · Migration Windows 10 Eligibility Unknown"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Migration Windows 10 Eligibility Unknown",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Migration Windows 10 Eligibility Unknown",
               "nativeQueryRef": "Eligibility unknown",
-              "displayName": "Eligibility unknown"
+              "displayName": "Windows 10 eligibility unknown"
             },
             {
               "field": {
@@ -118,12 +118,27 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Migration Windows 10 Eligibility Conflicting"
+                  "Property": "Enabled corporate PC · Migration Windows 10 Eligibility Conflicting"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Migration Windows 10 Eligibility Conflicting",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Migration Windows 10 Eligibility Conflicting",
               "nativeQueryRef": "Eligibility conflicting",
               "displayName": "Eligibility conflicting"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Enabled corporate PC · Windows 10 Legacy Build Review"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Legacy Build Review",
+              "nativeQueryRef": "Windows 10 Legacy Build Review",
+              "displayName": "Windows 10 pre-22H2"
             }
           ]
         }
@@ -308,258 +323,9 @@
       ],
       "columnFormatting": [
         {
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
-          },
           "selector": {
-            "metadata": "Windows Migration Evidence.Migration Windows 10 Eligibility Conflicting"
-          }
-        },
-        {
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
+            "metadata": "Windows Migration Evidence.Country Name"
           },
-          "selector": {
-            "metadata": "Windows Migration Evidence.Migration Windows 10 Eligibility Unknown"
-          }
-        },
-        {
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
-          },
-          "selector": {
-            "metadata": "Windows Migration Evidence.Hardware Incompatible Windows 10"
-          }
-        },
-        {
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
-          },
-          "selector": {
-            "metadata": "Windows Migration Evidence.Migration AD Windows 10 Without Intune Match"
-          }
-        },
-        {
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
-          },
-          "selector": {
-            "metadata": "Windows Migration Evidence.Remaining Managed Windows 10"
-          }
-        },
-        {
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleSubtotals": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
-          },
-          "selector": {
-            "metadata": "Windows Migration Evidence.Remaining Observed Windows 10"
-          }
-        },
-        {
           "properties": {
             "alignment": {
               "expr": {
@@ -588,17 +354,252 @@
                   "Value": "true"
                 }
               }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Remaining Observed Windows 10"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
             },
-            "styleSubtotals": {
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
               "expr": {
                 "Literal": {
                   "Value": "true"
                 }
               }
             }
-          },
+          }
+        },
+        {
           "selector": {
-            "metadata": "Windows Migration Evidence.Country Name"
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Remaining Managed Windows 10"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Migration AD Windows 10 Without Intune Match"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Hardware Incompatible Windows 10"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Migration Windows 10 Eligibility Unknown"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Migration Windows 10 Eligibility Conflicting"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Legacy Build Review"
+          },
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
           }
         }
       ]

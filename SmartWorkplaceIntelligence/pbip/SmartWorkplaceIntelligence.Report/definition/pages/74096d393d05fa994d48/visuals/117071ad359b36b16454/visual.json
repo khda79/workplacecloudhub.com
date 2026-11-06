@@ -3,7 +3,7 @@
   "name": "117071ad359b36b16454",
   "position": {
     "x": 1517.6,
-    "y": 380,
+    "y": 484,
     "z": 2000,
     "height": 88,
     "width": 366.4,
@@ -20,15 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Security Control Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Secure Boot Healthy (%)"
+                  "Property": "Enabled corporate Windows Secure Boot (%)"
                 }
               },
-              "queryRef": "Security Control Evidence.Secure Boot Healthy (%)",
+              "queryRef": "Global Device Inventory.Enabled corporate Windows Secure Boot (%)",
               "nativeQueryRef": "Secure Boot (%)",
-              "displayName": "Secure Boot (%)"
+              "displayName": "PC Secure Boot observed (%)"
             }
           ]
         },

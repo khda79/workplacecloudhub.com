@@ -3,7 +3,7 @@
   "name": "a315a562cf432c20b3fe",
   "position": {
     "x": 32,
-    "y": 376,
+    "y": 480,
     "z": 1000,
     "height": 96,
     "width": 1856,
@@ -53,6 +53,21 @@
                       "Entity": "Backup Mailbox Evidence"
                     }
                   },
+                  "Property": "Protected Outside Expected Scope"
+                }
+              },
+              "queryRef": "Backup Mailbox Evidence.Protected Outside Expected Scope",
+              "nativeQueryRef": "Protected outside scope",
+              "displayName": "Protected outside scope"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Backup Mailbox Evidence"
+                    }
+                  },
                   "Property": "Expected Mailboxes Protected (%)"
                 }
               },
@@ -74,21 +89,6 @@
               "queryRef": "Backup Mailbox Evidence.Protection Units With Errors",
               "nativeQueryRef": "Protection units with errors",
               "displayName": "Protection units with errors"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Backup Mailbox Evidence"
-                    }
-                  },
-                  "Property": "Protected Outside Expected Scope"
-                }
-              },
-              "queryRef": "Backup Mailbox Evidence.Protected Outside Expected Scope",
-              "nativeQueryRef": "Protected outside scope",
-              "displayName": "Protected outside scope"
             }
           ]
         }
@@ -336,6 +336,13 @@
                       "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }

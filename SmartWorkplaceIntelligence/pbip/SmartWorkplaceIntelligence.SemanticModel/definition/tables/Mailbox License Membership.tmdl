@@ -180,3 +180,4 @@ table 'Mailbox License Membership'
 				in Output
 
 	annotation PBI_ResultType = Exception
+

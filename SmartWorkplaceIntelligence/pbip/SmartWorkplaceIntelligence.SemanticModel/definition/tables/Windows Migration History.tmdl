@@ -140,3 +140,4 @@ table 'Windows Migration History'
 				)
 				in
 				    Readers[Finish](BusinessRows)
+

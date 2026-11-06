@@ -437,7 +437,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailboxes - on-premises and Exchange Online'"
+                  "Value": "'Mailboxes - on-premises and Exchange Online · historical collected objects'"
                 }
               }
             },

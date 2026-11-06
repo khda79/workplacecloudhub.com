@@ -77,3 +77,4 @@ table 'Readiness Source Status'
 				        #"Source Rows"=nullable Int64.Type,#"Source Columns"=Int64.Type,#"Evidence Date"=nullable datetime,
 				        #"Latest Evidence Date"=nullable datetime,#"Date Basis"=text,#"Loaded Batch ID"=text])
 				in Result
+

@@ -28,20 +28,6 @@
               },
               "queryRef": "Identity Reconciliation Evidence.AD to Entra Coverage",
               "nativeQueryRef": "AD to Entra Coverage"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Identity Reconciliation Evidence"
-                    }
-                  },
-                  "Property": "Identity Conflicts"
-                }
-              },
-              "queryRef": "Identity Reconciliation Evidence.Identity Conflicts",
-              "nativeQueryRef": "Identity Conflicts"
             }
           ]
         }
@@ -293,7 +279,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "2L"
+                  "Value": "1L"
                 }
               }
             },

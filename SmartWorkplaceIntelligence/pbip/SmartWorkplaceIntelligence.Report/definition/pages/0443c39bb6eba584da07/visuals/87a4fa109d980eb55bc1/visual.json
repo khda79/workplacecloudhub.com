@@ -23,20 +23,6 @@
                       "Entity": "User Inventory Evidence"
                     }
                   },
-                  "Property": "Users With Missing Manager"
-                }
-              },
-              "queryRef": "User Inventory Evidence.Users With Missing Manager",
-              "nativeQueryRef": "Users Missing Manager"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "User Inventory Evidence"
-                    }
-                  },
                   "Property": "Department Completeness"
                 }
               },
@@ -56,6 +42,20 @@
               },
               "queryRef": "User Inventory Evidence.Job Title Completeness",
               "nativeQueryRef": "Job Title Completeness"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "User Inventory Evidence"
+                    }
+                  },
+                  "Property": "Users With Missing Manager"
+                }
+              },
+              "queryRef": "User Inventory Evidence.Users With Missing Manager",
+              "nativeQueryRef": "Users Missing Manager"
             }
           ]
         }

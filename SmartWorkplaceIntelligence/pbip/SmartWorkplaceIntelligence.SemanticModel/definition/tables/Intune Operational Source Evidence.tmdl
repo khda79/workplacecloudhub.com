@@ -14,6 +14,15 @@ table 'Intune Operational Source Evidence'
 		displayFolder: Intune | Reported scope
 		lineageTag: 05700124-ca0e-4f87-93a2-0f6a846e3a40
 
+	measure 'Migration Intune Enrollment Source Qualified' =
+			VAR _batch=[Dataset Loaded Batch ID]
+			VAR _sources=FILTER(ALL('Intune Operational Source Evidence'), 'Intune Operational Source Evidence'[Loaded Batch ID]=_batch && 'Intune Operational Source Evidence'[Source Group]="EnrollmentFailures" && 'Intune Operational Source Evidence'[Availability]="Receipt and files verified" && LOWER(TRIM('Intune Operational Source Evidence'[Consumer Scope Qualified]))="true")
+			RETURN IF(NOT ISBLANK(_batch) && COUNTROWS(_sources)=1,1,0)
+		lineageTag: 64d248e1-3a55-45de-adc6-679f4e3feefa
+
+	measure 'Migration Intune Enrollment Scope Label' = IF([Migration Intune Enrollment Source Qualified]=1,"Enrollment failure events · qualified reported scope; unmatched events are not attributed to devices","Enrollment failure events · N/D: reported source scope is not qualified")
+		lineageTag: 00502fc7-777a-4bea-9dc2-ae5ba4bbc15f
+
 	/// Prepared IntuneOperationalSourceEvidence.csv: TenantKey. Reported source scope only; not whole-tenant coverage or endpoint health.
 	column 'Tenant Key'
 		dataType: string
@@ -177,3 +186,4 @@ table 'Intune Operational Source Evidence'
 				    Typed)
 				in
 				    Readers[Finish](BusinessRows)
+

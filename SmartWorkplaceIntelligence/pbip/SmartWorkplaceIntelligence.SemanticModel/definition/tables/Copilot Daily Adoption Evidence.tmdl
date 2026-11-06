@@ -134,3 +134,4 @@ table 'Copilot Daily Adoption Evidence'
 				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"Report Date", type datetime}, {"Date Key", Int64.Type}, {"App", type text}, {"Enabled Users", Int64.Type}, {"Active Users", Int64.Type}, {"Active User Rate (%)", type number}, {"Prompts Submitted", Int64.Type}, {"Report Version", type text}, {"Usage Refresh Date", type datetime}, {"Evidence Age Days", Int64.Type}, {"Freshness State", type text}, {"Evidence Status", type text}}, "en-US")
 				in
 				 Readers[Finish](Typed)
+

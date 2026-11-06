@@ -101,3 +101,4 @@ table 'OneDrive Activity Evidence'
 				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"Metric", type text}, {"Users", Int64.Type}, {"Files", Int64.Type}, {"Population Users", Int64.Type}, {"User Rate (%)", type number}, {"Report Period Days", Int64.Type}, {"Usage Refresh Date", type datetime}, {"Evidence Age Days", Int64.Type}, {"Freshness State", type text}, {"Evidence Status", type text}}, "en-US")
 				in
 				 Readers[Finish](Typed)
+

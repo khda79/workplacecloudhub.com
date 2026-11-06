@@ -42,22 +42,8 @@
                 }
               },
               "queryRef": "Application Inventory Evidence.Fragmented Applications",
-              "nativeQueryRef": "Fragmented Applications"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Application Inventory Evidence"
-                    }
-                  },
-                  "Property": "Installations Outside Dominant Version"
-                }
-              },
-              "queryRef": "Application Inventory Evidence.Installations Outside Dominant Version",
-              "nativeQueryRef": "Outside dominant version",
-              "displayName": "Outside dominant version"
+              "nativeQueryRef": "Fragmented Applications",
+              "displayName": "Fragmented apps (>1 version)"
             },
             {
               "field": {
@@ -100,36 +86,6 @@
               },
               "queryRef": "Application Inventory Evidence.Application Publishers",
               "nativeQueryRef": "Publishers"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Application Inventory Evidence"
-                    }
-                  },
-                  "Property": "Dominant Version Coverage (%)"
-                }
-              },
-              "queryRef": "Application Inventory Evidence.Dominant Version Coverage (%)",
-              "nativeQueryRef": "Dominant version coverage (%)",
-              "displayName": "Dominant version coverage (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Application Inventory Evidence"
-                    }
-                  },
-                  "Property": "Highly Fragmented Applications"
-                }
-              },
-              "queryRef": "Application Inventory Evidence.Highly Fragmented Applications",
-              "nativeQueryRef": "Highly fragmented applications",
-              "displayName": "Highly fragmented applications"
             }
           ]
         }
@@ -388,7 +344,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "8L"
+                  "Value": "5L"
                 }
               }
             },

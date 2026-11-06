@@ -91,3 +91,4 @@ table 'Tenant Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("DimTenant.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDisplayName", dataType="String"], [name="Environment", dataType="String"], [name="LastRefreshDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
+

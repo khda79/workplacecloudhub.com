@@ -247,3 +247,4 @@ table 'Mailbox Delegation Detail'
 				            #"Delegate Qualification"=if unique then "Exact unique reported principal" else if rawSam<>null then "Reported DOMAIN\\SAM; native identity unresolved" else "Reported principal; native identity unresolved"]),
 				    Output=Table.ExpandRecordColumn(Table.SelectColumns(Detail,Table.ColumnNames(Grouped)&{"Detail"}),"Detail",{"Delegate UPN","Delegate SAM","Delegate Qualification"})
 				in Output
+

@@ -164,3 +164,4 @@ table 'Intune Configuration Setting Evidence'
 				    WithPolicyKey)
 				in
 				    Readers[Finish](BusinessRows)
+

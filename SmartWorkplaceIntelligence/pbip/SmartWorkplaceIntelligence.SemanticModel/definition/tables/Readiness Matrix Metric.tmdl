@@ -26,3 +26,4 @@ table 'Readiness Matrix Metric'
 	partition 'Readiness Matrix Metric' = m
 		mode: import
 		source = #table(type table [Metric=text,State=text,Grain=text,Order=Int64.Type],{{"Triggered (AD GUID)","Triggered","AD GUID",0},{"Triggered (all rows)","Triggered","Rows",1},{"Indeterminate","Indeterminate","Rows",2},{"Not applicable","Not applicable","Rows",3},{"Not triggered","Not triggered","Rows",4}})
+

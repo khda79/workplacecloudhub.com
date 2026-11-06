@@ -2,7 +2,8 @@
 table 'Mailbox Evidence'
 	lineageTag: b52a10cc-35d2-4d9d-b246-011c49231393
 
-	measure Mailboxes = COALESCE(DISTINCTCOUNT('Mailbox Exploration Inventory'[Mailbox Identity]),0)
+	/// Counts observed online mailboxes and on-premises mailbox objects with a populated database. On-premises objects without an observed database are excluded and exposed for investigation.
+	measure Mailboxes = COALESCE(CALCULATE(DISTINCTCOUNT('Mailbox Exploration Inventory'[Mailbox Identity]), KEEPFILTERS(FILTER(ALL('Mailbox Exploration Inventory'[Hosting Location], 'Mailbox Exploration Inventory'[Database]), 'Mailbox Exploration Inventory'[Hosting Location] <> "On-premises" || (NOT ISBLANK('Mailbox Exploration Inventory'[Database]) && LEN(TRIM('Mailbox Exploration Inventory'[Database])) > 0)))), 0)
 		formatString: #,0
 		displayFolder: Messaging | Estate
 		lineageTag: 7fae2a8a-d346-45d6-91a8-2b0db5a72389
@@ -124,6 +125,24 @@ table 'Mailbox Evidence'
 		formatString: #,0
 		displayFolder: Report refinement
 		lineageTag: 7c657c6a-e4dc-4e27-965d-5cb1aa60c423
+
+	/// Mailboxes for which the server version was not observed in the prepared batch.
+	measure 'Exchange version unknown mailboxes' = CALCULATE([Mailboxes], KEEPFILTERS('Mailbox Exploration Inventory'[Exchange Version] = "Exchange Server - version not observed"))
+		formatString: #,0
+		displayFolder: Messaging | Estate
+		lineageTag: 7c61b82f-c0d7-46e6-aa36-5a8ab05fdc90
+
+	/// Share of observed mailboxes hosted on premises in the current country and filter context.
+	measure 'Observed on-premises mailbox share (%)' = DIVIDE([On-premises Mailboxes], [Mailboxes])
+		formatString: 0.0%
+		displayFolder: Messaging | Estate
+		lineageTag: 4f26ff9d-f3ca-4424-bd69-10694a943be2
+
+	/// On-premises mailbox objects with no database in the prepared batch. Presence does not prove an operational mailbox.
+	measure 'On-premises objects without database' = COALESCE(CALCULATE(DISTINCTCOUNT('Mailbox Exploration Inventory'[Mailbox Identity]), KEEPFILTERS('Mailbox Exploration Inventory'[Hosting Location] = "On-premises"), KEEPFILTERS(FILTER(ALL('Mailbox Exploration Inventory'[Database]), ISBLANK('Mailbox Exploration Inventory'[Database]) || LEN(TRIM('Mailbox Exploration Inventory'[Database])) = 0))), 0)
+		formatString: #,0
+		displayFolder: Messaging | Evidence
+		lineageTag: 9b29dfac-31d8-49e3-828e-dd5ce1b759a7
 
 	column 'Mailbox Key'
 		dataType: string
@@ -340,3 +359,4 @@ table 'Mailbox Evidence'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
+

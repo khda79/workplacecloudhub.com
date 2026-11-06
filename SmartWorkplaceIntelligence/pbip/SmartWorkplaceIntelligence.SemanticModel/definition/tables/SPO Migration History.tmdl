@@ -493,3 +493,4 @@ table 'SPO Migration History'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
+

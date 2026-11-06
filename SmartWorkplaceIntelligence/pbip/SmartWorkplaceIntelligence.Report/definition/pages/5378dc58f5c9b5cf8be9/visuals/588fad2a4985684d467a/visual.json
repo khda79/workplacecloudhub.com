@@ -20,6 +20,36 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
+                      "Entity": "Intune Managed App Deployment Evidence"
+                    }
+                  },
+                  "Property": "Intune App Pending Observations"
+                }
+              },
+              "queryRef": "Intune Managed App Deployment Evidence.Intune App Pending Observations",
+              "nativeQueryRef": "Pending app observations",
+              "displayName": "Pending app observations"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Intune Managed App Deployment Evidence"
+                    }
+                  },
+                  "Property": "Intune App Deployment Observations"
+                }
+              },
+              "queryRef": "Intune Managed App Deployment Evidence.Intune App Deployment Observations",
+              "nativeQueryRef": "App deployment observations",
+              "displayName": "App deployment observations"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
                       "Entity": "Intune Managed App Evidence"
                     }
                   },
@@ -65,21 +95,6 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Intune Managed App Deployment Evidence"
-                    }
-                  },
-                  "Property": "Intune App Pending Observations"
-                }
-              },
-              "queryRef": "Intune Managed App Deployment Evidence.Intune App Pending Observations",
-              "nativeQueryRef": "Pending app observations",
-              "displayName": "Pending app observations"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
                       "Entity": "Intune Managed App Evidence"
                     }
                   },
@@ -89,21 +104,6 @@
               "queryRef": "Intune Managed App Evidence.Intune Managed Apps Not Measured",
               "nativeQueryRef": "Apps not measured",
               "displayName": "Apps not measured"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Intune Managed App Deployment Evidence"
-                    }
-                  },
-                  "Property": "Intune App Deployment Observations"
-                }
-              },
-              "queryRef": "Intune Managed App Deployment Evidence.Intune App Deployment Observations",
-              "nativeQueryRef": "App deployment observations",
-              "displayName": "App deployment observations"
             }
           ]
         },
@@ -388,7 +388,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "7L"
+                  "Value": "6L"
                 }
               }
             },

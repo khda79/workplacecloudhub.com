@@ -649,3 +649,4 @@ table 'Device Identity Inventory'
 				"AD Computer Key",[__ADNativeKey],
 				"Primary User Source ID",[__PrimaryUserId],
 				"Primary User SAM",IF(NOT ISBLANK([__PrimaryUserId]),LOOKUPVALUE('Native User Evidence'[SAM Account Name],'Native User Evidence'[SourceUserId],[__PrimaryUserId],'Native User Evidence'[TenantKey],[TenantKey],'Native User Evidence'[Loaded Batch ID],[Loaded Batch ID])))
+

@@ -4,7 +4,7 @@ table 'Account Explorer Inventory'
 
 	/// Private approved account/device lot; existing loaded batch only.
 	measure 'Account Inventory Accounts' =
-
+			
 			VAR _countries=VALUES('Country Selection'[Country])
 			VAR _domains=VALUES('Daily Domain'[Domain])
 			VAR _cf=ISFILTERED('Country Selection')
@@ -24,7 +24,7 @@ table 'Account Explorer Inventory'
 
 	/// Private approved account/device lot; existing loaded batch only.
 	measure 'Disabled Accounts AD/Entra' =
-
+			
 			VAR _countries=VALUES('Country Selection'[Country])
 			VAR _domains=VALUES('Daily Domain'[Domain])
 			VAR _cf=ISFILTERED('Country Selection')
@@ -44,7 +44,7 @@ table 'Account Explorer Inventory'
 
 	/// Private approved account/device lot; existing loaded batch only.
 	measure 'Account Inventory Row In Scope' =
-
+			
 			VAR _countries=VALUES('Country Selection'[Country])
 			VAR _domains=VALUES('Daily Domain'[Domain])
 			VAR _cf=ISFILTERED('Country Selection')
@@ -64,7 +64,7 @@ table 'Account Explorer Inventory'
 
 	/// Private approved account/device lot; existing loaded batch only.
 	measure 'Account Inventory Active <=30D' =
-
+			
 			VAR _countries=VALUES('Country Selection'[Country])
 			VAR _domains=VALUES('Daily Domain'[Domain])
 			VAR _cf=ISFILTERED('Country Selection')
@@ -84,7 +84,7 @@ table 'Account Explorer Inventory'
 
 	/// Private approved account/device lot; existing loaded batch only.
 	measure 'Account Inventory Dormant 31-90D' =
-
+			
 			VAR _countries=VALUES('Country Selection'[Country])
 			VAR _domains=VALUES('Daily Domain'[Domain])
 			VAR _cf=ISFILTERED('Country Selection')
@@ -104,7 +104,7 @@ table 'Account Explorer Inventory'
 
 	/// Private approved account/device lot; existing loaded batch only.
 	measure 'Account Inventory Stale >90D' =
-
+			
 			VAR _countries=VALUES('Country Selection'[Country])
 			VAR _domains=VALUES('Daily Domain'[Domain])
 			VAR _cf=ISFILTERED('Country Selection')
@@ -124,7 +124,7 @@ table 'Account Explorer Inventory'
 
 	/// Private approved account/device lot; existing loaded batch only.
 	measure 'Account Inventory Missing Activity' =
-
+			
 			VAR _countries=VALUES('Country Selection'[Country])
 			VAR _domains=VALUES('Daily Domain'[Domain])
 			VAR _cf=ISFILTERED('Country Selection')
@@ -150,7 +150,7 @@ table 'Account Explorer Inventory'
 
 	/// Private approved account/device lot; existing loaded batch only.
 	measure 'Account Inventory Missing Manager' =
-
+			
 			VAR _countries=VALUES('Country Selection'[Country])
 			VAR _domains=VALUES('Daily Domain'[Domain])
 			VAR _cf=ISFILTERED('Country Selection')
@@ -170,7 +170,7 @@ table 'Account Explorer Inventory'
 
 	/// Private approved account/device lot; existing loaded batch only.
 	measure 'Account Inventory Department Completeness (%)' =
-
+			
 			VAR _countries=VALUES('Country Selection'[Country])
 			VAR _domains=VALUES('Daily Domain'[Domain])
 			VAR _cf=ISFILTERED('Country Selection')
@@ -709,3 +709,4 @@ table 'Account Explorer Inventory'
 				 VAR _skus=SELECTCOLUMNS(FILTER('Native User License',[TenantUserKey]=_key && [TenantKey]=_tenant && [Loaded Batch ID]=_batch),"K",[TenantSkuKey])
 				 RETURN IF(NOT ISBLANK(_key),CONCATENATEX(FILTER('Native License SKU',[TenantKey]=_tenant && [TenantSkuKey] IN _skus),[SkuPartNumberLabel],", ",[SkuPartNumberLabel],ASC))
 				)
+

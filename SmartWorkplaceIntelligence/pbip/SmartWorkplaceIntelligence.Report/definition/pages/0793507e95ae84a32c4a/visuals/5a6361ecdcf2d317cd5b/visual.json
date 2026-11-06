@@ -23,10 +23,10 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 10 Devices Remaining"
+                  "Property": "Enabled corporate PC · Windows 10 Devices Remaining"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 10 Devices Remaining",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Devices Remaining",
               "nativeQueryRef": "Intune inventory Windows 10",
               "displayName": "Intune inventory Windows 10"
             },
@@ -38,10 +38,25 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 10 Devices Not Capable"
+                  "Property": "Enabled corporate PC · Older Windows 11 Release Devices"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 10 Devices Not Capable",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Older Windows 11 Release Devices",
+              "nativeQueryRef": "Older Windows 11 releases",
+              "displayName": "Older Windows 11 releases"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Enabled corporate PC · Windows 10 Devices Not Capable"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Devices Not Capable",
               "nativeQueryRef": "Windows 10 not capable",
               "displayName": "Windows 10 not capable"
             },
@@ -53,27 +68,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Older Windows 11 Release Devices"
+                  "Property": "Enabled corporate PC · Windows 10 Eligibility Not Assessed"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Older Windows 11 Release Devices",
-              "nativeQueryRef": "Older Windows 11 releases",
-              "displayName": "Older Windows 11 releases"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Directory Summary"
-                    }
-                  },
-                  "Property": "Windows 10 Eligibility Undetermined"
-                }
-              },
-              "queryRef": "Device Directory Summary.Windows 10 Eligibility Undetermined",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Eligibility Not Assessed",
               "nativeQueryRef": "Windows 10 eligibility unknown",
-              "displayName": "Windows 10 eligibility unknown"
+              "displayName": "Intune Win10 eligibility unknown"
             }
           ]
         }

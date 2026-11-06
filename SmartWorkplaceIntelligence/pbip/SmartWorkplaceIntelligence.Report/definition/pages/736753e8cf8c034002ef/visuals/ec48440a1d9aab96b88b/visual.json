@@ -20,14 +20,14 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Mailbox Migration Inventory"
+                      "Entity": "Mailbox License Selection"
                     }
                   },
-                  "Property": "Exchange Version"
+                  "Property": "License Product"
                 }
               },
-              "queryRef": "Mailbox Migration Inventory.Exchange Version",
-              "nativeQueryRef": "Exchange Version",
+              "queryRef": "Mailbox License Selection.License Product",
+              "nativeQueryRef": "M365 licences",
               "active": true
             }
           ]
@@ -61,7 +61,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Exchange version'"
+                  "Value": "'M365 licences'"
                 }
               }
             },

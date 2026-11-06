@@ -42,11 +42,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Current Startup Score"
+                  "Property": "Enabled corporate PC · Current Startup Score"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Current Startup Score",
-              "nativeQueryRef": "Current Startup Score"
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Current Startup Score",
+              "nativeQueryRef": "Current Startup Score",
+              "displayName": "Current Startup Score"
             },
             {
               "field": {
@@ -56,11 +57,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Current App Reliability Score"
+                  "Property": "Enabled corporate PC · Current App Reliability Score"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Current App Reliability Score",
-              "nativeQueryRef": "Current App Reliability Score"
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Current App Reliability Score",
+              "nativeQueryRef": "Current App Reliability Score",
+              "displayName": "Current App Reliability Score"
             }
           ]
         }
@@ -75,7 +77,7 @@
                     "Entity": "Device Inventory Evidence"
                   }
                 },
-                "Property": "Current Startup Score"
+                "Property": "Enabled corporate PC · Current Startup Score"
               }
             },
             "direction": "Descending"

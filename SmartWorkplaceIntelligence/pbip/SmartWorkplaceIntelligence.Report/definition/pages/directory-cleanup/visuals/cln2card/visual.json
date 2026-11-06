@@ -53,12 +53,12 @@
                       "Entity": "Computer Cleanup Evidence"
                     }
                   },
-                  "Property": "Computer Cleanup Review"
+                  "Property": "Computer Cleanup Active"
                 }
               },
-              "queryRef": "Computer Cleanup Evidence.Computer Cleanup Review",
-              "nativeQueryRef": "Computer Cleanup Review",
-              "displayName": "Computers review"
+              "queryRef": "Computer Cleanup Evidence.Computer Cleanup Active",
+              "nativeQueryRef": "Computer Cleanup Active",
+              "displayName": "Computers active"
             },
             {
               "field": {
@@ -68,12 +68,12 @@
                       "Entity": "Computer Cleanup Evidence"
                     }
                   },
-                  "Property": "Computer Cleanup Active"
+                  "Property": "Computer Cleanup Review"
                 }
               },
-              "queryRef": "Computer Cleanup Evidence.Computer Cleanup Active",
-              "nativeQueryRef": "Computer Cleanup Active",
-              "displayName": "Computers active"
+              "queryRef": "Computer Cleanup Evidence.Computer Cleanup Review",
+              "nativeQueryRef": "Computer Cleanup Review",
+              "displayName": "Computers review"
             }
           ]
         }
@@ -332,7 +332,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "7L"
+                  "Value": "4L"
                 }
               }
             },

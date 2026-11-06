@@ -42,11 +42,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 10 Devices Remaining"
+                  "Property": "Enabled corporate PC · Windows 10 Devices Remaining"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 10 Devices Remaining",
-              "nativeQueryRef": "Windows 10 Devices Remaining"
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Devices Remaining",
+              "nativeQueryRef": "Windows 10 Devices Remaining",
+              "displayName": "Windows 10 Devices Remaining"
             },
             {
               "field": {
@@ -56,11 +57,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 10 Devices Not Capable"
+                  "Property": "Enabled corporate PC · Windows 10 Devices Not Capable"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 10 Devices Not Capable",
-              "nativeQueryRef": "Windows 10 Devices Not Capable"
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Devices Not Capable",
+              "nativeQueryRef": "Windows 10 Devices Not Capable",
+              "displayName": "Windows 10 not capable"
             }
           ]
         }
@@ -75,7 +77,7 @@
                     "Entity": "Device Inventory Evidence"
                   }
                 },
-                "Property": "Windows 10 Devices Remaining"
+                "Property": "Enabled corporate PC · Windows 10 Devices Remaining"
               }
             },
             "direction": "Descending"

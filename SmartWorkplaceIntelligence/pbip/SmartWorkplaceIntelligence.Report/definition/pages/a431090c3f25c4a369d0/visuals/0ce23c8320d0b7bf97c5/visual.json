@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "0ce23c8320d0b7bf97c5",
   "position": {
-    "x": 1119.3333333333335,
-    "y": 128,
+    "x": 32,
+    "y": 232,
     "z": 61000,
-    "height": 104,
-    "width": 147.33333333333334,
-    "tabOrder": 61083
+    "height": 96,
+    "width": 225,
+    "tabOrder": 61062
   },
   "visual": {
     "visualType": "cardVisual",
@@ -20,15 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Security Control Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Disk Encryption Healthy (%)"
+                  "Property": "Enabled corporate PC compliance (%)"
                 }
               },
-              "queryRef": "Security Control Evidence.Disk Encryption Healthy (%)",
-              "nativeQueryRef": "Disk Encryption Healthy (%)",
-              "displayName": "Encryption (Windows %)"
+              "queryRef": "Global Device Inventory.Enabled corporate PC compliance (%)",
+              "nativeQueryRef": "Equipment Compliance Rate (%)",
+              "displayName": "PC compliance (%)"
             }
           ]
         }
@@ -48,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "25D"
                 }
               }
             },
@@ -66,10 +66,10 @@
                                 "Measure": {
                                   "Expression": {
                                     "SourceRef": {
-                                      "Entity": "Security Control Evidence"
+                                      "Entity": "Global Device Inventory"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
+                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
                                 }
                               },
                               "Right": {
@@ -93,10 +93,10 @@
                                 "Measure": {
                                   "Expression": {
                                     "SourceRef": {
-                                      "Entity": "Security Control Evidence"
+                                      "Entity": "Global Device Inventory"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
+                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
                                 }
                               },
                               "Right": {
@@ -120,10 +120,10 @@
                                 "Measure": {
                                   "Expression": {
                                     "SourceRef": {
-                                      "Entity": "Security Control Evidence"
+                                      "Entity": "Global Device Inventory"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
+                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
                                 }
                               },
                               "Right": {
@@ -183,7 +183,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },
@@ -265,10 +265,10 @@
                                 "Measure": {
                                   "Expression": {
                                     "SourceRef": {
-                                      "Entity": "Security Control Evidence"
+                                      "Entity": "Global Device Inventory"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
+                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
                                 }
                               },
                               "Right": {
@@ -292,10 +292,10 @@
                                 "Measure": {
                                   "Expression": {
                                     "SourceRef": {
-                                      "Entity": "Security Control Evidence"
+                                      "Entity": "Global Device Inventory"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
+                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
                                 }
                               },
                               "Right": {
@@ -319,10 +319,10 @@
                                 "Measure": {
                                   "Expression": {
                                     "SourceRef": {
-                                      "Entity": "Security Control Evidence"
+                                      "Entity": "Global Device Inventory"
                                     }
                                   },
-                                  "Property": "KPI Alert Level Disk Encryption Healthy (%)"
+                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
                                 }
                               },
                               "Right": {
@@ -411,13 +411,6 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
-                }
-              }
-            },
-            "rowPadding": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
                 }
               }
             },

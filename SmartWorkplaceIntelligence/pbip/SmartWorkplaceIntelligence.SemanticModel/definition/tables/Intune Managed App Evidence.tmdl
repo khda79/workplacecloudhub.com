@@ -268,3 +268,4 @@ table 'Intune Managed App Evidence'
 				    WithApplicationKey)
 				in
 				    Readers[Finish](BusinessRows)
+

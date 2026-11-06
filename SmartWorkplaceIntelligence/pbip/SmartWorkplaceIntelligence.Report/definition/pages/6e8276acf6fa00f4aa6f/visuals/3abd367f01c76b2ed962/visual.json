@@ -20,21 +20,6 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Security Control Evidence"
-                    }
-                  },
-                  "Property": "Security Controls Without Evidence"
-                }
-              },
-              "queryRef": "Security Control Evidence.Security Controls Without Evidence",
-              "nativeQueryRef": "Security Controls Without Evidence",
-              "displayName": "Security Controls Without Evidence"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
                       "Entity": "Data Trust Evidence"
                     }
                   },
@@ -59,6 +44,21 @@
               "queryRef": "Data Trust Evidence.Sources Requiring Refresh",
               "nativeQueryRef": "Sources Requiring Refresh",
               "displayName": "Sources Requiring Refresh"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Security Control Evidence"
+                    }
+                  },
+                  "Property": "Security Controls Without Evidence"
+                }
+              },
+              "queryRef": "Security Control Evidence.Security Controls Without Evidence",
+              "nativeQueryRef": "Security Controls Without Evidence",
+              "displayName": "Security Controls Without Evidence"
             }
           ]
         }
@@ -246,6 +246,27 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "3L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }

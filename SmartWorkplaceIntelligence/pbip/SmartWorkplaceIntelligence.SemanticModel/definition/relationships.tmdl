@@ -550,10 +550,6 @@ relationship report_scope_Mailbox_Evidence_Country
 	fromColumn: 'Mailbox Evidence'.Country
 	toColumn: 'Country Selection'.'Source Country'
 
-relationship report_scope_Mailbox_Migration_Inventory_Country
-	fromColumn: 'Mailbox Migration Inventory'.Country
-	toColumn: 'Country Selection'.'Source Country'
-
 relationship report_scope_Windows_Migration_Evidence_Country
 	fromColumn: 'Windows Migration Evidence'.Country
 	toColumn: 'Country Selection'.'Source Country'
@@ -599,10 +595,6 @@ relationship m365_license_device_membership
 relationship m365_license_device_selection
 	fromColumn: 'M365 Device License Membership'.'License Product'
 	toColumn: 'M365 License Selection'.'License Product'
-
-relationship 9ffdd70a-a7cd-4620-879e-3d9a84d108cf
-	fromColumn: 'Exchange Mailbox Reconciliation'.Country
-	toColumn: 'Country Selection'.'Source Country'
 
 relationship Private_IntunePresence_DeviceSystemEvidence
 	fromColumn: 'Device System Evidence'.'Intune presence'
@@ -726,3 +718,20 @@ relationship cleanup_country_2
 relationship cleanup_domain_2
 	fromColumn: 'Mailbox Cleanup Evidence'.'AD Domain'
 	toColumn: 'Daily Domain'.Domain
+
+relationship report_scope_Mailbox_Migration_Inventory_Country
+	fromColumn: 'Mailbox Migration Inventory'.'Report Country'
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship 9ffdd70a-a7cd-4620-879e-3d9a84d108cf
+	fromColumn: 'Exchange Mailbox Reconciliation'.'Report Country'
+	toColumn: 'Country Selection'.'Source Country'
+
+relationship Private_Reconciliation_AD_Domain
+	fromColumn: 'Exchange Mailbox Reconciliation'.'Report AD Domain'
+	toColumn: 'Daily Domain'.Domain
+
+relationship a21191c4-6814-40ae-8c8e-9be31800a421
+	fromColumn: 'Historical Windows Readiness'.'Candidate Device Source ID'
+	toColumn: 'Windows Migration Evidence'.'Device Source ID'
+

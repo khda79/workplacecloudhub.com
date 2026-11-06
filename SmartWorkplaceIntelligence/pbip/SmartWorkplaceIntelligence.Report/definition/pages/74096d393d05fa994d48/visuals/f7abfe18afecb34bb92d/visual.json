@@ -3,7 +3,7 @@
   "name": "f7abfe18afecb34bb92d",
   "position": {
     "x": 32,
-    "y": 376,
+    "y": 480,
     "z": 1000,
     "height": 96,
     "width": 1856,
@@ -15,21 +15,6 @@
       "queryState": {
         "Data": {
           "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Collaboration Object Evidence"
-                    }
-                  },
-                  "Property": "Active Collaboration Objects 30D"
-                }
-              },
-              "queryRef": "Collaboration Object Evidence.Active Collaboration Objects 30D",
-              "nativeQueryRef": "Active objects (30D)",
-              "displayName": "Active objects (30D)"
-            },
             {
               "field": {
                 "Measure": {
@@ -68,21 +53,6 @@
                       "Entity": "Mailbox Evidence"
                     }
                   },
-                  "Property": "Observed Exchange Online Adoption (%)"
-                }
-              },
-              "queryRef": "Mailbox Evidence.Observed Exchange Online Adoption (%)",
-              "nativeQueryRef": "Exchange Online adoption (%)",
-              "displayName": "Exchange Online adoption (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Mailbox Evidence"
-                    }
-                  },
                   "Property": "On-premises Mailboxes"
                 }
               },
@@ -104,6 +74,21 @@
               "queryRef": "Mailbox Evidence.Mailboxes >=45 GB Without Archive",
               "nativeQueryRef": "Large mailboxes without archive",
               "displayName": "Large mailboxes without archive"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Object Evidence"
+                    }
+                  },
+                  "Property": "Active Collaboration Objects 30D"
+                }
+              },
+              "queryRef": "Collaboration Object Evidence.Active Collaboration Objects 30D",
+              "nativeQueryRef": "Active objects (30D)",
+              "displayName": "Active objects (30D)"
             }
           ]
         }
@@ -283,7 +268,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "6L"
+                  "Value": "5L"
                 }
               }
             },
@@ -351,6 +336,13 @@
                       "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }

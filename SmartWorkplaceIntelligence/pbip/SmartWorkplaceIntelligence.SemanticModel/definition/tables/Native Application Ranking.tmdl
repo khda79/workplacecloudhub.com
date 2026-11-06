@@ -99,3 +99,4 @@ table 'Native Application Ranking'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("TopApplication.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="ApplicationProduct", dataType="String"], [name="DisplayName", dataType="String"], [name="Publisher", dataType="String"], [name="Platform", dataType="String"], [name="VersionCount", dataType="Int64"], [name="ReportedDeviceCount", dataType="Int64"]}))
 				in
 				    Readers[Finish](BusinessRows)
+

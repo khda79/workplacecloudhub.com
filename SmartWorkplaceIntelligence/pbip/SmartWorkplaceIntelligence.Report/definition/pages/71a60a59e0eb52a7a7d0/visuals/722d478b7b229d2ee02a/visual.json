@@ -3,9 +3,9 @@
   "name": "722d478b7b229d2ee02a",
   "position": {
     "x": 32,
-    "y": 432,
+    "y": 416,
     "z": 1000,
-    "height": 342,
+    "height": 292,
     "width": 608,
     "tabOrder": 1333
   },
@@ -295,7 +295,7 @@
             "zoom": {
               "expr": {
                 "Literal": {
-                  "Value": "1.16D"
+                  "Value": "1.15D"
                 }
               }
             },
@@ -309,7 +309,7 @@
             "centerLongitude": {
               "expr": {
                 "Literal": {
-                  "Value": "-39.94197082519531D"
+                  "Value": "25.276674270629883D"
                 }
               }
             }

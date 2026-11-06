@@ -34,48 +34,6 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Identity Reconciliation Evidence"
-                    }
-                  },
-                  "Property": "AD to Entra Coverage"
-                }
-              },
-              "queryRef": "Identity Reconciliation Evidence.AD to Entra Coverage",
-              "nativeQueryRef": "AD to Entra Coverage"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Identity Reconciliation Evidence"
-                    }
-                  },
-                  "Property": "Identity Conflicts"
-                }
-              },
-              "queryRef": "Identity Reconciliation Evidence.Identity Conflicts",
-              "nativeQueryRef": "Classification Conflicts"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "User Inventory Evidence"
-                    }
-                  },
-                  "Property": "Missing Activity Evidence"
-                }
-              },
-              "queryRef": "User Inventory Evidence.Missing Activity Evidence",
-              "nativeQueryRef": "Missing Activity Evidence"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
                       "Entity": "User Inventory Evidence"
                     }
                   },
@@ -84,6 +42,20 @@
               },
               "queryRef": "User Inventory Evidence.Job Title Completeness",
               "nativeQueryRef": "Job Title Completeness"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Identity Reconciliation Evidence"
+                    }
+                  },
+                  "Property": "AD to Entra Coverage"
+                }
+              },
+              "queryRef": "Identity Reconciliation Evidence.AD to Entra Coverage",
+              "nativeQueryRef": "AD to Entra Coverage"
             }
           ]
         }
@@ -335,7 +307,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "5L"
+                  "Value": "3L"
                 }
               }
             },

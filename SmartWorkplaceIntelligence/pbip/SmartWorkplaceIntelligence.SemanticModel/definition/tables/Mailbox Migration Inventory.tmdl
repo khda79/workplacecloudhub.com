@@ -2,8 +2,8 @@
 table 'Mailbox Migration Inventory'
 	lineageTag: 685b37c0-abea-40f8-8d8d-c2eff6868231
 
-	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
-	measure 'Local Business Mailboxes Remaining' = IF(COUNTROWS(ALL('Mailbox Migration Inventory')) > 0, COALESCE(COUNTROWS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Mailbox Type] IN {"UserMailbox","SharedMailbox","RoomMailbox","EquipmentMailbox","LinkedMailbox"})),0), BLANK())
+	/// Business mailbox inventory records with a uniquely matched mailbox and a nonempty observed database. Excludes records with no matched database; DONTMIGRATE exceptions are not excluded from this count.
+	measure 'Local Business Mailboxes Remaining' = IF(COUNTROWS(ALL('Mailbox Migration Inventory')) > 0, COALESCE(COUNTROWS(FILTER('Mailbox Migration Inventory', 'Mailbox Migration Inventory'[Mailbox Type] IN {"UserMailbox","SharedMailbox","RoomMailbox","EquipmentMailbox","LinkedMailbox"} && NOT ISBLANK('Mailbox Migration Inventory'[Report Database]) && LEN(TRIM('Mailbox Migration Inventory'[Report Database])) > 0)),0), BLANK())
 		formatString: #,0
 		displayFolder: Migration planning
 		lineageTag: 8986d4e5-79ee-4a36-8787-70b98a8d7f3a
@@ -14,14 +14,14 @@ table 'Mailbox Migration Inventory'
 		displayFolder: Migration planning
 		lineageTag: 12ced943-6901-4f3c-b6b1-da35ad780ffb
 
-	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
-	measure 'Observed Mailbox Migration Blockers' = IF(COUNTROWS(ALL('Mailbox Migration Inventory')) > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Migration Inventory'),KEEPFILTERS('Mailbox Migration Inventory'[Migration Status]="Observed blocker")),0), BLANK())
+	/// Current on-premises mailboxes with database only. Risk indicators overlap; objects without a database remain in investigation.
+	measure 'Observed Mailbox Migration Blockers' = CALCULATE((IF(COUNTROWS(ALL('Mailbox Migration Inventory')) > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Migration Inventory'),KEEPFILTERS('Mailbox Migration Inventory'[Migration Status]="Observed blocker")),0), BLANK())),KEEPFILTERS('Mailbox Migration Inventory'[Report Has Database]="Yes"))
 		formatString: #,0
 		displayFolder: Migration planning
 		lineageTag: 3eed4ee4-9658-49ca-a72c-75527f0c6b8d
 
-	/// Observed local migration planning evidence. Missing evidence is not zero; see provenance and task views. Unloaded/empty source is blank, never a verified zero.
-	measure 'Mailbox Migration Risk Review' = IF(COUNTROWS(ALL('Mailbox Migration Inventory')) > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Migration Inventory'),KEEPFILTERS('Mailbox Migration Inventory'[Migration Status]="Risk review required")),0), BLANK())
+	/// Current on-premises mailboxes with database only. Risk indicators overlap; objects without a database remain in investigation.
+	measure 'Mailbox Migration Risk Review' = CALCULATE((IF(COUNTROWS(ALL('Mailbox Migration Inventory')) > 0, COALESCE(CALCULATE(COUNTROWS('Mailbox Migration Inventory'),KEEPFILTERS('Mailbox Migration Inventory'[Migration Status]="Risk review required")),0), BLANK())),KEEPFILTERS('Mailbox Migration Inventory'[Report Has Database]="Yes"))
 		formatString: #,0
 		displayFolder: Migration planning
 		lineageTag: cf77b00b-4ab9-423d-980e-22adca37ce40
@@ -49,16 +49,269 @@ table 'Mailbox Migration Inventory'
 		lineageTag: 384327fe-d9be-4426-9578-43b375f003d7
 
 	/// All local inventory records explicitly attributed to Exchange Server 2016. This population is distinct from unified mailbox evidence.
-	measure 'Local Mailboxes (2016)' = CALCULATE([Local Mailbox Inventory Records], KEEPFILTERS('Mailbox Migration Inventory'[Exchange Version] = "Exchange Server 2016"))
+	measure 'Local Mailboxes (2016)' = CALCULATE([Local Mailboxes With Database],KEEPFILTERS('Mailbox Migration Inventory'[Report Exchange Version]="Exchange Server 2016"))
 		formatString: #,0
 		displayFolder: Report refinement
 		lineageTag: 0f8f9fd0-e597-4b38-9965-974d794e2196
 
 	/// All local inventory records explicitly attributed to Exchange Server 2019 or SE. Unknown versions are excluded.
-	measure 'Local Mailboxes (2019/SE)' = CALCULATE([Local Mailbox Inventory Records], KEEPFILTERS('Mailbox Migration Inventory'[Exchange Version] IN {"Exchange Server 2019", "Exchange Server SE"}))
+	measure 'Local Mailboxes (2019/SE)' = CALCULATE([Local Mailboxes With Database],KEEPFILTERS('Mailbox Migration Inventory'[Report Exchange Version] IN {"Exchange Server 2019","Exchange Server SE"}))
 		formatString: #,0
 		displayFolder: Report refinement
 		lineageTag: c26eebf9-6e71-445e-8306-618d214d5da5
+
+	/// Provisional on-premises mailbox count with observed database, excluding uniquely matched retained exceptions. Unmatched or ambiguous exceptions require review; this is not a finalized migration decision.
+	measure 'To migrate to EXO provisional' =
+			VAR _active=ISFILTERED('Mailbox License Selection'[License Product])
+			VAR _products=VALUES('Mailbox License Selection'[License Product])
+			VAR _keys=CALCULATETABLE(SUMMARIZE('Mailbox License Membership','Mailbox License Membership'[Mailbox Key],'Mailbox License Membership'[Loaded Batch ID]),TREATAS(_products,'Mailbox License Membership'[License Product]))
+			RETURN IF([Mailbox Exception Source Status]="Qualified",IF(_active,CALCULATE([Local Mailbox Inventory Records],KEEPFILTERS('Mailbox Migration Inventory'[Report EXO Candidate]="Candidate"),KEEPFILTERS(TREATAS(_keys,'Mailbox Migration Inventory'[Report Linked Mailbox Key],'Mailbox Migration Inventory'[Loaded Batch ID]))),CALCULATE([Local Mailbox Inventory Records],KEEPFILTERS('Mailbox Migration Inventory'[Report EXO Candidate]="Candidate"))),BLANK())
+		formatString: #,0
+		lineageTag: 65759098-b9f3-4627-bced-04ae5509e60b
+
+	measure 'Local Mailboxes With Database' = CALCULATE([Local Mailbox Inventory Records],KEEPFILTERS('Mailbox Migration Inventory'[Report Has Database]="Yes"))
+		formatString: #,0
+		lineageTag: ac37916a-6f39-4e21-8e23-15796083c199
+
+	/// UserMailbox subset of the provisional Exchange Online (EXO) migration candidates; uses the same source qualification, database and retention rules as To migrate to EXO.
+	measure 'User mailboxes to migrate to EXO' = CALCULATE([To migrate to EXO provisional], KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type] = "UserMailbox"))
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 5914e17d-e152-44ab-b527-f833d13b6794
+
+	/// SharedMailbox subset of the provisional Exchange Online (EXO) migration candidates, with the same source qualification and retention rules.
+	measure 'Shared mailboxes to migrate to EXO' = CALCULATE([To migrate to EXO provisional], KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type] = "SharedMailbox"))
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 98fddba8-fe0a-429c-b242-424f6e1cd3cc
+
+	/// All provisional Exchange Online (EXO) migration candidate types other than UserMailbox and SharedMailbox, including rooms and discovery mailboxes. Same qualification and retention rules as the total.
+	measure 'Other mailboxes to migrate to EXO' = CALCULATE([To migrate to EXO provisional], KEEPFILTERS(NOT ('Mailbox Migration Inventory'[Mailbox Type] IN {"UserMailbox", "SharedMailbox"})))
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 5370b015-4bc8-458a-ada0-94224678d1f1
+
+	/// Non-overlapping size boundaries: users <=2, >2 to100, >100; shared <=50, >50 to100, >100; missing size remains unknown.
+	measure 'Shared mailboxes below 50 GB to EXO' = CALCULATE([To migrate to EXO provisional],KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="SharedMailbox"),KEEPFILTERS(NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB] <= 50))
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 88ab050f-1283-4c77-923e-97a730c78c5a
+
+	/// Shared mailboxes >50 to100GB; >100GB counted separately for technical review.
+	measure 'Shared mailboxes above 50 GB to EXO' = CALCULATE([To migrate to EXO provisional],KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="SharedMailbox"),KEEPFILTERS(NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB] > 50 && 'Mailbox Migration Inventory'[Mailbox Size GB] <= 100))
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 622e6081-616d-4723-b067-efd9169025e2
+
+	/// Mailbox type and observed primary mailbox size breakdown for the corresponding EXO migration view. Strict <50 and >50 GB thresholds; blank sizes remain unknown. Respects source qualification and active filters.
+	measure 'Retained user mailboxes' = IF([Mailbox Exception Source Status]="Qualified",CALCULATE([Local Mailbox Inventory Records],KEEPFILTERS('Mailbox Migration Inventory'[Report EXO Candidate]="DONTMIGRATE"),KEEPFILTERS('Mailbox Migration Inventory'[Report Has Database]="Yes"),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="UserMailbox")),BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: b8899f96-8644-4e2b-a6c5-9bdcfdec57a3
+
+	/// Non-overlapping size boundaries: users <=2, >2 to100, >100; shared <=50, >50 to100, >100; missing size remains unknown.
+	measure 'Retained shared mailboxes below 50 GB' = IF([Mailbox Exception Source Status]="Qualified",CALCULATE([Local Mailbox Inventory Records],KEEPFILTERS('Mailbox Migration Inventory'[Report EXO Candidate]="DONTMIGRATE"),KEEPFILTERS('Mailbox Migration Inventory'[Report Has Database]="Yes"),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="SharedMailbox"),KEEPFILTERS(NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB] <= 50)),BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: f84c7e1f-cdd3-49a6-a26a-1db790eec5d3
+
+	/// Shared mailboxes >50 to100GB; >100GB counted separately for technical review.
+	measure 'Retained shared mailboxes above 50 GB' = IF([Mailbox Exception Source Status]="Qualified",CALCULATE([Local Mailbox Inventory Records],KEEPFILTERS('Mailbox Migration Inventory'[Report EXO Candidate]="DONTMIGRATE"),KEEPFILTERS('Mailbox Migration Inventory'[Report Has Database]="Yes"),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="SharedMailbox"),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB] > 50 && 'Mailbox Migration Inventory'[Mailbox Size GB] <= 100)),BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 49d2eda9-4427-4baf-a5f2-5d1763d17054
+
+	/// Mailbox type and observed primary mailbox size breakdown for the corresponding EXO migration view. Strict <50 and >50 GB thresholds; blank sizes remain unknown. Respects source qualification and active filters.
+	measure 'Retained other mailboxes' = IF([Mailbox Exception Source Status]="Qualified",CALCULATE([Local Mailbox Inventory Records],KEEPFILTERS('Mailbox Migration Inventory'[Report EXO Candidate]="DONTMIGRATE"),KEEPFILTERS('Mailbox Migration Inventory'[Report Has Database]="Yes"),KEEPFILTERS(NOT ('Mailbox Migration Inventory'[Mailbox Type] IN {"UserMailbox","SharedMailbox"}))),BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 6c25eef2-eedb-4c9a-80fc-3669f648602f
+
+	/// Mailbox type and observed primary mailbox size breakdown for the corresponding EXO migration view. Strict <50 and >50 GB thresholds; blank sizes remain unknown. Respects source qualification and active filters.
+	measure 'Retained shared mailboxes size unknown' = IF([Mailbox Exception Source Status]="Qualified",CALCULATE([Local Mailbox Inventory Records],KEEPFILTERS('Mailbox Migration Inventory'[Report EXO Candidate]="DONTMIGRATE"),KEEPFILTERS('Mailbox Migration Inventory'[Report Has Database]="Yes"),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="SharedMailbox"),KEEPFILTERS(ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB]))),BLANK())
+		formatString: #,0
+		displayFolder: Migration planning
+		lineageTag: 2be0ba42-4598-4f86-bdf0-c3fbc7689420
+
+	/// Selected M365 products match any observed suite on a uniquely linked mailbox within the same batch. No observed suite and Unknown identity remain distinct.
+	measure 'Migration licence selection match' =
+			VAR _active=ISFILTERED('Mailbox License Selection'[License Product])
+			VAR _products=VALUES('Mailbox License Selection'[License Product])
+			VAR _mailboxes=SUMMARIZE('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report Linked Mailbox Key],'Mailbox Migration Inventory'[Loaded Batch ID])
+			VAR _matches=CALCULATE(COUNTROWS('Mailbox License Membership'),REMOVEFILTERS(),TREATAS(_products,'Mailbox License Membership'[License Product]),TREATAS(_mailboxes,'Mailbox License Membership'[Mailbox Key],'Mailbox License Membership'[Loaded Batch ID]))
+			RETURN IF(NOT _active || _matches>0,1,0)
+		formatString: #,0
+		isHidden
+		displayFolder: Migration planning\Size and licences
+		lineageTag: 5679d416-8059-4314-bd33-672ed97c1252
+
+	/// Non-overlapping size boundaries: users <=2, >2 to100, >100; shared <=50, >50 to100, >100; missing size remains unknown.
+	measure 'User mailboxes below 2 GB to EXO' = CALCULATE([User mailboxes to migrate to EXO],KEEPFILTERS(NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB]<=2))
+		formatString: #,0
+		displayFolder: Migration planning\Size and licences
+		lineageTag: 853b12e5-626a-4085-8106-2d9963dfee5c
+
+	/// Non-overlapping size boundaries: users <=2, >2 to100, >100; shared <=50, >50 to100, >100; missing size remains unknown.
+	measure 'User mailboxes 2 to 100 GB to EXO' = CALCULATE([User mailboxes to migrate to EXO],KEEPFILTERS(NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB]>2 && 'Mailbox Migration Inventory'[Mailbox Size GB]<=100))
+		formatString: #,0
+		displayFolder: Migration planning\Size and licences
+		lineageTag: 17e5314a-4461-4eaa-a179-edc2efb37365
+
+	/// Mutually exclusive observed-size subset of EXO candidates. Boundaries: <2, >=2 and <=100, >100 GB; unknown size excluded.
+	measure 'User mailboxes above 100 GB to EXO' = CALCULATE([User mailboxes to migrate to EXO],KEEPFILTERS(NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB]>100))
+		formatString: #,0
+		displayFolder: Migration planning\Size and licences
+		lineageTag: 67b9ec73-6e1f-4855-9e9c-cfc163ca07e2
+
+	/// Distinct native account x SKU assignments for the candidate cohort. Exact AD object GUID and same-batch native user key mapping; no SMTP/UPN match. Observed Microsoft 365 suite assignments, not licence requirements.
+	measure 'EXO candidate M365 assignments' =
+			VAR _products=VALUES('License User Assignments'[License Product])
+			VAR _cohort=FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report EXO Candidate]="Candidate" && [Migration licence selection match]=1)
+			VAR _ad=SUMMARIZE(_cohort,'Mailbox Migration Inventory'[Object GUID],'Mailbox Migration Inventory'[Loaded Batch ID])
+			VAR _nativeUsers=CALCULATETABLE(SUMMARIZE('AD User Evidence','AD User Evidence'[TenantKey],'AD User Evidence'[TenantUserKey],'AD User Evidence'[Loaded Batch ID]),REMOVEFILTERS(),TREATAS(_ad,'AD User Evidence'[ObjectGUID],'AD User Evidence'[Loaded Batch ID]))
+			VAR _users=SELECTCOLUMNS(_nativeUsers,"__key",VAR _t=LOWER(TRIM('AD User Evidence'[TenantKey])) VAR _u=LOWER(TRIM('AD User Evidence'[TenantUserKey])) RETURN LEN(_t)&":"&_t&"|"&LEN(_u)&":"&_u,"__batch",'AD User Evidence'[Loaded Batch ID])
+			VAR _assignments=CALCULATE(DISTINCTCOUNT('License User Assignments'[Assignment Key]),REMOVEFILTERS(),TREATAS(_products,'License User Assignments'[License Product]),KEEPFILTERS('License User Assignments'[M365 Scope]="Yes"),KEEPFILTERS(TREATAS(_users,'License User Assignments'[User Key],'License User Assignments'[Loaded Batch ID])))
+			RETURN IF([Mailbox Exception Source Status]="Qualified",COALESCE(_assignments,0),BLANK())
+		formatString: #,0
+		isHidden
+		displayFolder: Migration planning\Size and licences
+		lineageTag: 7ea57a99-81e9-4536-9eeb-bd1788f79c16
+
+	/// Observed distinct M365 suite assignments on the accounts of this EXO-candidate type/size cohort; same-batch native identity only.
+	measure 'M365 F3 assigned to user mailboxes below 2 GB' = CALCULATE([EXO candidate M365 assignments],KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="UserMailbox"),KEEPFILTERS(NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB]<2),KEEPFILTERS('License User Assignments'[License Product]="Microsoft 365 F3"))
+		formatString: #,0
+		displayFolder: Migration planning\Size and licences
+		lineageTag: 5aa4b486-726b-4305-a422-7d50883f4eae
+
+	/// Observed distinct M365 suite assignments on the accounts of this EXO-candidate type/size cohort; same-batch native identity only.
+	measure 'M365 E3 assigned to user mailboxes 2 to 100 GB' = CALCULATE([EXO candidate M365 assignments],KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="UserMailbox"),KEEPFILTERS(NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB]>=2 && 'Mailbox Migration Inventory'[Mailbox Size GB]<=100),KEEPFILTERS('License User Assignments'[License Product]="Microsoft 365 E3"))
+		formatString: #,0
+		displayFolder: Migration planning\Size and licences
+		lineageTag: d17cc712-4ecf-419e-8dba-50a151923390
+
+	/// Observed distinct M365 suite assignments on the accounts of this EXO-candidate type/size cohort; same-batch native identity only.
+	measure 'M365 E5 assigned to user mailboxes 2 to 100 GB' = CALCULATE([EXO candidate M365 assignments],KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="UserMailbox"),KEEPFILTERS(NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB]>=2 && 'Mailbox Migration Inventory'[Mailbox Size GB]<=100),KEEPFILTERS('License User Assignments'[License Product]="Microsoft 365 E5"))
+		formatString: #,0
+		displayFolder: Migration planning\Size and licences
+		lineageTag: 899978d0-79ee-4df0-9dd0-a55be8f638a2
+
+	/// Observed distinct M365 suite assignments on the accounts of this EXO-candidate type/size cohort; same-batch native identity only.
+	measure 'M365 assigned to shared mailboxes above 50 GB' = CALCULATE([EXO candidate M365 assignments],KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="SharedMailbox"),KEEPFILTERS(NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB]>50))
+		formatString: #,0
+		displayFolder: Migration planning\Size and licences
+		lineageTag: e944c3f6-b4e9-4993-a9d1-4e934b83fca7
+
+	/// Existing person scenario mapped by exact mailbox GUID and loaded batch; blank at mixed mailbox grain.
+	measure 'Licensing target' =
+			VAR _guid=SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox GUID]) VAR _batch=SELECTEDVALUE('Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN IF(_guid<>"" && _batch<>"",CALCULATE([Exchange Scenario Row Target],TREATAS({_guid},'Exchange Mailbox Reconciliation'[Mailbox GUID]),TREATAS({_batch},'Exchange Mailbox Reconciliation'[Loaded Batch ID])))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 95a1ba94-9a92-4b34-a5c6-b0497e46ef9a
+
+	/// Matched workbook retention decision from the current loaded inventory.
+	measure 'Licensing decision' = SWITCH(SELECTEDVALUE('Mailbox Migration Inventory'[Report EXO Candidate]),"Candidate","To migrate to EXO","DONTMIGRATE","Don't migrate to EXO","To review")
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: e3920f33-ca63-4225-8ed4-c41e2f394186
+
+	/// Workbook reasons only for exact local ObjectGUID and same batch. SMTP is not an identity join.
+	measure 'Licensing reason' =
+			VAR _object=LOWER(TRIM(SELECTEDVALUE('Mailbox Migration Inventory'[Object GUID]))) VAR _batch=SELECTEDVALUE('Mailbox Migration Inventory'[Loaded Batch ID])
+			VAR _rows=FILTER('Mailbox Migration Exceptions','Mailbox Migration Exceptions'[Loaded Batch ID]=_batch && _object<>"" && LOWER('Mailbox Migration Exceptions'[Mailbox Identity])="local_mailboxes|" & _object)
+			RETURN IF(HASONEVALUE('Mailbox Migration Inventory'[Mailbox GUID]),CONCATENATEX(DISTINCT(SELECTCOLUMNS(_rows,"Reason",'Mailbox Migration Exceptions'[Reason])),[Reason],"; "))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 81ee2566-bb36-4f4e-8a18-5f91f5cd771b
+
+	/// Same-batch observed Exchange plan.
+	measure 'Licensing plan observation' =
+			VAR _guid=SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox GUID]) VAR _batch=SELECTEDVALUE('Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN IF(_guid<>"" && _batch<>"",CALCULATE(SELECTEDVALUE('Exchange Mailbox Reconciliation'[Mailbox Plan Observation]),TREATAS({_guid},'Exchange Mailbox Reconciliation'[Mailbox GUID]),TREATAS({_batch},'Exchange Mailbox Reconciliation'[Loaded Batch ID])))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: df6aa3bf-ba3d-487a-89f8-355358b25f25
+
+	/// F3/E3 are scenario targets, not licence mandates. No automatic E5 from >100 GB; shared and resource features need separate assessment. Shared candidate >50 and <=100 GB uses own-account Plan 2 coverage; >100 GB remains review.
+	measure 'Licensing required' =
+			VAR _p2=SELECTEDVALUE('Mailbox Migration Inventory'[Report EXO Candidate])="Candidate" && SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Type])="SharedMailbox" && NOT ISBLANK(SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Size GB])) && SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Size GB])>50 && SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Size GB])<=100
+			VAR _code=[Licensing Shared Plan 2 Coverage code]
+			RETURN IF(_p2,"EXO Plan 2 or equivalent",(VAR _target=[Licensing target] VAR _kind=SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Type]) VAR _size=SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Size GB])
+			VAR _retained=SELECTEDVALUE('Mailbox Migration Inventory'[Report EXO Candidate])="DONTMIGRATE"
+			RETURN IF(HASONEVALUE('Mailbox Migration Inventory'[Mailbox GUID]),SWITCH(TRUE(),_retained && _kind="UserMailbox","Exchange SE user CAL - estimate",_retained,"Exchange SE - accessor CAL review",_target="F3","M365 F3 - estimate",_target="E3","M365 E3 - estimate",_kind="SharedMailbox" && NOT ISBLANK(_size) && _size>50 && _size<=100,"EXO Plan 2 / E3 equivalent - review",_kind IN {"SharedMailbox","RoomMailbox","EquipmentMailbox"},"Dedicated licence / features review","To review"))))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 5e061b0a-612e-4d6a-a9a9-890326d26d33
+
+	/// Observed active suitable suite for this row target. May require service-plan repair.
+	measure 'Licensing assigned coverage' =
+			VAR _guid=SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox GUID]) VAR _batch=SELECTEDVALUE('Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN IF(_guid<>"" && _batch<>"",CALCULATE([Exchange Scenario F3 Covered]+[Exchange Scenario E3 Covered],TREATAS({_guid},'Exchange Mailbox Reconciliation'[Mailbox GUID]),TREATAS({_batch},'Exchange Mailbox Reconciliation'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: b0764aa4-516c-4ddc-b509-dba479bc2275
+
+	/// Existing assignments shown without consuming unallocated tenant stock. Shared candidate >50 and <=100 GB uses own-account Plan 2 coverage; >100 GB remains review.
+	measure 'Licensing coverage status' =
+			VAR _p2=SELECTEDVALUE('Mailbox Migration Inventory'[Report EXO Candidate])="Candidate" && SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Type])="SharedMailbox" && NOT ISBLANK(SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Size GB])) && SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Size GB])>50 && SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Size GB])<=100
+			VAR _code=[Licensing Shared Plan 2 Coverage code]
+			RETURN IF(_p2,SWITCH(_code,1,"Assigned Plan 2 / equivalent observed",0,"To complete","Identity / assignment to review"),(VAR _target=[Licensing target] VAR _covered=[Licensing assigned coverage] RETURN IF(HASONEVALUE('Mailbox Migration Inventory'[Mailbox GUID]),SWITCH(TRUE(),SELECTEDVALUE('Mailbox Migration Inventory'[Report EXO Candidate])="DONTMIGRATE","CAL access scope to review",_target IN {"F3","E3"} && _covered>0,"Assigned suite observed",_target IN {"F3","E3"},"To complete","To review"))))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 062eab72-4cf9-4113-bab9-cdf3354a278f
+
+	/// Action explains scenario eligibility, plan repair and unresolved demand. Shared candidate >50 and <=100 GB uses own-account Plan 2 coverage; >100 GB remains review.
+	measure 'Licensing action' =
+			VAR _p2=SELECTEDVALUE('Mailbox Migration Inventory'[Report EXO Candidate])="Candidate" && SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Type])="SharedMailbox" && NOT ISBLANK(SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Size GB])) && SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Size GB])>50 && SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Size GB])<=100
+			VAR _code=[Licensing Shared Plan 2 Coverage code]
+			RETURN IF(_p2,SWITCH(_code,1,IF([Licensing plan observation]="Plan 2 observed","Covered for primary mailbox capacity","Enable / repair Exchange Plan 2"),0,"Assign EXO Plan 2 or suitable equivalent to mailbox","Resolve mailbox account / assignment before licensing"),(VAR _target=[Licensing target] VAR _plan=[Licensing plan observation] VAR _covered=[Licensing assigned coverage]
+			VAR _size=SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox Size GB])
+			RETURN IF(HASONEVALUE('Mailbox Migration Inventory'[Mailbox GUID]),SWITCH(TRUE(),
+			SELECTEDVALUE('Mailbox Migration Inventory'[Report EXO Candidate])="DONTMIGRATE","Confirm actual users / devices accessing SE",
+			NOT ISBLANK(_size) && _size>100,"Review primary quota and archive design",
+			_target="F3" && _covered>0,"Confirm frontline eligibility and Exchange plan",
+			_target="F3","Confirm frontline eligibility; allocate F3 or suitable equivalent",
+			_target="E3" && _covered>0 && _plan<>"Plan 2 observed","Enable / repair Exchange Plan 2",
+			_target="E3" && _covered>0,"Covered in the E3 scenario",
+			_target="E3","Allocate E3 or suitable equivalent",
+			_target="Assignment review","Repair assignment before purchasing",
+			"Review identity, mailbox features and licence target"))))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 219435e2-89c8-49b6-b83c-792d3858e6ce
+
+	/// Row-only coverage: 1 active Plan 2 or known equivalent assigned to exact mailbox account, 0 no suitable assignment observed, -1 identity/assignment review. Delegate licences never count.
+	measure 'Licensing Shared Plan 2 Coverage code' =
+			VAR _guid=SELECTEDVALUE('Mailbox Migration Inventory'[Mailbox GUID])
+			VAR _batch=SELECTEDVALUE('Mailbox Migration Inventory'[Loaded Batch ID])
+			VAR _r=FILTER(ALL('Exchange Mailbox Reconciliation'),'Exchange Mailbox Reconciliation'[Mailbox GUID]=_guid && 'Exchange Mailbox Reconciliation'[Loaded Batch ID]=_batch)
+			VAR _users=DISTINCT(SELECTCOLUMNS(_r,"User",'Exchange Mailbox Reconciliation'[Cloud Account Key]))
+			VAR _user=MAXX(_users,[User])
+			VAR _valid=_guid<>"" && _batch<>"" && COUNTROWS(_r)=1 && COUNTROWS(_users)=1 && _user<>"" && COUNTROWS(FILTER(_r,'Exchange Mailbox Reconciliation'[Account Link]<>"Unique AD GUID + native SID"))=0
+			VAR _p2=COUNTROWS(FILTER(ALL('Native User Service Plan'),'Native User Service Plan'[TenantUserKey]=_user && 'Native User Service Plan'[Loaded Batch ID]=_batch && 'Native User Service Plan'[ServicePlanName]="EXCHANGE_S_ENTERPRISE" && LOWER('Native User Service Plan'[IsEnabled]&"")="true" && 'Native User Service Plan'[AssignmentState]="Success"))>0
+			VAR _skuKeys=SELECTCOLUMNS(FILTER(ALL('Native License SKU'),'Native License SKU'[Loaded Batch ID]=_batch && 'Native License SKU'[SkuPartNumber] IN {"EXCHANGEENTERPRISE","SPE_E3","SPE_E5","ENTERPRISEPACK","ENTERPRISEPREMIUM","ENTERPRISEPREMIUM_NOPSTNCONF"}),"Sku",'Native License SKU'[TenantSkuKey])
+			VAR _assigned=COUNTROWS(FILTER(ALL('Native User License'),'Native User License'[TenantUserKey]=_user && 'Native User License'[Loaded Batch ID]=_batch && 'Native User License'[TenantSkuKey] IN _skuKeys && 'Native User License'[AssignmentState] IN {"Active","Success"}))>0
+			VAR _failed=COUNTROWS(FILTER(ALL('Native User License'),'Native User License'[TenantUserKey]=_user && 'Native User License'[Loaded Batch ID]=_batch && 'Native User License'[TenantSkuKey] IN _skuKeys && NOT('Native User License'[AssignmentState] IN {"Active","Success"})))>0
+			RETURN IF(NOT _valid,-1,IF(_p2 || _assigned,1,IF(_failed,-1,0)))
+		formatString: 0
+		displayFolder: Migration licensing simplified
+		lineageTag: bca638ef-defe-4ea2-94eb-5d2fc70d66d5
+
+	measure 'Shared mailboxes above 100 GB to EXO' = CALCULATE([To migrate to EXO provisional],KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="SharedMailbox"),KEEPFILTERS(NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB] > 100))
+		formatString: #,0
+		displayFolder: EXO candidate types
+		lineageTag: a91dc19d-6b33-4529-8995-a8ec9f6d920e
+
+	measure 'Retained shared mailboxes above 100 GB' = IF([Mailbox Exception Source Status]="Qualified",CALCULATE([Local Mailbox Inventory Records],KEEPFILTERS('Mailbox Migration Inventory'[Report EXO Candidate]="DONTMIGRATE"),KEEPFILTERS('Mailbox Migration Inventory'[Report Has Database]="Yes"),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type]="SharedMailbox"),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Size GB] > 100)),BLANK())
+		formatString: #,0
+		displayFolder: EXO candidate types
+		lineageTag: 17e3e588-b96d-4f1c-b798-c9f816c44d85
+
+	/// User/shared candidates whose size is missing; other mailbox types retain their own group.
+	measure 'EXO candidate mailbox size unknown' = CALCULATE([To migrate to EXO provisional],KEEPFILTERS(ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB])),KEEPFILTERS('Mailbox Migration Inventory'[Mailbox Type] IN {"UserMailbox","SharedMailbox"}))
+		formatString: #,0
+		displayFolder: EXO candidate types
+		lineageTag: 2d1f21c2-48fb-4f26-a7e1-a2e1cdaf716f
 
 	/// Mailbox GUID from the frozen local evidence preparation; source and qualification are recorded in migration-provenance.json.
 	column 'Mailbox GUID'
@@ -291,6 +544,30 @@ table 'Mailbox Migration Inventory'
 		displayFolder: Migration queue identity
 		lineageTag: cebc3fab-f271-4b3e-8160-1e23124b3c4e
 
+	/// Version reconciled to the unified mailbox evidence by unique mailbox key and same prepared batch.
+	column 'Report Exchange Version' = VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[Exchange Version],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))
+		dataType: string
+		lineageTag: 04767f9a-e13b-4d17-8b07-2f437feed6c9
+
+	column 'Report Has Database' = IF(LEN(TRIM('Mailbox Migration Inventory'[Report Database]))>0,"Yes","No")
+		dataType: string
+		lineageTag: 28238848-36d9-4054-a776-eb4653d6104e
+
+	/// Provisional candidates: on-premises with database minus matched retained exceptions. Unmatched/ambiguous exceptions remain for review.
+	column 'Report EXO Candidate' = VAR a='Mailbox Migration Inventory'[Primary SMTP Address] VAR retained=COUNTROWS(FILTER('Mailbox Migration Exceptions','Mailbox Migration Exceptions'[Retained]=1 && 'Mailbox Migration Exceptions'[Primary SMTP Address]=a)) RETURN SWITCH(TRUE(),LEN(TRIM('Mailbox Migration Inventory'[Report Database]))=0,"No database",retained>0,"DONTMIGRATE","Candidate")
+		dataType: string
+		lineageTag: 670fb80d-e784-4e38-b3d0-01a951caaf99
+
+	/// Country from canonical mailbox evidence, exact mailbox GUID/key and loaded batch. Original Country retained as source evidence.
+	column 'Report Country' = VAR canonical=(VAR k='Mailbox Migration Inventory'[Report Linked Mailbox Key] VAR b='Mailbox Migration Inventory'[Loaded Batch ID] RETURN IF(NOT ISBLANK(k),LOOKUPVALUE('Mailbox Exploration Inventory'[Country],'Mailbox Exploration Inventory'[Mailbox Key],k,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))) RETURN COALESCE(canonical,'Mailbox Migration Inventory'[Country],"Unknown")
+		dataType: string
+		lineageTag: d6b497d7-a85a-47e8-8c5e-3a2ff1e2c6f0
+
+	/// Display name for same-batch canonical mailbox country.
+	column 'Report Country Name' = VAR _country='Mailbox Migration Inventory'[Report Country] RETURN COALESCE(LOOKUPVALUE('Country Selection'[Country],'Country Selection'[Source Country],_country),_country,"Unknown")
+		dataType: string
+		lineageTag: e59d5d0a-bf8d-4125-bc6e-f430b0e1df68
+
 	/// Same governed batch as all Workplace evidence; original migration qualification retained.
 	partition 'Mailbox Migration Evidence Rebuilt' = m
 		mode: import
@@ -371,3 +648,4 @@ table 'Mailbox Migration Inventory'
 				)
 				in
 				    Readers[Finish](BusinessRows)
+

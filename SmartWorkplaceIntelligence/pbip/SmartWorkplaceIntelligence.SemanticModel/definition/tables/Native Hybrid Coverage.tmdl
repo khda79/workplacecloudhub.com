@@ -169,3 +169,4 @@ table 'Native Hybrid Coverage'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactHybridIdentityCoverage.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="EntityType", dataType="String"], [name="OnPremisesCount", dataType="Int64"], [name="CloudCount", dataType="Int64"], [name="MatchedCount", dataType="Int64"], [name="OnPremisesOnlyCount", dataType="Int64"], [name="CloudOnlyCount", dataType="Int64"], [name="DuplicateOnPremisesKeyCount", dataType="Int64"], [name="DuplicateCloudKeyCount", dataType="Int64"], [name="MatchRatio", dataType="Double"], [name="MatchMethod", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
+

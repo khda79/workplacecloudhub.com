@@ -113,3 +113,4 @@ table LocalDateTable_12cfc3be-73ac-46ad-83d3-b500fc834d3c
 		source = Calendar(Date(Year(MIN('SPO Migration Plan'[Snapshot Date])), 1, 1), Date(Year(MAX('SPO Migration Plan'[Snapshot Date])), 12, 31))
 
 	annotation __PBI_LocalDateTable = true
+

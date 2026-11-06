@@ -6,7 +6,7 @@
     "y": 248,
     "z": 90052,
     "height": 48,
-    "width": 225,
+    "width": 222,
     "tabOrder": 90052
   },
   "visual": {
@@ -45,7 +45,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Migration queue'"
+                  "Value": "'Migration queue to EXO'"
                 }
               }
             },
@@ -95,7 +95,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Migration queue'"
+                  "Value": "'Migration queue to EXO'"
                 }
               }
             },
@@ -148,7 +148,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Migration queue'"
+                  "Value": "'Migration queue to EXO'"
                 }
               }
             },
@@ -201,7 +201,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Migration queue'"
+                  "Value": "'Migration queue to EXO'"
                 }
               }
             },
@@ -254,7 +254,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Migration queue'"
+                  "Value": "'Migration queue to EXO'"
                 }
               }
             },
@@ -544,7 +544,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Migration queue'"
+                  "Value": "'Migration queue to EXO'"
                 }
               }
             }

@@ -23,10 +23,10 @@
                       "Entity": "Mailbox Migration Inventory"
                     }
                   },
-                  "Property": "Exchange Version"
+                  "Property": "Report Exchange Version"
                 }
               },
-              "queryRef": "Mailbox Migration Inventory.Exchange Version",
+              "queryRef": "Mailbox Migration Inventory.Report Exchange Version",
               "nativeQueryRef": "Exchange Version",
               "active": true
             }

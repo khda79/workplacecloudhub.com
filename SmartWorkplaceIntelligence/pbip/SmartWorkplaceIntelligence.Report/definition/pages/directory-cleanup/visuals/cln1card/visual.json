@@ -53,12 +53,12 @@
                       "Entity": "User Cleanup Evidence"
                     }
                   },
-                  "Property": "User Cleanup Review"
+                  "Property": "User Cleanup Active"
                 }
               },
-              "queryRef": "User Cleanup Evidence.User Cleanup Review",
-              "nativeQueryRef": "User Cleanup Review",
-              "displayName": "Users review"
+              "queryRef": "User Cleanup Evidence.User Cleanup Active",
+              "nativeQueryRef": "User Cleanup Active",
+              "displayName": "Users active"
             },
             {
               "field": {
@@ -68,12 +68,12 @@
                       "Entity": "User Cleanup Evidence"
                     }
                   },
-                  "Property": "User Cleanup Active"
+                  "Property": "User Cleanup Review"
                 }
               },
-              "queryRef": "User Cleanup Evidence.User Cleanup Active",
-              "nativeQueryRef": "User Cleanup Active",
-              "displayName": "Users active"
+              "queryRef": "User Cleanup Evidence.User Cleanup Review",
+              "nativeQueryRef": "User Cleanup Review",
+              "displayName": "Users review"
             }
           ]
         }
@@ -332,7 +332,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "7L"
+                  "Value": "4L"
                 }
               }
             },

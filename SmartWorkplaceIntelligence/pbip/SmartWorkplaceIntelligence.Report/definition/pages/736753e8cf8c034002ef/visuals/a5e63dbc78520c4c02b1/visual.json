@@ -23,6 +23,21 @@
                       "Entity": "Mailbox Migration Inventory"
                     }
                   },
+                  "Property": "Local Mailboxes With Database"
+                }
+              },
+              "queryRef": "Mailbox Migration Inventory.Local Mailboxes With Database",
+              "nativeQueryRef": "Local Mailboxes With Database",
+              "displayName": "On-prem mailboxes"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Inventory"
+                    }
+                  },
                   "Property": "Local Mailboxes (2016)"
                 }
               },
@@ -51,12 +66,42 @@
                       "Entity": "Mailbox Migration Inventory"
                     }
                   },
-                  "Property": "Local Business Mailboxes Remaining"
+                  "Property": "To migrate to EXO provisional"
                 }
               },
-              "queryRef": "Mailbox Migration Inventory.Local Business Mailboxes Remaining",
-              "nativeQueryRef": "Business mailboxes remaining",
-              "displayName": "Mailboxes remaining"
+              "queryRef": "Mailbox Migration Inventory.To migrate to EXO provisional",
+              "nativeQueryRef": "To migrate to EXO (review)",
+              "displayName": "To migrate to EXO"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Exception Summary"
+                    }
+                  },
+                  "Property": "Mailbox Planning Retained"
+                }
+              },
+              "queryRef": "Mailbox Migration Exception Summary.Mailbox Planning Retained",
+              "nativeQueryRef": "Mailbox Planning Retained",
+              "displayName": "Don’t migrate to EXO"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Mailbox Migration Exception Summary"
+                    }
+                  },
+                  "Property": "Mailbox Planning Review"
+                }
+              },
+              "queryRef": "Mailbox Migration Exception Summary.Mailbox Planning Review",
+              "nativeQueryRef": "Exceptions to review",
+              "displayName": "Exceptions to review"
             },
             {
               "field": {
@@ -125,7 +170,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "24D"
                 }
               }
             },
@@ -173,7 +218,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "10D"
                 }
               }
             },
@@ -306,7 +351,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "5L"
+                  "Value": "8L"
                 }
               }
             },

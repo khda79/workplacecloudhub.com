@@ -3,7 +3,7 @@
   "name": "44ae5b06bd51840d4ae8",
   "position": {
     "x": 267.5,
-    "y": 380,
+    "y": 484,
     "z": 5000,
     "height": 88,
     "width": 227.5,
@@ -20,15 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Device Compliance Rate"
+                  "Property": "Enabled corporate PC compliance (%)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Device Compliance Rate",
-              "nativeQueryRef": "Device compliance (%)",
-              "displayName": "Device compliance (%)"
+              "queryRef": "Global Device Inventory.Enabled corporate PC compliance (%)",
+              "nativeQueryRef": "Equipment Compliance Rate (%)",
+              "displayName": "PC compliance (%)"
             }
           ]
         },
@@ -705,5 +705,63 @@
       ]
     }
   },
-  "parentGroupName": "1413c5a3cf22d4eed68f"
+  "parentGroupName": "1413c5a3cf22d4eed68f",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "2376bc4e708240518f7c",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Global Device Inventory"
+              }
+            },
+            "Property": "Device type (report)"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "x",
+              "Entity": "Global Device Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "x"
+                          }
+                        },
+                        "Property": "Device type (report)"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'PC'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      }
+    ]
+  }
 }

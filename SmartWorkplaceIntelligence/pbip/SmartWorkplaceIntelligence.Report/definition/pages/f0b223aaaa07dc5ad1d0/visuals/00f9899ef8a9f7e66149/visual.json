@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "00f9899ef8a9f7e66149",
   "position": {
-    "x": 33,
+    "x": 617,
     "y": 425,
     "z": 18000,
     "height": 140,
-    "width": 558,
+    "width": 766,
     "tabOrder": 20000
   },
   "visual": {
@@ -23,11 +23,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Current Windows 11 Adoption (%)"
+                  "Property": "Enabled corporate PC · Current Windows 11 Adoption (%)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Current Windows 11 Adoption (%)",
-              "nativeQueryRef": "Current Windows 11 Adoption (%)"
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Current Windows 11 Adoption (%)",
+              "nativeQueryRef": "Current Windows 11 Adoption (%)",
+              "displayName": "Windows 11 adoption (%)"
             },
             {
               "field": {
@@ -37,10 +38,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 remaining active <30D"
+                  "Property": "Enabled corporate PC · Windows 10 remaining active <30D"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Windows 10 remaining active <30D",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 remaining active <30D",
               "nativeQueryRef": "Windows 10 remaining · active <30D",
               "displayName": "Windows 10 remaining · active <30D"
             },
@@ -49,28 +50,63 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 Devices Not Capable"
+                  "Property": "Enabled corporate PC · Windows 10 Not Capable Combined"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 10 Devices Not Capable",
-              "nativeQueryRef": "Windows 10 Devices Not Capable"
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Not Capable Combined",
+              "nativeQueryRef": "Windows 10 not capable",
+              "displayName": "Windows 10 not capable"
             },
             {
               "field": {
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Directory Summary"
+                      "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 Eligibility Undetermined"
+                  "Property": "Enabled corporate PC · Migration Windows 10 Eligibility Unknown"
                 }
               },
-              "queryRef": "Device Directory Summary.Windows 10 Eligibility Undetermined",
-              "nativeQueryRef": "Win10 eligibility unknown"
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Migration Windows 10 Eligibility Unknown",
+              "nativeQueryRef": "Win10 eligibility unknown",
+              "displayName": "Windows 10 eligibility unknown"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Historical Script Evidence Context"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Historical Script Evidence Context",
+              "nativeQueryRef": "Historical script evidence"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Windows 10 active · batch reference UTC"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Windows 10 active · batch reference UTC",
+              "nativeQueryRef": "Batch reference UTC",
+              "displayName": "Batch reference UTC"
             }
           ]
         }
@@ -394,7 +430,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows modernization: Current Windows 11 Adoption (%), Windows 10 Devices Remaining, Windows 10 Devices Not Capable.'"
+                  "Value": "'Windows modernization: Windows 11 adoption, active Windows 10, Windows 10 not capable by Intune, historical script not capable, and remaining eligibility unknown.'"
                 }
               }
             }
@@ -556,6 +592,19 @@
               "expr": {
                 "Literal": {
                   "Value": "4D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualTooltip": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

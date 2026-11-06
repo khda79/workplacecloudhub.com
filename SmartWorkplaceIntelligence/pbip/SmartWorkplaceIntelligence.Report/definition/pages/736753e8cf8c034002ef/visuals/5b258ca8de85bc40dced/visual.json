@@ -53,10 +53,10 @@
                       "Entity": "Mailbox Migration Inventory"
                     }
                   },
-                  "Property": "Country"
+                  "Property": "Report Country"
                 }
               },
-              "queryRef": "Mailbox Migration Inventory.Country",
+              "queryRef": "Mailbox Migration Inventory.Report Country",
               "nativeQueryRef": "Country",
               "active": true
             },
@@ -98,10 +98,10 @@
                       "Entity": "Mailbox Migration Inventory"
                     }
                   },
-                  "Property": "Exchange Version"
+                  "Property": "Report Exchange Version"
                 }
               },
-              "queryRef": "Mailbox Migration Inventory.Exchange Version",
+              "queryRef": "Mailbox Migration Inventory.Report Exchange Version",
               "nativeQueryRef": "Exchange Version",
               "active": true
             },
@@ -617,7 +617,7 @@
         },
         {
           "selector": {
-            "metadata": "Mailbox Migration Inventory.Country"
+            "metadata": "Mailbox Migration Inventory.Report Country"
           },
           "properties": {
             "alignment": {
@@ -722,7 +722,7 @@
         },
         {
           "selector": {
-            "metadata": "Mailbox Migration Inventory.Exchange Version"
+            "metadata": "Mailbox Migration Inventory.Report Exchange Version"
           },
           "properties": {
             "alignment": {

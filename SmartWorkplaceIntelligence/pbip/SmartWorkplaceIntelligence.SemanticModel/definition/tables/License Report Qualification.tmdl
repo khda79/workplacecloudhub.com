@@ -138,3 +138,4 @@ table 'License Report Qualification'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Table
+

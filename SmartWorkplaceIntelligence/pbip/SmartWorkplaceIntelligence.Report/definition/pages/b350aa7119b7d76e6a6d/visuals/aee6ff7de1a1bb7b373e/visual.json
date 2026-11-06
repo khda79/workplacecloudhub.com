@@ -53,21 +53,6 @@
                       "Entity": "Collaboration Adoption Evidence"
                     }
                   },
-                  "Property": "Collaboration Orphaned Objects"
-                }
-              },
-              "queryRef": "Collaboration Adoption Evidence.Collaboration Orphaned Objects",
-              "nativeQueryRef": "Orphaned Objects",
-              "displayName": "Orphaned Resources"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Collaboration Adoption Evidence"
-                    }
-                  },
                   "Property": "Collaboration Services"
                 }
               },
@@ -89,6 +74,21 @@
               "queryRef": "Collaboration Adoption Evidence.Collaboration Service Objects",
               "nativeQueryRef": "Service objects",
               "displayName": "Service resources"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Adoption Evidence"
+                    }
+                  },
+                  "Property": "Collaboration Orphaned Objects"
+                }
+              },
+              "queryRef": "Collaboration Adoption Evidence.Collaboration Orphaned Objects",
+              "nativeQueryRef": "Orphaned Objects",
+              "displayName": "Orphaned Resources"
             },
             {
               "field": {

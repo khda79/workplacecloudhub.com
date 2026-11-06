@@ -3,7 +3,7 @@
   "name": "9ab1f95a1288f56f2c62",
   "position": {
     "x": 32,
-    "y": 651.64524003254678,
+    "y": 755.64524003254678,
     "z": 1000,
     "height": 348.35475996745328,
     "width": 1856,
@@ -83,12 +83,13 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Managed Devices"
+                  "Property": "Enabled corporate PC · Managed inventory details"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Managed Devices",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Managed inventory details",
               "nativeQueryRef": "Managed Devices",
-              "active": true
+              "active": true,
+              "displayName": "Managed inventory details"
             },
             {
               "field": {
@@ -407,7 +408,7 @@
         },
         {
           "selector": {
-            "metadata": "Device Inventory Evidence.Managed Devices"
+            "metadata": "Device Inventory Evidence.Enabled corporate PC · Managed inventory details"
           },
           "properties": {
             "alignment": {

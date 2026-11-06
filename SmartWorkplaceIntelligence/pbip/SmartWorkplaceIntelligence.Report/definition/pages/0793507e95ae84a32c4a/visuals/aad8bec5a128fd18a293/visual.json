@@ -43,12 +43,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Managed Devices"
+                  "Property": "Enabled corporate PC · Managed inventory details"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Managed Devices",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Managed inventory details",
               "nativeQueryRef": "Managed Devices",
-              "displayName": "Managed Devices"
+              "displayName": "Managed inventory details"
             },
             {
               "field": {
@@ -58,12 +58,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Current Windows 11 Adoption (%)"
+                  "Property": "Enabled corporate PC · Current Windows 11 Adoption (%)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Current Windows 11 Adoption (%)",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Current Windows 11 Adoption (%)",
               "nativeQueryRef": "Current Windows 11 Adoption (%)",
-              "displayName": "Current Windows 11 Adoption (%)"
+              "displayName": "Windows 11 adoption (%)"
             },
             {
               "field": {
@@ -73,10 +73,10 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 10 Devices Remaining"
+                  "Property": "Enabled corporate PC · Windows 10 Devices Remaining"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 10 Devices Remaining",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Devices Remaining",
               "nativeQueryRef": "Windows 10 Devices Remaining",
               "displayName": "Windows 10 Devices Remaining"
             },
@@ -88,12 +88,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 10 Devices Not Capable"
+                  "Property": "Enabled corporate PC · Windows 10 Devices Not Capable"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 10 Devices Not Capable",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Devices Not Capable",
               "nativeQueryRef": "Windows 10 Devices Not Capable",
-              "displayName": "Windows 10 Devices Not Capable"
+              "displayName": "Windows 10 not capable"
             },
             {
               "field": {
@@ -103,12 +103,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 10 Eligibility Not Assessed"
+                  "Property": "Enabled corporate PC · Windows 10 Eligibility Not Assessed"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 10 Eligibility Not Assessed",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Eligibility Not Assessed",
               "nativeQueryRef": "Windows 10 Eligibility Not Assessed",
-              "displayName": "Windows 10 Eligibility Not Assessed"
+              "displayName": "Intune Win10 eligibility unknown"
             }
           ]
         }
@@ -323,7 +323,7 @@
             }
           },
           "selector": {
-            "metadata": "Device Inventory Evidence.Windows 10 Eligibility Not Assessed"
+            "metadata": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Eligibility Not Assessed"
           }
         },
         {
@@ -365,7 +365,7 @@
             }
           },
           "selector": {
-            "metadata": "Device Inventory Evidence.Windows 10 Devices Not Capable"
+            "metadata": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Devices Not Capable"
           }
         },
         {
@@ -407,7 +407,7 @@
             }
           },
           "selector": {
-            "metadata": "Device Inventory Evidence.Windows 10 Devices Remaining"
+            "metadata": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Devices Remaining"
           }
         },
         {
@@ -449,7 +449,7 @@
             }
           },
           "selector": {
-            "metadata": "Device Inventory Evidence.Current Windows 11 Adoption (%)"
+            "metadata": "Device Inventory Evidence.Enabled corporate PC · Current Windows 11 Adoption (%)"
           }
         },
         {
@@ -491,7 +491,7 @@
             }
           },
           "selector": {
-            "metadata": "Device Inventory Evidence.Managed Devices"
+            "metadata": "Device Inventory Evidence.Enabled corporate PC · Managed inventory details"
           }
         },
         {
@@ -565,7 +565,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Windows by country · current Intune scope; AD-only excluded'"
+                  "Value": "'Enabled corporate Windows PCs by country · observed Intune detail; AD-only excluded'"
                 }
               }
             },

@@ -113,3 +113,4 @@ table LocalDateTable_e51866cf-71bd-4a60-84c1-b0e49716c831
 		source = Calendar(Date(Year(MIN('Mailbox Migration Weekly History'[Snapshot Date])), 1, 1), Date(Year(MAX('Mailbox Migration Weekly History'[Snapshot Date])), 12, 31))
 
 	annotation __PBI_LocalDateTable = true
+

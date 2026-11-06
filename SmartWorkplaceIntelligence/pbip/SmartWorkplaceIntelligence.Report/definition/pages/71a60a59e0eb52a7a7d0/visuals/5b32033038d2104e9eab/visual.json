@@ -23,13 +23,13 @@
                       "Entity": "Mailbox Exploration Inventory"
                     }
                   },
-                  "Property": "Mailbox Search"
+                  "Property": "AD Account Type"
                 }
               },
-              "queryRef": "Mailbox Exploration Inventory.Mailbox Search",
-              "nativeQueryRef": "Mailbox (name / UPN / SMTP)",
-              "active": true,
-              "displayName": "Mailbox (name / UPN / SMTP)"
+              "queryRef": "Mailbox Exploration Inventory.AD Account Type",
+              "nativeQueryRef": "AD account type",
+              "displayName": "AD account type",
+              "active": true
             }
           ]
         }
@@ -62,7 +62,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Mailbox (name / UPN / SMTP)'"
+                  "Value": "'AD account type'"
                 }
               }
             },

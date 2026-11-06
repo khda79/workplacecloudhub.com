@@ -22,7 +22,9 @@
       "e1f681b1ab43195f39f1",
       "a37e20589fba3f2186a3",
       "afbed79ea9d1508a740f",
-      "33ed7d03fc448f48f719"
+      "33ed7d03fc448f48f719",
+      "e3d0108720c0492d9118",
+      "c98ae8930f2b4909a2af"
     ],
     "suppressActiveSection": true,
     "suppressData": true
@@ -83,6 +85,13 @@
                 "mode": "hidden"
               }
             }
+          },
+          "c98ae8930f2b4909a2af": {
+            "singleVisual": {
+              "display": {
+                "mode": "hidden"
+              }
+            }
           }
         },
         "visualContainerGroups": {
@@ -111,6 +120,9 @@
             "isHidden": true
           },
           "061d12ad31275555c4c6": {
+            "isHidden": true
+          },
+          "e3d0108720c0492d9118": {
             "isHidden": true
           }
         }

@@ -239,3 +239,4 @@ table 'Intune Enrollment Failure Evidence'
 				    WithDeviceKey)
 				in
 				    Readers[Finish](BusinessRows)
+

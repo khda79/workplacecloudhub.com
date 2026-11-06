@@ -3,7 +3,7 @@
   "name": "04bfaf628fbcc4aa32ed",
   "position": {
     "x": 32,
-    "y": 320,
+    "y": 424,
     "z": 0,
     "height": 107.36842105263159,
     "width": 912,
@@ -274,5 +274,6 @@
       ]
     }
   },
-  "parentGroupName": "a12765da9a93dcb54433"
+  "parentGroupName": "a12765da9a93dcb54433",
+  "isHidden": true
 }

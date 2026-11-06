@@ -3,9 +3,9 @@
   "name": "bc1d1d45d3073e7e05bd",
   "position": {
     "x": 336,
-    "y": 320,
+    "y": 440,
     "z": 90056,
-    "height": 680,
+    "height": 560,
     "width": 1552,
     "tabOrder": 90056
   },
@@ -87,10 +87,10 @@
                       "Entity": "Mailbox Migration Inventory"
                     }
                   },
-                  "Property": "Country"
+                  "Property": "Report Country"
                 }
               },
-              "queryRef": "Mailbox Migration Inventory.Country",
+              "queryRef": "Mailbox Migration Inventory.Report Country",
               "nativeQueryRef": "Country",
               "active": true,
               "displayName": "Country"
@@ -151,10 +151,10 @@
                       "Entity": "Mailbox Migration Inventory"
                     }
                   },
-                  "Property": "Exchange Version"
+                  "Property": "Report Exchange Version"
                 }
               },
-              "queryRef": "Mailbox Migration Inventory.Exchange Version",
+              "queryRef": "Mailbox Migration Inventory.Report Exchange Version",
               "nativeQueryRef": "Exchange Version",
               "active": true,
               "displayName": "Exchange version"
@@ -717,7 +717,7 @@
         },
         {
           "selector": {
-            "metadata": "Mailbox Migration Inventory.Country"
+            "metadata": "Mailbox Migration Inventory.Report Country"
           },
           "properties": {
             "alignment": {
@@ -857,7 +857,7 @@
         },
         {
           "selector": {
-            "metadata": "Mailbox Migration Inventory.Exchange Version"
+            "metadata": "Mailbox Migration Inventory.Report Exchange Version"
           },
           "properties": {
             "alignment": {
@@ -1480,7 +1480,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Local Exchange migration queue · identity and operational details'"
+                  "Value": "'Migration queue to EXO · candidates excluding matched DONTMIGRATE exceptions'"
                 }
               }
             },
@@ -1633,5 +1633,166 @@
     },
     "drillFilterOtherVisuals": true
   },
-  "parentGroupName": "0a43c9c252d5cc187e10"
+  "parentGroupName": "0a43c9c252d5cc187e10",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "4da80862b1374b79a291",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Mailbox Migration Inventory"
+              }
+            },
+            "Property": "Report Has Database"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "x",
+              "Entity": "Mailbox Migration Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "x"
+                          }
+                        },
+                        "Property": "Report Has Database"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Yes'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      },
+      {
+        "name": "155151cc1b02c9e35af3",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Mailbox Migration Inventory"
+              }
+            },
+            "Property": "Report EXO Candidate"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "x",
+              "Entity": "Mailbox Migration Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "x"
+                          }
+                        },
+                        "Property": "Report EXO Candidate"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Candidate'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      },
+      {
+        "name": "fcd6f875f824427da501",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Mailbox Migration Inventory"
+              }
+            },
+            "Property": "Migration licence selection match"
+          }
+        },
+        "type": "Advanced",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "m",
+              "Entity": "Mailbox Migration Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "Comparison": {
+                  "ComparisonKind": 2,
+                  "Left": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Source": "m"
+                        }
+                      },
+                      "Property": "Migration licence selection match"
+                    }
+                  },
+                  "Right": {
+                    "Literal": {
+                      "Value": "0L"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      }
+    ]
+  }
 }

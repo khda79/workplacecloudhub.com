@@ -196,3 +196,4 @@ table 'Native Source Health'
 				    BusinessRows = (Table.AddColumn(NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("SourceHealth.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="SourceName", dataType="String"], [name="Status", dataType="String"], [name="Coverage", dataType="String"], [name="SourceRows", dataType="Int64"], [name="MaxItems", dataType="Int64"], [name="StartedDateTime", dataType="DateTime"], [name="CompletedDateTime", dataType="DateTime"], [name="Evidence", dataType="String"], [name="SourceRowsLabel", dataType="String"], [name="CompletedDateTimeLabel", dataType="String"]}), "Health State", each NativeSourceHealthState([Status]), type text))
 				in
 				    Readers[Finish](BusinessRows)
+

@@ -68,12 +68,12 @@
                       "Entity": "Exchange Health Checker Servers"
                     }
                   },
-                  "Property": "Exchange Health Checker Errors"
+                  "Property": "Exchange Health Checker Warnings"
                 }
               },
-              "queryRef": "Exchange Health Checker Servers.Exchange Health Checker Errors",
-              "nativeQueryRef": "Errors",
-              "displayName": "Errors"
+              "queryRef": "Exchange Health Checker Servers.Exchange Health Checker Warnings",
+              "nativeQueryRef": "Warnings",
+              "displayName": "Warnings"
             },
             {
               "field": {
@@ -83,12 +83,12 @@
                       "Entity": "Exchange Health Checker Servers"
                     }
                   },
-                  "Property": "Exchange Health Checker Warnings"
+                  "Property": "Exchange Health Checker Errors"
                 }
               },
-              "queryRef": "Exchange Health Checker Servers.Exchange Health Checker Warnings",
-              "nativeQueryRef": "Warnings",
-              "displayName": "Warnings"
+              "queryRef": "Exchange Health Checker Servers.Exchange Health Checker Errors",
+              "nativeQueryRef": "Errors",
+              "displayName": "Errors"
             }
           ]
         }

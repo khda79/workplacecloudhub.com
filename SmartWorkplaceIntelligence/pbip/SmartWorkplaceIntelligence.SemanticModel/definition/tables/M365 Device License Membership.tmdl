@@ -29,3 +29,4 @@ table 'M365 Device License Membership'
 				VAR _matched = SELECTCOLUMNS(FILTER(_joined, _sameBatch && [UID]<>""), "Device Source ID", [Device Source ID], "License Product", [License Product])
 				VAR _missing = EXCEPT(SELECTCOLUMNS(_devices,"Device Source ID",[Device Source ID]),SELECTCOLUMNS(_matched,"Device Source ID",[Device Source ID]))
 				RETURN DISTINCT(UNION(_matched,ADDCOLUMNS(_missing,"License Product","Unknown")))
+

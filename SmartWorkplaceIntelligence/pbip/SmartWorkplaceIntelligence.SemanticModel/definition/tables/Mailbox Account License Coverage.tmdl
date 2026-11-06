@@ -266,3 +266,4 @@ table 'Mailbox Account License Coverage'
 				 Columns={"TenantKey","Mailbox GUID","AD Object GUID","Account UPN","Display Name","Coverage State","Native Link State","Workforce Match State","Account State","Identity Match Status","Has M365 License","M365 License Count","Backlog Country","Backlog AD Domain","Review Action"},
 				 Rows=Table.FromRecords(List.Transform(Table.ToRecords(Local),Project),Columns,MissingField.UseNull)
 				in R[Finish](Rows)
+

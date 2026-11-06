@@ -3,9 +3,9 @@
   "name": "1fe74329ef6006458241",
   "position": {
     "x": 32,
-    "y": 413.79310344827587,
+    "y": 518,
     "z": 1000,
-    "height": 586.20689655172418,
+    "height": 260,
     "width": 912,
     "tabOrder": 4000
   },
@@ -43,10 +43,10 @@
                       "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Equipment Managed Devices"
+                  "Property": "Managed enabled corporate PCs"
                 }
               },
-              "queryRef": "Global Device Inventory.Equipment Managed Devices",
+              "queryRef": "Global Device Inventory.Managed enabled corporate PCs",
               "nativeQueryRef": "Equipment Managed Devices"
             }
           ]
@@ -62,7 +62,7 @@
                     "Entity": "Global Device Inventory"
                   }
                 },
-                "Property": "Equipment Managed Devices"
+                "Property": "Managed enabled corporate PCs"
               }
             },
             "direction": "Descending"

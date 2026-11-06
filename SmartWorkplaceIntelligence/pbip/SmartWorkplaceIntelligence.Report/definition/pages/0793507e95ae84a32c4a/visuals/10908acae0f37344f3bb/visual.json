@@ -23,39 +23,10 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Current Windows 11 Adoption (%)"
+                  "Property": "Enabled corporate PC · Secure Boot Disabled Devices"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Current Windows 11 Adoption (%)",
-              "nativeQueryRef": "Windows 11 Adoption (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Windows 10 Readiness Assessed (%)"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Windows 10 Readiness Assessed (%)",
-              "nativeQueryRef": "Windows 10 readiness assessed (%)",
-              "displayName": "Windows 10 readiness assessed (%)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Secure Boot Disabled Devices"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Secure Boot Disabled Devices",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Secure Boot Disabled Devices",
               "nativeQueryRef": "Secure Boot disabled devices",
               "displayName": "Secure Boot disabled devices"
             },
@@ -67,12 +38,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 10 Devices Remaining"
+                  "Property": "Enabled corporate PC · Current Windows 11 Adoption (%)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 10 Devices Remaining",
-              "nativeQueryRef": "Intune inventory Windows 10",
-              "displayName": "Intune inventory Windows 10"
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Current Windows 11 Adoption (%)",
+              "nativeQueryRef": "Windows 11 Adoption (%)",
+              "displayName": "Windows 11 adoption (%)"
             },
             {
               "field": {
@@ -82,42 +53,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Windows 10 Devices Not Capable"
+                  "Property": "Enabled corporate PC · Windows 10 Readiness Assessed (%)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Windows 10 Devices Not Capable",
-              "nativeQueryRef": "Windows 10 not capable",
-              "displayName": "Windows 10 not capable"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Older Windows 11 Release Devices"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Older Windows 11 Release Devices",
-              "nativeQueryRef": "Older Windows 11 releases",
-              "displayName": "Older Windows 11 releases"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Directory Summary"
-                    }
-                  },
-                  "Property": "Windows 10 Eligibility Undetermined"
-                }
-              },
-              "queryRef": "Device Directory Summary.Windows 10 Eligibility Undetermined",
-              "nativeQueryRef": "Windows 10 eligibility unknown",
-              "displayName": "Windows 10 eligibility unknown"
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Readiness Assessed (%)",
+              "nativeQueryRef": "Windows 10 readiness assessed (%)",
+              "displayName": "Windows 10 readiness assessed (%)"
             }
           ]
         }
@@ -376,7 +317,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "7L"
+                  "Value": "3L"
                 }
               }
             },

@@ -23,12 +23,12 @@
                       "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Corporate mobile KPI value"
+                  "Property": "Enabled corporate PC devices <30D"
                 }
               },
-              "queryRef": "Global Device Inventory.Corporate mobile KPI value",
-              "nativeQueryRef": "Corporate mobile devices",
-              "displayName": "Corporate mobile devices"
+              "queryRef": "Global Device Inventory.Enabled corporate PC devices <30D",
+              "nativeQueryRef": "Enabled corporate PC devices <30D",
+              "displayName": "Enabled corporate PC devices <30D"
             }
           ]
         },
@@ -418,7 +418,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Corporate mobile devices. See tooltip for population and qualification.'"
+                  "Value": "'Enabled corporate PC devices <30D. Corporate enabled Windows/macOS PCs with technical activity observed within the last 30 days (UTC): AD approximate machine logon, Entra approximate device sign-in or Intune sync. Missing and future activity excluded. Does not prove human usage.'"
                 }
               }
             }
@@ -524,7 +524,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Counts observed Android/iOS/iPadOS devices by qualified Corporate or Personal ownership, regardless of enabled state. Devices with unknown ownership are excluded from these two counts and retained in inventory.'"
+                  "Value": "'Corporate enabled Windows/macOS PCs with technical activity observed within the last 30 days (UTC): AD approximate machine logon, Entra approximate device sign-in or Intune sync. Missing and future activity excluded. Does not prove human usage.'"
                 }
               }
             }

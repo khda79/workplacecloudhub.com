@@ -43,10 +43,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Remaining Observed Windows 10"
+                  "Property": "Enabled corporate PC · Remaining Observed Windows 10"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Remaining Observed Windows 10",
               "nativeQueryRef": "Observed Windows 10",
               "displayName": "Observed Windows 10"
             }
@@ -63,7 +63,7 @@
                     "Entity": "Windows Migration Evidence"
                   }
                 },
-                "Property": "Remaining Observed Windows 10"
+                "Property": "Enabled corporate PC · Remaining Observed Windows 10"
               }
             },
             "direction": "Descending"

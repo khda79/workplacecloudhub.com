@@ -352,27 +352,27 @@ table 'Global Device Inventory'
 		displayFolder: Private account and device explorer
 		lineageTag: 976b09a6-c4e6-4fcc-b604-22ef1c80359d
 
-	/// Confirmed enabled AD Windows PC equipment from consolidated inventory. Includes AD identities even when the legacy Windows exploration lookup is absent. Country/AD Domain and equipment selectors retained.
+	/// Confirmed enabled AD Windows PC equipment from consolidated inventory. Includes AD identities even when the legacy Windows exploration lookup is absent. Country/AD Domain and equipment selectors retained. Operational PC scope restricted to corporate enabled Windows/macOS.
 	measure 'Scoped Enabled AD Windows PCs' =
-			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			CALCULATE((VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
 			VAR _pu=VALUES('Primary User Selection'[Primary user])
-			RETURN IF(_puFilter,CALCULATE((CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[AD Windows PC]="Yes"),KEEPFILTERS('Global Device Inventory'[AD Enabled]="Yes"))),KEEPFILTERS(TREATAS(_pu,'Global Device Inventory'[Primary User (report)]))),(CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[AD Windows PC]="Yes"),KEEPFILTERS('Global Device Inventory'[AD Enabled]="Yes"))))
+			RETURN IF(_puFilter,CALCULATE((CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[AD Windows PC]="Yes"),KEEPFILTERS('Global Device Inventory'[AD Enabled]="Yes"))),KEEPFILTERS(TREATAS(_pu,'Global Device Inventory'[Primary User (report)]))),(CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[AD Windows PC]="Yes"),KEEPFILTERS('Global Device Inventory'[AD Enabled]="Yes"))))),KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"))
 		formatString: #,0
 		displayFolder: Private account and device explorer
 		lineageTag: 1f9927a6-67c4-4b0e-a5e9-4a1338761b28
 
-	/// Observed Intune-managed share of confirmed enabled AD Windows PCs at equipment grain. Unknown identity evidence not inferred.
+	/// Observed Intune-managed share of confirmed enabled AD Windows PCs at equipment grain. Unknown identity evidence not inferred. Operational PC scope restricted to corporate enabled Windows/macOS.
 	measure 'Scoped Enabled AD PCs Managed (%)' =
-			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			CALCULATE((VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
 			VAR _pu=VALUES('Primary User Selection'[Primary user])
-			RETURN IF(_puFilter,CALCULATE((DIVIDE(CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[AD Windows PC]="Yes"),KEEPFILTERS('Global Device Inventory'[AD Enabled]="Yes"),KEEPFILTERS('Global Device Inventory'[Intune presence]="In Intune")),[Scoped Enabled AD Windows PCs])),KEEPFILTERS(TREATAS(_pu,'Global Device Inventory'[Primary User (report)]))),(DIVIDE(CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[AD Windows PC]="Yes"),KEEPFILTERS('Global Device Inventory'[AD Enabled]="Yes"),KEEPFILTERS('Global Device Inventory'[Intune presence]="In Intune")),[Scoped Enabled AD Windows PCs])))
+			RETURN IF(_puFilter,CALCULATE((DIVIDE(CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[AD Windows PC]="Yes"),KEEPFILTERS('Global Device Inventory'[AD Enabled]="Yes"),KEEPFILTERS('Global Device Inventory'[Intune presence]="In Intune")),[Scoped Enabled AD Windows PCs])),KEEPFILTERS(TREATAS(_pu,'Global Device Inventory'[Primary User (report)]))),(DIVIDE(CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[AD Windows PC]="Yes"),KEEPFILTERS('Global Device Inventory'[AD Enabled]="Yes"),KEEPFILTERS('Global Device Inventory'[Intune presence]="In Intune")),[Scoped Enabled AD Windows PCs])))),KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"))
 		formatString: 0.0%
 		displayFolder: Private account and device explorer
 		lineageTag: bc8e5663-e47d-43f9-85b1-a06516a3d9a2
 
-	/// Private approved account/device lot; existing loaded batch only.
+	/// Private approved account/device lot; existing loaded batch only. Operational PC scope restricted to corporate enabled Windows/macOS.
 	measure 'Scoped Enabled PCs not in Intune <30D' =
-			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			CALCULATE((VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
 			VAR _pu=VALUES('Primary User Selection'[Primary user])
 			RETURN IF(_puFilter,CALCULATE((
 			VAR _countries=VALUES('Country Selection'[Country])
@@ -422,14 +422,14 @@ table 'Global Device Inventory'
 			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
 			 RETURN _legacy IN _riskKeys))
 			VAR _keys=SELECTCOLUMNS(_rows,"K",VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK([AD Computer Key]),"ad:" & [AD Computer Key])))
-			RETURN CALCULATE([Enabled PCs not in Intune <30D],KEEPFILTERS(TREATAS(_keys,'Device Exploration Inventory'[Inventory Key])))))
+			RETURN CALCULATE([Enabled PCs not in Intune <30D],KEEPFILTERS(TREATAS(_keys,'Device Exploration Inventory'[Inventory Key])))))),KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"))
 		formatString: #,0
 		displayFolder: Private account and device explorer
 		lineageTag: aac395c3-1a2d-48e9-9b41-844cc22808f1
 
-	/// Private approved account/device lot; existing loaded batch only.
+	/// Private approved account/device lot; existing loaded batch only. Operational PC scope restricted to corporate enabled Windows/macOS.
 	measure 'Scoped Intune Enrollment At Risk PCs' =
-			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			CALCULATE((VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
 			VAR _pu=VALUES('Primary User Selection'[Primary user])
 			RETURN IF(_puFilter,CALCULATE((
 			VAR _countries=VALUES('Country Selection'[Country])
@@ -479,14 +479,14 @@ table 'Global Device Inventory'
 			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
 			 RETURN _legacy IN _riskKeys))
 			VAR _keys=SELECTCOLUMNS(_rows,"K",VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK([AD Computer Key]),"ad:" & [AD Computer Key])))
-			RETURN CALCULATE([Intune Enrollment At Risk PCs],KEEPFILTERS(TREATAS(_keys,'Device Deployment Risk'[Inventory Key])))))
+			RETURN CALCULATE([Intune Enrollment At Risk PCs],KEEPFILTERS(TREATAS(_keys,'Device Deployment Risk'[Inventory Key])))))),KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"))
 		formatString: #,0
 		displayFolder: Private account and device explorer
 		lineageTag: 68c9e9f6-b424-4138-88da-dde88bde7347
 
-	/// Private approved account/device lot; existing loaded batch only.
+	/// Private approved account/device lot; existing loaded batch only. Operational PC scope restricted to corporate enabled Windows/macOS.
 	measure 'Scoped Windows 11 Deployment At Risk PCs' =
-			VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
+			CALCULATE((VAR _puFilter=ISFILTERED('Primary User Selection'[Primary user])
 			VAR _pu=VALUES('Primary User Selection'[Primary user])
 			RETURN IF(_puFilter,CALCULATE((
 			VAR _countries=VALUES('Country Selection'[Country])
@@ -536,7 +536,7 @@ table 'Global Device Inventory'
 			 VAR _legacy=IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK(_ad),"ad:"&_ad))
 			 RETURN _legacy IN _riskKeys))
 			VAR _keys=SELECTCOLUMNS(_rows,"K",VAR _id=[Device Source ID] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID] RETURN IF(NOT ISBLANK(_id),LOOKUPVALUE('Device Exploration Inventory'[Inventory Key],'Device Exploration Inventory'[Device Source ID],_id,'Device Exploration Inventory'[TenantKey],_t,'Device Exploration Inventory'[Loaded Batch ID],_b),IF(NOT ISBLANK([AD Computer Key]),"ad:" & [AD Computer Key])))
-			RETURN CALCULATE([Windows 11 Deployment At Risk PCs],KEEPFILTERS(TREATAS(_keys,'Device Deployment Risk'[Inventory Key])))))
+			RETURN CALCULATE([Windows 11 Deployment At Risk PCs],KEEPFILTERS(TREATAS(_keys,'Device Deployment Risk'[Inventory Key])))))),KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"))
 		formatString: #,0
 		displayFolder: Private account and device explorer
 		lineageTag: b2ceeb27-2a64-41c0-a132-f5441c050339
@@ -907,6 +907,130 @@ table 'Global Device Inventory'
 	measure 'Device qualification context' = "Corporate = observed AD domain; otherwise Intune ownership. Platform = Intune/native OS, then exact AD OS. Unknown platform (enabled corporate): "&FORMAT([Corporate devices with unknown platform],"#,0")&". Mobile account-state gaps: "&FORMAT([Mobile unknown account states],"#,0")&"; mobile unknown ownership: "&FORMAT([Mobile unknown ownership],"#,0")&". Personal mobile managed by Intune: "&FORMAT([Managed personal mobile devices],"#,0")&". Unknown is not disabled. Cached mobile AccountEnabled is absent; no enabled-state inference from management or recent sync."
 		displayFolder: Corporate device reporting
 		lineageTag: 074e9a21-8eb1-4d12-919c-427e230959e1
+
+	/// PCs with observed Windows generation or, when it is missing, an explicit Windows name or a qualified Windows build (10240–21999).
+	measure 'PCs Windows 10' = CALCULATE([Global Device Count], KEEPFILTERS(FILTER('Global Device Inventory', VAR _gen='Global Device Inventory'[Windows Generation] VAR _os=UPPER(COALESCE('Global Device Inventory'[Operating System Family],"")) VAR _v=SUBSTITUTE(SUBSTITUTE(COALESCE('Global Device Inventory'[Operating System Version],"")," (","."),")","") VAR _build=IFERROR(VALUE(PATHITEM(SUBSTITUTE(_v,".","|"),3,TEXT)),BLANK()) RETURN _gen="Windows 10" || ((_gen=BLANK() || _gen="Unknown") && CONTAINSSTRING(_os,"WINDOWS") && (CONTAINSSTRING(_os,"WINDOWS 10") || (NOT ISBLANK(_build) && _build>=10240 && _build<22000))))))
+		formatString: #,0
+		displayFolder: Private PC and Mobile equipment
+		lineageTag: f0194acf-62cb-41fa-9b9a-efe4c5143932
+
+	/// PCs with observed Windows generation or, when it is missing, an explicit Windows name or a qualified Windows build (22000 and above).
+	measure 'PCs Windows 11' = CALCULATE([Global Device Count], KEEPFILTERS(FILTER('Global Device Inventory', VAR _gen='Global Device Inventory'[Windows Generation] VAR _os=UPPER(COALESCE('Global Device Inventory'[Operating System Family],"")) VAR _v=SUBSTITUTE(SUBSTITUTE(COALESCE('Global Device Inventory'[Operating System Version],"")," (","."),")","") VAR _build=IFERROR(VALUE(PATHITEM(SUBSTITUTE(_v,".","|"),3,TEXT)),BLANK()) RETURN _gen="Windows 11" || ((_gen=BLANK() || _gen="Unknown") && CONTAINSSTRING(_os,"WINDOWS") && (CONTAINSSTRING(_os,"WINDOWS 11") || (NOT ISBLANK(_build) && _build>=22000))))))
+		formatString: #,0
+		displayFolder: Private PC and Mobile equipment
+		lineageTag: cead2058-cd02-4af4-9a29-c9565e4a58ce
+
+	/// PC equipment with an explicitly named Windows version older than Windows 10 (XP, Vista, 7, 8/8.1, 2000, NT, 95, 98, ME or 3.x); unknown Windows versions are not counted as legacy.
+	measure 'PCs Windows Legacy' = CALCULATE([Global Device Count], KEEPFILTERS(FILTER('Global Device Inventory', ISBLANK('Global Device Inventory'[Windows Generation]) && (CONTAINSSTRING(UPPER('Global Device Inventory'[Operating System Family]), "WINDOWS XP") || CONTAINSSTRING(UPPER('Global Device Inventory'[Operating System Family]), "WINDOWS VISTA") || CONTAINSSTRING(UPPER('Global Device Inventory'[Operating System Family]), "WINDOWS 7") || CONTAINSSTRING(UPPER('Global Device Inventory'[Operating System Family]), "WINDOWS 8") || CONTAINSSTRING(UPPER('Global Device Inventory'[Operating System Family]), "WINDOWS 2000") || CONTAINSSTRING(UPPER('Global Device Inventory'[Operating System Family]), "WINDOWS NT") || CONTAINSSTRING(UPPER('Global Device Inventory'[Operating System Family]), "WINDOWS 95") || CONTAINSSTRING(UPPER('Global Device Inventory'[Operating System Family]), "WINDOWS 98") || CONTAINSSTRING(UPPER('Global Device Inventory'[Operating System Family]), "WINDOWS ME") || CONTAINSSTRING(UPPER('Global Device Inventory'[Operating System Family]), "WINDOWS 3.") ))))
+		formatString: #,0
+		displayFolder: Private PC and Mobile equipment
+		lineageTag: 86690e8b-657b-4b8e-8009-f0fc2e00faff
+
+	/// Remaining scoped PC devices after explicitly observed Windows 10, Windows 11 and legacy Windows; includes other platforms and unknown or unclassified OS versions.
+	measure 'PCs other or OS unknown' = VAR _total = [Global Device Count] VAR _classified = [PCs Windows 10] + [PCs Windows 11] + [PCs Windows Legacy] RETURN IF(_total >= _classified, _total - _classified, BLANK())
+		formatString: #,0
+		displayFolder: Private PC and Mobile equipment
+		lineageTag: fa9b4485-2e01-4f97-834c-f0aa492151d1
+
+	measure 'PCs macOS' = CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[Platform (report)]="macOS"))
+		formatString: #,0
+		lineageTag: 1bbeb7c6-e127-43fc-885c-6fcaf729ad49
+
+	measure 'PCs Windows version unknown' = VAR t=CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[Platform (report)]="Windows")) VAR n=[PCs Windows 10]+[PCs Windows 11]+[PCs Windows Legacy] RETURN IF(NOT ISBLANK(t),MAX(0,t-n))
+		formatString: #,0
+		lineageTag: e8ecb8b2-2f7a-4fec-af70-35cfaf1deacc
+
+	/// Operational current PC population: confirmed Windows/macOS, Corporate, Enabled. Managed denominator includes unknown compliance/encryption; missing evidence is not inferred healthy.
+	measure 'Managed enabled corporate PCs' = CALCULATE([Equipment Managed Devices],KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"))
+		formatString: #,0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 01fb5101-af30-4e34-9b5f-947ab837b5b6
+
+	/// Operational current PC population: confirmed Windows/macOS, Corporate, Enabled. Managed denominator includes unknown compliance/encryption; missing evidence is not inferred healthy.
+	measure 'Compliant enabled corporate PCs' = CALCULATE([Equipment Compliant Devices],KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"))
+		formatString: #,0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: a63e9980-5e5b-4cbc-b47e-03148e1b4dea
+
+	/// Operational current PC population: confirmed Windows/macOS, Corporate, Enabled. Managed denominator includes unknown compliance/encryption; missing evidence is not inferred healthy.
+	measure 'Noncompliant enabled corporate PCs' = CALCULATE([Equipment Noncompliant Devices],KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"))
+		formatString: #,0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: e3d4cafb-7437-4cf4-a4d7-3a7cd745a353
+
+	/// Operational current PC population: confirmed Windows/macOS, Corporate, Enabled. Managed denominator includes unknown compliance/encryption; missing evidence is not inferred healthy.
+	measure 'Enabled corporate PC compliance (%)' = CALCULATE([Equipment Compliance Rate (%)],KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"))
+		formatString: 0.0%
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: c618eb20-3727-46e0-97ce-d3a6a6346d8c
+
+	/// Operational current PC population: confirmed Windows/macOS, Corporate, Enabled. Managed denominator includes unknown compliance/encryption; missing evidence is not inferred healthy.
+	measure 'Enabled corporate PC encryption (%)' = CALCULATE([Equipment Encryption Rate (%)],KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"))
+		formatString: 0.0%
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 2431792e-758e-4f2b-aa1d-b252cb628235
+
+	/// Enabled Secure Boot / all managed enabled corporate Windows PCs. Unobserved and unsupported states remain in denominator.
+	measure 'Enabled corporate Windows Secure Boot (%)' = DIVIDE(CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"),KEEPFILTERS('Global Device Inventory'[Platform (report)]="Windows"),KEEPFILTERS('Global Device Inventory'[Intune presence]="In Intune"),KEEPFILTERS('Global Device Inventory'[Secure Boot State]="Enabled")),CALCULATE([Equipment Managed Devices],KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"),KEEPFILTERS('Global Device Inventory'[Platform (report)]="Windows")))
+		formatString: 0.0%
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: c48f5fe5-1295-473f-97ad-49e3b1de00ab
+
+	/// Corporate enabled Windows/macOS equipment with qualified technical activity in the trailing 30 days at query time (UTC): latest AD replicated approximate logon, Entra approximate device sign-in or Intune sync. Exact identity/tenant/batch links. Missing and future timestamps excluded. Not proof of human usage. Shared inventory selectors retained.
+	measure 'Enabled corporate PC devices <30D' =
+			VAR _now=UTCNOW()
+			VAR _base=CALCULATETABLE('Global Device Inventory',
+			    KEEPFILTERS('Global Device Inventory'[Device type (report)]="PC"),
+			    KEEPFILTERS('Global Device Inventory'[Ownership (report)]="Corporate"),
+			    KEEPFILTERS('Global Device Inventory'[Enabled state (report)]="Enabled"))
+			VAR _recent=FILTER(_base,
+			    VAR _ad=[AD Computer Key] VAR _nk=[Native Device Key] VAR _t=[TenantKey] VAR _b=[Loaded Batch ID]
+			    VAR _adDate=IF(NOT ISBLANK(_ad),MAXX(FILTER(ALL('AD Computer Evidence'),
+			        'AD Computer Evidence'[TenantADComputerKey]=_ad &&
+			        'AD Computer Evidence'[TenantKey]=_t &&
+			        'AD Computer Evidence'[Loaded Batch ID]=_b &&
+			        'AD Computer Evidence'[LastLogonStatus]="UTC from replicated AD FILETIME; approximate logon" &&
+			        'AD Computer Evidence'[LastLogonUtcDateTime]<=_now),
+			        'AD Computer Evidence'[LastLogonUtcDateTime]))
+			    VAR _cloudDate=IF(NOT ISBLANK(_nk),MAXX(FILTER(ALL('Device Source Evidence'),
+			        'Device Source Evidence'[TenantDeviceKey]=_nk &&
+			        'Device Source Evidence'[TenantKey]=_t &&
+			        'Device Source Evidence'[Loaded Batch ID]=_b &&
+			        'Device Source Evidence'[ActivityStatus]="UTC qualified" &&
+			        'Device Source Evidence'[ActivityUtcDateTime]<=_now),
+			        'Device Source Evidence'[ActivityUtcDateTime]))
+			    VAR _latest=MAX(_adDate,_cloudDate)
+			    RETURN NOT ISBLANK(_latest) && _latest>_now-30)
+			RETURN CALCULATE([Global Device Count],KEEPFILTERS(_recent))
+		formatString: #,0
+		displayFolder: Enabled corporate PC KPIs
+		lineageTag: 352c9d5d-36aa-4d0e-abae-b476e280a6d7
+
+	/// Sum of the former Corporate and Personal mobile populations. Android/iOS/iPadOS with qualified Corporate or Personal ownership, regardless of account enabled state. Unknown ownership remains in inventory, excluded here. Existing country/domain/primary-user/license filters retained.
+	measure 'Mobile devices' = CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[Device type (report)]="Mobile"),KEEPFILTERS('Global Device Inventory'[Ownership (report)] IN {"Corporate","Personal"}))
+		formatString: #,0
+		displayFolder: Corporate device reporting
+		lineageTag: cede920d-5f1d-4f0d-a058-b6040399c65b
+
+	measure 'Intune Migration Windows 10 not observed <30D' = CALCULATE([Scoped Enabled PCs not in Intune <30D], KEEPFILTERS(FILTER('Global Device Inventory', VAR _gen='Global Device Inventory'[Windows Generation] VAR _os=UPPER(COALESCE('Global Device Inventory'[Operating System Family],"")) VAR _v=SUBSTITUTE(SUBSTITUTE(COALESCE('Global Device Inventory'[Operating System Version],"")," (","."),")","") VAR _build=IFERROR(VALUE(PATHITEM(SUBSTITUTE(_v,".","|"),3,TEXT)),BLANK()) RETURN _gen="Windows 10" || ((_gen=BLANK() || _gen="Unknown") && CONTAINSSTRING(_os,"WINDOWS") && (CONTAINSSTRING(_os,"WINDOWS 10") || (NOT ISBLANK(_build) && _build>=10240 && _build<22000))))))
+		formatString: #,0
+		lineageTag: 7dbffb2c-6edd-46b4-9c46-f2c4001332a2
+
+	measure 'Intune Migration Windows 11 not observed <30D' = CALCULATE([Scoped Enabled PCs not in Intune <30D], KEEPFILTERS(FILTER('Global Device Inventory', VAR _gen='Global Device Inventory'[Windows Generation] VAR _os=UPPER(COALESCE('Global Device Inventory'[Operating System Family],"")) VAR _v=SUBSTITUTE(SUBSTITUTE(COALESCE('Global Device Inventory'[Operating System Version],"")," (","."),")","") VAR _build=IFERROR(VALUE(PATHITEM(SUBSTITUTE(_v,".","|"),3,TEXT)),BLANK()) RETURN _gen="Windows 11" || ((_gen=BLANK() || _gen="Unknown") && CONTAINSSTRING(_os,"WINDOWS") && (CONTAINSSTRING(_os,"WINDOWS 11") || (NOT ISBLANK(_build) && _build>=22000))))))
+		formatString: #,0
+		lineageTag: 57946051-8992-4dab-b3e0-22f55f2d8a79
+
+	measure 'Intune Migration other Windows not observed <30D' = MAX(0,[Scoped Enabled PCs not in Intune <30D]-[Intune Migration Windows 10 not observed <30D]-[Intune Migration Windows 11 not observed <30D])
+		formatString: #,0
+		lineageTag: 30ffb75a-6307-4d30-9bd7-2fe82e186712
+
+	measure 'Migration Intune Ambiguous Presence' = CALCULATE([Global Device Count],KEEPFILTERS('Global Device Inventory'[Intune presence]="Unknown / ambiguous"))
+		formatString: #,0
+		lineageTag: 06cb940d-8f6d-45fe-9439-844d24cac99f
+
+	measure 'Intune Migration Default Computers <30D' = CALCULATE([Scoped Enabled PCs not in Intune <30D],KEEPFILTERS('Global Device Inventory'[AD Computers Container (migration)]="CN=Computers"))
+		formatString: #,0
+		lineageTag: 69b21128-2fbf-4aa6-a971-e38eb885c79f
 
 	column 'Device Source ID'
 		lineageTag: 5c638206-060f-4738-9e94-8da204c0e51a
@@ -1627,6 +1751,28 @@ table 'Global Device Inventory'
 		lineageTag: 02a511e8-e4a2-426b-ba04-7c52dd8f570a
 		summarizeBy: none
 
+	/// AD logon or Entra activity qualified UTC, evaluated against loaded batch UTC; Intune sync alone is not user activity.
+	column 'Migration Intune Activity Status' =
+			VAR _anchor = [Dataset Batch Timestamp UTC]
+			VAR _ad = [AD Computer Key]
+			VAR _native = [Native Device Key]
+			VAR _tenant = [TenantKey]
+			VAR _batch = [Loaded Batch ID]
+			VAR _adActivity = IF(NOT ISBLANK(_ad), MAXX(FILTER(ALL('AD Computer Evidence'), 'AD Computer Evidence'[TenantADComputerKey]=_ad && 'AD Computer Evidence'[TenantKey]=_tenant && 'AD Computer Evidence'[Loaded Batch ID]=_batch && 'AD Computer Evidence'[LastLogonStatus]="UTC from replicated AD FILETIME; approximate logon" && 'AD Computer Evidence'[LastLogonUtcDateTime]<=_anchor), 'AD Computer Evidence'[LastLogonUtcDateTime]))
+			VAR _entraActivity = IF(NOT ISBLANK(_native), MAXX(FILTER(ALL('Device Source Evidence'), 'Device Source Evidence'[TenantDeviceKey]=_native && 'Device Source Evidence'[TenantKey]=_tenant && 'Device Source Evidence'[Loaded Batch ID]=_batch && 'Device Source Evidence'[SourceSystem]="Entra" && 'Device Source Evidence'[ActivityStatus]="UTC qualified" && 'Device Source Evidence'[ActivityUtcDateTime]<=_anchor), 'Device Source Evidence'[ActivityUtcDateTime]))
+			VAR _activity = MAX(_adActivity,_entraActivity)
+			RETURN SWITCH(TRUE(), ISBLANK(_anchor),"Batch timestamp unavailable", ISBLANK(_activity),"Activity unknown", _activity>_anchor-30,"Active <30D", "Not active <30D")
+		dataType: string
+		lineageTag: a01215e6-8c9d-4c84-8426-7fb0c0102cc5
+
+	column 'AD Distinguished Name (migration)' = VAR _key=[AD Computer Key] RETURN IF(NOT ISBLANK(_key),LOOKUPVALUE('AD Computer Evidence'[DistinguishedName],'AD Computer Evidence'[TenantADComputerKey],_key))
+		dataType: string
+		lineageTag: 1f57950c-3b61-4c5d-82f6-783653a78977
+
+	column 'AD Computers Container (migration)' = VAR _dn=SUBSTITUTE(UPPER([AD Distinguished Name (migration)]),"\\,","#ESCAPEDCOMMA#") VAR _comma=FIND(",",_dn,1,0) RETURN SWITCH(TRUE(),ISBLANK([AD Distinguished Name (migration)]),"AD path unavailable",_comma>0 && LEFT(MID(_dn,_comma+1,999),16)="CN=COMPUTERS,DC=","CN=Computers","Other AD location")
+		dataType: string
+		lineageTag: 4b3d1362-7cd9-4962-adda-7a342c175965
+
 	partition 'Global Device Inventory' = calculated
 		mode: import
 		source =
@@ -1709,3 +1855,4 @@ table 'Global Device Inventory'
 				"AD Computer Key",[AD Computer Key],
 				"Primary User Source ID",[Primary User Source ID],
 				"Primary User SAM",[Primary User SAM])
+

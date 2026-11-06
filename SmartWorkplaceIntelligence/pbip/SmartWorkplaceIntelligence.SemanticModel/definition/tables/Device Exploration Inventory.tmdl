@@ -839,3 +839,4 @@ table 'Device Exploration Inventory'
 				in Typed
 
 	annotation PBI_ResultType = Exception
+

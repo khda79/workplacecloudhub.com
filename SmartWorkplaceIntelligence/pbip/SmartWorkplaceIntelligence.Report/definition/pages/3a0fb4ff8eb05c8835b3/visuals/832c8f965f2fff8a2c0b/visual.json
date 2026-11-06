@@ -292,6 +292,13 @@
                   "Value": "5L"
                 }
               }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
             }
           },
           "selector": {

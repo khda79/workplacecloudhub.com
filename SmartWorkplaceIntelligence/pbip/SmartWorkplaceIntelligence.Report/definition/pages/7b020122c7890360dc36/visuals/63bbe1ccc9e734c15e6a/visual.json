@@ -6,7 +6,7 @@
     "y": 128,
     "z": 24000,
     "height": 104,
-    "width": 1856,
+    "width": 504,
     "tabOrder": 16000
   },
   "visual": {
@@ -23,12 +23,11 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Remaining Observed Windows 10"
+                  "Property": "Enabled corporate PC · Remaining Observed Windows 10"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Remaining Observed Windows 10",
               "nativeQueryRef": "Windows 10 remaining",
-              "active": false,
               "displayName": "Windows 10 remaining"
             },
             {
@@ -39,44 +38,11 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 remaining active <30D"
+                  "Property": "Enabled corporate PC · Migration AD Windows 10 Without Intune Match"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Windows 10 remaining active <30D",
-              "nativeQueryRef": "Windows 10 remaining · active <30D",
-              "active": false,
-              "displayName": "Windows 10 remaining · active <30D"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Remaining Managed Windows 10"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Remaining Managed Windows 10",
-              "nativeQueryRef": "Intune-managed Windows 10",
-              "active": false,
-              "displayName": "Intune-managed Windows 10"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Migration AD Windows 10 Without Intune Match"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Migration AD Windows 10 Without Intune Match",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Migration AD Windows 10 Without Intune Match",
               "nativeQueryRef": "AD only - no Intune match",
-              "active": false,
               "displayName": "AD only - no Intune match"
             },
             {
@@ -87,77 +53,12 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Hardware Incompatible Windows 10"
+                  "Property": "Enabled corporate PC · Hardware Incompatible Windows 10 Combined"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Hardware Incompatible Windows 10",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Hardware Incompatible Windows 10 Combined",
               "nativeQueryRef": "Hardware incompatible",
-              "active": false,
               "displayName": "Hardware incompatible"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Migration Windows 10 Eligibility Unknown"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Migration Windows 10 Eligibility Unknown",
-              "nativeQueryRef": "Eligibility unknown",
-              "active": false,
-              "displayName": "Eligibility unknown"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Migration Windows 10 Eligibility Conflicting"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Migration Windows 10 Eligibility Conflicting",
-              "nativeQueryRef": "Eligibility conflicting",
-              "active": false,
-              "displayName": "Eligibility conflicting"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Windows 10 Autopatch Policy Observed"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Windows 10 Autopatch Policy Observed",
-              "nativeQueryRef": "Autopatch anchor observed",
-              "active": false,
-              "displayName": "Autopatch anchor observed"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Windows 10 Legacy Build Review"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Windows 10 Legacy Build Review",
-              "nativeQueryRef": "Windows 10 Legacy Build Review",
-              "active": true,
-              "displayName": "Legacy build · update-path review"
             }
           ]
         }
@@ -358,7 +259,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "9D"
+                  "Value": "3L"
                 }
               }
             },

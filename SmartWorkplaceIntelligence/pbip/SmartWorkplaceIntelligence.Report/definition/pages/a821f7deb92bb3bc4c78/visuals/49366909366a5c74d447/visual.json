@@ -53,12 +53,12 @@
                       "Entity": "Intune Managed App Deployment Evidence"
                     }
                   },
-                  "Property": "Intune Reported Failure Observations"
+                  "Property": "Intune App Pending Observations"
                 }
               },
-              "queryRef": "Intune Managed App Deployment Evidence.Intune Reported Failure Observations",
-              "nativeQueryRef": "Reported app failures",
-              "displayName": "Reported app failures"
+              "queryRef": "Intune Managed App Deployment Evidence.Intune App Pending Observations",
+              "nativeQueryRef": "Pending app observations",
+              "displayName": "Pending app observations"
             },
             {
               "field": {
@@ -68,12 +68,12 @@
                       "Entity": "Intune Managed App Deployment Evidence"
                     }
                   },
-                  "Property": "Intune App Pending Observations"
+                  "Property": "Intune Reported Failure Observations"
                 }
               },
-              "queryRef": "Intune Managed App Deployment Evidence.Intune App Pending Observations",
-              "nativeQueryRef": "Pending app observations",
-              "displayName": "Pending app observations"
+              "queryRef": "Intune Managed App Deployment Evidence.Intune Reported Failure Observations",
+              "nativeQueryRef": "Reported app failures",
+              "displayName": "Reported app failures"
             },
             {
               "field": {

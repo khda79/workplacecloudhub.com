@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "597c876463bf050122a0",
   "position": {
-    "x": 32,
+    "x": 1585.3333333333335,
     "y": 128,
     "z": 11000,
-    "height": 128,
-    "width": 152.88888888888889,
+    "height": 96,
+    "width": 302.66666666666669,
     "tabOrder": 14000
   },
   "visual": {
@@ -23,10 +23,10 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Current Windows 11 Adoption (%)"
+                  "Property": "Enabled corporate PC · Current Windows 11 Adoption (%)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Current Windows 11 Adoption (%)",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Current Windows 11 Adoption (%)",
               "nativeQueryRef": "Current Windows 11 Adoption (%)",
               "displayName": "Windows 11 adoption (%)"
             }
@@ -48,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "24D"
                 }
               }
             },
@@ -110,7 +110,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },

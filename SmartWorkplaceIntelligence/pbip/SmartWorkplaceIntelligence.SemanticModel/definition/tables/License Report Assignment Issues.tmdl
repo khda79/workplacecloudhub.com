@@ -229,3 +229,4 @@ table 'License Report Assignment Issues'
 				    NormalizedUserId)
 				in
 				    Readers[Finish](BusinessRows)
+

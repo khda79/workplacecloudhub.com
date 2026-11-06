@@ -1,0 +1,17 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "c0de3400000000000006",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 3000,
+    "height": 1080,
+    "width": 1920,
+    "tabOrder": 3000
+  },
+  "visualGroup": {
+    "displayName": "AD Computers candidates",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

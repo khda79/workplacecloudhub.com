@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "dacbba2a42cb0b7827d9",
   "position": {
-    "x": 192.88888888888889,
+    "x": 964,
     "y": 128,
     "z": 16000,
-    "height": 128,
-    "width": 152.88888888888889,
+    "height": 96,
+    "width": 302.66666666666669,
     "tabOrder": 19000
   },
   "visual": {
@@ -20,14 +20,14 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Exploration Inventory"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Enabled PCs not in Intune <30D"
+                  "Property": "Scoped Enabled PCs not in Intune <30D"
                 }
               },
-              "queryRef": "Device Exploration Inventory.Enabled PCs not in Intune <30D",
-              "nativeQueryRef": "Enabled AD PCs not in Intune",
+              "queryRef": "Global Device Inventory.Scoped Enabled PCs not in Intune <30D",
+              "nativeQueryRef": "Scoped Enabled PCs not in Intune <30D",
               "displayName": "Enabled PCs not in Intune <30D"
             }
           ]
@@ -67,7 +67,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "24D"
                 }
               }
             },
@@ -216,7 +216,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },
@@ -810,5 +810,63 @@
         }
       ]
     }
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "57fb833ea89a4572b971",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Global Device Inventory"
+              }
+            },
+            "Property": "Device type (report)"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "x",
+              "Entity": "Global Device Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "x"
+                          }
+                        },
+                        "Property": "Device type (report)"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'PC'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      }
+    ]
   }
 }

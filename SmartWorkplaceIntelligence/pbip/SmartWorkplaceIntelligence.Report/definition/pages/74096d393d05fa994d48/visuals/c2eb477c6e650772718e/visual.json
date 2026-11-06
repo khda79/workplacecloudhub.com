@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "c2eb477c6e650772718e",
   "position": {
-    "x": 514.66666666666663,
-    "y": 128,
+    "x": 32,
+    "y": 232,
     "z": 15000,
-    "height": 128,
-    "width": 152.88888888888889,
+    "height": 96,
+    "width": 364.8,
     "tabOrder": 18000
   },
   "visual": {
@@ -23,10 +23,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Remaining Observed Windows 10"
+                  "Property": "Enabled corporate PC · Remaining Observed Windows 10"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Remaining Observed Windows 10",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Remaining Observed Windows 10",
               "nativeQueryRef": "Windows 10 remaining · Intune + AD",
               "displayName": "Windows 10 remaining · Intune + AD"
             }
@@ -48,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "24D"
                 }
               }
             },
@@ -110,7 +110,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },

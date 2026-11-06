@@ -3,7 +3,7 @@
   "name": "75fc8796f93820ab1210",
   "position": {
     "x": 32,
-    "y": 320,
+    "y": 424,
     "z": 2000,
     "height": 94.444444444444443,
     "width": 1856,
@@ -23,12 +23,12 @@
                       "Entity": "Intune Enrollment Failure Evidence"
                     }
                   },
-                  "Property": "Intune Enrollment Failure Events"
+                  "Property": "Intune Enrollment Identified Devices"
                 }
               },
-              "queryRef": "Intune Enrollment Failure Evidence.Intune Enrollment Failure Events",
-              "nativeQueryRef": "Enrollment failure events",
-              "displayName": "Enrollment failure events"
+              "queryRef": "Intune Enrollment Failure Evidence.Intune Enrollment Identified Devices",
+              "nativeQueryRef": "Identified enrollment devices",
+              "displayName": "Identified enrollment devices"
             },
             {
               "field": {
@@ -38,12 +38,12 @@
                       "Entity": "Intune Enrollment Failure Evidence"
                     }
                   },
-                  "Property": "Intune Enrollment Identified Devices"
+                  "Property": "Intune Enrollment Failure Events"
                 }
               },
-              "queryRef": "Intune Enrollment Failure Evidence.Intune Enrollment Identified Devices",
-              "nativeQueryRef": "Identified enrollment devices",
-              "displayName": "Identified enrollment devices"
+              "queryRef": "Intune Enrollment Failure Evidence.Intune Enrollment Failure Events",
+              "nativeQueryRef": "Enrollment failure events",
+              "displayName": "Enrollment failure events"
             },
             {
               "field": {
@@ -343,7 +343,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "4L"
+                  "Value": "3L"
                 }
               }
             },

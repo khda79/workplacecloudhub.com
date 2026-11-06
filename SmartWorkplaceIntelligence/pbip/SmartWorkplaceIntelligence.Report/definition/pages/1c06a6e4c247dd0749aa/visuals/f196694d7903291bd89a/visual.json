@@ -23,72 +23,12 @@
                       "Entity": "Collaboration Object Evidence"
                     }
                   },
-                  "Property": "At-Risk Collaboration Objects"
-                }
-              },
-              "queryRef": "Collaboration Object Evidence.At-Risk Collaboration Objects",
-              "nativeQueryRef": "At-Risk Objects",
-              "displayName": "At-Risk Resources"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Collaboration Object Evidence"
-                    }
-                  },
-                  "Property": "Inactive Collaboration Objects"
-                }
-              },
-              "queryRef": "Collaboration Object Evidence.Inactive Collaboration Objects",
-              "nativeQueryRef": "Inactive Objects",
-              "displayName": "Inactive Resources"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Collaboration Object Evidence"
-                    }
-                  },
-                  "Property": "Orphaned Collaboration Objects"
-                }
-              },
-              "queryRef": "Collaboration Object Evidence.Orphaned Collaboration Objects",
-              "nativeQueryRef": "Orphaned Objects",
-              "displayName": "Orphaned Resources"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Collaboration Object Evidence"
-                    }
-                  },
                   "Property": "Collaboration Objects"
                 }
               },
               "queryRef": "Collaboration Object Evidence.Collaboration Objects",
               "nativeQueryRef": "Objects",
               "displayName": "Resources"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Collaboration Object Evidence"
-                    }
-                  },
-                  "Property": "Active Collaboration Objects 30D"
-                }
-              },
-              "queryRef": "Collaboration Object Evidence.Active Collaboration Objects 30D",
-              "nativeQueryRef": "Active Objects 30D",
-              "displayName": "Active Resources 30D"
             },
             {
               "field": {
@@ -117,6 +57,21 @@
               },
               "queryRef": "Collaboration Object Evidence.Collaboration Storage Used (GB)",
               "nativeQueryRef": "Storage Used (GB)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Collaboration Object Evidence"
+                    }
+                  },
+                  "Property": "Active Collaboration Objects 30D"
+                }
+              },
+              "queryRef": "Collaboration Object Evidence.Active Collaboration Objects 30D",
+              "nativeQueryRef": "Active Objects 30D",
+              "displayName": "Active Resources 30D"
             }
           ]
         }
@@ -375,7 +330,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "7L"
+                  "Value": "4L"
                 }
               }
             },

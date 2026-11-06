@@ -232,3 +232,6 @@ table 'Exchange Mailbox Databases'
 				    Forced = Table.RowCount(Buffered)
 				in
 				    if Forced >= 0 then Readers[Finish](Buffered) else error "Database observations unavailable"
+
+	annotation PBI_ResultType = Exception
+

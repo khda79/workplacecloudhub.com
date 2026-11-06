@@ -451,3 +451,4 @@ table 'License SKU Capacity'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
+

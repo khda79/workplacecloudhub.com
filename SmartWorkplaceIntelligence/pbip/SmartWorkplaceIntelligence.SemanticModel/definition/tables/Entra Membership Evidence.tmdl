@@ -147,3 +147,4 @@ table 'Entra Membership Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("EntraGroupMembership.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantMembershipKey", dataType="String"], [name="TenantGroupKey", dataType="String"], [name="TenantUserKey", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="NestedTenantGroupKey", dataType="String"], [name="MemberId", dataType="String"], [name="MemberType", dataType="String"], [name="MembershipKind", dataType="String"], [name="LinkStatus", dataType="String"], [name="SourceCollectedDateTime", dataType="DateTime"]}))
 				in
 				    Readers[Finish](BusinessRows)
+

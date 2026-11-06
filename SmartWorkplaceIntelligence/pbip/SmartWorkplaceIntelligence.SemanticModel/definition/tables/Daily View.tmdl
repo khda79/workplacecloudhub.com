@@ -10,3 +10,4 @@ table 'Daily View'
 	partition 'Daily View' = calculated
 		mode: import
 		source = DATATABLE ( "View", STRING, { {"Count"}, {"Share"} } )
+

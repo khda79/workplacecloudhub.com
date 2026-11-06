@@ -182,3 +182,4 @@ table 'SPO Migration Source Summary'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
+

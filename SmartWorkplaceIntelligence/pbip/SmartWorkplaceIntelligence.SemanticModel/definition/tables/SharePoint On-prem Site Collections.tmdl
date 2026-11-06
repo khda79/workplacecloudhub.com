@@ -310,3 +310,4 @@ table 'SharePoint On-prem Site Collections'
 				    SecondaryDisplay)
 				in
 				    Readers[Finish](BusinessRows)
+

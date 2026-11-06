@@ -20,14 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Encrypted Recently Synced Intune Devices (%)"
+                  "Property": "Enabled corporate PC encryption (%)"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Encrypted Recently Synced Intune Devices (%)",
-              "nativeQueryRef": "Encrypted devices (%)"
+              "queryRef": "Global Device Inventory.Enabled corporate PC encryption (%)",
+              "nativeQueryRef": "Encrypted devices (%)",
+              "displayName": "PC encryption observed (%)"
             }
           ]
         },

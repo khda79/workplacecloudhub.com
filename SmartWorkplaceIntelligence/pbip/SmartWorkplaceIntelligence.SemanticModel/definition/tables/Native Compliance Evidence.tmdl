@@ -111,3 +111,4 @@ table 'Native Compliance Evidence'
 				    BusinessRows = (NativeEvidenceTypes(Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("FactDeviceCompliance.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]), {[name="TenantKey", dataType="String"], [name="OrganizationKey", dataType="String"], [name="EnvironmentKey", dataType="String"], [name="TenantId", dataType="String"], [name="TenantDeviceKey", dataType="String"], [name="CmdbDeviceId", dataType="String"], [name="ComplianceState", dataType="String"], [name="LastSyncDateTime", dataType="DateTime"], [name="SourceSystem", dataType="String"]}))
 				in
 				    Readers[Finish](BusinessRows)
+

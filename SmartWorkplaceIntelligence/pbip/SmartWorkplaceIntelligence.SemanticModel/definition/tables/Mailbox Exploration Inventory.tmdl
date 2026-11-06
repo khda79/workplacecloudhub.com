@@ -347,9 +347,23 @@ table 'Mailbox Exploration Inventory'
 		isHidden
 		lineageTag: e83e2b82-71db-4e27-b6ad-c10e5d7076a5
 
+	/// Raw observed AD account type via unique same-batch native identity; Unknown when not qualified.
+	column 'AD Account Type'
+		dataType: string
+		lineageTag: 4e2258a7-9e59-4846-a375-cce5bc14fb94
+		summarizeBy: none
+		sourceColumn: AD Account Type
+
+	/// On-premises exception: missing database first, or missing observed server version when a database is present. This flag is not proof of mailbox absence.
+	column 'Mailbox qualification' = SWITCH(TRUE(), 'Mailbox Exploration Inventory'[Hosting Location] = "On-premises" && (ISBLANK('Mailbox Exploration Inventory'[Database]) || LEN(TRIM('Mailbox Exploration Inventory'[Database])) = 0), "Database not observed", 'Mailbox Exploration Inventory'[Hosting Location] = "On-premises" && 'Mailbox Exploration Inventory'[Exchange Version] = "Exchange Server - version not observed", "Version not observed", "Other")
+		dataType: string
+		lineageTag: 32868445-6bbd-4b83-85c9-507b3bc53a52
+		summarizeBy: none
+
 	partition 'Mailbox Exploration Inventory' = m
 		mode: import
 		source =
+				let Original = (
 				let Mode="Inventory", Result=(let
 				    NeedInventory=Mode="Inventory", NeedLicenses=NeedInventory or Mode="Licenses", NeedRights=NeedInventory or Mode="Delegation",
 				    Readers = CreatePreparedReaders(),
@@ -397,7 +411,7 @@ table 'Mailbox Exploration Inventory'
 				    SourcesValid=List.AllTrue(List.Transform({Exo,Local,Stats,Permissions,Archives,CombinedPermissions},each Table.RowCount(_[Rows])>=0)),
 				    B=#"Mailbox Evidence",U=#"Native User Evidence",A=#"AD User Evidence",N=#"Native EXO Mailbox",W=#"User Inventory Evidence",L=#"Native User License",S=#"Native License SKU",C=Table.RenameColumns(#"License SKU Capacity", {{"TenantKey","Tenant Key"},{"SkuId","SKU ID"},{"ReportProduct","Report Product"}}),
 				    UThin=Table.Buffer(Table.SelectColumns(U,{"TenantKey","TenantUserKey","Loaded Batch ID","SourceUserId","UserPrincipalName","CountryCode","AccountEnabled"},MissingField.Ignore)),
-				    AThin=Table.Buffer(Table.SelectColumns(A,{"TenantKey","TenantUserKey","Loaded Batch ID","ObjectGUID","DistinguishedName","CloudMatchStatus","UserPrincipalName","SamAccountName","DomainName","Enabled","Country"},MissingField.Ignore)),
+				    AThin=Table.Buffer(Table.SelectColumns(A,{"TenantKey","TenantUserKey","Loaded Batch ID","ObjectGUID","DistinguishedName","CloudMatchStatus","UserPrincipalName","SamAccountName","DomainName","Enabled","Country","AccountType"},MissingField.Ignore)),
 				    NThin=Table.Buffer(Table.SelectColumns(N,{"TenantKey","TenantUserKey","Loaded Batch ID","PrimarySmtpAddress","TenantMailboxKey"},MissingField.Ignore)),
 				    WThin=Table.Buffer(Table.SelectColumns(W,{"User Source ID","Loaded Batch ID","Workforce Persona"},MissingField.Ignore)),
 				    LThin=Table.Buffer(Table.SelectColumns(L,{"TenantKey","TenantUserKey","SkuId","Loaded Batch ID"},MissingField.Ignore)),
@@ -432,7 +446,7 @@ table 'Mailbox Exploration Inventory'
 				    CombinedTable=Table.FromRecords(CombinedGrants,type table [#"Hosting Location"=text,SMTP=text,Right=text,Delegate=text]),
 				    CombinedIndex=Index(Table.Group(CombinedTable,{"Hosting Location","SMTP","Right"},{{"Delegates",each Text.Combine(List.Sort(List.Distinct([Delegate],Comparer.OrdinalIgnoreCase)),"; "),type text}}),each Key({[#"Hosting Location"],[SMTP],[Right]})),
 				    nativeFields={"TenantUserKey","TenantMailboxKey"},
-				    adFields={"TenantUserKey","ObjectGUID","UserPrincipalName","SamAccountName","DomainName","Enabled","Country"},
+				    adFields={"TenantUserKey","ObjectGUID","UserPrincipalName","SamAccountName","DomainName","Enabled","Country","AccountType"},
 				    userFields={"SourceUserId","UserPrincipalName","CountryCode","AccountEnabled"},
 				    workFields={"Workforce Persona"},
 				    licFields={"Products"},
@@ -476,6 +490,7 @@ table 'Mailbox Exploration Inventory'
 				        country=Get(user,{"CountryCode"}) ?? Get(ad,{"Country"}) ?? "Unknown"
 				    in [TenantKey=Tenant,#"Mailbox Identity"=identity,#"User Principal Name"=upn,#"SAM Account Name"=sam,
 				        #"AD Domain"=Get(ad,{"DomainName"}),#"Scoped Country"=country,#"Country Qualification"=if Get(user,{"CountryCode"})<>null then "Native user country attribute" else if Get(ad,{"Country"})<>null then "Native AD country attribute" else "Unattributed",
+				        #"AD Account Type"=Get(ad,{"AccountType"}) ?? "Unknown",
 				        #"AD Account State"=if adEnabled=true then "Enabled" else if adEnabled=false then "Disabled" else "Unknown",
 				        #"Entra Account State"=if entraEnabled=true then "Enabled" else if entraEnabled=false then "Disabled" else "Unknown",
 				        #"M365 Licenses"=Get(licenses,{"Products"}) ?? (if Record.FieldCount(user)>0 then "No observed assignment" else "Unknown identity"),
@@ -492,9 +507,22 @@ table 'Mailbox Exploration Inventory'
 				        #"Identity Qualification"=if Get(ad,{"DomainName"})<>null then "Native object / unique SID" else if Record.FieldCount(user)>0 then "Native cloud identity; AD domain unavailable" else "Unavailable / ambiguous native identity",
 				        #"Raw Detail State"=if Record.FieldCount(raw)>0 then "Unique prepared source row" else if source[Available] then "Missing / ambiguous source SMTP locator" else "Not collected in prepared batch",
 				        #"Remote Recipient"=not cloud and Text.StartsWith(Normal(recipient),"remote")]),
-				    Fields=if NeedInventory then {"TenantKey","Mailbox Identity","User Principal Name","SAM Account Name","AD Domain","Scoped Country","Country Qualification","AD Account State","Entra Account State","M365 Licenses","Workforce Persona","Size Band","Delegation State","FullAccess","SendAs","GrantSendOnBehalfTo","Delegation Evidence","Stats Collected UTC","Stats Collection Qualification","Stats Source","Export Collected UTC","Server Name","Database","Forwarding Target","Mailbox Type Group","Identity Qualification","Raw Detail State","Remote Recipient"} else if Mode="Licenses" then {"TenantKey","M365 Licenses","Remote Recipient"} else {"TenantKey","FullAccess","SendAs","GrantSendOnBehalfTo","Remote Recipient"},
+				    Fields=if NeedInventory then {"TenantKey","Mailbox Identity","User Principal Name","SAM Account Name","AD Domain","Scoped Country","Country Qualification","AD Account Type","AD Account State","Entra Account State","M365 Licenses","Workforce Persona","Size Band","Delegation State","FullAccess","SendAs","GrantSendOnBehalfTo","Delegation Evidence","Stats Collected UTC","Stats Collection Qualification","Stats Source","Export Collected UTC","Server Name","Database","Forwarding Target","Mailbox Type Group","Identity Qualification","Raw Detail State","Remote Recipient"} else if Mode="Licenses" then {"TenantKey","M365 Licenses","Remote Recipient"} else {"TenantKey","FullAccess","SendAs","GrantSendOnBehalfTo","Remote Recipient"},
 				    Expanded=Table.ExpandRecordColumn(Table.SelectColumns(Enriched,Table.ColumnNames(B)&{"__detail"}),"__detail",Fields,Fields),
 				    Output=if not BatchSafe then error "Mailbox exploration requires one common prepared batch" else if not SourcesValid then error "Mailbox detail artifact validation failed" else Table.SelectRows(Expanded,each not [Remote Recipient]),
 				    Typed=Table.TransformColumnTypes(Output,List.Transform(List.RemoveItems(Fields,{"Remote Recipient"}),each {_,type text})&{{"Remote Recipient",type logical}}),
 				    Country=Table.RenameColumns(Table.RemoveColumns(Typed,{"Country"}),{{"Scoped Country","Country"}})
 				in if NeedInventory then Country else if Mode="Licenses" then Table.SelectColumns(Typed,{"Mailbox Key","M365 Licenses","Loaded Batch ID"}) else Table.SelectColumns(Typed,{"TenantKey","Mailbox Key","Loaded Batch ID","FullAccess","SendAs","GrantSendOnBehalfTo"})) in Result
+				),
+				Norm = (v as any) as text => if v=null then "" else Text.Lower(Text.Trim(Text.From(v))),
+				Databases = Table.Buffer(Table.SelectColumns(#"Exchange Mailbox Databases", {"Database", "Server Name", "Infrastructure Observed", "Loaded Batch ID"})),
+				Servers = Table.Buffer(Table.SelectRows(Table.SelectColumns(#"Exchange On-prem Infrastructure", {"Server Name", "Dataset", "Attribute", "Value", "Source Available", "Loaded Batch ID"}), each [Dataset]="Servers" and [Attribute]="AdminDisplayVersion" and [Source Available]=true)),
+				VersionOf = (v as any) as nullable text => let x=Norm(v), b=try Number.FromText(Text.BeforeDelimiter(Text.AfterDelimiter(x,"build "),".")) otherwise null in if Text.StartsWith(x,"version 15.1 ") then "Exchange Server 2016" else if Text.StartsWith(x,"version 15.2 ") and b<>null then (if b>=2562 then "Exchange Server SE" else "Exchange Server 2019") else null,
+				AddVersion = Table.AddColumn(Original, "__reconciled_version", each let r=_, db=Norm(r[Database]), batch=r[Loaded Batch ID], matches=if r[Hosting Location]="On-premises" and r[Exchange Version]="Exchange Server - version not observed" and db<>"" then Table.SelectRows(Databases, each Norm([Database])=db and [Loaded Batch ID]=batch and [Infrastructure Observed]=true) else #table({},{}), dbServer=if Table.RowCount(matches)=1 then Norm(matches{0}[Server Name]) else "", serverRows=if dbServer<>"" then Table.SelectRows(Servers, each Norm([Server Name])=dbServer and [Loaded Batch ID]=batch) else #table({},{}), resolved=if Table.RowCount(serverRows)=1 then VersionOf(serverRows{0}[Value]) else null in if resolved<>null then resolved else r[Exchange Version], type text),
+				Result = Table.RenameColumns(Table.RemoveColumns(AddVersion,{"Exchange Version"}),{{"__reconciled_version","Exchange Version"}})
+				in Result
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

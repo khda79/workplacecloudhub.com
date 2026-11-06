@@ -3,7 +3,7 @@
   "name": "3a08708960d10ffae690",
   "position": {
     "x": 32,
-    "y": 376,
+    "y": 480,
     "z": 1000,
     "height": 96,
     "width": 1856,
@@ -65,6 +65,21 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Enabled corporate PC · Current Endpoint Analytics Score"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Current Endpoint Analytics Score",
+              "nativeQueryRef": "Endpoint Analytics score",
+              "displayName": "Endpoint Analytics score"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
                       "Entity": "User Inventory Evidence"
                     }
                   },
@@ -89,21 +104,6 @@
               "queryRef": "User Inventory Evidence.Missing Activity Evidence",
               "nativeQueryRef": "Activity evidence missing",
               "displayName": "Activity evidence missing"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
-                    }
-                  },
-                  "Property": "Current Endpoint Analytics Score"
-                }
-              },
-              "queryRef": "Device Inventory Evidence.Current Endpoint Analytics Score",
-              "nativeQueryRef": "Endpoint Analytics score",
-              "displayName": "Endpoint Analytics score"
             }
           ]
         }
@@ -351,6 +351,13 @@
                       "Value": "'#CCDCEC'"
                     }
                   }
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }

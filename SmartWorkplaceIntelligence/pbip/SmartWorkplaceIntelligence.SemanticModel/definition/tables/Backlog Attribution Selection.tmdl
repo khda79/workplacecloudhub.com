@@ -11,3 +11,4 @@ table 'Backlog Attribution Selection'
 	partition 'Backlog Attribution Selection' = m
 		mode: import
 		source = #table(type table [#"Mode" = text],{{"In scope"},{"Unassigned evidence"}})
+

@@ -324,5 +324,63 @@
       ]
     }
   },
-  "parentGroupName": "0a43c9c252d5cc187e10"
+  "parentGroupName": "0a43c9c252d5cc187e10",
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "8e6fbb5a990d5d054725",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Mailbox Migration Inventory"
+              }
+            },
+            "Property": "Report EXO Candidate"
+          }
+        },
+        "type": "Categorical",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "x",
+              "Entity": "Mailbox Migration Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "x"
+                          }
+                        },
+                        "Property": "Report EXO Candidate"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Candidate'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "howCreated": "User"
+      }
+    ]
+  }
 }

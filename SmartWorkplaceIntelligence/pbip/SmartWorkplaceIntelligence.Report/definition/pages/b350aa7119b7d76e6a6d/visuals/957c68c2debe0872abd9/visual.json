@@ -37,81 +37,6 @@
                       "Entity": "Collaboration Adoption Evidence"
                     }
                   },
-                  "Property": "Collaboration Service Objects"
-                }
-              },
-              "queryRef": "Collaboration Adoption Evidence.Collaboration Service Objects",
-              "nativeQueryRef": "Service Objects",
-              "displayName": "Service Resources"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Collaboration Adoption Evidence"
-                    }
-                  },
-                  "Property": "Collaboration Inactive Objects"
-                }
-              },
-              "queryRef": "Collaboration Adoption Evidence.Collaboration Inactive Objects",
-              "nativeQueryRef": "Inactive Objects",
-              "displayName": "Inactive Resources"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Collaboration Adoption Evidence"
-                    }
-                  },
-                  "Property": "Collaboration Orphaned Objects"
-                }
-              },
-              "queryRef": "Collaboration Adoption Evidence.Collaboration Orphaned Objects",
-              "nativeQueryRef": "Orphaned Objects",
-              "displayName": "Orphaned Resources"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Collaboration Adoption Evidence"
-                    }
-                  },
-                  "Property": "Service-weighted Activity Rate (%)"
-                }
-              },
-              "queryRef": "Collaboration Adoption Evidence.Service-weighted Activity Rate (%)",
-              "nativeQueryRef": "Service-weighted activity (30D)",
-              "displayName": "Service-weighted activity (30D)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Collaboration Adoption Evidence"
-                    }
-                  },
-                  "Property": "Active User-Service Observations 30D"
-                }
-              },
-              "queryRef": "Collaboration Adoption Evidence.Active User-Service Observations 30D",
-              "nativeQueryRef": "User-service observations (30D)",
-              "displayName": "User-service observations (30D)"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Collaboration Adoption Evidence"
-                    }
-                  },
                   "Property": "Stale Collaboration Sources"
                 }
               },
@@ -375,7 +300,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "7L"
+                  "Value": "2L"
                 }
               }
             },

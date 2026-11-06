@@ -23,10 +23,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 Autopatch Policy Success"
+                  "Property": "Enabled corporate PC · Windows 10 Autopatch Policy Success"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Windows 10 Autopatch Policy Success",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Autopatch Policy Success",
               "nativeQueryRef": "Anchor policy: Success",
               "displayName": "Anchor policy: Success"
             },
@@ -38,10 +38,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 Autopatch Policy In Progress"
+                  "Property": "Enabled corporate PC · Windows 10 Autopatch Policy In Progress"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Windows 10 Autopatch Policy In Progress",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Autopatch Policy In Progress",
               "nativeQueryRef": "Anchor policy: In progress",
               "displayName": "Anchor policy: In progress"
             },
@@ -53,12 +53,12 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 Autopatch Policy Errors"
+                  "Property": "Enabled corporate PC · Windows 10 Autopatch Policy Unobserved"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Windows 10 Autopatch Policy Errors",
-              "nativeQueryRef": "Anchor policy: Error",
-              "displayName": "Anchor policy: Error"
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Autopatch Policy Unobserved",
+              "nativeQueryRef": "Anchor policy: Not observed",
+              "displayName": "Anchor policy: Not observed"
             },
             {
               "field": {
@@ -68,12 +68,12 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 Autopatch Policy Unobserved"
+                  "Property": "Enabled corporate PC · Windows 10 Autopatch Policy Errors"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Windows 10 Autopatch Policy Unobserved",
-              "nativeQueryRef": "Anchor policy: Not observed",
-              "displayName": "Anchor policy: Not observed"
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Autopatch Policy Errors",
+              "nativeQueryRef": "Anchor policy: Error",
+              "displayName": "Anchor policy: Error"
             }
           ]
         }

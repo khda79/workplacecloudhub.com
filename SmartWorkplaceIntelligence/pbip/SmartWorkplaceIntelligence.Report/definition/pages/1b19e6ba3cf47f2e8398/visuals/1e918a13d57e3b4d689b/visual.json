@@ -12,6 +12,5 @@
   "visualGroup": {
     "displayName": "Inventory",
     "groupMode": "ScaleMode"
-  },
-  "isHidden": true
+  }
 }

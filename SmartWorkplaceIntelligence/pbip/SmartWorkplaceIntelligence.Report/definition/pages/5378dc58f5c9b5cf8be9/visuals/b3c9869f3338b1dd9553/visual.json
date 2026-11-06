@@ -28,7 +28,7 @@
               },
               "queryRef": "Application Inventory Evidence.Highly Fragmented Applications",
               "nativeQueryRef": "Highly fragmented applications",
-              "displayName": "Highly fragmented applications"
+              "displayName": "Highly fragmented apps (≥20 versions)"
             },
             {
               "field": {

@@ -267,3 +267,4 @@ table 'AD Computer Evidence'
 				    Readers[Finish](BusinessRows)
 
 	annotation PBI_ResultType = Exception
+

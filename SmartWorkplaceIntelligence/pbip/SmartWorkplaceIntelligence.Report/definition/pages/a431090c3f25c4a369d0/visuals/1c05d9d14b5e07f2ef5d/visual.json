@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "1c05d9d14b5e07f2ef5d",
   "position": {
-    "x": 964,
-    "y": 128,
+    "x": 731,
+    "y": 232,
     "z": 61000,
-    "height": 104,
-    "width": 147.33333333333334,
-    "tabOrder": 61082
+    "height": 96,
+    "width": 225,
+    "tabOrder": 61061
   },
   "visual": {
     "visualType": "cardVisual",
@@ -23,12 +23,12 @@
                       "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Equipment Compliance Rate (%)"
+                  "Property": "Scoped Intune Enrollment At Risk PCs"
                 }
               },
-              "queryRef": "Global Device Inventory.Equipment Compliance Rate (%)",
-              "nativeQueryRef": "Equipment Compliance Rate (%)",
-              "displayName": "PC compliance (%)"
+              "queryRef": "Global Device Inventory.Scoped Intune Enrollment At Risk PCs",
+              "nativeQueryRef": "Scoped Intune Enrollment At Risk PCs",
+              "displayName": "Intune enrollment risk"
             }
           ]
         }
@@ -48,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "25D"
                 }
               }
             },
@@ -56,95 +56,8 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Conditional": {
-                      "Cases": [
-                        {
-                          "Condition": {
-                            "Comparison": {
-                              "ComparisonKind": 0,
-                              "Left": {
-                                "Measure": {
-                                  "Expression": {
-                                    "SourceRef": {
-                                      "Entity": "Global Device Inventory"
-                                    }
-                                  },
-                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
-                                }
-                              },
-                              "Right": {
-                                "Literal": {
-                                  "Value": "1L"
-                                }
-                              }
-                            }
-                          },
-                          "Value": {
-                            "Literal": {
-                              "Value": "'#A85D00'"
-                            }
-                          }
-                        },
-                        {
-                          "Condition": {
-                            "Comparison": {
-                              "ComparisonKind": 0,
-                              "Left": {
-                                "Measure": {
-                                  "Expression": {
-                                    "SourceRef": {
-                                      "Entity": "Global Device Inventory"
-                                    }
-                                  },
-                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
-                                }
-                              },
-                              "Right": {
-                                "Literal": {
-                                  "Value": "2L"
-                                }
-                              }
-                            }
-                          },
-                          "Value": {
-                            "Literal": {
-                              "Value": "'#B42318'"
-                            }
-                          }
-                        },
-                        {
-                          "Condition": {
-                            "Comparison": {
-                              "ComparisonKind": 0,
-                              "Left": {
-                                "Measure": {
-                                  "Expression": {
-                                    "SourceRef": {
-                                      "Entity": "Global Device Inventory"
-                                    }
-                                  },
-                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
-                                }
-                              },
-                              "Right": {
-                                "Literal": {
-                                  "Value": "3L"
-                                }
-                              }
-                            }
-                          },
-                          "Value": {
-                            "Literal": {
-                              "Value": "'#64748B'"
-                            }
-                          }
-                        }
-                      ],
-                      "DefaultValue": {
-                        "Literal": {
-                          "Value": "'#005A9E'"
-                        }
-                      }
+                    "Literal": {
+                      "Value": "'#005A9E'"
                     }
                   }
                 }
@@ -183,7 +96,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },
@@ -255,95 +168,8 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "Conditional": {
-                      "Cases": [
-                        {
-                          "Condition": {
-                            "Comparison": {
-                              "ComparisonKind": 0,
-                              "Left": {
-                                "Measure": {
-                                  "Expression": {
-                                    "SourceRef": {
-                                      "Entity": "Global Device Inventory"
-                                    }
-                                  },
-                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
-                                }
-                              },
-                              "Right": {
-                                "Literal": {
-                                  "Value": "1L"
-                                }
-                              }
-                            }
-                          },
-                          "Value": {
-                            "Literal": {
-                              "Value": "'#A85D00'"
-                            }
-                          }
-                        },
-                        {
-                          "Condition": {
-                            "Comparison": {
-                              "ComparisonKind": 0,
-                              "Left": {
-                                "Measure": {
-                                  "Expression": {
-                                    "SourceRef": {
-                                      "Entity": "Global Device Inventory"
-                                    }
-                                  },
-                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
-                                }
-                              },
-                              "Right": {
-                                "Literal": {
-                                  "Value": "2L"
-                                }
-                              }
-                            }
-                          },
-                          "Value": {
-                            "Literal": {
-                              "Value": "'#B42318'"
-                            }
-                          }
-                        },
-                        {
-                          "Condition": {
-                            "Comparison": {
-                              "ComparisonKind": 0,
-                              "Left": {
-                                "Measure": {
-                                  "Expression": {
-                                    "SourceRef": {
-                                      "Entity": "Global Device Inventory"
-                                    }
-                                  },
-                                  "Property": "Scoped KPI Alert Level Device Compliance Rate"
-                                }
-                              },
-                              "Right": {
-                                "Literal": {
-                                  "Value": "3L"
-                                }
-                              }
-                            }
-                          },
-                          "Value": {
-                            "Literal": {
-                              "Value": "'#64748B'"
-                            }
-                          }
-                        }
-                      ],
-                      "DefaultValue": {
-                        "Literal": {
-                          "Value": "'#215E9E'"
-                        }
-                      }
+                    "Literal": {
+                      "Value": "'#215E9E'"
                     }
                   }
                 }
@@ -411,13 +237,6 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
-                }
-              }
-            },
-            "rowPadding": {
-              "expr": {
-                "Literal": {
-                  "Value": "8L"
                 }
               }
             },

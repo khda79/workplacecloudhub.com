@@ -193,3 +193,4 @@ table 'Group Activity Evidence'
 				 Typed = Table.TransformColumnTypes(Nulls, {{"TenantKey", type text}, {"Group ID", type text}, {"Group Name", type text}, {"Group Type", type text}, {"Teams State", type text}, {"Activity State", type text}, {"Days Since Last Activity", Int64.Type}, {"Last Activity Date", type datetime}, {"Owner State", type text}, {"Member Count", Int64.Type}, {"External Member Count", Int64.Type}, {"External Access State", type text}, {"Received Email Count", Int64.Type}, {"SharePoint Active File Count", Int64.Type}, {"Viva Engage Posted Message Count", Int64.Type}, {"Storage Used GB", type number}, {"Risk Priority", type text}, {"Risk Signal", type text}, {"Recommended Action", type text}, {"Snapshot Date", type datetime}, {"Evidence Status", type text}}, "en-US")
 				in
 				 Readers[Finish](Typed)
+

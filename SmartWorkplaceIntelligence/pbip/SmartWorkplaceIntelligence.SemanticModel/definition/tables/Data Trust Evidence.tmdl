@@ -313,3 +313,4 @@ table 'Data Trust Evidence'
 				        Added=Table.FromRecords(NewRows,Value.Type(BusinessRows),MissingField.Error),
 				        Combined=Table.Combine({BusinessRows,Added})
 				    in Readers[Finish](Combined)
+

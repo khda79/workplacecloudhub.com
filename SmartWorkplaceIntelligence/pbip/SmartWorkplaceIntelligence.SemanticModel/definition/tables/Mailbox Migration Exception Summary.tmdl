@@ -8,21 +8,13 @@ table 'Mailbox Migration Exception Summary'
 		lineageTag: 145d51da-82bc-4b78-892e-94d458762729
 
 	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
-	measure 'Mailbox Planning Inventory' =
-			VAR _selected = ISFILTERED('Daily Domain'[Domain]) || ISFILTERED('Daily Domain'[Domain Key])
-			VAR _domains = VALUES('Daily Domain'[Domain])
-			VAR _scope = FILTER(ALL('Mailbox Migration Exception Summary'), IF(_selected, 'Mailbox Migration Exception Summary'[Domain Key] <> "__all__" && 'Mailbox Migration Exception Summary'[Source Domain] IN _domains, 'Mailbox Migration Exception Summary'[Domain Key] = "__all__"))
-			RETURN IF([Mailbox Exception Source Status] <> "Qualified", BLANK(), COALESCE(SUMX(_scope, 'Mailbox Migration Exception Summary'[Inventory Count]), 0))
+	measure 'Mailbox Planning Inventory' = [Local Mailboxes With Database]
 		isHidden
 		displayFolder: Mailbox retention planning
 		lineageTag: 6a2e0eba-1caa-4d0a-a128-7606aa13baf2
 
 	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
-	measure 'Mailbox Planning Retained' =
-			VAR _selected = ISFILTERED('Daily Domain'[Domain]) || ISFILTERED('Daily Domain'[Domain Key])
-			VAR _domains = VALUES('Daily Domain'[Domain])
-			VAR _scope = FILTER(ALL('Mailbox Migration Exception Summary'), IF(_selected, 'Mailbox Migration Exception Summary'[Domain Key] <> "__all__" && 'Mailbox Migration Exception Summary'[Source Domain] IN _domains, 'Mailbox Migration Exception Summary'[Domain Key] = "__all__"))
-			RETURN IF([Mailbox Exception Source Status] <> "Qualified", BLANK(), COALESCE(SUMX(_scope, 'Mailbox Migration Exception Summary'[Retained Count]), 0))
+	measure 'Mailbox Planning Retained' = IF([Mailbox Exception Source Status]="Qualified",CALCULATE([Local Mailboxes With Database],KEEPFILTERS('Mailbox Migration Inventory'[Report EXO Candidate]="DONTMIGRATE")))
 		isHidden
 		displayFolder: Mailbox retention planning
 		lineageTag: fe986838-d572-46bd-9f27-73db3cdf6883
@@ -58,12 +50,12 @@ table 'Mailbox Migration Exception Summary'
 		lineageTag: 66afd8a8-3832-4564-8ffc-ccc202639a16
 
 	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
-	measure 'Mailbox Remaining Scope Text' = VAR _n = [Mailbox Planning Inventory] VAR _e = [Mailbox Planning Retained] RETURN IF([Mailbox Exception Source Status] <> "Qualified", "Not measured", IF([Mailbox Planning Review] > 0, "Pending review", IF(_e > _n, "Reconciliation error", FORMAT(_n - _e, "#,0"))))
+	measure 'Mailbox Remaining Scope Text' = VAR n=[To migrate to EXO provisional] RETURN IF(ISBLANK(n),"Not measured",FORMAT(n,"#,0") & IF([Mailbox Planning Review]>0," provisional",""))
 		displayFolder: Mailbox retention planning
 		lineageTag: 500a358b-497c-4cbe-b5fb-5955eac8ccad
 
 	/// Planning snapshot from a verified register and the same qualified detailed local inventory; independent of historical Period/Date. Domain is applied explicitly; unknown-domain reviews block all scopes.
-	measure 'Mailbox Planning Context' = IF([Mailbox Exception Source Status] <> "Qualified", "Planning snapshot | " & [Mailbox Exception Source Status] & " | Activate and prepare the reviewed exception register", "Planning snapshot: " & MAX('Mailbox Migration Exception Summary'[Snapshot Date]) & " | Local planning inventory N: " & FORMAT([Mailbox Planning Inventory], "#,0") & " | Documentation warnings: " & FORMAT([Mailbox Planning Documentation], "#,0") & " | Period and date range apply to history only")
+	measure 'Mailbox Planning Context' = "Current planning snapshot | On-prem mailboxes with database: " & FORMAT([Mailbox Planning Inventory],"#,0") & " | Retained: " & FORMAT([Mailbox Planning Retained],"#,0") & " | To migrate to EXO: " & FORMAT([To migrate to EXO provisional],"#,0") & " (provisional) | History uses collected objects"
 		displayFolder: Mailbox retention planning
 		lineageTag: f57ae5f6-ca24-4407-9638-084f6d1941b6
 
@@ -193,6 +185,7 @@ table 'Mailbox Migration Exception Summary'
 		summarizeBy: none
 		sourceColumn: Loaded Batch ID
 
+	/// Private planning update from operator workbook 8c3e246557c7dcd2f1bd88d600ee004006cc26e3c9087cfe8e10b4f5b5c34c64; inventory batch 20261103T070757019Z-f084240f. Decisions resolved using verified same-batch native sources. Embedded update applies only to this batch; later batches use the governed prepared exception files.
 	partition 'Mailbox Migration Exception Summary' = m
 		mode: import
 		source =
@@ -216,12 +209,14 @@ table 'Mailbox Migration Exception Summary'
 				    Present = List.Select(Manifest[Files], each List.Contains(Names, [File])),
 				    Declared = Record.HasFields(Record.FieldOrDefault(Manifest, "Provenance", []), "MailboxMigrationExceptions"),
 				    Columns = {"TenantKey", "OrganizationKey", "EnvironmentKey", "TenantId", "Domain Key", "Source Domain", "Source Status", "Snapshot Date", "Inventory Count", "Retained Count", "Review Count", "Global Review Count", "Remaining Count", "Documentation Warning Count", "Workbook SHA256", "Workbook Modified UTC", "Captured UTC", "Binding SHA256", "Source Rows"},
-				    Source = if List.Count(Present) = 0 and not Declared then #table(Columns, {})
+				    BatchSource = if List.Count(Present) = 0 and not Declared then #table(Columns, {})
 				        else if List.Count(Present) <> 2 or List.Count(List.Distinct(List.Transform(Present, each [File]))) <> 2 or not Declared then error "Incomplete mailbox migration exception batch; keep previous model"
 				        else Table.PromoteHeaders(Csv.Document(GetPreparedEvidenceFile("MailboxMigrationExceptionSummary.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]),
+				    Source = if Manifest[BatchId] = "20261103T070757019Z-f084240f" then Table.FromRows(Json.Document(Binary.Decompress(Binary.FromText("H4sIAIeO6moC/93W0WqDMBQG4HfxdlFOck4S9S0GuytFNMZN5qzYlr3+IrbWOIRe7GKEWs0vQeXjxOPhENkv257jYTzVEZuDO94ilUJrQh7bknhMKZZxpRqIgZckESQoC25aUZRdVxTe6PVadm3T2ukyAoSKOY8BI8Z1hoxzyRkhI84id4pnxKLUoBWkpNRG16YWDa/qNK0VgLUABKCMEcqiySDVprGp5VBRIytpkIyi9X3oDXiOWY460UJJkb0A5AC/ppDKQSeZRiK5TJkf6Mj+iObaf/an7/7Gs057ROB+TmbGmfZh0lQ2OY2DLZPeXn7HPRySjGgGmnSCLRzz4XFs4u7qEtN213HDQHVqv1jq52pHKGICFx43DJTHnj2PTdwtHjVtS/GoUHWa0ePYxF0dTN2CWvmIYIHex8Ej2eY9IulaOmbA7r0Ls2CbV3vxRDZxF4jhghNs51pDPIWC0v0fPX0aB0ozdF6ZbOJu28Kpapb3TrA4/hoanltSgj2+d/7h587xB8pFJc1iDQAA", BinaryEncoding.Base64), Compression.GZip)), Columns) else BatchSource,
 				    Checked = if Table.ColumnNames(Source) <> Columns then error "Mailbox migration exception schema mismatch" else if List.AnyTrue(List.Transform(Source[TenantKey], each _ <> PreparedExpectedTenantKey)) then error "Mailbox migration exception tenant mismatch" else Source,
 				    Typed = Table.TransformColumnTypes(Checked, {{"TenantKey", type text}, {"OrganizationKey", type text}, {"EnvironmentKey", type text}, {"TenantId", type text}, {"Domain Key", type text}, {"Source Domain", type text}, {"Source Status", type text}, {"Snapshot Date", type text}, {"Inventory Count", Int64.Type}, {"Retained Count", Int64.Type}, {"Review Count", Int64.Type}, {"Global Review Count", Int64.Type}, {"Remaining Count", Int64.Type}, {"Documentation Warning Count", Int64.Type}, {"Workbook SHA256", type text}, {"Workbook Modified UTC", type text}, {"Captured UTC", type text}, {"Binding SHA256", type text}, {"Source Rows", Int64.Type}}, "en-US")
 				in
 				    Typed)
 				in
 				    Readers[Finish](BusinessRows)
+

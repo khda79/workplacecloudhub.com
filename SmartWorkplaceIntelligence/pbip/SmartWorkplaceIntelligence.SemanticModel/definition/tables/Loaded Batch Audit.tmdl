@@ -181,3 +181,4 @@ table 'Loaded Batch Audit'
 				ROW("Table Name", "Device Readiness Gap Evidence", "Loaded Batch ID", MAXX('Device Readiness Gap Evidence', 'Device Readiness Gap Evidence'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Device Readiness Gap Evidence')),
 				ROW("Table Name", "Readiness Source Status", "Loaded Batch ID", MAXX('Readiness Source Status', 'Readiness Source Status'[Loaded Batch ID]), "Loaded Rows", COUNTROWS('Readiness Source Status'))
 				)
+

@@ -47,13 +47,10 @@
       "5527d2be1fac7d6813b8",
       "747a5baf1597e9afb2bb",
       "8084106fadc8fd97e46b",
-      "8131c2051c48a7d939a9",
       "c4ad8986f1f57bbfbf66",
       "c85c3d9ea355b7b483cf",
       "e1c1b599a1f821d08782",
-      "4166439ecff9514bf11d",
-      "c682aa86b4718d31214e",
-      "d4e6b808ff35c6c28076"
+      "c682aa86b4718d31214e"
     ],
     "suppressData": true,
     "suppressActiveSection": true
@@ -272,13 +269,6 @@
               }
             }
           },
-          "8131c2051c48a7d939a9": {
-            "singleVisual": {
-              "display": {
-                "mode": "hidden"
-              }
-            }
-          },
           "c4ad8986f1f57bbfbf66": {
             "singleVisual": {
               "display": {
@@ -300,21 +290,7 @@
               }
             }
           },
-          "4166439ecff9514bf11d": {
-            "singleVisual": {
-              "display": {
-                "mode": "hidden"
-              }
-            }
-          },
           "c682aa86b4718d31214e": {
-            "singleVisual": {
-              "display": {
-                "mode": "hidden"
-              }
-            }
-          },
-          "d4e6b808ff35c6c28076": {
             "singleVisual": {
               "display": {
                 "mode": "hidden"

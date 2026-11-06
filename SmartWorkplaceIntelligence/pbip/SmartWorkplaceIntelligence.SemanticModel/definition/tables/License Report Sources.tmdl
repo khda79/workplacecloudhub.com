@@ -76,3 +76,4 @@ table 'License Report Sources'
 					Result)
 				in
 				    Readers[Finish](BusinessRows)
+

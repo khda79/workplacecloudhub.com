@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "4b6833f20e9657584ce8",
   "position": {
-    "x": 1740.6666666666667,
-    "y": 128,
+    "x": 1197,
+    "y": 232,
     "z": 95000,
-    "height": 104,
-    "width": 147.33333333333334,
-    "tabOrder": 95000
+    "height": 96,
+    "width": 691,
+    "tabOrder": 61066
   },
   "visual": {
     "visualType": "cardVisual",
@@ -23,12 +23,42 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 remaining active <30D"
+                  "Property": "Enabled corporate PC · Windows 10 remaining active <30D"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Windows 10 remaining active <30D",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 remaining active <30D",
               "nativeQueryRef": "Windows 10 remaining · active <30D",
               "displayName": "Windows 10 remaining · active <30D"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Device Inventory Evidence"
+                    }
+                  },
+                  "Property": "Enabled corporate PC · Windows 10 Devices Not Capable"
+                }
+              },
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Windows 10 Devices Not Capable",
+              "nativeQueryRef": "Windows 10 not capable by Intune",
+              "displayName": "Windows 10 not capable by Intune"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Enabled corporate PC · Windows 10 Not Capable by Script"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Not Capable by Script",
+              "nativeQueryRef": "Windows 10 not capable by Script",
+              "displayName": "Windows 10 not capable by Script"
             }
           ]
         },
@@ -48,6 +78,21 @@
               "queryRef": "Global Device Inventory.Device qualification context",
               "nativeQueryRef": "Device qualification context",
               "displayName": "Device qualification context"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Windows 10 active · batch reference UTC"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Windows 10 active · batch reference UTC",
+              "nativeQueryRef": "Batch reference UTC",
+              "displayName": "Batch reference UTC"
             }
           ]
         }
@@ -67,7 +112,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "25D"
                 }
               }
             },
@@ -115,7 +160,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },
@@ -248,7 +293,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "1L"
+                  "Value": "3L"
                 }
               }
             },
@@ -484,6 +529,19 @@
               "expr": {
                 "Literal": {
                   "Value": "'Corporate: observed AD domain, otherwise Intune ownership. Unknown is not Disabled. Activity <30D uses qualified AD or Entra sign-in, not Intune sync.'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "visualTooltip": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

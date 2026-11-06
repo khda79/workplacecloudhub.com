@@ -12,5 +12,6 @@
   "visualGroup": {
     "displayName": "Manufacturers & OS",
     "groupMode": "ScaleMode"
-  }
+  },
+  "isHidden": true
 }

@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "2c0d5516d2924c8c44ac",
   "position": {
-    "x": 1280,
-    "y": 544,
-    "z": 5000,
-    "height": 88,
-    "width": 608,
-    "tabOrder": 5000
+    "x": 1552,
+    "y": 320,
+    "z": 11000,
+    "height": 128,
+    "width": 336,
+    "tabOrder": 11000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -23,12 +23,12 @@
                       "Entity": "Exchange Mailbox Reconciliation"
                     }
                   },
-                  "Property": "Exchange Scenario SE Required Label"
+                  "Property": "Exchange SE CAL planning label"
                 }
               },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Scenario SE Required Label",
-              "nativeQueryRef": "Total required SE licences | known minimum",
-              "displayName": "Total required SE licences | known minimum"
+              "queryRef": "Exchange Mailbox Reconciliation.Exchange SE CAL planning label",
+              "nativeQueryRef": "Exchange SE CALs required",
+              "displayName": "Exchange SE CALs required"
             }
           ]
         }
@@ -80,7 +80,7 @@
             "bold": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
+                  "Value": "false"
                 }
               }
             }
@@ -341,6 +341,22 @@
             }
           }
         }
+      ],
+      "spacing": [
+        {
+          "selector": {
+            "id": "default"
+          },
+          "properties": {
+            "verticalSpacing": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -350,7 +366,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Total required SE licences | known minimum; mailbox and licensing scope limitations are in the assumptions banner.'"
+                  "Value": "'Planning estimates. F3 requires frontline eligibility; higher suites can cover lower needs. E5 demand is not collected. SE is retained user scope, not final CAL count.'"
                 }
               }
             }
@@ -370,7 +386,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Exchange SE · CAL review'"
+                  "Value": "'Exchange SE · retained users'"
                 }
               }
             },

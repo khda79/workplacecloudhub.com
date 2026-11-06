@@ -1,0 +1,116 @@
+/// Latest historical script observation for Windows 10 records without an exploitable Intune result; unqualified name/model matches cannot contribute to KPIs.
+table 'Historical Windows Readiness'
+	lineageTag: 14b32115-8fdf-4420-a613-4b73b3a6a12d
+
+	column TenantKey
+		dataType: string
+		isHidden
+		lineageTag: c93ba965-c945-4389-b8f7-6ad3163d53bd
+		sourceColumn: TenantKey
+
+	column ObservationKey
+		dataType: string
+		isHidden
+		lineageTag: 3a3e9f39-5c1f-449c-b2a1-60dec2daf0b0
+		sourceColumn: ObservationKey
+
+	column 'Device Name'
+		dataType: string
+		lineageTag: 36aa8ae9-41a7-4686-ae8a-21dd0f41bad0
+		sourceColumn: Device Name
+
+	column 'Observation UTC'
+		dataType: string
+		lineageTag: 1c3ade9a-9b66-43cb-903c-bbe88bc85aa7
+		sourceColumn: Observation UTC
+
+	column 'Historical Result'
+		dataType: string
+		lineageTag: c5aec508-20b7-4520-bd2e-d6145bcddd52
+		sourceColumn: Historical Result
+
+	column 'Storage Check'
+		dataType: string
+		lineageTag: dd06e851-373d-40f6-8352-660cb96bd6e0
+		sourceColumn: Storage Check
+
+	column 'Memory Check'
+		dataType: string
+		lineageTag: 7f602c9b-f55a-4757-a8c1-641ce0062695
+		sourceColumn: Memory Check
+
+	column 'TPM Check'
+		dataType: string
+		lineageTag: c5bdcc91-765c-4b08-a91e-87c78e95914a
+		sourceColumn: TPM Check
+
+	column 'Processor Check'
+		dataType: string
+		lineageTag: 12f4d2c9-98c4-4721-b290-6244ae8f9b76
+		sourceColumn: Processor Check
+
+	column 'Secure Boot Check'
+		dataType: string
+		lineageTag: 9dfe4de9-33c2-4f14-9458-5dd2a169b2b1
+		sourceColumn: Secure Boot Check
+
+	column Manufacturer
+		dataType: string
+		lineageTag: 27029fe5-b050-4c5e-97e4-07a1dbb6cb78
+		sourceColumn: Manufacturer
+
+	column Model
+		dataType: string
+		lineageTag: a76c8f89-5a34-4974-8367-a7f170879307
+		sourceColumn: Model
+
+	column 'Source Files'
+		dataType: string
+		lineageTag: 11f87d61-2828-42d2-8656-42a8c9a1a78e
+		sourceColumn: Source Files
+
+	column 'Source SHA256'
+		dataType: string
+		isHidden
+		lineageTag: 566f59e0-d7cd-482e-8c04-ba848790e265
+		sourceColumn: Source SHA256
+
+	column 'Duplicate Count'
+		dataType: string
+		lineageTag: e7f003f1-ec83-4ed4-b886-57c148dbe4b7
+		sourceColumn: Duplicate Count
+
+	column 'Observation Status'
+		dataType: string
+		lineageTag: 6fbf77d5-906c-44ee-a1eb-4f2af9209cc4
+		sourceColumn: Observation Status
+
+	column 'Match Status'
+		dataType: string
+		lineageTag: 7ecbb503-5e1a-40c3-9dc0-334919f30063
+		sourceColumn: Match Status
+
+	column 'Candidate Device Source ID'
+		dataType: string
+		isHidden
+		lineageTag: c88f63b4-baf1-46e7-be93-0e9df3f1b4c9
+		sourceColumn: Candidate Device Source ID
+
+	column 'Loaded Batch ID'
+		dataType: string
+		isHidden
+		lineageTag: 9ed6f679-64bf-4715-82c0-11694a319935
+		sourceColumn: Loaded Batch ID
+
+	partition 'Historical Windows Readiness' = m
+		mode: import
+		source =
+				let
+				 Readers = CreatePreparedReaders(),
+				 Manifest = Readers[GetPreparedBatchManifest](),
+				 Entries = List.Select(Manifest[Files], each [File] = "HistoricalWindowsReadiness.csv"),
+				 Raw = if List.Count(Entries) = 0 then #table({"TenantKey","ObservationKey","Device Name","Observation UTC","Historical Result","Storage Check","Memory Check","TPM Check","Processor Check","Secure Boot Check","Manufacturer","Model","Source Files","Source SHA256","Duplicate Count","Observation Status","Match Status","Candidate Device Source ID"}, {}) else if List.Count(Entries) = 1 then Table.PromoteHeaders(Csv.Document(Readers[GetPreparedEvidenceFile]("HistoricalWindowsReadiness.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]), [PromoteAllScalars=true]) else error "Ambiguous historical readiness batch membership",
+				 Checked = Table.SelectColumns(Raw, {"TenantKey","ObservationKey","Device Name","Observation UTC","Historical Result","Storage Check","Memory Check","TPM Check","Processor Check","Secure Boot Check","Manufacturer","Model","Source Files","Source SHA256","Duplicate Count","Observation Status","Match Status","Candidate Device Source ID"}),
+				 Result = Readers[Finish](Checked)
+				in Result
+

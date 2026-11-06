@@ -28,8 +28,8 @@
               },
               "queryRef": "Windows Migration Evidence.Device Name",
               "nativeQueryRef": "Device Name",
-              "displayName": "Device Name",
-              "active": true
+              "active": true,
+              "displayName": "Device Name"
             },
             {
               "field": {
@@ -108,8 +108,8 @@
               },
               "queryRef": "Windows Migration Evidence.Inventory Source",
               "nativeQueryRef": "Inventory Source",
-              "displayName": "Inventory Source",
-              "active": true
+              "active": true,
+              "displayName": "Inventory Source"
             },
             {
               "field": {
@@ -124,8 +124,8 @@
               },
               "queryRef": "Windows Migration Evidence.AD Domain",
               "nativeQueryRef": "AD Domain",
-              "displayName": "AD Domain",
-              "active": true
+              "active": true,
+              "displayName": "AD Domain"
             },
             {
               "field": {
@@ -140,8 +140,8 @@
               },
               "queryRef": "Windows Migration Evidence.Country Name",
               "nativeQueryRef": "Primary user country",
-              "displayName": "Primary user country",
-              "active": true
+              "active": true,
+              "displayName": "Primary user country"
             },
             {
               "field": {
@@ -156,8 +156,8 @@
               },
               "queryRef": "Windows Migration Evidence.AD Domain Match Status",
               "nativeQueryRef": "AD Domain Match Status",
-              "displayName": "AD Domain Match Status",
-              "active": true
+              "active": true,
+              "displayName": "AD Domain Match Status"
             },
             {
               "field": {
@@ -172,8 +172,8 @@
               },
               "queryRef": "Windows Migration Evidence.Upgrade Eligibility",
               "nativeQueryRef": "Upgrade Eligibility",
-              "displayName": "Upgrade Eligibility",
-              "active": true
+              "active": true,
+              "displayName": "Upgrade Eligibility"
             },
             {
               "field": {
@@ -188,8 +188,8 @@
               },
               "queryRef": "Windows Migration Evidence.Migration Status",
               "nativeQueryRef": "Migration Status",
-              "displayName": "Migration Status",
-              "active": true
+              "active": true,
+              "displayName": "Migration Status"
             },
             {
               "field": {
@@ -204,8 +204,8 @@
               },
               "queryRef": "Windows Migration Evidence.OS Version",
               "nativeQueryRef": "OS Version",
-              "displayName": "OS Version",
-              "active": true
+              "active": true,
+              "displayName": "OS Version"
             },
             {
               "field": {
@@ -220,8 +220,8 @@
               },
               "queryRef": "Windows Migration Evidence.Eligibility OS Version",
               "nativeQueryRef": "Eligibility OS Version",
-              "displayName": "Eligibility OS Version",
-              "active": true
+              "active": true,
+              "displayName": "Eligibility OS Version"
             },
             {
               "field": {
@@ -236,8 +236,8 @@
               },
               "queryRef": "Windows Migration Evidence.Eligibility Observation Date",
               "nativeQueryRef": "Eligibility Observation Date",
-              "displayName": "Eligibility Observation Date",
-              "active": true
+              "active": true,
+              "displayName": "Eligibility Observation Date"
             },
             {
               "field": {
@@ -252,8 +252,8 @@
               },
               "queryRef": "Windows Migration Evidence.Eligibility Match Status",
               "nativeQueryRef": "Eligibility Match Status",
-              "displayName": "Eligibility Match Status",
-              "active": true
+              "active": true,
+              "displayName": "Eligibility Match Status"
             },
             {
               "field": {
@@ -284,8 +284,72 @@
               },
               "queryRef": "Windows Migration Evidence.Device Source ID",
               "nativeQueryRef": "Device Source ID",
-              "displayName": "Device Source ID",
-              "active": true
+              "active": true,
+              "displayName": "Device Source ID"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Historical Script Result"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Historical Script Result",
+              "nativeQueryRef": "Historical script result",
+              "active": false,
+              "displayName": "Historical script result"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Historical Script Observation Date"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Historical Script Observation Date",
+              "nativeQueryRef": "Historical script date (UTC)",
+              "active": false,
+              "displayName": "Historical script date (UTC)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Historical Script Match"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Historical Script Match",
+              "nativeQueryRef": "Historical script match",
+              "active": false,
+              "displayName": "Historical script match"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Windows Migration Evidence"
+                    }
+                  },
+                  "Property": "Historical Script Checks"
+                }
+              },
+              "queryRef": "Windows Migration Evidence.Historical Script Checks",
+              "nativeQueryRef": "Historical script checks",
+              "active": false,
+              "displayName": "Historical script checks"
             }
           ]
         }
@@ -428,9 +492,6 @@
       ],
       "columnFormatting": [
         {
-          "selector": {
-            "metadata": "Windows Migration Evidence.Device Name"
-          },
           "properties": {
             "alignment": {
               "expr": {
@@ -460,12 +521,47 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Windows Migration Evidence.Device Name"
           }
         },
         {
+          "properties": {
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "styleHeader": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleValues": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "styleTotal": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Primary User (report)"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -495,12 +591,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Primary User SAM (report)"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -530,12 +626,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Last Console User (report)"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -565,12 +661,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Last Console Logon UTC (report)"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -600,12 +696,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Inventory Source"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -635,12 +731,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.AD Domain"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -670,12 +766,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Country Name"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -705,12 +801,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.AD Domain Match Status"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -740,12 +836,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Upgrade Eligibility"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -775,12 +871,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Migration Status"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -810,12 +906,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.OS Version"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -845,12 +941,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Eligibility OS Version"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -880,12 +976,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Eligibility Observation Date"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -915,12 +1011,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Eligibility Match Status"
-          },
+          }
+        },
+        {
           "properties": {
             "alignment": {
               "expr": {
@@ -950,47 +1046,12 @@
                 }
               }
             }
-          }
-        },
-        {
+          },
           "selector": {
             "metadata": "Windows Migration Evidence.Console Logon Qualification (report)"
-          },
-          "properties": {
-            "alignment": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Center'"
-                }
-              }
-            },
-            "styleHeader": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleValues": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "styleTotal": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            }
           }
         },
         {
-          "selector": {
-            "metadata": "Windows Migration Evidence.Device Source ID"
-          },
           "properties": {
             "alignment": {
               "expr": {
@@ -1020,6 +1081,9 @@
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "Windows Migration Evidence.Device Source ID"
           }
         }
       ],

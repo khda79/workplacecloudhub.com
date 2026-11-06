@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "0d1d4824a4b6166e36e6",
   "position": {
-    "x": 1280,
-    "y": 416,
-    "z": 0,
-    "height": 112,
-    "width": 608,
-    "tabOrder": 0
+    "x": 32,
+    "y": 460,
+    "z": 11000,
+    "height": 128,
+    "width": 744,
+    "tabOrder": 11000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -23,12 +23,12 @@
                       "Entity": "Exchange Mailbox Reconciliation"
                     }
                   },
-                  "Property": "Exchange Scenario SE Covered"
+                  "Property": "EXO E5 Required"
                 }
               },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Scenario SE Covered",
-              "nativeQueryRef": "Observed equivalents (review)",
-              "displayName": "Observed equivalents (review)"
+              "queryRef": "Exchange Mailbox Reconciliation.EXO E5 Required",
+              "nativeQueryRef": "Required",
+              "displayName": "Required"
             },
             {
               "field": {
@@ -38,12 +38,42 @@
                       "Entity": "Exchange Mailbox Reconciliation"
                     }
                   },
-                  "Property": "Exchange Scenario SE Gap"
+                  "Property": "EXO E5 Assigned"
                 }
               },
-              "queryRef": "Exchange Mailbox Reconciliation.Exchange Scenario SE Gap",
-              "nativeQueryRef": "Without observed equivalence",
-              "displayName": "Without observed equivalence"
+              "queryRef": "Exchange Mailbox Reconciliation.EXO E5 Assigned",
+              "nativeQueryRef": "Assigned coverage",
+              "displayName": "Assigned coverage"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Exchange Mailbox Reconciliation"
+                    }
+                  },
+                  "Property": "EXO E5 To complete"
+                }
+              },
+              "queryRef": "Exchange Mailbox Reconciliation.EXO E5 To complete",
+              "nativeQueryRef": "To complete",
+              "displayName": "To complete"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Exchange Mailbox Reconciliation"
+                    }
+                  },
+                  "Property": "EXO E5 Available stock label"
+                }
+              },
+              "queryRef": "Exchange Mailbox Reconciliation.EXO E5 Available stock label",
+              "nativeQueryRef": "Available stock",
+              "displayName": "Available stock"
             }
           ]
         }
@@ -51,6 +81,50 @@
     },
     "objects": {
       "value": [
+        {
+          "selector": {
+            "metadata": "Exchange Mailbox Reconciliation.EXO E5 To complete"
+          },
+          "properties": {
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Exchange Mailbox Reconciliation"
+                        }
+                      },
+                      "Property": "EXO E5 To complete color"
+                    }
+                  }
+                }
+              }
+            },
+            "bold": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Exchange Mailbox Reconciliation.EXO E5 Available stock label"
+          },
+          "properties": {
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "16D"
+                }
+              }
+            }
+          }
+        },
         {
           "properties": {
             "show": {
@@ -251,7 +325,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "2L"
+                  "Value": "4L"
                 }
               }
             },
@@ -356,6 +430,22 @@
             }
           }
         }
+      ],
+      "spacing": [
+        {
+          "selector": {
+            "id": "default"
+          },
+          "properties": {
+            "verticalSpacing": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            }
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -365,7 +455,7 @@
             "altText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Exchange SE | known retained users; mailbox and licensing scope limitations are in the assumptions banner.'"
+                  "Value": "'To complete: remaining assignments before stock. Red: stock insufficient. Green: stock sufficient. Grey: unknown demand or stock. Tenant stock is not reserved.'"
                 }
               }
             }
@@ -385,7 +475,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Exchange SE · retained users'"
+                  "Value": "'Microsoft 365 E5 · EXO review'"
                 }
               }
             },

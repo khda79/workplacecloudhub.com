@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "afc6f2aa136acca5dfe5",
   "position": {
-    "x": 1576,
-    "y": 347.35632183908046,
-    "z": 7000,
-    "height": 62.52873563218391,
-    "width": 304,
+    "x": 964,
+    "y": 528.13793103448279,
+    "z": 9002,
+    "height": 55.172413793103445,
+    "width": 455,
     "tabOrder": 7000
   },
   "visual": {
@@ -23,11 +23,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Devices Low on Disk"
+                  "Property": "Enabled corporate PC · Devices Low on Disk"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Devices Low on Disk",
-              "nativeQueryRef": "Devices Low on Disk"
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Devices Low on Disk",
+              "nativeQueryRef": "Devices Low on Disk",
+              "displayName": "Devices Low on Disk"
             }
           ]
         }

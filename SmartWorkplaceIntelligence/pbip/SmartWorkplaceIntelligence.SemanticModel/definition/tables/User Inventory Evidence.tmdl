@@ -4,7 +4,7 @@ table 'User Inventory Evidence'
 
 	/// Original enabled-workforce population retained. Intersects the new global-account and full-license selections through native source IDs.
 	measure 'Enabled Workforce Accounts' =
-
+			
 			VAR _countries=VALUES('Country Selection'[Country])
 			VAR _domains=VALUES('Daily Domain'[Domain])
 			VAR _cf=ISFILTERED('Country Selection')
@@ -1061,3 +1061,4 @@ table 'User Inventory Evidence'
 				    Table.AddColumn(Readers[Finish](BusinessRows), "TenantKey", each PreparedExpectedTenantKey, type text)
 
 	annotation PBI_ResultType = Exception
+

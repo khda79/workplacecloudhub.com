@@ -345,3 +345,4 @@ table 'Intune Configuration Device Evidence'
 				    WithDeviceKey)
 				in
 				    Readers[Finish](BusinessRows)
+

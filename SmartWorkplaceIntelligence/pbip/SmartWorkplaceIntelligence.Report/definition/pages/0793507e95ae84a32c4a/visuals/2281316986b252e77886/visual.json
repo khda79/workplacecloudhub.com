@@ -42,11 +42,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Managed Devices"
+                  "Property": "Enabled corporate PC · Managed inventory details"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Managed Devices",
-              "nativeQueryRef": "Managed Devices"
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Managed inventory details",
+              "nativeQueryRef": "Managed Devices",
+              "displayName": "Managed inventory details"
             }
           ]
         }
@@ -61,7 +62,7 @@
                     "Entity": "Device Inventory Evidence"
                   }
                 },
-                "Property": "Managed Devices"
+                "Property": "Enabled corporate PC · Managed inventory details"
               }
             },
             "direction": "Descending"

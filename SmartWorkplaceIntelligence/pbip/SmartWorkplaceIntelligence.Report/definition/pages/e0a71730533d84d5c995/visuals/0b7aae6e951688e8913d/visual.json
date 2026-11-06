@@ -134,6 +134,13 @@
                   "Value": "0L"
                 }
               }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
             }
           },
           "selector": {

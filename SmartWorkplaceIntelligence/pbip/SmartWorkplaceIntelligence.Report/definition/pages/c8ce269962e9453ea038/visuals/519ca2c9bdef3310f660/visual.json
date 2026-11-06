@@ -3,7 +3,7 @@
   "name": "519ca2c9bdef3310f660",
   "position": {
     "x": 960,
-    "y": 320,
+    "y": 424,
     "z": 70154,
     "height": 680,
     "width": 928,
@@ -42,11 +42,91 @@
                       "Entity": "Global Device Inventory"
                     }
                   },
+                  "Property": "PCs Windows 10"
+                }
+              },
+              "queryRef": "Global Device Inventory.PCs Windows 10",
+              "nativeQueryRef": "PCs Windows 10",
+              "displayName": "Windows 10"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "PCs Windows 11"
+                }
+              },
+              "queryRef": "Global Device Inventory.PCs Windows 11",
+              "nativeQueryRef": "PCs Windows 11",
+              "displayName": "Windows 11"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "PCs Windows Legacy"
+                }
+              },
+              "queryRef": "Global Device Inventory.PCs Windows Legacy",
+              "nativeQueryRef": "PCs Windows Legacy",
+              "displayName": "Windows Legacy"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "PCs macOS"
+                }
+              },
+              "queryRef": "Global Device Inventory.PCs macOS",
+              "nativeQueryRef": "PCs macOS",
+              "displayName": "macOS"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
+                  "Property": "PCs Windows version unknown"
+                }
+              },
+              "queryRef": "Global Device Inventory.PCs Windows version unknown",
+              "nativeQueryRef": "PCs Windows version unknown",
+              "displayName": "Windows unknown"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Global Device Inventory"
+                    }
+                  },
                   "Property": "Global Device Count"
                 }
               },
               "queryRef": "Global Device Inventory.Global Device Count",
-              "nativeQueryRef": "Global Device Count"
+              "nativeQueryRef": "Global Device Count",
+              "displayName": "Total PCs"
             }
           ]
         }
@@ -70,23 +150,6 @@
       }
     },
     "objects": {
-      "dataPoint": [
-        {
-          "properties": {
-            "defaultColor": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#0078D4'"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      ],
       "categoryAxis": [
         {
           "properties": {
@@ -204,6 +267,40 @@
             }
           }
         }
+      ],
+      "legend": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "position": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Top'"
+                }
+              }
+            },
+            "showTitle": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
+                }
+              }
+            }
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -233,7 +330,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'PC equipment by country'"
+                  "Value": "'Enabled corporate PCs by country and OS'"
                 }
               }
             },
@@ -412,6 +509,175 @@
                       "Value": "1L"
                     }
                   }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "PCEnabledChartState",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Global Device Inventory"
+              }
+            },
+            "Property": "Enabled state (report)"
+          }
+        },
+        "type": "Categorical",
+        "howCreated": "User",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "d",
+              "Entity": "Global Device Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "d"
+                          }
+                        },
+                        "Property": "Enabled state (report)"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Enabled'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "PCEnabledChartOS",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Global Device Inventory"
+              }
+            },
+            "Property": "OS Family"
+          }
+        },
+        "type": "Categorical",
+        "howCreated": "User",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "d",
+              "Entity": "Global Device Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "d"
+                          }
+                        },
+                        "Property": "OS Family"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Windows'"
+                        }
+                      }
+                    ],
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'macOS'"
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "CorporatePC_519ca2c9bdef3310f660",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Global Device Inventory"
+              }
+            },
+            "Property": "Ownership (report)"
+          }
+        },
+        "type": "Categorical",
+        "howCreated": "User",
+        "filter": {
+          "Version": 2,
+          "From": [
+            {
+              "Name": "d",
+              "Entity": "Global Device Inventory",
+              "Type": 0
+            }
+          ],
+          "Where": [
+            {
+              "Condition": {
+                "In": {
+                  "Expressions": [
+                    {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Source": "d"
+                          }
+                        },
+                        "Property": "Ownership (report)"
+                      }
+                    }
+                  ],
+                  "Values": [
+                    [
+                      {
+                        "Literal": {
+                          "Value": "'Corporate'"
+                        }
+                      }
+                    ]
+                  ]
                 }
               }
             }

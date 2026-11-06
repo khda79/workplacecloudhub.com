@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "65cb36cb6da28f834fd7",
   "position": {
-    "x": 641.33333333333337,
-    "y": 354.67105263157896,
+    "x": 32,
+    "y": 424,
     "z": 2000,
-    "height": 68.223684210526315,
-    "width": 298.66666666666669,
+    "height": 170,
+    "width": 420,
     "tabOrder": 4000
   },
   "visual": {
@@ -20,14 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Device Inventory Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Noncompliant Devices"
+                  "Property": "Noncompliant enabled corporate PCs"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Noncompliant Devices",
-              "nativeQueryRef": "Noncompliant Devices"
+              "queryRef": "Global Device Inventory.Noncompliant enabled corporate PCs",
+              "nativeQueryRef": "Noncompliant Devices",
+              "displayName": "Noncompliant enabled PCs"
             }
           ]
         },

@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "776e034b507e60eb21b3",
   "position": {
-    "x": 32,
+    "x": 336,
     "y": 320,
     "z": 1000,
-    "height": 113.13691507798961,
-    "width": 1856,
+    "height": 104,
+    "width": 1552,
     "tabOrder": 1000
   },
   "visual": {
@@ -23,10 +23,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 Disk Review"
+                  "Property": "Enabled corporate PC · Windows 10 Disk Review"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Windows 10 Disk Review",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Disk Review",
               "nativeQueryRef": "Disk below 20 GB · planning review",
               "displayName": "Disk below 20 GB · planning review"
             },
@@ -38,25 +38,10 @@
                       "Entity": "Windows Migration Evidence"
                     }
                   },
-                  "Property": "Windows 10 Legacy Build Review"
+                  "Property": "Enabled corporate PC · Windows 10 Deployment Errors"
                 }
               },
-              "queryRef": "Windows Migration Evidence.Windows 10 Legacy Build Review",
-              "nativeQueryRef": "Legacy build · update-path review",
-              "displayName": "Legacy build · update-path review"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Windows Migration Evidence"
-                    }
-                  },
-                  "Property": "Windows 10 Deployment Errors"
-                }
-              },
-              "queryRef": "Windows Migration Evidence.Windows 10 Deployment Errors",
+              "queryRef": "Windows Migration Evidence.Enabled corporate PC · Windows 10 Deployment Errors",
               "nativeQueryRef": "Observed update errors",
               "displayName": "Observed update errors"
             }
@@ -259,7 +244,7 @@
             "columnCount": {
               "expr": {
                 "Literal": {
-                  "Value": "3L"
+                  "Value": "2L"
                 }
               }
             },

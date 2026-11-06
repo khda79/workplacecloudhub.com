@@ -50,6 +50,21 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
+                      "Entity": "Daily Directory Trends"
+                    }
+                  },
+                  "Property": "Persistent Domain Absence Events"
+                }
+              },
+              "queryRef": "Daily Directory Trends.Persistent Domain Absence Events",
+              "nativeQueryRef": "Persistent domain absence events",
+              "displayName": "Persistent domain absence events"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
                       "Entity": "Data Trust Evidence"
                     }
                   },
@@ -68,27 +83,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "AD-to-Intune Unmatched Devices"
+                  "Property": "Enabled corporate PC · AD-to-Intune Unmatched Devices"
                 }
               },
-              "queryRef": "Device Inventory Evidence.AD-to-Intune Unmatched Devices",
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · AD-to-Intune Unmatched Devices",
               "nativeQueryRef": "AD-to-Intune Unmatched Devices",
               "displayName": "AD-to-Intune Unmatched Devices"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Daily Directory Trends"
-                    }
-                  },
-                  "Property": "Persistent Domain Absence Events"
-                }
-              },
-              "queryRef": "Daily Directory Trends.Persistent Domain Absence Events",
-              "nativeQueryRef": "Persistent domain absence events",
-              "displayName": "Persistent domain absence events"
             }
           ]
         }
@@ -276,6 +276,27 @@
               "expr": {
                 "Literal": {
                   "Value": "0D"
+                }
+              }
+            },
+            "rowCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "columnCount": {
+              "expr": {
+                "Literal": {
+                  "Value": "5L"
+                }
+              }
+            },
+            "autoGrid": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
                 }
               }
             }

@@ -299,7 +299,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Intune Windows 10 / Windows 11 - 90 days - recorded weekly stock'"
+                  "Value": "'Windows 10 / 11 · global Intune history (90 days)'"
                 }
               }
             },

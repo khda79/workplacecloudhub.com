@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "f592315c8183624953bd",
   "position": {
-    "x": 1274.6666666666667,
-    "y": 128,
+    "x": 498,
+    "y": 232,
     "z": 61000,
-    "height": 104,
-    "width": 147.33333333333334,
-    "tabOrder": 61063
+    "height": 96,
+    "width": 225,
+    "tabOrder": 61064
   },
   "visual": {
     "visualType": "cardVisual",
@@ -20,15 +20,15 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Security Control Evidence"
+                      "Entity": "Global Device Inventory"
                     }
                   },
-                  "Property": "Secure Boot Healthy (%)"
+                  "Property": "Enabled corporate Windows Secure Boot (%)"
                 }
               },
-              "queryRef": "Security Control Evidence.Secure Boot Healthy (%)",
+              "queryRef": "Global Device Inventory.Enabled corporate Windows Secure Boot (%)",
               "nativeQueryRef": "Secure Boot Healthy (%)",
-              "displayName": "Secure Boot (Windows %)"
+              "displayName": "PC Secure Boot observed (%)"
             }
           ]
         }
@@ -48,7 +48,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "26D"
+                  "Value": "25D"
                 }
               }
             },
@@ -183,7 +183,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "11D"
+                  "Value": "12D"
                 }
               }
             },

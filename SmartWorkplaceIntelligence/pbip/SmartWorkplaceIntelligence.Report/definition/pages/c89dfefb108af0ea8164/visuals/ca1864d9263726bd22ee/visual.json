@@ -68,12 +68,12 @@
                       "Entity": "SharePoint Tenant Capacity"
                     }
                   },
-                  "Property": "SPO Tenant Utilization (%)"
+                  "Property": "SPO Tenant Capacity State"
                 }
               },
-              "queryRef": "SharePoint Tenant Capacity.SPO Tenant Utilization (%)",
-              "nativeQueryRef": "Tenant utilization",
-              "displayName": "Tenant utilization"
+              "queryRef": "SharePoint Tenant Capacity.SPO Tenant Capacity State",
+              "nativeQueryRef": "Capacity qualification",
+              "displayName": "Capacity qualification"
             },
             {
               "field": {
@@ -83,12 +83,12 @@
                       "Entity": "SharePoint Tenant Capacity"
                     }
                   },
-                  "Property": "SPO Tenant Capacity State"
+                  "Property": "SPO Tenant Utilization (%)"
                 }
               },
-              "queryRef": "SharePoint Tenant Capacity.SPO Tenant Capacity State",
-              "nativeQueryRef": "Capacity qualification",
-              "displayName": "Capacity qualification"
+              "queryRef": "SharePoint Tenant Capacity.SPO Tenant Utilization (%)",
+              "nativeQueryRef": "Tenant utilization",
+              "displayName": "Tenant utilization"
             }
           ]
         }

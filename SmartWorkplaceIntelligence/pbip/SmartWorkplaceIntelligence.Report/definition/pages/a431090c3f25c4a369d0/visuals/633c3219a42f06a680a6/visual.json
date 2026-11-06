@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "633c3219a42f06a680a6",
   "position": {
-    "x": 1440,
-    "y": 320,
+    "x": 1192,
+    "y": 424,
     "z": 5000,
-    "height": 170,
-    "width": 448,
+    "height": 230,
+    "width": 696,
     "tabOrder": 7000
   },
   "visual": {
@@ -42,11 +42,12 @@
                       "Entity": "Device Inventory Evidence"
                     }
                   },
-                  "Property": "Managed Devices"
+                  "Property": "Enabled corporate PC · Managed inventory details"
                 }
               },
-              "queryRef": "Device Inventory Evidence.Managed Devices",
-              "nativeQueryRef": "# Devices"
+              "queryRef": "Device Inventory Evidence.Enabled corporate PC · Managed inventory details",
+              "nativeQueryRef": "# Devices",
+              "displayName": "Managed inventory details"
             }
           ]
         }
@@ -255,7 +256,7 @@
             }
           },
           "selector": {
-            "metadata": "Device Inventory Evidence.Managed Devices"
+            "metadata": "Device Inventory Evidence.Enabled corporate PC · Managed inventory details"
           }
         },
         {

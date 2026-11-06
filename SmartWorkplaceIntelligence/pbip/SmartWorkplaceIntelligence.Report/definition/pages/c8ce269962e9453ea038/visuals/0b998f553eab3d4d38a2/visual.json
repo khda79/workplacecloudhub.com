@@ -3,9 +3,9 @@
   "name": "0b998f553eab3d4d38a2",
   "position": {
     "x": 32,
-    "y": 538.85057471264372,
+    "y": 601.05882352941171,
     "z": 15000,
-    "height": 461.14942528735634,
+    "height": 502.94117647058823,
     "width": 1856,
     "tabOrder": 15000
   },
@@ -32,38 +32,6 @@
             }
           ]
         },
-        "Tooltips": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Executive KPI Trends"
-                    }
-                  },
-                  "Property": "# Devices Monthly Delta"
-                }
-              },
-              "queryRef": "Executive KPI Trends.# Devices Monthly Delta",
-              "nativeQueryRef": "# Devices Monthly Delta"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Executive KPI Trends"
-                    }
-                  },
-                  "Property": "Executive Trend Evidence Status"
-                }
-              },
-              "queryRef": "Executive KPI Trends.Executive Trend Evidence Status",
-              "nativeQueryRef": "Executive Trend Evidence Status"
-            }
-          ]
-        },
         "Y": {
           "projections": [
             {
@@ -71,14 +39,45 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Executive KPI Trends"
+                      "Entity": "Daily Directory Trends"
                     }
                   },
-                  "Property": "# Devices Trend"
+                  "Property": "AD devices trend last 90 days"
                 }
               },
-              "queryRef": "Executive KPI Trends.# Devices Trend",
-              "nativeQueryRef": "# Devices Trend"
+              "queryRef": "Daily Directory Trends.AD devices trend last 90 days",
+              "nativeQueryRef": "AD devices trend last 90 days",
+              "displayName": "AD devices"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Directory Trends"
+                    }
+                  },
+                  "Property": "Windows 10 AD trend last 90 days"
+                }
+              },
+              "queryRef": "Daily Directory Trends.Windows 10 AD trend last 90 days",
+              "nativeQueryRef": "Windows 10 AD trend last 90 days",
+              "displayName": "Windows 10"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Daily Directory Trends"
+                    }
+                  },
+                  "Property": "Windows 11 AD trend last 90 days"
+                }
+              },
+              "queryRef": "Daily Directory Trends.Windows 11 AD trend last 90 days",
+              "nativeQueryRef": "Windows 11 AD trend last 90 days",
+              "displayName": "Windows 11"
             }
           ]
         }
@@ -215,7 +214,28 @@
             "show": {
               "expr": {
                 "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "position": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Top'"
+                }
+              }
+            },
+            "showTitle": {
+              "expr": {
+                "Literal": {
                   "Value": "false"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "10D"
                 }
               }
             }
@@ -224,13 +244,52 @@
       ],
       "dataPoint": [
         {
+          "selector": {
+            "metadata": "Daily Directory Trends.AD devices trend last 90 days"
+          },
           "properties": {
-            "defaultColor": {
+            "fill": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#005A9E'"
+                      "Value": "'#1F4E79'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Daily Directory Trends.Windows 10 AD trend last 90 days"
+          },
+          "properties": {
+            "fill": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#E49B27'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "selector": {
+            "metadata": "Daily Directory Trends.Windows 11 AD trend last 90 days"
+          },
+          "properties": {
+            "fill": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#0B8A83'"
                     }
                   }
                 }
@@ -300,7 +359,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Device count (AD) · trend - last 90 days'"
+                  "Value": "'AD device counts by Windows version · last 90 observed days'"
                 }
               }
             },
@@ -345,7 +404,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Observed snapshots · 2026-07-12 to 2026-10-09'"
+                  "Value": "'Complete AD snapshots; missing observations remain blank'"
                 }
               }
             },
@@ -509,62 +568,5 @@
     },
     "drillFilterOtherVisuals": true
   },
-  "parentGroupName": "020a68837ab1e4142264",
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "Filtercbfbcbaccdd9691ada5621e3",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Date"
-              }
-            },
-            "Property": "Date"
-          }
-        },
-        "type": "Advanced",
-        "filter": {
-          "Version": 2,
-          "From": [
-            {
-              "Name": "s",
-              "Entity": "Date",
-              "Type": 0
-            }
-          ],
-          "Where": [
-            {
-              "Condition": {
-                "Between": {
-                  "Expression": {
-                    "Column": {
-                      "Expression": {
-                        "SourceRef": {
-                          "Source": "s"
-                        }
-                      },
-                      "Property": "Date"
-                    }
-                  },
-                  "LowerBound": {
-                    "Literal": {
-                      "Value": "datetime'2026-07-12T00:00:00'"
-                    }
-                  },
-                  "UpperBound": {
-                    "Literal": {
-                      "Value": "datetime'2026-10-09T23:59:59'"
-                    }
-                  }
-                }
-              }
-            }
-          ]
-        },
-        "howCreated": "User"
-      }
-    ]
-  }
+  "parentGroupName": "020a68837ab1e4142264"
 }

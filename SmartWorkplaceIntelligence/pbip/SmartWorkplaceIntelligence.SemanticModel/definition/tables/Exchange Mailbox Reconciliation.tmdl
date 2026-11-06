@@ -872,9 +872,9 @@ table 'Exchange Mailbox Reconciliation'
 		displayFolder: Migration licensing scenario
 		lineageTag: 04f0da5d-bc3b-4202-b119-daf3a2e81c31
 
-	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
+	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints. Current qualified mailboxes with database; canonical Country and AD Domain filters.
 	measure 'Exchange Population Total' =
-			VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			CALCULATE((VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
 			    "Mailbox",'Exchange Mailbox Reconciliation'[Mailbox GUID],
 			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
 			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
@@ -898,14 +898,14 @@ table 'Exchange Mailbox Reconciliation'
 			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
 			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
 			    RETURN ROW("Population",SWITCH(TRUE(),_retained,"Register retained",_pending,"Register review","Potential before service review"))))
-			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,TRUE())),0))
+			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,TRUE())),0))),KEEPFILTERS('Exchange Mailbox Reconciliation'[Report Has Database]="Yes"))
 		formatString: #,0
 		displayFolder: Migration mailbox populations
 		lineageTag: db3d924f-c0b7-41b3-8bcf-1f57bfda543c
 
-	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
+	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints. Current qualified mailboxes with database; canonical Country and AD Domain filters.
 	measure 'Exchange Population Register Retained' =
-			VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			CALCULATE((VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
 			    "Mailbox",'Exchange Mailbox Reconciliation'[Mailbox GUID],
 			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
 			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
@@ -929,14 +929,14 @@ table 'Exchange Mailbox Reconciliation'
 			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
 			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
 			    RETURN ROW("Population",SWITCH(TRUE(),_retained,"Register retained",_pending,"Register review","Potential before service review"))))
-			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Register retained")),0))
+			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Register retained")),0))),KEEPFILTERS('Exchange Mailbox Reconciliation'[Report Has Database]="Yes"))
 		formatString: #,0
 		displayFolder: Migration mailbox populations
 		lineageTag: c0689a8e-3b33-4884-aa97-c2133590646d
 
-	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
+	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints. Current qualified mailboxes with database; canonical Country and AD Domain filters.
 	measure 'Exchange Population Register Review' =
-			VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			CALCULATE((VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
 			    "Mailbox",'Exchange Mailbox Reconciliation'[Mailbox GUID],
 			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
 			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
@@ -960,14 +960,14 @@ table 'Exchange Mailbox Reconciliation'
 			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
 			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
 			    RETURN ROW("Population",SWITCH(TRUE(),_retained,"Register retained",_pending,"Register review","Potential before service review"))))
-			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Register review")),0))
+			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Register review")),0))),KEEPFILTERS('Exchange Mailbox Reconciliation'[Report Has Database]="Yes"))
 		formatString: #,0
 		displayFolder: Migration mailbox populations
 		lineageTag: d6e0e437-04e2-4282-8111-280b334ffa3a
 
-	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
+	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints. Current qualified mailboxes with database; canonical Country and AD Domain filters.
 	measure 'Exchange Population Potential Before Service Review' =
-			VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
+			CALCULATE((VAR _mailboxes=(VAR _scope=SELECTCOLUMNS('Exchange Mailbox Reconciliation',
 			    "Mailbox",'Exchange Mailbox Reconciliation'[Mailbox GUID],
 			    "Batch",'Exchange Mailbox Reconciliation'[Loaded Batch ID],
 			    "Object",LOWER(TRIM('Exchange Mailbox Reconciliation'[Object GUID])),
@@ -991,7 +991,7 @@ table 'Exchange Mailbox Reconciliation'
 			            ((_object<>"" && ([Identity]="local_mailboxes|" & _object || [Candidate]="local_mailboxes|" & _object)) ||
 			             (_address<>"" && [ExceptionAddress]=_address))))>0,1,0))>0
 			    RETURN ROW("Population",SWITCH(TRUE(),_retained,"Register retained",_pending,"Register review","Potential before service review"))))
-			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Potential before service review")),0))
+			RETURN IF(COUNTROWS(_mailboxes)>0,COALESCE(COUNTROWS(FILTER(_mailboxes,[Population]="Potential before service review")),0))),KEEPFILTERS('Exchange Mailbox Reconciliation'[Report Has Database]="Yes"))
 		formatString: #,0
 		displayFolder: Migration mailbox populations
 		lineageTag: aa9edc53-1973-4924-b4dc-af23bc6e6139
@@ -1003,9 +1003,7 @@ table 'Exchange Mailbox Reconciliation'
 		lineageTag: cbd9414c-3366-4a18-90ce-24158e0e1663
 
 	/// Upper bound for the currently unquarantined mailbox pool, before service-account exclusion and technical checks. Excludes confirmed retained mailboxes and pending exact native-ID/SMTP hints, deduplicated. Not an EXO licence requirement.
-	measure 'Exchange Population Potential Label' =
-			VAR _n=[Exchange Population Potential Before Service Review]
-			RETURN IF(ISBLANK(_n),"Unknown", "At most " & FORMAT(_n,"#,0"))
+	measure 'Exchange Population Potential Label' = VAR n=[To migrate to EXO provisional] RETURN IF(ISBLANK(n),"Unknown",FORMAT(n,"#,0") & " provisional")
 		formatString: @
 		displayFolder: Migration mailbox populations
 		lineageTag: fb84b72b-7c20-40e8-8556-60b7b7cfd227
@@ -1019,10 +1017,262 @@ table 'Exchange Mailbox Reconciliation'
 		lineageTag: 92119002-8924-4295-8882-419de61c71a4
 
 	/// Distinct same-batch native mailbox GUIDs. Mailbox counts are not licence quantities. Confirmed register retention takes precedence over duplicate pending hints.
-	measure 'Exchange Population Note' = "INCOMPLETE SERVICE SCOPE: classification is not captured; Generic is not Service. Potential EXO excludes confirmed retention and " & FORMAT([Exchange Population Register Review],"0") & " other mailboxes with pending register hints; upper bound before service/technical review, not licence demand. SE = known minimum user scope; service accounts and other accessors uncounted. ESTIMATE: F3 <=2 GB, no archive/hold/delegation, frontline eligibility assumed; E3 for other known user cases <=100 GB. Assigned suites deducted; free tenant stock shared, assumed allocatable, not reserved. " & FORMAT([Exchange Scenario Register Review Rows],"0") & " register rows to reconcile; " & FORMAT([Exchange Scenario Review People],"0") & " unpriced people; " & FORMAT([Exchange Scenario Plan Remediation],"0") & " plan repairs, not purchases."
+	measure 'Exchange Population Note' = "Current mailbox scope requires a database. Objects without a database remain in Mailbox investigation. EXO candidates exclude matched retained exceptions; " & FORMAT([Mailbox Planning Review],"#,0") & " exception register rows still require review. Mailbox populations are not licence quantities. F3/E3 and Exchange SE CAL figures are planning estimates; stock is tenant-wide and not reserved."
 		formatString: @
 		displayFolder: Migration mailbox populations
 		lineageTag: 773384c0-e245-4dfe-98d3-07996db9fe14
+
+	/// Planning estimate using existing qualified identity, feature and assignment scenario, restricted to on-premises mailboxes with an observed database and current inventory filters. F3 frontline eligibility remains an assumption. Assigned coverage includes higher suites; plan repair is a separate action. To complete is before available stock, not purchases.
+	measure 'EXO F3 Required' =
+			VAR _mailboxes=SELECTCOLUMNS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report Has Database]="Yes"),"Guid",'Mailbox Migration Inventory'[Mailbox GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN CALCULATE([Exchange Scenario F3 Need],KEEPFILTERS(TREATAS(_mailboxes,'Exchange Mailbox Reconciliation'[Mailbox GUID],'Exchange Mailbox Reconciliation'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: 7e2d27e0-7163-4b78-a150-b4ca2576b92c
+
+	/// Planning estimate using existing qualified identity, feature and assignment scenario, restricted to on-premises mailboxes with an observed database and current inventory filters. F3 frontline eligibility remains an assumption. Assigned coverage includes higher suites; plan repair is a separate action. To complete is before available stock, not purchases.
+	measure 'EXO F3 Assigned coverage' =
+			VAR _mailboxes=SELECTCOLUMNS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report Has Database]="Yes"),"Guid",'Mailbox Migration Inventory'[Mailbox GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN CALCULATE([Exchange Scenario F3 Covered],KEEPFILTERS(TREATAS(_mailboxes,'Exchange Mailbox Reconciliation'[Mailbox GUID],'Exchange Mailbox Reconciliation'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: adfc22b7-886e-482a-b673-3edfd344ddce
+
+	/// Planning estimate using existing qualified identity, feature and assignment scenario, restricted to on-premises mailboxes with an observed database and current inventory filters. F3 frontline eligibility remains an assumption. Assigned coverage includes higher suites; plan repair is a separate action. To complete is before available stock, not purchases.
+	measure 'EXO F3 To complete' =
+			VAR _mailboxes=SELECTCOLUMNS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report Has Database]="Yes"),"Guid",'Mailbox Migration Inventory'[Mailbox GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN CALCULATE([Exchange Scenario F3 Gap],KEEPFILTERS(TREATAS(_mailboxes,'Exchange Mailbox Reconciliation'[Mailbox GUID],'Exchange Mailbox Reconciliation'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: 8795a018-0e96-430d-ab00-075b7b135c82
+
+	/// Planning estimate using existing qualified identity, feature and assignment scenario, restricted to on-premises mailboxes with an observed database and current inventory filters. F3 frontline eligibility remains an assumption. Assigned coverage includes higher suites; plan repair is a separate action. To complete is before available stock, not purchases.
+	measure 'EXO E3 Required' =
+			VAR _mailboxes=SELECTCOLUMNS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report Has Database]="Yes"),"Guid",'Mailbox Migration Inventory'[Mailbox GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN CALCULATE([Exchange Scenario E3 Need],KEEPFILTERS(TREATAS(_mailboxes,'Exchange Mailbox Reconciliation'[Mailbox GUID],'Exchange Mailbox Reconciliation'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: 0d9c4820-1e42-4650-a327-856da20130f8
+
+	/// Planning estimate using existing qualified identity, feature and assignment scenario, restricted to on-premises mailboxes with an observed database and current inventory filters. F3 frontline eligibility remains an assumption. Assigned coverage includes higher suites; plan repair is a separate action. To complete is before available stock, not purchases.
+	measure 'EXO E3 Assigned coverage' =
+			VAR _mailboxes=SELECTCOLUMNS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report Has Database]="Yes"),"Guid",'Mailbox Migration Inventory'[Mailbox GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN CALCULATE([Exchange Scenario E3 Covered],KEEPFILTERS(TREATAS(_mailboxes,'Exchange Mailbox Reconciliation'[Mailbox GUID],'Exchange Mailbox Reconciliation'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: 6c4029fd-e04a-4b22-ba44-065c40a467d4
+
+	/// Planning estimate using existing qualified identity, feature and assignment scenario, restricted to on-premises mailboxes with an observed database and current inventory filters. F3 frontline eligibility remains an assumption. Assigned coverage includes higher suites; plan repair is a separate action. To complete is before available stock, not purchases.
+	measure 'EXO E3 To complete' =
+			VAR _mailboxes=SELECTCOLUMNS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report Has Database]="Yes"),"Guid",'Mailbox Migration Inventory'[Mailbox GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN CALCULATE([Exchange Scenario E3 Gap],KEEPFILTERS(TREATAS(_mailboxes,'Exchange Mailbox Reconciliation'[Mailbox GUID],'Exchange Mailbox Reconciliation'[Loaded Batch ID])))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: dbd86f6d-746e-47af-a151-c3cd14646625
+
+	/// No governed E5-specific security/compliance requirement is collected. Mailbox size does not establish E5 demand.
+	measure 'EXO E5 Required' = IF([Dataset Loaded Batch ID]<>"","To review")
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 4f5a6dc2-3c02-4a9e-be3a-dbbd61c70225
+
+	/// E5 demand is unqualified; zero and purchase quantities must not be inferred.
+	measure 'EXO E5 To complete' = IF([Dataset Loaded Batch ID]<>"","To review")
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 3db997ad-d0fc-410f-a135-06b1ffe7e63f
+
+	/// Distinct active M365 E5 assignments among same-batch strongly linked EXO candidates. Observed assignments, not proof of an E5 requirement.
+	measure 'EXO E5 Assigned' =
+			VAR _mailboxes=SELECTCOLUMNS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report EXO Candidate]="Candidate"),"Guid",'Mailbox Migration Inventory'[Mailbox GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			VAR _people=CALCULATETABLE(SUMMARIZE('Exchange Mailbox Reconciliation','Exchange Mailbox Reconciliation'[Cloud Account Key],'Exchange Mailbox Reconciliation'[Loaded Batch ID]),TREATAS(_mailboxes,'Exchange Mailbox Reconciliation'[Mailbox GUID],'Exchange Mailbox Reconciliation'[Loaded Batch ID]))
+			VAR _sku=SELECTCOLUMNS(FILTER('Native License SKU','Native License SKU'[SkuPartNumber]="SPE_E5"),"Sku",'Native License SKU'[TenantSkuKey],"Batch",'Native License SKU'[Loaded Batch ID])
+			RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(CALCULATE(DISTINCTCOUNT('Native User License'[TenantUserKey]),TREATAS(_people,'Native User License'[TenantUserKey],'Native User License'[Loaded Batch ID]),TREATAS(_sku,'Native User License'[TenantSkuKey],'Native User License'[Loaded Batch ID]),'Native User License'[AssignmentState] IN {"Active","Success"}),0))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: 20dfd04a-76a4-4b40-8ece-76a78a3da875
+
+	/// Planning scope based on distinct retained UserMailbox identities, not final CAL requirements, not a minimum, and not net purchases. Actual accessors, disabled accounts, shared-mailbox access and device CAL options need qualification.
+	measure 'Exchange SE CAL planning label' =
+			VAR _mailboxes=SELECTCOLUMNS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report Has Database]="Yes"),"Guid",'Mailbox Migration Inventory'[Mailbox GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])
+			RETURN CALCULATE(IF(NOT ISBLANK([Exchange Scenario SE Need]),FORMAT([Exchange Scenario SE Need],"#,0") & " est."),KEEPFILTERS(TREATAS(_mailboxes,'Exchange Mailbox Reconciliation'[Mailbox GUID],'Exchange Mailbox Reconciliation'[Loaded Batch ID])))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 88d1a3b3-47af-43ce-902c-d354ffe8f191
+
+	/// Qualified standalone product capacity, global tenant stock in the loaded batch. Missing, duplicate or invalid capacity is unknown. Equivalent suites are not added to standalone stock.
+	measure 'EXO F3 Available stock' =
+			CALCULATE((VAR _batch=[Dataset Loaded Batch ID]
+			VAR _q=FILTER(ALL('License Report Qualification'),
+			    'License Report Qualification'[Loaded Batch ID]=_batch &&
+			    'License Report Qualification'[Scope]="M365_Licenses_ReportSkuCapacity.csv" &&
+			    'License Report Qualification'[State]="Qualified")
+			VAR _rows=FILTER(ALL('License SKU Capacity'),
+			    'License SKU Capacity'[Loaded Batch ID]=_batch && 'License SKU Capacity'[SKU Part Number]="SPE_F1" &&
+			    'License SKU Capacity'[Capacity Class]="Governed" && LOWER('License SKU Capacity'[Excluded] & "")="false")
+			VAR _snapshots=DISTINCT(SELECTCOLUMNS(_rows,"Snapshot",'License SKU Capacity'[Snapshot ID]))
+			VAR _ids=SELECTCOLUMNS(_rows,"Sku",'License SKU Capacity'[SKU ID])
+			VAR _valid=_batch<>"" && COUNTROWS(_q)=1 && COUNTROWS(_rows)>0 &&
+			    COUNTROWS(_snapshots)=1 && COUNTROWS(_ids)=COUNTROWS(DISTINCT(_ids)) &&
+			    COUNTROWS(FILTER(_rows,ISBLANK('License SKU Capacity'[Available Units]) ||
+			        'License SKU Capacity'[Available Units]<0 || 'License SKU Capacity'[SKU ID]="" || 'License SKU Capacity'[Snapshot ID]=""))=0
+			RETURN IF(_valid,SUMX(_rows,'License SKU Capacity'[Available Units]))),REMOVEFILTERS())
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: 09bd79f4-8941-469f-a8fb-a1ffd86e9e8e
+
+	/// Observed unassigned capacity, not reserved for migration.
+	measure 'EXO F3 Available stock label' = VAR _n=[EXO F3 Available stock] RETURN IF(ISBLANK(_n),"Not observed",FORMAT(_n,"#,0"))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 5c284c93-ec7f-410f-ab64-da4f6d2cf5f7
+
+	/// Qualified standalone product capacity, global tenant stock in the loaded batch. Missing, duplicate or invalid capacity is unknown. Equivalent suites are not added to standalone stock.
+	measure 'EXO E3 Available stock' =
+			CALCULATE((VAR _batch=[Dataset Loaded Batch ID]
+			VAR _q=FILTER(ALL('License Report Qualification'),
+			    'License Report Qualification'[Loaded Batch ID]=_batch &&
+			    'License Report Qualification'[Scope]="M365_Licenses_ReportSkuCapacity.csv" &&
+			    'License Report Qualification'[State]="Qualified")
+			VAR _rows=FILTER(ALL('License SKU Capacity'),
+			    'License SKU Capacity'[Loaded Batch ID]=_batch && 'License SKU Capacity'[SKU Part Number]="SPE_E3" &&
+			    'License SKU Capacity'[Capacity Class]="Governed" && LOWER('License SKU Capacity'[Excluded] & "")="false")
+			VAR _snapshots=DISTINCT(SELECTCOLUMNS(_rows,"Snapshot",'License SKU Capacity'[Snapshot ID]))
+			VAR _ids=SELECTCOLUMNS(_rows,"Sku",'License SKU Capacity'[SKU ID])
+			VAR _valid=_batch<>"" && COUNTROWS(_q)=1 && COUNTROWS(_rows)>0 &&
+			    COUNTROWS(_snapshots)=1 && COUNTROWS(_ids)=COUNTROWS(DISTINCT(_ids)) &&
+			    COUNTROWS(FILTER(_rows,ISBLANK('License SKU Capacity'[Available Units]) ||
+			        'License SKU Capacity'[Available Units]<0 || 'License SKU Capacity'[SKU ID]="" || 'License SKU Capacity'[Snapshot ID]=""))=0
+			RETURN IF(_valid,SUMX(_rows,'License SKU Capacity'[Available Units]))),REMOVEFILTERS())
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: 646878c3-6baa-4773-9547-0a3d1efcea10
+
+	/// Observed unassigned capacity, not reserved for migration.
+	measure 'EXO E3 Available stock label' = VAR _n=[EXO E3 Available stock] RETURN IF(ISBLANK(_n),"Not observed",FORMAT(_n,"#,0"))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 2b3e2df8-46e2-49c6-81bc-d67b7b784f71
+
+	/// Qualified standalone product capacity, global tenant stock in the loaded batch. Missing, duplicate or invalid capacity is unknown. Equivalent suites are not added to standalone stock.
+	measure 'EXO E5 Available stock' =
+			CALCULATE((VAR _batch=[Dataset Loaded Batch ID]
+			VAR _q=FILTER(ALL('License Report Qualification'),
+			    'License Report Qualification'[Loaded Batch ID]=_batch &&
+			    'License Report Qualification'[Scope]="M365_Licenses_ReportSkuCapacity.csv" &&
+			    'License Report Qualification'[State]="Qualified")
+			VAR _rows=FILTER(ALL('License SKU Capacity'),
+			    'License SKU Capacity'[Loaded Batch ID]=_batch && 'License SKU Capacity'[SKU Part Number]="SPE_E5" &&
+			    'License SKU Capacity'[Capacity Class]="Governed" && LOWER('License SKU Capacity'[Excluded] & "")="false")
+			VAR _snapshots=DISTINCT(SELECTCOLUMNS(_rows,"Snapshot",'License SKU Capacity'[Snapshot ID]))
+			VAR _ids=SELECTCOLUMNS(_rows,"Sku",'License SKU Capacity'[SKU ID])
+			VAR _valid=_batch<>"" && COUNTROWS(_q)=1 && COUNTROWS(_rows)>0 &&
+			    COUNTROWS(_snapshots)=1 && COUNTROWS(_ids)=COUNTROWS(DISTINCT(_ids)) &&
+			    COUNTROWS(FILTER(_rows,ISBLANK('License SKU Capacity'[Available Units]) ||
+			        'License SKU Capacity'[Available Units]<0 || 'License SKU Capacity'[SKU ID]="" || 'License SKU Capacity'[Snapshot ID]=""))=0
+			RETURN IF(_valid,SUMX(_rows,'License SKU Capacity'[Available Units]))),REMOVEFILTERS())
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: e9f0f3d1-8008-483a-b8ac-e48a6d762e34
+
+	/// Observed unassigned capacity, not reserved for migration.
+	measure 'EXO E5 Available stock label' = VAR _n=[EXO E5 Available stock] RETURN IF(ISBLANK(_n),"Not observed",FORMAT(_n,"#,0"))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 7faac0d0-15c6-4e8f-905a-d2ff972604fc
+
+	/// Qualified standalone product capacity, global tenant stock in the loaded batch. Missing, duplicate or invalid capacity is unknown. Equivalent suites are not added to standalone stock.
+	measure 'EXO Plan 2 Available stock' =
+			CALCULATE((VAR _batch=[Dataset Loaded Batch ID]
+			VAR _q=FILTER(ALL('License Report Qualification'),
+			    'License Report Qualification'[Loaded Batch ID]=_batch &&
+			    'License Report Qualification'[Scope]="M365_Licenses_ReportSkuCapacity.csv" &&
+			    'License Report Qualification'[State]="Qualified")
+			VAR _rows=FILTER(ALL('License SKU Capacity'),
+			    'License SKU Capacity'[Loaded Batch ID]=_batch && 'License SKU Capacity'[SKU Part Number]="EXCHANGEENTERPRISE" &&
+			    'License SKU Capacity'[Capacity Class]="Governed" && LOWER('License SKU Capacity'[Excluded] & "")="false")
+			VAR _snapshots=DISTINCT(SELECTCOLUMNS(_rows,"Snapshot",'License SKU Capacity'[Snapshot ID]))
+			VAR _ids=SELECTCOLUMNS(_rows,"Sku",'License SKU Capacity'[SKU ID])
+			VAR _valid=_batch<>"" && COUNTROWS(_q)=1 && COUNTROWS(_rows)>0 &&
+			    COUNTROWS(_snapshots)=1 && COUNTROWS(_ids)=COUNTROWS(DISTINCT(_ids)) &&
+			    COUNTROWS(FILTER(_rows,ISBLANK('License SKU Capacity'[Available Units]) ||
+			        'License SKU Capacity'[Available Units]<0 || 'License SKU Capacity'[SKU ID]="" || 'License SKU Capacity'[Snapshot ID]=""))=0
+			RETURN IF(_valid,SUMX(_rows,'License SKU Capacity'[Available Units]))),REMOVEFILTERS())
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: cbfb3bb0-8486-477d-bbe7-cfb558e2c0cc
+
+	/// Observed unassigned capacity, not reserved for migration.
+	measure 'EXO Plan 2 Available stock label' = VAR _n=[EXO Plan 2 Available stock] RETURN IF(ISBLANK(_n),"Not observed",FORMAT(_n,"#,0"))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 8044a784-42a5-4bbf-a7e1-9da557e3eff5
+
+	/// Distinct candidate SharedMailbox GUIDs in the current batch, observed database, >50 and <=100 GB. Retained, >100 and unknown-size rows excluded from capacity demand.
+	measure 'EXO Shared Plan 2 Required' = VAR _keys=DISTINCT(SELECTCOLUMNS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report Has Database]="Yes" && 'Mailbox Migration Inventory'[Report EXO Candidate]="Candidate" && 'Mailbox Migration Inventory'[Mailbox Type]="SharedMailbox" && NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB]) && 'Mailbox Migration Inventory'[Mailbox Size GB]>50 && 'Mailbox Migration Inventory'[Mailbox Size GB]<=100 && 'Mailbox Migration Inventory'[Mailbox GUID]<>"" && 'Mailbox Migration Inventory'[Loaded Batch ID]=[Dataset Loaded Batch ID]),"Guid",'Mailbox Migration Inventory'[Mailbox GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])) RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(COUNTROWS(_keys),0))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: 36b5124b-aef5-41c9-bbd9-057f46cee22e
+
+	/// Distinct required shared mailboxes with an observed suitable own-account assignment. Higher suites cover existing demand but are not pooled into standalone free stock.
+	measure 'EXO Shared Plan 2 Assigned coverage' = VAR _keys=DISTINCT(SELECTCOLUMNS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report Has Database]="Yes" && 'Mailbox Migration Inventory'[Report EXO Candidate]="Candidate" && 'Mailbox Migration Inventory'[Mailbox Type]="SharedMailbox" && NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB]) && 'Mailbox Migration Inventory'[Mailbox Size GB]>50 && 'Mailbox Migration Inventory'[Mailbox Size GB]<=100 && 'Mailbox Migration Inventory'[Mailbox GUID]<>"" && 'Mailbox Migration Inventory'[Loaded Batch ID]=[Dataset Loaded Batch ID]),"Guid",'Mailbox Migration Inventory'[Mailbox GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])) RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_keys,VAR _guid=[Guid] VAR _batch=[Batch] RETURN IF(CALCULATE([Licensing Shared Plan 2 Coverage code],TREATAS({_guid},'Mailbox Migration Inventory'[Mailbox GUID]),TREATAS({_batch},'Mailbox Migration Inventory'[Loaded Batch ID]))=1,1,0)),0))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: 439a1b61-917d-448e-8df6-1df9a3a22d38
+
+	/// Required shared mailboxes with ambiguous account or failed assignment; unresolved is never zero coverage.
+	measure 'EXO Shared Plan 2 Coverage review' = VAR _keys=DISTINCT(SELECTCOLUMNS(FILTER('Mailbox Migration Inventory','Mailbox Migration Inventory'[Report Has Database]="Yes" && 'Mailbox Migration Inventory'[Report EXO Candidate]="Candidate" && 'Mailbox Migration Inventory'[Mailbox Type]="SharedMailbox" && NOT ISBLANK('Mailbox Migration Inventory'[Mailbox Size GB]) && 'Mailbox Migration Inventory'[Mailbox Size GB]>50 && 'Mailbox Migration Inventory'[Mailbox Size GB]<=100 && 'Mailbox Migration Inventory'[Mailbox GUID]<>"" && 'Mailbox Migration Inventory'[Loaded Batch ID]=[Dataset Loaded Batch ID]),"Guid",'Mailbox Migration Inventory'[Mailbox GUID],"Batch",'Mailbox Migration Inventory'[Loaded Batch ID])) RETURN IF([Dataset Loaded Batch ID]<>"",COALESCE(SUMX(_keys,VAR _guid=[Guid] VAR _batch=[Batch] RETURN IF(CALCULATE([Licensing Shared Plan 2 Coverage code],TREATAS({_guid},'Mailbox Migration Inventory'[Mailbox GUID]),TREATAS({_batch},'Mailbox Migration Inventory'[Loaded Batch ID]))<0,1,0)),0))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: c8ededfa-114e-497d-8abf-8ac31ffa3608
+
+	/// Remaining suitable assignments before stock, blank when coverage is unresolved.
+	measure 'EXO Shared Plan 2 To complete' = VAR _need=[EXO Shared Plan 2 Required] RETURN IF(NOT ISBLANK(_need) && [EXO Shared Plan 2 Coverage review]=0,MAX(0,_need-[EXO Shared Plan 2 Assigned coverage]))
+		formatString: #,0
+		displayFolder: Migration licensing simplified
+		lineageTag: 8487478f-c69c-4694-b279-b91bf27ed1a3
+
+	/// Remaining suitable assignments, explicit unresolved review.
+	measure 'EXO Shared Plan 2 To complete label' = VAR _n=[EXO Shared Plan 2 To complete] RETURN IF(ISBLANK(_n),"To review",FORMAT(_n,"#,0"))
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: e902b303-4fb3-44ff-a363-9ec7f26f13e6
+
+	/// Red stock shortage; green sufficient known stock; neutral unknown demand or stock. Compare current selection demand with global product stock.
+	measure 'EXO F3 To complete color' = VAR _need=IFERROR(VALUE([EXO F3 To complete]),BLANK()) VAR _stock=[EXO F3 Available stock] RETURN SWITCH(TRUE(),ISBLANK(_need) || ISBLANK(_stock),"#64748B",_stock<_need,"#C62828","#237A3B")
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 4750dfbe-e3c4-4e1e-bc90-d23d60f6f82d
+
+	/// Red stock shortage; green sufficient known stock; neutral unknown demand or stock. Compare current selection demand with global product stock.
+	measure 'EXO E3 To complete color' = VAR _need=IFERROR(VALUE([EXO E3 To complete]),BLANK()) VAR _stock=[EXO E3 Available stock] RETURN SWITCH(TRUE(),ISBLANK(_need) || ISBLANK(_stock),"#64748B",_stock<_need,"#C62828","#237A3B")
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: a16406c3-f597-48a2-ad59-934089a91f51
+
+	/// Red stock shortage; green sufficient known stock; neutral unknown demand or stock. Compare current selection demand with global product stock.
+	measure 'EXO E5 To complete color' = VAR _need=IFERROR(VALUE([EXO E5 To complete]),BLANK()) VAR _stock=[EXO E5 Available stock] RETURN SWITCH(TRUE(),ISBLANK(_need) || ISBLANK(_stock),"#64748B",_stock<_need,"#C62828","#237A3B")
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: f85630c9-c0e5-4756-b057-cb05dfff93b5
+
+	/// Red stock shortage; green sufficient known stock; neutral unknown demand or stock. Compare current selection demand with global product stock.
+	measure 'EXO Shared Plan 2 To complete color' = VAR _need=IFERROR(VALUE([EXO Shared Plan 2 To complete]),BLANK()) VAR _stock=[EXO Plan 2 Available stock] RETURN SWITCH(TRUE(),ISBLANK(_need) || ISBLANK(_stock),"#64748B",_stock<_need,"#C62828","#237A3B")
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 20792b57-17e3-4f35-a4c5-814845efd08a
+
+	/// Actual licence snapshot date matched by snapshot ID and batch, not report generation or batch date.
+	measure 'EXO Stock as of' =
+			VAR _batch=[Dataset Loaded Batch ID]
+			VAR _cap=FILTER(ALL('License SKU Capacity'),'License SKU Capacity'[Loaded Batch ID]=_batch)
+			VAR _snapshots=DISTINCT(SELECTCOLUMNS(_cap,"Snapshot",'License SKU Capacity'[Snapshot ID]))
+			VAR _dates=DISTINCT(SELECTCOLUMNS(FILTER(ALL('License Report Summary'),'License Report Summary'[Loaded Batch ID]=_batch && 'License Report Summary'[Snapshot ID] IN _snapshots),"Date",'License Report Summary'[License Snapshot UTC]))
+			VAR _date=MAXX(_dates,[Date])
+			RETURN IF(COUNTROWS(_snapshots)=1 && COUNTROWS(_dates)=1 && _date<>"","Stock as of "&LEFT(_date,10)&" "&MID(_date,12,5)&" UTC · Tenant-wide; not reserved","Stock date: Not observed")
+		formatString: @
+		displayFolder: Migration licensing simplified
+		lineageTag: 9f887449-3ab1-488b-8be4-157e28a6bdb4
 
 	column 'Mailbox GUID'
 		dataType: string
@@ -1216,6 +1466,26 @@ table 'Exchange Mailbox Reconciliation'
 		summarizeBy: none
 		sourceColumn: [Licensing Decision]
 
+	/// Country from canonical mailbox evidence, exact mailbox GUID/key and loaded batch. Original Country retained as source evidence.
+	column 'Report Country' = VAR canonical=(VAR g=LOWER(SUBSTITUTE(SUBSTITUTE('Exchange Mailbox Reconciliation'[Mailbox GUID],"{",""),"}","")) VAR b='Exchange Mailbox Reconciliation'[Loaded Batch ID] RETURN IF(NOT ISBLANK(g),LOOKUPVALUE('Mailbox Exploration Inventory'[Country],'Mailbox Exploration Inventory'[Report Mailbox GUID],g,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))) RETURN COALESCE(canonical,'Exchange Mailbox Reconciliation'[Country],"Unknown")
+		dataType: string
+		lineageTag: 6da73de1-6fc5-45c1-be22-965deaab0581
+
+	/// Canonical AD domain, exact mailbox GUID and loaded batch; unresolved remains Unknown.
+	column 'Report AD Domain' = COALESCE((VAR g=LOWER(SUBSTITUTE(SUBSTITUTE('Exchange Mailbox Reconciliation'[Mailbox GUID],"{",""),"}","")) VAR b='Exchange Mailbox Reconciliation'[Loaded Batch ID] RETURN IF(NOT ISBLANK(g),LOOKUPVALUE('Mailbox Exploration Inventory'[AD Domain],'Mailbox Exploration Inventory'[Report Mailbox GUID],g,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK()))),"Unknown")
+		dataType: string
+		lineageTag: c6bd5fa0-61c2-4800-b31d-380d17422ccb
+
+	/// Qualified mailbox database from canonical evidence; recipient objects without database excluded from current mailbox populations.
+	column 'Report Has Database' = IF(LEN(TRIM((VAR g=LOWER(SUBSTITUTE(SUBSTITUTE('Exchange Mailbox Reconciliation'[Mailbox GUID],"{",""),"}","")) VAR b='Exchange Mailbox Reconciliation'[Loaded Batch ID] RETURN IF(NOT ISBLANK(g),LOOKUPVALUE('Mailbox Exploration Inventory'[Database],'Mailbox Exploration Inventory'[Report Mailbox GUID],g,'Mailbox Exploration Inventory'[Loaded Batch ID],b,BLANK())))))>0,"Yes","No")
+		dataType: string
+		lineageTag: c9c3d81e-1233-4a55-aa7b-a73bf6f81702
+
+	/// Display name for same-batch canonical mailbox country.
+	column 'Report Country Name' = VAR _country='Exchange Mailbox Reconciliation'[Report Country] RETURN COALESCE(LOOKUPVALUE('Country Selection'[Country],'Country Selection'[Source Country],_country),_country,"Unknown")
+		dataType: string
+		lineageTag: 26066ed4-84fe-46a0-a51f-01d83cea5b5a
+
 	partition 'Exchange Mailbox Reconciliation' = calculated
 		mode: import
 		source =
@@ -1313,3 +1583,4 @@ table 'Exchange Mailbox Reconciliation'
 				            IF(_p1,"Plan 1 observed - base equivalency to verify","CAL coverage unverified; reconcile contracts and accessors")),
 				        "Licensing Decision", "Unqualified - contract, active coverage, accessors and frontline eligibility required")
 				)
+

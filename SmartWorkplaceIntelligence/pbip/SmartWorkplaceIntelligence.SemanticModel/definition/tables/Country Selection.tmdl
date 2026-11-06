@@ -49,3 +49,4 @@ table 'Country Selection'
 				                    COALESCE ( LOOKUPVALUE ( 'Country Reference'[Country Name], 'Country Reference'[Country Code], _countryCode ), TRIM ( _rawCountry ) )
 				                )
 				    )
+
