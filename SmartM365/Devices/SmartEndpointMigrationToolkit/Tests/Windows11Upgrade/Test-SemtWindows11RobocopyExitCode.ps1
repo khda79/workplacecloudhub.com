@@ -78,6 +78,10 @@ finally {
     Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 }
 
+$copyDefinition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Copy-SetupMediaToLocalCache' }, $true)
+$copyText = if ($null -ne $copyDefinition) { $copyDefinition.Extent.Text } else { '' }
+Assert-Test 'media copy retries robocopy 10 times, 30 seconds apart' ($copyText -match "'/Z', '/R:10', '/W:30'")
+
 Write-Host ("Summary: Passed={0}; Failed={1}" -f $passed,$failed)
 if ($failed -gt 0) { exit 1 }
 exit 0

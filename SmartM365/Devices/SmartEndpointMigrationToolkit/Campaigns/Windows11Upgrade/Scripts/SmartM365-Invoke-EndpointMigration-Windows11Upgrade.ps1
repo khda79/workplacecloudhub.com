@@ -4013,7 +4013,9 @@ function Copy-SetupMediaToLocalCache {
         Write-SmartLog ("Copying setup media on target from '{0}' to local cache '{1}'." -f $SourcePath,$CachePath)
         $robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
         if (Test-Path -LiteralPath $robocopy -PathType Leaf) {
-            $robocopyArgs = @($SourcePath, $CachePath, '/MIR', '/Z', '/R:2', '/W:5', '/NP', '/NFL', '/NDL', "/LOG+:$robocopyLog")
+            # Ten retries 30 seconds apart ride out short WAN or SMB drops; /Z resumes a file
+            # where the copy stopped, and SetupMediaCopyTimeoutMinutes still bounds the copy.
+            $robocopyArgs = @($SourcePath, $CachePath, '/MIR', '/Z', '/R:10', '/W:30', '/NP', '/NFL', '/NDL', "/LOG+:$robocopyLog")
             if ($SetupMediaCopyIpGapMilliseconds -gt 0) {
                 $robocopyHelp = ''
                 try { $robocopyHelp = (& $robocopy /? 2>$null | Out-String) } catch { }
