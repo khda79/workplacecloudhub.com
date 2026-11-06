@@ -16,7 +16,7 @@ param([string]$OutputPath,[string]$TenantId,[switch]$NoConnect,[switch]$ForceRef
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $root 'Modules\SmartEndpointMigration.Core\SmartEndpointMigration.Core.psd1') -MinimumVersion 1.0.0 -Force
-if (-not $OutputPath) { $OutputPath = Join-Path $root 'Inventory\UsersLicenses.csv' }
+if (-not $OutputPath) { $OutputPath = Get-SemtSharedInventoryPath -PackageRoot $root -Kind UserLicenses }
 
 # Cache provenance is carried in each row; an empty, incomplete or stale export is never trusted.
 function Test-UserLicenseCache {

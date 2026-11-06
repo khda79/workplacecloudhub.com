@@ -252,6 +252,19 @@ try {
         $single = New-SemtEphemeralWave -PackageRoot $packageCopy -Campaign HybridJoin -ComputerName PC-4 -RunId 'TEST-SINGLE'
         $externalRun.RunRoot -eq (Join-Path $externalRuns 'Windows11Upgrade\WAVE-EXTERNAL\TEST-RUN') -and $single.RunRoot -eq (Join-Path $externalRuns 'HybridJoin\_SinglePC\TEST-SINGLE')
     }
+    Test-Step 'shared inventories default to the package Inventory folder' {
+        (Get-SemtSharedInventoryPath -PackageRoot $packageCopy -Kind AD) -eq (Join-Path $packageCopy 'Inventory\DevicesAD.csv') -and
+        (Get-SemtSharedInventoryPath -PackageRoot $packageCopy -Kind UserLicenses) -eq (Join-Path $packageCopy 'Inventory\UsersLicenses.csv')
+    }
+    $externalInventory = Join-Path $tempRoot 'External Inventory'
+    Write-SemtJsonFileAtomic -Path $runtimePath -InputObject @{ Storage = @{ WavesPath = $externalWaves; RunsPath = $externalRuns; InventoryPath = $externalInventory } }
+    Test-Step 'configured Inventory path holds every shared inventory' {
+        (Get-SemtSharedInventoryPath -PackageRoot $packageCopy -Kind Intune) -eq (Join-Path $externalInventory 'DevicesIntune.csv') -and
+        (Get-SemtSharedInventoryPath -PackageRoot $packageCopy -Kind Entra) -eq (Join-Path $externalInventory 'DevicesEntra.csv') -and
+        (Get-SemtSharedInventoryPath -PackageRoot $packageCopy -Kind UserLicenses) -eq (Join-Path $externalInventory 'UsersLicenses.csv') -and
+        $externalWave.Path -eq (Join-Path $externalWaves 'Windows11Upgrade\WAVE-EXTERNAL')
+    }
+    Write-SemtJsonFileAtomic -Path $runtimePath -InputObject @{ Storage = @{ WavesPath = $externalWaves; RunsPath = $externalRuns } }
     $scriptDir = Join-Path $packageCopy 'Scripts'
     New-Item -ItemType Directory -Path $scriptDir -Force | Out-Null
     $stub = '@echo off' + "`r`n" + 'echo %~1^|%~2^|%~3 > "%SEMT_WRAPPER_RESULT%"' + "`r`n" + 'exit /b 7' + "`r`n"

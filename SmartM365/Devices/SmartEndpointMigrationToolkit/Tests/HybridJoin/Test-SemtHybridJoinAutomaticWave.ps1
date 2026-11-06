@@ -187,6 +187,28 @@ try {
     Assert-Equal ([int]$idPreview.Summary.ExclusionReasonCounts['INTUNE_ENROLLED_CONFIRMED_BY_DEVICE_ID']) 2 'count per exclusion reason includes the device-ID rule'
     Assert-Equal ([int]$preview.Summary.ExclusionReasonCounts['AD_DISABLED']) 1 'count per exclusion reason matches the safety exclusions'
     Assert-True ([string]$idPreview.Summary.SelectionSignature -match 'ExcludeIntuneConfirmedByDeviceId=True') 'selection signature records the device-ID rule (an older preview is not reused)'
+    Assert-True ([string]$idPreview.Summary.SelectionSignature -match 'IntuneIdentityProof=AdObjectGuid,EntraDeviceId') 'selection signature records the objectGUID proof'
+
+    # With an AD objectGUID (Entra device ID of a hybrid-joined computer), the proof is objectGUID = Intune Entra device ID.
+    $guidAdPath = Join-Path $dataRoot 'DevicesAD-ObjectGuid.csv'; $guidIntunePath = Join-Path $dataRoot 'DevicesIntune-ObjectGuid.csv'; $guidEntraPath = Join-Path $dataRoot 'DevicesEntra-ObjectGuid.csv'
+    $guidCases = [ordered]@{ 'GUID-CONFIRMED'='c0000000-0000-0000-0000-000000000001'; 'GUID-MISMATCH'='c0000000-0000-0000-0000-000000000002'; 'GUID-STALE'='c0000000-0000-0000-0000-000000000003'; 'GUID-NOENTRA'='c0000000-0000-0000-0000-000000000004' }
+    $mismatchEntraId = 'd0000000-0000-0000-0000-000000000002'
+    @($guidCases.Keys | ForEach-Object { [pscustomobject]@{ ComputerName=$_; Name=$_; ADInventoryPresent=$true; Enabled=$true; ObjectGUID=$guidCases[$_]; OperatingSystem='Windows 10 Enterprise'; OperatingSystemVersion='10.0 (19045)' } }) | Export-Csv -LiteralPath $guidAdPath -NoTypeInformation -Encoding UTF8
+    @($guidCases.Keys | Where-Object { $_ -ne 'GUID-NOENTRA' } | ForEach-Object { [pscustomobject]@{ ComputerName=$_; DisplayName=$_; EntraInventoryPresent=$true; EntraRegisteredState='Registered'; TrustType='ServerAd'; AlternativeSecurityIdCount=1; AccountEnabled=$true; DeviceId=$(if ($_ -eq 'GUID-MISMATCH') { $mismatchEntraId } else { $guidCases[$_] }); EntraObjectId=('obj-' + $_); InventoryTenantId=$tenantA } }) | Export-Csv -LiteralPath $guidEntraPath -NoTypeInformation -Encoding UTF8
+    @($guidCases.Keys | ForEach-Object {
+        $aadId = if ($_ -eq 'GUID-MISMATCH') { $mismatchEntraId } else { $guidCases[$_] }
+        $sync = if ($_ -eq 'GUID-STALE') { $now.AddDays(-40) } else { $now.AddHours(-2) }
+        [pscustomobject]@{ ComputerName=$_; DeviceName=$_; IntuneInventoryPresent=$true; IntuneManagedDeviceId=('managed-' + $_); AzureADDeviceId=$aadId; LastSyncDateTime=$sync.ToString('o'); InventoryTenantId=$tenantA }
+    }) | Export-Csv -LiteralPath $guidIntunePath -NoTypeInformation -Encoding UTF8
+    $guidPreview = & $engine -AdInventoryCsv $guidAdPath -IntuneInventoryCsv $guidIntunePath -EntraInventoryCsv $guidEntraPath -WaveName 'WAVE-AUTO-HJ-OBJECTGUID' -NoEvidence
+    $guidSelected = @{}; foreach ($row in @($guidPreview.SelectedDevices)) { $guidSelected[[string]$row.ComputerName] = [string]$row.IntuneDeviceIdCheck }
+    $guidExcluded = @{}; foreach ($row in @($guidPreview.ExcludedDevices)) { $guidExcluded[[string]$row.ComputerName] = [string]$row.IntuneDeviceIdCheck }
+    Assert-Equal $guidExcluded['GUID-CONFIRMED'] 'ConfirmedByAdObjectGuid' 'Intune device carrying the AD objectGUID is excluded'
+    Assert-Equal $guidSelected['GUID-NOENTRA'] 'EntraNotRegistered' 'the objectGUID proof still needs the single registered Entra ServerAd object'
+    Assert-Equal $guidSelected['GUID-MISMATCH'] 'AdObjectGuidMismatch' 'Entra and Intune registered under another identity than the AD object stay selected'
+    Assert-Equal $guidSelected['GUID-STALE'] 'StaleSync' 'an old Intune sync stays selected with the objectGUID proof'
+    Assert-Equal $guidPreview.Summary.IntuneConfirmedByAdObjectGuidExcluded 1 'objectGUID exclusions are counted'
+    Assert-Equal $guidPreview.Summary.AdObjectGuidMismatchSelected 1 'objectGUID mismatches are counted'
 
     # Name and stale filters.
     $filtered = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-FILTERED' -ComputerNamePrefix 'FR-' -ComputerNameContains '-PC' -NoEvidence

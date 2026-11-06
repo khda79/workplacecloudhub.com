@@ -7,17 +7,18 @@ Selects explicit Windows 10 devices from broad AD and Intune inventory CSV files
 deduplicates them, excludes Windows 11 evidence and unsafe inventory states, writes
 selection evidence under Runs\Windows11Upgrade\_AutomaticWave, and can create a
 standard Windows11Upgrade Wave through New-SemtWave without launching it. Default
-inventory inputs are the shared caches in <Package>\Inventory.
+inventory inputs are the shared caches in <Inventory>.
+<Inventory> is Storage.InventoryPath of Config\SmartEndpointMigrationToolkit.local.json.txt (default <Package>\Inventory).
 Provenance: copied from SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM365-Windows11Upgrade-New-AutomaticLot.ps1 1.3.2 (see Docs\PROVENANCE.json.txt).
 
 .PARAMETER Source
 Inventory sources required for the selection: AD, Intune or Both.
 
 .PARAMETER AdInventoryCsv
-AD inventory CSV. Defaults to the shared cache <Package>\Inventory\DevicesAD.csv.
+AD inventory CSV. Defaults to the shared cache <Inventory>\DevicesAD.csv.
 
 .PARAMETER IntuneInventoryCsv
-Intune inventory CSV. Defaults to the shared cache <Package>\Inventory\DevicesIntune.csv.
+Intune inventory CSV. Defaults to the shared cache <Inventory>\DevicesIntune.csv.
 
 .PARAMETER PackageRoot
 Smart Endpoint Migration Toolkit package root. Defaults to the package that contains this script.

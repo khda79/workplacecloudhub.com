@@ -6,7 +6,8 @@ Exports Intune managed devices to DevicesIntune.csv for the Smart Endpoint Migra
 Uses Microsoft Graph to read Intune managed devices from:
 /deviceManagement/managedDevices
 
-Without -OutputPath, an unscoped export writes the shared cache <Package>\Inventory\DevicesIntune.csv
+Without -OutputPath, an unscoped export writes the shared cache <Inventory>\DevicesIntune.csv
+<Inventory> is Storage.InventoryPath of Config\SmartEndpointMigrationToolkit.local.json.txt (default <Package>\Inventory).
 and a -ComputerListPath export writes DevicesIntune.csv next to that Computers.txt. A scoped export
 never overwrites the shared cache. The CSV includes DeviceName and ComputerName columns plus the
 columns read by the HybridJoin and Windows11Upgrade automatic Wave engines. InventoryTenantId,

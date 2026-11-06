@@ -39,7 +39,7 @@ $targets.Add([pscustomobject]@{
     Text = ConvertTo-TemplateText -Object ([ordered]@{
         SchemaVersion = 1
         Product = 'SmartEndpointMigrationToolkit'
-        Storage = [ordered]@{ WavesPath = ''; RunsPath = '' }
+        Storage = [ordered]@{ WavesPath = ''; RunsPath = ''; InventoryPath = '' }
         Description = 'Global options of this technician installation. __INHERIT__ keeps the campaign default of Config\SmartEndpointMigrationToolkit.options.json.txt. A Wave, a SEMT_* environment variable, a GUI choice or an explicit CLI option overrides it.'
         Options = $globalOptions
     })

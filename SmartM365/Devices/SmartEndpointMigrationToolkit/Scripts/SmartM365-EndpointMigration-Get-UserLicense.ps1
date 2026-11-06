@@ -39,7 +39,7 @@ try {
     if (-not $details.Contains('value') -or $null -eq $details['value'] -or $details['@odata.nextLink']) { throw 'License lookup incomplete or paginated.' }
     $report=[ordered]@{ CollectedUtc=[datetime]::UtcNow.ToString('o'); TenantId=$TenantId.ToString(); User=$user; LicenseDetails=$details['value']; MdmUserScope='Unknown: verify in Entra'; Provenance='TargetedGraphRead' }
     $full=[IO.Path]::GetFullPath($OutputPath)
-    $shared=[IO.Path]::GetFullPath((Join-Path $root 'Inventory\UsersLicenses.csv'))
+    $shared=[IO.Path]::GetFullPath((Get-SemtSharedInventoryPath -PackageRoot $root -Kind UserLicenses))
     if ($full -ieq $shared -or [IO.File]::Exists($full)) { throw 'Output already exists or targets the shared cache.' }
     $parent=Split-Path -Parent $full
     if (-not (Test-Path -LiteralPath $parent -PathType Container)) { throw 'Output directory does not exist.' }

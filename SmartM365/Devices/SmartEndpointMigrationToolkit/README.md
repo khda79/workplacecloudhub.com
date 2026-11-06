@@ -33,6 +33,9 @@ Both default to empty: Waves and Runs then remain under the toolkit directory. T
 the Waves and Runs directories themselves, each retaining the Campaign subdirectories. Change
 them only when no Runs are active. Existing content is not moved automatically; copy it if needed
 and regenerate existing Wave launchers using the GUI or `Scripts\SmartM365-EndpointMigration-Update-WaveCmdWrappers.ps1`.
+`Storage.InventoryPath` likewise relocates the shared inventory folder (`DevicesAD.csv`,
+`DevicesIntune.csv`, `DevicesEntra.csv`, `UsersLicenses.csv`); empty keeps `<toolkit>\Inventory`.
+The files are not moved: copy them to the new folder or export them again.
 SEMT now reads and writes its own JSON data as `.json.txt`. It does not read or migrate earlier
 `.json` configuration, Wave options, Run history or endpoint state. Configure the new files before
 starting a Run; existing settings and guard history are not inherited from the old filenames.

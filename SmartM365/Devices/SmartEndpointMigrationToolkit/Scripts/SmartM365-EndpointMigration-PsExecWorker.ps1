@@ -210,7 +210,7 @@ try {
 
     $licensePreflight = $null
     if ($campaign -eq 'HybridJoin' -and -not [bool]$contract.Flags.DryRun -and $access.AdminShareReachable) {
-        $licensePreflight = Invoke-SemtUserLicensePreflight -ComputerName $target -InventoryPath (Join-Path $packageRoot 'Inventory\UsersLicenses.csv')
+        $licensePreflight = Invoke-SemtUserLicensePreflight -ComputerName $target -InventoryPath (Get-SemtSharedInventoryPath -PackageRoot $packageRoot -Kind UserLicenses)
         $result['UserLicensePreflightState'] = $licensePreflight.State
         $result['UserLicensePreflightDetail'] = $licensePreflight.Detail
         if ($licensePreflight.Block) {

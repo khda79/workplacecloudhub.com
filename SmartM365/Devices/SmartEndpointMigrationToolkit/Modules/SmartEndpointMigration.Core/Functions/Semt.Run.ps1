@@ -34,8 +34,9 @@ function Get-SemtStorageRoot {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$PackageRoot,
-        [Parameter(Mandatory = $true)][ValidateSet('Waves','Runs')][string]$Kind
+        [Parameter(Mandatory = $true)][ValidateSet('Waves','Runs','Inventory')][string]$Kind
     )
+    # Storage.<Kind>Path of the local configuration; empty keeps <Package>\<Kind>.
     $template = Join-Path $PackageRoot 'Config\SmartEndpointMigrationToolkit.local.json.template'
     $configured = ''
     if (Test-Path -LiteralPath $template -PathType Leaf) {

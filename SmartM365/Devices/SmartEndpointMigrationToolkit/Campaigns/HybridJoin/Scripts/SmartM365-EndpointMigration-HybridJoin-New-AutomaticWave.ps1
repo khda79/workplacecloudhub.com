@@ -8,17 +8,18 @@ keeps name-only Intune matches for local verification, excludes ambiguous invent
 the remaining devices with Entra evidence, writes selection evidence under
 Runs\HybridJoin\_AutomaticWave, and can create a standard HybridJoin Wave through
 New-SemtWave without launching it. Default inventory inputs are the shared caches
-in <Package>\Inventory.
+in <Inventory>.
+<Inventory> is Storage.InventoryPath of Config\SmartEndpointMigrationToolkit.local.json.txt (default <Package>\Inventory).
 Provenance: copied from SmartM365/Devices/IntuneHybridJoinToolkit/Scripts/SmartM365-IntuneHybridJoinRepair-New-AutomaticLot.ps1 1.0.2 (see Docs\PROVENANCE.json.txt).
 
 .PARAMETER AdInventoryCsv
-AD inventory CSV. Defaults to the shared cache <Package>\Inventory\DevicesAD.csv.
+AD inventory CSV. Defaults to the shared cache <Inventory>\DevicesAD.csv.
 
 .PARAMETER IntuneInventoryCsv
-Intune inventory CSV. Defaults to the shared cache <Package>\Inventory\DevicesIntune.csv.
+Intune inventory CSV. Defaults to the shared cache <Inventory>\DevicesIntune.csv.
 
 .PARAMETER EntraInventoryCsv
-Optional Entra inventory CSV. Defaults to the shared cache <Package>\Inventory\DevicesEntra.csv when present.
+Optional Entra inventory CSV. Defaults to the shared cache <Inventory>\DevicesEntra.csv when present.
 
 .PARAMETER PackageRoot
 Smart Endpoint Migration Toolkit package root. Defaults to the package that contains this script.
@@ -42,7 +43,7 @@ the inventory files have not changed since, and it is less than 24 hours old. Ot
 is computed again.
 
 .VERSION
-1.0.0
+1.1.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -71,7 +72,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AutomaticWaveVersion = '1.0.0'
+$script:AutomaticWaveVersion = '1.1.0'
 $script:IntuneConfirmedMaxSyncAgeDays = 30
 $script:AutomaticWaveCampaign = 'HybridJoin'
 $script:AutomaticWaveProgressCallback = $ProgressCallback
@@ -364,6 +365,7 @@ function Get-AdAutomaticWaveRecord {
     $colLastSeen = Resolve-InventoryColumn -Rows $rows -Names @('LastLogonTimestampUtc')
     $colDomain = Resolve-InventoryColumn -Rows $rows -Names @('ADDomain')
     $colDn = Resolve-InventoryColumn -Rows $rows -Names @('DistinguishedName')
+    $colObjectGuid = Resolve-InventoryColumn -Rows $rows -Names @('ObjectGUID')
     $classificationCache = @{}
     $invariant = [System.Globalization.CultureInfo]::InvariantCulture
     $dateStyles = [System.Globalization.DateTimeStyles]::AllowWhiteSpaces -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
@@ -399,6 +401,7 @@ function Get-AdAutomaticWaveRecord {
             PreferredName      = $identity
             Domain             = if ($colDomain) { [string]$row.$colDomain } else { '' }
             DistinguishedName  = if ($colDn) { [string]$row.$colDn } else { '' }
+            ObjectGuid         = if ($colObjectGuid) { [string]$row.$colObjectGuid } else { '' }
             Present            = $present
             Enabled            = $enabled
             Classification     = $classificationCache[$operatingSystem]
@@ -652,8 +655,8 @@ $adDomainDisplay = $adDomains -join ';'
 $availableSourcesText = if ($entraAvailable) { 'AD+Intune+Entra' } else { 'AD+Intune' }
 $safeWaveName = Get-AutomaticWaveSafeName -Name $WaveName -NamePrefixes $namePrefixes
 $emptySelectionMessage = 'No eligible Hybrid Join device was selected; the Wave was not created.'
-$descriptionBase = 'Automatic HybridJoin Wave; Sources={0}; ComputerNamePrefix={1}; ComputerNameContains={2}; ADDomain={5}; ExcludeIntunePresent=False; ExcludeIntuneConfirmedByDeviceId=True; ExcludeStaleAd={3}; ADLastLogonMaxAgeDays={4}' -f $availableSourcesText, $namePrefixDisplay, $nameContainsDisplay, [bool]$ExcludeStaleAd, $AdLastLogonMaxAgeDays, $adDomainDisplay
-$selectionSignature = @($script:AutomaticWaveCampaign, $script:AutomaticWaveVersion, "Sources=$availableSourcesText", "ComputerNamePrefix=$namePrefixDisplay", "ComputerNameContains=$nameContainsDisplay", "ADDomain=$adDomainDisplay", "ExcludeIntuneConfirmedByDeviceId=True", "ExcludeStaleAd=$([bool]$ExcludeStaleAd)", "ADLastLogonMaxAgeDays=$AdLastLogonMaxAgeDays") -join '|'
+$descriptionBase = 'Automatic HybridJoin Wave; Sources={0}; ComputerNamePrefix={1}; ComputerNameContains={2}; ADDomain={5}; ExcludeIntunePresent=False; ExcludeIntuneConfirmedByDeviceId=True; IntuneIdentityProof=AdObjectGuid,EntraDeviceId; ExcludeStaleAd={3}; ADLastLogonMaxAgeDays={4}' -f $availableSourcesText, $namePrefixDisplay, $nameContainsDisplay, [bool]$ExcludeStaleAd, $AdLastLogonMaxAgeDays, $adDomainDisplay
+$selectionSignature = @($script:AutomaticWaveCampaign, $script:AutomaticWaveVersion, "Sources=$availableSourcesText", "ComputerNamePrefix=$namePrefixDisplay", "ComputerNameContains=$nameContainsDisplay", "ADDomain=$adDomainDisplay", "ExcludeIntuneConfirmedByDeviceId=True", "IntuneIdentityProof=AdObjectGuid,EntraDeviceId", "ExcludeStaleAd=$([bool]$ExcludeStaleAd)", "ADLastLogonMaxAgeDays=$AdLastLogonMaxAgeDays") -join '|'
 $inventoryFingerprint = Get-AutomaticWaveInventoryFingerprint -Paths @($AdInventoryCsv, $IntuneInventoryCsv, $(if ($entraAvailable) { $EntraInventoryCsv } else { '' }))
 
 if ($Create -and -not [string]::IsNullOrWhiteSpace($PreviewEvidencePath)) {
@@ -787,17 +790,44 @@ foreach ($key in @($adByKey.Keys | Sort-Object)) {
     if ($serverAdRecords.Count -gt 1) { $reasons.Add('ENTRA_SERVERAD_COLLISION') }
     if ($serverAdRecords.Count -eq 1 -and -not $serverAdRecords[0].AccountEnabled) { $reasons.Add('ENTRA_SERVERAD_DISABLED') }
 
-    # Enrollment proven by identity, not by name: an Intune device carries the Entra device ID of the
-    # only enabled, registered ServerAd object of this computer, in the same tenant, with a recent sync,
-    # and no other Intune record carries that ID. Anything weaker keeps the computer selected for local
-    # verification; IntuneDeviceIdCheck records why.
+    # Enrollment proven by identity, not by name. The computer needs one enabled, registered ServerAd
+    # object. For a hybrid-joined computer its Entra device ID is the objectGUID of the AD computer
+    # object, so with an objectGUID in the AD inventory the proof is AD objectGUID = Entra device ID =
+    # Intune Entra device ID (ConfirmedByAdObjectGuid). Without one (older AD export), the proof is the
+    # Entra device ID alone (Confirmed). Either way the Intune device must be in the same tenant, have a
+    # recent sync, and be the only Intune record carrying that ID. Anything weaker keeps the computer selected for
+    # local verification; IntuneDeviceIdCheck records why.
     $intuneDeviceIdCheck = ''
+    $adObjectGuid = [guid]::Empty
+    $hasAdObjectGuid = [guid]::TryParse([string]$preferredAd.ObjectGuid, [ref]$adObjectGuid) -and $adObjectGuid -ne [guid]::Empty
     if ($reasons.Count -eq 0 -and $keyIntuneRecords.Count -gt 0) {
         $intuneDeviceIdCheck = 'NameOnly'
         if ($serverAdRecords.Count -ne 1 -or -not $serverAdRecords[0].AccountEnabled -or $serverAdRecords[0].RegisteredState -ieq 'Pending' -or [string]$serverAdRecords[0].AlternativeSecurityIdCount -eq '0') {
             $intuneDeviceIdCheck = 'EntraNotRegistered'
         }
+        elseif ($hasAdObjectGuid) {
+            # The three IDs must agree: AD objectGUID = Entra device ID = Intune Entra device ID.
+            $entraTenant = [string]$serverAdRecords[0].TenantId
+            $entraDeviceId = [guid]::Empty
+            if (-not [guid]::TryParse([string]$serverAdRecords[0].DeviceId, [ref]$entraDeviceId) -or $entraDeviceId -ne $adObjectGuid) {
+                # Entra registered under another identity (the AD object was recreated or the PC rejoined).
+                $intuneDeviceIdCheck = 'AdObjectGuidMismatch'
+            }
+            else {
+                foreach ($record in $keyIntuneRecords) {
+                    $intuneDeviceId = [guid]::Empty
+                    if (-not $record.Present -or -not [guid]::TryParse([string]$record.AzureADDeviceId, [ref]$intuneDeviceId) -or $intuneDeviceId -ne $adObjectGuid) { continue }
+                    if ($intuneRecordsByDeviceId[$intuneDeviceId.ToString()] -gt 1) { $intuneDeviceIdCheck = 'AmbiguousIntuneDeviceId'; break }
+                    if (-not [string]::IsNullOrWhiteSpace($entraTenant) -and -not [string]::IsNullOrWhiteSpace([string]$record.TenantId) -and [string]$record.TenantId -ine $entraTenant) { $intuneDeviceIdCheck = 'OtherTenant'; continue }
+                    if ($record.LastSyncUtc -lt $intuneConfirmedSyncCutoffUtc) { $intuneDeviceIdCheck = 'StaleSync'; continue }
+                    $intuneDeviceIdCheck = 'ConfirmedByAdObjectGuid'
+                    $reasons.Add('INTUNE_ENROLLED_CONFIRMED_BY_DEVICE_ID')
+                    break
+                }
+            }
+        }
         else {
+            # Older AD export without objectGUID: the proof is the Entra device ID alone.
             $entraDeviceId = [guid]::Empty
             if (-not [guid]::TryParse([string]$serverAdRecords[0].DeviceId, [ref]$entraDeviceId) -or $entraDeviceId -eq [guid]::Empty) {
                 $intuneDeviceIdCheck = 'EntraDeviceIdMissing'
@@ -830,6 +860,8 @@ foreach ($key in @($adByKey.Keys | Sort-Object)) {
             ADEnabled = [string]$preferredAd.Enabled
             IntuneMatches = $intuneMatches
             EntraServerAdMatches = $serverAdRecords.Count
+            ADObjectGuid = [string]$preferredAd.ObjectGuid
+            IntuneDeviceIdCheck = $intuneDeviceIdCheck
         })
         continue
     }
@@ -860,6 +892,7 @@ foreach ($key in @($adByKey.Keys | Sort-Object)) {
         EntraRegisteredState = if ($serverAdRecords.Count -eq 1) { [string]$serverAdRecords[0].RegisteredState } else { '' }
         EntraTrustType = if ($serverAdRecords.Count -eq 1) { [string]$serverAdRecords[0].TrustType } else { '' }
         EntraDeviceId = if ($serverAdRecords.Count -eq 1) { [string]$serverAdRecords[0].DeviceId } else { '' }
+        ADObjectGuid = [string]$preferredAd.ObjectGuid
         IntuneDeviceIdCheck = $intuneDeviceIdCheck
     })
 }
@@ -935,6 +968,8 @@ $summary = [pscustomobject]@{
     EntraUnavailableSelected = $selected.Where({ $_.SelectionReason -eq 'ENTRA_INVENTORY_UNAVAILABLE' }).Count
     IntunePresentExcluded = $excluded.Where({ $_.ExclusionReason -match 'INTUNE_DEVICE_PRESENT' }).Count
     IntuneConfirmedExcluded = $excluded.Where({ $_.ExclusionReason -match 'INTUNE_ENROLLED_CONFIRMED_BY_DEVICE_ID' }).Count
+    IntuneConfirmedByAdObjectGuidExcluded = $excluded.Where({ $_.IntuneDeviceIdCheck -eq 'ConfirmedByAdObjectGuid' }).Count
+    AdObjectGuidMismatchSelected = $selected.Where({ $_.IntuneDeviceIdCheck -eq 'AdObjectGuidMismatch' }).Count
     IntuneDeviceIdAmbiguousSelected = $selected.Where({ $_.IntuneDeviceIdCheck -eq 'AmbiguousIntuneDeviceId' }).Count
     ExclusionReasonCounts = $exclusionReasonCounts
     ADDisabledExcluded = $excluded.Where({ $_.ExclusionReason -match 'AD_DISABLED' }).Count

@@ -1185,7 +1185,7 @@ function Get-AutomaticInventoryChecks {
     foreach ($kind in $kinds) {
         $maxAge = 24
         if ($kind -eq 'Users') {
-            $path = Join-Path $script:PackageRoot 'Inventory\UsersLicenses.csv'
+            $path = Get-SemtSharedInventoryPath -PackageRoot $script:PackageRoot -Kind UserLicenses
             $check = [pscustomobject]@{ Usable=$false; Reason='Missing'; AgeHours=$null }
             if (Test-Path -LiteralPath $path -PathType Leaf) {
                 $age = ((Get-Date).ToUniversalTime() - (Get-Item -LiteralPath $path).LastWriteTimeUtc).TotalHours

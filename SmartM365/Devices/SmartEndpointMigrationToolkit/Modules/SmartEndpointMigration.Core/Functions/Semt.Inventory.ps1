@@ -3,7 +3,8 @@
     AD, Intune and Entra inventory caches, scoped refreshes and result enrichment.
 
 .DESCRIPTION
-    Shared inventories live in <Package>\Inventory and are reused READ-ONLY while they are
+    Shared inventories live in <Inventory> and are reused READ-ONLY while they are
+    <Inventory> is Storage.InventoryPath of Config\SmartEndpointMigrationToolkit.local.json.txt (default <Package>\Inventory).
     fresh (and, for Intune, when their delegated provenance matches). A refresh scoped to a
     Wave is always written inside the Run folder and never replaces a shared inventory.
 
@@ -133,10 +134,12 @@ function Get-SemtSharedInventoryPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$PackageRoot,
-        [Parameter(Mandatory = $true)][ValidateSet('AD','Intune','Entra')][string]$Kind
+        [Parameter(Mandatory = $true)][ValidateSet('AD','Intune','Entra','UserLicenses')][string]$Kind
     )
 
-    return (Join-Path -Path (Join-Path -Path $PackageRoot -ChildPath 'Inventory') -ChildPath ("Devices{0}.csv" -f $Kind))
+    # The shared inventory folder is Storage.InventoryPath of the local configuration (default <Package>\Inventory).
+    $fileName = if ($Kind -eq 'UserLicenses') { 'UsersLicenses.csv' } else { "Devices{0}.csv" -f $Kind }
+    return (Join-Path -Path (Get-SemtStorageRoot -PackageRoot $PackageRoot -Kind Inventory) -ChildPath $fileName)
 }
 
 function Get-SemtInventoryMap {

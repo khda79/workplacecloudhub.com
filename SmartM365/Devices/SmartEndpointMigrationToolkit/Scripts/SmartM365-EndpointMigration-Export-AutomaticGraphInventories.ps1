@@ -6,14 +6,15 @@ Exports the full Intune and Entra inventories used by the automatic Wave engines
 Uses one delegated interactive Microsoft Graph connection with the union of the
 required read scopes. Intune is mandatory; Entra is optional enrichment and is
 reported as a warning when its export fails. Without explicit output paths, the
-shared caches <Package>\Inventory\DevicesIntune.csv and DevicesEntra.csv are written.
+shared caches <Inventory>\DevicesIntune.csv and DevicesEntra.csv are written.
+<Inventory> is Storage.InventoryPath of Config\SmartEndpointMigrationToolkit.local.json.txt (default <Package>\Inventory).
 Provenance: copied from SmartM365/Devices/IntuneHybridJoinToolkit/Scripts/SmartM365-IntuneHybridJoinRepair-Export-AutomaticGraphInventories.ps1 1.0.0 (see Docs\PROVENANCE.json.txt).
 
 .PARAMETER IntuneOutputPath
-Intune CSV path. Defaults to the shared cache <Package>\Inventory\DevicesIntune.csv.
+Intune CSV path. Defaults to the shared cache <Inventory>\DevicesIntune.csv.
 
 .PARAMETER EntraOutputPath
-Entra CSV path. Defaults to the shared cache <Package>\Inventory\DevicesEntra.csv.
+Entra CSV path. Defaults to the shared cache <Inventory>\DevicesEntra.csv.
 
 .VERSION
 1.0.0

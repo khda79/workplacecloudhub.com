@@ -4,7 +4,8 @@ Exports Microsoft Entra devices to DevicesEntra.csv for the Smart Endpoint Migra
 
 .DESCRIPTION
 Uses Microsoft Graph to read Entra devices from /devices.
-Without -OutputPath, an unscoped export writes the shared cache <Package>\Inventory\DevicesEntra.csv
+Without -OutputPath, an unscoped export writes the shared cache <Inventory>\DevicesEntra.csv
+<Inventory> is Storage.InventoryPath of Config\SmartEndpointMigrationToolkit.local.json.txt (default <Package>\Inventory).
 and a -ComputerListPath export writes DevicesEntra.csv next to that Computers.txt. A scoped export
 never overwrites the shared cache. InventoryTenantId, InventoryAuthenticationMode, and InventoryScope
 preserve the delegated full-inventory provenance used by the automatic Wave engines.

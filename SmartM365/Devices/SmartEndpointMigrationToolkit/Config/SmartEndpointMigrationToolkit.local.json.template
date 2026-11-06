@@ -3,7 +3,8 @@
     "Product":  "SmartEndpointMigrationToolkit",
     "Storage":  {
                     "WavesPath":  "",
-                    "RunsPath":  ""
+                    "RunsPath":  "",
+                    "InventoryPath":  ""
                 },
     "Description":  "Global options of this technician installation. __INHERIT__ keeps the campaign default of Config\\SmartEndpointMigrationToolkit.options.json.txt. A Wave, a SEMT_* environment variable, a GUI choice or an explicit CLI option overrides it.",
     "Options":  {

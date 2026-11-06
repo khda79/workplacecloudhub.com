@@ -7,10 +7,12 @@ Uses the ActiveDirectory PowerShell module to read computer objects.
 Without -Domain, the script exports all domains in the current AD forest.
 With -Domain, the script exports only that domain, and only to -OutputPath or a -ComputerListPath
 folder: the shared cache always covers the whole forest.
-Without -OutputPath, an unscoped export writes the shared cache <Package>\Inventory\DevicesAD.csv
+Without -OutputPath, an unscoped export writes the shared cache <Inventory>\DevicesAD.csv
+<Inventory> is Storage.InventoryPath of Config\SmartEndpointMigrationToolkit.local.json.txt (default <Package>\Inventory).
 and a -ComputerListPath export writes DevicesAD.csv next to that Computers.txt. A scoped export
 never overwrites the shared cache. The columns cover both the HybridJoin and the Windows11Upgrade
-automatic Wave engines.
+automatic Wave engines. ObjectGUID is the Entra device ID of a hybrid-joined computer: the
+HybridJoin automatic Wave uses it to prove an Intune enrollment of this exact AD object.
 Provenance: copied from SmartM365/Devices/Windows11UpgradeToolkit/Scripts/SmartM365-Windows11Upgrade-Export-ADDevicesCsv.ps1 1.0.0 (see Docs\PROVENANCE.json.txt).
 
 .PARAMETER OutputPath
@@ -27,7 +29,7 @@ When omitted, all domains in the current AD forest are exported.
 Regenerates the shared cache even when it is less than 12 hours old.
 
 .VERSION
-1.0.0
+1.1.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -44,7 +46,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.0.0"
+$ScriptVersion = "1.1.0"
 $AdInventoryFreshnessHours = 24
 
 function Write-Host {
@@ -194,7 +196,8 @@ $commonProperties = @(
     "OperatingSystem",
     "OperatingSystemVersion",
     "LastLogonTimestamp",
-    "DistinguishedName"
+    "DistinguishedName",
+    "ObjectGUID"
 )
 
 Write-Host "Smart Endpoint Migration Toolkit - Export-ADDevicesCsv version $ScriptVersion" -ForegroundColor Cyan
@@ -225,6 +228,7 @@ function New-AdExportRow {
         Enabled               = $Computer.Enabled
         DNSHostName           = $Computer.DNSHostName
         DistinguishedName     = $Computer.DistinguishedName
+        ObjectGUID            = if ($Computer.ObjectGUID) { $Computer.ObjectGUID.ToString() } else { "" }
         OperatingSystem       = $Computer.OperatingSystem
         OperatingSystemVersion = $Computer.OperatingSystemVersion
         LastLogonTimestampUtc = Convert-FileTimeUtc -Value $Computer.LastLogonTimestamp
@@ -242,6 +246,7 @@ function New-MissingAdExportRow {
         Enabled               = ""
         DNSHostName           = ""
         DistinguishedName     = ""
+        ObjectGUID            = ""
         OperatingSystem       = ""
         OperatingSystemVersion = ""
         LastLogonTimestampUtc = ""
