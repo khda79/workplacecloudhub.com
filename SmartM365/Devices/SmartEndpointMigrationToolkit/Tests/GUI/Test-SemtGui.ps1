@@ -366,9 +366,34 @@ foreach ($pair in @(@('singlePcXaml','LaunchSingleButton'),@('newWaveXaml','Crea
     $button = $child.FindName($pair[1])
     'WINDOW={0};NAME={4};BUTTON={1};ENABLED={2};STYLED={3}' -f $pair[0],($null -ne $button),$button.IsEnabled,($null -ne $button.Style),$pair[1]
 }
+# Layout: at the default size and at the minimum size, every button outside a ScrollViewer is whole and inside the window (no clipped Create Wave).
+foreach ($name in 'singlePcXaml','newWaveXaml','automaticWaveXaml') {
+    foreach ($size in 'Default','Minimum') {
+        $child = [Windows.Markup.XamlReader]::Load([System.Xml.XmlReader]::Create([System.IO.StringReader]::new((Get-GuiChildWindowMarkup -Markup (Get-Literal $name) -MainMarkup $main))))
+        if ($size -eq 'Minimum') { $child.Width = $child.MinWidth; $child.Height = $child.MinHeight }
+        $child.WindowStartupLocation = 'Manual'; $child.Left = -20000; $child.Top = -20000; $child.ShowActivated = $false
+        $child.Show(); $child.UpdateLayout()
+        $root = $child.Content
+        $bad = @()
+        $queue = New-Object System.Collections.Queue; $queue.Enqueue($root)
+        while ($queue.Count -gt 0) {
+            $node = $queue.Dequeue()
+            if ($node -is [Windows.Controls.ScrollViewer]) { continue }
+            if ($node -is [Windows.Controls.Button] -and $node.Visibility -eq 'Visible' -and $node.Name) {
+                $box = $node.TransformToAncestor($root).TransformBounds([Windows.Rect]::new(0, 0, $node.ActualWidth, $node.ActualHeight))
+                $clip = [Windows.Controls.Primitives.LayoutInformation]::GetLayoutClip($node)
+                if ($node.ActualHeight -lt 20 -or $box.Bottom -gt ($root.ActualHeight + 0.5) -or $box.Right -gt ($root.ActualWidth + 0.5) -or $null -ne $clip) { $bad += $node.Name }
+            }
+            for ($i = 0; $i -lt [Windows.Media.VisualTreeHelper]::GetChildrenCount($node); $i++) { $queue.Enqueue([Windows.Media.VisualTreeHelper]::GetChild($node, $i)) }
+        }
+        $child.Close()
+        'LAYOUT={0};SIZE={1};CLIPPED={2}' -f $name,$size,($bad -join ',')
+    }
+}
 '@ | Set-Content -LiteralPath $windowsScript -Encoding ASCII
     $windowsCheck = @(& $powershell -NoProfile -STA -ExecutionPolicy Bypass -File $windowsScript -Gui $guiPath 2>&1 | ForEach-Object { [string]$_ })
     Test-Step 'Single PC, New Wave and Automatic Wave windows load under Windows PowerShell 5.1 STA (styled main buttons)' { @($windowsCheck | Where-Object { $_ -match '^WINDOW=(singlePcXaml|newWaveXaml|automaticWaveXaml);NAME=[A-Za-z]+;BUTTON=True;ENABLED=True;STYLED=True$' }).Count -eq 6 }
+    Test-Step 'no button of the three windows is clipped, at the default size and at the minimum size (Create Wave, Launch Single PC, Close)' { @($windowsCheck | Where-Object { $_ -match '^LAYOUT=(singlePcXaml|newWaveXaml|automaticWaveXaml);SIZE=(Default|Minimum);CLIPPED=$' }).Count -eq 6 }
     Test-Step 'Create Wave of the Automatic Wave window is enabled when the window opens (no Preview needed)' { @($windowsCheck | Where-Object { $_ -match '^WINDOW=automaticWaveXaml;NAME=AutomaticCreateButton;BUTTON=True;ENABLED=True' }).Count -eq 1 }
     $popupScript = Join-Path $tempRoot 'popup-check.ps1'
     @'

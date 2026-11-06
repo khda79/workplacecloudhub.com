@@ -783,7 +783,7 @@ $xaml = @'
 $singlePcXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Single PC" Width="900" Height="420" MinWidth="700" MinHeight="360"
+        Title="Single PC" Width="900" Height="460" MinWidth="700" MinHeight="420"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
         UseLayoutRounding="True" SnapsToDevicePixels="True">
@@ -825,7 +825,7 @@ $singlePcXaml = @'
 $newWaveXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="New Wave" Width="900" Height="560" MinWidth="700" MinHeight="480"
+        Title="New Wave" Width="900" Height="620" MinWidth="700" MinHeight="500"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="#F5F8FB" FontFamily="Segoe UI" FontSize="12"
         UseLayoutRounding="True" SnapsToDevicePixels="True">
@@ -843,15 +843,25 @@ $newWaveXaml = @'
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Margin="0,0,14,0">
-                    <TextBlock Text="New Wave" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
-                    <TextBlock Text="Wave name (letters, digits, dot, dash, underscore)"/>
-                    <TextBox x:Name="NewWaveNameText"/>
-                    <TextBlock Text="Computers (one per line, optional)"/>
-                    <TextBox x:Name="NewWaveComputersText" AcceptsReturn="True" Height="220" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
-                    <TextBlock Text="Create only prepares the Wave folder, Computers.txt, Wave.local.json.txt and the Loop/Once launchers. It never launches the Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                    <Button x:Name="CreateWaveButton" Content="Create Wave" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" MinWidth="140"/>
-                </StackPanel>
+                <!-- The Computers list takes the free height, so Create Wave always stays visible above the Close row. -->
+                <Grid Margin="0,0,14,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*" MinHeight="90"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="New Wave" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
+                    <TextBlock Grid.Row="1" Text="Wave name (letters, digits, dot, dash, underscore)"/>
+                    <TextBox Grid.Row="2" x:Name="NewWaveNameText"/>
+                    <TextBlock Grid.Row="3" Text="Computers (one per line, optional)"/>
+                    <TextBox Grid.Row="4" x:Name="NewWaveComputersText" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+                    <TextBlock Grid.Row="5" Text="Create only prepares the Wave folder, Computers.txt, Wave.local.json.txt and the Loop/Once launchers. It never launches the Wave." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <Button Grid.Row="6" x:Name="CreateWaveButton" Content="Create Wave" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" MinWidth="140"/>
+                </Grid>
                 <StackPanel Grid.Column="1" Margin="14,0,0,0">
                     <TextBlock Text="Created Wave" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
                     <TextBox x:Name="NewWavePathText" IsReadOnly="True"/>
