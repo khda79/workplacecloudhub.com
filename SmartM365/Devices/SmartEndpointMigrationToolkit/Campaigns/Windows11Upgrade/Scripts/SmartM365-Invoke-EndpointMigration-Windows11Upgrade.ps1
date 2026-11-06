@@ -2347,7 +2347,34 @@ function Get-SetupMediaIntegrityManifestHash {
 
     $manifestPath = Get-SetupMediaIntegrityManifestPath -MediaRoot $MediaRoot
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return '' }
-    return (Get-SmartFileSha256 -Path $manifestPath)
+
+    # Hash of what the manifest describes (path, length and SHA256 of every file), not of the
+    # manifest file itself: a manifest regenerated with another row order, encoding or line
+    # ending describes the same media and must give the same value. A manifest that cannot be
+    # read this way keeps the hash of the file, as before.
+    try {
+        $rows = @(Import-Csv -LiteralPath $manifestPath -ErrorAction Stop)
+        if ($rows.Count -eq 0) { throw 'empty manifest' }
+        foreach ($column in @('RelativePath','Length','SHA256')) {
+            if (-not $rows[0].PSObject.Properties[$column]) { throw ("missing column {0}" -f $column) }
+        }
+        $lines = New-Object System.Collections.Generic.List[string]
+        foreach ($row in $rows) {
+            $relativePath = ([string]$row.RelativePath).Trim().Replace('/', '\').TrimStart('\').ToUpperInvariant()
+            $length = ([string]$row.Length).Trim()
+            $hash = ([string]$row.SHA256).Trim().ToUpperInvariant()
+            $lines.Add(("{0}|{1}|{2}" -f $relativePath,$length,$hash))
+        }
+        $sorted = $lines.ToArray()
+        [System.Array]::Sort($sorted, [System.StringComparer]::Ordinal)
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes(($sorted -join "`n"))
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try { $digest = $sha.ComputeHash($bytes) } finally { $sha.Dispose() }
+        return ('content:' + (($digest | ForEach-Object { $_.ToString('X2') }) -join ''))
+    }
+    catch {
+        return ('file:' + (Get-SmartFileSha256 -Path $manifestPath))
+    }
 }
 
 function Test-SetupMediaIntegrityManifest {
