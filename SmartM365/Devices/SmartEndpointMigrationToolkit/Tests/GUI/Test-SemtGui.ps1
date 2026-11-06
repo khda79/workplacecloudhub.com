@@ -289,8 +289,7 @@ try {
     $directWave = Join-Path $packageRoot 'Waves\HybridJoin\WAVE-AUTO-HJ-GUI'
     $directComputers = if (Test-Path -LiteralPath (Join-Path $directWave 'Computers.txt')) { @(Get-Content -LiteralPath (Join-Path $directWave 'Computers.txt') | Where-Object { $_ -and $_ -notmatch '^\s*#' }) } else { @() }
     $directOk = ($direct.ExitCode -eq 0 -and $direct.Summary.Count -eq 1 -and $direct.Selection.Count -eq 1 -and @(Import-Csv -LiteralPath $direct.Selection[0].FullName | Where-Object { $_.ComputerName -like 'GUI-PC01*' }).Count -eq 1 -and @($directComputers | Where-Object { $_ -match '^GUI-PC01' }).Count -eq 1)
-    Write-TestResult -Condition $directOk -Message 'Create without a Preview computes the selection, writes AutomaticWaveSelection.csv and creates the Wave' -Detail ('exit={0}; summary={1}; selection={2}; computers={3}; log={4}' -f $direct.ExitCode,$direct.Summary.Count,$direct.Selection.Count,($directComputers -join '|'),((@($direct.Log -split '?
-' | Where-Object { $_.Trim() }) | Select-Object -Last 3) -join ' / '))
+    Write-TestResult -Condition $directOk -Message 'Create without a Preview computes the selection, writes AutomaticWaveSelection.csv and creates the Wave' -Detail ('exit={0}; summary={1}; selection={2}; computers={3}; log={4}' -f $direct.ExitCode,$direct.Summary.Count,$direct.Selection.Count,($directComputers -join '|'),((@($direct.Log -split '\r?\n' | Where-Object { $_.Trim() }) | Select-Object -Last 3) -join ' / '))
     Remove-Item -LiteralPath $directWave -Recurse -Force -ErrorAction SilentlyContinue
     Test-Step 'engine stages reach the log for the waiting window' { (Get-AutomaticWaveLastStage -Text $ok.Log) -match '^Automatic Wave preview ready\.' -and $ok.Log -match ' STAGE Loading inventory records\.\.\.' }
     Test-Step 'end message counts read the HybridJoin and Windows 11 summaries' { (Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 3; ExcludedDevices = 2; FilterExcludedDevices = 1 })) -match 'Selected: 3' -and (Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 4; ExcludedDevices = 0; NameFilterExcludedDevices = 7 })) -match 'Filtered out: 7' }
@@ -405,8 +404,8 @@ exit 0
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDbErCHYsTnnbqv
-# rAQuBUyt59e1oyE+R40vUffFuctT7KCCF/swggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDU1McGfXVjN8YF
+# xbQg9im5WBpqyeBaxPgWdymOJAtIxKCCF/swggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -539,31 +538,31 @@ exit 0
 # a3BsYWNlY2xvdWRodWIuY29tAhAebu87xzjhs0Q4yPEDH+JoMA0GCWCGSAFlAwQC
 # AQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwG
 # CisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZI
-# hvcNAQkEMSIEIOt+U6PRS7AT+SRq3UsSXmqErrhUyzC1S5nubDV7DzhzMA0GCSqG
-# SIb3DQEBAQUABIIBgE58zndFWKAX58ypbeFP8QdPwhGP0Vf1xwLRIoCT97tEHq0R
-# x6xuzUgKmQJqLDZS/w78okmEQ1mTJtag/9QqDnyHTVcyYyjqCGmrRfMw9ckKPOxZ
-# zx0EU3V5t1/E8pMoHWzWv6qrGeSHyo7Ws44mvVOytZS1bHh4rOA3LbKdZy+Gxr1w
-# JGwDLZOGNYuL5MRCqCx/pr0kKRJAn1WoG1XFChqbuObXz3HGOog1H9q3/5DzVqVv
-# 7GWJg4xt2g/fgqzvwCNEA7AIYdLHWi8lf5SM3w3HILvynKxMJPNa8oswJSJfBhvr
-# HgEPsWbII6tj/gNJ7VgMY3MV609xDQZu5HwU7SCCTeeBuv75wyRLEBFl9qpl2Ufp
-# CIqIXOigEGBTLtEaIMa50OUpZhbzWZE9tnunfnmdLb2NBLwQ2IGU+W96MW1w0l+F
-# 61BqNmlair+Hq14jMbkBTqDl6rxZGsYQa/DocXfcpFlug1c9DH7zJaxa5dnFx2zs
-# 3dcE2OeyJZYO/frK+KGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# hvcNAQkEMSIEIJpHAxv1Z2zmeyYuLpC9fO+9T7huJYKs7CJhSuYkGXXWMA0GCSqG
+# SIb3DQEBAQUABIIBgIc+m0OaZWNlINWegMKpkLfGBHPuyJdk6Zw41xYaF0PmpCau
+# xRA4Pnr042fZ1fNemPMG8DGPBH87s5FBF8IfNWXJLLWjG2FIGPtLXM21RwdqAPIr
+# 2HVcVcK0ZQCvcfj2jYoq+ph6Uy3ACiqimsBkIPyeOqzAjykP/sYGAZbJ/vA/etoV
+# v56NoNimxakM4IHMf997lLZbnV+iooOQ7+UG/GwYQatfYraerzS3uu2/R/HxNveF
+# +jzcwU2WsE9JkIU3LtEcDwVhXnzIA6jsywia1zwj6fr8/atPwVFnih+nXgxwG5In
+# QW96SGkTdvsGGUgCACwcsuGlOr+egAuTtLjqvTBCNSJ6f3ZMeXWzeD6SVkYaRreg
+# D74reWMBKw+WMkYZEqTFLghGPyLj5C3uZwb2zbSXM4bApPqV5tQ7I+/dVTy05a6v
+# 20ZHAfMVZWejshG2/7g7ubFJ68DdjE+MdpekBQDU0DcWmUBvk/QVOC8HtG+i0XeV
+# aJmrMMHuKL19gg/U+aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDYxNDI4
-# MThaMC8GCSqGSIb3DQEJBDEiBCDwQoUAyni8yi/mwTsFuGlFNrhm/HikOPklGX4M
-# YULe+DANBgkqhkiG9w0BAQEFAASCAgArP+HeFxizw+koaA+GqvemEAQjrKOo667u
-# d5cQGBgLziteTuy7WT/TttS190U+gg1zbCAoIN3wC1XPAz571LxAqe1m1Kedk390
-# 9RmpNllDdCqYcMbvXcnB4SVVQPYZmGKQ4DvH2A59vLj6mSVNxnyL4q7dmcIEvl65
-# 0Lj1naffPmCjSk2kuhxh3s+aKJfuqxStjdlgi6cMRHj97bs0Xw/sycgqOWojYPec
-# eeaN1wlh6multxuwFowe+4PFmPkF38rh3Df0dmV8bbj2hlK3RF5edI0laUf2enHL
-# H9Z4IOMR7cDI5xTMaeCQRHAEcdUyim8+TmrUCND2TGuMqwJpyQGMLPXXCo0+zO/l
-# J6os5tU62TkD7s73LdiV6WhykM28FE71hUg/s/6SXfiGrmLS+Om/fvl8+g6OAryW
-# tRNwiLxvPjPayPhJiG9qMfog9FsNnCg/HhP0IpPJO8v/eMnDfUFfB681fgdA/0IH
-# yX09n8k7U/hoPqQGA92TZZM5+rUef3oALyCNeo8UkOxuWUJZBqrUtQvcVUo/FI7f
-# RoAcOJ4HOavrDTqr04VuIx8FHNCgh/bFtcbA/jzIU87wSwyRKqFQcdl9EcKqIA14
-# MfRosHc5Bhqp8APfR8c5dqlN+A133CCwPxjZnhW1xIah5kdBf4HafKSXq3AmGTug
-# Jz+l3z5w/g==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjExMDYxNTQ0
+# NTVaMC8GCSqGSIb3DQEJBDEiBCAaRxmfHrjaMLSWlA9mZahQUD/BoSleJy+4s1eb
+# VtcIsDANBgkqhkiG9w0BAQEFAASCAgAiZuILjAyAg6qZ1MtObiPNCYvFt70tnO6t
+# uiVLQrG6Q6y/Nim5w/J+fqaMAZ+K+jBTqST5ksmYCe0v/g+HwcOns8dZ+g6QTdZs
+# 4YF7x7nlkUGN+M4Z9i29r7bRU6UaRXaI5tcvwFcZtHN6pyhBBwqPjBetcCKDmXMS
+# x5TdCXXTSRLId6RvAJ4ffzwkM7zuUIRS7BUNijOGNe52kwHtfeekl+SpTNpZAskX
+# lul4g6yT58WablBXv7t4plrFbAvD2bC3i6+p3XY7EuZ7Bq4o+MSFcYgwwFngUetz
+# 1RQDGaC1Naa81TUk+Fa3a0RUtXraMUl8vRW7+sMTNV2KN8Tv1rqCXbjr1iQvqVg3
+# KpFDpIsdmIohEMgcpYtS+sfkAIe2zqrJkVRsLdx23ikgph7gqlHUMqTn1/k/VM8d
+# v3X9+Y7xwhd718tZXj1I59tMQ9ig4GGc8UOctycJpjVfmS1EtBmTCtbk2Mi6aq70
+# Msc94/C9YezQBWjmwoeOYDz6+OB/7twWg/t3xgpO+NcsfnsYTPAAFiNCT5E++7Vn
+# AWBRV/qu492h7GzqzxDGwF1mt1EHHrejEWxCYQDwqCp9wyUuzWVv7m+TgbmCzamc
+# Uk8+CExlmKPN8HK+5Ajtleh3tyLPHludmfKn5LPsEVrykfn7pHdcNkCRaboosHeJ
+# 8h4ehzAKvA==
 # SIG # End signature block
