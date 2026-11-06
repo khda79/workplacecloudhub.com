@@ -236,6 +236,24 @@ if ($hjEndpointText -notmatch '\[string\]\$enrollStart\.ExitCode -eq "-214591077
 if ($hjEndpointText -notmatch "\*DeviceManagement_Admin\.csv") { throw 'Enrollment evidence summary does not read the Admin channel.' }
 Write-Host 'PASS: an Intune enrollment stub is recognised strictly and removed only on opt-in'
 
+# Enrollment backups: reg.exe export cannot write past MAX_PATH (260), which blocked every stub removal.
+$backupNameDefinition=$ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-EnrollmentRegistryBackupFileName' },$true)
+if (-not $backupNameDefinition) { throw 'Endpoint function missing: Get-EnrollmentRegistryBackupFileName' }
+. ([scriptblock]::Create($backupNameDefinition.Extent.Text))
+$removalDefinition=$ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Remove-NonIntuneMdmEnrollment' },$true)
+$registryPathPatterns=@([regex]::Matches($removalDefinition.Extent.Text,'"(HKLM\\[^"$]+)\$id"') | ForEach-Object { $_.Groups[1].Value })
+if ($registryPathPatterns.Count -lt 9) { throw "Enrollment registry paths not found in Remove-NonIntuneMdmEnrollment: $($registryPathPatterns.Count)" }
+$worstId='FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF'
+$worstDir='C:\ProgramData\WCH\SmartM365\SmartEndpointMigrationToolkit\HybridJoin\Output\{0}_{1}_backup_{2}' -f 'ABCDEFGHIJKLMNO','intune_trace_with_unhealthy_join','20261106_094539_015'
+$backupNames=@($registryPathPatterns | ForEach-Object { Get-EnrollmentRegistryBackupFileName -RegistryPath ($_ + $worstId) })
+foreach ($backupName in $backupNames) {
+    $fullPath=Join-Path $worstDir $backupName
+    if ($fullPath.Length -ge 260) { throw "Enrollment backup path reaches MAX_PATH ($($fullPath.Length)): $fullPath" }
+    if ($backupName -notmatch [regex]::Escape($worstId)) { throw "Enrollment backup name lost the enrollment ID: $backupName" }
+}
+if (@($backupNames | Select-Object -Unique).Count -ne $backupNames.Count) { throw 'Two enrollment keys share one backup file name.' }
+Write-Host ('PASS: enrollment backup paths stay below MAX_PATH (longest {0})' -f (@($backupNames | ForEach-Object { (Join-Path $worstDir $_).Length } | Measure-Object -Maximum).Maximum))
+
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG

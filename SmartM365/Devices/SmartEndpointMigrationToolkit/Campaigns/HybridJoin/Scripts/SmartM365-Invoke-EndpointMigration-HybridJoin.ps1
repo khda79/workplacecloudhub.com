@@ -1604,6 +1604,16 @@ function Get-MdmEnrollmentState {
     catch { throw }
 }
 
+function Get-EnrollmentRegistryBackupFileName {
+    # Short, unique .reg name for one enrollment key. The key path already holds the enrollment ID,
+    # so the common HKLM\SOFTWARE\Microsoft prefix is dropped: reg.exe export cannot write a path
+    # longer than 260 characters (MAX_PATH) and fails with "Impossible d'ecrire dans le fichier".
+    param([Parameter(Mandatory=$true)][string]$RegistryPath)
+
+    $relative = $RegistryPath -replace '^(?i)HKLM\\SOFTWARE\\Microsoft\\', ''
+    return ("{0}.reg" -f ($relative -replace '[\\/:*?"<>|{} ]', '_'))
+}
+
 function Remove-NonIntuneMdmEnrollment {
     param(
         [Parameter(Mandatory=$true)][string]$EnrollmentIds,
@@ -1636,8 +1646,6 @@ function Remove-NonIntuneMdmEnrollment {
     }
 
     foreach ($id in $ids) {
-        $safeId = $id -replace '[\\/:*?"<>|{}]', '_'
-
         $registryPaths = @(
             "HKLM\SOFTWARE\Microsoft\Enrollments\$id",
             "HKLM\SOFTWARE\Microsoft\Enrollments\Status\$id",
@@ -1656,8 +1664,7 @@ function Remove-NonIntuneMdmEnrollment {
             $psPath = "Registry::$regPath"
             if (-not (Test-Path -LiteralPath $psPath)) { continue }
 
-            $safeRegName = ($regPath -replace '[\\/:*?"<>|{} ]', '_')
-            $backupFile = Join-Path $backupDir ("{0}_{1}.reg" -f $safeId,$safeRegName)
+            $backupFile = Join-Path $backupDir (Get-EnrollmentRegistryBackupFileName -RegistryPath $regPath)
             try {
                 $exportOutput = & reg.exe export $regPath $backupFile /y 2>&1
                 $exportExitCode = $LASTEXITCODE
