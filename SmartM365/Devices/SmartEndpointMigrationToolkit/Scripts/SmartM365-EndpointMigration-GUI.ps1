@@ -1514,7 +1514,9 @@ function Start-InventoryRefresh {
     #>
     param([ValidateSet('AD','Intune','Entra','Users')][string[]]$Kinds)
 
-    $plan = if ($PSBoundParameters.ContainsKey('Kinds')) { @(Get-InventoryRefreshPlan -Campaign $script:CurrentCampaign -Kinds $Kinds) } else { @(Get-InventoryRefreshPlan -Campaign $script:CurrentCampaign) }
+    # @() outside the if: an if statement unrolls its output, so a single stream (for example Graph
+    # only) would be one object without .Count under StrictMode in Windows PowerShell 5.1.
+    $plan = @(if ($PSBoundParameters.ContainsKey('Kinds')) { Get-InventoryRefreshPlan -Campaign $script:CurrentCampaign -Kinds $Kinds } else { Get-InventoryRefreshPlan -Campaign $script:CurrentCampaign })
     if ($plan.Count -eq 0) { return }
     $evidence = Join-Path (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) ("{0}\_InventoryRefresh\{1}" -f $script:CurrentCampaign,(Get-Date -Format 'yyyyMMdd-HHmmss'))
     New-SemtDirectory -Path $evidence
