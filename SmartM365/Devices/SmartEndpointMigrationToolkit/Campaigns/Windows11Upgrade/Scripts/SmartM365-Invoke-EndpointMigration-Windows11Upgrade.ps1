@@ -4829,9 +4829,15 @@ function Invoke-SetupUpgrade {
     param([Parameter(Mandatory = $true)][string]$SetupExePath)
 
     New-SmartDirectory -Path $script:SetupLogDir
+    # /noreboot: Windows Setup must not restart the computer by itself at the end of its online
+    # phase. The restart that completes the upgrade is decided afterwards by
+    # Resolve-SetupUpgradeSuccessOutcome: only when no interactive user is connected (or when the
+    # uptime threshold forces it), otherwise the user is notified and the upgrade completes at the
+    # next restart.
     $args = @(
         '/auto','upgrade',
         '/quiet',
+        '/noreboot',
         '/eula','accept',
         '/dynamicupdate',$SetupDynamicUpdate.ToLowerInvariant(),
         '/copylogs',"`"$script:SetupLogDir`""
