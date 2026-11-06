@@ -71,7 +71,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtProgramFolde
 ## 5. Windows 11 (laboratoire)
 
 - [ ] Média de test + manifeste SHA256 ; Wave avec source UNC.
-- [ ] Dry run puis Audit : préparation, matériel, disque, source.
+- [ ] Dry run puis Audit : préparation, matériel, disque, source ; l'audit copie le média dans
+      le cache du poste (`SETUP_UPGRADE_READY`, `SetupValidatedAuditOnly`) sans lancer le setup.
 - [ ] Réparation avec **DirectSetup activé et *Allow controlled reboots* désactivé** : aucun
       redémarrage demandé (l'endpoint ne reçoit pas `-AllowReboot`).
 - [ ] Réparation normale sur un poste : copie par le poste, validation, setup lancé, marqueur

@@ -59,8 +59,11 @@ DirectSetup et *Allow controlled reboots* désactivé, aucun redémarrage n'est 
 
 1. **Dry run** (Once) : DNS, ping, SMB 445 et partage administratif pour chaque poste. Rien
    n'est copié.
-2. **Audit distant seul** (Once) : préparation, matériel, disque, médias et accès aux sources,
-   sans modification.
+2. **Audit distant seul** (Once) : préparation, matériel, disque, médias et accès aux sources.
+   Aucune réparation, aucun nettoyage disque, aucun setup ni redémarrage. Quand le poste est
+   prêt, l'audit valide le média : il le **copie** dans le cache du poste (environ 5 à 6 Go,
+   portes de copie respectées), adopte un média de l'ancien outil selon les règles de la
+   section 5 et remplace un cache invalide. Le run de réparation réutilise ensuite ce cache.
 3. **Réparation** (Loop) : les actions activées s'exécutent ; le média est copié par le poste
    lui-même depuis la source choisie (pas par le poste technicien), validé, puis le setup
    Windows démarre. Un poste non inscrit dans Intune est mis à niveau par le setup comme les

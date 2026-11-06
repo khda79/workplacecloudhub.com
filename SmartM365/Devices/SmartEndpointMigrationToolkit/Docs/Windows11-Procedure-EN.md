@@ -56,8 +56,11 @@ only when no user is connected, **except** when uptime exceeds
 
 1. **Dry run** (Once): DNS, ping, SMB 445 and administrative share for every computer. Nothing
    is copied.
-2. **Remote audit only** (Once): readiness, hardware, disk, media and source reachability
-   without changes.
+2. **Remote audit only** (Once): readiness, hardware, disk, media and source reachability.
+   No repair, disk cleanup, setup or reboot. When the computer is ready, the audit validates
+   the media: it **copies** it into the computer cache (about 5 to 6 GB, copy gates honoured),
+   adopts media of the previous toolkit under the rules of section 5 and replaces an invalid
+   cache. The repair Run then reuses this cache.
 3. **Repair** (Loop): the enabled actions run; setup media is copied by the target itself from
    the selected source (not by the technician computer), validated, then Windows Setup starts.
    A computer not enrolled in Intune is upgraded by setup like the others (warning in the
