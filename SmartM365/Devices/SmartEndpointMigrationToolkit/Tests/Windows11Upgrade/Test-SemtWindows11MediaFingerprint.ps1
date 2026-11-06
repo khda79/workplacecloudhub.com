@@ -32,7 +32,7 @@ $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($w11Path, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw ('Windows 11 upgrade script does not parse: {0}' -f $parseErrors[0].Message) }
 $functionText = @{}
-foreach ($name in 'Get-SetupMediaIntegrityManifestHash','Get-SetupMediaIntegrityManifestPath','Get-SmartFileSha256','Test-SetupFingerprintMatch') {
+foreach ($name in 'Get-SetupMediaIntegrityManifestHash','Get-SetupMediaIntegrityManifestPath','Get-SmartFileSha256','Open-SmartFileReadStream','Test-SetupFingerprintMatch') {
     $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     if ($null -eq $definition) { throw "Function not found in the Windows 11 upgrade script: $name" }
     $functionText[$name] = $definition.Extent.Text

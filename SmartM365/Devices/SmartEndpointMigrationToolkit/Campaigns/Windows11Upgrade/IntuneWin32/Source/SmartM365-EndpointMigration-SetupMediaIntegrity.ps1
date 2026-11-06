@@ -22,13 +22,35 @@ function ConvertTo-SmartM365LongLiteralPath {
     return '\\?\' + $fullPath
 }
 
+function Open-SmartM365FileReadStream {
+    # Opens a file for reading through its \\?\ long literal path. Some Windows PowerShell hosts refuse that prefix
+    # ("Illegal characters in path"); the same file is then reopened through its ordinary full path when that path
+    # is shorter than MAX_PATH. Any other error (missing file, access denied, long path) is rethrown unchanged.
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [scriptblock]$OpenRead = { param($LiteralPath) [System.IO.File]::OpenRead($LiteralPath) }
+    )
+
+    $longPath = ConvertTo-SmartM365LongLiteralPath -Path $Path
+    try { return (& $OpenRead $longPath) }
+    catch {
+        $refusal = $_.Exception
+        while ($refusal -is [System.Management.Automation.MethodInvocationException] -and $null -ne $refusal.InnerException) { $refusal = $refusal.InnerException }
+        if (-not ($refusal -is [System.ArgumentException] -or $refusal -is [System.NotSupportedException])) { throw }
+        if ($Path.StartsWith('\\?\')) { throw }
+        $plainPath = [System.IO.Path]::GetFullPath($Path)
+        if ($plainPath.Length -ge 260) { throw }
+        return (& $OpenRead $plainPath)
+    }
+}
+
 function Get-SmartM365SetupMediaFileHash {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     $sha = [System.Security.Cryptography.SHA256]::Create()
     $stream = $null
     try {
-        $stream = [System.IO.File]::OpenRead((ConvertTo-SmartM365LongLiteralPath -Path $Path))
+        $stream = Open-SmartM365FileReadStream -Path $Path
         $hashBytes = $sha.ComputeHash($stream)
         return (($hashBytes | ForEach-Object { $_.ToString('X2') }) -join '')
     }

@@ -40,6 +40,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Windows11Upgrade
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Windows11Upgrade\Test-SemtWindows11InteractiveUserDetection.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Windows11Upgrade\Test-SemtWindows11MediaFingerprint.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Windows11Upgrade\Test-SemtWindows11SetupNoReboot.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Windows11Upgrade\Test-SemtWindows11LongPathFallback.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtPowerShellDates.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtPowerShellDates.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Core\Test-SemtProgramFolder.ps1

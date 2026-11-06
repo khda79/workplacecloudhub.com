@@ -918,13 +918,39 @@ function ConvertTo-LongLiteralPath {
     return '\\?\' + $fullPath
 }
 
+function Open-SmartFileReadStream {
+    # Opens a file for reading through its \\?\ long literal path. Some Windows PowerShell hosts refuse that prefix
+    # ("Illegal characters in path"); the same file is then reopened through its ordinary full path when that path
+    # is shorter than MAX_PATH. Any other error (missing file, access denied, long path) is rethrown unchanged.
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [scriptblock]$OpenRead = { param($LiteralPath) [System.IO.File]::OpenRead($LiteralPath) }
+    )
+
+    $longPath = ConvertTo-LongLiteralPath -Path $Path
+    try { return (& $OpenRead $longPath) }
+    catch {
+        $refusal = $_.Exception
+        while ($refusal -is [System.Management.Automation.MethodInvocationException] -and $null -ne $refusal.InnerException) { $refusal = $refusal.InnerException }
+        if (-not ($refusal -is [System.ArgumentException] -or $refusal -is [System.NotSupportedException])) { throw }
+        if ($Path.StartsWith('\\?\')) { throw }
+        $plainPath = [System.IO.Path]::GetFullPath($Path)
+        if ($plainPath.Length -ge 260) { throw }
+        if (-not (Get-Variable -Name SmartLongLiteralPathFallbackLogged -Scope Script -ErrorAction SilentlyContinue)) {
+            $script:SmartLongLiteralPathFallbackLogged = $true
+            Write-SmartLog ("Long literal path refused by this PowerShell host; files are opened through their ordinary path (shorter than 260 characters). Path={0}; Error={1}" -f $longPath,$refusal.Message) 'WARN'
+        }
+        return (& $OpenRead $plainPath)
+    }
+}
+
 function Get-SmartFileSha256 {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     $sha = [System.Security.Cryptography.SHA256]::Create()
     $stream = $null
     try {
-        $stream = [System.IO.File]::OpenRead((ConvertTo-LongLiteralPath -Path $Path))
+        $stream = Open-SmartFileReadStream -Path $Path
         $hashBytes = $sha.ComputeHash($stream)
         return (($hashBytes | ForEach-Object { $_.ToString('X2') }) -join '')
     }
@@ -933,6 +959,24 @@ function Get-SmartFileSha256 {
         if ($null -ne $sha) { $sha.Dispose() }
     }
 }
+
+function Get-SmartPowerShellHostSummary {
+    # Diagnostic only: never throws. LongLiteralPath tells whether this host accepts \\?\ paths.
+    $hostPath = ''
+    try { $hostPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { $hostPath = 'unknown' }
+    $longLiteralPath = 'Unknown'
+    try {
+        $probe = [System.IO.File]::OpenRead('\\?\' + [System.IO.Path]::Combine([Environment]::SystemDirectory, 'kernel32.dll'))
+        $probe.Dispose()
+        $longLiteralPath = 'Supported'
+    }
+    catch { $longLiteralPath = 'Refused' }
+    try {
+        return ("PSVersion={0}; CLRVersion={1}; Is64BitProcess={2}; Host={3}; LanguageMode={4}; LongLiteralPath={5}" -f $PSVersionTable.PSVersion,$PSVersionTable.CLRVersion,[Environment]::Is64BitProcess,$hostPath,$ExecutionContext.SessionState.LanguageMode,$longLiteralPath)
+    }
+    catch { return ("LongLiteralPath={0}; Error={1}" -f $longLiteralPath,$_.Exception.Message) }
+}
+
 function Convert-SignedExitCodeToHex {
     param([Parameter(Mandatory = $true)][int]$ExitCode)
 
@@ -6176,6 +6220,7 @@ try {
 
     $os = Get-OsSummary
     Write-SmartLog ("Startup OS before upgrade: ComputerName={0}; LocalIPv4={1}; Caption={2}; Version={3}; Build={4}; Architecture={5}; Family={6}" -f $script:ComputerName,$script:LocalIPv4Addresses,$os.Caption,$os.Version,$os.BuildNumber,$os.Architecture,$os.MajorFamily)
+    Write-SmartLog ("Startup PowerShell host: {0}" -f (Get-SmartPowerShellHostSummary))
     $script:DeviceUptimeSummary = Get-DeviceUptimeSummary -LastBootUpTime $os.LastBootUpTime
     Write-SmartLog ("Startup uptime before upgrade: {0}" -f $script:DeviceUptimeSummary.Detail)
     if ($os.MajorFamily -eq 'Windows10') {
