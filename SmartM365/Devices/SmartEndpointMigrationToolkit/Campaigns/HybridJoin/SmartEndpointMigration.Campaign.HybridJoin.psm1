@@ -249,6 +249,22 @@ function Get-HybridJoinPerComputerArguments {
     return @($arguments.ToArray())
 }
 
+$script:HybridJoinGraphSignInRequiredDetail = 'Graph sign-in required: the Run has no reusable Microsoft Graph sign-in; refresh the Intune and Entra inventories in the GUI'
+
+function Test-HybridJoinGraphSignInMissing {
+    <#
+    True when an inventory exporter failed before any Graph account was connected: its log
+    exists but never printed the "Account :" line. The hidden Run process cannot show the
+    interactive prompt, so the next exporter would fail the same way.
+    #>
+    param($Export)
+
+    if ($null -eq $Export -or $Export.Success) { return $false }
+    $logPath = [string](Get-SemtPropertyValue -InputObject $Export -Name 'LogPath' -Default '')
+    if ([string]::IsNullOrWhiteSpace($logPath) -or -not (Test-Path -LiteralPath $logPath -PathType Leaf)) { return $false }
+    return -not (Select-String -LiteralPath $logPath -Pattern '\bAccount\s+:' -Quiet)
+}
+
 function Invoke-HybridJoinPostCycle {
     <#
     Confirms results with Intune and Entra inventories scoped to computers whose state could
@@ -331,15 +347,19 @@ function Invoke-HybridJoinPostCycle {
     foreach ($row in $cloudRows) { $keys[(Get-SemtComputerKey -ComputerName ([string]$row.ComputerName))] = $true }
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 
-    $intuneExport = Invoke-SemtInventoryExport -Kind Intune -ExportScriptPath $Context.ExportScripts.Intune -OutputPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesIntune_Cycle{0}PostCycle_{1}.csv" -f $Context.CycleNumber,$stamp)) -LogPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesIntune_Cycle{0}PostCycle_{1}.log" -f $Context.CycleNumber,$stamp)) -ComputerListPath $scopePath -TenantId (Get-SemtOption -Options $Context.Options -Name 'IntuneTenantId') -PageSize (Get-SemtOption -Options $Context.Options -Name 'IntuneInventoryPageSize') -SharedInventoryPath $Context.Inventory['Intune'].SharedPath -DeviceIdListPath $deviceIdPath
+    $intuneWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $intuneExport =Invoke-SemtInventoryExport -Kind Intune -ExportScriptPath $Context.ExportScripts.Intune -OutputPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesIntune_Cycle{0}PostCycle_{1}.csv" -f $Context.CycleNumber,$stamp)) -LogPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesIntune_Cycle{0}PostCycle_{1}.log" -f $Context.CycleNumber,$stamp)) -ComputerListPath $scopePath -TenantId (Get-SemtOption -Options $Context.Options -Name 'IntuneTenantId') -PageSize (Get-SemtOption -Options $Context.Options -Name 'IntuneInventoryPageSize') -SharedInventoryPath $Context.Inventory['Intune'].SharedPath -DeviceIdListPath $deviceIdPath
+    $intuneSeconds = [int][math]::Round($intuneWatch.Elapsed.TotalSeconds)
     $intuneRows = @()
     if ($intuneExport.Success) { $intuneRows = @(Import-Csv -LiteralPath $intuneExport.CsvPath) }
+    $signInRequired = Test-HybridJoinGraphSignInMissing -Export $intuneExport
+    $signInDetail = '{0} (the Intune export waited {1} s for the hidden sign-in prompt)' -f $script:HybridJoinGraphSignInRequiredDetail,$intuneSeconds
     foreach ($row in $cloudRows) {
         Set-SemtResultField -Result $row -Name 'PostCycleIntuneInventoryChecked' -Value $true
         Set-SemtResultField -Result $row -Name 'PostCycleIntuneInventoryCsv' -Value $intuneExport.CsvPath
         if (-not $intuneExport.Success) {
             Set-SemtResultField -Result $row -Name 'PostCycleIntuneInventoryError' -Value $intuneExport.Error
-            Set-SemtResultField -Result $row -Name 'IntuneConfirmationDetail' -Value 'Intune inventory query failed'
+            Set-SemtResultField -Result $row -Name 'IntuneConfirmationDetail' -Value $(if ($signInRequired) { $signInDetail } else { 'Intune inventory query failed' })
             continue
         }
         $confirmation = Get-HybridJoinIntuneConfirmation -Row $row -CloudRows $intuneRows
@@ -358,6 +378,12 @@ function Invoke-HybridJoinPostCycle {
         & $log ('Cycle {0}: post-cycle Intune confirmation: {1}/{2} present; CSV={3}' -f $Context.CycleNumber,@($cloudRows | Where-Object { $_.PostCycleIntuneInventoryPresent -eq $true }).Count,$cloudRows.Count,$intuneExport.CsvPath) 'Green'
     }
     else { & $log ('Cycle {0}: post-cycle Intune confirmation failed: {1}' -f $Context.CycleNumber,$intuneExport.Error) 'Yellow' }
+    if ($signInRequired) {
+        # The Entra export would wait for the same hidden sign-in prompt: it is not started.
+        foreach ($row in $cloudRows) { Set-SemtResultField -Result $row -Name 'PostCycleEntraInventoryError' -Value 'Not started: Graph sign-in required' }
+        & $log ('Cycle {0}: GRAPH_SIGN_IN_REQUIRED: the Run has no reusable Microsoft Graph sign-in (the Intune export waited {2} s for the hidden sign-in prompt), so {1} result(s) stay INTUNE_CLOUD_CONFIRMATION_PENDING and the Entra confirmation was not started. Refresh the Intune and Entra inventories in the GUI, then regenerate the Preview.' -f $Context.CycleNumber,$cloudRows.Count,$intuneSeconds) 'Yellow'
+        return
+    }
 
     if ((Get-SemtCancellationState).Requested) { return }
     $entraExport = Invoke-SemtInventoryExport -Kind Entra -ExportScriptPath $Context.ExportScripts.Entra -OutputPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesEntra_Cycle{0}PostCycle_{1}.csv" -f $Context.CycleNumber,$stamp)) -LogPath (Join-Path $Context.RunContext.InventoryRoot ("DevicesEntra_Cycle{0}PostCycle_{1}.log" -f $Context.CycleNumber,$stamp)) -ComputerListPath $scopePath -TenantId (Get-SemtOption -Options $Context.Options -Name 'IntuneTenantId') -PageSize (Get-SemtOption -Options $Context.Options -Name 'IntuneInventoryPageSize') -SharedInventoryPath $Context.Inventory['Entra'].SharedPath -DeviceIdListPath $deviceIdPath

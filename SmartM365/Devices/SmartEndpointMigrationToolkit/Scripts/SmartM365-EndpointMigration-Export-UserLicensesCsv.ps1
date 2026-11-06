@@ -1,6 +1,6 @@
 <#
 .VERSION
-1.0.0
+1.1.0
 #>
 <#
 .SYNOPSIS
@@ -94,7 +94,8 @@ try {
     } finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
     Write-Host "User inventory exported: $($rows.Count) users; $OutputPath"
 } finally {
-    if (-not $NoConnect) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+    # No Disconnect-MgGraph: with WAM it signs the account out of the broker, so a Run in
+    # progress could no longer confirm its results silently after the cycle.
 }
 
 # SIG # Begin signature block

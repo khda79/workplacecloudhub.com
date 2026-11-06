@@ -5,7 +5,7 @@ Read-only targeted user license lookup for an identified Single PC user.
 Uses a unique on-premises SID and the confirmed device tenant ID. The operator must
 obtain these from a current endpoint audit. No user, license or endpoint is modified.
 .VERSION
-1.0.0
+1.1.0
 #>
 #requires -Version 5.1
 [CmdletBinding()]
@@ -45,7 +45,10 @@ try {
     if (-not (Test-Path -LiteralPath $parent -PathType Container)) { throw 'Output directory does not exist.' }
     $report | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $full -Encoding UTF8 -ErrorAction Stop
     Write-Host "Targeted license evidence: $full"
-} finally { if (-not $NoConnect) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } }
+} finally {
+    # No Disconnect-MgGraph: with WAM it signs the account out of the broker, so a Run in
+    # progress could no longer confirm its results silently after the cycle.
+}
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

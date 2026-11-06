@@ -23,8 +23,11 @@ technician signs in once. A failed user license export fails the script after th
 .PARAMETER UserLicensesOutputPath
 Users and licenses CSV path. Defaults to the shared cache <Inventory>\UsersLicenses.csv.
 
+The Graph sign-in is kept when the script ends: a Run in progress reuses it to confirm its
+results after each cycle without an interactive prompt.
+
 .VERSION
-1.1.0
+1.2.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -43,7 +46,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.1.0'
+$ScriptVersion = '1.2.0'
 
 function Write-Host {
     param(
@@ -167,7 +170,8 @@ try {
     }
 }
 finally {
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    # No Disconnect-MgGraph: with WAM it signs the account out of the broker, so a Run in
+    # progress could no longer confirm its results silently after the cycle.
 }
 # Each stream is reported on its own: a license failure never reads as an Intune/Entra failure.
 $failures = @()

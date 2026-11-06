@@ -144,6 +144,62 @@ Write-Host 'PASS: audit result still stops Loop retries for an unlicensed device
     if ($trace.Status -ne 'INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY' -or $trace.NextAction -ne 'REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN' -or (Get-HybridJoinNextAction -Status 'INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY') -ne 'REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN') { throw 'Local Intune trace with unhealthy join was not kept for review.' }
 }
 Write-Host 'PASS: unlicensed audit preserves the device diagnostic and skips post-cycle Graph confirmation'
+
+# Without a reusable Graph sign-in the post-cycle confirmation reports it and never starts Entra.
+& $module {
+    $base = Join-Path ([IO.Path]::GetTempPath()) ('SEMT-signin-'+[guid]::NewGuid().ToString('N'))
+    $inventoryRoot = Join-Path $base 'Inventory'
+    New-Item -ItemType Directory -Path $inventoryRoot -Force | Out-Null
+    try {
+        $entraMarker = Join-Path $base 'entra-started.txt'
+        $noAccount = Join-Path $base 'Intune-NoAccount.ps1'
+        Set-Content -LiteralPath $noAccount -Encoding ASCII -Value @('param([string]$OutputPath,[switch]$ForceRefresh,[string]$ComputerListPath,[string]$PageSize,[string]$TenantId,[string]$DeviceIdListPath)','Write-Output ''Graph module : Microsoft.Graph.Authentication 2.41.2''','exit 5')
+        $entra = Join-Path $base 'Entra-Marker.ps1'
+        Set-Content -LiteralPath $entra -Encoding ASCII -Value @('param([string]$OutputPath,[switch]$ForceRefresh,[string]$ComputerListPath,[string]$PageSize,[string]$TenantId,[string]$DeviceIdListPath)',("Set-Content -LiteralPath '{0}' -Value started" -f $entraMarker),'exit 5')
+        $options = [ordered]@{
+            'HybridJoin.PostCycleCloudInventoryRefresh' = [pscustomobject]@{ Value = $true }
+            'IntuneTenantId' = [pscustomobject]@{ Value = '' }
+            'IntuneInventoryPageSize' = [pscustomobject]@{ Value = 999 }
+        }
+        $messages = New-Object System.Collections.Generic.List[string]
+        $context = [pscustomobject]@{
+            PackageRoot = $base; DryRun = $false; CycleNumber = 1; Options = $options
+            Log = { param($text,$color) $messages.Add([string]$text) }.GetNewClosure()
+            RunContext = [pscustomobject]@{ InventoryRoot = $inventoryRoot }
+            ExportScripts = [pscustomobject]@{ Intune = $noAccount; Entra = $entra }
+            Inventory = @{ Intune = [pscustomobject]@{ SharedPath = (Join-Path $base 'DevicesIntune.csv'); Map = @{} }; Entra = [pscustomobject]@{ SharedPath = (Join-Path $base 'DevicesEntra.csv'); Map = @{} } }
+        }
+        $row = [pscustomobject]@{ ComputerName = 'PC-SIGNIN'; Status = 'SUCCESS'; NextAction = 'NO_ACTION_ALREADY_INTUNE_OR_HEALTHY'; UserLicensePreflightState = 'Unknown'; InteractiveUserSid = ''; Dsreg_TenantId = ''; Dsreg_DeviceId = '' }
+        Invoke-HybridJoinPostCycle -Context $context -Rows @($row)
+        if ($row.Status -ne 'INTUNE_CLOUD_CONFIRMATION_PENDING' -or $row.NextAction -ne 'VERIFY_INTUNE_IDENTITY') { throw "Unconfirmed result changed status: $($row.Status)/$($row.NextAction)" }
+        if ($row.IntuneConfirmationDetail -notmatch '^Graph sign-in required.*waited \d+ s for the hidden sign-in prompt\)$') { throw "Sign-in failure was not explicit: $($row.IntuneConfirmationDetail)" }
+        if (Test-Path -LiteralPath $entraMarker) { throw 'Entra export started although Graph sign-in was missing.' }
+        if ($row.PostCycleEntraInventoryError -ne 'Not started: Graph sign-in required') { throw 'Entra skip was not recorded.' }
+        if (-not @($messages | Where-Object { $_ -match 'GRAPH_SIGN_IN_REQUIRED' }).Count) { throw 'Run log did not report GRAPH_SIGN_IN_REQUIRED.' }
+
+        # A failure after a successful sign-in stays a plain query failure and Entra still runs.
+        $connected = Join-Path $base 'Intune-Connected.ps1'
+        Set-Content -LiteralPath $connected -Encoding ASCII -Value @('param([string]$OutputPath,[switch]$ForceRefresh,[string]$ComputerListPath,[string]$PageSize,[string]$TenantId,[string]$DeviceIdListPath)','Write-Output ''Account     : admin@example.test''','exit 1')
+        $context.ExportScripts = [pscustomobject]@{ Intune = $connected; Entra = $entra }
+        $row2 = [pscustomobject]@{ ComputerName = 'PC-QUERY'; Status = 'SUCCESS'; NextAction = 'NO_ACTION_ALREADY_INTUNE_OR_HEALTHY'; UserLicensePreflightState = 'Unknown'; InteractiveUserSid = ''; Dsreg_TenantId = ''; Dsreg_DeviceId = '' }
+        Invoke-HybridJoinPostCycle -Context $context -Rows @($row2)
+        if ($row2.IntuneConfirmationDetail -ne 'Intune inventory query failed') { throw "Connected failure was misreported: $($row2.IntuneConfirmationDetail)" }
+        if (-not (Test-Path -LiteralPath $entraMarker)) { throw 'Entra export was skipped after a signed-in Intune failure.' }
+    }
+    finally { Remove-Item -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue }
+}
+Write-Host 'PASS: missing Graph sign-in is reported explicitly and the Entra export is not started'
+
+# With WAM, a Disconnect-MgGraph after the work signs the account out of the broker and a Run in
+# progress can no longer confirm its results silently: no exporter disconnects after connecting.
+foreach ($name in @('Export-AutomaticGraphInventories','Export-IntuneDevicesCsv','Export-EntraDevicesCsv','Export-UserLicensesCsv','Get-UserLicense')) {
+    $text = [IO.File]::ReadAllText((Join-Path $root ('Scripts\SmartM365-EndpointMigration-{0}.ps1' -f $name)))
+    $connectAt = $text.IndexOf('Connect-MgGraph @')
+    if ($connectAt -lt 0) { $connectAt = $text.IndexOf('Connect-MgGraph -TenantId') }
+    if ($connectAt -lt 0) { throw "Connect-MgGraph not found in $name." }
+    if ($text.IndexOf('Disconnect-MgGraph -', $connectAt) -ge 0) { throw "$name disconnects from Graph after its work." }
+}
+Write-Host 'PASS: Graph exporters keep the sign-in for the Run post-cycle confirmation'
 Write-Host 'PASS: local Intune trace with unhealthy join stays a review item'
 $hjEndpointText = [IO.File]::ReadAllText((Join-Path $root 'Campaigns\HybridJoin\Scripts\SmartM365-Invoke-EndpointMigration-HybridJoin.ps1'))
 if ($hjEndpointText -match '\$status = "INTUNE_ENROLLED"' -or $hjEndpointText -notmatch '"INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY" \{ return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" \}' -or $hjEndpointText -notmatch '\$status = "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY"') { throw 'Endpoint still reports a local Intune trace with unhealthy join as INTUNE_ENROLLED.' }
