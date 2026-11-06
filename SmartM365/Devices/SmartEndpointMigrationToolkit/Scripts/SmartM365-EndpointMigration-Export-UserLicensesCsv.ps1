@@ -87,7 +87,9 @@ try {
     try {
         $rows | Export-Csv -LiteralPath $temp -NoTypeInformation -Encoding UTF8
         $target = [IO.Path]::GetFullPath($OutputPath)
-        if ([IO.File]::Exists($target)) { [IO.File]::Replace($temp, $target, $null) }
+        # [NullString]::Value, not $null: Windows PowerShell 5.1 passes $null to a .NET string as ""
+        # and File.Replace then fails with "The path is not of a legal form".
+        if ([IO.File]::Exists($target)) { [IO.File]::Replace($temp, $target, [NullString]::Value) }
         else { [IO.File]::Move($temp, $target) }
     } finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
     Write-Host "User inventory exported: $($rows.Count) users; $OutputPath"

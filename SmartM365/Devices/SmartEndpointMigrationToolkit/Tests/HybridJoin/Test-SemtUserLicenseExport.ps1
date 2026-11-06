@@ -34,6 +34,11 @@ Export-ModuleMember -Function Get-MgContext,Invoke-MgGraphRequest
     $rows = @(Import-Csv -LiteralPath $output)
     if ($rows.Count -ne 2 -or $rows[0].InventoryComplete -ne 'True') { throw 'Paged export incomplete.' }
     Write-Host 'PASS: all user pages exported with provenance'
+    $firstWrite = (Get-Item -LiteralPath $output).LastWriteTimeUtc
+    Start-Sleep -Milliseconds 50
+    & $exporter -NoConnect -TenantId '22222222-2222-2222-2222-222222222222' -OutputPath $output -ForceRefresh
+    if (@(Import-Csv -LiteralPath $output).Count -ne 2 -or (Get-Item -LiteralPath $output).LastWriteTimeUtc -le $firstWrite) { throw 'A forced refresh did not replace the existing user inventory.' }
+    Write-Host 'PASS: a forced refresh replaces an existing user inventory'
     $targeted = Join-Path $testRoot 'Targeted.json.txt'
     & (Join-Path $root 'Scripts\SmartM365-EndpointMigration-Get-UserLicense.ps1') -UserSid 'S-1-5-21-42' -TenantId '22222222-2222-2222-2222-222222222222' -OutputPath $targeted -NoConnect
     $targetData = Get-Content -LiteralPath $targeted -Raw | ConvertFrom-Json
