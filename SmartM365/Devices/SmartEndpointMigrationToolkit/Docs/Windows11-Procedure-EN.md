@@ -60,6 +60,8 @@ only when no user is connected, **except** when uptime exceeds
    without changes.
 3. **Repair** (Loop): the enabled actions run; setup media is copied by the target itself from
    the selected source (not by the technician computer), validated, then Windows Setup starts.
+   A computer not enrolled in Intune is upgraded by setup like the others (warning in the
+   endpoint log); only with setup upgrade disabled is it reported `NOT_INTUNE_ENROLLED`.
 4. Follow the **Runs** tab: live HTML report, status and next action per computer, evidence in
    `CentralLogs`.
 
@@ -112,4 +114,5 @@ target the same devices at the same time.
 | `SETUP_MEDIA_DUPLICATION_BLOCKED` | Legacy media present and not reusable; unassign the legacy Intune app, free the media or allow duplication |
 | `SETUP_MEDIA_LEGACY_UNTRUSTED` | Legacy media present but modifiable by non-administrators (or containing a reparse point); not used and its permissions not changed. Secure or remove it (administrator decision), or allow duplication |
 | `SETUP_MEDIA_STATE_INDETERMINATE` | Ownership, use, permissions or folder tree of the media could not be read; nothing changed. Check the device, then retry |
+| `NOT_INTUNE_ENROLLED` | Setup upgrade disabled and the computer is not enrolled in Intune, so Windows Update through Intune cannot upgrade it; enable setup upgrade or enroll the computer |
 | `TARGET_OPERATION_ACTIVE` | Another toolkit operation runs on the target; next cycle |

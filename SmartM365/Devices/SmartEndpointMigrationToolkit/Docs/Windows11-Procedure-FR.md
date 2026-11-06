@@ -63,7 +63,9 @@ DirectSetup et *Allow controlled reboots* désactivé, aucun redémarrage n'est 
    sans modification.
 3. **Réparation** (Loop) : les actions activées s'exécutent ; le média est copié par le poste
    lui-même depuis la source choisie (pas par le poste technicien), validé, puis le setup
-   Windows démarre.
+   Windows démarre. Un poste non inscrit dans Intune est mis à niveau par le setup comme les
+   autres (avertissement dans le log du poste) ; il n'est signalé `NOT_INTUNE_ENROLLED` que si
+   l'upgrade par setup est désactivé.
 4. Suivre l'onglet **Runs** : rapport HTML en direct, statut et prochaine action par poste,
    preuves dans `CentralLogs`.
 
@@ -119,4 +121,5 @@ outil : les deux packages ne doivent jamais cibler les mêmes postes en même te
 | `SETUP_MEDIA_DUPLICATION_BLOCKED` | Média de l'ancien outil présent et non réutilisable ; désassigner l'app Intune de l'ancien outil, libérer le média ou autoriser la duplication |
 | `SETUP_MEDIA_LEGACY_UNTRUSTED` | Média de l'ancien outil présent mais modifiable par un non-administrateur (ou contenant un point de réanalyse) ; non utilisé, permissions non modifiées. Le sécuriser ou le supprimer (décision d'administrateur), ou autoriser la duplication |
 | `SETUP_MEDIA_STATE_INDETERMINATE` | Propriétaire, utilisation, permissions ou arborescence du média illisibles ; rien n'est modifié. Vérifier le poste puis relancer |
+| `NOT_INTUNE_ENROLLED` | Upgrade par setup désactivé et poste non inscrit dans Intune : Windows Update via Intune ne peut pas le mettre à niveau ; activer l'upgrade par setup ou inscrire le poste |
 | `TARGET_OPERATION_ACTIVE` | Une autre opération de l'outil tourne sur le poste ; cycle suivant |

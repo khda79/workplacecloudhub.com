@@ -6027,7 +6027,13 @@ try {
     $policy = Get-WindowsUpdatePolicySummary
     $indicators = Get-Windows11IndicatorSummary
 
-    $diskCleanupEligible = ($os.MajorFamily -eq 'Windows10' -and -not $hardwareReadinessBlocksUpgrade -and -not $DirectSetupUpgrade -and $intune.IsIntuneEnrolled -and -not $indicators.ActionableBlocking)
+    # Intune enrollment does not gate the setup upgrade: a device that is not enrolled follows the
+    # same gates and setup path. Only the Windows Update path through Intune needs enrollment.
+    if ($os.MajorFamily -eq 'Windows10' -and -not $intune.IsIntuneEnrolled) {
+        $intuneGateText = if ($AllowSetupUpgrade -or $DirectSetupUpgrade) { 'setup upgrade continues through the usual gates' } else { 'setup upgrade is disabled, so the device cannot be upgraded through Windows Update via Intune' }
+        Write-SmartLog ("Device is not enrolled in Intune; {0}. WeakEvidence={1}" -f $intuneGateText,$intune.WeakEvidence) 'WARN'
+    }
+    $diskCleanupEligible = ($os.MajorFamily -eq 'Windows10' -and -not $hardwareReadinessBlocksUpgrade -and -not $DirectSetupUpgrade -and ($intune.IsIntuneEnrolled -or $AllowSetupUpgrade) -and -not $indicators.ActionableBlocking)
     if ($diskCleanupEligible -and $freeGb -lt $MinimumFreeDiskGB -and $AllowDiskCleanup -and -not $AuditOnly) {
         try {
             $freeGb = Invoke-SafeDiskCleanup
@@ -6064,7 +6070,7 @@ try {
     # Repair the existing policy gate before choosing the upgrade path. On timeout,
     # re-read policy; the timeout alone must not suppress an otherwise eligible upgrade.
     if ($os.MajorFamily -eq 'Windows10' -and -not $hardwareReadinessBlocksUpgrade -and
-        -not $DirectSetupUpgrade -and $intune.IsIntuneEnrolled -and
+        -not $DirectSetupUpgrade -and ($intune.IsIntuneEnrolled -or $AllowSetupUpgrade) -and
         -not $indicators.ActionableBlocking -and $freeGb -ge $MinimumFreeDiskGB -and
         -not $pendingReboot -and $policy.HasLegacyBlocker -and $AllowPolicyRepair -and -not $AuditOnly) {
         $gpUpdateResult = Repair-WindowsUpdatePolicyBlockers
@@ -6152,7 +6158,7 @@ try {
             }
         }
     }
-    elseif (-not $intune.IsIntuneEnrolled) {
+    elseif (-not $intune.IsIntuneEnrolled -and -not $AllowSetupUpgrade) {
         $status = 'NOT_INTUNE_ENROLLED'
         $nextAction = 'FIX_INTUNE_ENROLLMENT_FIRST'
         $detail = $intune.WeakEvidence
