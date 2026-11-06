@@ -113,12 +113,27 @@ content after acceptance, keeps a deduplication receipt and retries failures aft
 minutes. Pending failures are retained, never silently deleted. Payloads and attachments
 are snapshots, not references to files that a collector may overwrite or delete.
 
-No exactly-once guarantee: a crash between remote acceptance and recording Sent can
-repeat a message; a crash between enqueue and updating a collector's submission marker
-can also repeat submission. Persistent receipts and locks prevent ordinary worker replays.
+The queue writes a durable Sending checkpoint, attempt count, start time and worker
+host before calling the transport. A crash or failure to persist Sent leaves that
+checkpoint in place. Once no worker holds its lock, it is counted as Uncertain and
+is never automatically resent. Reconcile transport/delivery evidence before manually
+recovering such a record; Sending does not prove delivery. Batch readers allow atomic
+file replacement, preventing their reads from blocking another worker's state commit.
+Deploy the updated queue module and restart every resident using the shared queue.
+
+No exactly-once guarantee: transport-internal retries or an exception after remote
+acceptance can still repeat a message. A crash between enqueue and updating a
+collector's submission marker can also repeat submission. Persistent receipts and
+locks prevent ordinary worker replays.
 The checksum detects accidental payload damage, not malicious access by a trusted writer.
 
 ## Offline validation
+
+Test-SmartM365ReportMailCommitFailureOffline holds a reader that denies file deletion
+to reproduce a failed state replacement before and after transport acceptance. It
+verifies no send before a durable checkpoint, no replay after an uncertain commit
+even following module reload, and successful delivery with compatible shared readers.
+All transport calls are synthetic; no mail service or production share is contacted.
 
 Test-SmartM365DeferredMailIntegrationOffline extracts the actual PS7 and PS5 send
 entrypoints and uses the actual admission/queue/worker with mocked transports and

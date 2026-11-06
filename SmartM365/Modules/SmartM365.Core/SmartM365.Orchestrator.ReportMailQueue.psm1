@@ -1,6 +1,8 @@
 ﻿<#
 .SYNOPSIS
     Offline queue primitives for deferred report mail.
+.VERSION
+    1.0.1
 .DESCRIPTION
     Does not connect to mail services or select a production path. The caller must
     verify the queue directory and its access controls before each operation.
@@ -64,6 +66,17 @@ function Write-ReportMailQueueRecord {
     } finally { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force } }
 }
 
+function Read-ReportMailQueueRecord {
+    param([Parameter(Mandatory)][string]$Path)
+    # A batch reader must not block another worker's atomic state replacement.
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try {
+        $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+        try { return ($reader.ReadToEnd() | ConvertFrom-Json -ErrorAction Stop) }
+        finally { $reader.Dispose() }
+    } finally { $stream.Dispose() }
+}
+
 function Add-SmartM365ReportMailQueueItem {
     [CmdletBinding()]
     param(
@@ -86,7 +99,7 @@ function Add-SmartM365ReportMailQueueItem {
         if (Test-Path -LiteralPath $path) {
             $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked queue record is not accepted.' }
-            $existing = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json
+            $existing = Read-ReportMailQueueRecord -Path $path
             if ($existing.Id -ne $id -or $existing.TenantKey -cne $TenantKey) { throw 'Queue record identity mismatch.' }
             if ($existing.PayloadHash -cne $payloadHash) { throw 'Queue deduplication key is already used for a different message.' }
             return [pscustomobject]@{ Id = $id; Status = [string]$existing.Status; Existing = $true }
@@ -119,31 +132,42 @@ function Invoke-SmartM365ReportMailQueueItem {
         $path = Join-Path $root ($Id + '.json')
         $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked queue record is not accepted.' }
-        $record = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json
-        if ($record.SchemaVersion -ne 1 -or $record.Id -cne $Id -or $record.TenantKey -cne $TenantKey -or $record.Status -notin @('Pending','Sent')) { throw 'Invalid queue record.' }
+        $record = Read-ReportMailQueueRecord -Path $path
+        if ($record.SchemaVersion -ne 1 -or $record.Id -cne $Id -or $record.TenantKey -cne $TenantKey -or $record.Status -notin @('Pending','Sending','Sent')) { throw 'Invalid queue record.' }
         if ($record.Status -eq 'Sent') { return 'Sent' }
+        # The exclusive guard is held: Sending now means a previous outcome is unknown.
+        # Never automatically replay it, even after a process restart.
+        if ($record.Status -eq 'Sending') { return 'Uncertain' }
         if ($record.NotBeforeUnixMs -isnot [long] -and $record.NotBeforeUnixMs -isnot [int]) { throw 'Invalid queue delivery timestamp.' }
         if ($Now.ToUnixTimeMilliseconds() -lt [long]$record.NotBeforeUnixMs) { return 'Pending' }
         $payloadBytes = [Convert]::FromBase64String([string]$record.PayloadBase64)
         if ((Get-ReportMailPayloadHash $payloadBytes) -cne $record.PayloadHash) { throw 'Queue payload integrity check failed.' }
         $message = [Text.Encoding]::UTF8.GetString($payloadBytes) | ConvertFrom-Json
+        $record.Attempts = [int]$record.Attempts + 1
+        $record.Status = 'Sending'
+        $record | Add-Member -NotePropertyName AttemptStartedAtUtc -NotePropertyValue ([datetimeoffset]::UtcNow.ToString('o')) -Force
+        $record | Add-Member -NotePropertyName AttemptHost -NotePropertyValue ([Environment]::MachineName) -Force
+        # This checkpoint must succeed before the transport can accept a message.
+        Write-ReportMailQueueRecord -Path $path -Record $record
         try {
             $transportResult = @(& $SendAction $message)
             if ($transportResult.Count -ne 1 -or $transportResult[0] -isnot [bool] -or -not $transportResult[0]) {
                 throw 'The transport did not explicitly confirm acceptance.'
             }
         } catch {
-            $record.Attempts = [int]$record.Attempts + 1
+            $record.Status = 'Pending'
             $record.NotBeforeUnixMs = $Now.AddMinutes($RetryMinutes).ToUnixTimeMilliseconds()
             Write-ReportMailQueueRecord -Path $path -Record $record
             return 'Retry'
         }
-        $record.Attempts = [int]$record.Attempts + 1
         $record.Status = 'Sent'
         $record.PayloadBase64 = ''
-        $record | Add-Member -NotePropertyName SentAtUtc -NotePropertyValue $Now.ToUniversalTime().ToString('o')
-        # Transport acceptance followed by failure to record Sent may cause a duplicate.
-        Write-ReportMailQueueRecord -Path $path -Record $record
+        $record | Add-Member -NotePropertyName SentAtUtc -NotePropertyValue ([datetimeoffset]::UtcNow.ToString('o')) -Force
+        try { Write-ReportMailQueueRecord -Path $path -Record $record }
+        catch {
+            Write-Warning ("Report mail {0}: transport accepted, but final state persistence failed. Automatic replay is blocked; reconcile delivery before recovery. {1}" -f $Id, $_.Exception.Message)
+            return 'Uncertain'
+        }
         return 'Sent'
     } finally { $guard.Dispose() }
 }
@@ -159,20 +183,21 @@ function Invoke-SmartM365ReportMailQueueBatch {
         [ValidateRange(1, 1000)][int]$MaximumItems = 50
     )
     $root = Assert-ReportMailQueueDirectory $QueuePath $AssertTrustedDirectory
-    $counts = [ordered]@{ Sent=0; Pending=0; Retry=0; Busy=0; Invalid=0 }
+    $counts = [ordered]@{ Sent=0; Pending=0; Retry=0; Busy=0; Invalid=0; Uncertain=0 }
     $items = @(Get-ChildItem -LiteralPath $root -Filter '*.json' -File -ErrorAction Stop | Where-Object { $_.BaseName -cmatch '^[0-9a-f]{64}$' } | Sort-Object Name)
     $attempted = 0
     foreach ($item in $items) {
         if ($attempted -ge $MaximumItems) { break }
         try {
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked queue record is not accepted.' }
-            $metadata = Get-Content -LiteralPath $item.FullName -Raw -ErrorAction Stop | ConvertFrom-Json
-            if ($metadata.SchemaVersion -ne 1 -or $metadata.Id -cne $item.BaseName -or $metadata.Status -notin @('Pending','Sent')) { throw 'Invalid queue record.' }
+            $metadata = Read-ReportMailQueueRecord -Path $item.FullName
+            if ($metadata.SchemaVersion -ne 1 -or $metadata.Id -cne $item.BaseName -or $metadata.Status -notin @('Pending','Sending','Sent')) { throw 'Invalid queue record.' }
             if ($metadata.TenantKey -cne $TenantKey -or $metadata.Status -eq 'Sent') { continue }
             if ($metadata.NotBeforeUnixMs -isnot [long] -and $metadata.NotBeforeUnixMs -isnot [int]) { throw 'Invalid queue delivery timestamp.' }
             if ($Now.ToUnixTimeMilliseconds() -lt [long]$metadata.NotBeforeUnixMs) { $counts.Pending++; continue }
             $attempted++
             $status = Invoke-SmartM365ReportMailQueueItem -QueuePath $root -AssertTrustedDirectory $AssertTrustedDirectory -Id $item.BaseName -TenantKey $TenantKey -Now $Now -SendAction $SendAction
+            if ($status -eq 'Uncertain') { $attempted-- }
             $counts[$status]++
         } catch [IO.IOException] { $counts.Busy++ }
         catch { $counts.Invalid++ }
@@ -185,8 +210,8 @@ Export-ModuleMember -Function Add-SmartM365ReportMailQueueItem, Invoke-SmartM365
 # SIG # Begin signature block
 # MIIH/wYJKoZIhvcNAQcCoIIH8DCCB+wCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD9T5ptTCJtEyCI
-# o9yLTmckqMjIFfydx+GzlbbGeKYbcqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCnoMbpkZQynJC/
+# xbfbdA+vY9dNZ4svub46yYuOFe2XwqCCBMEwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -216,14 +241,14 @@ Export-ModuleMember -Function Add-SmartM365ReportMailQueueItem, Invoke-SmartM365
 # KoZIhvcNAQkBFh1jb250YWN0QHdvcmtwbGFjZWNsb3VkaHViLmNvbQIQHm7vO8c4
 # 4bNEOMjxAx/iaDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDPFkcoO7kMns10+nE2Yd7k
-# FAnkJvAkKDNriXKGcKniPDANBgkqhkiG9w0BAQEFAASCAYBEVUQITlBDpL8vAFDI
-# i6xtfeoXMCVdT8ND4WadGdlIchj4Gwl+doRXLmqIYXvuy4xT7pmGeZCUTgky8myR
-# kcU5Q9fjJkO+wYIvQ0XRySkhOtEKbAyt0y2RFvMw5K1hex4b5I6XeI1K4Vex2KOa
-# HnTx3oVl4gxzeepzV73aOvk4Y7zJhc/nf0KyU4krM4Ox9NETSefcnzGbBbRvZGFC
-# vAqDSeHwXej4E2OMejn1csK5+wnx7m+8pSMI4/jqlUuotNTYCdU53zM9eWnPwPeQ
-# 0sRobyJOuyJsEf6J7bZ92+hBkPug3XzNDAGPg6fJtKX9eInTGG1jyXbNT+2VsDAc
-# skvdAminEC33TRMbd7fCied7QLW+HM6OH6znA4wHlgfe6hZBp2wIPedBwriJTdir
-# 01zdVMD9yGwkNCNkVpHhNniYKEToSKAEKGzWCckp6wlfP1EMnoo5vcZR2dzy+R2y
-# J/r4lUBz2ECaFtAjt3n8n2YHhoqR3t4aoty4E76MNsIqVj0=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD8PMFihrcYFngiXZBBeTW0
+# DxbFgoFGLi3uPXeN1SP+TzANBgkqhkiG9w0BAQEFAASCAYBxV6rsnz4/I7NNbKJQ
+# ZnIHQjXLMhOGJH79uSf+Z7+bmA+Mw/IeWrjfcbhNxNJ49Fli+HHmFiA7VTsfr+5W
+# CpK0YSA5mVGuDMYKAOTMgkJH//BC94+JpNZFjVJrPcclzsw9GA88CBFdrq39UzC5
+# L66iwwqQwBz9UGBvoge6KsWrRFRX+x5drf/THQa6959GiQqEhYZ8byzZjejaU+ii
+# PvI4NHKO+kWegRTUqC9sOdkEOuRr50Cf8qGLcY/6oNIM4atHRnRMit5JrfGhqFkg
+# 0dwerZ5lVbJSIqXWgvnucQA5JvNDdZlvtkc6QEKSAhE3TRWSGoWXvE9jJObs0COP
+# gXyyTRdwNu95kzEc1a56b0xbHTZVHXOP6BVhW9Nfuwz7Mc3s6n1ihNnrXMUgVdf+
+# jBEYcloMFtNSAnJMjYIT7fHVdsxHYsWcHCg3HRmsnfFJYJg5Q2iAh94jJsmeOq55
+# RhWebmEGPt6XINO/WcIcLPGuMtH/LBM7P97qFb9Lwmf1qz8=
 # SIG # End signature block
