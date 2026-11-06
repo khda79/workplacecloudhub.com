@@ -3933,6 +3933,9 @@ function Invoke-RobocopySetupMediaCopy {
 
     $argumentText = (@($Arguments) | ForEach-Object { Format-SmartProcessArgument -Argument $_ }) -join ' '
     $process = Start-Process -FilePath $RobocopyPath -ArgumentList $Arguments -PassThru -NoNewWindow -ErrorAction Stop
+    # Windows PowerShell 5.1 returns an empty ExitCode for a process started with -PassThru and
+    # polled with HasExited unless its handle is opened while it runs.
+    $null = $process.Handle
     $startedAt = Get-Date
     $lastHeartbeatAt = $startedAt
     $heartbeatSeconds = 300
@@ -3964,8 +3967,19 @@ function Invoke-RobocopySetupMediaCopy {
     }
 
     Update-SetupCacheLock -Lock $CacheLock
-    Write-SmartLog ("Robocopy setup media copy process exited. PID={0}; ElapsedMinutes={1}; ExitCode={2}; Log={3}" -f $process.Id,([math]::Round(((Get-Date) - $startedAt).TotalMinutes, 1)),$process.ExitCode,$LogPath)
-    return [int]$process.ExitCode
+    try { $process.WaitForExit() } catch { }
+    $exitCode = $null
+    try { $exitCode = $process.ExitCode } catch { $exitCode = $null }
+    Write-SmartLog ("Robocopy setup media copy process exited. PID={0}; ElapsedMinutes={1}; ExitCode={2}; Log={3}" -f $process.Id,([math]::Round(((Get-Date) - $startedAt).TotalMinutes, 1)),$exitCode,$LogPath)
+    if ($null -eq $exitCode -or [string]::IsNullOrWhiteSpace([string]$exitCode)) {
+        # An unreadable exit code never counts as success: the copy may have failed.
+        $robocopyErrorSummary = Get-RobocopyLogErrorSummary -LogPath $LogPath
+        $unreadableDetail = ("Robocopy setup media copy exit code could not be read; the copy is treated as failed. Log={0}" -f $LogPath)
+        if (-not [string]::IsNullOrWhiteSpace($robocopyErrorSummary)) { $unreadableDetail = ("{0}; {1}" -f $unreadableDetail,$robocopyErrorSummary) }
+        Write-SmartLog $unreadableDetail 'ERROR'
+        throw $unreadableDetail
+    }
+    return [int]$exitCode
 }
 
 function Copy-SetupMediaToLocalCache {
