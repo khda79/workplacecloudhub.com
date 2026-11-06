@@ -195,7 +195,13 @@ Hybrid Join runs `deviceenroller.exe /c /AutoEnrollMDM` itself, from SYSTEM, as 
 EnterpriseMgmt task does (for User Credential, Windows uses the signed-in user's token; started in
 the user context the tool returns `0x80070005`). Its own exit code is logged. When enrollment is
 still not confirmed and an MDM `UserLicense` / `0x80180018` fault was logged after the trigger, the
-status is `INTUNE_USER_LICENSE_REJECTED` (NextAction `ASSIGN_USER_INTUNE_LICENSE`). When the tool
+status is `INTUNE_USER_LICENSE_REJECTED` (NextAction `ASSIGN_USER_INTUNE_LICENSE`). When Entra ID
+rejects the device token with `AADSTS5000611` (key derivation function `KDFV1` is invalid; event 1098
+in `Microsoft-Windows-AAD/Operational`), Windows lacks the cumulative update that brings KDFv2 and no
+enrollment can succeed: the status is `AAD_DEVICE_KDF_UPDATE_REQUIRED` (NextAction
+`INSTALL_WINDOWS_UPDATE_KDFV2`), without the confirmation wait when the rejection follows a failed
+trigger. Install the latest cumulative update (or upgrade Windows), have the user sign out and in
+again, then rerun the repair. When the tool
 returns `0x8018000A` (already enrolled) but the only local Intune traces are incomplete stubs left by
 an interrupted enrollment (`EnrollmentType` 6, empty `ProviderID`, `fooUser@` UPN, no OMA-DM account
 or tasks), the stub blocks every new attempt: the status is `INTUNE_ENROLLMENT_STUB_BLOCKING` at once,

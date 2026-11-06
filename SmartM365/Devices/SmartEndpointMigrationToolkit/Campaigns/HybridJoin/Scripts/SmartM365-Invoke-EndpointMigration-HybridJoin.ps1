@@ -2387,6 +2387,43 @@ function Get-RecentMdmUserLicenseFailure {
     return $null
 }
 
+function Get-RecentAadKdfV1Rejection {
+    <#
+    Returns the first Microsoft-Windows-AAD/Operational error 1098 with AADSTS5000611 ("Symmetric Key
+    Derivation Function version 'KDFV1' is invalid") logged since the auto-enrollment trigger, or $null.
+    Entra ID then refuses every token of this device until Windows gets the cumulative update that
+    brings KDFv2: the MDM enrollment cannot succeed, so the confirmation wait is useless.
+    #>
+    param([Parameter(Mandatory=$true)][datetime]$Since)
+
+    $logName = "Microsoft-Windows-AAD/Operational"
+    try {
+        $kdfEvent = Get-WinEvent -FilterHashtable @{ LogName=$logName; Id=1098; StartTime=$Since } -ErrorAction Stop |
+            Where-Object { Test-AadKdfV1RejectionMessage -Message $_.Message } |
+            Sort-Object TimeCreated |
+            Select-Object -First 1
+        if ($kdfEvent) {
+            return [PSCustomObject]@{
+                LogName=$logName
+                Id=$kdfEvent.Id
+                RecordId=$kdfEvent.RecordId
+                TimeCreated=$kdfEvent.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss")
+            }
+        }
+    }
+    catch {
+        if ([string]$_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') {
+            Write-RunLog ("Unable to read {0} for KDFV1 token rejections: {1}" -f $logName,$_.Exception.Message)
+        }
+    }
+    return $null
+}
+
+function Test-AadKdfV1RejectionMessage {
+    param([AllowNull()][string]$Message)
+    return ([string]$Message -match '(?i)AADSTS5000611|Derivation Function version .KDFV1. is invalid')
+}
+
 function Get-AutoEnrollmentPolicyState {
     try {
         $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
@@ -3204,6 +3241,7 @@ function Get-NextActionForStatus {
         "INTUNE_ENROLLMENT_TRIGGERED" { return "RECHECK_AFTER_AUTOENROLL" }
         "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" { return "RECHECK_LATER_INTUNE_ENROLLMENT" }
         "INTUNE_USER_LICENSE_REJECTED" { return "ASSIGN_USER_INTUNE_LICENSE" }
+        "AAD_DEVICE_KDF_UPDATE_REQUIRED" { return "INSTALL_WINDOWS_UPDATE_KDFV2" }
         "INTUNE_TRACE_DEVICE_JOIN_UNHEALTHY" { return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" }
         "INTUNE_TRACE_REMOVE_FAILED" { return "REVIEW_INTUNE_TRACE_AND_DEVICE_JOIN" }
         "INTUNE_ENROLLMENT_STUB_BLOCKING" { return "ENABLE_INTUNE_STUB_REMOVAL_OR_REVIEW" }
@@ -5195,16 +5233,24 @@ try {
                     # A failed deviceenroller call still waits: the native EnterpriseMgmt task retries
                     # enrollment on its own schedule.
                     $intuneAutoEnrollTriggerText = if ($enrollStart.Success) { "Intune auto-enrollment was triggered successfully" } else { "deviceenroller did not report success ({0})" -f $enrollStart.Detail }
-                    Write-ProvisionalRunState `
-                        -StatusValue "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" `
-                        -DetailValue ("{0}. Waiting up to {1} minute(s) for confirmed local Intune enrollment before final status." -f $intuneAutoEnrollTriggerText,($IntuneRetrySleepMinutes * $IntuneRetryMaxRetries))
+                    # Entra ID rejecting the device key (KDFV1) right after a failed trigger: no wait.
+                    $kdfRejection = if (-not $enrollStart.Success) { Get-RecentAadKdfV1Rejection -Since $intuneAutoEnrollTriggeredAt } else { $null }
+                    $r3 = $null
+                    if ($kdfRejection) {
+                        Write-RunLog ("Entra ID rejected the device token with AADSTS5000611 (KDFV1) after the trigger; the Intune confirmation wait is skipped. Event {0}, record {1}, time {2}." -f $kdfRejection.Id,$kdfRejection.RecordId,$kdfRejection.TimeCreated)
+                    }
+                    else {
+                        Write-ProvisionalRunState `
+                            -StatusValue "INTUNE_ENROLLMENT_PENDING_CONFIRMATION" `
+                            -DetailValue ("{0}. Waiting up to {1} minute(s) for confirmed local Intune enrollment before final status." -f $intuneAutoEnrollTriggerText,($IntuneRetrySleepMinutes * $IntuneRetryMaxRetries))
 
-                    $r3 = Invoke-BoundedRetryUntilIntuneEnrollment `
-                        -SleepMinutes $IntuneRetrySleepMinutes `
-                        -MaxRetries $IntuneRetryMaxRetries `
-                        -ContextLabel "intune_auto_enroll"
+                        $r3 = Invoke-BoundedRetryUntilIntuneEnrollment `
+                            -SleepMinutes $IntuneRetrySleepMinutes `
+                            -MaxRetries $IntuneRetryMaxRetries `
+                            -ContextLabel "intune_auto_enroll"
+                    }
 
-                    if ($r3.Success) {
+                    if ($r3 -and $r3.Success) {
                         $status = "SUCCESS"
                         $dsregStatusErrorMessage = ""
                         $intuneEnrolled = $true
@@ -5212,8 +5258,14 @@ try {
                         Write-RunLog ("Intune enrollment detected after auto-enrollment retry loop after {0} attempt(s)." -f $r3.Attempts)
                     }
                     else {
-                        $licenseFailure = Get-RecentMdmUserLicenseFailure -Since $intuneAutoEnrollTriggeredAt
-                        if ($licenseFailure) {
+                        # The native EnterpriseMgmt task may also have hit the KDFV1 rejection during the wait.
+                        if (-not $kdfRejection) { $kdfRejection = Get-RecentAadKdfV1Rejection -Since $intuneAutoEnrollTriggeredAt }
+                        $licenseFailure = if ($kdfRejection) { $null } else { Get-RecentMdmUserLicenseFailure -Since $intuneAutoEnrollTriggeredAt }
+                        if ($kdfRejection) {
+                            $status = "AAD_DEVICE_KDF_UPDATE_REQUIRED"
+                            $dsregStatusErrorMessage = ("Entra ID rejected the device token: AADSTS5000611, key derivation function KDFV1 is invalid ({0} event {1}, record {2}, time {3}). Windows lacks the cumulative update that brings KDFv2 (OS build {4}). Install the latest cumulative update (or upgrade Windows), sign the user out and in again, then rerun the repair. Trigger: {5}." -f $kdfRejection.LogName,$kdfRejection.Id,$kdfRejection.RecordId,$kdfRejection.TimeCreated,$osBuildNumber,$intuneAutoEnrollTriggerText)
+                        }
+                        elseif ($licenseFailure) {
                             $status = "INTUNE_USER_LICENSE_REJECTED"
                             $dsregStatusErrorMessage = ("Intune rejected the enrollment with a user license fault (UserLicense/0x80180018) after the auto-enrollment trigger: {0} event {1}, record {2}, time {3}. Assign an Intune license to the signed-in user and check the MDM user scope, then rerun the repair. Trigger: {4}." -f $licenseFailure.LogName,$licenseFailure.Id,$licenseFailure.RecordId,$licenseFailure.TimeCreated,$intuneAutoEnrollTriggerText)
                         }

@@ -236,6 +236,34 @@ if ($hjEndpointText -notmatch '\[string\]\$enrollStart\.ExitCode -eq "-214591077
 if ($hjEndpointText -notmatch "\*DeviceManagement_Admin\.csv") { throw 'Enrollment evidence summary does not read the Admin channel.' }
 Write-Host 'PASS: an Intune enrollment stub is recognised strictly and removed only on opt-in'
 
+# Entra ID rejecting a KDFV1 device key (AADSTS5000611): a review status at once, no confirmation wait.
+foreach ($name in @('Test-AadKdfV1RejectionMessage','Get-RecentAadKdfV1Rejection')) {
+    $definition=$ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name },$true)
+    if (-not $definition) { throw "Endpoint function missing: $name" }
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$kdfMessage = "Error: 0xCAA20003 Authorization grant failed for this assertion. Code: invalid_grant Description: AADSTS5000611: Symmetric Key Derivation Function version 'KDFV1' is invalid. Update the device for the latest updates."
+if (-not (Test-AadKdfV1RejectionMessage -Message $kdfMessage)) { throw 'The AADSTS5000611 KDFV1 rejection was not recognised.' }
+foreach ($other in @('Error: 0xCAA90014 Server WS-Trust response reported fault exception and it failed to get assertion','Error: 0xCAA20003 Authorization grant failed. AADSTS50126: Invalid username or password.','',$null)) {
+    if (Test-AadKdfV1RejectionMessage -Message $other) { throw "Another AAD error was taken for a KDFV1 rejection: $other" }
+}
+$script:FakeAadEvents = @(
+    [pscustomobject]@{ Id=1098; RecordId=11; TimeCreated=[datetime]'2026-11-06 09:59:02'; Message='Error: 0xCAA90014 Server WS-Trust response reported fault exception' },
+    [pscustomobject]@{ Id=1098; RecordId=12; TimeCreated=[datetime]'2026-11-06 09:59:02'; Message=$kdfMessage }
+)
+function Get-WinEvent { param($FilterHashtable,$ErrorAction) if ($FilterHashtable.LogName -ne 'Microsoft-Windows-AAD/Operational' -or $FilterHashtable.Id -ne 1098 -or -not ($FilterHashtable.StartTime -is [datetime])) { throw 'Unexpected event query.' }; @($script:FakeAadEvents | Where-Object { $_.TimeCreated -ge $FilterHashtable.StartTime }) }
+$kdfFound = Get-RecentAadKdfV1Rejection -Since ([datetime]'2026-11-06 09:58:00')
+if (-not $kdfFound -or $kdfFound.RecordId -ne 12 -or $kdfFound.LogName -ne 'Microsoft-Windows-AAD/Operational') { throw 'The KDFV1 event was not returned.' }
+# An old KDFV1 rejection (before this run's trigger, for example before an OS update) does not count.
+if ($null -ne (Get-RecentAadKdfV1Rejection -Since ([datetime]'2026-11-06 10:00:00'))) { throw 'A KDFV1 event older than the trigger was counted.' }
+$kdfDefinitionText = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-RecentAadKdfV1Rejection' },$true).Extent.Text
+if ($kdfDefinitionText -notmatch 'StartTime=\$Since' -or ([regex]::Matches($hjEndpointText,'Get-RecentAadKdfV1Rejection -Since \$intuneAutoEnrollTriggeredAt')).Count -ne 2) { throw 'The KDFV1 lookup is not limited to events after the deviceenroller trigger of this run.' }
+$script:FakeAadEvents = @($script:FakeAadEvents[0])
+if ($null -ne (Get-RecentAadKdfV1Rejection -Since ([datetime]'2026-11-06 09:58:00'))) { throw 'A WS-Trust error alone was reported as a KDFV1 rejection.' }
+Remove-Item Function:\Get-WinEvent
+if ($hjEndpointText -notmatch '"AAD_DEVICE_KDF_UPDATE_REQUIRED" \{ return "INSTALL_WINDOWS_UPDATE_KDFV2" \}' -or $hjEndpointText -notmatch '\$kdfRejection = if \(-not \$enrollStart\.Success\) \{ Get-RecentAadKdfV1Rejection' -or $hjEndpointText -notmatch 'if \(\$r3 -and \$r3\.Success\)' -or $hjEndpointText -notmatch '\$status = "AAD_DEVICE_KDF_UPDATE_REQUIRED"') { throw 'Endpoint does not report the KDFV1 rejection as a review status without the confirmation wait.' }
+Write-Host 'PASS: an AADSTS5000611 KDFV1 rejection is a review status, without the Intune confirmation wait'
+
 # Enrollment backups: reg.exe export cannot write past MAX_PATH (260), which blocked every stub removal.
 $backupNameDefinition=$ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-EnrollmentRegistryBackupFileName' },$true)
 if (-not $backupNameDefinition) { throw 'Endpoint function missing: Get-EnrollmentRegistryBackupFileName' }
