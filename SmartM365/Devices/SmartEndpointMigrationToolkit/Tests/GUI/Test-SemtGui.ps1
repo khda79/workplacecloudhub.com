@@ -133,7 +133,7 @@ try {
         Remove-Item -LiteralPath $optionsWave -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path Function:\Add-Status -ErrorAction SilentlyContinue
     }
-    $filters = @{ WaveName = 'WAVE-AUTO-TEST'; Prefixes = @('CTSO-'); Contains = @("O'Brien"); ExcludeStaleAd = $true; LastLogonDays = 30; Source = 'Both'; ExcludeIntunePresent = $true; AdDomain = 'fr.example' }
+    $filters = @{ WaveName = 'WAVE-AUTO-TEST'; Prefixes = @('CTSO-'); Contains = @("O'Brien"); NotContains = @('-A-'); ExcludeStaleAd = $true; LastLogonDays = 30; Source = 'Both'; ExcludeIntunePresent = $true; AdDomain = 'fr.example' }
     foreach ($campaign in @('HybridJoin','Windows11Upgrade')) {
         $engine = Join-Path $packageRoot ("Campaigns\{0}\Scripts\SmartM365-EndpointMigration-{0}-New-AutomaticWave.ps1" -f $campaign)
         $engineAst = [System.Management.Automation.Language.Parser]::ParseFile($engine, [ref]$null, [ref]$null)
@@ -145,6 +145,8 @@ try {
         Write-TestResult -Condition ($unknown.Count -eq 0) -Message ("{0}: Automatic Wave command uses only engine parameters" -f $campaign) -Detail ($unknown -join ', ')
         Write-TestResult -Condition ($preview -notmatch '-Create\b' -and $create -match '-Create$') -Message ("{0}: Preview never passes -Create; Create does" -f $campaign)
         Write-TestResult -Condition ($create -match "'O''Brien'") -Message ("{0}: filter values are quoted as PowerShell literals" -f $campaign)
+        $noExclusion = $filters.Clone(); $noExclusion.NotContains = @()
+        Write-TestResult -Condition ($create -match "-ComputerNameNotContains @\('-A-'\)" -and (Get-AutomaticWaveCommandText -Campaign $campaign -Filters $noExclusion -EvidenceRoot 'C:\Evidence') -notmatch 'ComputerNameNotContains') -Message ("{0}: does-not-contain filter is passed only when set" -f $campaign)
         $reuseCreate = Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot 'C:\Evidence' -Create -PreviewEvidencePath 'C:\Evidence\Preview'
         $reuseUsed = @([regex]::Matches($reuseCreate, '(?<=\s)-(?<Name>[A-Za-z]+)') | ForEach-Object { $_.Groups['Name'].Value } | Where-Object { $engineParameters -notcontains $_ })
         Write-TestResult -Condition ($reuseCreate -match "-Create -PreviewEvidencePath 'C:\\Evidence\\Preview'$" -and $reuseUsed.Count -eq 0 -and (Get-AutomaticWaveCommandText -Campaign $campaign -Filters $filters -EvidenceRoot 'C:\Evidence' -PreviewEvidencePath 'C:\Evidence\Preview') -notmatch 'PreviewEvidencePath') -Message ("{0}: Create passes the previewed evidence to the engine (Preview never does)" -f $campaign)
@@ -155,7 +157,8 @@ try {
         $a = Get-AutomaticFilterSignature -Campaign HybridJoin -Filters $filters
         $changed = $filters.Clone(); $changed.LastLogonDays = 31
         $domain = $filters.Clone(); $domain.AdDomain = 'be.example'
-        $a -ne (Get-AutomaticFilterSignature -Campaign HybridJoin -Filters $changed) -and $a -ne (Get-AutomaticFilterSignature -Campaign HybridJoin -Filters $domain)
+        $exclusion = $filters.Clone(); $exclusion.NotContains = @('-B-')
+        $a -ne (Get-AutomaticFilterSignature -Campaign HybridJoin -Filters $changed) -and $a -ne (Get-AutomaticFilterSignature -Campaign HybridJoin -Filters $domain) -and $a -ne (Get-AutomaticFilterSignature -Campaign HybridJoin -Filters $exclusion)
     }
     $run = Get-GuiRunCommand -Campaign Windows11Upgrade -WavePath 'C:\Waves\W 1' -RunMode Once -IgnoreRunGuard $true -SelectionPath 'C:\Sel\s.json.txt'
     Test-Step 'Run command uses Windows PowerShell 5.1, the engine, the GUI selection and the run mode' { $run -match 'WindowsPowerShell\\v1\.0\\powershell\.exe' -and $run -match 'SmartM365-Invoke-EndpointMigrationWithPsExec\.ps1' -and $run -match '-GuiSelectionPath' -and $run -match '-RunMode Once' -and $run -match '-IgnoreRunGuard' -and $run -match '"C:\\Waves\\W 1"' }
@@ -255,6 +258,8 @@ try {
     Test-Step 'end message counts read the HybridJoin and Windows 11 summaries' { (Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 3; ExcludedDevices = 2; FilterExcludedDevices = 1 })) -match 'Selected: 3' -and (Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 4; ExcludedDevices = 0; NameFilterExcludedDevices = 7 })) -match 'Filtered out: 7' }
     $reasonSummary = '{"SelectedDevices":5,"ExcludedDevices":4,"FilterExcludedDevices":0,"ExclusionReasonCounts":{"AD_DISABLED":1,"INTUNE_ENROLLED_CONFIRMED_BY_DEVICE_ID":3}}' | ConvertFrom-Json
     $reasonText = Get-AutomaticWaveResultText -Summary $reasonSummary
+    $nameFilterText = Get-AutomaticWaveResultText -Summary ([pscustomobject]@{ SelectedDevices = 1; ExcludedDevices = 0; FilterExcludedDevices = 2; ComputerNamePrefixes = 'FR'; ComputerNameContains = ''; ComputerNameNotContains = '-A-' })
+    Test-Step 'end message shows the name filters that are set' { $nameFilterText -match '(?m)^  - Name prefix: FR\r?$' -and $nameFilterText -match '(?m)^  - Name does not contain: -A-\r?$' -and $nameFilterText -notmatch 'Name contains' }
     Test-Step 'end message lists the count per safety exclusion reason' { $reasonText -match '(?m)^  - INTUNE_ENROLLED_CONFIRMED_BY_DEVICE_ID: 3\r?$' -and $reasonText -match '(?m)^  - AD_DISABLED: 1\r?$' -and $reasonText -match '(?s)Safety exclusions: 4.*AD_DISABLED.*Filtered out: 0' }
     Remove-Item -LiteralPath $inventoryRoot -Recurse -Force
     $catalog = Import-SemtOptionCatalog -PackageRoot $packageRoot

@@ -245,7 +245,7 @@ function Get-AutomaticWaveCommandText {
 
     $script = Join-Path $script:PackageRoot ("Campaigns\{0}\Scripts\SmartM365-EndpointMigration-{0}-New-AutomaticWave.ps1" -f $Campaign)
     $parts = @('&',(ConvertTo-PowerShellLiteral $script),'-PackageRoot',(ConvertTo-PowerShellLiteral $script:PackageRoot),'-WaveName',(ConvertTo-PowerShellLiteral $Filters.WaveName),'-EvidenceRoot',(ConvertTo-PowerShellLiteral $EvidenceRoot))
-    foreach ($pair in @(@('ComputerNamePrefix','Prefixes'),@('ComputerNameContains','Contains'))) {
+    foreach ($pair in @(@('ComputerNamePrefix','Prefixes'),@('ComputerNameContains','Contains'),@('ComputerNameNotContains','NotContains'))) {
         $items = @($Filters[$pair[1]] | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         if ($items.Count -gt 0) { $parts += @(('-{0}' -f $pair[0]),('@({0})' -f (($items | ForEach-Object { ConvertTo-PowerShellLiteral $_ }) -join ','))) }
     }
@@ -359,12 +359,16 @@ function Get-AutomaticWaveResultText {
     if ($reasonCounts -is [System.Collections.IDictionary]) { foreach ($reason in @($reasonCounts.Keys)) { $lines.Add(('  - {0}: {1}' -f $reason,$reasonCounts[$reason])) } }
     elseif ($null -ne $reasonCounts) { foreach ($property in @($reasonCounts.PSObject.Properties)) { $lines.Add(('  - {0}: {1}' -f $property.Name,$property.Value)) } }
     $lines.Add(('Filtered out: {0}' -f $filtered))
+    foreach ($nameFilter in @(@('Name prefix','ComputerNamePrefixes'),@('Name contains','ComputerNameContains'),@('Name does not contain','ComputerNameNotContains'))) {
+        $value = [string](Get-SemtPropertyValue -InputObject $Summary -Name $nameFilter[1] -Default '')
+        if (-not [string]::IsNullOrWhiteSpace($value)) { $lines.Add(('  - {0}: {1}' -f $nameFilter[0],$value)) }
+    }
     return ($lines.ToArray() -join [Environment]::NewLine)
 }
 
 function Get-AutomaticFilterSignature {
     param([Parameter(Mandatory = $true)][string]$Campaign,[Parameter(Mandatory = $true)][hashtable]$Filters)
-    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}' -f $Campaign,$Filters.WaveName,(@($Filters.Prefixes) -join ';'),(@($Filters.Contains) -join ';'),$Filters.ExcludeStaleAd,$Filters.LastLogonDays,$Filters.Source,$Filters.ExcludeIntunePresent,$Filters.AdDomain)
+    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}' -f $Campaign,$Filters.WaveName,(@($Filters.Prefixes) -join ';'),(@($Filters.Contains) -join ';'),$Filters.ExcludeStaleAd,$Filters.LastLogonDays,$Filters.Source,$Filters.ExcludeIntunePresent,$Filters.AdDomain,(@($Filters.NotContains) -join ';'))
 }
 
 function Get-AdInventoryDomains {
@@ -724,6 +728,8 @@ $xaml = @'
                                 <TextBox x:Name="AutomaticNamePrefixText"/>
                                 <TextBlock Text="Computer name contains (separated by ;)"/>
                                 <TextBox x:Name="AutomaticNameContainsText"/>
+                                <TextBlock Text="Computer name does not contain (separated by ;)"/>
+                                <TextBox x:Name="AutomaticNameNotContainsText"/>
                                 <TextBlock Text="AD domain (from the shared AD inventory)"/>
                                 <ComboBox x:Name="AutomaticAdDomainCombo"/>
                                 <StackPanel x:Name="AutomaticSourcePanel">
@@ -1316,6 +1322,7 @@ function Invoke-AutomaticWave {
         WaveName = $controls.AutomaticWaveNameText.Text.Trim()
         Prefixes = @(Split-GuiList $controls.AutomaticNamePrefixText.Text)
         Contains = @(Split-GuiList $controls.AutomaticNameContainsText.Text)
+        NotContains = @(Split-GuiList $controls.AutomaticNameNotContainsText.Text)
         ExcludeStaleAd = [bool]$controls.AutomaticExcludeStaleAdCheck.IsChecked
         LastLogonDays = [int]$controls.AutomaticLastLogonDaysText.Text
         Source = [string]$controls.AutomaticSourceCombo.SelectedItem
@@ -1673,7 +1680,7 @@ $controls.CreateWaveButton.Add_Click({
     catch { Show-GuiError $_.Exception.Message }
 })
 $controls.OpenNewWaveComputersButton.Add_Click({ Open-TextFile $controls.NewWavePathText.Text })
-foreach ($name in @('AutomaticWaveNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticLastLogonDaysText')) { $controls[$name].Add_TextChanged({ if ($script:AutomaticPreviewSignature) { $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false } }) }
+foreach ($name in @('AutomaticWaveNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticNameNotContainsText','AutomaticLastLogonDaysText')) { $controls[$name].Add_TextChanged({ if ($script:AutomaticPreviewSignature) { $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false } }) }
 foreach ($name in @('AutomaticExcludeStaleAdCheck','AutomaticExcludeIntuneCheck')) { $controls[$name].Add_Click({ $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false }) }
 foreach ($name in @('AutomaticSourceCombo','AutomaticAdDomainCombo')) { $controls[$name].Add_SelectionChanged({ $script:AutomaticPreviewSignature = ''; $controls.AutomaticCreateButton.IsEnabled = $false }) }
 $controls.AutomaticPreviewButton.Add_Click({ try { Invoke-AutomaticWave } catch { Show-GuiError $_.Exception.Message; $controls.AutomaticPreviewButton.IsEnabled = $true } })

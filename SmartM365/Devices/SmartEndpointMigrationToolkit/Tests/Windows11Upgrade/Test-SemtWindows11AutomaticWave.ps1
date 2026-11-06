@@ -230,6 +230,10 @@ try {
     # Guards.
     Assert-Throws { & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -WaveName 'WAVE-AUTO-WILDCARD' -ComputerNamePrefix 'FR-*' -NoEvidence } 'wildcards and regular expressions are not supported' 'wildcard prefix is rejected explicitly'
     Assert-Throws { & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -WaveName 'WAVE-AUTO-CONTAINS-WILDCARD' -ComputerNameContains '*-A-*' -NoEvidence } 'wildcards and regular expressions are not supported' 'wildcard contains filter is rejected explicitly'
+    Assert-Throws { & $engine -Source Both -AdInventoryCsv $adCsv -IntuneInventoryCsv $intuneCsv -WaveName 'WAVE-AUTO-CONTRADICTION' -ComputerNameContains '-A-' -ComputerNameNotContains '-a-' -NoEvidence } 'exclude every computer' 'contradictory contains and does-not-contain filters fail with a clear message'
+    $exclusion = & $engine -Source Both -AdInventoryCsv $filterAdCsv -IntuneInventoryCsv $filterIntuneCsv -WaveName 'WAVE-AUTO-NOT-A' -ComputerNamePrefix 'FR-' -ComputerNameNotContains '-a-' -NoEvidence
+    Assert-True (@($exclusion.SelectedDevices | Where-Object { ([string]$_.ComputerName).ToUpperInvariant().Contains('-A-') }).Count -eq 0) 'does-not-contain filter is case-insensitive and removes every match'
+    Assert-Equal $exclusion.Summary.ComputerNameNotContains '-A-' 'does-not-contain filter is normalized and reported'
     Assert-Throws { & $engine -Source AD -AdInventoryCsv $adCsv -WaveName 'WAVE-AUTO-INTUNE-FILTER-SOURCE' -ExcludeIntunePresent -NoEvidence } 'requires an available Intune inventory source' 'Intune presence filter requires Intune inventory evidence'
     Assert-Throws { & $engine -Source Intune -IntuneInventoryCsv $intuneCsv -WaveName 'WAVE-AUTO-AD-FILTER-SOURCE' -ExcludeStaleAd -NoEvidence } 'requires an available AD inventory source' 'AD LastLogon filter requires AD inventory evidence'
     Assert-Throws { & $engine -Source Both -AdInventoryCsv $adCsv -WaveName 'WAVE-AUTO-MISSING-SOURCE' -NoEvidence } 'source\(s\) missing' 'missing requested source is blocked by default (shared Intune cache absent)'

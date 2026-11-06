@@ -223,6 +223,14 @@ try {
     $filtered = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-FILTERED' -ComputerNamePrefix 'FR-' -ComputerNameContains '-PC' -NoEvidence
     Assert-Equal $filtered.Summary.SelectedDevices 4 'prefix and contains filters are combined with AND'
     Assert-Equal $filtered.Summary.FilterExcludedDevices 5 'nonmatching AD keys are recorded once as filter exclusions'
+    $notContains = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-NOTCONTAINS' -ComputerNamePrefix 'FR-' -ComputerNameNotContains '-pc' -NoEvidence
+    $withoutPc = @($filtered.SelectedDevices | ForEach-Object { [string]$_.ComputerName })
+    Assert-True (@($notContains.SelectedDevices | Where-Object { ([string]$_.ComputerName).ToUpperInvariant().Contains('-PC') }).Count -eq 0) 'does-not-contain filter is case-insensitive and removes every match'
+    Assert-Equal $notContains.Summary.ComputerNameNotContains '-PC' 'does-not-contain filter is normalized and reported'
+    Assert-True ($notContains.Summary.SelectionSignature -match '\|ComputerNameNotContains=-PC\|') 'a used does-not-contain filter is part of the selection signature'
+    Assert-True ($filtered.Summary.SelectionSignature -notmatch 'ComputerNameNotContains') 'an empty does-not-contain filter keeps the earlier signature format'
+    Assert-True (@($notContains.SelectedDevices | Where-Object { $withoutPc -contains [string]$_.ComputerName }).Count -eq 0) 'contains and does-not-contain select disjoint sets'
+    Assert-Throws { & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-CONTRADICTION' -ComputerNameContains '-A-' -ComputerNameNotContains '-a-' -NoEvidence } 'exclude every computer' 'contradictory contains and does-not-contain filters fail with a clear message'
     $stale = & $engine -AdInventoryCsv $adPath -IntuneInventoryCsv $intunePath -EntraInventoryCsv $entraPath -WaveName 'WAVE-AUTO-HJ-STALE' -ExcludeStaleAd -AdLastLogonMaxAgeDays 45 -NoEvidence
     Assert-Equal $stale.Summary.ADLastLogonFilterExcluded 1 'stale AD device is excluded by the optional 45-day filter'
 

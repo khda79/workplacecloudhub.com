@@ -32,6 +32,10 @@ these domains are kept; the others are listed in AutomaticWaveFilterExclusions.c
 AD_DOMAIN_NOT_MATCHED, or AD_DOMAIN_UNKNOWN when they have no AD record (Intune only) or no domain. Requires the AD source.
 Each domain must exist in the AD inventory. The shared AD inventory always covers the whole forest.
 
+.PARAMETER ComputerNameNotContains
+Optional texts (separated by ;). A computer whose name contains one of them is left out and listed
+in AutomaticWaveFilterExclusions.csv with COMPUTER_NAME_EXCLUDED_TEXT_MATCHED. Plain text only.
+
 .PARAMETER Create
 Creates the Wave (Computers.txt, Wave.local.json.txt, wrappers). Without it, only evidence is written.
 
@@ -42,7 +46,7 @@ the inventory files have not changed since, and it is less than 24 hours old. Ot
 is computed again.
 
 .VERSION
-1.1.0
+1.2.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -60,6 +64,7 @@ param(
     [string]$WaveName,
     [string[]]$ComputerNamePrefix,
     [string[]]$ComputerNameContains,
+    [string[]]$ComputerNameNotContains,
     [string[]]$AdDomainFilter,
     [switch]$ExcludeIntunePresent,
     [switch]$ExcludeStaleAd,
@@ -75,7 +80,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AutomaticWaveVersion = '1.1.0'
+$script:AutomaticWaveVersion = '1.2.0'
 $script:AutomaticWaveCampaign = 'Windows11Upgrade'
 $script:AutomaticWaveProgressCallback = $ProgressCallback
 
@@ -727,12 +732,24 @@ $namePrefixes = @(Get-AutomaticWaveNamePrefixes -Prefixes $ComputerNamePrefix)
 $namePrefixDisplay = $namePrefixes -join ';'
 $nameContainsValues = @(Get-AutomaticWaveNameContainsValues -ContainsValues $ComputerNameContains)
 $nameContainsDisplay = $nameContainsValues -join ';'
+$nameNotContainsValues = @(Get-AutomaticWaveNameContainsValues -ContainsValues $ComputerNameNotContains)
+$nameNotContainsDisplay = $nameNotContainsValues -join ';'
+# Contradictory name filters would silently select nothing: every computer that contains a
+# ComputerNameContains value would also contain an excluded text.
+if ($nameContainsValues.Count -gt 0 -and $nameNotContainsValues.Count -gt 0) {
+    $contradicted = @($nameContainsValues | Where-Object { $containsValue = $_; @($nameNotContainsValues | Where-Object { $containsValue.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -gt 0 })
+    if ($contradicted.Count -eq $nameContainsValues.Count) {
+        throw ("The name filters exclude every computer: each 'contains' value ({0}) also contains a 'does not contain' value ({1}). Change one of the two filters." -f $nameContainsDisplay,$nameNotContainsDisplay)
+    }
+}
 $adDomains = @(Get-AutomaticWaveAdDomains -Domains $AdDomainFilter)
 $adDomainDisplay = $adDomains -join ';'
 $safeWaveName = Get-AutomaticWaveSafeName -Name $WaveName -NamePrefixes $namePrefixes
 $emptySelectionMessage = 'No eligible Windows 10 device was selected; the Wave was not created.'
-$descriptionBase = 'Automatic Windows11Upgrade Wave; Source={0}; AvailableSources={1}; ComputerNamePrefix={2}; ComputerNameContains={3}; ADDomain={7}; ExcludeIntunePresent={4}; ExcludeStaleAd={5}; ADLastLogonMaxAgeDays={6}' -f $Source,($availableSources.ToArray() -join '+'),$namePrefixDisplay,$nameContainsDisplay,[bool]$ExcludeIntunePresent,[bool]$ExcludeStaleAd,$AdLastLogonMaxAgeDays,$adDomainDisplay
+$descriptionBase = 'Automatic Windows11Upgrade Wave; Source={0}; AvailableSources={1}; ComputerNamePrefix={2}; ComputerNameContains={3}; ComputerNameNotContains={8}; ADDomain={7}; ExcludeIntunePresent={4}; ExcludeStaleAd={5}; ADLastLogonMaxAgeDays={6}' -f $Source,($availableSources.ToArray() -join '+'),$namePrefixDisplay,$nameContainsDisplay,[bool]$ExcludeIntunePresent,[bool]$ExcludeStaleAd,$AdLastLogonMaxAgeDays,$adDomainDisplay, $nameNotContainsDisplay
 $selectionSignature = @($script:AutomaticWaveCampaign, $script:AutomaticWaveVersion, "Source=$Source", "AvailableSources=$($availableSources.ToArray() -join '+')", "ComputerNamePrefix=$namePrefixDisplay", "ComputerNameContains=$nameContainsDisplay", "ADDomain=$adDomainDisplay", "ExcludeIntunePresent=$([bool]$ExcludeIntunePresent)", "ExcludeStaleAd=$([bool]$ExcludeStaleAd)", "ADLastLogonMaxAgeDays=$AdLastLogonMaxAgeDays") -join '|'
+# The field is present only when used: an empty filter keeps the signature of earlier versions.
+if ($nameNotContainsDisplay) { $selectionSignature = $selectionSignature.Replace('|ADDomain=', ('|ComputerNameNotContains={0}|ADDomain=' -f $nameNotContainsDisplay)) }
 $inventoryFingerprint = Get-AutomaticWaveInventoryFingerprint -Paths @($(if ('AD' -in $availableSources) { $AdInventoryCsv } else { '' }), $(if ('Intune' -in $availableSources) { $IntuneInventoryCsv } else { '' }))
 
 if ($Create -and -not [string]::IsNullOrWhiteSpace($PreviewEvidencePath)) {
@@ -820,6 +837,11 @@ foreach ($key in $allKeys) {
         $filterTypes.Add('ComputerNameContains')
         $filterValues.Add($nameContainsDisplay)
         $filterReasons.Add('COMPUTER_NAME_CONTAINS_NOT_MATCHED')
+    }
+    if ($nameNotContainsValues.Count -gt 0 -and (Test-AutomaticWaveNameContains -ComputerKey $key -ContainsValues $nameNotContainsValues)) {
+        $filterTypes.Add('ComputerNameNotContains')
+        $filterValues.Add($nameNotContainsDisplay)
+        $filterReasons.Add('COMPUTER_NAME_EXCLUDED_TEXT_MATCHED')
     }
     $adDomainReason = if ($adDomains.Count -gt 0) { Get-AutomaticWaveAdDomainFilterReason -AdRecords $keyAdRecords -Domains $adDomains } else { '' }
     if (-not [string]::IsNullOrWhiteSpace($adDomainReason)) {
@@ -1006,11 +1028,12 @@ $summary = [pscustomobject]@{
     PartialSource              = ($missingSources.Count -gt 0)
     ComputerNamePrefixes       = $namePrefixDisplay
     ComputerNameContains       = $nameContainsDisplay
+    ComputerNameNotContains    = $nameNotContainsDisplay
     ADDomainFilter             = $adDomainDisplay
     ExcludeIntunePresent       = [bool]$ExcludeIntunePresent
     ExcludeStaleAd             = [bool]$ExcludeStaleAd
     ADLastLogonMaxAgeDays      = $AdLastLogonMaxAgeDays
-    NameFilterEnabled          = ($namePrefixes.Count -gt 0 -or $nameContainsValues.Count -gt 0 -or $adDomains.Count -gt 0 -or $ExcludeIntunePresent -or $ExcludeStaleAd)
+    NameFilterEnabled          = ($namePrefixes.Count -gt 0 -or $nameContainsValues.Count -gt 0 -or $nameNotContainsValues.Count -gt 0 -or $adDomains.Count -gt 0 -or $ExcludeIntunePresent -or $ExcludeStaleAd)
     UniqueInventoryDevices     = $allKeys.Count
     NameFilterMatchedDevices   = $matchedKeyLookup.Count
     NameFilterExcludedDevices  = $filterExcluded.Count
