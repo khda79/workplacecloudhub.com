@@ -405,6 +405,25 @@ function Split-GuiList {
     return @(([string]$Text -split '[;,\r\n]+') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
+function Remove-GuiWaveFolder {
+    <#
+    Deletes one Wave of a Campaign: its folder (Computers.txt, Wave.local.json.txt, launchers) goes
+    to the Recycle Bin. Runs, reports and evidence are not touched. Refuses a name that is not a
+    Wave name or a folder outside Waves\<Campaign>.
+    #>
+    param([Parameter(Mandatory = $true)][string]$PackageRoot,[Parameter(Mandatory = $true)][string]$Campaign,[Parameter(Mandatory = $true)][string]$Name)
+
+    if (-not (Test-SemtWaveName -Name $Name)) { throw ("'{0}' is not a valid Wave name." -f $Name) }
+    $waveRoot = [IO.Path]::GetFullPath((Get-SemtWaveRoot -PackageRoot $PackageRoot -Campaign $Campaign)).TrimEnd('\')
+    $path = [IO.Path]::GetFullPath((Join-Path $waveRoot $Name))
+    if (-not [string]::Equals([IO.Path]::GetDirectoryName($path).TrimEnd('\'), $waveRoot, [StringComparison]::OrdinalIgnoreCase)) { throw ('Wave folder outside {0}: {1}' -f $waveRoot,$path) }
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw ('Wave folder not found: {0}' -f $path) }
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($path, [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs, [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin, [Microsoft.VisualBasic.FileIO.UICancelOption]::ThrowException)
+    if (Test-Path -LiteralPath $path) { throw ('The Wave folder is still present: {0}' -f $path) }
+    return $path
+}
+
 function Get-GuiChildWindowMarkup {
     <#
     Markup of a dedicated window (Single PC, New Wave, Automatic Wave): the placeholder
@@ -581,23 +600,30 @@ $xaml = @'
                     <TextBlock Text="Campaign" FontWeight="SemiBold"/>
                     <ComboBox x:Name="CampaignCombo" Margin="0,4,0,0"/>
                 </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Ellipse Width="10" Height="10" Fill="#0078D4" Margin="2,0,12,0"/>
                     <StackPanel>
                         <TextBlock x:Name="StatusTitle" Text="Ready" FontWeight="SemiBold" Foreground="#0078D4"/>
                         <TextBlock x:Name="StatusText" Text="Select a Campaign and a Wave." Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button x:Name="RefreshButton" Content="Refresh"/>
-                    <Button x:Name="StopAllButton" Content="Stop running Waves" Background="#FFF4E5" Foreground="#9A3412" BorderBrush="#FDBA74" MinWidth="150"/>
-                    <Button x:Name="LaunchAllButton" Content="Launch All Waves" Style="{StaticResource PrimaryButtonStyle}" MinWidth="150"/>
-                </StackPanel>
-                <WrapPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,10,0,0">
-                    <Button x:Name="OpenSinglePcButton" Content="Single PC" MinWidth="130" ToolTip="Launch one computer of the selected Campaign (dedicated window)."/>
-                    <Button x:Name="OpenNewWaveButton" Content="New Wave" MinWidth="130" ToolTip="Create a Wave of the selected Campaign from a list of computers (dedicated window)."/>
-                    <Button x:Name="OpenAutomaticWaveButton" Content="Automatic Wave" MinWidth="130" ToolTip="Create a Wave of the selected Campaign from the shared inventories (dedicated window)."/>
-                </WrapPanel>
+                <!-- Every button of the action card on one line: the dedicated windows on the left, the Campaign actions on the right. -->
+                <Grid Grid.Row="1" Grid.ColumnSpan="3" x:Name="ActionButtonBar" Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="OpenSinglePcButton" Content="Single PC" MinWidth="120" ToolTip="Launch one computer of the selected Campaign (dedicated window)."/>
+                        <Button x:Name="OpenNewWaveButton" Content="New Wave" MinWidth="120" ToolTip="Create a Wave of the selected Campaign from a list of computers (dedicated window)."/>
+                        <Button x:Name="OpenAutomaticWaveButton" Content="Automatic Wave" MinWidth="120" ToolTip="Create a Wave of the selected Campaign from the shared inventories (dedicated window)."/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button x:Name="RefreshButton" Content="Refresh"/>
+                        <Button x:Name="StopAllButton" Content="Stop running Waves" Background="#FFF4E5" Foreground="#9A3412" BorderBrush="#FDBA74" MinWidth="150"/>
+                        <Button x:Name="LaunchAllButton" Content="Launch All Waves" Style="{StaticResource PrimaryButtonStyle}" MinWidth="150"/>
+                    </StackPanel>
+                </Grid>
             </Grid>
         </Border>
 
@@ -621,13 +647,16 @@ $xaml = @'
                             <Grid Grid.Row="1" Margin="0,14,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="160"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="Existing Waves of the selected Campaign"/>
                                     <ComboBox x:Name="WaveCombo"/>
                                 </StackPanel>
-                                <Button Grid.Column="1" x:Name="LaunchWaveButton" Content="Launch Wave" Style="{StaticResource PrimaryButtonStyle}" Margin="12,22,0,10"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,22,0,10">
+                                    <Button x:Name="LaunchWaveButton" Content="Launch Wave" Style="{StaticResource PrimaryButtonStyle}" MinWidth="130" Margin="0,0,8,0"/>
+                                    <Button x:Name="DeleteWaveButton" Content="Delete Wave" MinWidth="120" Margin="0" Background="#FDECEC" Foreground="#991B1B" BorderBrush="#FCA5A5" ToolTip="Send the Wave folder to the Recycle Bin (Runs, reports and evidence are kept)."/>
+                                </StackPanel>
                             </Grid>
                             <UniformGrid Grid.Row="2" Columns="4" Margin="0,4,0,12">
                                 <StackPanel>
@@ -762,6 +791,10 @@ $singlePcXaml = @'
         <!--SEMT_SHARED_RESOURCES-->
     </Window.Resources>
     <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
         <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -784,6 +817,7 @@ $singlePcXaml = @'
                 </StackPanel>
             </Grid>
         </Border>
+        <Button Grid.Row="1" x:Name="SinglePcCloseButton" Content="Close" IsCancel="True" MinWidth="110" HorizontalAlignment="Right" Margin="0,12,0,0"/>
     </Grid>
 </Window>
 '@
@@ -799,6 +833,10 @@ $newWaveXaml = @'
         <!--SEMT_SHARED_RESOURCES-->
     </Window.Resources>
     <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
         <Border CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" Padding="18">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -821,6 +859,7 @@ $newWaveXaml = @'
                 </StackPanel>
             </Grid>
         </Border>
+        <Button Grid.Row="1" x:Name="NewWaveCloseButton" Content="Close" IsCancel="True" MinWidth="110" HorizontalAlignment="Right" Margin="0,12,0,0"/>
     </Grid>
 </Window>
 '@
@@ -836,6 +875,10 @@ $automaticWaveXaml = @'
         <!--SEMT_SHARED_RESOURCES-->
     </Window.Resources>
     <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="0.95*"/>
@@ -905,6 +948,7 @@ $automaticWaveXaml = @'
                 </Grid>
             </Border>
         </Grid>
+        <Button Grid.Row="1" x:Name="AutomaticWaveCloseButton" Content="Close" IsCancel="True" MinWidth="110" HorizontalAlignment="Right" Margin="0,12,0,0"/>
     </Grid>
 </Window>
 '@
@@ -961,6 +1005,10 @@ foreach ($entry in @(@('SinglePc',$singlePcXaml),@('NewWave',$newWaveXaml),@('Au
         if ($control) { $controls[$name] = $control }
     }
     $child.Add_Closing({ param($eventSource,$cancelEventArgs) if (-not $script:GuiClosing) { $cancelEventArgs.Cancel = $true; $eventSource.Hide() } })
+    # Close button (also Esc): hides the window like its title bar button.
+    $closeButton = $controls[$entry[0] + 'CloseButton']
+    $closeButton.Tag = $child
+    $closeButton.Add_Click({ param($eventSource,$routedEventArgs) $eventSource.Tag.Close() })
     $script:GuiChildWindows[$entry[0]] = $child
 }
 
@@ -1201,6 +1249,7 @@ function Update-WaveView {
     if ($null -eq $wave) {
         foreach ($name in @('WaveDeviceCountText','WaveSourceText','WaveWrappersText','WaveLastRunText')) { $controls[$name].Text = '-' }
         $controls.LaunchWaveButton.IsEnabled = $false
+        $controls.DeleteWaveButton.IsEnabled = $false
         Update-WaveOptionsView
         return
     }
@@ -1216,6 +1265,7 @@ function Update-WaveView {
     $last = @(Get-SemtRuns -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Last 200 | Where-Object { $_.WaveName -eq $wave.Name } | Select-Object -First 1)
     $controls.WaveLastRunText.Text = if ($last.Count -gt 0) { '{0} ({1})' -f $last[0].Status,$last[0].UpdatedUtc } else { 'Never' }
     $controls.LaunchWaveButton.IsEnabled = [bool]$wave.Launchable
+    $controls.DeleteWaveButton.IsEnabled = $true
     Update-WaveOptionsView
 }
 
@@ -1502,7 +1552,9 @@ function Invoke-AutomaticWave {
             Add-Status -Title 'Wave created' -Message ("Wave '{0}' created from the automatic selection. It was not launched." -f $info.WaveName)
             Update-WaveList -SelectName $info.WaveName
             Update-AutomaticView
-            [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), ("Wave '{0}' was created.{1}{1}{2}{1}{1}The Wave was NOT launched." -f $info.WaveName,[Environment]::NewLine,$counts), 'Create Wave', 'OK', 'Information')
+            [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), ("Wave '{0}' was created.{1}{1}{2}{1}{1}The Wave was NOT launched. It is selected in the Waves tab." -f $info.WaveName,[Environment]::NewLine,$counts), 'Create Wave', 'OK', 'Information')
+            # The Automatic Wave window closes after a successful Create (the evidence stays in Runs).
+            $script:GuiChildWindows['AutomaticWave'].Close()
         }
         else {
             $script:AutomaticPreviewSignature = $info.Signature
@@ -1726,6 +1778,20 @@ $controls.LaunchWaveButton.Add_Click({
     }
     catch { Show-GuiError $_.Exception.Message }
 })
+$controls.DeleteWaveButton.Add_Click({
+    try {
+        $wave = $script:SelectedWave
+        if ($null -eq $wave) { return }
+        if (@(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) -Campaign $script:CurrentCampaign | Where-Object { $_.Alive -and $_.WaveName -eq $wave.Name }).Count -gt 0) { Show-GuiError ("Wave '{0}' is running. Stop it before deleting it." -f $wave.Name); return }
+        $question = "Delete Wave '{0}' ({1} computer(s)) of {2}?{3}{3}The Wave folder (Computers.txt, Wave.local.json.txt, launchers) goes to the Recycle Bin. Runs, reports and evidence are kept.{3}{3}Folder: {4}" -f $wave.Name,$wave.ComputerCount,$script:CampaignTitles[$script:CurrentCampaign],[Environment]::NewLine,$wave.Path
+        if (-not (Show-GuiWarningQuestion -Message $question -Title 'Delete Wave')) { return }
+        $deleted = Remove-GuiWaveFolder -PackageRoot $script:PackageRoot -Campaign $script:CurrentCampaign -Name $wave.Name
+        Update-WaveList
+        Add-Status -Title 'Wave deleted' -Message ("Wave '{0}' sent to the Recycle Bin: {1}" -f $wave.Name,$deleted)
+        [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), ("Wave '{0}' was deleted (sent to the Recycle Bin).{1}{1}Runs, reports and evidence are kept." -f $wave.Name,[Environment]::NewLine), 'Delete Wave', 'OK', 'Information')
+    }
+    catch { Show-GuiError $_.Exception.Message }
+})
 $controls.LaunchAllButton.Add_Click({
     try {
         $active = @(Get-SemtActiveRuns -RunsRoot (Get-SemtStorageRoot -PackageRoot $script:PackageRoot -Kind Runs) -Campaign $script:CurrentCampaign | Where-Object { $_.Alive } | ForEach-Object { $_.WaveName })
@@ -1781,7 +1847,12 @@ $controls.LaunchSingleButton.Add_Click({
     try {
         $name = ConvertTo-SemtComputerName -Line $controls.SingleComputerText.Text
         if ([string]::IsNullOrWhiteSpace($name)) { Show-GuiError 'Enter a computer name.'; return }
-        [void](Start-GuiRun -ComputerName $name -ModeKey ([string]$controls.SingleModeCombo.SelectedItem) -TargetText ("Single PC '{0}'" -f $name))
+        if (-not (Start-GuiRun -ComputerName $name -ModeKey ([string]$controls.SingleModeCombo.SelectedItem) -TargetText ("Single PC '{0}'" -f $name))) { return }
+        Update-RunsView
+        # End message (the status bar is hidden behind this window), then the Single PC window closes.
+        [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), ("Single PC Run launched for '{0}' ({1}) in an elevated console.{2}{2}Follow it in that console and in the Runs tab.{2}{2}Single PC Runs: {3}" -f $name,$script:CampaignTitles[$script:CurrentCampaign],[Environment]::NewLine,$controls.SingleRunFolderText.Text), 'Launch Single PC', 'OK', 'Information')
+        $controls.SingleComputerText.Text = ''
+        $script:GuiChildWindows['SinglePc'].Close()
     }
     catch { Show-GuiError $_.Exception.Message }
 })
@@ -1795,10 +1866,15 @@ $controls.CreateWaveButton.Add_Click({
         $controls.NewWavePathText.Text = $wave.ComputersPath
         Update-WaveList -SelectName $wave.Name
         Add-Status -Title 'Wave created' -Message ("Wave '{0}' created ({1} computer(s)). It was not launched." -f $wave.Name,$wave.ComputerCount)
+        # End message, then the window closes (a hidden window keeps nothing of this Wave).
+        [void][System.Windows.MessageBox]::Show((Get-GuiDialogOwner), ("Wave '{0}' was created for {1} with {2} computer(s).{3}{3}Folder: {4}{3}{3}The Wave was NOT launched. It is selected in the Waves tab." -f $wave.Name,$script:CampaignTitles[$script:CurrentCampaign],$wave.ComputerCount,[Environment]::NewLine,$wave.Path), 'Create Wave', 'OK', 'Information')
+        $controls.NewWaveNameText.Text = ''
+        $controls.NewWaveComputersText.Text = ''
+        $script:GuiChildWindows['NewWave'].Close()
     }
     catch { Show-GuiError $_.Exception.Message }
 })
-$controls.OpenNewWaveComputersButton.Add_Click({ Open-TextFile $controls.NewWavePathText.Text })
+$controls.OpenNewWaveComputersButton.Add_Click({ if ([string]::IsNullOrWhiteSpace($controls.NewWavePathText.Text)) { Show-GuiError 'No Wave was created from this window yet.' } else { Open-TextFile $controls.NewWavePathText.Text } })
 foreach ($name in @('AutomaticWaveNameText','AutomaticNamePrefixText','AutomaticNameContainsText','AutomaticNameNotContainsText','AutomaticLastLogonDaysText')) { $controls[$name].Add_TextChanged({ $script:AutomaticPreviewSignature = '' }) }
 foreach ($name in @('AutomaticExcludeStaleAdCheck','AutomaticExcludeIntuneCheck')) { $controls[$name].Add_Click({ $script:AutomaticPreviewSignature = '' }) }
 foreach ($name in @('AutomaticSourceCombo','AutomaticAdDomainCombo')) { $controls[$name].Add_SelectionChanged({ $script:AutomaticPreviewSignature = '' }) }

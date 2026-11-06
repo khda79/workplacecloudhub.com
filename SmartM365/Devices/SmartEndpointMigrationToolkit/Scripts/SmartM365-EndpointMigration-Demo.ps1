@@ -184,6 +184,19 @@ function script:Invoke-SmartM365DemoProfileAction {
             Update-SemtDemoCampaign
             $c.WaveCombo.SelectedIndex = $c.WaveCombo.Items.Count - 1
             Write-SmartM365DemoActivity ('Wave created in memory and NOT launched: ' + $wave)
+            # As in the GUI, the window closes after a successful Create.
+            $window = $s.Data.SemtWindows[$(if ($Name -eq 'CreateWaveButton') { 'NewWave' } else { 'AutomaticWave' })]
+            if ($window.IsVisible) { $window.Hide() }
+            return $true
+        }
+        '^(SinglePc|NewWave|AutomaticWave)CloseButton$' { $key = $Name -replace 'CloseButton$',''; $window = $s.Data.SemtWindows[$key]; if ($window.IsVisible) { $window.Hide() }; Write-SmartM365DemoActivity ($script:SemtDemoWindowTitles[$key] + ' window closed.'); return $true }
+        '^DeleteWaveButton$' {
+            $campaign = Get-SemtDemoCampaign
+            $key = 'Waves:' + $campaign
+            $waves = @(Get-SemtDemoWaves -Campaign $campaign)
+            $index = [Math]::Max(0, $c.WaveCombo.SelectedIndex)
+            if ($waves.Count -gt 1) { $s.Data[$key] = @($waves | Where-Object { $_ -ne $waves[$index] }); Update-SemtDemoCampaign }
+            Write-SmartM365DemoActivity ('Wave deletion simulated (Recycle Bin in the real GUI): ' + $waves[$index] + '. Runs and reports are kept.')
             return $true
         }
         '^OpenSinglePcButton$' { Show-SemtDemoWindow -Name SinglePc; return $true }
