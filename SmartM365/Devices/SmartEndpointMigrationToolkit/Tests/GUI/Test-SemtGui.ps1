@@ -186,8 +186,13 @@ try {
     # Parallel plan: AD and Graph streams; Graph uses one sign-in (combined exporter for HybridJoin).
     $hjPlan = @(Get-InventoryRefreshPlan -Campaign HybridJoin)
     $w11Plan = @(Get-InventoryRefreshPlan -Campaign Windows11Upgrade)
-    Test-Step 'inventory refresh runs AD and Graph streams; HybridJoin also exports user licenses' { ($hjPlan.Name -join ',') -eq 'AD,Graph' -and ($w11Plan.Name -join ',') -eq 'AD,Graph' -and @($hjPlan[1].Exports).Count -eq 2 -and $hjPlan[1].Exports[1].Script -eq 'SmartM365-EndpointMigration-Export-UserLicensesCsv.ps1' -and @($w11Plan[1].Exports).Count -eq 1 }
-    Test-Step 'HybridJoin Graph stream exports Intune and Entra on one connection; Windows 11 exports Intune only' { $hjPlan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and $w11Plan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' }
+    Test-Step 'inventory refresh runs AD and Graph streams with one Graph export each' { ($hjPlan.Name -join ',') -eq 'AD,Graph' -and ($w11Plan.Name -join ',') -eq 'AD,Graph' -and @($hjPlan[1].Exports).Count -eq 1 -and @($w11Plan[1].Exports).Count -eq 1 }
+    Test-Step 'HybridJoin Graph stream exports Intune, Entra and user licenses on one sign-in; Windows 11 exports Intune only' { $hjPlan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and (@($hjPlan[1].Exports[0].Arguments) -contains '-IncludeUserLicenses') -and $w11Plan[1].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1' }
+    $usersOnly = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds Users)
+    $entraUsers = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds Entra,Users)
+    Test-Step 'old inventories only: users alone run the license exporter; users with a device inventory share its sign-in' { @($usersOnly[0].Exports).Count -eq 1 -and $usersOnly[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-UserLicensesCsv.ps1' -and @($entraUsers[0].Exports).Count -eq 1 -and $entraUsers[0].Exports[0].Script -eq 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1' -and (@($entraUsers[0].Exports[0].Arguments) -contains '-IncludeUserLicenses') }
+    $graphExporterText = Get-Content -LiteralPath (Join-Path $script:PackageRoot 'Scripts\SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1') -Raw
+    Test-Step 'combined Graph exporter adds User.Read.All and runs the license export without a second connection' { $graphExporterText -match "if \(\`$IncludeUserLicenses\) \{ \`$scopes \+= 'User\.Read\.All' \}" -and $graphExporterText -match '\$userLicenseExporter -OutputPath \$UserLicensesOutputPath -NoConnect -ForceRefresh' }
     # "Refresh old inventories only": only the old inventories are exported.
     $adOnly = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds AD)
     $entraOnly = @(Get-InventoryRefreshPlan -Campaign HybridJoin -Kinds Entra)

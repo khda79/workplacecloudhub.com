@@ -16,8 +16,15 @@ Intune CSV path. Defaults to the shared cache <Inventory>\DevicesIntune.csv.
 .PARAMETER EntraOutputPath
 Entra CSV path. Defaults to the shared cache <Inventory>\DevicesEntra.csv.
 
+.PARAMETER IncludeUserLicenses
+Also exports users and licenses on the same connection (adds the User.Read.All scope), so the
+technician signs in once. A failed user license export fails the script after the device exports.
+
+.PARAMETER UserLicensesOutputPath
+Users and licenses CSV path. Defaults to the shared cache <Inventory>\UsersLicenses.csv.
+
 .VERSION
-1.0.0
+1.1.0
 
 .NOTES
 Author: https://github.com/khda79/workplacecloudhub.com
@@ -30,11 +37,13 @@ param(
     [string]$IntuneOutputPath,
     [string]$EntraOutputPath,
     [string]$TenantId,
+    [switch]$IncludeUserLicenses,
+    [string]$UserLicensesOutputPath,
     [switch]$SkipModuleInstall
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.1.0'
 
 function Write-Host {
     param(
@@ -86,20 +95,27 @@ if ([string]::IsNullOrWhiteSpace($EntraOutputPath)) { $EntraOutputPath = Get-Sem
 
 $intuneExporter = Join-Path $scriptsRoot 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1'
 $entraExporter = Join-Path $scriptsRoot 'SmartM365-EndpointMigration-Export-EntraDevicesCsv.ps1'
-foreach ($path in @($intuneExporter, $entraExporter)) {
+$userLicenseExporter = Join-Path $scriptsRoot 'SmartM365-EndpointMigration-Export-UserLicensesCsv.ps1'
+if ([string]::IsNullOrWhiteSpace($UserLicensesOutputPath)) { $UserLicensesOutputPath = Get-SemtSharedInventoryPath -PackageRoot $packageRoot -Kind UserLicenses }
+foreach ($path in @($intuneExporter, $entraExporter, $userLicenseExporter)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Exporter not found: $path" }
 }
 
 Write-Host "Smart Endpoint Migration Toolkit - Automatic Graph inventory exporter version $ScriptVersion" -ForegroundColor Cyan
 Import-GraphAuthentication
 Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+$scopes = @('DeviceManagementManagedDevices.Read.All', 'Device.Read.All')
+if ($IncludeUserLicenses) { $scopes += 'User.Read.All' }
 $connectParameters = @{
-    Scopes = @('DeviceManagementManagedDevices.Read.All', 'Device.Read.All')
+    Scopes = $scopes
     NoWelcome = $true
 }
 if (-not [string]::IsNullOrWhiteSpace($TenantId)) { $connectParameters.TenantId = $TenantId.Trim() }
 
 $entraSucceeded = $false
+$userLicensesSucceeded = $false
+$deviceExportError = $null
+$userLicenseExportError = $null
 $context = $null
 try {
     Write-Host 'Waiting for delegated interactive Microsoft Graph authentication...' -ForegroundColor Cyan
@@ -113,29 +129,51 @@ try {
     Write-Host ("Tenant      : {0}" -f $context.TenantId)
     Write-Host ("Account     : {0}" -f $context.Account)
 
-    Write-Host 'Exporting the required full Intune managed-device inventory...' -ForegroundColor Cyan
-    & $intuneExporter -OutputPath $IntuneOutputPath -NoConnect -ForceRefresh -SkipModuleInstall
-    if (-not (Test-Path -LiteralPath $IntuneOutputPath -PathType Leaf)) {
-        throw "Intune inventory was not created: $IntuneOutputPath"
-    }
-
     try {
-        Write-Host 'Exporting the optional full Entra device inventory...' -ForegroundColor Cyan
-        & $entraExporter -OutputPath $EntraOutputPath -NoConnect -ForceRefresh -SkipModuleInstall
-        if (-not (Test-Path -LiteralPath $EntraOutputPath -PathType Leaf)) {
-            throw "Entra inventory was not created: $EntraOutputPath"
+        Write-Host 'Exporting the required full Intune managed-device inventory...' -ForegroundColor Cyan
+        & $intuneExporter -OutputPath $IntuneOutputPath -NoConnect -ForceRefresh -SkipModuleInstall
+        if (-not (Test-Path -LiteralPath $IntuneOutputPath -PathType Leaf)) {
+            throw "Intune inventory was not created: $IntuneOutputPath"
         }
-        $entraSucceeded = $true
+
+        try {
+            Write-Host 'Exporting the optional full Entra device inventory...' -ForegroundColor Cyan
+            & $entraExporter -OutputPath $EntraOutputPath -NoConnect -ForceRefresh -SkipModuleInstall
+            if (-not (Test-Path -LiteralPath $EntraOutputPath -PathType Leaf)) {
+                throw "Entra inventory was not created: $EntraOutputPath"
+            }
+            $entraSucceeded = $true
+        }
+        catch {
+            Remove-Item -LiteralPath $EntraOutputPath -Force -ErrorAction SilentlyContinue
+            Write-Host ("WARNING: Entra enrichment export failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+            Write-Host 'The automatic Wave can continue from the required AD and Intune inventories.' -ForegroundColor Yellow
+        }
     }
-    catch {
-        Remove-Item -LiteralPath $EntraOutputPath -Force -ErrorAction SilentlyContinue
-        Write-Host ("WARNING: Entra enrichment export failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
-        Write-Host 'The automatic Wave can continue from the required AD and Intune inventories.' -ForegroundColor Yellow
+    catch { $deviceExportError = $_ }
+
+    # Same connection: the user license export runs even when the device export failed, as it did
+    # when it was a separate step with its own sign-in.
+    if ($IncludeUserLicenses) {
+        try {
+            Write-Host 'Exporting users and licenses...' -ForegroundColor Cyan
+            & $userLicenseExporter -OutputPath $UserLicensesOutputPath -NoConnect -ForceRefresh
+            $userLicensesSucceeded = $true
+        }
+        catch {
+            $userLicenseExportError = $_
+            Write-Host ("ERROR: Users and licenses export failed: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        }
     }
 }
 finally {
     Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
 }
+# Each stream is reported on its own: a license failure never reads as an Intune/Entra failure.
+$failures = @()
+if ($deviceExportError) { $failures += ('Intune/Entra devices export failed: {0}' -f $deviceExportError.Exception.Message) }
+if ($userLicenseExportError) { $failures += ('Users and licenses export failed: {0}' -f $userLicenseExportError.Exception.Message) }
+if ($deviceExportError) { throw ($failures -join ' | ') }
 
 [pscustomobject]@{
     TenantId = if ($context) { [string]$context.TenantId } else { '' }
@@ -143,7 +181,10 @@ finally {
     IntuneOutputPath = $IntuneOutputPath
     EntraOutputPath = if ($entraSucceeded) { $EntraOutputPath } else { '' }
     EntraSucceeded = $entraSucceeded
+    UserLicensesOutputPath = if ($userLicensesSucceeded) { $UserLicensesOutputPath } else { '' }
+    UserLicensesSucceeded = $userLicensesSucceeded
 }
+if ($userLicenseExportError) { throw ($failures -join ' | ') }
 
 # SIG # Begin signature block
 # MIIeYwYJKoZIhvcNAQcCoIIeVDCCHlACAQExDzANBglghkgBZQMEAgEFADB5Bgor

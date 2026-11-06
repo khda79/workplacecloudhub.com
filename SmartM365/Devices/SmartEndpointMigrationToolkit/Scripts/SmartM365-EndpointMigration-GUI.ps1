@@ -266,8 +266,8 @@ function Get-AutomaticWaveCommandText {
 function Get-InventoryRefreshPlan {
     <#
     Two independent streams started in parallel: AD (ActiveDirectory module, the longest) and Graph
-    (one delegated sign-in). HybridJoin uses the combined Graph exporter (Intune, then Entra on the
-    same connection); Windows11Upgrade needs Intune only.
+    (one delegated sign-in). HybridJoin uses the combined Graph exporter (Intune, Entra, then users
+    and licenses on the same connection); Windows11Upgrade needs Intune only.
     #>
     param(
         [Parameter(Mandatory = $true)][ValidateSet('HybridJoin','Windows11Upgrade','Prerequisites')][string]$Campaign,
@@ -282,16 +282,21 @@ function Get-InventoryRefreshPlan {
     $ad = [pscustomobject]@{ Label = 'AD'; Script = 'SmartM365-EndpointMigration-Export-ADDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }
     $intune = [pscustomobject]@{ Label = 'Intune'; Script = 'SmartM365-EndpointMigration-Export-IntuneDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }
     $entra = [pscustomobject]@{ Label = 'Entra'; Script = 'SmartM365-EndpointMigration-Export-EntraDevicesCsv.ps1'; Arguments = @('-ForceRefresh') }
-    $graph = if ($Kinds -contains 'Intune' -and $Kinds -contains 'Entra') {
+    $withUsers = $Kinds -contains 'Users' -and $Campaign -eq 'HybridJoin'
+    # One sign-in per refresh: users and licenses with Intune or Entra go through the combined
+    # exporter (it then refreshes Intune, Entra and users on one connection).
+    $graph = if ($withUsers -and ($Kinds -contains 'Intune' -or $Kinds -contains 'Entra')) {
+        [pscustomobject]@{ Label = 'Intune, Entra, users and licenses'; Script = 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1'; Arguments = @('-IncludeUserLicenses') }
+    }
+    elseif ($Kinds -contains 'Intune' -and $Kinds -contains 'Entra') {
         [pscustomobject]@{ Label = 'Intune and Entra'; Script = 'SmartM365-EndpointMigration-Export-AutomaticGraphInventories.ps1'; Arguments = @() }
     }
     elseif ($Kinds -contains 'Intune') { $intune }
     elseif ($Kinds -contains 'Entra') { $entra }
+    elseif ($withUsers) { [pscustomobject]@{ Label = 'Users and licenses'; Script = 'SmartM365-EndpointMigration-Export-UserLicensesCsv.ps1'; Arguments = @('-ForceRefresh') } }
     else { $null }
-    $users = [pscustomobject]@{ Label = 'Users and licenses'; Script = 'SmartM365-EndpointMigration-Export-UserLicensesCsv.ps1'; Arguments = @('-ForceRefresh') }
     $graphExports = @()
     if ($null -ne $graph) { $graphExports += $graph }
-    if ($Kinds -contains 'Users' -and $Campaign -eq 'HybridJoin') { $graphExports += $users }
     $plan = @()
     if ($Kinds -contains 'AD') { $plan += [pscustomobject]@{ Name = 'AD'; Title = 'Active Directory'; Exports = @($ad) } }
     if ($graphExports.Count -gt 0) { $plan += [pscustomobject]@{ Name = 'Graph'; Title = 'Microsoft Graph inventories'; Exports = $graphExports } }
