@@ -315,6 +315,15 @@ manifest; missing or unqualified inputs produce `N/D`, not zero. Its computation
 uses the same batch before the pointer is published and never depends on the
 previous batch's computed results.
 
+`SharedMailboxLicenseDetail` contains tenant-wide shared mailbox rows for the
+selected F1, F3, E3 and E5 suites. Prepare reconstructs these rows only when
+the qualified report and its snapshot integrity proof are present, both source
+files have the exact snapshot hashes, and the detail reconciles with the
+published counts. Otherwise the detail is unavailable and existing aggregates
+remain usable. The batch manifest therefore contains mailbox names, addresses,
+license and hold observations; it must be protected like the prepared account
+and mailbox evidence. Recommendations are for manual review only.
+
 - `Qualified`: the license tables are loaded.
 - `Not qualified`: a lineage defect (for example a report produced outside the
   receipt run or a file hash that differs). The batch is still published and the

@@ -776,6 +776,23 @@ function Publish-PreparedEvidenceBatch {
             $manifest.SharedMailboxLicenseEvidence=@{State='Qualified';BatchId=$batchId;ExceptionSnapshotDate=$exceptionDate;Counts=$evidence.Counts}
         } catch { Write-Warning 'Shared mailbox license evidence unavailable; existing prepared data remains usable.' }
         finally { if(Test-Path -LiteralPath $draftManifest -PathType Leaf){Remove-Item -LiteralPath $draftManifest -Force} }
+        # Detail is reconstructed only from the exact raw sources named by the
+        # qualified report snapshot. A mismatch must never produce a partial list.
+        $manifest.SharedMailboxLicenseDetail=@{State='N/D';Reason='Qualified source detail unavailable.';Rows=@()}
+        if ($licenseQualification -and $licenseQualification.State -ceq 'Qualified' -and
+            @($licenseQualification.Files | Where-Object { $_.File -ceq 'M365_Licenses_ReportSnapshotIntegrity.csv' -and $_.State -ceq 'Qualified' }).Count -eq 1) {
+            try {
+                $last=Join-Path $ArtifactSnapshotRoot 'DATA-LAST'
+                $snapshot=Join-Path $last 'M365_Licenses_ReportSnapshot.json.txt'
+                $snapshotHash=(Get-FileHash -LiteralPath $snapshot -Algorithm SHA256).Hash
+                $python=Get-Command $PythonCommand -CommandType Application -ErrorAction Stop | Select-Object -First 1
+                $detailOutput=@(& $python.Source -B (Join-Path $PSScriptRoot 'shared_mailbox_license_detail.py') --snapshot $snapshot --licenses (Join-Path $last 'M365_Licenses_Users.csv') --mailboxes (Join-Path $last 'Exchange_EXO_Mailboxes_AllDomains.csv') --tenant $TenantKey 2>&1)
+                if ($LASTEXITCODE -ne 0 -or $detailOutput.Count -ne 1 -or (Get-FileHash -LiteralPath $snapshot -Algorithm SHA256).Hash -cne $snapshotHash) { throw 'Shared mailbox detail qualification failed.' }
+                $detailRows=ConvertFrom-Json -InputObject ([string]$detailOutput[0]) -NoEnumerate -ErrorAction Stop
+                if ($detailRows -isnot [array]) { throw 'Shared mailbox detail has an invalid schema.' }
+                $manifest.SharedMailboxLicenseDetail=@{State='Qualified';SnapshotId=$licenseQualification.SnapshotId;Rows=$detailRows}
+            } catch { Write-Warning 'Shared mailbox license detail unavailable; aggregate evidence remains usable.' }
+        }
         Write-PreparedJson (Join-Path $batch 'batch.json.txt') $manifest
         $pointer = @{SchemaVersion=1;BatchId=$batchId;TenantKey=$TenantKey;ManifestSHA256=(Get-FileHash (Join-Path $batch 'batch.json.txt')).Hash;PreviousBatchId=if($previous){$previous.BatchId}else{$null}}
         $pointerTemp = Join-Path $output ('current.'+$batchId+'.tmp')
@@ -1035,8 +1052,8 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # SIG # Begin signature block
 # MIIfPQYJKoZIhvcNAQcCoIIfLjCCHyoCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBpMquNwcj3lBX
-# w+R1+HQJbsKeEGE5INY/BY6TmOOI5aCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDw60/giFVXuw2v
+# 66PkHXJTOkJmbVbhmjtzvIW9tmfVNKCCGNgwggS9MIIDJaADAgECAhAebu87xzjh
 # s0Q4yPEDH+JoMA0GCSqGSIb3DQEBCwUAME4xHjAcBgNVBAMMFXdvcmtwbGFjZWNs
 # b3VkaHViLmNvbTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91
 # ZGh1Yi5jb20wHhcNMjYwNzEzMDgyMjM1WhcNMjkwNzEzMDgzMjI5WjBOMR4wHAYD
@@ -1173,31 +1190,31 @@ Export-ModuleMember -Function Get-PreparedSourcePlan, Invoke-PreparedEvidencePip
 # bTEsMCoGCSqGSIb3DQEJARYdY29udGFjdEB3b3JrcGxhY2VjbG91ZGh1Yi5jb20C
 # EB5u7zvHOOGzRDjI8QMf4mgwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIB
 # DDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEE
-# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg5fh71B0EzZaY
-# zczfp7gtO6eAecMeMiI27DB8aG+V1AcwDQYJKoZIhvcNAQEBBQAEggGASJY/Fhdy
-# TX+CQmDGhVIx8GO8qo8NdaYXTZWYqTq9ko2rQpiNIPD84Wtk6jJI9msk0LkRd38v
-# L992suQTlxWJRDvlWgXT7PgHgeq42oM4cnr66Xm1hhQv+N5/bdrFmeWjrhcX9LKg
-# mYnmjJfZz96ZCAlYq3W39rLReKOdFDF+wfr6WBzFz09oAW2iqdTVQh9HO/Ba7U1B
-# qkAfGEMbZXDL+IMOrUbHf5uGoXCQZ1OfyxvaHsaLGt/r8o8Z1UYvBeMgwfzmFTYi
-# cf0/teY2hd7QZzOlhKKT23Em5oSVbsCqHXVYogE4Om1dIYQqZVTk/5jOPF2ngGOD
-# joVXiGSUd9vYRRLtizGOuGHRUnA7WiQuju26z0ByQzVI1tx5s8YRMsOq6aoznzBP
-# PgCwno5/7r1HrwQB+VfjzWewT975rtWB+7iElHFhV6AKX7Zea/11fNAGXQAriKZo
-# v0eOraw+1oX764AMyjBn1y/crUR5a7ckoD2T3cvC7VEcSMJDtz22pNgJoYIDIzCC
+# AYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgCgzGvhug4IHY
+# R/GdUTOUCJnbaoJcFUM2c06F+lcjDy4wDQYJKoZIhvcNAQEBBQAEggGAZ1JJENP7
+# tsK3mMaQJSAeqBl+ES1EHcJEAP+lkhzN1Vpd6yUmlp6KGmAE3O4f72jCGc6+/sGL
+# ad7iQHWQMciEpQhbPSv4LlzEuqTLw8fQ9e7XzkQmYU1UBo8LVuYejND8onJRF6z+
+# RHK+/X6N94q2S+O6YnQtsBkBqSBdYOgz3BtEiImAqtqixW5ws1Or2/wcVvG11QiA
+# e9bWmiEEbpWe1gK1BiaYjyPhopiOmiZOhuIJGfSC6ejJmqtf7Ui6F4Xm7nQio2me
+# pyWc5iEtG5K3urdFKyHCYA2P7nV2dwCv7KEv2SpHMR17fQQuwawl0ku8eOoO599F
+# FI7LRuKqwUJ2Zm+oZMz7EMKZq4mUyAxpd5oWcWEb8fHWa1ayGMOjwZ0b3a07ZLKf
+# U50dSBodJGPHFMTrrjajJuNE5t539cvmJCt+x3I5bOxLCBroVMBUbqKSYu7xXdco
+# lF85UNSs08Xk4sAzM3Q87lVrkLQ4sYpoKDtNFFQfwd9FqxGsJRbMVreJoYIDIzCC
 # Ax8GCSqGSIb3DQEJBjGCAxAwggMMAgEBMGowVTELMAkGA1UEBhMCR0IxGDAWBgNV
 # BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
 # ZSBTdGFtcGluZyBDQSBSNDECEQDnTvJVsFBP+tum3/f8i6MVMA0GCWCGSAFlAwQC
 # AgUAoHkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcN
-# MjYxMTA1MTU0NzMwWjA/BgkqhkiG9w0BCQQxMgQwYGCoiVvvWTqRWo3Vhxa4kH/L
-# aZH/c8dmS2DpRFhA7WKEpy4Me+i/dxz38DkJf0MZMA0GCSqGSIb3DQEBAQUABIIC
-# AJSoZMuU8o0zgApb+SPlALb6HLmXKZ6nZj14Hre2S102fz89/oz3wIYgpbvLHxix
-# fMBPhV6nSyj4gvcQnSRLAxR/1tdiZlq0xIYrNpnNxzYwZ3cu3HvtompDVZDRZbdw
-# kQRYymt/8ZNWvizZWl82p469lCy3SUmbRApvbrs6CEnFheSo9mfPhAgn7d9WlKI5
-# DK0cMonsIfp8SDHBn/thc7uz5A240SHbDXrxZ9Gy2Xesa2ol/htVl/UcCqet61WZ
-# 75z2LCf3vdmY4mVxZYtQkkYwyQBVM6wU2CvBaRlvtDp83AlFqSu14QTWef9ZZEVN
-# bA8YbT5/bZsWI27Jx6BDXkJsAhPpQJd3v093WqP2eEkOivYXX39CD9sTKl/jZfR7
-# Bsx3il46aFoiaJqjidMb/qoUjeGXF9kCI8y6cYfLStGutFfZ5HqO/Q014NDnAqON
-# c15dF/B34jj+kbBCNbsWjx0JrQRvXBZBNlz9IZj+QMMBK4wZb7uwcX3HICQKIzXk
-# BtvQIwQqFuBjDk+grl0lN/8KPHp4bRKnW5dyUavEWavBb1Kkkad7JKXC+n1Pwcu8
-# mKDfiPGo1PUpme4/eIl3myo69DJgU/kFFappm58IX8KZ8RzswzzNlqf3SIQuTEtv
-# sjHKVc5kVKNRRv5YqY6mDKAQl6zVeXChxLPpcacFdgdu
+# MjYxMTA2MDExMDU4WjA/BgkqhkiG9w0BCQQxMgQwyI0fVRJQE0s4qKWYYcrdjVDP
+# 9oPm9pZ8T541EfvK+G7pod0aZQG4fDj00/td830dMA0GCSqGSIb3DQEBAQUABIIC
+# AJ0rH8EOM1m+DLbk2vCSg+Cn7b0eBBUohb7Q9P9YwmL5qEgWgco4p+zi6WDrRxta
+# qzfVO6xvu/x0fCNYgL1B/fUhMqRsg7QWTUfOylJw2+e4aQw5zbNRRDEDzDKCLRx7
+# wyT7lhmkSpSCRqOXezjCAAq3qk0JtVvN/B/mvy2gar7VCSvCOvpBGi8hJ+9wntEq
+# Gjksv9Go13jUKDN09PL3Z8YisFarvs26GSAzF1jeccOuFfzo3D9sWDTh7HaJCJ2w
+# 6wNpCSpGUBpuqwRt01o5JyJhGN4/NCuS4QW1A0w/DtwzEvlnHveAosbgCmUbyX9i
+# kHKwBijKiMDQTuGKawM0fQqhrNPljNwo4Zfx4pCK7OYAIoXH0dtZ6Ax4C8fANC/d
+# bZgPPuzsbZhTx1VMvWA7m1iXh4hqZlKt9quJ/9baBPEmW0UKSMEV5G+18bFay2ec
+# blg6yQTQqitBnnpvkMc17AAeHZuRdXvcan28sdOdV5oY7ZsRj1OMIqasmfVxD/Mz
+# 0r6JfdDLf4l37mF7HiNd3qh93MWdKWECGMnqamBYcALLma6FkaJSwW/ho+Jy8z1W
+# VFiicc2b7g4MRnjM4WwOtR4Jp9kxq6AhbNd6MHKTltiPJbSarHawAlSRbdRxEaJr
+# d6MEmJ6ztQJIlP7buTlcu1wmzVhwBBlMzsVgkMwn2hdh
 # SIG # End signature block
